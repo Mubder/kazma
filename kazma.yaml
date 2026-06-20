@@ -1,0 +1,53 @@
+# Kazma Configuration
+# Copy to kazma.local.yaml for local overrides (git-ignored)
+
+agent:
+  name: "kazma"
+  version: "0.1.0"
+  language: "ar"  # default interface language (Arabic)
+  rtl: true
+
+models:
+  default: "gpt-4o-mini"
+  router: "litellm"
+  fallback: "gpt-4o-mini"
+
+storage:
+  engine: "sqlite-vec"
+  path: "data/kazma.db"
+  vector_dim: 1536
+
+memory:
+  enabled: true
+  max_context_tokens: 128000
+  retrieval_top_k: 5
+  provenance: true
+
+skills:
+  path: "kazma-skills/manifests/"
+  auto_discover: true
+
+connectors:
+  telegram:
+    enabled: false
+    token: ""  # set via env TELEGRAM_BOT_TOKEN
+  discord:
+    enabled: false
+    token: ""  # set via env DISCORD_BOT_TOKEN
+  slack:
+    enabled: false
+    token: ""  # set via env SLACK_BOT_TOKEN
+
+ui:
+  host: "0.0.0.0"
+  port: 8000
+  rtl: true
+  title: "Kazma Dashboard"
+
+logging:
+  level: "INFO"
+  format: "json"
+  langfuse:
+    enabled: false
+    public_key: ""
+    secret_key: ""
