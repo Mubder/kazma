@@ -67,7 +67,22 @@ tests/               979 tests — pytest + asyncio
 git clone https://github.com/Mubder/kazma.git
 cd kazma
 
-# Install with uv (recommended — fast, deterministic)
+# Run the certified bootstrap script
+chmod +x setup.sh && ./setup.sh
+```
+
+The `setup.sh` script performs a deterministic, fail-fast initialization:
+1. Verifies Python 3.11+ and uv are installed
+2. Syncs all dependencies from `pyproject.toml`
+3. Validates sqlite-vec, aiosqlite, and LangGraph are loadable
+4. Reports the total test count
+
+If any step fails, the script exits immediately with an actionable error message.
+
+#### Manual Install (alternative)
+
+```bash
+# Install with uv (recommended)
 uv sync
 
 # Or with pip
