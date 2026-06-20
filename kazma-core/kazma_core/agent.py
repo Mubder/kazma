@@ -476,6 +476,8 @@ async def create_app(db_path: str = CHECKPOINT_DB) -> Any:
 
 
 if __name__ == "__main__":
+    import os as _os
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
@@ -488,3 +490,5 @@ if __name__ == "__main__":
         except Exception:
             pass
         loop.close()
+    # Skip atexit/threading shutdown noise
+    _os._exit(0)
