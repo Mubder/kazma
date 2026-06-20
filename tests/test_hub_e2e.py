@@ -210,13 +210,13 @@ class TestBadgeIssuanceFlow:
         bs = badge_system_with_skill
 
         # Issue badge
-        badge = await bs.issue_badge("e2e-badge-skill", "basic")
+        badge = bs.issue_badge("e2e-badge-skill", "basic")
         assert badge.skill_id == "e2e-badge-skill"
         assert badge.level == "basic"
         assert badge.revoked is False
 
         # Verify badge
-        verification = await bs.verify_badge("e2e-badge-skill")
+        verification = bs.verify_badge("e2e-badge-skill")
         assert verification.valid is True
         assert verification.level == "basic"
 
@@ -226,13 +226,13 @@ class TestBadgeIssuanceFlow:
         bs = badge_system_with_skill
 
         # Issue basic
-        await bs.issue_badge("e2e-badge-skill", "basic")
-        v1 = await bs.verify_badge("e2e-badge-skill")
+        bs.issue_badge("e2e-badge-skill", "basic")
+        v1 = bs.verify_badge("e2e-badge-skill")
         assert v1.level == "basic"
 
         # Replace with standard
-        await bs.issue_badge("e2e-badge-skill", "standard")
-        v2 = await bs.verify_badge("e2e-badge-skill")
+        bs.issue_badge("e2e-badge-skill", "standard")
+        v2 = bs.verify_badge("e2e-badge-skill")
         assert v2.valid is True
         assert v2.level == "standard"
 
@@ -241,10 +241,10 @@ class TestBadgeIssuanceFlow:
         """Issue badge, then revoke it."""
         bs = badge_system_with_skill
 
-        await bs.issue_badge("e2e-badge-skill", "basic")
-        await bs.revoke_badge("e2e-badge-skill", "security vulnerability")
+        bs.issue_badge("e2e-badge-skill", "basic")
+        bs.revoke_badge("e2e-badge-skill", "security vulnerability")
 
-        verification = await bs.verify_badge("e2e-badge-skill")
+        verification = bs.verify_badge("e2e-badge-skill")
         assert verification.valid is False
         assert "revoked" in verification.reason.lower()
 

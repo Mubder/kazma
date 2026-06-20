@@ -120,13 +120,13 @@ def _rule_based_detect(text: str) -> DialectResult:
 
     # Egyptian markers
     for marker in _EGYPTIAN_MARKERS:
-        if marker in text:
+        if marker.lower() in text_lower:
             scores["eg"] += 2.0
             total_hits += 1
 
     # Levantine markers
     for marker in _LEVANTINE_MARKERS:
-        if marker in text:
+        if marker.lower() in text_lower:
             scores["lb"] += 2.0
             total_hits += 1
 

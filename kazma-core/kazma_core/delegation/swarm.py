@@ -101,12 +101,15 @@ class SwarmIntelligence:
                 results[idx] = result
 
         # Execute all tasks in parallel
-        await asyncio.gather(
+        done = await asyncio.gather(
             *[_run_task(i, t) for i, t in enumerate(tasks)],
             return_exceptions=True,
         )
 
-        # Filter out None results (from exceptions)
+        # Log any exceptions and filter out None results
+        for item in done:
+            if isinstance(item, Exception):
+                logger.error("Parallel task failed: %s", item)
         final_results = [r for r in results if r is not None]
 
         elapsed = time.time() - start

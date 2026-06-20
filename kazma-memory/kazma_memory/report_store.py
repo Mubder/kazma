@@ -263,8 +263,6 @@ class ReportStore:
 
     async def delete_old(self, days: int = 90) -> int:
         """Delete reports older than N days. Returns count deleted."""
-        cutoff = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
-        # Rough date math — subtract days from current ISO timestamp
         from datetime import timedelta
         cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
         cutoff = cutoff_dt.isoformat()

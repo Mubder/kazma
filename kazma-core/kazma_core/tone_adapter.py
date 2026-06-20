@@ -203,11 +203,8 @@ class ToneAdapter:
         if profile is None:
             profile = self.profiles["general_polite"]
 
-        # Formalize slang if requested
-        if formalize and not profile.avoid_slang:
-            # Only formalize if the profile explicitly wants it
-            pass
-        elif formalize or profile.avoid_slang:
+        # Formalize slang if requested or profile prefers formal language
+        if formalize or profile.avoid_slang:
             response = self._formalize_text(response, dialect)
 
         # Apply prefix

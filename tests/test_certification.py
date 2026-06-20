@@ -206,9 +206,9 @@ class TestRevoke:
 class TestDBOperations:
     @pytest.mark.asyncio
     async def test_init_db(self, cert_db: KazmaCertification):
-        await cert_db._init_db()
+        cert_db._init_db()
         # Should be callable multiple times without error
-        await cert_db._init_db()
+        cert_db._init_db()
 
     @pytest.mark.asyncio
     async def test_db_persistence(self, tmp_path: Path, basic_skill: Path):

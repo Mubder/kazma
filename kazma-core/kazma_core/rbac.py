@@ -5,6 +5,7 @@ access controls for the ALMuhalab Global ecosystem.
 """
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -156,7 +157,6 @@ class RBACEngine:
             for div, roles in _DEFAULT_PERMISSIONS.items():
                 for role, resources in roles.items():
                     for pattern, actions in resources.items():
-                        import json
                         await db.execute(
                             "INSERT OR IGNORE INTO division_permissions (division, role, resource_pattern, actions) VALUES (?, ?, ?, ?)",
                             (div, role, pattern, json.dumps(actions)),
@@ -333,7 +333,6 @@ class RBACEngine:
                 break
 
         # 3. Check permission matrix
-        import json
         permissions = _DEFAULT_PERMISSIONS.get(division, {}).get(highest_role, {})
 
         # Check exact resource match first, then wildcard

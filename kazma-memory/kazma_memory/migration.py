@@ -25,7 +25,7 @@ class MigrationResult:
     total_migrated: int
     total_failed: int
     duration_seconds: float
-    errors: List[str] = None
+    errors: Optional[List[str]] = None
 
     def __post_init__(self):
         if self.errors is None:
@@ -38,8 +38,8 @@ class VerificationResult:
     sqlite_count: int
     tantivy_count: int
     mismatch: bool
-    missing_in_tantivy: List[str] = None
-    extra_in_tantivy: List[str] = None
+    missing_in_tantivy: Optional[List[str]] = None
+    extra_in_tantivy: Optional[List[str]] = None
 
     def __post_init__(self):
         if self.missing_in_tantivy is None:

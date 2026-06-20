@@ -303,7 +303,7 @@ class KazmaHub:
                 results.append(agent)
         results.sort(
             key=lambda a: (
-                len(a.capabilities) / max(len(required), 1),
+                sum(1 for c in required if c in a.capabilities) / max(len(required), 1),
                 a.reputation,
             ),
             reverse=True,

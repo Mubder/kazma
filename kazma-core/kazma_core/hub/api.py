@@ -213,7 +213,7 @@ async def list_skills(
     # Filter by certified status if requested
     items = []
     for m in manifests:
-        cert = await api.certifier.verify_badge(m.data["name"])
+        cert = api.certifier.verify_badge(m.data["name"])
         if certified is not None and cert.valid != certified:
             continue
         items.append(_manifest_to_summary(m, certified=cert.valid))
@@ -248,7 +248,7 @@ async def search_skills(
 
     items = []
     for m in manifests:
-        cert = await api.certifier.verify_badge(m.data["name"])
+        cert = api.certifier.verify_badge(m.data["name"])
         if certified is not None and cert.valid != certified:
             continue
         items.append(_manifest_to_summary(m, certified=cert.valid))
@@ -289,7 +289,7 @@ async def get_certification_status(skill_id: str):
     parts = skill_id.split("/")
     skill_name = parts[-1].split("@")[0] if "/" in skill_id else skill_id
 
-    result = await api.certifier.verify_badge(skill_name)
+    result = api.certifier.verify_badge(skill_name)
     if not result.valid and result.reason == "No badge found":
         raise HTTPException(status_code=404, detail=f"No certification for: {skill_id}")
 
@@ -342,7 +342,7 @@ async def get_skill(skill_id: str):
     if manifest is None:
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_id}")
 
-    cert = await api.certifier.verify_badge(manifest.data["name"])
+    cert = api.certifier.verify_badge(manifest.data["name"])
     data = manifest.data
 
     return SkillDetailResponse(
@@ -375,7 +375,7 @@ async def get_stats():
     certified = 0
     by_category: dict[str, int] = {}
     for m in manifests:
-        cert = await api.certifier.verify_badge(m.data["name"])
+        cert = api.certifier.verify_badge(m.data["name"])
         if cert.valid:
             certified += 1
         cat = m.data.get("category", "uncategorized")

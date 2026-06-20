@@ -89,7 +89,7 @@ class KazmaCertification:
             self._conn.row_factory = sqlite3.Row
         return self._conn
 
-    async def _init_db(self) -> None:
+    def _init_db(self) -> None:
         """Create the certifications table if it does not exist."""
         with self._db_lock:
             conn = self._get_conn()
@@ -144,7 +144,7 @@ class KazmaCertification:
         skill_id = await self._extract_skill_id(skill_path)
 
         if certified:
-            await self._init_db()
+            self._init_db()
             with self._db_lock:
                 conn = self._get_conn()
                 conn.execute(
@@ -175,7 +175,7 @@ class KazmaCertification:
         Returns:
             :class:`VerificationResult` indicating validity.
         """
-        await self._init_db()
+        self._init_db()
         now = datetime.now(timezone.utc)
         last_verified = now.isoformat()
 
@@ -211,7 +211,7 @@ class KazmaCertification:
         Returns:
             ``True`` if the certification was revoked, ``False`` otherwise.
         """
-        await self._init_db()
+        self._init_db()
         with self._db_lock:
             conn = self._get_conn()
             cursor = conn.execute(

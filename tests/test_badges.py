@@ -113,7 +113,7 @@ class TestIssueBadge:
 
     @pytest.mark.asyncio
     async def test_issue_basic_badge(self, badge_system_with_skill: CertificationBadgeSystem):
-        badge = await badge_system_with_skill.issue_badge("test-skill", "basic")
+        badge = badge_system_with_skill.issue_badge("test-skill", "basic")
         assert badge.skill_id == "test-skill"
         assert badge.level == "basic"
         assert badge.revoked is False
@@ -121,23 +121,23 @@ class TestIssueBadge:
 
     @pytest.mark.asyncio
     async def test_issue_standard_badge(self, badge_system_with_skill: CertificationBadgeSystem):
-        badge = await badge_system_with_skill.issue_badge("test-skill", "standard")
+        badge = badge_system_with_skill.issue_badge("test-skill", "standard")
         assert badge.level == "standard"
 
     @pytest.mark.asyncio
     async def test_issue_premium_badge(self, badge_system_with_skill: CertificationBadgeSystem):
-        badge = await badge_system_with_skill.issue_badge("test-skill", "premium")
+        badge = badge_system_with_skill.issue_badge("test-skill", "premium")
         assert badge.level == "premium"
 
     @pytest.mark.asyncio
     async def test_issue_badge_nonexistent_skill(self, badge_system: CertificationBadgeSystem):
         with pytest.raises(ValueError, match="Skill .* not found"):
-            await badge_system.issue_badge("nonexistent-skill", "basic")
+            badge_system.issue_badge("nonexistent-skill", "basic")
 
     @pytest.mark.asyncio
     async def test_issue_badge_invalid_level(self, badge_system_with_skill: CertificationBadgeSystem):
         with pytest.raises(ValueError, match="Invalid badge level"):
-            await badge_system_with_skill.issue_badge("test-skill", "invalid")
+            badge_system_with_skill.issue_badge("test-skill", "invalid")
 
 
 # --- Verify badge tests ---
@@ -148,8 +148,8 @@ class TestVerifyBadge:
 
     @pytest.mark.asyncio
     async def test_verify_valid_badge(self, badge_system_with_skill: CertificationBadgeSystem):
-        await badge_system_with_skill.issue_badge("test-skill", "basic")
-        result = await badge_system_with_skill.verify_badge("test-skill")
+        badge_system_with_skill.issue_badge("test-skill", "basic")
+        result = badge_system_with_skill.verify_badge("test-skill")
         assert result.valid is True
         assert result.level == "basic"
 
@@ -167,21 +167,21 @@ class TestVerifyBadge:
         )
         conn.commit()
         conn.close()
-        result = await badge_system_with_skill.verify_badge("test-skill")
+        result = badge_system_with_skill.verify_badge("test-skill")
         assert result.valid is False
         assert "expired" in result.reason.lower()
 
     @pytest.mark.asyncio
     async def test_verify_revoked_badge(self, badge_system_with_skill: CertificationBadgeSystem):
-        await badge_system_with_skill.issue_badge("test-skill", "basic")
-        await badge_system_with_skill.revoke_badge("test-skill", "security issue")
-        result = await badge_system_with_skill.verify_badge("test-skill")
+        badge_system_with_skill.issue_badge("test-skill", "basic")
+        badge_system_with_skill.revoke_badge("test-skill", "security issue")
+        result = badge_system_with_skill.verify_badge("test-skill")
         assert result.valid is False
         assert "revoked" in result.reason.lower()
 
     @pytest.mark.asyncio
     async def test_verify_no_badge(self, badge_system: CertificationBadgeSystem):
-        result = await badge_system.verify_badge("nonexistent")
+        result = badge_system.verify_badge("nonexistent")
         assert result.valid is False
 
     @pytest.mark.asyncio
@@ -200,7 +200,7 @@ class TestVerifyBadge:
         conn.close()
 
         # Should be valid immediately
-        result = await badge_system_with_skill.verify_badge("test-skill")
+        result = badge_system_with_skill.verify_badge("test-skill")
         assert result.valid is True
 
 
@@ -212,15 +212,15 @@ class TestRevokeBadge:
 
     @pytest.mark.asyncio
     async def test_revoke_badge(self, badge_system_with_skill: CertificationBadgeSystem):
-        await badge_system_with_skill.issue_badge("test-skill", "basic")
-        await badge_system_with_skill.revoke_badge("test-skill", "vulnerability found")
-        result = await badge_system_with_skill.verify_badge("test-skill")
+        badge_system_with_skill.issue_badge("test-skill", "basic")
+        badge_system_with_skill.revoke_badge("test-skill", "vulnerability found")
+        result = badge_system_with_skill.verify_badge("test-skill")
         assert result.valid is False
 
     @pytest.mark.asyncio
     async def test_revoke_nonexistent_badge(self, badge_system: CertificationBadgeSystem):
         with pytest.raises(ValueError, match="No badge found"):
-            await badge_system.revoke_badge("nonexistent", "test reason")
+            badge_system.revoke_badge("nonexistent", "test reason")
 
 
 # --- Badge replacement tests ---
@@ -235,13 +235,13 @@ class TestBadgeReplacement:
         bs = badge_system_with_skill
 
         # Issue basic
-        await bs.issue_badge("test-skill", "basic")
-        v1 = await bs.verify_badge("test-skill")
+        bs.issue_badge("test-skill", "basic")
+        v1 = bs.verify_badge("test-skill")
         assert v1.level == "basic"
 
         # Replace with premium
-        await bs.issue_badge("test-skill", "premium")
-        v2 = await bs.verify_badge("test-skill")
+        bs.issue_badge("test-skill", "premium")
+        v2 = bs.verify_badge("test-skill")
         assert v2.valid is True
         assert v2.level == "premium"
 
@@ -250,12 +250,12 @@ class TestBadgeReplacement:
         """Issuing a lower-level badge replaces the higher one."""
         bs = badge_system_with_skill
 
-        await bs.issue_badge("test-skill", "premium")
-        v1 = await bs.verify_badge("test-skill")
+        bs.issue_badge("test-skill", "premium")
+        v1 = bs.verify_badge("test-skill")
         assert v1.level == "premium"
 
-        await bs.issue_badge("test-skill", "basic")
-        v2 = await bs.verify_badge("test-skill")
+        bs.issue_badge("test-skill", "basic")
+        v2 = bs.verify_badge("test-skill")
         assert v2.level == "basic"
 
 
@@ -310,9 +310,9 @@ class TestBadgeStats:
         conn.commit()
         conn.close()
 
-        await badge_system_with_skill.issue_badge("test-skill", "basic")
-        await badge_system_with_skill.issue_badge("skill-0", "standard")
-        await badge_system_with_skill.issue_badge("skill-1", "premium")
+        badge_system_with_skill.issue_badge("test-skill", "basic")
+        badge_system_with_skill.issue_badge("skill-0", "standard")
+        badge_system_with_skill.issue_badge("skill-1", "premium")
 
         stats = await badge_system_with_skill.get_badge_stats()
         assert stats.total == 3
@@ -334,9 +334,9 @@ class TestBadgeStats:
         conn.commit()
         conn.close()
 
-        await badge_system_with_skill.issue_badge("test-skill", "basic")
-        await badge_system_with_skill.issue_badge("extra-skill", "standard")
-        await badge_system_with_skill.revoke_badge("extra-skill", "revoked for testing")
+        badge_system_with_skill.issue_badge("test-skill", "basic")
+        badge_system_with_skill.issue_badge("extra-skill", "standard")
+        badge_system_with_skill.revoke_badge("extra-skill", "revoked for testing")
 
         stats = await badge_system_with_skill.get_badge_stats()
         assert stats.total == 1  # only non-revoked
@@ -346,7 +346,7 @@ class TestBadgeStats:
     @pytest.mark.asyncio
     async def test_stats_recent_issuances(self, badge_system_with_skill: CertificationBadgeSystem):
         """Stats should count recent issuances correctly."""
-        await badge_system_with_skill.issue_badge("test-skill", "basic")
+        badge_system_with_skill.issue_badge("test-skill", "basic")
         stats = await badge_system_with_skill.get_badge_stats()
         assert stats.recent_issuances >= 1
 

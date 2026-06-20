@@ -103,7 +103,7 @@ class CertificationBadgeSystem:
         conn.row_factory = sqlite3.Row
         return conn
 
-    async def issue_badge(self, skill_id: str, level: str) -> Badge:
+    def issue_badge(self, skill_id: str, level: str) -> Badge:
         """Issue a badge for a skill at the given level.
 
         Validates the skill exists and the level is valid, then records
@@ -152,7 +152,7 @@ class CertificationBadgeSystem:
         finally:
             conn.close()
 
-    async def verify_badge(self, skill_id: str) -> BadgeVerification:
+    def verify_badge(self, skill_id: str) -> BadgeVerification:
         """Verify a badge is valid (exists, not revoked, not expired).
 
         Args:
@@ -179,7 +179,10 @@ class CertificationBadgeSystem:
                 )
 
             if row["expires_at"]:
-                expires = datetime.fromisoformat(row["expires_at"])
+                try:
+                    expires = datetime.fromisoformat(row["expires_at"])
+                except (ValueError, TypeError):
+                    return BadgeVerification(valid=False, level=row["level"], reason="Invalid expiry date")
                 if datetime.now(timezone.utc) > expires:
                     return BadgeVerification(
                         valid=False,
@@ -191,7 +194,7 @@ class CertificationBadgeSystem:
         finally:
             conn.close()
 
-    async def revoke_badge(self, skill_id: str, reason: str) -> None:
+    def revoke_badge(self, skill_id: str, reason: str) -> None:
         """Revoke a badge with a reason.
 
         Args:

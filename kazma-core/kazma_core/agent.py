@@ -220,11 +220,15 @@ async def create_app(db_path: str = CHECKPOINT_DB) -> Any:
     from pathlib import Path as _Path
     _Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = await aiosqlite.connect(db_path)
-    await conn.execute("PRAGMA journal_mode=WAL")
-    await conn.execute("PRAGMA synchronous=NORMAL")
-    saver = AsyncSqliteSaver(conn)
-    await saver.setup()
-    return build_graph(checkpointer=saver), saver
+    try:
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA synchronous=NORMAL")
+        saver = AsyncSqliteSaver(conn)
+        await saver.setup()
+        return build_graph(checkpointer=saver), saver
+    except Exception:
+        await conn.close()
+        raise
 
 
 async def run_agent(
@@ -257,7 +261,7 @@ async def main() -> None:
     logger.info("Kazma agent started. Type 'quit' to exit.")
     try:
         while agent._running:
-            user_input = await asyncio.get_event_loop().run_in_executor(
+            user_input = await asyncio.get_running_loop().run_in_executor(
                 None, lambda: input("kazma> ")
             )
             if user_input.strip().lower() in ("quit", "exit"):

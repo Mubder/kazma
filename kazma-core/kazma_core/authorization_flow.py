@@ -331,7 +331,13 @@ class AuthorizationFlow:
         expired = []
         for req in self._requests.values():
             if req.status == "approved":
-                expires = datetime.fromisoformat(req.expires_at)
+                if not req.expires_at:
+                    continue
+                try:
+                    expires = datetime.fromisoformat(req.expires_at)
+                except (ValueError, TypeError):
+                    logger.warning("Request %s has malformed expires_at: %s", req.id[:8], req.expires_at)
+                    continue
                 if now > expires:
                     req.status = "expired"
                     expired.append(req.id)
