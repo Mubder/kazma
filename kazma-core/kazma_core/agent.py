@@ -476,4 +476,7 @@ async def create_app(db_path: str = CHECKPOINT_DB) -> Any:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
