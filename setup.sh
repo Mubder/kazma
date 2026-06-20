@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# Kazma (كاظمه) — Certified Bootstrap Script v2
+# Kazma (كاظمه) — Certified Bootstrap Script v3
 # Deterministic, fail-fast, idempotent initialization.
 # Compatible with WSL2, Docker, bare-metal Linux.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
 
-# ── Trap: print diagnostic on any failure ────────────────────────────────────
 trap 'echo -e "\n\033[0;31m❌ Installation aborted due to error (exit code $?).\033[0m"; echo -e "\033[0;34mℹ️  Run with DEBUG=1 for verbose output: DEBUG=1 ./setup.sh\033[0m"' ERR
 
-# Debug mode
 if [[ "${DEBUG:-0}" == "1" ]]; then
     set -x
 fi
@@ -27,6 +25,11 @@ log_fail()    { echo -e "  ${RED}❌ $*${NC}"; }
 log_info()    { echo -e "  ${BLUE}ℹ️  $*${NC}"; }
 log_header()  { echo -e "\n${BLUE}━━━ $* ━━━${NC}"; }
 
+# ── Helper: test if uv actually works ───────────────────────────────────────
+uv_works() {
+    uv --version &>/dev/null
+}
+
 # ── 0. Permission Guard ─────────────────────────────────────────────────────
 if [[ ! -x "$0" ]]; then
     log_warn "This script is not executable."
@@ -34,7 +37,7 @@ if [[ ! -x "$0" ]]; then
     exit 1
 fi
 
-echo -e "\n${GREEN}🇰🇼 Kazma (كاظمه) — Bootstrap v2${NC}"
+echo -e "\n${GREEN}🇰🇼 Kazma (كاظمه) — Bootstrap v3${NC}"
 echo -e "${BLUE}   Autonomous AI Agent Framework${NC}\n"
 
 # ── 1. Environmental Guardrails ─────────────────────────────────────────────
@@ -60,79 +63,93 @@ if [[ -n "$PYTHON_CMD" ]]; then
 else
     log_fail "Python 3.11+ required but not found"
     log_info "Install: sudo apt install python3.11 (Ubuntu/Debian/WSL)"
-    log_info "Or:     https://www.python.org/downloads/"
     exit 1
 fi
 
 # 1b. uv package manager (pip-first, snap-fallback)
 UV_INSTALLED=false
 
+# First: remove broken snap uv if present
 if command -v uv &>/dev/null; then
-    UV_VERSION=$(uv --version 2>/dev/null || echo "unknown")
     UV_PATH=$(command -v uv)
-
-    # Detect broken snap uv (systemd scope error)
     if [[ "$UV_PATH" == *snap* ]]; then
-        log_warn "uv installed via snap — known systemd scope issues"
-        log_info "Replacing with pip-installed uv..."
-        sudo snap remove astral-uv 2>/dev/null || true
-        "$PYTHON_CMD" -m pip install uv 2>/dev/null || true
-        export PATH="$HOME/.local/bin:$PATH"
-        hash -r
-    fi
-
-    if command -v uv &>/dev/null; then
-        UV_VERSION=$(uv --version 2>/dev/null || echo "unknown")
-        log_ok "uv detected: $UV_VERSION"
-        UV_INSTALLED=true
+        if ! uv_works; then
+            log_warn "Broken snap uv detected at $UV_PATH — removing"
+            sudo snap remove astral-uv 2>/dev/null || true
+        fi
     fi
 fi
 
-if [[ "$UV_INSTALLED" == "false" ]]; then
-    log_warn "uv not found — installing..."
+# Check if uv is now available and working
+if command -v uv &>/dev/null && uv_works; then
+    UV_VERSION=$(uv --version 2>/dev/null || echo "unknown")
+    log_ok "uv detected: $UV_VERSION"
+    UV_INSTALLED=true
+fi
 
-    # Priority 1: pip (most universal, works in WSL/Docker/bare-metal)
-    if "$PYTHON_CMD" -m pip install uv 2>/dev/null; then
-        # Ensure uv is on PATH (pip may install to ~/.local/bin)
+# Install uv if needed
+if [[ "$UV_INSTALLED" == "false" ]]; then
+    log_warn "uv not found — installing via pip..."
+
+    # Priority 1: pip (works everywhere — WSL, Docker, bare metal)
+    if "$PYTHON_CMD" -m pip install --user uv 2>&1 | tail -1; then
         export PATH="$HOME/.local/bin:$PATH"
-        hash -r  # refresh command cache
-        if command -v uv &>/dev/null; then
+        hash -r
+        if command -v uv &>/dev/null && uv_works; then
             UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
             log_ok "uv installed via pip: $UV_VERSION"
             UV_INSTALLED=true
-        fi
-    fi
-
-    # Priority 2: snap (bare-metal Ubuntu, not available in Docker/WSL)
-    if [[ "$UV_INSTALLED" == "false" ]] && command -v snap &>/dev/null; then
-        log_info "pip install failed or uv not on PATH, trying snap..."
-        if sudo snap install astral-uv --classic 2>/dev/null; then
-            hash -r
-            UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
-            log_ok "uv installed via snap: $UV_VERSION"
-            UV_INSTALLED=true
-        fi
-    fi
-
-    # Priority 3: official installer (curl)
-    if [[ "$UV_INSTALLED" == "false" ]] && command -v curl &>/dev/null; then
-        log_info "snap unavailable, trying official installer..."
-        if curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null; then
-            export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-            hash -r
-            if command -v uv &>/dev/null; then
-                UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
-                log_ok "uv installed via official installer: $UV_VERSION"
+        else
+            log_warn "pip install succeeded but uv not on PATH"
+            log_info "Trying: export PATH=\$HOME/.local/bin:\$PATH"
+            # One more check with explicit path
+            if [[ -x "$HOME/.local/bin/uv" ]]; then
+                export PATH="$HOME/.local/bin:$PATH"
+                UV_VERSION=$("$HOME/.local/bin/uv" --version 2>/dev/null || echo "installed")
+                log_ok "uv found at ~/.local/bin/uv: $UV_VERSION"
                 UV_INSTALLED=true
             fi
         fi
     fi
 
+    # Priority 2: official curl installer (works in Docker/bare metal)
+    if [[ "$UV_INSTALLED" == "false" ]] && command -v curl &>/dev/null; then
+        log_info "pip failed, trying official installer..."
+        if curl -LsSf https://astral.sh/uv/install.sh | sh 2>&1 | tail -1; then
+            export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+            hash -r
+            if command -v uv &>/dev/null && uv_works; then
+                UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
+                log_ok "uv installed via curl: $UV_VERSION"
+                UV_INSTALLED=true
+            fi
+        fi
+    fi
+
+    # Priority 3: snap (last resort — known systemd issues in WSL2)
+    if [[ "$UV_INSTALLED" == "false" ]] && command -v snap &>/dev/null; then
+        log_warn "Trying snap as last resort (may fail in WSL2)..."
+        if sudo snap install astral-uv --classic 2>&1 | tail -1; then
+            hash -r
+            if uv_works; then
+                UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
+                log_ok "uv installed via snap: $UV_VERSION"
+                UV_INSTALLED=true
+            else
+                log_fail "snap uv installed but broken (systemd scope error)"
+                sudo snap remove astral-uv 2>/dev/null || true
+            fi
+        fi
+    fi
+
     if [[ "$UV_INSTALLED" == "false" ]]; then
-        log_fail "Could not install uv automatically"
-        log_info "Install manually:"
-        log_info "  curl -LsSf https://astral.sh/uv/install.sh | sh"
-        log_info "  # or: pip install uv"
+        log_fail "Could not install a working uv"
+        log_info "Fix manually:"
+        log_info "  pip install uv"
+        log_info "  # or: curl -LsSf https://astral.sh/uv/install.sh | sh"
+        log_info ""
+        log_info "Or skip uv entirely:"
+        log_info "  $PYTHON_CMD -m pip install -e '.[dev,cli]'"
         exit 1
     fi
 fi
@@ -158,7 +175,6 @@ fi
 
 log_header "2. Sync Handshake (uv sync)"
 
-# Idempotent: uv sync is safe to re-run (only installs missing/changed deps)
 if uv sync 2>&1 | tail -5; then
     log_ok "Environment synced from pyproject.toml"
 else
@@ -169,7 +185,6 @@ else
     echo ""
     log_info "Running diagnostics..."
 
-    # Check disk space
     AVAIL_KB=$(df -k . 2>/dev/null | tail -1 | awk '{print $4}')
     AVAIL_MB=$((AVAIL_KB / 1024))
     if [[ "$AVAIL_MB" -lt 100 ]]; then
@@ -178,16 +193,12 @@ else
         log_ok "Disk space: ${AVAIL_MB}MB available"
     fi
 
-    # Check pyproject.toml syntax
     if "$PYTHON_CMD" -c "import tomllib; tomllib.load(open('pyproject.toml', 'rb'))" 2>/dev/null; then
-        log_ok "pyproject.toml syntax valid"
-    elif "$PYTHON_CMD" -c "import tomli; tomli.load(open('pyproject.toml', 'rb'))" 2>/dev/null; then
         log_ok "pyproject.toml syntax valid"
     else
         log_warn "Could not validate pyproject.toml syntax"
     fi
 
-    # Check network
     if curl -s --max-time 5 https://pypi.org >/dev/null 2>&1; then
         log_ok "PyPI reachable"
     else
@@ -195,7 +206,7 @@ else
     fi
 
     echo ""
-    log_info "Fallback: try installing without uv:"
+    log_info "Fallback — install without uv:"
     log_info "  $PYTHON_CMD -m pip install -e '.[dev,cli]'"
     exit 1
 fi
@@ -211,7 +222,6 @@ if [[ ! -f "$VENV_PYTHON" ]]; then
     exit 1
 fi
 
-# Verify core imports
 INTRO_ERRORS=0
 
 check_import() {
@@ -237,11 +247,9 @@ if [[ "$INTRO_ERRORS" -gt 0 ]]; then
     log_fail "$INTRO_ERRORS core import(s) failed"
     log_info "Fix: uv sync --reinstall"
     log_info "If sqlite-vec fails: ensure SQLite 3.35+ (sqlite3 --version)"
-    log_info "If langgraph fails:  uv lock --upgrade && uv sync"
     exit 1
 fi
 
-# Test collection (fast, no execution)
 TEST_COUNT=$($VENV_PYTHON -m pytest tests/ --co -q 2>/dev/null | tail -1 | grep -oP '\d+' | head -1 || echo "0")
 if [[ -n "$TEST_COUNT" && "$TEST_COUNT" -gt 0 ]]; then
     log_ok "$TEST_COUNT tests collected"
