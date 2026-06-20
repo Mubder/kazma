@@ -14,7 +14,7 @@ models:
 
 storage:
   engine: "sqlite-vec"
-  path: "data/kazma.db"
+  path: "kazma-data/checkpoints.db"
   vector_dim: 1536
 
 memory:

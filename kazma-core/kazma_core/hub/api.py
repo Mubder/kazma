@@ -256,34 +256,6 @@ async def search_skills(
     return SearchResponse(items=items, total=len(items), query=q)
 
 
-@app.get("/api/v1/skills/{skill_id:path}", response_model=SkillDetailResponse)
-async def get_skill(skill_id: str):
-    """Get detailed information for a specific skill."""
-    api = _get_api()
-
-    try:
-        manifest = await api.registry.get(skill_id)
-    except ValueError:
-        raise HTTPException(status_code=404, detail=f"Skill not found: {skill_id}")
-    if manifest is None:
-        raise HTTPException(status_code=404, detail=f"Skill not found: {skill_id}")
-
-    cert = await api.certifier.verify_badge(manifest.data["name"])
-    data = manifest.data
-
-    return SkillDetailResponse(
-        id=skill_id,
-        name=data.get("name", ""),
-        author=data.get("author", ""),
-        description=data.get("description"),
-        version=data.get("version", ""),
-        category=data.get("category"),
-        tags=data.get("tags", []),
-        certified=cert.valid,
-        downloads=0,
-    )
-
-
 @app.post("/api/v1/skills/submit", response_model=SubmissionResponse)
 async def submit_skill(payload: SubmissionRequest):
     """Submit a skill for certification review."""
@@ -355,6 +327,34 @@ async def download_skill(skill_id: str):
         content=buf.read(),
         media_type="application/gzip",
         headers={"Content-Disposition": f"attachment; filename={skill_id.split('/')[-1].split('@')[0]}.tar.gz"},
+    )
+
+
+@app.get("/api/v1/skills/{skill_id:path}", response_model=SkillDetailResponse)
+async def get_skill(skill_id: str):
+    """Get detailed information for a specific skill."""
+    api = _get_api()
+
+    try:
+        manifest = await api.registry.get(skill_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {skill_id}")
+    if manifest is None:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {skill_id}")
+
+    cert = await api.certifier.verify_badge(manifest.data["name"])
+    data = manifest.data
+
+    return SkillDetailResponse(
+        id=skill_id,
+        name=data.get("name", ""),
+        author=data.get("author", ""),
+        description=data.get("description"),
+        version=data.get("version", ""),
+        category=data.get("category"),
+        tags=data.get("tags", []),
+        certified=cert.valid,
+        downloads=0,
     )
 
 

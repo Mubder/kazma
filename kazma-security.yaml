@@ -1,0 +1,66 @@
+# Kazma Security Configuration
+# Controls automated scanning, disclosure workflow, bug bounty, and hardening.
+
+scanning:
+  enabled: true
+  interval: "24h"
+  sources:
+    - osv
+    - github_advisories
+    - nvd
+  auto_create_issues: true
+  severity_threshold: medium
+  ignore:
+    - ""  # Add CVE IDs or package patterns to ignore
+
+disclosure:
+  enabled: true
+  response_window: "48h"
+  assessment_window: "7d"
+  pgp_key_url: "https://kazma.dev/.well-known/security.txt"
+  encrypted_channels:
+    - type: email
+      address: "security@kazma.dev"
+    - type: signal
+      number: "+1-XXX-XXX-XXXX"
+
+bug_bounty:
+  enabled: true
+  min_payout: 50
+  max_payout: 2000
+  currency: USD
+  tiers:
+    critical:
+      range: [500, 2000]
+      criteria: "Remote code execution, full RBAC bypass, data exfiltration"
+    high:
+      range: [200, 500]
+      criteria: "Privilege escalation, authentication bypass, significant info leak"
+    medium:
+      range: [50, 200]
+      criteria: "Limited information disclosure, CSRF, stored XSS"
+    low:
+      range: [0, 0]
+      criteria: "Hall of Fame recognition"
+
+hardening:
+  run_on_startup: true
+  fail_on_critical: true
+  auto_fix: false
+  checks:
+    - name: secrets_in_logs
+      enabled: true
+    - name: input_validation
+      enabled: true
+    - name: rbac_enforcement
+      enabled: true
+    - name: tls_required
+      enabled: true
+    - name: dependency_audit
+      enabled: true
+    - name: least_privilege
+      enabled: true
+    - name: audit_trail
+      enabled: true
+    - name: config_integrity
+      enabled: true

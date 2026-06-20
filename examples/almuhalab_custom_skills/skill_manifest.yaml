@@ -1,0 +1,34 @@
+name: almuhalab-custom-skills
+version: 0.1.0
+description: "ALMuhalab-specific operational skills — drone inspection, trading intelligence, branding"
+author: "ALMuhalab International Holding Group"
+license: MIT
+
+capabilities:
+  - drone_inspection
+  - trading_intelligence
+  - division_branding
+  - asset_generation
+
+dependencies:
+  core: ">=0.1.0"
+  optional:
+    - numpy
+    - paho-mqtt
+    - opencv-python
+
+mcp_servers:
+  - name: oil-pricing-api
+    type: stdio
+    command: ["python", "-m", "oil_pricing_server"]
+  - name: booking-engine
+    type: stdio
+    command: ["python", "-m", "booking_server"]
+
+permissions:
+  required:
+    - file_read
+    - network_outbound
+  optional:
+    - camera_access
+    - mqtt_broker

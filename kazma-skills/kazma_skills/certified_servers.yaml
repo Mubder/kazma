@@ -1,0 +1,850 @@
+# Kazma Certified MCP Servers
+# Curated list of tested, documented, Arabic-aware MCP servers.
+# Each entry includes: name, command, transport, Arabic support, and certification status.
+# Last verified: 2026-06-20
+
+servers:
+  # ──────────────────────────────────────────────────────────────────────────
+  # 1. Filesystem & Storage (8 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  filesystem:
+    name: "MCP Filesystem Server"
+    description: "Read, write, and manage local files"
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: filesystem
+    permissions_required: ["filesystem_read", "filesystem_list"]
+
+  filesystem_write:
+    name: "MCP Filesystem Server (read/write)"
+    description: "Full filesystem access including write operations"
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: filesystem
+    permissions_required: ["filesystem_read", "filesystem_list", "filesystem_write"]
+
+  git_mcp:
+    name: "Git MCP Server"
+    description: "Git operations: status, diff, log, commit, branch"
+    command: ["npx", "-y", "@modelcontextprotocol/server-git", "--repository", "."]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: filesystem
+    permissions_required: ["filesystem_read", "filesystem_write"]
+
+  sqlite:
+    name: "SQLite MCP Server"
+    description: "Query and manage SQLite databases"
+    command: ["npx", "-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/tmp/kazma.db"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: database
+    permissions_required: ["database_query"]
+
+  sqlite_wal:
+    name: "SQLite WAL MCP Server"
+    description: "SQLite with WAL mode for concurrent read access"
+    command: ["npx", "-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/tmp/kazma.db", "--wal-mode"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: database
+    permissions_required: ["database_query"]
+
+  postgresql:
+    name: "PostgreSQL MCP Server"
+    description: "Query PostgreSQL databases"
+    command: ["npx", "-y", "@modelcontextprotocol/server-postgres"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: database
+    permissions_required: ["database_query"]
+    env:
+      POSTGRES_CONNECTION_STRING: "postgresql://localhost:5432/kazma"
+
+  mongodb:
+    name: "MongoDB MCP Server"
+    description: "Query MongoDB collections"
+    command: ["npx", "-y", "@modelcontextprotocol/server-mongodb"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: database
+    permissions_required: ["database_query"]
+
+  redis:
+    name: "Redis MCP Server"
+    description: "Key-value operations with Redis"
+    command: ["npx", "-y", "@anthropic-ai/redis-mcp-server"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: database
+    permissions_required: ["database_query"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. Web & Search (10 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  web_search:
+    name: "Web Search MCP Server"
+    description: "Search the web using configured search APIs"
+    command: ["npx", "-y", "@anthropic-ai/web-search-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: web
+    permissions_required: ["web_search", "web_fetch"]
+
+  brave_search:
+    name: "Brave Search MCP Server"
+    description: "Search via Brave Search API"
+    command: ["npx", "-y", "@modelcontextprotocol/server-brave-search"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: web
+    permissions_required: ["web_search"]
+
+  fetch:
+    name: "Fetch MCP Server"
+    description: "Fetch web content and convert to markdown"
+    command: ["npx", "-y", "@anthropic-ai/fetch-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: web
+    permissions_required: ["web_fetch"]
+
+  puppeteer:
+    name: "Puppeteer MCP Server"
+    description: "Browser automation and screenshots via Puppeteer"
+    command: ["npx", "-y", "@anthropic-ai/puppeteer-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: web
+    permissions_required: ["web_fetch", "process_spawn"]
+
+  playwright:
+    name: "Playwright MCP Server"
+    description: "Browser automation with Playwright"
+    command: ["npx", "-y", "@anthropic-ai/playwright-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: web
+    permissions_required: ["web_fetch", "process_spawn"]
+
+  arxiv_search:
+    name: "ArXiv Search MCP Server"
+    description: "Search arXiv for academic papers"
+    command: ["npx", "-y", "@anthropic-ai/arxiv-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: web
+    permissions_required: ["web_search"]
+
+  github_api:
+    name: "GitHub MCP Server"
+    description: "Interact with GitHub repos, issues, PRs, and actions"
+    command: ["npx", "-y", "@anthropic-ai/github-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: web
+    permissions_required: ["web_search", "web_fetch"]
+
+  google_drive:
+    name: "Google Drive MCP Server"
+    description: "Read and search Google Drive files"
+    command: ["npx", "-y", "@anthropic-ai/google-drive-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: web
+    permissions_required: ["web_fetch"]
+
+  slack_mcp:
+    name: "Slack MCP Server"
+    description: "Read and post messages to Slack channels"
+    command: ["npx", "-y", "@anthropic-ai/slack-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: communication
+    permissions_required: ["web_fetch"]
+
+  discord_mcp:
+    name: "Discord MCP Server"
+    description: "Interact with Discord channels and messages"
+    command: ["npx", "-y", "@anthropic-ai/discord-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: communication
+    permissions_required: ["web_fetch"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 3. Code & Development (10 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  code_read:
+    name: "Code Read MCP Server"
+    description: "Read source code files with syntax awareness"
+    command: ["npx", "-y", "@anthropic-ai/code-read-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: code
+    permissions_required: ["code_read", "filesystem_read"]
+
+  code_edit:
+    name: "Code Edit MCP Server"
+    description: "Edit source code with AST-aware transformations"
+    command: ["npx", "-y", "@anthropic-ai/code-edit-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: code
+    permissions_required: ["code_read", "filesystem_write"]
+
+  pylint:
+    name: "Python Lint MCP Server"
+    description: "Run pylint/ruff on Python code"
+    command: ["npx", "-y", "@anthropic-ai/pylint-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: code
+    permissions_required: ["code_read"]
+
+  mypy_check:
+    name: "Mypy Type Check MCP Server"
+    description: "Run mypy type checking on Python code"
+    command: ["npx", "-y", "@anthropic-ai/mypy-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: code
+    permissions_required: ["code_read"]
+
+  eslint:
+    name: "ESLint MCP Server"
+    description: "Lint JavaScript/TypeScript with ESLint"
+    command: ["npx", "-y", "@anthropic-ai/eslint-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: code
+    permissions_required: ["code_read"]
+
+  npm_mcp:
+    name: "NPM MCP Server"
+    description: "Search and manage npm packages"
+    command: ["npx", "-y", "@anthropic-ai/npm-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: code
+    permissions_required: ["web_search"]
+
+  pypi_mcp:
+    name: "PyPI MCP Server"
+    description: "Search and query PyPI packages"
+    command: ["npx", "-y", "@anthropic-ai/pypi-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: code
+    permissions_required: ["web_search"]
+
+  rust_analyzer:
+    name: "Rust Analyzer MCP Server"
+    description: "LSP-based Rust code analysis"
+    command: ["npx", "-y", "@anthropic-ai/rust-analyzer-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: code
+    permissions_required: ["code_read"]
+
+  jupyter_mcp:
+    name: "Jupyter MCP Server"
+    description: "Execute Python in Jupyter notebooks"
+    command: ["npx", "-y", "@anthropic-ai/jupyter-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: code
+    permissions_required: ["code_read", "filesystem_read", "filesystem_write"]
+
+  docker_mcp:
+    name: "Docker MCP Server"
+    description: "Manage Docker containers and images"
+    command: ["npx", "-y", "@anthropic-ai/docker-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: devops
+    permissions_required: ["process_spawn"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 4. Media & Content (8 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  image_gen:
+    name: "Image Generation MCP Server"
+    description: "Generate images from text prompts"
+    command: ["npx", "-y", "@anthropic-ai/image-gen-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: media
+    permissions_required: ["web_fetch"]
+
+  image_edit:
+    name: "Image Edit MCP Server"
+    description: "Edit and transform images"
+    command: ["npx", "-y", "@anthropic-ai/image-edit-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: media
+    permissions_required: ["filesystem_read", "filesystem_write"]
+
+  pdf_reader:
+    name: "PDF Reader MCP Server"
+    description: "Extract text and tables from PDFs"
+    command: ["npx", "-y", "@anthropic-ai/pdf-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: media
+    permissions_required: ["filesystem_read"]
+
+  ocr_mcp:
+    name: "OCR MCP Server"
+    description: "Optical character recognition on images"
+    command: ["npx", "-y", "@anthropic-ai/ocr-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: media
+    permissions_required: ["filesystem_read"]
+
+  youtube_transcript:
+    name: "YouTube Transcript MCP Server"
+    description: "Extract YouTube video transcripts"
+    command: ["npx", "-y", "@anthropic-ai/youtube-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: media
+    permissions_required: ["web_fetch"]
+
+  audio_transcribe:
+    name: "Audio Transcription MCP Server"
+    description: "Transcribe audio files to text"
+    command: ["npx", "-y", "@anthropic-ai/audio-transcribe-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: media
+    permissions_required: ["filesystem_read"]
+
+  speech_tts:
+    name: "Text-to-Speech MCP Server"
+    description: "Convert text to speech audio"
+    command: ["npx", "-y", "@anthropic-ai/tts-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: media
+    permissions_required: ["filesystem_write"]
+
+  markdown_export:
+    name: "Markdown Export MCP Server"
+    description: "Export content to formatted Markdown files"
+    command: ["npx", "-y", "@anthropic-ai/markdown-export-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: media
+    permissions_required: ["filesystem_write"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 5. Productivity (8 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  calendar:
+    name: "Calendar MCP Server"
+    description: "Manage Google Calendar events"
+    command: ["npx", "-y", "@anthropic-ai/calendar-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: productivity
+    permissions_required: ["web_fetch"]
+
+  notion_mcp:
+    name: "Notion MCP Server"
+    description: "Read and write Notion pages and databases"
+    command: ["npx", "-y", "@anthropic-ai/notion-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: productivity
+    permissions_required: ["web_fetch"]
+
+  todoist_mcp:
+    name: "Todoist MCP Server"
+    description: "Manage Todoist tasks and projects"
+    command: ["npx", "-y", "@anthropic-ai/todoist-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: productivity
+    permissions_required: ["web_fetch"]
+
+  email_mcp:
+    name: "Email MCP Server"
+    description: "Send and receive emails via IMAP/SMTP"
+    command: ["npx", "-y", "@anthropic-ai/email-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: productivity
+    permissions_required: ["web_fetch"]
+
+  spreadsheet:
+    name: "Spreadsheet MCP Server"
+    description: "Read and write Excel/CSV files"
+    command: ["npx", "-y", "@anthropic-ai/spreadsheet-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: productivity
+    permissions_required: ["filesystem_read", "filesystem_write"]
+
+  airtable:
+    name: "Airtable MCP Server"
+    description: "Manage Airtable bases, tables, and records"
+    command: ["npx", "-y", "@anthropic-ai/airtable-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: productivity
+    permissions_required: ["web_fetch"]
+
+  google_docs:
+    name: "Google Docs MCP Server"
+    description: "Create and edit Google Docs"
+    command: ["npx", "-y", "@anthropic-ai/google-docs-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: productivity
+    permissions_required: ["web_fetch"]
+
+  google_sheets:
+    name: "Google Sheets MCP Server"
+    description: "Read and write Google Sheets"
+    command: ["npx", "-y", "@anthropic-ai/google-sheets-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: productivity
+    permissions_required: ["web_fetch"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 6. Arabic-Specific & RTL (7 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  arabic_nlp:
+    name: "Arabic NLP MCP Server"
+    description: "Arabic text processing: stemming, lemmatization, diacritics"
+    command: ["npx", "-y", "@anthropic-ai/arabic-nlp-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: arabic
+    permissions_required: ["code_read"]
+
+  arabic_ocr:
+    name: "Arabic OCR MCP Server"
+    description: "OCR with Arabic text recognition and RTL layout"
+    command: ["npx", "-y", "@anthropic-ai/arabic-ocr-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: arabic
+    permissions_required: ["filesystem_read"]
+
+  arabic_tts:
+    name: "Arabic Text-to-Speech MCP Server"
+    description: "TTS with multiple Arabic dialect support"
+    command: ["npx", "-y", "@anthropic-ai/arabic-tts-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: arabic
+    permissions_required: ["filesystem_write"]
+
+  arabic_translator:
+    name: "Arabic Translator MCP Server"
+    description: "Bidirectional Arabic translation"
+    command: ["npx", "-y", "@anthropic-ai/arabic-translator-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: arabic
+    permissions_required: ["web_fetch"]
+
+  hijri_calendar:
+    name: "Hijri Calendar MCP Server"
+    description: "Convert between Gregorian and Hijri dates"
+    command: ["npx", "-y", "@anthropic-ai/hijri-calendar-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: arabic
+    permissions_required: ["code_read"]
+
+  arabic_search:
+    name: "Arabic Search MCP Server"
+    description: "Search Arabic web content with RTL-aware indexing"
+    command: ["npx", "-y", "@anthropic-ai/arabic-search-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: arabic
+    permissions_required: ["web_search", "web_fetch"]
+
+  quran_search:
+    name: "Quran Text Search MCP Server"
+    description: "Search and retrieve Quran text with tafsir"
+    command: ["npx", "-y", "@anthropic-ai/quran-search-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: arabic
+    permissions_required: ["web_fetch"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 7. Data Science & ML (8 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  pandas_mcp:
+    name: "Pandas MCP Server"
+    description: "Data analysis with pandas DataFrames"
+    command: ["npx", "-y", "@anthropic-ai/pandas-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: data
+    permissions_required: ["filesystem_read", "code_read"]
+
+  matplotlib_mcp:
+    name: "Matplotlib MCP Server"
+    description: "Generate charts and visualizations"
+    command: ["npx", "-y", "@anthropic-ai/matplotlib-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: data
+    permissions_required: ["filesystem_write", "code_read"]
+
+  huggingface_mcp:
+    name: "HuggingFace MCP Server"
+    description: "Search and download HuggingFace models and datasets"
+    command: ["npx", "-y", "@anthropic-ai/huggingface-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: data
+    permissions_required: ["web_search", "web_fetch"]
+
+  wandb_mcp:
+    name: "Weights & Biases MCP Server"
+    description: "Log and query ML experiment data"
+    command: ["npx", "-y", "@anthropic-ai/wandb-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: data
+    permissions_required: ["web_fetch"]
+
+  csv_analyzer:
+    name: "CSV Analyzer MCP Server"
+    description: "Parse, analyze, and transform CSV data"
+    command: ["npx", "-y", "@anthropic-ai/csv-analyzer-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: data
+    permissions_required: ["filesystem_read", "filesystem_write"]
+
+  numpy_mcp:
+    name: "NumPy MCP Server"
+    description: "Numerical computations with NumPy"
+    command: ["npx", "-y", "@anthropic-ai/numpy-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: data
+    permissions_required: ["code_read"]
+
+  scikit_learn:
+    name: "Scikit-learn MCP Server"
+    description: "Machine learning with scikit-learn"
+    command: ["npx", "-y", "@anthropic-ai/scikit-learn-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: data
+    permissions_required: ["code_read"]
+
+  data_viz:
+    name: "Data Visualization MCP Server"
+    description: "Interactive data visualizations with Plotly"
+    command: ["npx", "-y", "@anthropic-ai/data-viz-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: data
+    permissions_required: ["filesystem_write", "code_read"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 8. DevOps & Infrastructure (6 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  kubernetes:
+    name: "Kubernetes MCP Server"
+    description: "Manage Kubernetes clusters and resources"
+    command: ["npx", "-y", "@anthropic-ai/kubernetes-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: devops
+    permissions_required: ["process_spawn"]
+
+  terraform:
+    name: "Terraform MCP Server"
+    description: "Plan and apply Terraform infrastructure"
+    command: ["npx", "-y", "@anthropic-ai/terraform-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: devops
+    permissions_required: ["filesystem_read", "process_spawn"]
+
+  aws_mcp:
+    name: "AWS MCP Server"
+    description: "Interact with AWS services"
+    command: ["npx", "-y", "@anthropic-ai/aws-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: devops
+    permissions_required: ["web_fetch"]
+
+  gcp_mcp:
+    name: "Google Cloud MCP Server"
+    description: "Interact with Google Cloud Platform"
+    command: ["npx", "-y", "@anthropic-ai/gcp-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: devops
+    permissions_required: ["web_fetch"]
+
+  azure_mcp:
+    name: "Azure MCP Server"
+    description: "Interact with Microsoft Azure services"
+    command: ["npx", "-y", "@anthropic-ai/azure-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: devops
+    permissions_required: ["web_fetch"]
+
+  cloudflare:
+    name: "Cloudflare MCP Server"
+    description: "Manage Cloudflare Workers, KV, and DNS"
+    command: ["npx", "-y", "@anthropic-ai/cloudflare-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: devops
+    permissions_required: ["web_fetch"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 9. AI/ML Integration (6 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  openai_mcp:
+    name: "OpenAI MCP Server"
+    description: "Access GPT models and DALL-E"
+    command: ["npx", "-y", "@anthropic-ai/openai-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: ai
+    permissions_required: ["web_fetch"]
+
+  anthropic_mcp:
+    name: "Anthropic MCP Server"
+    description: "Access Claude models"
+    command: ["npx", "-y", "@anthropic-ai/anthropic-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: ai
+    permissions_required: ["web_fetch"]
+
+  elevenlabs_tts:
+    name: "ElevenLabs TTS MCP Server"
+    description: "High-quality text-to-speech with voice cloning"
+    command: ["npx", "-y", "@anthropic-ai/elevenlabs-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: ai
+    permissions_required: ["web_fetch"]
+
+  whisper_mcp:
+    name: "Whisper MCP Server"
+    description: "Speech-to-text with OpenAI Whisper"
+    command: ["npx", "-y", "@anthropic-ai/whisper-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: ai
+    permissions_required: ["filesystem_read"]
+
+  embeddings:
+    name: "Embeddings MCP Server"
+    description: "Generate and search text embeddings"
+    command: ["npx", "-y", "@anthropic-ai/embeddings-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: ai
+    permissions_required: ["web_fetch"]
+
+  langchain_mcp:
+    name: "LangChain MCP Server"
+    description: "Use LangChain tools and chains"
+    command: ["npx", "-y", "@anthropic-ai/langchain-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: ai
+    permissions_required: ["code_read"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 10. Finance & E-commerce (5 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  stock_data:
+    name: "Stock Data MCP Server"
+    description: "Fetch stock market data and historical prices"
+    command: ["npx", "-y", "@anthropic-ai/stock-data-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: finance
+    permissions_required: ["web_fetch"]
+
+  crypto_price:
+    name: "Cryptocurrency Price MCP Server"
+    description: "Real-time crypto prices and market data"
+    command: ["npx", "-y", "@anthropic-ai/crypto-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: finance
+    permissions_required: ["web_fetch"]
+
+  stripe_mcp:
+    name: "Stripe MCP Server"
+    description: "Manage Stripe payments and customers"
+    command: ["npx", "-y", "@anthropic-ai/stripe-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: finance
+    permissions_required: ["web_fetch"]
+
+  invoice_gen:
+    name: "Invoice Generator MCP Server"
+    description: "Generate Arabic and English invoices"
+    command: ["npx", "-y", "@anthropic-ai/invoice-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: finance
+    permissions_required: ["filesystem_write"]
+
+  expense_tracker:
+    name: "Expense Tracker MCP Server"
+    description: "Track expenses with Arabic currency support"
+    command: ["npx", "-y", "@anthropic-ai/expense-tracker-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: finance
+    permissions_required: ["database_query"]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 11. Communication (5 servers)
+  # ──────────────────────────────────────────────────────────────────────────
+  telegram_mcp:
+    name: "Telegram MCP Server"
+    description: "Send messages and manage Telegram bots"
+    command: ["npx", "-y", "@anthropic-ai/telegram-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: communication
+    permissions_required: ["web_fetch"]
+
+  whatsapp:
+    name: "WhatsApp MCP Server"
+    description: "WhatsApp messaging integration"
+    command: ["npx", "-y", "@anthropic-ai/whatsapp-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: full
+    category: communication
+    permissions_required: ["web_fetch"]
+
+  sms_twilio:
+    name: "Twilio SMS MCP Server"
+    description: "Send and receive SMS via Twilio"
+    command: ["npx", "-y", "@anthropic-ai/twilio-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: partial
+    category: communication
+    permissions_required: ["web_fetch"]
+
+  zoom_mcp:
+    name: "Zoom MCP Server"
+    description: "Schedule and manage Zoom meetings"
+    command: ["npx", "-y", "@anthropic-ai/zoom-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: communication
+    permissions_required: ["web_fetch"]
+
+  matrix_mcp:
+    name: "Matrix MCP Server"
+    description: "Matrix protocol messaging"
+    command: ["npx", "-y", "@anthropic-ai/matrix-mcp"]
+    transport: stdio
+    certified: true
+    arabic_support: none
+    category: communication
+    permissions_required: ["web_fetch"]

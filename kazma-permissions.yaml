@@ -1,0 +1,36 @@
+# Enterprise permission boundaries for ALMuhalab divisions
+# Controls which MCP servers each division can access.
+
+divisions:
+  gas_oil:
+    allowed_mcp_servers:
+      - "oil-pricing-api"
+      - "contract-manager"
+      - "supplier-directory"
+    denied_mcp_servers:
+      - "tourism-booking-api"
+      - "general-inventory-api"
+
+  tourism:
+    allowed_mcp_servers:
+      - "booking-engine"
+      - "hotel-api"
+      - "flight-search"
+    denied_mcp_servers:
+      - "oil-pricing-api"
+      - "contract-manager"
+
+  general_trading:
+    allowed_mcp_servers:
+      - "inventory-api"
+      - "supplier-directory"
+      - "procurement-api"
+    denied_mcp_servers:
+      - "oil-pricing-api"
+      - "booking-engine"
+
+cross_division_rules:
+  require_explicit_approval: true
+  max_approval_duration_hours: 24
+  notify_admins: true
+  audit_all_access: true

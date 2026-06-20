@@ -38,6 +38,11 @@ Thumbs.db
 *.db
 *.db-journal
 *.db-wal
+kazma-data/
+kazma-core/kazma-data/
+
+# Hermes Agent
+.hermes/
 
 # Environment / Secrets
 .env
