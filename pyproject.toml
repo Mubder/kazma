@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Kazma — Autonomous AI agent framework with sqlite-vec, LangGraph, and Arabic RTL dashboard"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
@@ -32,7 +32,7 @@ cli = [
     "rich>=13.0.0",
 ]
 tantivy = [
-    "tantivy-py>=0.11.0",
+    "tantivy-py>=0.10.0",
 ]
 
 [project.scripts]

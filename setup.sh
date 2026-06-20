@@ -68,7 +68,7 @@ fi
 UV_INSTALLED=false
 
 if command -v uv &>/dev/null; then
-    UV_VERSION=$(uv --version 2>/dev/null | head -1)
+    UV_VERSION=$(uv --version 2>/dev/null || echo "unknown")
     log_ok "uv detected: $UV_VERSION"
     UV_INSTALLED=true
 fi
@@ -80,8 +80,9 @@ if [[ "$UV_INSTALLED" == "false" ]]; then
     if "$PYTHON_CMD" -m pip install uv 2>/dev/null; then
         # Ensure uv is on PATH (pip may install to ~/.local/bin)
         export PATH="$HOME/.local/bin:$PATH"
+        hash -r  # refresh command cache
         if command -v uv &>/dev/null; then
-            UV_VERSION=$(uv --version 2>/dev/null | head -1)
+            UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
             log_ok "uv installed via pip: $UV_VERSION"
             UV_INSTALLED=true
         fi
@@ -89,9 +90,10 @@ if [[ "$UV_INSTALLED" == "false" ]]; then
 
     # Priority 2: snap (bare-metal Ubuntu, not available in Docker/WSL)
     if [[ "$UV_INSTALLED" == "false" ]] && command -v snap &>/dev/null; then
-        log_info "pip install failed, trying snap..."
+        log_info "pip install failed or uv not on PATH, trying snap..."
         if sudo snap install astral-uv --classic 2>/dev/null; then
-            UV_VERSION=$(uv --version 2>/dev/null | head -1)
+            hash -r
+            UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
             log_ok "uv installed via snap: $UV_VERSION"
             UV_INSTALLED=true
         fi
@@ -102,8 +104,9 @@ if [[ "$UV_INSTALLED" == "false" ]]; then
         log_info "snap unavailable, trying official installer..."
         if curl -LsSf https://astral.sh/uv/install.sh | sh 2>/dev/null; then
             export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+            hash -r
             if command -v uv &>/dev/null; then
-                UV_VERSION=$(uv --version 2>/dev/null | head -1)
+                UV_VERSION=$(uv --version 2>/dev/null || echo "installed")
                 log_ok "uv installed via official installer: $UV_VERSION"
                 UV_INSTALLED=true
             fi
