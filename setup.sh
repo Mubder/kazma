@@ -175,8 +175,8 @@ fi
 
 log_header "2. Sync Handshake (uv sync)"
 
-if uv sync 2>&1 | tail -5; then
-    log_ok "Environment synced from pyproject.toml"
+if uv sync --extra dev --extra cli 2>&1 | tail -5; then
+    log_ok "Environment synced from pyproject.toml (with dev + cli extras)"
 else
     SYNC_EXIT=$?
     log_fail "uv sync failed (exit code $SYNC_EXIT)"
