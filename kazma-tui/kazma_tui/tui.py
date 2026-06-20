@@ -23,11 +23,6 @@ from kazma_core.agent import AgentConfig, KazmaAgent, load_config
 logger = logging.getLogger(__name__)
 
 try:
-    import arabic_reshaper
-except ImportError:
-    arabic_reshaper = None
-
-try:
     from bidi.algorithm import get_display
 except ImportError:
     get_display = None
@@ -37,13 +32,19 @@ except ImportError:
 
 
 def _fix_arabic(text: str) -> str:
-    """Reshape Arabic text for proper terminal display.
+    """Apply Unicode bidi algorithm for Arabic text display.
+
+    Uses python-bidi to reorder Arabic text for RTL display
+    WITHOUT reshaping characters — this avoids font clipping
+    issues in fixed-width terminal cells.
+
     Falls back to the original text if libraries aren't installed.
     """
-    if arabic_reshaper is None or get_display is None:
+    if get_display is None:
         return text
     try:
-        return get_display(arabic_reshaper.reshape(text))
+        result = get_display(text)
+        return str(result) if not isinstance(result, str) else result
     except Exception:
         return text
 

@@ -34,7 +34,6 @@ cli = [
 ]
 tui = [
     "textual>=8.0.0",
-    "arabic_reshaper>=3.0.0",
     "python-bidi>=0.4.0",
 ]
 tantivy = [
