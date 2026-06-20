@@ -1,4 +1,4 @@
-# Kazma (كزمة)
+# Kazma (كاظمه)
 
 Autonomous AI agent framework — Python 3.11+, asyncio-native, sqlite-vec only.
 
