@@ -1,8 +1,9 @@
 """Kazma TUI — A Textual-based Terminal User Interface with Arabic support.
 
 Features:
-- Full Arabic/RTL text rendering (via arabic_reshaper + python-bidi)
-- RTL layout: input on the left, prompt label on the right
+- Full Arabic/RTL text rendering via arabic_reshaper + python-bidi
+- Arabic-aware input: reshapes on-the-fly while keeping value raw
+- RTL layout: input on left, prompt label on right
 - Chat interface with real-time KazmaAgent integration
 - Status bar showing model, tools, and session info
 """
@@ -12,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from rich.text import Text as RichText
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Input, Label, RichLog, Static
@@ -43,6 +45,45 @@ def _fix_arabic(text: str) -> str:
     try:
         return get_display(arabic_reshaper.reshape(text))
     except Exception:
+        return text
+
+
+def _has_arabic(text: str) -> bool:
+    """Check if text contains Arabic script characters."""
+    return any(
+        '\u0600' <= c <= '\u06FF'
+        or '\u0750' <= c <= '\u077F'
+        or '\u08A0' <= c <= '\u08FF'
+        or '\uFB50' <= c <= '\uFDFF'
+        or '\uFE70' <= c <= '\uFEFF'
+        for c in text
+    )
+
+
+# ── Arabic-aware Input ──────────────────────────────────────────────
+
+
+class ArabicInput(Input):
+    """Input widget that reshapes Arabic text for display.
+
+    Overrides the _value property so the display shows correctly
+    reshaped Arabic characters while keeping self.value (raw text)
+    untouched for submission.
+    """
+
+    @property
+    def _value(self) -> RichText:
+        """Value rendered with Arabic reshaping for display."""
+        if self.password:
+            return RichText(
+                "•" * len(self.value), no_wrap=True, overflow="ignore", end=""
+            )
+
+        raw = self.value
+        display = _fix_arabic(raw) if _has_arabic(raw) else raw
+        text = RichText(display, no_wrap=True, overflow="ignore", end="")
+        if self.highlighter is not None:
+            text = self.highlighter(text)
         return text
 
 
@@ -135,7 +176,7 @@ class KazmaTUI(App):
             )
         # Label on the RIGHT side (last child = rightmost)
         with Horizontal(id="input-row"):
-            yield Input(
+            yield ArabicInput(
                 id="message-input",
                 placeholder=_fix_arabic("اكتب رسالتك هنا..."),
             )
