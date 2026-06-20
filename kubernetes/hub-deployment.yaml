@@ -1,0 +1,102 @@
+# kazma-hub namespace + deployment + service + ingress
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kazma
+  labels:
+    app.kubernetes.io/part-of: kazma
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kazma-hub
+  namespace: kazma
+  labels:
+    app: kazma-hub
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kazma-hub
+  template:
+    metadata:
+      labels:
+        app: kazma-hub
+    spec:
+      containers:
+      - name: hub-api
+        image: kazma/hub-api:latest
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: hub-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: hub-secrets
+              key: redis-url
+        - name: KAZMA_ENV
+          value: "production"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /api/v1/health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kazma-hub
+  namespace: kazma
+spec:
+  selector:
+    app: kazma-hub
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kazma-hub
+  namespace: kazma
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  tls:
+  - hosts:
+    - hub.kazma.dev
+    secretName: kazma-hub-tls
+  rules:
+  - host: hub.kazma.dev
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kazma-hub
+            port:
+              number: 80
