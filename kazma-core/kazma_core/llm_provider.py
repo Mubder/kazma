@@ -1,0 +1,228 @@
+"""LLM Provider — OpenAI-compatible API client for Kazma.
+
+Connects to any OpenAI-compatible endpoint (OpenAI, LM Studio, Ollama,
+LiteLLM, vLLM, etc.) using httpx. No SDK dependency required.
+
+Usage:
+    provider = LLMProvider(config)
+    response = await provider.chat(messages, tools=tools)
+    # response["content"] = text response
+    # response["tool_calls"] = list of tool calls (if any)
+    # response["usage"] = {prompt_tokens, completion_tokens, total_tokens}
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+# ── Configuration ─────────────────────────────────────────────────────
+
+@dataclass
+class LLMConfig:
+    """Configuration for an LLM provider."""
+
+    base_url: str = "https://api.openai.com/v1"
+    api_key: str = ""
+    model: str = "gpt-4o-mini"
+    max_tokens: int = 4096
+    temperature: float = 0.7
+    timeout: float = 60.0
+    # Cost tracking (per 1M tokens, in USD)
+    input_cost_per_1m: float = 0.15
+    output_cost_per_1m: float = 0.60
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> LLMConfig:
+        """Create config from a dict (e.g. from kazma.yaml)."""
+        return cls(
+            base_url=d.get("base_url", cls.base_url),
+            api_key=d.get("api_key", cls.api_key),
+            model=d.get("model", cls.model),
+            max_tokens=d.get("max_tokens", cls.max_tokens),
+            temperature=d.get("temperature", cls.temperature),
+            timeout=d.get("timeout", cls.timeout),
+            input_cost_per_1m=d.get("input_cost_per_1m", cls.input_cost_per_1m),
+            output_cost_per_1m=d.get("output_cost_per_1m", cls.output_cost_per_1m),
+        )
+
+
+# ── Response types ────────────────────────────────────────────────────
+
+@dataclass
+class ToolCall:
+    """A single tool call from the LLM."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass
+class LLMResponse:
+    """Parsed response from an LLM call."""
+
+    content: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    finish_reason: str = ""  # "stop", "tool_calls", "length"
+    model: str = ""
+    usage: dict[str, int] = field(default_factory=dict)
+    cost_usd: float = 0.0
+    duration_ms: float = 0.0
+
+
+# ── Provider ──────────────────────────────────────────────────────────
+
+class LLMProvider:
+    """OpenAI-compatible LLM client using httpx.
+
+    Works with:
+    - OpenAI (api.openai.com)
+    - LM Studio (localhost:1234)
+    - Ollama (localhost:11434/v1)
+    - LiteLLM (localhost:4000)
+    - vLLM (localhost:8000/v1)
+    - Any OpenAI-compatible API
+    """
+
+    def __init__(self, config: LLMConfig | None = None) -> None:
+        self.config = config or LLMConfig()
+        self._resolve_api_key()
+        self._http: httpx.AsyncClient | None = None
+
+    def _resolve_api_key(self) -> None:
+        """Resolve API key from config or environment."""
+        key = self.config.api_key
+        if not key:
+            key = os.getenv("OPENAI_API_KEY", "")
+        if not key:
+            key = os.getenv("KAZMA_API_KEY", "")
+        # LM Studio / Ollama don't need a real key
+        if not key:
+            key = "not-needed"
+        self.config.api_key = key
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Lazy-init the HTTP client."""
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.AsyncClient(
+                base_url=self.config.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.config.api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=httpx.Timeout(self.config.timeout, connect=10.0),
+            )
+        return self._http
+
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ) -> LLMResponse:
+        """Send a chat completion request.
+
+        Args:
+            messages: Conversation messages in OpenAI format.
+            tools: Optional tool definitions in OpenAI function-calling format.
+            max_tokens: Override max_tokens for this call.
+            temperature: Override temperature for this call.
+
+        Returns:
+            LLMResponse with content, tool_calls, usage, and cost.
+        """
+        client = await self._get_client()
+
+        payload: dict[str, Any] = {
+            "model": self.config.model,
+            "messages": messages,
+            "max_tokens": max_tokens or self.config.max_tokens,
+            "temperature": temperature if temperature is not None else self.config.temperature,
+        }
+
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        start = time.monotonic()
+
+        try:
+            resp = await client.post("/chat/completions", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPStatusError as e:
+            logger.error("LLM API error: %d %s — %s", e.response.status_code, e.response.reason_phrase, e.response.text[:500])
+            raise LLMError(f"API error {e.response.status_code}: {e.response.text[:200]}") from e
+        except httpx.ConnectError as e:
+            logger.error("Cannot connect to LLM at %s", self.config.base_url)
+            raise LLMError(f"Cannot connect to {self.config.base_url}. Is the server running?") from e
+        except Exception as e:
+            logger.error("LLM call failed: %s", e)
+            raise LLMError(f"LLM call failed: {e}") from e
+
+        duration_ms = (time.monotonic() - start) * 1000
+
+        return self._parse_response(data, duration_ms)
+
+    def _parse_response(self, data: dict[str, Any], duration_ms: float) -> LLMResponse:
+        """Parse the OpenAI-format response into an LLMResponse."""
+        choice = data.get("choices", [{}])[0]
+        message = choice.get("message", {})
+        finish_reason = choice.get("finish_reason", "")
+
+        content = message.get("content", "") or ""
+        tool_calls: list[ToolCall] = []
+
+        for tc in message.get("tool_calls", []):
+            func = tc.get("function", {})
+            args_raw = func.get("arguments", "{}")
+            try:
+                args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+            except json.JSONDecodeError:
+                args = {"raw": args_raw}
+
+            tool_calls.append(ToolCall(
+                id=tc.get("id", ""),
+                name=func.get("name", ""),
+                arguments=args,
+            ))
+
+        usage = data.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+
+        # Calculate cost
+        cost = (
+            (prompt_tokens * self.config.input_cost_per_1m / 1_000_000)
+            + (completion_tokens * self.config.output_cost_per_1m / 1_000_000)
+        )
+
+        return LLMResponse(
+            content=content,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            model=data.get("model", self.config.model),
+            usage=usage,
+            cost_usd=round(cost, 6),
+            duration_ms=round(duration_ms, 1),
+        )
+
+    async def close(self) -> None:
+        """Close the HTTP client."""
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
+
+
+class LLMError(Exception):
+    """Raised when an LLM API call fails."""

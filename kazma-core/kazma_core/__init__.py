@@ -18,6 +18,8 @@ from kazma_core.rbac import RBACEngine, PermissionResult, DIVISIONS
 from kazma_core.audit_logger import AuditLogger, AuditEntry
 from kazma_core.division_sandbox import DivisionSandbox, SandboxResult, CrossDivisionRequest
 from kazma_core.authorization_flow import AuthorizationFlow, AuthorizationRequest, ApprovalResult, DenialResult
+from kazma_core.llm_provider import LLMProvider, LLMConfig, LLMResponse, LLMError
+from kazma_core.tool_registry import ToolRegistry
 
 __all__ = [
     "AgentState",
@@ -43,6 +45,10 @@ __all__ = [
     "FormalityLevel",
     "Intent",
     "KazmaTracer",
+    "LLMConfig",
+    "LLMError",
+    "LLMProvider",
+    "LLMResponse",
     "MajlisProtocol",
     "MajlisResponse",
     "AgentRequest",
@@ -52,6 +58,7 @@ __all__ = [
     "SandboxResult",
     "ToneAdapter",
     "ToneProfile",
+    "ToolRegistry",
     "TokenResult",
     "TransitionDecision",
     "create_cost_breaker",

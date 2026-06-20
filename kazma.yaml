@@ -12,6 +12,52 @@ models:
   router: "litellm"
   fallback: "gpt-4o-mini"
 
+# ── LLM Provider ─────────────────────────────────────────────────────
+# Supports any OpenAI-compatible API. Change base_url for local models.
+llm:
+  base_url: "https://api.openai.com/v1"
+  api_key: ""             # set via env OPENAI_API_KEY or KAZMA_API_KEY
+  model: "gpt-4o-mini"
+  max_tokens: 4096
+  temperature: 0.7
+  timeout: 60.0
+  # Cost per 1M tokens (USD) for budget tracking
+  input_cost_per_1m: 0.15
+  output_cost_per_1m: 0.60
+
+  # Local model presets (uncomment one):
+  # lm_studio:
+  #   base_url: "http://localhost:1234/v1"
+  #   model: "local-model"
+  #   api_key: "not-needed"
+  # ollama:
+  #   base_url: "http://localhost:11434/v1"
+  #   model: "llama3.2"
+  #   api_key: "not-needed"
+
+# ── MCP Servers ──────────────────────────────────────────────────────
+# Add MCP servers to give the agent access to tools.
+mcp:
+  servers: []
+  # Example stdio server:
+  # - name: "filesystem"
+  #   transport: "stdio"
+  #   command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+  #
+  # Example SSE server:
+  # - name: "web-search"
+  #   transport: "sse"
+  #   url: "http://localhost:8080/sse"
+
+# ── System Prompt ─────────────────────────────────────────────────────
+system_prompt: |
+  You are Kazma (كاظمه), an autonomous AI agent framework.
+  You understand Arabic dialects including Kuwaiti/Gulf Arabic.
+  Respond in the same language and dialect the user uses.
+  Be helpful, precise, and culturally aware.
+  When you don't know something, say so honestly.
+  When you have tools available, use them to accomplish tasks.
+
 storage:
   engine: "sqlite-vec"
   path: "kazma-data/checkpoints.db"
