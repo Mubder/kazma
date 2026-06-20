@@ -36,7 +36,7 @@ class TestLoadConfig:
     def test_loads_from_yaml(self, tmp_path, monkeypatch) -> None:
         config_file = tmp_path / "kazma.yaml"
         config_file.write_text(
-            "agent:\n  name: test-agent\n  version: 1.0\n"
+            'agent:\n  name: test-agent\n  version: "1.0"\n'
         )
         monkeypatch.chdir(tmp_path)
         config = load_config(config_file)
