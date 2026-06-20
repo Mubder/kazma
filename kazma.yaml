@@ -38,7 +38,10 @@ llm:
 # ── MCP Servers ──────────────────────────────────────────────────────
 # Add MCP servers to give the agent access to tools.
 mcp:
-  servers: []
+  servers:
+    - name: "filesystem"
+      transport: "stdio"
+      command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
   # Example stdio server:
   # - name: "filesystem"
   #   transport: "stdio"
