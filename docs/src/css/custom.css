@@ -1,0 +1,82 @@
+:root {
+  --ifm-color-primary: #2563eb;
+  --ifm-color-primary-dark: #1d4ed8;
+  --ifm-color-primary-darker: #1e40af;
+  --ifm-color-primary-darkest: #1e3a8a;
+  --ifm-color-primary-light: #3b82f6;
+  --ifm-color-primary-lighter: #60a5fa;
+  --ifm-color-primary-lightest: #93c5fd;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #60a5fa;
+  --ifm-color-primary-dark: #3b82f6;
+  --ifm-color-primary-darker: #2563eb;
+  --ifm-color-primary-darkest: #1d4ed8;
+  --ifm-color-primary-light: #93c5fd;
+  --ifm-color-primary-lighter: #bfdbfe;
+  --ifm-color-primary-lightest: #dbeafe;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+/* Certification badge styles */
+.certification-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.certification-badge.basic {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.certification-badge.standard {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.certification-badge.premium {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+/* Skill card */
+.skill-card {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 8px;
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  transition: box-shadow 0.2s;
+}
+
+.skill-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* Security badge */
+.security-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.security-badge.excellent { background: #d1fae5; color: #065f46; }
+.security-badge.good { background: #dbeafe; color: #1e40af; }
+.security-badge.fair { background: #fef3c7; color: #92400e; }
+.security-badge.poor { background: #fee2e2; color: #991b1b; }
+
+[data-theme='dark'] .security-badge.excellent { background: #064e3b; color: #6ee7b7; }
+[data-theme='dark'] .security-badge.good { background: #1e3a8a; color: #93c5fd; }
+[data-theme='dark'] .security-badge.fair { background: #78350f; color: #fcd34d; }
+[data-theme='dark'] .security-badge.poor { background: #7f1d1d; color: #fca5a5; }

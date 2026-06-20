@@ -1,0 +1,22 @@
+{
+    "model": "yolov11-oilgas",
+    "version": "1.0.0",
+    "description": "YOLOv11 model for Gas & Oil infrastructure inspection",
+    "classes": {
+        "0": {"name": "pipeline_leak", "severity": "critical"},
+        "1": {"name": "valve_damage", "severity": "high"},
+        "2": {"name": "corrosion_spot", "severity": "medium"},
+        "3": {"name": "ground_disturbance", "severity": "low"},
+        "4": {"name": "vehicle_intrusion", "severity": "medium"},
+        "5": {"name": "fire_smoke", "severity": "critical"}
+    },
+    "input_size": [640, 640],
+    "confidence_threshold": 0.7,
+    "nms_threshold": 0.45,
+    "training": {
+        "dataset": "kazma-oilgas-v1",
+        "epochs": 100,
+        "backbone": "yolov11",
+        "note": "Actual weights to be trained on domain-specific dataset and downloaded separately"
+    }
+}
