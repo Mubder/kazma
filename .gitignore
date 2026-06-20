@@ -48,3 +48,7 @@ kazma-core/kazma-data/
 .env
 .env.local
 .env.*.local
+
+# Local config overrides
+kazma.local.yaml
+kazma.local.yml
