@@ -5,9 +5,8 @@
 Autonomous AI agent framework — Python 3.11+, asyncio-native, sqlite-vec only.
 
 ![Tests](https://img.shields.io/badge/tests-979_passing-green)
-![Version](https://img.shields.io/badge/version-1.0.0-blue)
+![Version](https://img.shields.io/badge/version-0.1.0--alpha-orange)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Status](https://img.shields.io/badge/status-production_ready-brightgreen)
 
 ---
 
