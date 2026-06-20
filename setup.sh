@@ -69,8 +69,23 @@ UV_INSTALLED=false
 
 if command -v uv &>/dev/null; then
     UV_VERSION=$(uv --version 2>/dev/null || echo "unknown")
-    log_ok "uv detected: $UV_VERSION"
-    UV_INSTALLED=true
+    UV_PATH=$(command -v uv)
+
+    # Detect broken snap uv (systemd scope error)
+    if [[ "$UV_PATH" == *snap* ]]; then
+        log_warn "uv installed via snap — known systemd scope issues"
+        log_info "Replacing with pip-installed uv..."
+        sudo snap remove astral-uv 2>/dev/null || true
+        "$PYTHON_CMD" -m pip install uv 2>/dev/null || true
+        export PATH="$HOME/.local/bin:$PATH"
+        hash -r
+    fi
+
+    if command -v uv &>/dev/null; then
+        UV_VERSION=$(uv --version 2>/dev/null || echo "unknown")
+        log_ok "uv detected: $UV_VERSION"
+        UV_INSTALLED=true
+    fi
 fi
 
 if [[ "$UV_INSTALLED" == "false" ]]; then
