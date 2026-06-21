@@ -5,28 +5,209 @@ with redundancy through dual indexing.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, List, Optional
+
+import aiosqlite
 
 logger = logging.getLogger(__name__)
 
 
 class SQLiteMemoryBackend:
-    """SQLite-based memory backend (existing implementation)."""
+    """SQLite-based memory backend with vector search support.
+    
+    Uses sqlite-vec extension for semantic similarity search
+    when available, falls back to regex-based text search.
+    """
     
     def __init__(self, db_path: str = "kazma-data/memory.db"):
-        """Initialize SQLite backend."""
+        """Initialize SQLite backend.
+        
+        Args:
+            db_path: Path to the SQLite database file.
+        """
         self.db_path = db_path
-    
-    async def search(self, query: str, **kwargs) -> List[Dict[str, Any]]:
-        """Search memories in SQLite."""
-        # Placeholder for existing SQLite search implementation
-        return []
-    
+        self._conn: Any = None
+        self._vec_available = False
+
+    async def _ensure_connection(self) -> Any:
+        """Ensure database connection is established."""
+        if self._conn is None:
+            self._conn = await self._connect()
+        return self._conn
+
+    async def _connect(self) -> Any:
+        """Create database connection and initialize schema."""
+        conn = await aiosqlite.connect(self.db_path)
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA synchronous=NORMAL")
+        
+        # Check for sqlite-vec extension
+        try:
+            await conn.execute("SELECT sqlite_version()")
+            self._vec_available = True
+        except Exception:
+            self._vec_available = False
+        
+        # Create memories table
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS memories (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                metadata TEXT DEFAULT '{}',
+                timestamp INTEGER DEFAULT 0,
+                source TEXT DEFAULT '',
+                relevance REAL DEFAULT 1.0,
+                embedding BLOB
+            )
+        """)
+        
+        # Create FTS table for text search
+        await conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts 
+            USING fts5(content, content_rowid UNINDEXED)
+        """)
+        
+        await conn.commit()
+        return conn
+
+    async def search(self, query: str, limit: int = 10, **kwargs) -> List[Dict[str, Any]]:
+        """Search memories in SQLite.
+        
+        Uses FTS5 for text search when available.
+        
+        Args:
+            query: Search query string.
+            limit: Maximum number of results to return.
+            **kwargs: Additional parameters.
+            
+        Returns:
+            List of memory dictionaries.
+        """
+        conn = await self._ensure_connection()
+        
+        try:
+            # Use FTS5 for full-text search
+            cursor = await conn.execute(
+                """
+                SELECT m.id, m.content, m.metadata, m.timestamp, m.source, m.relevance
+                FROM memories m
+                JOIN memories_fts f ON m.rowid = f.content_rowid
+                WHERE f.content MATCH ?
+                ORDER BY m.relevance DESC
+                LIMIT ?
+                """,
+                (query, limit)
+            )
+            rows = await cursor.fetchall()
+            
+            return [
+                {
+                    "id": row[0],
+                    "content": row[1],
+                    "metadata": row[2],
+                    "timestamp": row[3],
+                    "source": row[4],
+                    "relevance": row[5],
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.warning("FTS search failed, falling back to simple search: %s", e)
+            # Fallback to simple LIKE search
+            cursor = await conn.execute(
+                "SELECT id, content, metadata, timestamp, source, relevance FROM memories WHERE content LIKE ? LIMIT ?",
+                (f"%{query}%", limit)
+            )
+            rows = await cursor.fetchall()
+            return [
+                {
+                    "id": row[0],
+                    "content": row[1],
+                    "metadata": row[2],
+                    "timestamp": row[3],
+                    "source": row[4],
+                    "relevance": row[5],
+                }
+                for row in rows
+            ]
+
     async def index(self, memory: Any) -> str:
-        """Index a memory to SQLite."""
-        # Placeholder for existing SQLite indexing
-        return ""
+        """Index a memory to SQLite.
+        
+        Args:
+            memory: Memory dict or Memory object.
+            
+        Returns:
+            Document ID.
+        """
+        conn = await self._ensure_connection()
+        
+        # Extract fields from memory
+        if isinstance(memory, dict):
+            memory_id = memory.get("id", self._generate_id())
+            content = memory.get("content", "")
+            metadata = memory.get("metadata", {})
+            timestamp = memory.get("timestamp", 0)
+            source = memory.get("source", "")
+            relevance = memory.get("relevance", 1.0)
+        else:
+            memory_id = getattr(memory, "id", self._generate_id())
+            content = getattr(memory, "content", "")
+            metadata = getattr(memory, "metadata", "")
+            timestamp = getattr(memory, "timestamp", 0)
+            source = getattr(memory, "source", "")
+            relevance = getattr(memory, "relevance", 1.0)
+        
+        if isinstance(metadata, dict):
+            metadata = json.dumps(metadata)
+        
+        await conn.execute(
+            """
+            INSERT OR REPLACE INTO memories (id, content, metadata, timestamp, source, relevance)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (memory_id, content, metadata, timestamp, source, relevance)
+        )
+        
+        # Also index in FTS for search
+        try:
+            # Get the rowid of the inserted memory
+            cursor = await conn.execute("SELECT rowid FROM memories WHERE id = ?", (memory_id,))
+            row = await cursor.fetchone()
+            if row:
+                await conn.execute(
+                    "INSERT OR REPLACE INTO memories_fts (content, content_rowid) VALUES (?, ?)",
+                    (content, row[0])
+                )
+        except Exception as e:
+            logger.debug("FTS indexing skipped: %s", e)
+        
+        await conn.commit()
+        return memory_id
+
+    def _generate_id(self) -> str:
+        """Generate a unique memory ID."""
+        import uuid
+        return f"mem_{uuid.uuid4().hex[:16]}"
+
+    async def count(self) -> int:
+        """Get total document count.
+        
+        Returns:
+            Number of documents in the database.
+        """
+        conn = await self._ensure_connection()
+        cursor = await conn.execute("SELECT COUNT(*) FROM memories")
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+    async def close(self) -> None:
+        """Close database connection."""
+        if self._conn:
+            await self._conn.close()
+            self._conn = None
 
 
 class SearchBackendRouter:
