@@ -59,6 +59,32 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
         else:
             return JSONResponse({"status": "error", "message": f"Unknown action: {action}"}, status_code=400)
 
+    @router.get("/api/agents/hub")
+    async def agents_hub() -> JSONResponse:
+        """List all agents from the hub registry."""
+        try:
+            from kazma_core.hub.registry import KazmaHub
+
+            hub = KazmaHub()
+            hub_agents = await hub.list_agents()
+            await hub.close()
+            return JSONResponse({
+                "agents": [
+                    {
+                        "agent_id": a.agent_id,
+                        "capabilities": a.capabilities,
+                        "endpoint": a.endpoint,
+                        "reputation": a.reputation,
+                        "metadata": a.metadata,
+                    }
+                    for a in hub_agents
+                ],
+                "count": len(hub_agents),
+            })
+        except Exception as e:
+            logger.warning("Failed to list hub agents: %s", e)
+            return JSONResponse({"agents": [], "count": 0, "error": str(e)})
+
     return router
 
 

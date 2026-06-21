@@ -5,6 +5,18 @@
 {% block content %}
 <div class="agents-container" style="max-width: 1200px; margin: 0 auto;" x-data="agentsApp()">
 
+  <!-- Tabs -->
+  <div class="skills-tabs" style="margin-bottom: 1.5rem;">
+    <button class="tab-btn" :class="{ active: tab === 'overview' }" @click="tab = 'overview'">
+      Local Agent
+    </button>
+    <button class="tab-btn" :class="{ active: tab === 'network' }" @click="tab = 'network'; loadHubAgents()">
+      Multi-Agent Network <span x-show="hubCount > 0" style="margin-left: 4px; color: var(--text-muted);" x-text="'(' + hubCount + ')'"></span>
+    </button>
+  </div>
+
+  <!-- Local Agent Tab -->
+  <div x-show="tab === 'overview'">
   <!-- Header -->
   <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem;">
     <h1 style="font-size: 1.5rem; font-weight: 500; letter-spacing: -0.02em;">Agent Management</h1>
@@ -119,11 +131,81 @@
     </div>
 
   </div>
+
+  <!-- Multi-Agent Network Tab -->
+  <div x-show="tab === 'network'" style="padding: 0;">
+    <div style="margin-bottom: 1rem;">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+        <h2 style="font-size: 1.25rem; font-weight: 500; letter-spacing: -0.02em;">Multi-Agent Network</h2>
+        <button class="btn btn-sm btn-secondary" @click="loadHubAgents()">Refresh</button>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-tertiary); margin-bottom: 1rem;">
+        Agents discovered via the Kazma Hub registry. Each agent can be delegated tasks based on capabilities.
+      </p>
+    </div>
+
+    <template x-if="hubAgents.length === 0 && !hubLoading">
+      <div style="text-align: center; padding: 60px 20px; color: var(--text-tertiary);">
+        <div style="font-size: 2rem; margin-bottom: 12px;">🔍</div>
+        <p style="margin-bottom: 8px;">No agents discovered on the network.</p>
+        <p style="font-size: 0.85rem;">Register an agent first, or check that the hub is running.</p>
+      </div>
+    </template>
+
+    <template x-if="hubLoading">
+      <div style="text-align: center; padding: 40px; color: var(--text-tertiary);">Loading agents...</div>
+    </template>
+
+    <div class="skills-grid" style="grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));">
+      <template x-for="agent in hubAgents" :key="agent.agent_id">
+        <div class="card" style="padding: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+            <div class="status-dot status-ok"></div>
+            <h3 style="font-size: 1rem; flex: 1; font-family: var(--font-mono);" x-text="agent.agent_id"></h3>
+            <span class="badge badge-basic" x-text="'★ ' + agent.reputation.toFixed(1)"></span>
+          </div>
+          <div style="font-size: 0.85rem; color: var(--text-tertiary); margin-bottom: 8px;">
+            <span x-text="agent.endpoint || 'No endpoint'"></span>
+          </div>
+          <div style="margin-bottom: 8px;">
+            <span class="badge badge-basic" style="font-size: 0.7rem; margin: 2px;"
+                  x-for="cap in agent.capabilities" x-text="cap"></span>
+            <span x-show="!agent.capabilities || agent.capabilities.length === 0"
+                  style="font-size: 0.8rem; color: var(--text-muted); font-style: italic;">No capabilities advertised</span>
+          </div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">
+            <span x-show="agent.metadata" x-text="'Model: ' + (agent.metadata.model || 'N/A')"></span>
+          </div>
+        </div>
+      </template>
+    </div>
+  </div>
+
 </div>
 
 <script>
 function agentsApp() {
-    return { tab: 'overview' };
+    return {
+        tab: 'overview',
+        hubAgents: [],
+        hubCount: 0,
+        hubLoading: false,
+        loadHubAgents() {
+            this.hubLoading = true;
+            fetch('/api/agents/hub')
+                .then(r => r.json())
+                .then(data => {
+                    this.hubAgents = data.agents || [];
+                    this.hubCount = data.count || 0;
+                    this.hubLoading = false;
+                })
+                .catch(() => {
+                    this.hubAgents = [];
+                    this.hubCount = 0;
+                    this.hubLoading = false;
+                });
+        }
+    };
 }
 
 function controlAgent(action) {
