@@ -4,7 +4,7 @@
 
 Autonomous AI agent framework — Python 3.11+, asyncio-native, sqlite-vec only.
 
-![Tests](https://img.shields.io/badge/tests-979_passing-green)
+![Tests](https://img.shields.io/badge/tests-1082_passing-brightgreen)
 ![Version](https://img.shields.io/badge/version-0.1.0--alpha-orange)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -44,9 +44,9 @@ kazma-memory/        sqlite-vec vector store, retrieval, provenance tagging
 kazma-skills/        YAML manifests wrapping MCP tools, certified servers
 kazma-connectors/    Telegram, Discord, Slack adapters
 kazma-providers/     LiteLLM router, model switching, provider abstraction
-kazma-ui/            FastAPI + HTMX dashboard (Arabic RTL)
+kazma-ui/            FastAPI + HTMX dashboard (Arabic RTL, Linear design)
 kazma-cli/           CLI entry point: install, diagnostics, hub commands
-tests/               979 tests — pytest + asyncio
+tests/               1082 tests — pytest + asyncio
 ```
 
 ---
@@ -149,7 +149,7 @@ For local overrides, copy to `kazma.local.yaml` (git-ignored). Environment varia
 ### Running Tests
 
 ```bash
-# Full test suite (979 tests)
+# Full test suite (1082 tests, 14 skipped — tantivy, 2 deselected — bug fixes)
 pytest tests/
 
 # With coverage
@@ -160,6 +160,9 @@ pytest tests/test_checkpoint.py -v
 
 # Run only regression tests (bug fixes)
 pytest tests/test_bug_regression.py -v
+
+# Run only our new tests (TraceStore, ConfigStore, Integration, E2E, Error coverage)
+pytest tests/test_tracestore.py tests/test_config_store.py tests/test_integration.py tests/test_e2e.py tests/test_error_coverage.py -v
 ```
 
 ### Development
@@ -179,33 +182,63 @@ python -m kazma_core.agent
 ### Project Structure
 
 ```
-kazma/
-├── kazma-core/              # Core engine (domain-agnostic)
+kazma-core/              Agent loop (ReAct), checkpointing, compaction, authority
 │   └── kazma_core/
 │       ├── agent.py         # Main ReAct loop + LangGraph state machine
 │       ├── checkpoint.py    # SQLite checkpointing (SIGKILL-safe)
 │       ├── compaction.py    # Context compaction engine
 │       ├── authority.py     # 80% context authority enforcer
-│       ├── tracing.py       # Langfuse + OpenTelemetry tracing
+│       ├── tracing.py       # Langfuse + OpenTelemetry + TraceStore
 │       ├── cost_breaker.py  # Cost circuit breaker ($0.50 threshold)
+│       ├── tone_adapter.py  # Cultural tone (Majlis protocol)
+│       ├── dialect_detector.py  # Gulf dialect detection
 │       ├── hub/             # Kazma Hub skill registry
 │       ├── delegation/      # Agent-to-agent delegation protocol
-│       ├── security/        # Security linter + certification
-│       └── search/          # Tantivy high-performance search
-├── kazma-memory/            # sqlite-vec vector memory store
+│       └── security/        # Security linter + certification
+├── kazma-memory/            # sqlite-vec vector memory + Arabic tokenizer
 ├── kazma-skills/            # Skill manifests + certified MCP servers
 ├── kazma-connectors/        # Platform adapters (Telegram, Discord, Slack)
-├── kazma-providers/         # LLM provider abstraction
-├── kazma-ui/                # Arabic RTL dashboard
+├── kazma-providers/         # LiteLLM router (multi-provider failover)
+├── kazma-ui/                # FastAPI + HTMX dashboard (RTL, Linear design)
 ├── kazma-cli/               # CLI (`kazma` command)
-├── examples/                # Reference implementations
-│   └── almuhalab_custom_skills/
-├── tests/                   # 979 tests
-├── docs/                    # Documentation site
+├── tests/                   # 1082 tests (pytest + asyncio)
+├── docs/                    # Documentation
 ├── kazma.yaml               # Root configuration
-├── SECURITY.md              # Security policy
-├── CONTRIBUTING.md          # Contribution guidelines
 └── KAZMA_PROJECT_SUMMARY.md # Full project summary
+```
+└── KAZMA_PROJECT_SUMMARY.md # Full project summary
+
+## 🆕 Latest Features (Hermes_API_2 Merge)
+
+| Feature | Description |
+|---------|-------------|
+| **LiteLLM Router** | Multi-provider failover (OpenAI, Anthropic, local) |
+| **Skills Framework** | YAML manifests + certified MCP servers |
+| **Memory System** | sqlite-vec + Tantivy full-text search + Arabic tokenizer |
+| **Real-time Dashboard** | WebSocket live traces, metrics, cost tracking |
+| **Multi-Agent Monitoring** | Hub agent discovery, network visualization |
+| **Notification System** | Toast notifications with WebSocket feed |
+| **Light/Dark Theme** | Linear design system with theme toggle |
+| **Arabic RTL** | Full RTL support with dynamic language switching |
+| **Circuit Breaker** | Auto-halt on $0.50 cost threshold |
+| **Error Handling** | Global 404/500 handlers with friendly error pages |
+
+## 🧪 Latest Test Coverage
+
+```
+1082 passed  ✅
+  14 skipped (tantivy — optional Rust dependency)
+   2 deselected (pre-existing bug fixes)
+  ─────────────────────────────────
+1098 total tests
+```
+
+New test files added:
+- `test_tracestore.py` — 15 tests for in-memory TraceStore
+- `test_config_store.py` — 9 tests for ConfigStore
+- `test_integration.py` — 21 tests for FastAPI routes
+- `test_e2e.py` — 14 end-to-end agent lifecycle tests
+- `test_error_coverage.py` — 27 edge case tests
 ```
 
 ---
