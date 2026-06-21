@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Kazma{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/kazma.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            corePlugins: { preflight: false },
+            theme: { extend: {} }
+        }
+    </script>
+    <script src="/static/js/htmx.min.js"></script>
+    <script src="/static/js/htmx-ws.min.js"></script>
+    <script defer src="/static/js/alpine.min.js"></script>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="app-layout">
+        {% include "components/nav.html" %}
+        <main class="main-content">
+            <header class="page-header">
+                <h1>{% block page_title %}{% endblock %}</h1>
+                <div class="header-actions">{% block header_actions %}{% endblock %}</div>
+            </header>
+            <div class="page-body">
+                {% block content %}{% endblock %}
+            </div>
+        </main>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+
+    <script>
+        function showToast(message, type) {
+            type = type || 'info';
+            var container = document.getElementById('toast-container');
+            var toast = document.createElement('div');
+            toast.className = 'toast toast-' + type;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(function() { toast.classList.add('toast-show'); }, 10);
+            setTimeout(function() {
+                toast.classList.remove('toast-show');
+                setTimeout(function() { toast.remove(); }, 300);
+            }, 3000);
+        }
+    </script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

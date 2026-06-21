@@ -146,5 +146,28 @@ class SkillManifest:
             self.manifest = {"tools": {}}
             logger.warning("Manifest not found at %s, starting empty", self._path)
 
+    def _load_directory(self, directory_path: str | Path) -> None:
+        """Load all YAML files from a directory."""
+        dir_path = Path(directory_path)
+        if not dir_path.exists():
+            logger.warning("Manifest directory not found at %s", dir_path)
+            return
+
+        self.manifest = {"tools": {}}
+        loaded_count = 0
+
+        for yaml_file in dir_path.glob("*.yaml"):
+            try:
+                with open(yaml_file, "r", encoding="utf-8") as fh:
+                    file_manifest = yaml.safe_load(fh) or {}
+                    if "tools" in file_manifest:
+                        self.manifest["tools"].update(file_manifest["tools"])
+                        loaded_count += len(file_manifest["tools"])
+            except Exception as e:
+                logger.error("Failed to load manifest %s: %s", yaml_file, e)
+
+        logger.info("Loaded %d tools from %d manifest files in %s", 
+                    loaded_count, len(list(dir_path.glob("*.yaml"))), dir_path)
+
     def _get_tool(self, tool_name: str) -> dict[str, Any]:
         return self.manifest.get("tools", {}).get(tool_name, {})

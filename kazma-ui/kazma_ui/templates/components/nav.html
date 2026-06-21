@@ -1,0 +1,73 @@
+<nav class="sidebar" x-data="{ collapsed: false, darkMode: localStorage.getItem('kazma-theme') !== 'light', toggleTheme() { this.darkMode = !this.darkMode; } }"
+     x-init="$watch('darkMode', val => {
+         localStorage.setItem('kazma-theme', val ? 'dark' : 'light');
+         document.documentElement.setAttribute('data-theme', val ? 'dark' : 'light');
+     });
+     document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light');">
+    <div class="sidebar-header">
+        <div class="logo">
+            <span class="logo-icon">&#x1F30A;</span>
+            <span class="logo-text" x-show="!collapsed">Kazma</span>
+        </div>
+        <button class="sidebar-toggle" @click="collapsed = !collapsed" aria-label="Toggle sidebar">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M4 6h12M4 10h12M4 14h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+        </button>
+    </div>
+
+    <div class="nav-links">
+        <a href="/chat" class="nav-link {% if request.url.path == '/chat' %}active{% endif %}">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span class="nav-label" x-show="!collapsed">Chat</span>
+        </a>
+        <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+            </svg>
+            <span class="nav-label" x-show="!collapsed">Settings</span>
+        </a>
+        <a href="/agents" class="nav-link {% if request.url.path == '/agents' %}active{% endif %}">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2a10 10 0 1 0 10 10M12 2v10l5 5"/>
+                <circle cx="12" cy="12" r="2"/>
+            </svg>
+            <span class="nav-label" x-show="!collapsed">Agent</span>
+        </a>
+        <a href="/skills" class="nav-link {% if request.url.path == '/skills' %}active{% endif %}">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+            </svg>
+            <span class="nav-label" x-show="!collapsed">Skills</span>
+        </a>
+        <a href="/mcp" class="nav-link {% if request.url.path == '/mcp' %}active{% endif %}">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+            </svg>
+            <span class="nav-label" x-show="!collapsed">MCP</span>
+        </a>
+        <a href="/dashboard" class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+            </svg>
+            <span class="nav-label" x-show="!collapsed">Dashboard</span>
+        </a>
+    </div>
+
+    <div class="sidebar-footer" x-show="!collapsed">
+        <div class="model-badge">
+            <span class="status-dot status-ok"></span>
+            <span>{{ config.default_model if config else 'gpt-4o-mini' }}</span>
+        </div>
+        <button class="theme-toggle" @click="toggleTheme()" aria-label="Toggle theme">
+            <svg x-show="darkMode" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+            </svg>
+            <svg x-show="!darkMode" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+            </svg>
+        </button>
+    </div>
+</nav>

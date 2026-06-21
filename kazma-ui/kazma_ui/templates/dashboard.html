@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}Kazma — Observability Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-container" style="max-width: 1200px; margin: 0 auto;">
+
+  <!-- Page Header -->
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem;">
+    <h1 style="font-size: 1.5rem; font-weight: 500; letter-spacing: -0.02em; color: var(--text-primary);">
+      Observability Dashboard
+    </h1>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <span style="font-size: 0.8rem; color: var(--text-muted);" id="connection-status">Connecting...</span>
+      <span style="font-size: 0.8rem; color: var(--text-muted);" id="trace-count">{{ traces|length }} traces</span>
+    </div>
+  </div>
+
+  <!-- Metrics Row -->
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 1.5rem;" id="metrics-row">
+    <div class="card" style="padding: 16px;">
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Cost</div>
+      <div class="{{ cost_color }}" id="metric-cost" style="font-size: 1.75rem; font-weight: 500; letter-spacing: -0.03em;">${{ "%.4f"|format(cost_current) }}</div>
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); margin-top: 2px;" id="silence-info">{{ silence_info }}</div>
+    </div>
+    <div class="card" style="padding: 16px;">
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Circuit Breaker</div>
+      <div class="{{ breaker_color }}" id="metric-breaker" style="font-size: 1.75rem; font-weight: 500; letter-spacing: -0.03em;">{{ breaker_status }}</div>
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); margin-top: 2px;">{{ tracing_backend }} backend</div>
+    </div>
+    <div class="card" style="padding: 16px;">
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Tokens</div>
+      <div id="metric-tokens" style="font-size: 1.75rem; font-weight: 500; letter-spacing: -0.03em; color: var(--text-primary);">{{ metrics.total_tokens }}</div>
+      <div id="metric-llm-calls" style="font-size: 0.75rem; color: var(--text-tertiary); margin-top: 2px;">{{ metrics.total_llm_calls }} LLM calls</div>
+    </div>
+    <div class="card" style="padding: 16px;">
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Tools</div>
+      <div id="metric-tools" style="font-size: 1.75rem; font-weight: 500; letter-spacing: -0.03em; color: var(--text-primary);">{{ metrics.total_tool_calls }}</div>
+      <div id="metric-total-traces" style="font-size: 0.75rem; color: var(--text-tertiary); margin-top: 2px;">{{ metrics.total_traces }} total traces</div>
+    </div>
+  </div>
+
+  <!-- Uptime -->
+  <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1.5rem;" id="metric-uptime">
+    Uptime: {{ metrics.uptime }}
+  </div>
+
+  <!-- Traces Table -->
+  <div class="card" style="padding: 0; overflow: hidden;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle);">
+      <h2 style="font-size: 0.875rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500;">Recent Traces</h2>
+    </div>
+    <div style="overflow-x: auto;">
+      <table style="width: 100%; border-collapse: collapseto; font-size: 0.85rem;">
+        <thead>
+          <tr style="border-bottom: 1px solid var(--border-subtle);">
+            <th style="padding: 10px 16px; text-align: left; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Time</th>
+            <th style="padding: 10px 16px; text-align: left; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Type</th>
+            <th style="padding: 10px 16px; text-align: left; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Label</th>
+            <th style="padding: 10px 16px; text-align: left; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Status</th>
+            <th style="padding: 10px 16px; text-align: right; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Duration</th>
+            <th style="padding: 10px 16px; text-align: right; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Tokens</th>
+            <th style="padding: 10px 16px; text-align: right; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Cost</th>
+          </tr>
+        </thead>
+        <tbody id="traces-tbody">
+          {% for trace in traces %}
+          <tr class="trace-row" style="border-bottom: 1px solid var(--border-subtle); transition: background 0.15s;">
+            <td style="padding: 10px 16px; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">{{ trace.time }}</td>
+            <td style="padding: 10px 16px;"><span class="badge badge-basic" style="font-size: 0.7rem;">{{ trace.trace_type }}</span></td>
+            <td style="padding: 10px 16px; font-weight: 500; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ trace.label }}</td>
+            <td style="padding: 10px 16px;"><span class="badge {{ trace.badge_class }}" style="font-size: 0.7rem;">{{ trace.status }}</span></td>
+            <td style="padding: 10px 16px; text-align: right; font-family: var(--font-mono); font-size: 0.8rem;">{{ trace.duration_ms }}ms</td>
+            <td style="padding: 10px 16px; text-align: right; font-family: var(--font-mono); font-size: 0.8rem;">{{ trace.tokens }}</td>
+            <td style="padding: 10px 16px; text-align: right; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-tertiary);">{{ trace.cost }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  const wsUrl = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws/dashboard';
+  let ws = null;
+  let reconnectTimer = null;
+
+  function connect() {
+    document.getElementById('connection-status').textContent = 'Connecting...';
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = function() {
+      document.getElementById('connection-status').textContent = '● Live';
+      document.getElementById('connection-status').style.color = 'var(--success)';
+    };
+
+    ws.onmessage = function(event) {
+      try {
+        var msg = JSON.parse(event.data);
+        if (msg.type === 'trace') {
+          updateDashboard(msg.data, msg.metrics);
+        }
+      } catch(e) {
+        // ignore parse errors
+      }
+    };
+
+    ws.onclose = function() {
+      document.getElementById('connection-status').textContent = '● Reconnecting...';
+      document.getElementById('connection-status').style.color = 'var(--warning)';
+      reconnectTimer = setTimeout(connect, 3000);
+    };
+
+    ws.onerror = function() {
+      ws.close();
+    };
+  }
+
+  function updateDashboard(trace, metrics) {
+    // Update metrics
+    if (metrics) {
+      document.getElementById('metric-cost').textContent = metrics.total_cost;
+      document.getElementById('metric-tokens').textContent = metrics.total_tokens;
+      document.getElementById('metric-tools').textContent = metrics.total_tool_calls;
+      document.getElementById('metric-llm-calls').textContent = metrics.total_llm_calls + ' LLM calls';
+      document.getElementById('metric-total-traces').textContent = metrics.total_traces + ' total traces';
+      if (document.getElementById('trace-count')) {
+        document.getElementById('trace-count').textContent = metrics.total_traces + ' traces';
+      }
+    }
+
+    // Prepend new trace to table
+    if (trace && document.getElementById('traces-tbody')) {
+      var tbody = document.getElementById('traces-tbody');
+      var tr = document.createElement('tr');
+      tr.className = 'trace-row';
+      tr.style.cssText = 'border-bottom: 1px solid var(--border-subtle); animation: fadeIn 0.3s ease;';
+
+      var badgeClass = 'badge-basic';
+      if (trace.status === 'success') badgeClass = 'badge-stdio';
+      else if (trace.status === 'error') badgeClass = 'badge-premium';
+      else if (trace.status === 'warning') badgeClass = 'badge-standard';
+
+      tr.innerHTML =
+        '<td style="padding: 10px 16px; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); white-space: nowrap;">' + trace.timestamp + '</td>' +
+        '<td style="padding: 10px 16px;"><span class="badge ' + badgeClass + '" style="font-size: 0.7rem;">' + trace.trace_type + '</span></td>' +
+        '<td style="padding: 10px 16px; font-weight: 500; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + trace.label + '</td>' +
+        '<td style="padding: 10px 16px;"><span class="badge ' + badgeClass + '" style="font-size: 0.7rem;">' + trace.status + '</span></td>' +
+        '<td style="padding: 10px 16px; text-align: right; font-family: var(--font-mono); font-size: 0.8rem;">' + trace.duration_ms + 'ms</td>' +
+        '<td style="padding: 10px 16px; text-align: right; font-family: var(--font-mono); font-size: 0.8rem;">' + trace.tokens + '</td>' +
+        '<td style="padding: 10px 16px; text-align: right; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-tertiary);">' + trace.cost + '</td>';
+
+      // Keep max 50 rows
+      if (tbody.children.length >= 50) {
+        tbody.removeChild(tbody.lastChild);
+      }
+      tbody.insertBefore(tr, tbody.firstChild);
+    }
+  }
+
+  // Start connection when page loads
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', connect);
+  } else {
+    connect();
+  }
+})();
+</script>
+<style>
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.trace-row {
+  transition: background 0.15s;
+}
+.trace-row:hover {
+  background: var(--bg-hover);
+}
+</style>
+{% endblock %}

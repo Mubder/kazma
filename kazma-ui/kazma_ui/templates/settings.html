@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Kazma — Settings{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+<div class="settings-container" x-data="settingsApp()">
+    <div class="settings-nav">
+        <button class="settings-tab" :class="{ active: tab === 'model' }" @click="tab = 'model'">Model</button>
+        <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="tab = 'agent'">Agent</button>
+        <button class="settings-tab" :class="{ active: tab === 'cost' }" @click="tab = 'cost'">Cost</button>
+        <button class="settings-tab" :class="{ active: tab === 'import' }" @click="tab = 'import'">Import/Export</button>
+    </div>
+
+    <!-- Model Settings -->
+    <div class="settings-panel" x-show="tab === 'model'">
+        <div class="settings-group">
+            <h3>LLM Provider</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Base URL</label>
+                    <input type="text" x-model="model.base_url" class="form-input" placeholder="https://api.openai.com/v1">
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <div class="input-with-toggle">
+                        <input :type="showKey ? 'text' : 'password'" x-model="model.api_key" class="form-input" placeholder="sk-...">
+                        <button class="btn-icon" @click="showKey = !showKey" x-text="showKey ? 'Hide' : 'Show'"></button>
+                    </div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Model</label>
+                    <input type="text" x-model="model.model" class="form-input" placeholder="gpt-4o-mini">
+                </div>
+                <div class="form-group">
+                    <label>Max Tokens</label>
+                    <input type="number" x-model.number="model.max_tokens" class="form-input" min="256" max="128000">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Temperature: <span x-text="model.temperature"></span></label>
+                    <input type="range" x-model.number="model.temperature" class="form-range" min="0" max="2" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>Timeout (seconds)</label>
+                    <input type="number" x-model.number="model.timeout" class="form-input" min="5" max="300">
+                </div>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" @click="saveModel()">Save</button>
+                <button class="btn btn-secondary" @click="testModel()">
+                    <span x-show="!testing">Test Connection</span>
+                    <span x-show="testing">Testing...</span>
+                </button>
+                <span x-show="testResult" :class="testResult?.success ? 'text-success' : 'text-error'" x-text="testResult?.success ? 'Connected! ' + testResult.model : testResult?.error"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Settings -->
+    <div class="settings-panel" x-show="tab === 'agent'">
+        <div class="settings-group">
+            <h3>Agent Configuration</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Agent Name</label>
+                    <input type="text" x-model="agent.name" class="form-input">
+                </div>
+                <div class="form-group">
+                    <label>Language</label>
+                    <select x-model="agent.language" class="form-select">
+                        <option value="ar">Arabic</option>
+                        <option value="en">English</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>System Prompt</label>
+                <textarea x-model="agent.system_prompt" class="form-textarea" rows="8"></textarea>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" @click="saveAgent()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cost Settings -->
+    <div class="settings-panel" x-show="tab === 'cost'">
+        <div class="settings-group">
+            <h3>Cost Limits</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Max Cost per Session (USD)</label>
+                    <input type="number" x-model.number="cost.max_cost" class="form-input" min="0.01" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label>Silence Window (seconds)</label>
+                    <input type="number" x-model.number="cost.silence_window" class="form-input" min="30">
+                </div>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary" @click="saveCost()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import/Export -->
+    <div class="settings-panel" x-show="tab === 'import'">
+        <div class="settings-group">
+            <h3>Export Settings</h3>
+            <p class="text-muted">Download current settings as kazma.yaml</p>
+            <a href="/api/settings/export" class="btn btn-secondary">Download YAML</a>
+        </div>
+        <div class="settings-group">
+            <h3>Import Settings</h3>
+            <p class="text-muted">Upload a kazma.yaml to import settings</p>
+            <input type="file" accept=".yaml,.yml" @change="importYaml($event)" class="form-input">
+        </div>
+        <div class="settings-group">
+            <h3>Reset All</h3>
+            <p class="text-muted">Delete all runtime settings and revert to YAML defaults</p>
+            <button class="btn btn-danger" @click="resetSettings()">Reset All Settings</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/settings.js"></script>
+{% endblock %}

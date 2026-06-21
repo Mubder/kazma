@@ -39,6 +39,9 @@ class LLMConfig:
     # Cost tracking (per 1M tokens, in USD)
     input_cost_per_1m: float = 0.15
     output_cost_per_1m: float = 0.60
+    # LiteLLM router support
+    router: str | None = None
+    fallback_model: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> LLMConfig:
@@ -52,6 +55,8 @@ class LLMConfig:
             timeout=d.get("timeout", cls.timeout),
             input_cost_per_1m=d.get("input_cost_per_1m", cls.input_cost_per_1m),
             output_cost_per_1m=d.get("output_cost_per_1m", cls.output_cost_per_1m),
+            router=d.get("router", cls.router),
+            fallback_model=d.get("fallback_model", cls.fallback_model),
         )
 
 
@@ -160,15 +165,21 @@ class LLMProvider:
             resp = await client.post("/chat/completions", json=payload)
             resp.raise_for_status()
             data = resp.json()
-        except httpx.HTTPStatusError as e:
-            logger.error("LLM API error: %d %s — %s", e.response.status_code, e.response.reason_phrase, e.response.text[:500])
-            raise LLMError(f"API error {e.response.status_code}: {e.response.text[:200]}") from e
-        except httpx.ConnectError as e:
-            logger.error("Cannot connect to LLM at %s", self.config.base_url)
-            raise LLMError(f"Cannot connect to {self.config.base_url}. Is the server running?") from e
-        except Exception as e:
+        except (httpx.HTTPStatusError, httpx.ConnectError, Exception) as e:
             logger.error("LLM call failed: %s", e)
-            raise LLMError(f"LLM call failed: {e}") from e
+            # Try fallback model if configured
+            if self.config.fallback_model and self.config.router == "litellm":
+                logger.info("Retrying with fallback model: %s", self.config.fallback_model)
+                payload["model"] = self.config.fallback_model
+                try:
+                    resp = await client.post("/chat/completions", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception as fallback_error:
+                    logger.error("Fallback model also failed: %s", fallback_error)
+                    raise LLMError(f"Primary and fallback models failed: {e} / {fallback_error}") from e
+            else:
+                raise LLMError(f"LLM call failed: {e}") from e
 
         duration_ms = (time.monotonic() - start) * 1000
 

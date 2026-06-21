@@ -9,7 +9,7 @@ agent:
 
 models:
   default: "gpt-4o-mini"
-  router: "litellm"
+  router: "litellm"  # Enable LiteLLM router
   fallback: "gpt-4o-mini"
 
 # ── LLM Provider ─────────────────────────────────────────────────────

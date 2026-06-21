@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Kazma — MCP Servers{% endblock %}
+{% block page_title %}MCP Server Management{% endblock %}
+
+{% block content %}
+<div class="mcp-container" x-data="mcpApp()">
+    <div class="mcp-header-actions">
+        <button class="btn btn-primary" @click="showAddModal = true">Add Server</button>
+    </div>
+
+    <div class="mcp-grid">
+        {% for server in servers %}
+        <div class="mcp-card" x-data="{ expanded: false }">
+            <div class="mcp-card-header">
+                <div class="status-dot status-{{ server.status }}"></div>
+                <h3>{{ server.name }}</h3>
+                <span class="badge badge-{{ server.transport }}">{{ server.transport }}</span>
+                <span class="tool-count">{{ server.tool_count }} tools</span>
+            </div>
+            <div class="mcp-card-body">
+                {% if server.transport == 'stdio' %}
+                <div class="mcp-detail">
+                    <span class="label">Command:</span>
+                    <code>{{ server.command|join(' ') }}</code>
+                </div>
+                {% else %}
+                <div class="mcp-detail">
+                    <span class="label">URL:</span>
+                    <code>{{ server.url }}</code>
+                </div>
+                {% endif %}
+            </div>
+            <div class="mcp-card-actions">
+                {% if server.status == 'stopped' %}
+                <button class="btn btn-sm btn-primary"
+                        hx-post="/api/mcp/servers/{{ server.name }}/start"
+                        hx-on::after-request="showToast('Server started', 'success')">Start</button>
+                {% else %}
+                <button class="btn btn-sm btn-secondary"
+                        hx-post="/api/mcp/servers/{{ server.name }}/stop"
+                        hx-on::after-request="showToast('Server stopped', 'info')">Stop</button>
+                {% endif %}
+                <button class="btn btn-sm btn-secondary"
+                        @click="testServer('{{ server.name }}')">Test</button>
+                <button class="btn btn-sm btn-secondary" @click="expanded = !expanded">
+                    <span x-text="expanded ? 'Hide Tools' : 'Show Tools'"></span>
+                </button>
+                <button class="btn btn-sm btn-danger"
+                        hx-delete="/api/mcp/servers/{{ server.name }}"
+                        hx-on::after-request="showToast('Server removed', 'success')">Remove</button>
+            </div>
+            <div x-show="expanded" class="mcp-tools-list">
+                {% for tool in server.tools %}
+                <div class="tool-item">
+                    <code class="tool-name">{{ tool.name }}</code>
+                    <span class="tool-desc">{{ tool.description }}</span>
+                </div>
+                {% endfor %}
+                {% if not server.tools %}
+                <div class="text-muted">No tools loaded. Start the server to see tools.</div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+
+        {% if not servers %}
+        <div class="empty-state">
+            <p>No MCP servers configured. Click "Add Server" to get started.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Add Server Modal -->
+    <div class="modal-overlay" x-show="showAddModal" @click.self="showAddModal = false" style="display:none">
+        <div class="modal">
+            <h2>Add MCP Server</h2>
+            <div class="form-group">
+                <label>Server Name</label>
+                <input type="text" x-model="newServer.name" class="form-input" placeholder="my-server">
+            </div>
+            <div class="form-group">
+                <label>Transport</label>
+                <select x-model="newServer.transport" class="form-select">
+                    <option value="stdio">stdio (local process)</option>
+                    <option value="sse">SSE (HTTP)</option>
+                </select>
+            </div>
+            <template x-if="newServer.transport === 'stdio'">
+                <div>
+                    <div class="form-group">
+                        <label>Command (space-separated)</label>
+                        <input type="text" x-model="newServer.commandStr" class="form-input" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
+                    </div>
+                    <div class="form-group">
+                        <label>Working Directory (optional)</label>
+                        <input type="text" x-model="newServer.working_dir" class="form-input" placeholder="/home/user">
+                    </div>
+                </div>
+            </template>
+            <template x-if="newServer.transport === 'sse'">
+                <div class="form-group">
+                    <label>SSE URL</label>
+                    <input type="text" x-model="newServer.url" class="form-input" placeholder="http://localhost:8080/sse">
+                </div>
+            </template>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" @click="showAddModal = false">Cancel</button>
+                <button class="btn btn-primary" @click="addServer()">Add Server</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/mcp.js"></script>
+{% endblock %}

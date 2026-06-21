@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block title %}Kazma — Agent Management{% endblock %}
+
+{% block content %}
+<div class="agents-container" style="max-width: 1200px; margin: 0 auto;" x-data="agentsApp()">
+
+  <!-- Header -->
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem;">
+    <h1 style="font-size: 1.5rem; font-weight: 500; letter-spacing: -0.02em;">Agent Management</h1>
+    <div style="display: flex; gap: 8px; align-items: center;">
+      <div class="status-dot status-{{ 'ok' if running else 'error' }}"></div>
+      <span style="font-size: 0.9rem; font-weight: 500;">{{ 'Running' if running else 'Stopped' }}</span>
+      {% if running %}
+      <button class="btn btn-sm btn-secondary" onclick="controlAgent('stop')">Stop</button>
+      {% else %}
+      <button class="btn btn-sm btn-primary" onclick="controlAgent('start')">Start</button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Agent Config Card -->
+  <div class="card" style="margin-bottom: 1rem;">
+    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+      <h2 style="font-size: 0.875rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500;">Agent Configuration</h2>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px;">
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-tertiary); margin-bottom: 2px;">Name</div>
+        <div style="font-weight: 500;">{{ config.name }}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-tertiary); margin-bottom: 2px;">Version</div>
+        <div style="font-weight: 500;">{{ config.version }}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-tertiary); margin-bottom: 2px;">Language</div>
+        <div style="font-weight: 500;">{{ config.language }}</div>
+      </div>
+      <div>
+        <div style="font-size: 0.75rem; color: var(--text-tertiary); margin-bottom: 2px;">Default Model</div>
+        <div style="font-weight: 500; font-family: var(--font-mono); font-size: 0.85rem;">{{ config.default_model }}</div>
+      </div>
+    </div>
+    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); margin-bottom: 4px;">System Prompt</div>
+      <div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6;">{{ config.system_prompt }}</div>
+    </div>
+  </div>
+
+  <!-- Metrics Row -->
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 1rem;">
+    <div class="card" style="padding: 16px;">
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">LLM Calls</div>
+      <div style="font-size: 1.5rem; font-weight: 500; letter-spacing: -0.03em;">{{ metrics.total_llm_calls }}</div>
+    </div>
+    <div class="card" style="padding: 16px;">
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Tool Calls</div>
+      <div style="font-size: 1.5rem; font-weight: 500; letter-spacing: -0.03em;">{{ metrics.total_tool_calls }}</div>
+    </div>
+    <div class="card" style="padding: 16px;">
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Total Cost</div>
+      <div style="font-size: 1.5rem; font-weight: 500; letter-spacing: -0.03em;">{{ metrics.total_cost }}</div>
+    </div>
+    <div class="card" style="padding: 16px;">
+      <div style="font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;">Tokens</div>
+      <div style="font-size: 1.5rem; font-weight: 500; letter-spacing: -0.03em;">{{ metrics.total_tokens }}</div>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+
+    <!-- LLM Config -->
+    <div class="card">
+      <h2 style="font-size: 0.875rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; margin-bottom: 12px;">LLM Provider</h2>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between;">
+          <span style="font-size: 0.85rem; color: var(--text-tertiary);">Model</span>
+          <span style="font-size: 0.85rem; font-family: var(--font-mono);">{{ llm.model }}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="font-size: 0.85rem; color: var(--text-tertiary);">Base URL</span>
+          <span style="font-size: 0.85rem; font-family: var(--font-mono); color: var(--text-secondary);">{{ llm.base_url }}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="font-size: 0.85rem; color: var(--text-tertiary);">Max Tokens</span>
+          <span style="font-size: 0.85rem; font-family: var(--font-mono);">{{ llm.max_tokens }}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;">
+          <span style="font-size: 0.85rem; color: var(--text-tertiary);">Temperature</span>
+          <span style="font-size: 0.85rem; font-family: var(--font-mono);">{{ llm.temperature }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tools / MCP Servers -->
+    <div class="card">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+        <h2 style="font-size: 0.875rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500;">Tools &amp; MCP Servers</h2>
+        <span class="tool-count">{{ tools.count }} tools, {{ tools.servers }} servers</span>
+      </div>
+      {% if tools.list %}
+      <div style="display: flex; flex-direction: column; gap: 4px;">
+        {% for t in tools.list[:15] %}
+        <div style="display: flex; gap: 6px; padding: 4px 0; font-size: 0.85rem;">
+          <code style="color: var(--accent-light); font-family: var(--font-mono); white-space: nowrap;">{{ t.name }}</code>
+          <span style="color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ t.description }}</span>
+        </div>
+        {% endfor %}
+        {% if tools.list|length > 15 %}
+        <div style="font-size: 0.8rem; color: var(--text-muted); padding-top: 4px;">...and {{ tools.list|length - 15 }} more</div>
+        {% endif %}
+      </div>
+      {% else %}
+      <div style="text-align: center; padding: 20px; color: var(--text-tertiary); font-style: italic;">
+        No tools loaded.
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+<script>
+function agentsApp() {
+    return { tab: 'overview' };
+}
+
+function controlAgent(action) {
+    fetch('/api/agents/' + action, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                location.reload();
+            } else {
+                alert('Error: ' + (data.message || 'Unknown error'));
+            }
+        })
+        .catch(err => alert('Request failed: ' + err));
+}
+</script>
+{% endblock %}

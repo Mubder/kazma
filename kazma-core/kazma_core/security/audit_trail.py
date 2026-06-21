@@ -55,7 +55,17 @@ class SecurityAuditTrail:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: Optional[sqlite3.Connection] = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+
+    def close(self) -> None:
+        """Close the database connection."""
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+
+    def __del__(self) -> None:
+        self.close()
 
     # ------------------------------------------------------------------
     # DB helpers

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from kazma_core.mcp_client import MCPClient, MCPServerConfig, MCPError
@@ -39,6 +40,8 @@ class ToolRegistry:
         self._clients: dict[str, MCPClient] = {}  # server_name -> client
         self._tools: dict[str, RegisteredTool] = {}  # tool_name -> tool
         self._connected: bool = False
+        self._skills_manifest = None
+        self._load_skills()  # Load skills from kazma-skills/manifests/
 
     @property
     def connected(self) -> bool:
@@ -47,6 +50,38 @@ class ToolRegistry:
     @property
     def tool_count(self) -> int:
         return len(self._tools)
+
+    def _load_skills(self) -> None:
+        """Load skills from kazma-skills/manifests/ directory."""
+        try:
+            from kazma_skills.manifest import SkillManifest
+            # Resolve the path to kazma-skills/manifests/
+            manifest_path = Path(__file__).resolve().parent.parent.parent / "kazma-skills" / "manifests"
+            self._skills_manifest = SkillManifest()
+            self._skills_manifest._load_directory(manifest_path)
+            logger.info("Loaded %d skills from manifests", len(self._skills_manifest.list_tools()))
+        except ImportError:
+            logger.warning("kazma_skills module not found — skills disabled")
+        except Exception as e:
+            logger.error("Failed to load skills: %s", e)
+
+    def get_skill_arabic_name(self, tool_name: str) -> str:
+        """Get the Arabic name for a tool (if defined in skills manifest)."""
+        if not self._skills_manifest:
+            return tool_name
+        return self._skills_manifest.get_arabic_name(tool_name)
+
+    def get_skill_prompt_chain(self, tool_name: str) -> str:
+        """Get the Arabic prompt chain for a tool (if defined in skills manifest)."""
+        if not self._skills_manifest:
+            return ""
+        return self._skills_manifest.get_arabic_prompt(tool_name)
+
+    def get_skill_cultural_context(self, tool_name: str) -> dict[str, Any]:
+        """Get cultural formatting rules for a tool (if defined in skills manifest)."""
+        if not self._skills_manifest:
+            return {}
+        return self._skills_manifest.get_cultural_context(tool_name)
 
     async def connect_server(self, server_config: dict[str, Any]) -> int:
         """Connect to an MCP server and register its tools.

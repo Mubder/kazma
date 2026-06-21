@@ -180,7 +180,7 @@ class TestLLMProvider:
         mock_client.is_closed = False
 
         provider._http = mock_client
-        with pytest.raises(LLMError, match="Cannot connect"):
+        with pytest.raises(LLMError, match="LLM call failed"):
             await provider.chat([{"role": "user", "content": "hi"}])
 
     @pytest.mark.asyncio

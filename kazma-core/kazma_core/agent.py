@@ -133,6 +133,10 @@ class KazmaAgent:
             llm_client=self._make_compaction_client(),
         )
 
+        # Memory System (Tantivy backend)
+        self.memory = None
+        self._init_memory()
+
         # System prompt
         self.system_prompt = self.config.system_prompt or self._default_system_prompt()
 
@@ -151,6 +155,53 @@ class KazmaAgent:
             "Respond in the same language and dialect the user uses. "
             "Be helpful, precise, and culturally aware."
         )
+
+    def _init_memory(self) -> None:
+        """Initialize the memory system.
+
+        Uses Tantivy + SQLite when tantivy-py is available.
+        Falls back to SQLite-only when tantivy-py is not installed.
+        """
+        try:
+            memory_cfg = self.config.raw.get("memory", {})
+            if not memory_cfg.get("enabled", True):
+                logger.info("Memory system disabled in config")
+                return
+
+            tantivy_available = False
+            try:
+                import tantivy  # noqa: F401
+                tantivy_available = True
+            except ImportError:
+                logger.info("tantivy-py not installed — using SQLite-only memory")
+
+            from kazma_memory import (
+                TantivySearchBackend,
+                SearchBackendRouter,
+                SQLiteMemoryBackend,
+            )
+
+            sqlite_backend = SQLiteMemoryBackend(
+                db_path=memory_cfg.get("sqlite_path", "kazma-data/memory.db"),
+            )
+
+            if tantivy_available:
+                tantivy_backend = TantivySearchBackend(
+                    index_path=memory_cfg.get("index_path", "kazma-data/memory"),
+                )
+                self.memory = SearchBackendRouter(
+                    sqlite_backend=sqlite_backend,
+                    tantivy_backend=tantivy_backend,
+                )
+                logger.info("Memory system initialized (Tantivy + SQLite)")
+            else:
+                self.memory = sqlite_backend
+                logger.info("Memory system initialized (SQLite-only — install tantivy-py for full-text search)")
+
+        except ImportError:
+            logger.warning("kazma_memory module not found — memory disabled")
+        except Exception as e:
+            logger.error("Failed to initialize memory: %s", e)
 
     def _make_compaction_client(self) -> Any:
         """Create a lightweight LLM client for the compaction engine."""

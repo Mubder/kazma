@@ -9,10 +9,125 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections import deque
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# ─── In-memory trace store (feeds the dashboard) ─────────────────────
+
+
+@dataclass
+class TraceEntry:
+    """A single trace entry for dashboard display."""
+    timestamp: float
+    trace_type: str  # llm, tool, state, compaction
+    label: str
+    status: str  # success, error, warning
+    duration_ms: float
+    tokens: int = 0
+    cost: float = 0.0
+    details: str = ""
+
+
+class TraceStore:
+    """In-memory ring buffer of recent traces with WebSocket broadcasting.
+
+    Feeds the real-time observability dashboard without needing
+    Langfuse or OpenTelemetry. Default capacity: 500 entries.
+    Broadcasts new entries to connected WebSocket clients.
+    """
+
+    def __init__(self, max_entries: int = 500) -> None:
+        self._traces: deque[TraceEntry] = deque(maxlen=max_entries)
+        self._total_cost: float = 0.0
+        self._total_tokens: int = 0
+        self._total_llm_calls: int = 0
+        self._total_tool_calls: int = 0
+        self._start_time: float = time.time()
+        self._ws_clients: set[Any] = set()
+
+    def register_ws(self, websocket: Any) -> None:
+        self._ws_clients.add(websocket)
+
+    def unregister_ws(self, websocket: Any) -> None:
+        self._ws_clients.discard(websocket)
+
+    async def _broadcast(self, entry: TraceEntry) -> None:
+        """Broadcast a new trace entry to all connected WebSocket clients."""
+        import json
+        import time as t
+
+        payload = json.dumps({
+            "type": "trace",
+            "data": {
+                "timestamp": t.strftime("%H:%M:%S", t.localtime(entry.timestamp)),
+                "trace_type": entry.trace_type,
+                "label": entry.label,
+                "status": entry.status,
+                "duration_ms": f"{entry.duration_ms:.0f}",
+                "tokens": entry.tokens,
+                "cost": f"${entry.cost:.4f}",
+            },
+            "metrics": {
+                "total_cost": f"${self._total_cost:.4f}",
+                "total_tokens": f"{self._total_tokens:,}",
+                "total_llm_calls": self._total_llm_calls,
+                "total_tool_calls": self._total_tool_calls,
+                "total_traces": len(self._traces),
+            },
+        })
+        dead = set()
+        for ws in self._ws_clients:
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                dead.add(ws)
+        self._ws_clients -= dead
+
+    def add(self, entry: TraceEntry) -> None:
+        self._traces.append(entry)
+        self._total_cost += entry.cost
+        self._total_tokens += entry.tokens
+        if entry.trace_type == "llm":
+            self._total_llm_calls += 1
+        elif entry.trace_type == "tool":
+            self._total_tool_calls += 1
+        # Fire-and-forget broadcast (safe in both sync and async contexts)
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(self._broadcast(entry))
+        except RuntimeError:
+            pass  # No running event loop (sync test context)
+
+    def recent(self, limit: int = 50) -> list[TraceEntry]:
+        return list(self._traces)[-limit:]
+
+    def stats(self) -> dict[str, Any]:
+        return {
+            "total_cost": round(self._total_cost, 4),
+            "total_tokens": self._total_tokens,
+            "total_llm_calls": self._total_llm_calls,
+            "total_tool_calls": self._total_tool_calls,
+            "total_traces": len(self._traces),
+            "uptime_seconds": time.time() - self._start_time,
+        }
+
+
+# Global trace store singleton
+_trace_store = TraceStore()
+
+
+def get_trace_store() -> TraceStore:
+    return _trace_store
+
+
+# ─── Tracing Backend ──────────────────────────────────────────────────
 
 
 class TracingBackend(str, Enum):
@@ -28,6 +143,9 @@ class KazmaTracer:
     - langfuse: Full-featured dashboard at localhost:3000 (primary)
     - opentelemetry: Jaeger/Zipkin exporter at localhost:16686 (fallback)
     - console: Stdout logging for testing / no-dashboard environments
+
+    All traces are also written to the in-memory TraceStore for the
+    local dashboard at /dashboard.
     """
 
     def __init__(self, backend: str | None = None, config: dict[str, Any] | None = None) -> None:
@@ -81,7 +199,6 @@ class KazmaTracer:
             resource = Resource.create({"service.name": "kazma-agent"})
             provider = TracerProvider(resource=resource)
 
-            # Try OTLP exporter first (for Jaeger/Zipkin), fall back to console
             try:
                 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
                     OTLPSpanExporter,
@@ -126,6 +243,19 @@ class KazmaTracer:
             cost: Dollar cost of this call.
             duration_ms: Wall-clock duration in milliseconds.
         """
+        # Write to local trace store
+        _trace_store.add(TraceEntry(
+            timestamp=time.time(),
+            trace_type="llm",
+            label=model,
+            status="success",
+            duration_ms=duration_ms,
+            tokens=tokens,
+            cost=cost,
+            details=prompt[:200],
+        ))
+
+        # Send to configured backend
         metadata = {
             "model": model,
             "tokens": tokens,
@@ -161,7 +291,7 @@ class KazmaTracer:
                 model=model,
                 usage={
                     "totalTokens": tokens,
-                    "inputTokens": len(prompt.split()) * 2,  # rough estimate
+                    "inputTokens": len(prompt.split()) * 2,
                     "outputTokens": len(response.split()) * 2,
                 },
                 metadata={
@@ -210,6 +340,18 @@ class KazmaTracer:
             duration_ms: Wall-clock duration in milliseconds.
             success: Whether the tool executed successfully.
         """
+        # Write to local trace store
+        status = "success" if success else "error"
+        _trace_store.add(TraceEntry(
+            timestamp=time.time(),
+            trace_type="tool",
+            label=tool_name,
+            status=status,
+            duration_ms=duration_ms,
+            details=str(list(input_data.keys()))[:200],
+        ))
+
+        # Send to configured backend
         metadata = {
             "tool": tool_name,
             "success": success,
@@ -223,10 +365,10 @@ class KazmaTracer:
         elif self.backend == TracingBackend.OPENTELEMETRY and self._otel_tracer:
             self._trace_tool_otel(tool_name, duration_ms, success)
         else:
-            status = "OK" if success else "FAIL"
+            status_label = "OK" if success else "FAIL"
             logger.info(
                 "Tool %s [%s]: duration=%.0fms",
-                tool_name, status, duration_ms,
+                tool_name, status_label, duration_ms,
             )
 
     def _trace_tool_langfuse(
@@ -280,6 +422,16 @@ class KazmaTracer:
             to_state: New state name (e.g. "tool_calling", "responding").
             checkpoint_id: LangGraph checkpoint ID for this transition.
         """
+        # Write to local trace store
+        _trace_store.add(TraceEntry(
+            timestamp=time.time(),
+            trace_type="state",
+            label=f"{from_state} → {to_state}",
+            status="success",
+            duration_ms=0,
+            details=f"checkpoint={checkpoint_id[:12]}",
+        ))
+
         if self.backend == TracingBackend.LANGFUSE and self._client:
             self._trace_transition_langfuse(from_state, to_state, checkpoint_id)
         elif self.backend == TracingBackend.OPENTELEMETRY and self._otel_tracer:
@@ -339,6 +491,16 @@ class KazmaTracer:
         reduction_pct = (
             (1 - tokens_after / tokens_before) * 100 if tokens_before > 0 else 0
         )
+
+        # Write to local trace store
+        _trace_store.add(TraceEntry(
+            timestamp=time.time(),
+            trace_type="compaction",
+            label=f"{tokens_before} → {tokens_after}",
+            status="success",
+            duration_ms=0,
+            details=f"{reduction_pct:.0f}% reduction",
+        ))
 
         if self.backend == TracingBackend.LANGFUSE and self._client:
             self._trace_compaction_langfuse(tokens_before, tokens_after, summary, reduction_pct)

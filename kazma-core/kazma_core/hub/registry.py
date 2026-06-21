@@ -56,6 +56,17 @@ CREATE TABLE IF NOT EXISTS skill_dependencies (
 );
 """
 
+_CREATE_AGENTS = """\
+CREATE TABLE IF NOT EXISTS agents (
+    agent_id TEXT PRIMARY KEY,
+    capabilities TEXT NOT NULL,
+    endpoint TEXT DEFAULT '',
+    reputation REAL DEFAULT 1.0,
+    metadata TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 
 def _parse_skill_id(skill_id: str):
     """Return (author, name, version) or raise ValueError."""
@@ -87,7 +98,6 @@ class KazmaHub:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: Optional[aiosqlite.Connection] = None
         self._initialized = False
-        self._agents: dict[str, AgentInfo] = {}
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -99,7 +109,7 @@ class KazmaHub:
             self._conn.row_factory = aiosqlite.Row
             await self._conn.execute("PRAGMA foreign_keys = ON")
         if not self._initialized:
-            await self._conn.executescript(_CREATE_SKILLS + _CREATE_DEPS)
+            await self._conn.executescript(_CREATE_SKILLS + _CREATE_DEPS + _CREATE_AGENTS)
             await self._conn.commit()
             self._initialized = True
         return self._conn
@@ -284,21 +294,34 @@ class KazmaHub:
 
     async def register_agent(self, agent: AgentInfo) -> None:
         """Register an agent with its capabilities for delegation discovery."""
-        self._agents[agent.agent_id] = agent
+        conn = await self._get_conn()
+        await conn.execute(
+            "INSERT OR REPLACE INTO agents (agent_id, capabilities, endpoint, reputation, metadata) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                agent.agent_id,
+                json.dumps(agent.capabilities),
+                agent.endpoint,
+                agent.reputation,
+                json.dumps(agent.metadata),
+            ),
+        )
+        await conn.commit()
 
     async def unregister_agent(self, agent_id: str) -> bool:
         """Remove an agent from the registry."""
-        if agent_id in self._agents:
-            del self._agents[agent_id]
-            return True
-        return False
+        conn = await self._get_conn()
+        cursor = await conn.execute("DELETE FROM agents WHERE agent_id = ?", (agent_id,))
+        await conn.commit()
+        return cursor.rowcount > 0
 
     async def find_agents_by_capabilities(
         self, required: list[str]
     ) -> list[AgentInfo]:
         """Find agents that have all required capabilities."""
+        agents = await self.list_agents()
         results = []
-        for agent in self._agents.values():
+        for agent in agents:
             if all(c in agent.capabilities for c in required):
                 results.append(agent)
         results.sort(
@@ -312,13 +335,44 @@ class KazmaHub:
 
     async def get_agent(self, agent_id: str) -> Optional[AgentInfo]:
         """Get a registered agent by ID."""
-        return self._agents.get(agent_id)
+        conn = await self._get_conn()
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(
+            "SELECT * FROM agents WHERE agent_id = ?", (agent_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return AgentInfo(
+            agent_id=row["agent_id"],
+            capabilities=json.loads(row["capabilities"]),
+            endpoint=row["endpoint"],
+            reputation=row["reputation"],
+            metadata=json.loads(row["metadata"]),
+        )
 
     async def list_agents(self) -> list[AgentInfo]:
         """List all registered agents."""
-        return list(self._agents.values())
+        conn = await self._get_conn()
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute("SELECT * FROM agents")
+        rows = await cursor.fetchall()
+        return [
+            AgentInfo(
+                agent_id=r["agent_id"],
+                capabilities=json.loads(r["capabilities"]),
+                endpoint=r["endpoint"],
+                reputation=r["reputation"],
+                metadata=json.loads(r["metadata"]),
+            )
+            for r in rows
+        ]
 
     async def update_agent_reputation(self, agent_id: str, score: float) -> None:
         """Update an agent's reputation score."""
-        if agent_id in self._agents:
-            self._agents[agent_id].reputation = score
+        conn = await self._get_conn()
+        await conn.execute(
+            "UPDATE agents SET reputation = ? WHERE agent_id = ?",
+            (score, agent_id),
+        )
+        await conn.commit()

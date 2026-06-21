@@ -20,7 +20,8 @@ def main() -> None:
         print("Kazma status: OK")
 
     elif cmd == "serve":
-        print("Starting Kazma UI...")
+        port = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
+        _run_serve(port)
 
     elif cmd == "wizard":
         _run_wizard()
@@ -35,15 +36,34 @@ def main() -> None:
         print("Kazma CLI v0.1.0")
         print("Commands:")
         print("  status     Show Kazma status")
-        print("  serve      Start the agent server")
+        print("  serve      Start the WebUI server (default port 8000)")
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")
         print("  docs       Documentation commands (build, serve)")
+        print("")
+        print("Options:")
+        print("  serve [port]  Start server on specified port (default: 8000)")
 
     else:
         print(f"Unknown command: {cmd}")
         print("Run 'kazma help' for available commands.")
         sys.exit(1)
+
+
+def _run_serve(port: int) -> None:
+    """Start the Kazma WebUI server."""
+    try:
+        from kazma_ui.app import create_app
+        import uvicorn
+    except ImportError as e:
+        print(f"Error: WebUI dependencies not installed: {e}")
+        print("Install with: pip install 'kazma[ui]' or pip install jinja2 python-multipart")
+        sys.exit(1)
+
+    app = create_app()
+    print(f"Starting Kazma WebUI on http://0.0.0.0:{port}")
+    print("Press Ctrl+C to stop")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 
 def _run_wizard() -> None:

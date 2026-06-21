@@ -357,6 +357,15 @@ class DependabotStyleScanner:
         self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
 
+    def close(self) -> None:
+        """Close the database connection."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def __del__(self) -> None:
+        self.close()
+
     # ------------------------------------------------------------------
     # DB helpers
     # ------------------------------------------------------------------

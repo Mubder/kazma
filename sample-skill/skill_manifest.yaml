@@ -1,0 +1,18 @@
+# Kazma Skill Manifest — filesystem-read
+# Arabic-aware wrapper for the MCP filesystem_read tool.
+
+name: filesystem-read
+version: 0.1.0
+description: Read files from the filesystem
+author: Kazma Team
+license: MIT
+
+tools:
+  filesystem_read:
+    arabic_name: "قراءة الملفات"
+    prompt_chain:
+      - "اسحب الملف المطلوب من النظام"
+      - "استخرج المحتوى المطلوب"
+    cultural_context:
+      kuwaiti: true
+      formal: false

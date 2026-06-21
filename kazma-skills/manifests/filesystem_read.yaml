@@ -1,0 +1,15 @@
+# Kazma Skill Manifest — filesystem_read
+# Arabic-aware wrapper for the MCP filesystem_read tool.
+
+tools:
+  filesystem_read:
+    arabic_name: "قراءة الملفات"
+    prompt_chain:
+      - "اسحب الملف المطلوب من النظام"
+      - "اعرض المحتوى بالعربية مع احترام RTL"
+    cultural_context:
+      direction: rtl
+      number_format: arabic-indic
+      date_format: hijri
+    description: "Read files from the filesystem"
+    certified: true
