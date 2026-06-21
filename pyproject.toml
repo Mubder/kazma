@@ -39,7 +39,7 @@ tui = [
     "python-bidi>=0.4.0",
 ]
 tantivy = [
-    "tantivy-py>=0.10.0",
+    "tantivy-py>=0.12.0",
 ]
 
 [project.scripts]
