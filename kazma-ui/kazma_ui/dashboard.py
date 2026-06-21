@@ -139,6 +139,15 @@ async def dashboard(request: Request) -> HTMLResponse:
     )
 
 
+def _safe_silence(sr: Any) -> float | None:
+    """Convert float('inf') to None for JSON safety."""
+    if sr is None:
+        return None
+    if isinstance(sr, float) and (sr == float("inf") or sr == float("-inf")):
+        return None
+    return round(float(sr), 2)
+
+
 @router.get("/api/dashboard/status")
 async def dashboard_status() -> JSONResponse:
     """JSON endpoint for dashboard status (for AJAX refresh)."""
@@ -152,7 +161,7 @@ async def dashboard_status() -> JSONResponse:
         "circuit_breaker": {
             "is_halted": False,
             "seconds_since_user": 0.0,
-            "silence_remaining": float("inf"),
+            "silence_remaining": None,
         },
     }
 
@@ -162,14 +171,14 @@ async def dashboard_status() -> JSONResponse:
     if _cost_breaker:
         cb_status = _cost_breaker.status()
         status["cost"] = {
-            "current": cb_status["current_cost"],
-            "max": cb_status["max_cost"],
-            "headroom": cb_status["cost_headroom"],
+            "current": cb_status.get("current_cost", 0.0),
+            "max": cb_status.get("max_cost", 0.50),
+            "headroom": cb_status.get("cost_headroom", 0.50),
         }
         status["circuit_breaker"] = {
-            "is_halted": cb_status["is_halted"],
-            "seconds_since_user": cb_status["seconds_since_user"],
-            "silence_remaining": cb_status["silence_remaining"],
+            "is_halted": cb_status.get("is_halted", False),
+            "seconds_since_user": cb_status.get("seconds_since_user", 0.0),
+            "silence_remaining": _safe_silence(cb_status.get("silence_remaining")),
         }
 
     status["metrics"] = _get_metrics()
