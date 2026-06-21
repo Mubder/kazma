@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Kazma — Error {{ code }}{% endblock %}
+
+{% block page_title %}Error {{ code }}{% endblock %}
+
+{% block content %}
+<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 50vh; text-align: center;">
+    <div style="font-size: 4rem; margin-bottom: 1rem; color: var(--text-tertiary);">
+        {% if code == 404 %}
+        🔍
+        {% elif code == 500 %}
+        ⚠️
+        {% else %}
+        ❌
+        {% endif %}
+    </div>
+    <h2 style="font-size: 1.5rem; font-weight: 500; margin-bottom: 0.5rem; color: var(--text-primary);">{{ message }}</h2>
+    <p style="font-size: 0.9rem; color: var(--text-tertiary); margin-bottom: 1.5rem; max-width: 400px;">
+        {% if code == 404 %}
+        The page you're looking for doesn't exist or has been moved.
+        {% elif code == 500 %}
+        Something went wrong on our end. Please try again.
+        {% else %}
+        An unexpected error occurred.
+        {% endif %}
+    </p>
+    <div style="display: flex; gap: 8px;">
+        <a href="/" class="btn btn-primary">Go Home</a>
+        <button class="btn btn-secondary" onclick="history.back()">Go Back</button>
+    </div>
+    {% if detail and code == 500 %}
+    <pre style="margin-top: 2rem; padding: 1rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.75rem; max-width: 600px; overflow-x: auto; text-align: left; color: var(--text-muted);">{{ detail }}</pre>
+    {% endif %}
+</div>
+{% endblock %}

@@ -10,7 +10,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Request, WebSocket
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse
@@ -128,6 +129,37 @@ def create_app(config_path: str | None = None) -> FastAPI:
         await agent.shutdown()
         config_store.close()
         logger.info("Kazma WebUI shut down.")
+
+    # ── Global Error Handlers ──────────────────────────────────────────
+
+    @app.exception_handler(404)
+    async def not_found(request: Request, exc: Any) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            {"code": 404, "message": "Page not found", "detail": str(exc)},
+            status_code=404,
+        )
+
+    @app.exception_handler(500)
+    async def server_error(request: Request, exc: Any) -> HTMLResponse:
+        logger.error("Internal server error: %s", exc)
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            {"code": 500, "message": "Internal server error", "detail": str(exc)},
+            status_code=500,
+        )
+
+    @app.exception_handler(Exception)
+    async def catch_all(request: Request, exc: Any) -> HTMLResponse:
+        logger.error("Unhandled exception: %s", exc)
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            {"code": 500, "message": "Something went wrong", "detail": str(exc)},
+            status_code=500,
+        )
 
     return app
 
