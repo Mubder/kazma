@@ -58,6 +58,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
     _TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
+    # Global template context for language/direction
+    templates.env.globals["lang"] = agent.config.language if hasattr(agent.config, "language") else "ar"
+    templates.env.globals["dir"] = "rtl" if getattr(agent.config, "rtl", True) else "ltr"
+
     # Create routers
     from kazma_ui.chat import create_chat_router, chat_websocket_handler
     from kazma_ui.settings import create_settings_router
