@@ -20,8 +20,8 @@ from kazma_core.hub import KazmaHub, AgentInfo as HubInfo
 
 
 @pytest.fixture
-def hub():
-    return KazmaHub()
+def hub(tmp_path):
+    return KazmaHub(registry_path=str(tmp_path / "test_swarm.db"))
 
 
 @pytest.fixture

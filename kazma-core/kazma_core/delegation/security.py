@@ -9,10 +9,10 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import time
-from dataclasses import dataclass
+import os
 from typing import Any
 
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
     Ed25519PublicKey,
@@ -22,7 +22,6 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
     X25519PublicKey,
 )
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives import serialization
 
 logger = logging.getLogger(__name__)
 
@@ -144,9 +143,8 @@ class DelegationSecurity:
         shared_key = self._encryption_key.exchange(recipient_pub)
         # Derive AES key from shared secret
         aes_key = hashlib.sha256(shared_key).digest()
-        nonce = hashlib.sha256(
-            shared_key + str(time.time()).encode()
-        ).digest()[:12]
+        # Use cryptographically secure random nonce
+        nonce = os.urandom(12)
         aesgcm = AESGCM(aes_key)
         plaintext = json.dumps(payload, sort_keys=True).encode()
         ciphertext = aesgcm.encrypt(nonce, plaintext, None)

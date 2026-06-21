@@ -98,6 +98,7 @@ class KazmaHub:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: Optional[aiosqlite.Connection] = None
         self._initialized = False
+        self._agents: dict[str, AgentInfo] = {}
 
     # ------------------------------------------------------------------
     # Connection lifecycle

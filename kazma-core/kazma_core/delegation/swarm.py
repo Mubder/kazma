@@ -13,10 +13,8 @@ from typing import Any
 
 from kazma_core.delegation.orchestrator import (
     DelegationOrchestrator,
-    OrchestrationResult,
 )
 from kazma_core.delegation.protocol import (
-    DelegationProtocol,
     DelegationResult,
     RequestStatus,
 )
@@ -152,6 +150,13 @@ class SwarmIntelligence:
             ["general"], max_results=min_responses * 2
         )
 
+        # Early return if no agents available
+        if not agents:
+            logger.warning("No agents available for consensus execution")
+            result.actual_responses = 0
+            result.duration_seconds = time.time() - start
+            return result
+
         # Execute on multiple agents
         exec_tasks = []
         for agent in agents[:min_responses * 2]:
@@ -175,7 +180,7 @@ class SwarmIntelligence:
                 if isinstance(r, DelegationResult):
                     result.responses.append(r)
                     result.total_cost += r.cost_incurred
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("Consensus execution timed out")
 
         result.actual_responses = len(result.responses)
@@ -273,7 +278,7 @@ class SwarmIntelligence:
                     stage_info["error"] = exec_result.error
                     break
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 result.all_succeeded = False
                 result.failed_stage = i
                 stage_info["status"] = "timed_out"
