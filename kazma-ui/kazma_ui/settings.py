@@ -10,7 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from kazma_ui.models import MCPServerTestRequest, ModelTestRequest, SettingsUpdate
