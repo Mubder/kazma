@@ -12,7 +12,6 @@ import time
 from pathlib import Path
 
 import pytest
-
 from kazma_memory import ArabicTokenizer, SearchBackend, SQLiteMemoryBackend
 
 
