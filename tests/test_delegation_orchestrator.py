@@ -1,4 +1,5 @@
 """Tests for DelegationOrchestrator — task decomposition and coordination."""
+
 from __future__ import annotations
 
 import pytest

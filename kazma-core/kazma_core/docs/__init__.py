@@ -47,9 +47,7 @@ class DocumentationGenerator:
         except (SyntaxError, UnicodeDecodeError):
             return None
 
-    def _get_docstring(
-        self, node: ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
-    ) -> str | None:
+    def _get_docstring(self, node: ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef) -> str | None:
         """Extract docstring from an AST node."""
         return ast.get_docstring(node)
 
@@ -101,21 +99,22 @@ class DocumentationGenerator:
                 methods = []
                 for item in ast.iter_child_nodes(node):
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        methods.append({
-                            "name": item.name,
-                            "signature": self._get_signature(item),
-                            "docstring": self._get_docstring(item),
-                            "is_async": isinstance(item, ast.AsyncFunctionDef),
-                        })
-                classes.append({
-                    "name": node.name,
-                    "docstring": docstring,
-                    "methods": methods,
-                    "bases": [
-                        b.id if isinstance(b, ast.Name) else "..."
-                        for b in node.bases
-                    ],
-                })
+                        methods.append(
+                            {
+                                "name": item.name,
+                                "signature": self._get_signature(item),
+                                "docstring": self._get_docstring(item),
+                                "is_async": isinstance(item, ast.AsyncFunctionDef),
+                            }
+                        )
+                classes.append(
+                    {
+                        "name": node.name,
+                        "docstring": docstring,
+                        "methods": methods,
+                        "bases": [b.id if isinstance(b, ast.Name) else "..." for b in node.bases],
+                    }
+                )
         return classes
 
     def _extract_functions(self, module: ast.Module) -> list[dict]:
@@ -123,12 +122,14 @@ class DocumentationGenerator:
         functions = []
         for node in ast.iter_child_nodes(module):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                functions.append({
-                    "name": node.name,
-                    "signature": self._get_signature(node),
-                    "docstring": self._get_docstring(node),
-                    "is_async": isinstance(node, ast.AsyncFunctionDef),
-                })
+                functions.append(
+                    {
+                        "name": node.name,
+                        "signature": self._get_signature(node),
+                        "docstring": self._get_docstring(node),
+                        "is_async": isinstance(node, ast.AsyncFunctionDef),
+                    }
+                )
         return functions
 
     async def generate_api_docs(self) -> list[DocPage]:

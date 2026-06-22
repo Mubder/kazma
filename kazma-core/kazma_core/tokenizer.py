@@ -12,6 +12,7 @@ from kazma_core.msa_tokenizer import MSATokenizer
 @dataclass(frozen=True, slots=True)
 class TokenResult:
     """Result of tokenization including dialect metadata."""
+
     tokens: list[Token]
     dialect: DialectResult
     text: str = ""  # original input text

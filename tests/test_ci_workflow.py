@@ -3,6 +3,7 @@
 Tests the validation steps that a CI pipeline would run when
 reviewing a submitted skill for certification.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,14 +39,17 @@ class TestManifestValidation:
 
     def test_valid_manifest_passes(self, tmp_path):
         """A valid manifest should pass validation."""
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0.0",
-            "author": "test-author",
-            "description": "A test skill",
-            "category": "testing",
-            "license": "MIT",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0.0",
+                "author": "test-author",
+                "description": "A test skill",
+                "category": "testing",
+                "license": "MIT",
+            },
+        )
         manifest = SkillManifest(tmp_path / "skill_manifest.yaml")
         result = manifest.validate()
         assert result.passed is True
@@ -54,11 +58,14 @@ class TestManifestValidation:
     def test_missing_required_field_fails(self, tmp_path):
         """Missing required fields should fail validation."""
         # Missing 'author' and 'license'
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0.0",
-            "description": "A test skill",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0.0",
+                "description": "A test skill",
+            },
+        )
         manifest = SkillManifest(tmp_path / "skill_manifest.yaml")
         result = manifest.validate()
         assert result.passed is False
@@ -67,13 +74,16 @@ class TestManifestValidation:
 
     def test_invalid_version_format_fails(self, tmp_path):
         """Non-semver version should fail."""
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0",  # missing patch
-            "author": "test-author",
-            "description": "A test skill",
-            "license": "MIT",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0",  # missing patch
+                "author": "test-author",
+                "description": "A test skill",
+                "license": "MIT",
+            },
+        )
         manifest = SkillManifest(tmp_path / "skill_manifest.yaml")
         result = manifest.validate()
         assert result.passed is False
@@ -81,13 +91,16 @@ class TestManifestValidation:
 
     def test_invalid_name_not_kebab_case_fails(self, tmp_path):
         """Non-kebab-case name should fail."""
-        _write_manifest(tmp_path, {
-            "name": "Test_Skill",  # not kebab-case
-            "version": "1.0.0",
-            "author": "test-author",
-            "description": "A test skill",
-            "license": "MIT",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "Test_Skill",  # not kebab-case
+                "version": "1.0.0",
+                "author": "test-author",
+                "description": "A test skill",
+                "license": "MIT",
+            },
+        )
         manifest = SkillManifest(tmp_path / "skill_manifest.yaml")
         result = manifest.validate()
         assert result.passed is False
@@ -113,13 +126,16 @@ class TestDirectoryValidation:
     @pytest.mark.asyncio
     async def test_valid_directory_passes(self, tmp_path):
         """A complete valid skill directory should pass all checks."""
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0.0",
-            "author": "test-author",
-            "description": "A test skill",
-            "license": "MIT",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0.0",
+                "author": "test-author",
+                "description": "A test skill",
+                "license": "MIT",
+            },
+        )
         _write_skill_file(tmp_path, "main.py", "def hello(): pass\n")
 
         validator = SkillValidator()
@@ -140,14 +156,17 @@ class TestDirectoryValidation:
     @pytest.mark.asyncio
     async def test_missing_entry_point_warns(self, tmp_path):
         """Missing declared entry point should fail."""
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0.0",
-            "author": "test-author",
-            "description": "A test skill",
-            "license": "MIT",
-            "entry_point": "main:MyClass",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0.0",
+                "author": "test-author",
+                "description": "A test skill",
+                "license": "MIT",
+                "entry_point": "main:MyClass",
+            },
+        )
         # No main.py file created
 
         validator = SkillValidator()
@@ -167,13 +186,16 @@ class TestSecurityLinter:
     @pytest.mark.asyncio
     async def test_clean_directory_passes(self, tmp_path):
         """Clean skill directory should pass security scan."""
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0.0",
-            "author": "test-author",
-            "description": "A test skill",
-            "license": "MIT",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0.0",
+                "author": "test-author",
+                "description": "A test skill",
+                "license": "MIT",
+            },
+        )
         _write_skill_file(tmp_path, "main.py", "def hello(): pass\n")
 
         validator = SkillValidator()
@@ -186,13 +208,16 @@ class TestSecurityLinter:
     @pytest.mark.asyncio
     async def test_hardcoded_secret_detected(self, tmp_path):
         """Hardcoded secrets should be detected."""
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0.0",
-            "author": "test-author",
-            "description": "A test skill",
-            "license": "MIT",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0.0",
+                "author": "test-author",
+                "description": "A test skill",
+                "license": "MIT",
+            },
+        )
         _write_skill_file(tmp_path, "main.py", 'api_key = "sk-1234567890abcdef"\n')
 
         validator = SkillValidator()
@@ -203,13 +228,16 @@ class TestSecurityLinter:
     @pytest.mark.asyncio
     async def test_eval_detected(self, tmp_path):
         """eval() usage should be flagged."""
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0.0",
-            "author": "test-author",
-            "description": "A test skill",
-            "license": "MIT",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0.0",
+                "author": "test-author",
+                "description": "A test skill",
+                "license": "MIT",
+            },
+        )
         _write_skill_file(tmp_path, "main.py", "eval('print(1)')\n")
 
         validator = SkillValidator()
@@ -220,13 +248,16 @@ class TestSecurityLinter:
     @pytest.mark.asyncio
     async def test_exec_detected(self, tmp_path):
         """exec() usage should be flagged."""
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0.0",
-            "author": "test-author",
-            "description": "A test skill",
-            "license": "MIT",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0.0",
+                "author": "test-author",
+                "description": "A test skill",
+                "license": "MIT",
+            },
+        )
         _write_skill_file(tmp_path, "main.py", "exec('import os')\n")
 
         validator = SkillValidator()
@@ -236,13 +267,16 @@ class TestSecurityLinter:
     @pytest.mark.asyncio
     async def test_os_system_detected(self, tmp_path):
         """os.system() usage should be flagged."""
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0.0",
-            "author": "test-author",
-            "description": "A test skill",
-            "license": "MIT",
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0.0",
+                "author": "test-author",
+                "description": "A test skill",
+                "license": "MIT",
+            },
+        )
         _write_skill_file(tmp_path, "main.py", "import os\nos.system('echo hello')\n")
 
         validator = SkillValidator()
@@ -252,14 +286,17 @@ class TestSecurityLinter:
     @pytest.mark.asyncio
     async def test_unknown_permission_flagged(self, tmp_path):
         """Unknown permissions should be warned about."""
-        _write_manifest(tmp_path, {
-            "name": "test-skill",
-            "version": "1.0.0",
-            "author": "test-author",
-            "description": "A test skill",
-            "license": "MIT",
-            "permissions": ["file_read", "totally_fake_permission"],
-        })
+        _write_manifest(
+            tmp_path,
+            {
+                "name": "test-skill",
+                "version": "1.0.0",
+                "author": "test-author",
+                "description": "A test skill",
+                "license": "MIT",
+                "permissions": ["file_read", "totally_fake_permission"],
+            },
+        )
         _write_skill_file(tmp_path, "main.py", "def hello(): pass\n")
 
         validator = SkillValidator()

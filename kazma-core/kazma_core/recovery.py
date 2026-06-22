@@ -83,6 +83,7 @@ async def resume_agent(
     tid = thread_id or state.get("provenance", {}).get("thread_id")
     if tid is None:
         from uuid import uuid4
+
         tid = str(uuid4())
 
     config: dict[str, Any] = {"configurable": {"thread_id": tid}}

@@ -117,18 +117,22 @@ class TestMCPClient:
 
         with patch("kazma_core.mcp_client.subprocess.Popen", return_value=mock_proc):
             # We need to mock the _send_stdio to return a valid initialize response
-            init_response = json.dumps({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "result": {"serverInfo": {"name": "test-server"}},
-            })
+            init_response = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"serverInfo": {"name": "test-server"}},
+                }
+            )
             mock_proc.stdout.readline.return_value = (init_response + "\n").encode()
 
-            result = await client.connect({
-                "name": "test-server",
-                "transport": "stdio",
-                "command": ["echo", "test"],
-            })
+            result = await client.connect(
+                {
+                    "name": "test-server",
+                    "transport": "stdio",
+                    "command": ["echo", "test"],
+                }
+            )
 
             assert result is True
             assert client.connected
@@ -141,11 +145,13 @@ class TestMCPClient:
         """Simulate a successful SSE connection."""
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.text = json.dumps({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "result": {"serverInfo": {"name": "sse-server"}},
-        })
+        mock_response.text = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "result": {"serverInfo": {"name": "sse-server"}},
+            }
+        )
         mock_response.raise_for_status = MagicMock()
 
         mock_client = AsyncMock()
@@ -153,11 +159,13 @@ class TestMCPClient:
         mock_client.aclose = AsyncMock()
 
         with patch("kazma_core.mcp_client.httpx.AsyncClient", return_value=mock_client):
-            result = await client.connect({
-                "name": "sse-server",
-                "transport": "sse",
-                "url": "http://localhost:8080",
-            })
+            result = await client.connect(
+                {
+                    "name": "sse-server",
+                    "transport": "sse",
+                    "url": "http://localhost:8080",
+                }
+            )
             assert result is True
             assert client.connected
 
@@ -181,18 +189,22 @@ class TestMCPClient:
         mock_proc.stderr = MagicMock()
 
         with patch("kazma_core.mcp_client.subprocess.Popen", return_value=mock_proc):
-            init_response = json.dumps({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "result": {"serverInfo": {"name": "test"}},
-            })
+            init_response = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {"serverInfo": {"name": "test"}},
+                }
+            )
             mock_proc.stdout.readline.return_value = (init_response + "\n").encode()
 
-            await client.connect({
-                "name": "test",
-                "transport": "stdio",
-                "command": ["echo", "test"],
-            })
+            await client.connect(
+                {
+                    "name": "test",
+                    "transport": "stdio",
+                    "command": ["echo", "test"],
+                }
+            )
             assert client.connected
 
         await client.disconnect()
@@ -205,8 +217,10 @@ class TestMCPClient:
         """Test connecting with a nonexistent command."""
         client = MCPClient()
         with pytest.raises(MCPConnectionError, match="Command not found"):
-            await client.connect({
-                "name": "test",
-                "transport": "stdio",
-                "command": ["/nonexistent/binary/that/does/not/exist"],
-            })
+            await client.connect(
+                {
+                    "name": "test",
+                    "transport": "stdio",
+                    "command": ["/nonexistent/binary/that/does/not/exist"],
+                }
+            )

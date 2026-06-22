@@ -21,6 +21,7 @@ from kazma_core.security.dependency_scanner import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def scanner(tmp_path: Path) -> DependencyScanner:
     return DependencyScanner(cache_path=tmp_path / "vuln_cache.json")
@@ -82,17 +83,13 @@ def skills_dir(tmp_path: Path) -> Path:
     s2 = skills / "suspicious-skill"
     s2.mkdir()
     (s2 / "manifest.yaml").write_text(
-        "name: suspicious-skill\nversion: 0.1.0\n"
-        "mcp_server:\n  command: eval(user_input)\n  env:\n    TOKEN: abc123\n"
+        "name: suspicious-skill\nversion: 0.1.0\nmcp_server:\n  command: eval(user_input)\n  env:\n    TOKEN: abc123\n"
     )
 
     # Skill 3: escalation manifest
     s3 = skills / "escalation-skill"
     s3.mkdir()
-    (s3 / "manifest.yaml").write_text(
-        "name: escalation-skill\nversion: 2.0.0\n"
-        "run: sudo apt-get install something\n"
-    )
+    (s3 / "manifest.yaml").write_text("name: escalation-skill\nversion: 2.0.0\nrun: sudo apt-get install something\n")
 
     # Skill 4: no manifest, should be skipped
     s4 = skills / "no-manifest-skill"
@@ -104,6 +101,7 @@ def skills_dir(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 # DependencyScanner dataclass tests
 # ---------------------------------------------------------------------------
+
 
 class TestDependencyReport:
     def test_report_dataclass(self):
@@ -129,6 +127,7 @@ class TestDependencyReport:
 # ---------------------------------------------------------------------------
 # DependencyScanner check_single
 # ---------------------------------------------------------------------------
+
 
 class TestCheckSingle:
     @pytest.mark.asyncio
@@ -212,6 +211,7 @@ class TestCheckSingle:
 # DependencyScanner scan
 # ---------------------------------------------------------------------------
 
+
 class TestScan:
     @pytest.mark.asyncio
     async def test_scan_requirements_txt(self, scanner: DependencyScanner, skill_with_reqs: Path):
@@ -247,6 +247,7 @@ class TestScan:
 # DependencyScanner parse dependencies
 # ---------------------------------------------------------------------------
 
+
 class TestParseDependencies:
     def test_parse_requirements_txt(self, scanner: DependencyScanner, tmp_path: Path):
         req = tmp_path / "requirements.txt"
@@ -280,11 +281,7 @@ class TestParseDependencies:
     def test_parse_pyproject_toml(self, scanner: DependencyScanner, tmp_path: Path):
         pyproject = tmp_path / "pyproject.toml"
         pyproject.write_text(
-            "[project]\n"
-            'name = "test"\n\n'
-            "[project.dependencies]\n"
-            '"requests>=2.28.0",\n'
-            '"flask==2.3.2",\n'
+            '[project]\nname = "test"\n\n[project.dependencies]\n"requests>=2.28.0",\n"flask==2.3.2",\n'
         )
         deps = scanner._parse_pyproject_toml(pyproject)
         assert len(deps) == 2
@@ -299,6 +296,7 @@ class TestParseDependencies:
 # ---------------------------------------------------------------------------
 # DependencyScanner cache
 # ---------------------------------------------------------------------------
+
 
 class TestCache:
     def test_cache_stores_results(self, scanner: DependencyScanner):
@@ -372,9 +370,7 @@ class TestDependabotStyleScanner:
         assert dep_scanner._db_path.exists()
         conn = dep_scanner._get_conn()
         # Verify tables exist
-        tables = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        tables = conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         table_names = {t["name"] for t in tables}
         assert "scan_history" in table_names
         assert "scan_results" in table_names
@@ -395,9 +391,11 @@ class TestDependabotStyleScanner:
         (project / "requirements.txt").write_text("requests>=2.28.0\n")
 
         # Mock all sources to return empty
-        with patch.object(dep_scanner, "_query_osv", new_callable=AsyncMock, return_value=[]), \
-             patch.object(dep_scanner, "_query_github_advisories", new_callable=AsyncMock, return_value=[]), \
-             patch.object(dep_scanner, "_query_nvd", new_callable=AsyncMock, return_value=[]):
+        with (
+            patch.object(dep_scanner, "_query_osv", new_callable=AsyncMock, return_value=[]),
+            patch.object(dep_scanner, "_query_github_advisories", new_callable=AsyncMock, return_value=[]),
+            patch.object(dep_scanner, "_query_nvd", new_callable=AsyncMock, return_value=[]),
+        ):
             report = await dep_scanner.scan_all_dependencies(project)
 
         assert isinstance(report, ScanReport)
@@ -429,9 +427,11 @@ class TestDependabotStyleScanner:
             source="nvd",
         )
 
-        with patch.object(dep_scanner, "_query_osv", new_callable=AsyncMock, return_value=[osv_vuln]), \
-             patch.object(dep_scanner, "_query_github_advisories", new_callable=AsyncMock, return_value=[]), \
-             patch.object(dep_scanner, "_query_nvd", new_callable=AsyncMock, return_value=[nvd_vuln]):
+        with (
+            patch.object(dep_scanner, "_query_osv", new_callable=AsyncMock, return_value=[osv_vuln]),
+            patch.object(dep_scanner, "_query_github_advisories", new_callable=AsyncMock, return_value=[]),
+            patch.object(dep_scanner, "_query_nvd", new_callable=AsyncMock, return_value=[nvd_vuln]),
+        ):
             report = await dep_scanner.scan_all_dependencies(project)
 
         assert report.vulnerable_packages == 1
@@ -447,24 +447,32 @@ class TestDependabotStyleScanner:
         (project / "requirements.txt").write_text("requests==2.28.0\n")
 
         same_vuln_osv = ScanResult(
-            package="requests", current_version="2.28.0",
+            package="requests",
+            current_version="2.28.0",
             vulnerability=Vulnerability("requests", "2.28.0", "GHSA-shared", "HIGH", "dup"),
-            fix_available=True, source="osv",
+            fix_available=True,
+            source="osv",
         )
         same_vuln_gh = ScanResult(
-            package="requests", current_version="2.28.0",
+            package="requests",
+            current_version="2.28.0",
             vulnerability=Vulnerability("requests", "2.28.0", "GHSA-shared", "HIGH", "dup"),
-            fix_available=True, source="github_advisories",
+            fix_available=True,
+            source="github_advisories",
         )
         diff_vuln = ScanResult(
-            package="requests", current_version="2.28.0",
+            package="requests",
+            current_version="2.28.0",
             vulnerability=Vulnerability("requests", "2.28.0", "CVE-diff", "MEDIUM", "other"),
-            fix_available=False, source="nvd",
+            fix_available=False,
+            source="nvd",
         )
 
-        with patch.object(dep_scanner, "_query_osv", new_callable=AsyncMock, return_value=[same_vuln_osv]), \
-             patch.object(dep_scanner, "_query_github_advisories", new_callable=AsyncMock, return_value=[same_vuln_gh]), \
-             patch.object(dep_scanner, "_query_nvd", new_callable=AsyncMock, return_value=[diff_vuln]):
+        with (
+            patch.object(dep_scanner, "_query_osv", new_callable=AsyncMock, return_value=[same_vuln_osv]),
+            patch.object(dep_scanner, "_query_github_advisories", new_callable=AsyncMock, return_value=[same_vuln_gh]),
+            patch.object(dep_scanner, "_query_nvd", new_callable=AsyncMock, return_value=[diff_vuln]),
+        ):
             report = await dep_scanner.scan_all_dependencies(project)
 
         # GHSA-shared should appear only once, CVE-diff once
@@ -481,14 +489,19 @@ class TestDependabotStyleScanner:
         (project / "requirements.txt").write_text("flask==2.0.0\n")
 
         vuln = ScanResult(
-            package="flask", current_version="2.0.0",
+            package="flask",
+            current_version="2.0.0",
             vulnerability=Vulnerability("flask", "2.0.0", "CVE-persist", "CRITICAL", "XSS"),
-            fix_available=True, fix_version="2.0.1", source="osv",
+            fix_available=True,
+            fix_version="2.0.1",
+            source="osv",
         )
 
-        with patch.object(dep_scanner, "_query_osv", new_callable=AsyncMock, return_value=[vuln]), \
-             patch.object(dep_scanner, "_query_github_advisories", new_callable=AsyncMock, return_value=[]), \
-             patch.object(dep_scanner, "_query_nvd", new_callable=AsyncMock, return_value=[]):
+        with (
+            patch.object(dep_scanner, "_query_osv", new_callable=AsyncMock, return_value=[vuln]),
+            patch.object(dep_scanner, "_query_github_advisories", new_callable=AsyncMock, return_value=[]),
+            patch.object(dep_scanner, "_query_nvd", new_callable=AsyncMock, return_value=[]),
+        ):
             await dep_scanner.scan_all_dependencies(project)
 
         history = dep_scanner.get_scan_history()
@@ -503,6 +516,7 @@ class TestDependabotStyleScanner:
 
         # Add some history manually
         from datetime import datetime
+
         now = datetime.now(UTC).isoformat()
         conn = dep_scanner._get_conn()
         conn.execute(
@@ -553,7 +567,9 @@ class TestDependabotStyleScanner:
         mock_proc.returncode = 0
         mock_proc.stdout = "https://github.com/test/repo/issues/42\n"
 
-        with patch("kazma_core.security.dependency_scanner.asyncio.to_thread", new_callable=AsyncMock, return_value=mock_proc):
+        with patch(
+            "kazma_core.security.dependency_scanner.asyncio.to_thread", new_callable=AsyncMock, return_value=mock_proc
+        ):
             url = await dep_scanner.create_github_issue(vuln)
             assert url == "https://github.com/test/repo/issues/42"
 
@@ -562,7 +578,11 @@ class TestDependabotStyleScanner:
         """Test creating issue when gh CLI is not installed."""
         vuln = Vulnerability("requests", "2.28.0", "GHSA-test", "HIGH", "Test")
 
-        with patch("kazma_core.security.dependency_scanner.asyncio.to_thread", new_callable=AsyncMock, side_effect=FileNotFoundError):
+        with patch(
+            "kazma_core.security.dependency_scanner.asyncio.to_thread",
+            new_callable=AsyncMock,
+            side_effect=FileNotFoundError,
+        ):
             result = await dep_scanner.create_github_issue(vuln)
             assert "gh CLI not installed" in result
 
@@ -587,9 +607,12 @@ class TestDependabotStyleScanner:
         (project / "requirements.txt").write_text("requests==2.28.0\n")
 
         fix_vuln = ScanResult(
-            package="requests", current_version="2.28.0",
+            package="requests",
+            current_version="2.28.0",
             vulnerability=Vulnerability("requests", "2.28.0", "GHSA-fix", "HIGH", "Fix available"),
-            fix_available=True, fix_version="2.28.1", source="osv",
+            fix_available=True,
+            fix_version="2.28.1",
+            source="osv",
         )
 
         with patch.object(dep_scanner, "_query_osv_single", new_callable=AsyncMock, return_value=[fix_vuln]):
@@ -609,9 +632,7 @@ class TestDependabotStyleScanner:
                     "id": "GHSA-mock",
                     "summary": "Mock vuln",
                     "severity": [{"type": "CVSS_V3", "score": "7.5"}],
-                    "affected": [
-                        {"ranges": [{"events": [{"introduced": "0"}, {"fixed": "1.0.1"}]}]}
-                    ],
+                    "affected": [{"ranges": [{"events": [{"introduced": "0"}, {"fixed": "1.0.1"}]}]}],
                 }
             ]
         }

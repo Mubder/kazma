@@ -39,15 +39,9 @@ class CostCircuitBreaker:
         _halted: Whether the breaker has tripped.
     """
 
-    max_cost: float = field(
-        default_factory=lambda: float(
-            os.getenv("KAZMA_MAX_COST", str(DEFAULT_MAX_COST))
-        )
-    )
+    max_cost: float = field(default_factory=lambda: float(os.getenv("KAZMA_MAX_COST", str(DEFAULT_MAX_COST))))
     silence_window_seconds: float = field(
-        default_factory=lambda: float(
-            os.getenv("KAZMA_SILENCE_WINDOW", str(DEFAULT_SILENCE_WINDOW_SECONDS))
-        )
+        default_factory=lambda: float(os.getenv("KAZMA_SILENCE_WINDOW", str(DEFAULT_SILENCE_WINDOW_SECONDS)))
     )
     current_cost: float = 0.0
     last_user_interaction: float = field(default_factory=time.time)

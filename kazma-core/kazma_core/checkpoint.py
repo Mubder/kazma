@@ -193,9 +193,7 @@ class CheckpointManager:
         conn = self._conn
         assert conn is not None
         for cp_id in ids_to_delete:
-            await conn.execute(
-                "DELETE FROM checkpoints WHERE checkpoint_id = ?", (cp_id,)
-            )
+            await conn.execute("DELETE FROM checkpoints WHERE checkpoint_id = ?", (cp_id,))
         await conn.commit()
 
         removed = len(ids_to_delete)

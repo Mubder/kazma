@@ -3,6 +3,7 @@
 Tracks cultural context (Ramadan, Eid, National Day) and returns modifiers
 that influence conversation pacing and tone.
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,8 +17,10 @@ logger = logging.getLogger(__name__)
 
 # ── Cultural events ───────────────────────────────────────────────────
 
+
 class CulturalEvent(Enum):
     """Recognized cultural events that affect conversation style."""
+
     NONE = "none"
     RAMADAN = "ramadan"
     EID_AL_FITR = "eid_al_fitr"
@@ -34,9 +37,11 @@ _NATIONAL_DAY_LIBERATION = (2, 26)
 
 # ── Data models ───────────────────────────────────────────────────────
 
+
 @dataclass
 class CulturalContextState:
     """Current cultural context for a conversation."""
+
     current_date: date
     is_ramadan: bool = False
     is_eid: bool = False
@@ -71,6 +76,7 @@ class CulturalContextState:
 
 # ── Hijri date conversion (lightweight) ───────────────────────────────
 
+
 def _gregorian_to_hijri_approx(g: date) -> tuple[int, int, int]:
     """Approximate Gregorian → Hijri conversion.
 
@@ -101,7 +107,7 @@ def _gregorian_to_hijri_approx(g: date) -> tuple[int, int, int]:
     hijri_year = cycle * 30 + year_in_cycle + 1  # 1-indexed
 
     # --- month / day ---
-    is_leap = year_in_cycle in _leap_years
+    is_leap = year_in_cycle in _LEAP_YEARS
     month = 1
     for m in range(12):
         month_len = (30 if is_leap else 29) if m == 11 else (30 if m % 2 == 0 else 29)
@@ -116,14 +122,24 @@ def _gregorian_to_hijri_approx(g: date) -> tuple[int, int, int]:
 def _hijri_month_name(month: int) -> str:
     """Return the Arabic name of a Hijri month."""
     names = {
-        1: "محرم", 2: "صفر", 3: "ربيع الأول", 4: "ربيع الثاني",
-        5: "جمادى الأولى", 6: "جمادى الآخرة", 7: "رجب", 8: "شعبان",
-        9: "رمضان", 10: "شوال", 11: "ذو القعدة", 12: "ذو الحجة",
+        1: "محرم",
+        2: "صفر",
+        3: "ربيع الأول",
+        4: "ربيع الثاني",
+        5: "جمادى الأولى",
+        6: "جمادى الآخرة",
+        7: "رجب",
+        8: "شعبان",
+        9: "رمضان",
+        10: "شوال",
+        11: "ذو القعدة",
+        12: "ذو الحجة",
     }
     return names.get(month, "غير معروف")
 
 
 # ── Ramadan detection ─────────────────────────────────────────────────
+
 
 def _detect_ramadan_hijri(hijri_year: int, hijri_month: int) -> bool:
     """Check if current Hijri date falls in Ramadan (month 9)."""
@@ -131,6 +147,7 @@ def _detect_ramadan_hijri(hijri_year: int, hijri_month: int) -> bool:
 
 
 # ── Public API ────────────────────────────────────────────────────────
+
 
 class CulturalContext:
     """Tracks cultural context for conversations.
@@ -205,7 +222,9 @@ class CulturalContext:
 
         logger.debug(
             "Cultural context updated: hijri=%d/%d/%d, events=%s",
-            hijri_year, hijri_month, hijri_day,
+            hijri_year,
+            hijri_month,
+            hijri_day,
             [e.value for e in events],
         )
 
@@ -248,35 +267,43 @@ class CulturalContext:
         if s.is_ramadan:
             modifiers["formality_boost"] += 1
             modifiers["avoid_business_during_iftar"] = True
-            modifiers["seasonal_greetings"].extend([
-                "رمضان كريم",
-                "كل عام وأنتم بخير",
-            ])
+            modifiers["seasonal_greetings"].extend(
+                [
+                    "رمضان كريم",
+                    "كل عام وأنتم بخير",
+                ]
+            )
 
         if s.is_eid_al_fitr:
             modifiers["celebratory_tone"] = True
             modifiers["formality_boost"] += 1
-            modifiers["seasonal_greetings"].extend([
-                "عيد مبارك",
-                "كل عام وأنتم بخير",
-                "عيد سعيد",
-            ])
+            modifiers["seasonal_greetings"].extend(
+                [
+                    "عيد مبارك",
+                    "كل عام وأنتم بخير",
+                    "عيد سعيد",
+                ]
+            )
 
         if s.is_eid_al_adha:
             modifiers["celebratory_tone"] = True
             modifiers["formality_boost"] += 1
-            modifiers["seasonal_greetings"].extend([
-                "عيد أضحى مبارك",
-                "تقبل الله منا ومنكم",
-            ])
+            modifiers["seasonal_greetings"].extend(
+                [
+                    "عيد أضحى مبارك",
+                    "تقبل الله منا ومنكم",
+                ]
+            )
 
         if s.is_national_day:
             modifiers["patriotic_references"] = True
             modifiers["celebratory_tone"] = True
-            modifiers["seasonal_greetings"].extend([
-                "يوم الكويت الوطني سعيد",
-                "عشت الكويت",
-            ])
+            modifiers["seasonal_greetings"].extend(
+                [
+                    "يوم الكويت الوطني سعيد",
+                    "عشت الكويت",
+                ]
+            )
 
         if s.is_isra_un_miraj:
             modifiers["formality_boost"] += 1
@@ -294,32 +321,42 @@ class CulturalContext:
         greetings: list[str] = []
 
         if s.is_eid_al_fitr:
-            greetings.extend([
-                "عيد مبارك عليكم",
-                "كل عام وأنتم بخير",
-                "تقبل الله منا ومنكم",
-            ])
+            greetings.extend(
+                [
+                    "عيد مبارك عليكم",
+                    "كل عام وأنتم بخير",
+                    "تقبل الله منا ومنكم",
+                ]
+            )
         elif s.is_eid_al_adha:
-            greetings.extend([
-                "عيد أضحى مبارك",
-                "تقبل الله منا ومنكم",
-            ])
+            greetings.extend(
+                [
+                    "عيد أضحى مبارك",
+                    "تقبل الله منا ومنكم",
+                ]
+            )
         elif s.is_ramadan:
-            greetings.extend([
-                "رمضان كريم",
-                "صيام مقبول",
-            ])
+            greetings.extend(
+                [
+                    "رمضان كريم",
+                    "صيام مقبول",
+                ]
+            )
         elif s.is_national_day:
-            greetings.extend([
-                "يوم الكويت الوطني سعيد",
-                "كل عام الكويت بخير",
-            ])
+            greetings.extend(
+                [
+                    "يوم الكويت الوطني سعيد",
+                    "كل عام الكويت بخير",
+                ]
+            )
         else:
-            greetings.extend([
-                "السلام عليكم",
-                "هلا والله",
-                "شلونك",
-            ])
+            greetings.extend(
+                [
+                    "السلام عليكم",
+                    "هلا والله",
+                    "شلونك",
+                ]
+            )
 
         return greetings
 

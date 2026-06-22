@@ -53,32 +53,23 @@ class SkillLoader:
 
         manifest_path = skill_dir / "skill_manifest.yaml"
         if not manifest_path.exists():
-            raise SkillNotFoundError(
-                f"Manifest not found for skill: {skill_name}"
-            )
+            raise SkillNotFoundError(f"Manifest not found for skill: {skill_name}")
 
         # Load and validate manifest
         try:
             with open(manifest_path) as f:
                 data = yaml.safe_load(f)
         except yaml.YAMLError as exc:
-            raise SkillLoadError(
-                f"Invalid YAML in manifest for {skill_name}: {exc}"
-            ) from exc
+            raise SkillLoadError(f"Invalid YAML in manifest for {skill_name}: {exc}") from exc
 
         if not isinstance(data, dict):
-            raise SkillLoadError(
-                f"Invalid manifest format for skill: {skill_name}"
-            )
+            raise SkillLoadError(f"Invalid manifest format for skill: {skill_name}")
 
         # Validate required fields
         required = ("name", "version", "description", "author", "license")
         for field_name in required:
             if field_name not in data:
-                raise SkillLoadError(
-                    f"Manifest missing required field '{field_name}' "
-                    f"for skill: {skill_name}"
-                )
+                raise SkillLoadError(f"Manifest missing required field '{field_name}' for skill: {skill_name}")
 
         entry_point = data.get("entry_point")
         if not entry_point:
@@ -119,10 +110,7 @@ class SkillLoader:
 
         # Evict all cached modules for this skill
         prefix = f"_kazma_skill_{skill_name}"
-        to_remove = [
-            key for key in sys.modules
-            if key == prefix or key.startswith(f"{prefix}_")
-        ]
+        to_remove = [key for key in sys.modules if key == prefix or key.startswith(f"{prefix}_")]
         for key in to_remove:
             del sys.modules[key]
 
@@ -157,9 +145,7 @@ class SkillLoader:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _import_entry_point(
-        self, skill_dir: Path, entry_point: str, skill_name: str
-    ) -> Any:
+    async def _import_entry_point(self, skill_dir: Path, entry_point: str, skill_name: str) -> Any:
         """Import a skill via its entry_point spec (e.g. 'my_skill.main:MySkill').
 
         The entry point format is ``module_path:ClassName``.  If no colon
@@ -175,31 +161,20 @@ class SkillLoader:
         file_stem = module_path.replace(".", "/")
         module_file = skill_dir / f"{file_stem}.py"
         if not module_file.exists():
-            raise SkillLoadError(
-                f"entry_point file not found: {module_file} "
-                f"for skill {skill_name}"
-            )
+            raise SkillLoadError(f"entry_point file not found: {module_file} for skill {skill_name}")
 
         # Unique module name to avoid cache collisions across skills
         unique_name = f"_kazma_skill_{skill_name}_{module_path.replace('.', '_')}"
-        return await self._load_module_from_file(
-            module_file, unique_name, skill_name, class_name
-        )
+        return await self._load_module_from_file(module_file, unique_name, skill_name, class_name)
 
-    async def _import_skill_module(
-        self, skill_dir: Path, skill_name: str
-    ) -> Any:
+    async def _import_skill_module(self, skill_dir: Path, skill_name: str) -> Any:
         """Import the skill directory as a module when no entry_point is set."""
         main_py = skill_dir / "main.py"
         if not main_py.exists():
-            raise SkillLoadError(
-                f"No entry_point and no main.py found for skill: {skill_name}"
-            )
+            raise SkillLoadError(f"No entry_point and no main.py found for skill: {skill_name}")
 
         unique_name = f"_kazma_skill_{skill_name}_main"
-        return await self._load_module_from_file(
-            main_py, unique_name, skill_name, class_name=None
-        )
+        return await self._load_module_from_file(main_py, unique_name, skill_name, class_name=None)
 
     async def _load_module_from_file(
         self,
@@ -219,10 +194,7 @@ class SkillLoader:
 
         spec = importlib.util.spec_from_file_location(unique_name, str(file_path))
         if spec is None or spec.loader is None:
-            raise SkillLoadError(
-                f"Cannot create module spec for {file_path} "
-                f"(skill: {skill_name})"
-            )
+            raise SkillLoadError(f"Cannot create module spec for {file_path} (skill: {skill_name})")
 
         module = importlib.util.module_from_spec(spec)
         sys.modules[unique_name] = module
@@ -232,24 +204,17 @@ class SkillLoader:
         except Exception as exc:
             # Clean up on failure
             sys.modules.pop(unique_name, None)
-            raise SkillLoadError(
-                f"Failed to execute module {file_path.name} "
-                f"for skill {skill_name}: {exc}"
-            ) from exc
+            raise SkillLoadError(f"Failed to execute module {file_path.name} for skill {skill_name}: {exc}") from exc
 
         if class_name is not None:
             cls = getattr(module, class_name, None)
             if cls is None:
                 raise SkillLoadError(
-                    f"Class {class_name!r} not found in module "
-                    f"{file_path.name!r} for skill {skill_name}"
+                    f"Class {class_name!r} not found in module {file_path.name!r} for skill {skill_name}"
                 )
             try:
                 return cls()
             except Exception as exc:
-                raise SkillLoadError(
-                    f"Failed to instantiate {class_name!r} for skill "
-                    f"{skill_name}: {exc}"
-                ) from exc
+                raise SkillLoadError(f"Failed to instantiate {class_name!r} for skill {skill_name}: {exc}") from exc
 
         return module

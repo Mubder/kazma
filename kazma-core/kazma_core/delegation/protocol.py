@@ -4,6 +4,7 @@ Implements the request/response lifecycle for delegating sub-tasks
 between autonomous Kazma agents. Each request is cryptographically
 signed for authenticity and audited for cost control.
 """
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 class RequestStatus(StrEnum):
     """Status of a delegation request."""
+
     PENDING = "pending"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
@@ -31,6 +33,7 @@ class RequestStatus(StrEnum):
 @dataclass
 class DelegationRequest:
     """A request to delegate a sub-task to another agent."""
+
     request_id: str
     requester_id: str
     task_description: str
@@ -57,6 +60,7 @@ class DelegationRequest:
 @dataclass
 class DelegationResponse:
     """Response to a delegation request from the target agent."""
+
     request_id: str
     responder_id: str
     status: RequestStatus
@@ -68,6 +72,7 @@ class DelegationResponse:
 @dataclass
 class DelegationResult:
     """Result of executing a delegated task."""
+
     request_id: str
     executor_id: str
     status: RequestStatus
@@ -156,9 +161,7 @@ class DelegationProtocol:
         )
         return request
 
-    async def receive_delegation_request(
-        self, request: DelegationRequest
-    ) -> DelegationResponse:
+    async def receive_delegation_request(self, request: DelegationRequest) -> DelegationResponse:
         """Receive and evaluate a delegation request.
 
         Evaluation steps:
@@ -175,9 +178,7 @@ class DelegationProtocol:
         """
         # Step 1: Verify signature
         if self.security is not None and request.signature:
-            valid = self.security.verify_request(
-                request.to_dict(), request.signature
-            )
+            valid = self.security.verify_request(request.to_dict(), request.signature)
             if not valid:
                 logger.warning(
                     "Invalid signature on request %s from %s",
@@ -227,19 +228,13 @@ class DelegationProtocol:
         )
 
         if self.security is not None:
-            response.signature = self.security.sign_request(
-                {"request_id": request.request_id, "status": "accepted"}
-            )
+            response.signature = self.security.sign_request({"request_id": request.request_id, "status": "accepted"})
 
         self._pending_requests[request.request_id] = request
-        logger.info(
-            "Delegation request accepted: %s", request.request_id
-        )
+        logger.info("Delegation request accepted: %s", request.request_id)
         return response
 
-    async def execute_delegated_task(
-        self, request: DelegationRequest
-    ) -> DelegationResult:
+    async def execute_delegated_task(self, request: DelegationRequest) -> DelegationResult:
         """Execute a delegated task.
 
         If an executor callback was provided, delegates to it.
@@ -285,9 +280,7 @@ class DelegationProtocol:
             )
             return result
 
-    async def report_completion(
-        self, request_id: str, result: DelegationResult
-    ) -> bool:
+    async def report_completion(self, request_id: str, result: DelegationResult) -> bool:
         """Report task completion back to the requester.
 
         Args:

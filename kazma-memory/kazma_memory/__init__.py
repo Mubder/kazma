@@ -4,6 +4,7 @@ This module provides high-performance search capabilities using Tantivy
 (Rust-based engine) for massive, multi-million object agent memories
 with sub-millisecond query latency.
 """
+
 from .arabic_tokenizer import ArabicTantivyTokenizer
 from .benchmark import BenchmarkReport, BenchmarkResult, SearchBenchmark
 from .migration import MigrationResult, SQLiteToTantivyMigration, VerificationResult
@@ -22,24 +23,19 @@ __all__ = [
     "Memory",
     "SearchResult",
     "IndexStats",
-
     # Arabic Tokenizer
     "ArabicTantivyTokenizer",
-
     # Migration
     "SQLiteToTantivyMigration",
     "MigrationResult",
     "VerificationResult",
-
     # Benchmark
     "SearchBenchmark",
     "BenchmarkResult",
     "BenchmarkReport",
-
     # Search Backend Router
     "SearchBackendRouter",
     "SQLiteMemoryBackend",
-
     # Existing
     "ReportStore",
     "ReportStoreError",

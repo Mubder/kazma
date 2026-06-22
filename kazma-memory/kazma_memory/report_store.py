@@ -3,6 +3,7 @@
 Stores, retrieves, and searches TradingIntelReport objects with
 filtering by division, date range, and severity.
 """
+
 from __future__ import annotations
 
 import json
@@ -48,6 +49,7 @@ CREATE INDEX IF NOT EXISTS idx_reports_period ON trading_reports(period);
 
 class ReportStoreError(Exception):
     """Raised when report storage operations fail."""
+
     pass
 
 
@@ -80,45 +82,54 @@ class ReportStore:
         report_id = report.report_id
 
         # Serialize nested objects
-        risks_json = json.dumps([
-            {
-                "title": r.title,
-                "title_ar": r.title_ar,
-                "description": r.description,
-                "description_ar": r.description_ar,
-                "severity": r.severity.value if hasattr(r.severity, "value") else str(r.severity),
-                "likelihood": r.likelihood,
-                "mitigation": r.mitigation,
-                "mitigation_ar": r.mitigation_ar,
-            }
-            for r in (report.risks or [])
-        ], ensure_ascii=False)
+        risks_json = json.dumps(
+            [
+                {
+                    "title": r.title,
+                    "title_ar": r.title_ar,
+                    "description": r.description,
+                    "description_ar": r.description_ar,
+                    "severity": r.severity.value if hasattr(r.severity, "value") else str(r.severity),
+                    "likelihood": r.likelihood,
+                    "mitigation": r.mitigation,
+                    "mitigation_ar": r.mitigation_ar,
+                }
+                for r in (report.risks or [])
+            ],
+            ensure_ascii=False,
+        )
 
-        opps_json = json.dumps([
-            {
-                "title": o.title,
-                "title_ar": o.title_ar,
-                "description": o.description,
-                "description_ar": o.description_ar,
-                "potential_value_kwd": o.potential_value_kwd,
-                "urgency": o.urgency.value if hasattr(o.urgency, "value") else str(o.urgency),
-                "confidence": o.confidence,
-            }
-            for o in (report.opportunities or [])
-        ], ensure_ascii=False)
+        opps_json = json.dumps(
+            [
+                {
+                    "title": o.title,
+                    "title_ar": o.title_ar,
+                    "description": o.description,
+                    "description_ar": o.description_ar,
+                    "potential_value_kwd": o.potential_value_kwd,
+                    "urgency": o.urgency.value if hasattr(o.urgency, "value") else str(o.urgency),
+                    "confidence": o.confidence,
+                }
+                for o in (report.opportunities or [])
+            ],
+            ensure_ascii=False,
+        )
 
-        actions_json = json.dumps([
-            {
-                "action": a.action,
-                "action_ar": a.action_ar,
-                "urgency": a.urgency.value if hasattr(a.urgency, "value") else str(a.urgency),
-                "responsible_division": a.responsible_division,
-                "responsible_division_ar": a.responsible_division_ar,
-                "expected_outcome": a.expected_outcome,
-                "expected_outcome_ar": a.expected_outcome_ar,
-            }
-            for a in (report.actions or [])
-        ], ensure_ascii=False)
+        actions_json = json.dumps(
+            [
+                {
+                    "action": a.action,
+                    "action_ar": a.action_ar,
+                    "urgency": a.urgency.value if hasattr(a.urgency, "value") else str(a.urgency),
+                    "responsible_division": a.responsible_division,
+                    "responsible_division_ar": a.responsible_division_ar,
+                    "expected_outcome": a.expected_outcome,
+                    "expected_outcome_ar": a.expected_outcome_ar,
+                }
+                for a in (report.actions or [])
+            ],
+            ensure_ascii=False,
+        )
 
         # Full report as JSON
         report_full = {
@@ -128,7 +139,9 @@ class ReportStore:
             "period": report.period,
             "language": report.language,
             "generated_at": report.generated_at,
-            "overall_severity": report.overall_severity.value if hasattr(report.overall_severity, "value") else str(report.overall_severity),
+            "overall_severity": report.overall_severity.value
+            if hasattr(report.overall_severity, "value")
+            else str(report.overall_severity),
             "oil_price": report.oil_price,
             "gold_price_kwd": report.gold_price_kwd,
             "boursa_index": report.boursa_index,
@@ -136,7 +149,9 @@ class ReportStore:
             "summary_ar": report.summary_ar,
         }
 
-        severity_val = report.overall_severity.value if hasattr(report.overall_severity, "value") else str(report.overall_severity)
+        severity_val = (
+            report.overall_severity.value if hasattr(report.overall_severity, "value") else str(report.overall_severity)
+        )
 
         sql = """
             INSERT OR REPLACE INTO trading_reports
@@ -147,12 +162,24 @@ class ReportStore:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
-            report_id, report.division, report.division_ar, report.period,
-            report.language, report.generated_at, severity_val,
-            report.oil_price, report.gold_price_kwd, report.boursa_index,
-            report.summary_en, report.summary_ar,
-            report.market_overview_en, report.market_overview_ar,
-            risks_json, opps_json, actions_json, json.dumps(report_full, ensure_ascii=False),
+            report_id,
+            report.division,
+            report.division_ar,
+            report.period,
+            report.language,
+            report.generated_at,
+            severity_val,
+            report.oil_price,
+            report.gold_price_kwd,
+            report.boursa_index,
+            report.summary_en,
+            report.summary_ar,
+            report.market_overview_en,
+            report.market_overview_ar,
+            risks_json,
+            opps_json,
+            actions_json,
+            json.dumps(report_full, ensure_ascii=False),
         )
 
         conn = sqlite3.connect(self.db_path)
@@ -263,6 +290,7 @@ class ReportStore:
     async def delete_old(self, days: int = 90) -> int:
         """Delete reports older than N days. Returns count deleted."""
         from datetime import timedelta
+
         cutoff_dt = datetime.now(UTC) - timedelta(days=days)
         cutoff = cutoff_dt.isoformat()
         sql = "DELETE FROM trading_reports WHERE generated_at < ?"

@@ -1,4 +1,5 @@
 """Tests for ToneAdapter — Cultural tone profiles and response adaptation."""
+
 from __future__ import annotations
 
 import pytest
@@ -82,23 +83,17 @@ class TestProfileSelection:
 
     def test_ramadan_overrides(self):
         adapter = ToneAdapter()
-        profile = adapter.select_profile(
-            FormalityLevel.NORMAL, is_ramadan=True
-        )
+        profile = adapter.select_profile(FormalityLevel.NORMAL, is_ramadan=True)
         assert profile.name == "ramadan_warm"
 
     def test_eid_overrides(self):
         adapter = ToneAdapter()
-        profile = adapter.select_profile(
-            FormalityLevel.FORMAL, is_eid=True
-        )
+        profile = adapter.select_profile(FormalityLevel.FORMAL, is_eid=True)
         assert profile.name == "eid_celebratory"
 
     def test_national_day_overrides(self):
         adapter = ToneAdapter()
-        profile = adapter.select_profile(
-            FormalityLevel.NORMAL, is_national_day=True
-        )
+        profile = adapter.select_profile(FormalityLevel.NORMAL, is_national_day=True)
         assert profile.name == "national_pride"
 
 
@@ -107,30 +102,22 @@ class TestAdaptResponse:
 
     def test_prefix_applied(self):
         adapter = ToneAdapter()
-        result = adapter.adapt_response(
-            "مرحباً", profile_name="formal_business"
-        )
+        result = adapter.adapt_response("مرحباً", profile_name="formal_business")
         assert result.startswith("سيدي/سيدتي")
 
     def test_suffix_applied(self):
         adapter = ToneAdapter()
-        result = adapter.adapt_response(
-            "مرحباً", profile_name="formal_business"
-        )
+        result = adapter.adapt_response("مرحباً", profile_name="formal_business")
         assert "خالص التقدير" in result
 
     def test_casual_no_prefix(self):
         adapter = ToneAdapter()
-        result = adapter.adapt_response(
-            "هلا", profile_name="casual_family"
-        )
+        result = adapter.adapt_response("هلا", profile_name="casual_family")
         assert result.startswith("")  # No prefix for casual
 
     def test_government_suffix(self):
         adapter = ToneAdapter()
-        result = adapter.adapt_response(
-            "نعم", profile_name="government_official"
-        )
+        result = adapter.adapt_response("نعم", profile_name="government_official")
         assert "الاحترام والتقدير" in result
 
     def test_profile_object_accepted(self):
@@ -148,9 +135,7 @@ class TestAdaptResponse:
     def test_preserves_existing_prefix(self):
         """If response already has the prefix, don't double it."""
         adapter = ToneAdapter()
-        result = adapter.adapt_response(
-            "سيدي/سيدتي، مرحباً", profile_name="formal_business"
-        )
+        result = adapter.adapt_response("سيدي/سيدتي، مرحباً", profile_name="formal_business")
         assert result.count("سيدي/سيدتي") == 1
 
 

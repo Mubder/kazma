@@ -3,6 +3,7 @@
 Enforces division-level permissions, role hierarchies, and cross-division
 access controls for the ALMuhalab Global ecosystem.
 """
+
 from __future__ import annotations
 
 import json

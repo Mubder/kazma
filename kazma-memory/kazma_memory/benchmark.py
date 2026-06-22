@@ -3,6 +3,7 @@
 Provides comprehensive benchmarking suite for comparing search
 performance between SQLite and Tantivy backends.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,6 +20,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class BenchmarkResult:
     """Result of a single benchmark run."""
+
     test_name: str
     size: int
     duration_seconds: float
@@ -35,6 +37,7 @@ class BenchmarkResult:
 @dataclass
 class BenchmarkReport:
     """Complete benchmark report."""
+
     timestamp: str
     results: list[BenchmarkResult]
     sqlite_results: list[BenchmarkResult] = field(default_factory=list)
@@ -44,7 +47,7 @@ class BenchmarkReport:
 
 class SearchBenchmark:
     """Benchmarks SQLite vs Tantivy performance.
-    
+
     Provides comprehensive performance comparison across different
     dataset sizes and query patterns.
     """
@@ -71,10 +74,10 @@ class SearchBenchmark:
 
     async def benchmark_indexing(self, size: int) -> BenchmarkResult:
         """Benchmark indexing performance.
-        
+
         Args:
             size: Number of documents to index.
-            
+
         Returns:
             BenchmarkResult with indexing performance metrics.
         """
@@ -131,11 +134,11 @@ class SearchBenchmark:
 
     async def benchmark_search(self, size: int, queries: int = 100) -> BenchmarkResult:
         """Benchmark search performance.
-        
+
         Args:
             size: Number of indexed documents.
             queries: Number of search queries to run.
-            
+
         Returns:
             BenchmarkResult with search performance metrics.
         """
@@ -162,7 +165,9 @@ class SearchBenchmark:
             test_name="search",
             size=size,
             duration_seconds=sum(sqlite_latencies) + sum(tantivy_latencies),
-            operations_per_second=queries / (sum(sqlite_latencies) + sum(tantivy_latencies)) if (sum(sqlite_latencies) + sum(tantivy_latencies)) > 0 else 0,
+            operations_per_second=queries / (sum(sqlite_latencies) + sum(tantivy_latencies))
+            if (sum(sqlite_latencies) + sum(tantivy_latencies)) > 0
+            else 0,
             avg_latency_ms=(sqlite_avg + tantivy_avg) / 2,
             p95_latency_ms=sqlite_sorted[int(len(sqlite_sorted) * 0.95)] if sqlite_sorted else 0,
             p99_latency_ms=sqlite_sorted[int(len(sqlite_sorted) * 0.99)] if sqlite_sorted else 0,
@@ -182,10 +187,10 @@ class SearchBenchmark:
 
     async def benchmark_arabic_search(self, size: int) -> BenchmarkResult:
         """Benchmark Arabic-specific search.
-        
+
         Args:
             size: Number of indexed documents.
-            
+
         Returns:
             BenchmarkResult with Arabic search performance metrics.
         """
@@ -249,7 +254,7 @@ class SearchBenchmark:
 
     async def run_full_benchmark(self) -> BenchmarkReport:
         """Run complete benchmark suite.
-        
+
         Returns:
             BenchmarkReport with all benchmark results.
         """
@@ -281,7 +286,7 @@ class SearchBenchmark:
 
     def generate_report(self) -> str:
         """Generate human-readable benchmark report.
-        
+
         Returns:
             Formatted benchmark report string.
         """
@@ -331,9 +336,7 @@ class SearchBenchmark:
         if self.results:
             # Find best improvement
             improvements = [
-                r.metadata.get("improvement_factor", 0)
-                for r in self.results
-                if "improvement_factor" in r.metadata
+                r.metadata.get("improvement_factor", 0) for r in self.results if "improvement_factor" in r.metadata
             ]
 
             if improvements:
@@ -472,16 +475,10 @@ class SearchBenchmark:
             "improvement_factor": 0,
         }
 
-        sqlite_latencies = [
-            r.metadata.get("sqlite_avg_ms", 0)
-            for r in self.results
-            if "sqlite_avg_ms" in r.metadata
-        ]
+        sqlite_latencies = [r.metadata.get("sqlite_avg_ms", 0) for r in self.results if "sqlite_avg_ms" in r.metadata]
 
         tantivy_latencies = [
-            r.metadata.get("tantivy_avg_ms", 0)
-            for r in self.results
-            if "tantivy_avg_ms" in r.metadata
+            r.metadata.get("tantivy_avg_ms", 0) for r in self.results if "tantivy_avg_ms" in r.metadata
         ]
 
         if sqlite_latencies:
@@ -491,8 +488,6 @@ class SearchBenchmark:
             comparison["tantivy_avg_latency"] = sum(tantivy_latencies) / len(tantivy_latencies)
 
         if comparison["tantivy_avg_latency"] > 0:
-            comparison["improvement_factor"] = (
-                comparison["sqlite_avg_latency"] / comparison["tantivy_avg_latency"]
-            )
+            comparison["improvement_factor"] = comparison["sqlite_avg_latency"] / comparison["tantivy_avg_latency"]
 
         return comparison

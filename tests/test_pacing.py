@@ -1,4 +1,5 @@
 """Tests for ConversationPacing — Flow management and timing."""
+
 from __future__ import annotations
 
 import pytest
@@ -65,9 +66,7 @@ class TestTransitionDecision:
             {"role": "user", "text": "السلام عليكم"},
             {"role": "assistant", "text": "وعليكم السلام"},
         ]
-        decision = await self.pacing.should_transition_to_transaction(
-            conv, user_intent=Intent.TRANSACTION
-        )
+        decision = await self.pacing.should_transition_to_transaction(conv, user_intent=Intent.TRANSACTION)
         assert decision == TransitionDecision.SKIP_TO_TRANSACTION
 
     @pytest.mark.asyncio
@@ -77,9 +76,7 @@ class TestTransitionDecision:
             {"role": "user", "text": "السلام عليكم"},
             {"role": "assistant", "text": "وعليكم السلام"},
         ]
-        decision = await self.pacing.should_transition_to_transaction(
-            conv, user_intent=Intent.GREETING
-        )
+        decision = await self.pacing.should_transition_to_transaction(conv, user_intent=Intent.GREETING)
         assert decision == TransitionDecision.STAY_SOCIAL
 
     @pytest.mark.asyncio
@@ -91,9 +88,7 @@ class TestTransitionDecision:
             {"role": "user", "text": "شلونك"},
             {"role": "assistant", "text": "الحمد لله بخير"},
         ]
-        decision = await self.pacing.should_transition_to_transaction(
-            conv, user_intent=Intent.UNKNOWN
-        )
+        decision = await self.pacing.should_transition_to_transaction(conv, user_intent=Intent.UNKNOWN)
         assert decision == TransitionDecision.READY_TO_TRANSITION
 
     @pytest.mark.asyncio
@@ -106,9 +101,7 @@ class TestTransitionDecision:
             {"role": "assistant", "text": "تمام الحمد لله"},
         ]
         # With extension=2, need 4 greetings total
-        decision = await self.pacing.should_transition_to_transaction(
-            conv, greeting_extension=2
-        )
+        decision = await self.pacing.should_transition_to_transaction(conv, greeting_extension=2)
         assert decision == TransitionDecision.STAY_SOCIAL
 
     @pytest.mark.asyncio
@@ -124,9 +117,7 @@ class TestTransitionDecision:
             {"role": "user", "text": "الحمد لله"},
             {"role": "assistant", "text": "الله يسلمك"},
         ]
-        decision = await self.pacing.should_transition_to_transaction(
-            conv, greeting_extension=2
-        )
+        decision = await self.pacing.should_transition_to_transaction(conv, greeting_extension=2)
         assert decision == TransitionDecision.READY_TO_TRANSITION
 
     @pytest.mark.asyncio
@@ -166,6 +157,7 @@ class TestResponseDelay:
     def test_enum_formality(self):
         """FormalityLevel enum works."""
         from kazma_core.tone_adapter import FormalityLevel
+
         delay = self.pacing.calculate_response_delay(FormalityLevel.CASUAL)
         assert 0.3 <= delay <= 0.6
 
@@ -182,28 +174,20 @@ class TestGreetingResponse:
         assert len(resp) > 0
 
     def test_ramadan_greeting(self):
-        resp = self.pacing.get_greeting_response(
-            dialect="kw", is_ramadan=True, greeting_number=1
-        )
+        resp = self.pacing.get_greeting_response(dialect="kw", is_ramadan=True, greeting_number=1)
         assert "رمضان" in resp
 
     def test_eid_greeting(self):
-        resp = self.pacing.get_greeting_response(
-            dialect="kw", is_eid=True, greeting_number=1
-        )
+        resp = self.pacing.get_greeting_response(dialect="kw", is_eid=True, greeting_number=1)
         assert "عيد" in resp
 
     def test_eid_second_greeting(self):
-        resp = self.pacing.get_greeting_response(
-            dialect="kw", is_eid=True, greeting_number=2
-        )
+        resp = self.pacing.get_greeting_response(dialect="kw", is_eid=True, greeting_number=2)
         assert "تقبل" in resp
 
     def test_greeting_number_clamps(self):
         """High greeting numbers clamp to last response."""
-        resp = self.pacing.get_greeting_response(
-            dialect="kw", greeting_number=100
-        )
+        resp = self.pacing.get_greeting_response(dialect="kw", greeting_number=100)
         assert isinstance(resp, str)
 
 

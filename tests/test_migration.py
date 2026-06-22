@@ -3,6 +3,7 @@
 Comprehensive tests for the SQLiteToTantivyMigration including
 migration, verification, and rollback capabilities.
 """
+
 import json
 import tempfile
 import time
@@ -19,8 +20,7 @@ from kazma_memory.migration import (
 @pytest.fixture
 def temp_dirs():
     """Create temporary directories for SQLite and Tantivy."""
-    with tempfile.TemporaryDirectory() as sqlite_dir, \
-         tempfile.TemporaryDirectory() as tantivy_dir:
+    with tempfile.TemporaryDirectory() as sqlite_dir, tempfile.TemporaryDirectory() as tantivy_dir:
         yield {
             "sqlite": Path(sqlite_dir) / "memory.db",
             "tantivy": Path(tantivy_dir) / "tantivy-index",
@@ -63,7 +63,7 @@ def sample_sqlite_db(temp_dirs):
                 "test_source",
                 0.5 + (i * 0.05),
                 "engineering" if i % 2 == 0 else "finance",
-            )
+            ),
         )
 
     conn.commit()

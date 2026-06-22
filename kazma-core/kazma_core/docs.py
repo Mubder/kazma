@@ -101,18 +101,22 @@ class DocumentationGenerator:
                 methods = []
                 for item in node.body:
                     if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        methods.append({
-                            "name": item.name,
-                            "signature": self._get_signature(item),
-                            "docstring": self._get_docstring(item) or "",
-                        })
+                        methods.append(
+                            {
+                                "name": item.name,
+                                "signature": self._get_signature(item),
+                                "docstring": self._get_docstring(item) or "",
+                            }
+                        )
 
-                classes.append({
-                    "name": node.name,
-                    "docstring": self._get_docstring(node) or "",
-                    "methods": methods,
-                    "bases": [ast.unparse(base) for base in node.bases],
-                })
+                classes.append(
+                    {
+                        "name": node.name,
+                        "docstring": self._get_docstring(node) or "",
+                        "methods": methods,
+                        "bases": [ast.unparse(base) for base in node.bases],
+                    }
+                )
         return classes
 
     def _extract_functions(self, module: ast.Module) -> list[dict[str, Any]]:
@@ -120,12 +124,14 @@ class DocumentationGenerator:
         functions = []
         for node in module.body:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                functions.append({
-                    "name": node.name,
-                    "signature": self._get_signature(node),
-                    "docstring": self._get_docstring(node) or "",
-                    "is_async": isinstance(node, ast.AsyncFunctionDef),
-                })
+                functions.append(
+                    {
+                        "name": node.name,
+                        "signature": self._get_signature(node),
+                        "docstring": self._get_docstring(node) or "",
+                        "is_async": isinstance(node, ast.AsyncFunctionDef),
+                    }
+                )
         return functions
 
     async def generate_api_docs(self) -> list[DocPage]:
@@ -149,18 +155,24 @@ class DocumentationGenerator:
             for cls in classes:
                 content_parts.append(f"\n### class {cls['name']}\n\n{cls['docstring']}\n")
                 for method in cls["methods"]:
-                    content_parts.append(f"\n#### {method['name']}\n\n```python\n{method['signature']}\n```\n\n{method['docstring']}\n")
+                    content_parts.append(
+                        f"\n#### {method['name']}\n\n```python\n{method['signature']}\n```\n\n{method['docstring']}\n"
+                    )
 
             functions = self._extract_functions(module)
             for func in functions:
-                content_parts.append(f"\n### {func['name']}\n\n```python\n{func['signature']}\n```\n\n{func['docstring']}\n")
+                content_parts.append(
+                    f"\n### {func['name']}\n\n```python\n{func['signature']}\n```\n\n{func['docstring']}\n"
+                )
 
-            pages.append(DocPage(
-                title=py_file.stem.replace("_", " ").title(),
-                category="api-reference",
-                filename=f"{py_file.stem}.md",
-                content="\n".join(content_parts),
-            ))
+            pages.append(
+                DocPage(
+                    title=py_file.stem.replace("_", " ").title(),
+                    category="api-reference",
+                    filename=f"{py_file.stem}.md",
+                    content="\n".join(content_parts),
+                )
+            )
 
         return pages
 
@@ -302,12 +314,6 @@ File access requires explicit permission grants.
             page_dir.mkdir(parents=True, exist_ok=True)
             (page_dir / page.filename).write_text(page.render())
 
-        (output_dir / "skill-development" / "skill-guide.md").write_text(
-            (await self.generate_skill_guide()).render()
-        )
-        (output_dir / "api-reference" / "cli-reference.md").write_text(
-            (await self.generate_cli_reference()).render()
-        )
-        (output_dir / "security" / "security-overview.md").write_text(
-            (await self.generate_security_docs()).render()
-        )
+        (output_dir / "skill-development" / "skill-guide.md").write_text((await self.generate_skill_guide()).render())
+        (output_dir / "api-reference" / "cli-reference.md").write_text((await self.generate_cli_reference()).render())
+        (output_dir / "security" / "security-overview.md").write_text((await self.generate_security_docs()).render())

@@ -6,6 +6,7 @@ Covers:
 - Audit trail querying with filters
 - Clear functionality
 """
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -30,6 +31,7 @@ async def audit(tmp_audit_db):
 
 
 # ─── Access Attempt Logging Tests ──────────────────────────────────────
+
 
 class TestAccessLogging:
     """Test access attempt logging."""
@@ -83,13 +85,18 @@ class TestAccessLogging:
     async def test_entry_has_timestamp(self, audit: AuditLogger):
         """Each entry has an ISO timestamp."""
         entry = await audit.log_access_attempt(
-            user_id="alice", division="gas_oil", resource="x", action="r", result="allowed",
+            user_id="alice",
+            division="gas_oil",
+            resource="x",
+            action="r",
+            result="allowed",
         )
         ts = datetime.fromisoformat(entry.timestamp)
         assert ts.tzinfo is not None  # Should be UTC
 
 
 # ─── Authorization Decision Logging Tests ─────────────────────────────
+
 
 class TestDecisionLogging:
     """Test authorization decision logging."""
@@ -125,6 +132,7 @@ class TestDecisionLogging:
 
 
 # ─── Audit Trail Query Tests ──────────────────────────────────────────
+
 
 class TestAuditTrail:
     """Test audit trail querying."""
@@ -195,6 +203,7 @@ class TestAuditTrail:
         await audit.log_access_attempt("alice", "gas_oil", "x", "r", "allowed")
         # Small delay to ensure different timestamps
         import asyncio
+
         await asyncio.sleep(0.01)
         await audit.log_access_attempt("alice", "gas_oil", "y", "r", "allowed")
 
@@ -205,6 +214,7 @@ class TestAuditTrail:
 
 
 # ─── Clear Tests ───────────────────────────────────────────────────────
+
 
 class TestClear:
     """Test clearing audit log."""

@@ -21,11 +21,11 @@ _ALEF_VARIANTS = {
 # ── Diacritics (Tashkeel) ────────────────────────────────────────────
 # Arabic diacritics / short vowels
 _DIACRITICS: set[str] = {
-    "\u064B",  # Fathatan  ً
-    "\u064C",  # Dammatan  ٌ
-    "\u064D",  # Kasratan  ٍ
-    "\u064E",  # Fatha     َ
-    "\u064F",  # Damma     ُ
+    "\u064b",  # Fathatan  ً
+    "\u064c",  # Dammatan  ٌ
+    "\u064d",  # Kasratan  ٍ
+    "\u064e",  # Fatha     َ
+    "\u064f",  # Damma     ُ
     "\u0650",  # Kasra     ِ
     "\u0651",  # Shadda    ّ
     "\u0652",  # Sukun     ْ
@@ -42,15 +42,39 @@ _DIACRITICS: set[str] = {
     "\u0617",  # Small Low   ֘
     "\u0618",  # Small High   ֙
     "\u0619",  # Small Low   ֚
-    "\u061A",  # Small High   ֛
+    "\u061a",  # Small High   ֛
 }
 
 # Common MSA stop words (for potential future use in morphological analysis)
 _MSA_STOP_WORDS: set[str] = {
-    "في", "من", "إلى", "على", "عن", "مع", "بين", "حتى",
-    "أن", "إن", "لا", "ما", "هل", "قد", "لم", "لن",
-    "هذا", "هذه", "ذلك", "تلك", "الذي", "التي",
-    "كان", "يكون", "قد", "ليس", "لم", "لن",
+    "في",
+    "من",
+    "إلى",
+    "على",
+    "عن",
+    "مع",
+    "بين",
+    "حتى",
+    "أن",
+    "إن",
+    "لا",
+    "ما",
+    "هل",
+    "قد",
+    "لم",
+    "لن",
+    "هذا",
+    "هذه",
+    "ذلك",
+    "تلك",
+    "الذي",
+    "التي",
+    "كان",
+    "يكون",
+    "قد",
+    "ليس",
+    "لم",
+    "لن",
 }
 
 
@@ -115,23 +139,27 @@ class MSATokenizer:
                 end = pos
                 while end < len(text) and text[end] in (" ", "\t", "\n", "\r"):
                     end += 1
-                tokens.append(Token(
-                    text=text[pos:end],
-                    start=pos,
-                    end=end,
-                    token_type=TokenType.WHITESPACE,
-                ))
+                tokens.append(
+                    Token(
+                        text=text[pos:end],
+                        start=pos,
+                        end=end,
+                        token_type=TokenType.WHITESPACE,
+                    )
+                )
                 pos = end
                 continue
 
             # Punctuation
             if char in "،.؟!؛:«»\"'()[]{}-/\\":
-                tokens.append(Token(
-                    text=char,
-                    start=pos,
-                    end=pos + 1,
-                    token_type=TokenType.PUNCTUATION,
-                ))
+                tokens.append(
+                    Token(
+                        text=char,
+                        start=pos,
+                        end=pos + 1,
+                        token_type=TokenType.PUNCTUATION,
+                    )
+                )
                 pos += 1
                 continue
 
@@ -140,21 +168,23 @@ class MSATokenizer:
                 end = pos
                 while end < len(text) and (text[end].isdigit() or text[end] in ".,"):
                     end += 1
-                tokens.append(Token(
-                    text=text[pos:end],
-                    start=pos,
-                    end=end,
-                    token_type=TokenType.NUMBER,
-                ))
+                tokens.append(
+                    Token(
+                        text=text[pos:end],
+                        start=pos,
+                        end=end,
+                        token_type=TokenType.NUMBER,
+                    )
+                )
                 pos = end
                 continue
 
             # Arabic word
-            if "\u0600" <= char <= "\u06FF" or "\u0750" <= char <= "\u077F":
+            if "\u0600" <= char <= "\u06ff" or "\u0750" <= char <= "\u077f":
                 end = pos
                 while end < len(text) and (
-                    "\u0600" <= text[end] <= "\u06FF"
-                    or "\u0750" <= text[end] <= "\u077F"
+                    "\u0600" <= text[end] <= "\u06ff"
+                    or "\u0750" <= text[end] <= "\u077f"
                     or text[end] == "\u0640"  # tatweel
                     or text[end] in _DIACRITICS
                 ):
@@ -168,13 +198,15 @@ class MSATokenizer:
                 if self.unify_alef:
                     normalized = _unify_alef(normalized)
 
-                tokens.append(Token(
-                    text=raw_text,
-                    start=pos,
-                    end=end,
-                    token_type=TokenType.WORD,
-                    dialect_meaning=normalized if normalized != raw_text else None,
-                ))
+                tokens.append(
+                    Token(
+                        text=raw_text,
+                        start=pos,
+                        end=end,
+                        token_type=TokenType.WORD,
+                        dialect_meaning=normalized if normalized != raw_text else None,
+                    )
+                )
                 pos = end
                 continue
 
@@ -183,23 +215,27 @@ class MSATokenizer:
                 end = pos
                 while end < len(text) and text[end].isalpha() and ord(text[end]) < 0x080:
                     end += 1
-                tokens.append(Token(
-                    text=text[pos:end],
-                    start=pos,
-                    end=end,
-                    token_type=TokenType.CODE_SWITCH,
-                    language="en",
-                ))
+                tokens.append(
+                    Token(
+                        text=text[pos:end],
+                        start=pos,
+                        end=end,
+                        token_type=TokenType.CODE_SWITCH,
+                        language="en",
+                    )
+                )
                 pos = end
                 continue
 
             # Unknown
-            tokens.append(Token(
-                text=char,
-                start=pos,
-                end=pos + 1,
-                token_type=TokenType.UNKNOWN,
-            ))
+            tokens.append(
+                Token(
+                    text=char,
+                    start=pos,
+                    end=pos + 1,
+                    token_type=TokenType.UNKNOWN,
+                )
+            )
             pos += 1
 
         return tokens

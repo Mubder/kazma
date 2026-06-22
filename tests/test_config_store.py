@@ -1,4 +1,5 @@
 """Tests for the ConfigStore — runtime settings persistence."""
+
 from __future__ import annotations
 
 from kazma_core.config_store import ConfigStore

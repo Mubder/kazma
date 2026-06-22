@@ -91,11 +91,9 @@ class TestCrashSurvival:
 
         # Simulate crash: spawn a subprocess that writes and gets killed
         script = (
-            'import asyncio\n'
-            'import sys\n'
-            'sys.path.insert(0, "'
-            + str(Path(__file__).parent.parent / "kazma-core")
-            + '")\n'
+            "import asyncio\n"
+            "import sys\n"
+            'sys.path.insert(0, "' + str(Path(__file__).parent.parent / "kazma-core") + '")\n'
             "from kazma_core.checkpoint import CheckpointManager\n"
             "from kazma_core.state import initial_state\n"
             "async def main():\n"

@@ -3,6 +3,7 @@
 Ensures that operations execute within the correct division context,
 with audit logging and cross-division access controls.
 """
+
 from __future__ import annotations
 
 import logging
@@ -254,7 +255,10 @@ class DivisionSandbox:
 
         logger.info(
             "Cross-division request %s: %s -> %s for %s",
-            request_id[:8], source_division, target_division, resource,
+            request_id[:8],
+            source_division,
+            target_division,
+            resource,
         )
         return request
 
@@ -265,8 +269,8 @@ class DivisionSandbox:
     async def get_pending_requests(self, division: str | None = None) -> list[CrossDivisionRequest]:
         """Get all pending cross-division requests, optionally filtered by target division."""
         requests = [
-            r for r in self._cross_division_requests.values()
-            if r.status == "pending"
-            and (division is None or r.target_division == division)
+            r
+            for r in self._cross_division_requests.values()
+            if r.status == "pending" and (division is None or r.target_division == division)
         ]
         return requests

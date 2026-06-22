@@ -1,4 +1,5 @@
 """Tests for SwarmIntelligence — parallel, consensus, and cascade execution."""
+
 from __future__ import annotations
 
 import pytest
@@ -62,9 +63,7 @@ class TestParallelExecute:
 
     async def test_parallel_respects_concurrency(self, swarm):
         # Should not raise
-        results = await swarm.parallel_execute(
-            ["T1", "T2", "T3"], max_concurrent=2
-        )
+        results = await swarm.parallel_execute(["T1", "T2", "T3"], max_concurrent=2)
         assert isinstance(results, list)
 
 
@@ -74,9 +73,7 @@ class TestConsensusExecute:
     async def test_consensus_basic(self, swarm, hub):
         # Register agents
         for i in range(5):
-            await hub.register_agent(
-                HubInfo(agent_id=f"worker-{i}", capabilities=["general"])
-            )
+            await hub.register_agent(HubInfo(agent_id=f"worker-{i}", capabilities=["general"]))
 
         result = await swarm.consensus_execute(
             "Verify this result",
@@ -97,12 +94,8 @@ class TestCascadeExecute:
     """Test pipeline (cascade) execution."""
 
     async def test_cascade_basic(self, swarm, hub):
-        await hub.register_agent(
-            HubInfo(agent_id="stage-1", capabilities=["general"])
-        )
-        result = await swarm.cascade_execute(
-            ["Stage 1: Collect data", "Stage 2: Analyze"]
-        )
+        await hub.register_agent(HubInfo(agent_id="stage-1", capabilities=["general"]))
+        result = await swarm.cascade_execute(["Stage 1: Collect data", "Stage 2: Analyze"])
         assert isinstance(result, CascadeResult)
         assert result.total_cost >= 0.0
 

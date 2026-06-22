@@ -1,4 +1,5 @@
 """Tests for CulturalContext — Hijri calendar, Islamic events, and modifiers."""
+
 from __future__ import annotations
 
 from datetime import date

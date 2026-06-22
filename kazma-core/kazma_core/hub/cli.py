@@ -23,6 +23,7 @@ def _run(coro):
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import nest_asyncio
+
             nest_asyncio.apply()
             return loop.run_until_complete(coro)
         else:
@@ -83,11 +84,11 @@ def _http_request(
             if exc.response.status_code in (404, 422):
                 return None
             if attempt < retries - 1:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
         except (httpx.ConnectError, httpx.TimeoutException) as exc:
             last_error = exc
             if attempt < retries - 1:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
         except Exception as exc:
             last_error = exc
             break
@@ -185,12 +186,14 @@ def search(ctx, query: str | None, capabilities: str | None, tags: str | None, a
     rows = []
     for m in results:
         d = m.data
-        rows.append([
-            d.get("name", ""),
-            d.get("author", ""),
-            d.get("version", ""),
-            (d.get("description", "") or "")[:40],
-        ])
+        rows.append(
+            [
+                d.get("name", ""),
+                d.get("author", ""),
+                d.get("version", ""),
+                (d.get("description", "") or "")[:40],
+            ]
+        )
 
     click.echo(_format_table(headers, rows, col_widths))
 
@@ -244,12 +247,14 @@ def list_installed(ctx) -> None:
     rows = []
     for m in results:
         d = m.data
-        rows.append([
-            d.get("name", ""),
-            d.get("author", ""),
-            d.get("version", ""),
-            (d.get("description", "") or "")[:40],
-        ])
+        rows.append(
+            [
+                d.get("name", ""),
+                d.get("author", ""),
+                d.get("version", ""),
+                (d.get("description", "") or "")[:40],
+            ]
+        )
 
     click.echo(_format_table(headers, rows, col_widths))
 
@@ -305,13 +310,18 @@ def validate(path: str, output_json: bool = False) -> None:
     result = _run(validator.validate(skill_dir))
 
     if output_json:
-        click.echo(json.dumps({
-            "path": str(path),
-            "passed": result.passed,
-            "errors": result.errors,
-            "warnings": result.warnings,
-            "score": result.score,
-        }, indent=2))
+        click.echo(
+            json.dumps(
+                {
+                    "path": str(path),
+                    "passed": result.passed,
+                    "errors": result.errors,
+                    "warnings": result.warnings,
+                    "score": result.score,
+                },
+                indent=2,
+            )
+        )
         return
 
     click.echo(f"Validation Results for {path}")
@@ -532,12 +542,14 @@ def certified(ctx, output_json: bool = False) -> None:
     col_widths = [24, 16, 10, 12]
     rows = []
     for item in items:
-        rows.append([
-            item.get("name", ""),
-            item.get("author", ""),
-            item.get("version", ""),
-            "CERTIFIED" if item.get("certified") else "-",
-        ])
+        rows.append(
+            [
+                item.get("name", ""),
+                item.get("author", ""),
+                item.get("version", ""),
+                "CERTIFIED" if item.get("certified") else "-",
+            ]
+        )
 
     click.echo(_format_table(headers, rows, col_widths))
 
@@ -643,13 +655,18 @@ def check_certification(path: str, output_json: bool = False) -> None:
     requirements["license_present"] = bool(license_val and str(license_val).strip())
 
     if output_json:
-        click.echo(json.dumps({
-            "path": str(path),
-            "requirements": requirements,
-            "score": val_result.score,
-            "errors": val_result.errors,
-            "warnings": val_result.warnings,
-        }, indent=2))
+        click.echo(
+            json.dumps(
+                {
+                    "path": str(path),
+                    "requirements": requirements,
+                    "score": val_result.score,
+                    "errors": val_result.errors,
+                    "warnings": val_result.warnings,
+                },
+                indent=2,
+            )
+        )
         return
 
     click.echo(f"Certification Check: {path}")

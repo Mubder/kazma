@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────
 
+
 @dataclass
 class LLMConfig:
     """Configuration for an LLM provider."""
@@ -62,6 +63,7 @@ class LLMConfig:
 
 # ── Response types ────────────────────────────────────────────────────
 
+
 @dataclass
 class ToolCall:
     """A single tool call from the LLM."""
@@ -85,6 +87,7 @@ class LLMResponse:
 
 
 # ── Provider ──────────────────────────────────────────────────────────
+
 
 class LLMProvider:
     """OpenAI-compatible LLM client using httpx.
@@ -202,20 +205,21 @@ class LLMProvider:
             except json.JSONDecodeError:
                 args = {"raw": args_raw}
 
-            tool_calls.append(ToolCall(
-                id=tc.get("id", ""),
-                name=func.get("name", ""),
-                arguments=args,
-            ))
+            tool_calls.append(
+                ToolCall(
+                    id=tc.get("id", ""),
+                    name=func.get("name", ""),
+                    arguments=args,
+                )
+            )
 
         usage = data.get("usage", {})
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
 
         # Calculate cost
-        cost = (
-            (prompt_tokens * self.config.input_cost_per_1m / 1_000_000)
-            + (completion_tokens * self.config.output_cost_per_1m / 1_000_000)
+        cost = (prompt_tokens * self.config.input_cost_per_1m / 1_000_000) + (
+            completion_tokens * self.config.output_cost_per_1m / 1_000_000
         )
 
         return LLMResponse(

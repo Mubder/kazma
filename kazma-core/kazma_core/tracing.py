@@ -11,7 +11,7 @@ import os
 import time
 from collections import deque
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TraceEntry:
     """A single trace entry for dashboard display."""
+
     timestamp: float
     trace_type: str  # llm, tool, state, compaction
     label: str
@@ -61,25 +62,27 @@ class TraceStore:
         import json
         import time as t
 
-        payload = json.dumps({
-            "type": "trace",
-            "data": {
-                "timestamp": t.strftime("%H:%M:%S", t.localtime(entry.timestamp)),
-                "trace_type": entry.trace_type,
-                "label": entry.label,
-                "status": entry.status,
-                "duration_ms": f"{entry.duration_ms:.0f}",
-                "tokens": entry.tokens,
-                "cost": f"${entry.cost:.4f}",
-            },
-            "metrics": {
-                "total_cost": f"${self._total_cost:.4f}",
-                "total_tokens": f"{self._total_tokens:,}",
-                "total_llm_calls": self._total_llm_calls,
-                "total_tool_calls": self._total_tool_calls,
-                "total_traces": len(self._traces),
-            },
-        })
+        payload = json.dumps(
+            {
+                "type": "trace",
+                "data": {
+                    "timestamp": t.strftime("%H:%M:%S", t.localtime(entry.timestamp)),
+                    "trace_type": entry.trace_type,
+                    "label": entry.label,
+                    "status": entry.status,
+                    "duration_ms": f"{entry.duration_ms:.0f}",
+                    "tokens": entry.tokens,
+                    "cost": f"${entry.cost:.4f}",
+                },
+                "metrics": {
+                    "total_cost": f"${self._total_cost:.4f}",
+                    "total_tokens": f"{self._total_tokens:,}",
+                    "total_llm_calls": self._total_llm_calls,
+                    "total_tool_calls": self._total_tool_calls,
+                    "total_traces": len(self._traces),
+                },
+            }
+        )
         dead = set()
         for ws in self._ws_clients:
             try:
@@ -99,6 +102,7 @@ class TraceStore:
         # Fire-and-forget broadcast (safe in both sync and async contexts)
         try:
             import asyncio
+
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 asyncio.ensure_future(self._broadcast(entry))
@@ -130,7 +134,7 @@ def get_trace_store() -> TraceStore:
 # ─── Tracing Backend ──────────────────────────────────────────────────
 
 
-class TracingBackend(str, Enum):
+class TracingBackend(StrEnum):
     LANGFUSE = "langfuse"
     OPENTELEMETRY = "opentelemetry"
     CONSOLE = "console"  # fallback for testing / no-dashboard mode
@@ -149,9 +153,7 @@ class KazmaTracer:
     """
 
     def __init__(self, backend: str | None = None, config: dict[str, Any] | None = None) -> None:
-        self.backend = TracingBackend(
-            backend or os.getenv("KAZMA_TRACING_BACKEND", "console")
-        )
+        self.backend = TracingBackend(backend or os.getenv("KAZMA_TRACING_BACKEND", "console"))
         self._config = config or {}
         self._client: Any = None
         self._otel_tracer: Any = None
@@ -244,16 +246,18 @@ class KazmaTracer:
             duration_ms: Wall-clock duration in milliseconds.
         """
         # Write to local trace store
-        _trace_store.add(TraceEntry(
-            timestamp=time.time(),
-            trace_type="llm",
-            label=model,
-            status="success",
-            duration_ms=duration_ms,
-            tokens=tokens,
-            cost=cost,
-            details=prompt[:200],
-        ))
+        _trace_store.add(
+            TraceEntry(
+                timestamp=time.time(),
+                trace_type="llm",
+                label=model,
+                status="success",
+                duration_ms=duration_ms,
+                tokens=tokens,
+                cost=cost,
+                details=prompt[:200],
+            )
+        )
 
         # Send to configured backend
         metadata = {
@@ -272,7 +276,10 @@ class KazmaTracer:
         else:
             logger.info(
                 "LLM call: model=%s tokens=%d cost=$%.4f duration=%.0fms",
-                model, tokens, cost, duration_ms,
+                model,
+                tokens,
+                cost,
+                duration_ms,
             )
 
     def _trace_llm_langfuse(
@@ -342,14 +349,16 @@ class KazmaTracer:
         """
         # Write to local trace store
         status = "success" if success else "error"
-        _trace_store.add(TraceEntry(
-            timestamp=time.time(),
-            trace_type="tool",
-            label=tool_name,
-            status=status,
-            duration_ms=duration_ms,
-            details=str(list(input_data.keys()))[:200],
-        ))
+        _trace_store.add(
+            TraceEntry(
+                timestamp=time.time(),
+                trace_type="tool",
+                label=tool_name,
+                status=status,
+                duration_ms=duration_ms,
+                details=str(list(input_data.keys()))[:200],
+            )
+        )
 
         # Send to configured backend
         metadata = {
@@ -368,7 +377,9 @@ class KazmaTracer:
             status_label = "OK" if success else "FAIL"
             logger.info(
                 "Tool %s [%s]: duration=%.0fms",
-                tool_name, status_label, duration_ms,
+                tool_name,
+                status_label,
+                duration_ms,
             )
 
     def _trace_tool_langfuse(
@@ -423,14 +434,16 @@ class KazmaTracer:
             checkpoint_id: LangGraph checkpoint ID for this transition.
         """
         # Write to local trace store
-        _trace_store.add(TraceEntry(
-            timestamp=time.time(),
-            trace_type="state",
-            label=f"{from_state} → {to_state}",
-            status="success",
-            duration_ms=0,
-            details=f"checkpoint={checkpoint_id[:12]}",
-        ))
+        _trace_store.add(
+            TraceEntry(
+                timestamp=time.time(),
+                trace_type="state",
+                label=f"{from_state} → {to_state}",
+                status="success",
+                duration_ms=0,
+                details=f"checkpoint={checkpoint_id[:12]}",
+            )
+        )
 
         if self.backend == TracingBackend.LANGFUSE and self._client:
             self._trace_transition_langfuse(from_state, to_state, checkpoint_id)
@@ -439,7 +452,9 @@ class KazmaTracer:
         else:
             logger.info(
                 "State transition: %s → %s (checkpoint=%s)",
-                from_state, to_state, checkpoint_id[:12],
+                from_state,
+                to_state,
+                checkpoint_id[:12],
             )
 
     def _trace_transition_langfuse(
@@ -488,19 +503,19 @@ class KazmaTracer:
             tokens_after: Token count after compaction.
             summary: Brief description of what was compacted.
         """
-        reduction_pct = (
-            (1 - tokens_after / tokens_before) * 100 if tokens_before > 0 else 0
-        )
+        reduction_pct = (1 - tokens_after / tokens_before) * 100 if tokens_before > 0 else 0
 
         # Write to local trace store
-        _trace_store.add(TraceEntry(
-            timestamp=time.time(),
-            trace_type="compaction",
-            label=f"{tokens_before} → {tokens_after}",
-            status="success",
-            duration_ms=0,
-            details=f"{reduction_pct:.0f}% reduction",
-        ))
+        _trace_store.add(
+            TraceEntry(
+                timestamp=time.time(),
+                trace_type="compaction",
+                label=f"{tokens_before} → {tokens_after}",
+                status="success",
+                duration_ms=0,
+                details=f"{reduction_pct:.0f}% reduction",
+            )
+        )
 
         if self.backend == TracingBackend.LANGFUSE and self._client:
             self._trace_compaction_langfuse(tokens_before, tokens_after, summary, reduction_pct)
@@ -509,7 +524,10 @@ class KazmaTracer:
         else:
             logger.info(
                 "Compaction: %d → %d tokens (%.0f%% reduction): %s",
-                tokens_before, tokens_after, reduction_pct, summary[:100],
+                tokens_before,
+                tokens_after,
+                reduction_pct,
+                summary[:100],
             )
 
     def _trace_compaction_langfuse(

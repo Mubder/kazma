@@ -3,6 +3,7 @@
 Provides sub-millisecond query latency for massive, multi-million object
 agent memories via the tantivy-py bindings.
 """
+
 from __future__ import annotations
 
 import logging
@@ -27,6 +28,7 @@ try:
     from tantivy import (
         SearchResult as TantivySearchResult,
     )
+
     TANTIVY_AVAILABLE = True
 except ImportError:
     TANTIVY_AVAILABLE = False
@@ -38,6 +40,7 @@ from .arabic_tokenizer import ArabicTantivyTokenizer
 @dataclass
 class Memory:
     """Represents a single memory document for indexing."""
+
     id: str
     content: str
     metadata: str = ""
@@ -50,6 +53,7 @@ class Memory:
 @dataclass
 class SearchResult:
     """Search result from Tantivy backend."""
+
     id: str
     content: str
     score: float
@@ -63,6 +67,7 @@ class SearchResult:
 @dataclass
 class IndexStats:
     """Statistics about the Tantivy index."""
+
     total_documents: int = 0
     index_size_bytes: int = 0
     last_optimized: str | None = None
@@ -72,22 +77,19 @@ class IndexStats:
 
 class TantivySearchBackend:
     """High-performance search backend using Tantivy (Rust).
-    
+
     Provides full-text search with Arabic language support, faceted filtering,
     and sub-millisecond query latency for large document collections.
     """
 
     def __init__(self, index_path: str = "kazma-data/tantivy-index"):
         """Initialize Tantivy search backend.
-        
+
         Args:
             index_path: Path to store the Tantivy index files.
         """
         if not TANTIVY_AVAILABLE:
-            raise ImportError(
-                "tantivy-py is required for TantivySearchBackend. "
-                "Install with: pip install tantivy-py"
-            )
+            raise ImportError("tantivy-py is required for TantivySearchBackend. Install with: pip install tantivy-py")
 
         self.index_path = Path(index_path)
         self.index_path.mkdir(parents=True, exist_ok=True)
@@ -103,7 +105,7 @@ class TantivySearchBackend:
 
     def _create_schema(self) -> Schema:
         """Define Tantivy schema for memory indexing.
-        
+
         Returns:
             Schema object with all required fields.
         """
@@ -132,10 +134,7 @@ class TantivySearchBackend:
         self._register_arabic_tokenizer()
 
         # Open writer
-        self._writer = self._index.writer(
-            memory_budget_mb=50,
-            num_threads=2
-        )
+        self._writer = self._index.writer(memory_budget_mb=50, num_threads=2)
 
     def _register_arabic_tokenizer(self) -> None:
         """Register the Arabic tokenizer with Tantivy index."""
@@ -148,10 +147,10 @@ class TantivySearchBackend:
 
     async def index_memory(self, memory: Memory) -> str:
         """Index a single memory document.
-        
+
         Args:
             memory: Memory object to index.
-            
+
         Returns:
             Document ID.
         """
@@ -174,10 +173,10 @@ class TantivySearchBackend:
 
     async def index_batch(self, memories: list[Memory]) -> list[str]:
         """Index multiple memories in batch (10x faster than single).
-        
+
         Args:
             memories: List of Memory objects to index.
-            
+
         Returns:
             List of document IDs.
         """
@@ -204,24 +203,19 @@ class TantivySearchBackend:
         self._writer.commit()
         return doc_ids
 
-    async def search(
-        self,
-        query: str,
-        limit: int = 10,
-        filters: dict[str, Any] | None = None
-    ) -> list[SearchResult]:
+    async def search(self, query: str, limit: int = 10, filters: dict[str, Any] | None = None) -> list[SearchResult]:
         """Search indexed memories.
-        
+
         Supports:
         - Full-text search (Arabic + English)
         - Faceted filtering (division, source, date range)
         - Relevance scoring
-        
+
         Args:
             query: Search query string.
             limit: Maximum number of results to return.
             filters: Optional filters (division, source, date_from, date_to).
-            
+
         Returns:
             List of SearchResult objects.
         """
@@ -265,11 +259,11 @@ class TantivySearchBackend:
 
     def _build_query(self, query: str, filters: dict[str, Any] | None = None) -> Any:
         """Build Tantivy query from search parameters.
-        
+
         Args:
             query: Search query string.
             filters: Optional filters.
-            
+
         Returns:
             Tantivy query object.
         """
@@ -292,10 +286,10 @@ class TantivySearchBackend:
 
     async def delete_memory(self, memory_id: str) -> bool:
         """Delete a memory from the index.
-        
+
         Args:
             memory_id: ID of the memory to delete.
-            
+
         Returns:
             True if deleted successfully.
         """
@@ -312,7 +306,7 @@ class TantivySearchBackend:
 
     async def optimize(self) -> None:
         """Optimize index for better performance.
-        
+
         This merges segments and compacts the index.
         """
         if self._writer is None:
@@ -326,7 +320,7 @@ class TantivySearchBackend:
 
     async def get_stats(self) -> IndexStats:
         """Get index statistics.
-        
+
         Returns:
             IndexStats object with current statistics.
         """

@@ -7,6 +7,7 @@ Covers:
 - Cross-division access requests
 - Audit logging integration
 """
+
 from __future__ import annotations
 
 import pytest
@@ -48,6 +49,7 @@ async def failing_operation(*args, **kwargs):
 
 # ─── Sandboxed Execution Tests ────────────────────────────────────────
 
+
 class TestSandboxedExecution:
     """Test operation execution within division sandboxes."""
 
@@ -56,7 +58,11 @@ class TestSandboxedExecution:
         """User with correct role can execute in sandbox."""
         await sandbox.rbac.assign_role("alice", "gas_oil", "trader")
         result = await sandbox.execute_in_sandbox(
-            "alice", "gas_oil", sample_operation, resource="pricing", action="read",
+            "alice",
+            "gas_oil",
+            sample_operation,
+            resource="pricing",
+            action="read",
         )
         assert result.success is True
         assert result.result["division"] == "gas_oil"
@@ -66,8 +72,11 @@ class TestSandboxedExecution:
     async def test_unauthorized_user_denied(self, sandbox: DivisionSandbox):
         """User not in division is denied."""
         result = await sandbox.execute_in_sandbox(
-            "alice", "gas_oil", sample_operation,
-            resource="pricing", action="read",
+            "alice",
+            "gas_oil",
+            sample_operation,
+            resource="pricing",
+            action="read",
         )
         assert result.success is False
         assert "not in division" in result.error
@@ -78,8 +87,11 @@ class TestSandboxedExecution:
         """User with viewer role cannot write."""
         await sandbox.rbac.assign_role("alice", "gas_oil", "viewer")
         result = await sandbox.execute_in_sandbox(
-            "alice", "gas_oil", sample_operation,
-            resource="pricing", action="write",
+            "alice",
+            "gas_oil",
+            sample_operation,
+            resource="pricing",
+            action="write",
         )
         assert result.success is False
         assert "does not have" in result.error
@@ -89,8 +101,11 @@ class TestSandboxedExecution:
         """Operation failures are captured and audit-logged."""
         await sandbox.rbac.assign_role("alice", "gas_oil", "trader")
         result = await sandbox.execute_in_sandbox(
-            "alice", "gas_oil", failing_operation,
-            resource="pricing", action="read",
+            "alice",
+            "gas_oil",
+            failing_operation,
+            resource="pricing",
+            action="read",
         )
         assert result.success is False
         assert "Operation failed" in result.error
@@ -101,14 +116,18 @@ class TestSandboxedExecution:
         """Write on sensitive resource returns pending_approval."""
         await sandbox.rbac.assign_role("alice", "gas_oil", "trader")
         result = await sandbox.execute_in_sandbox(
-            "alice", "gas_oil", sample_operation,
-            resource="contracts", action="write",
+            "alice",
+            "gas_oil",
+            sample_operation,
+            resource="contracts",
+            action="write",
         )
         assert result.success is False
         assert "Requires admin approval" in result.error
 
 
 # ─── Cross-Division Access Tests ──────────────────────────────────────
+
 
 class TestCrossDivisionAccess:
     """Test cross-division access request flow."""
@@ -161,10 +180,18 @@ class TestCrossDivisionAccess:
         await sandbox.rbac.assign_role("bob", "tourism", "agent")
 
         req1 = await sandbox.request_cross_division_access(
-            "alice", "gas_oil", "tourism", "bookings", "reason1",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "reason1",
         )
         req2 = await sandbox.request_cross_division_access(
-            "bob", "tourism", "gas_oil", "pricing", "reason2",
+            "bob",
+            "tourism",
+            "gas_oil",
+            "pricing",
+            "reason2",
         )
 
         pending = await sandbox.get_pending_requests()
@@ -179,7 +206,11 @@ class TestCrossDivisionAccess:
         """Cross-division request is audit logged."""
         await sandbox.rbac.assign_role("alice", "gas_oil", "trader")
         await sandbox.request_cross_division_access(
-            "alice", "gas_oil", "tourism", "bookings", "auditable reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "auditable reason",
         )
 
         trail = await sandbox.audit.get_audit_trail(user_id="alice")

@@ -171,6 +171,7 @@ class KazmaAgent:
             tantivy_available = False
             try:
                 import tantivy  # noqa: F401
+
                 tantivy_available = True
             except ImportError:
                 logger.info("tantivy-py not installed — using SQLite-only memory")
@@ -278,9 +279,7 @@ class KazmaAgent:
             except Exception as e:
                 logger.error("LLM call failed on iteration %d: %s", iteration, e)
                 error_msg = f"عذراً، حدث خطأ في الاتصال: {e}"
-                state["messages"] = state.get("messages", []) + [
-                    {"role": "assistant", "content": error_msg}
-                ]
+                state["messages"] = state.get("messages", []) + [{"role": "assistant", "content": error_msg}]
                 return error_msg
 
             duration_ms = (time.monotonic() - start) * 1000
@@ -310,9 +309,7 @@ class KazmaAgent:
 
             # ── If no tool calls, we're done ──
             if not llm_response.tool_calls:
-                state["messages"] = state.get("messages", []) + [
-                    {"role": "assistant", "content": llm_response.content}
-                ]
+                state["messages"] = state.get("messages", []) + [{"role": "assistant", "content": llm_response.content}]
                 logger.info("Agent responded (no tool calls) after %d iterations", iteration)
                 return llm_response.content
 
@@ -365,7 +362,9 @@ class KazmaAgent:
 
                 logger.info(
                     "Tool '%s' executed in %.0fms (error=%s)",
-                    tc.name, tool_duration, result.get("is_error", False),
+                    tc.name,
+                    tool_duration,
+                    result.get("is_error", False),
                 )
 
             # ── OBSERVE: Continue the loop (LLM will see tool results) ──
@@ -442,9 +441,7 @@ async def main() -> None:
 
     try:
         while agent._running:
-            user_input = await asyncio.get_running_loop().run_in_executor(
-                None, lambda: input("kazma> ")
-            )
+            user_input = await asyncio.get_running_loop().run_in_executor(None, lambda: input("kazma> "))
             if user_input.strip().lower() in ("quit", "exit"):
                 break
             if not user_input.strip():
@@ -463,6 +460,7 @@ async def main() -> None:
 # ---------------------------------------------------------------------------
 # Backward-compatible aliases for tests that import these names
 # ---------------------------------------------------------------------------
+
 
 # Keep build_graph available for tests that import it directly
 def build_graph(checkpointer: AsyncSqliteSaver | None = None) -> Any:
@@ -487,9 +485,8 @@ def build_graph(checkpointer: AsyncSqliteSaver | None = None) -> Any:
         tool_results = state.get("tool_results", {})
         done = len(tool_results) >= 3
         return {
-            "messages": state.get("messages", []) + [
-                {"role": "assistant", "content": "[done]" if done else "[continue]"}
-            ],
+            "messages": state.get("messages", [])
+            + [{"role": "assistant", "content": "[done]" if done else "[continue]"}],
             "_should_continue": not done,
         }
 
@@ -513,6 +510,7 @@ def build_graph(checkpointer: AsyncSqliteSaver | None = None) -> Any:
 async def create_app(db_path: str = CHECKPOINT_DB) -> Any:
     """Create a compiled LangGraph app with SQLite checkpointer (backward-compatible)."""
     from pathlib import Path as _Path
+
     _Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = await aiosqlite.connect(db_path)
     try:

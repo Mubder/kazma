@@ -95,11 +95,7 @@ class SkillManifest:
 
     def list_certified(self) -> list[str]:
         """Return names of all certified tools."""
-        return [
-            name
-            for name, info in self.manifest.get("tools", {}).items()
-            if info.get("certified", False)
-        ]
+        return [name for name, info in self.manifest.get("tools", {}).items() if info.get("certified", False)]
 
     def get_description(self, tool_name: str) -> str:
         """Get the English description for a tool."""
@@ -166,8 +162,9 @@ class SkillManifest:
             except Exception as e:
                 logger.error("Failed to load manifest %s: %s", yaml_file, e)
 
-        logger.info("Loaded %d tools from %d manifest files in %s",
-                    loaded_count, len(list(dir_path.glob("*.yaml"))), dir_path)
+        logger.info(
+            "Loaded %d tools from %d manifest files in %s", loaded_count, len(list(dir_path.glob("*.yaml"))), dir_path
+        )
 
     def _get_tool(self, tool_name: str) -> dict[str, Any]:
         return self.manifest.get("tools", {}).get(tool_name, {})

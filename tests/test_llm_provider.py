@@ -20,12 +20,14 @@ class TestLLMConfig:
         assert config.temperature == 0.7
 
     def test_from_dict(self) -> None:
-        config = LLMConfig.from_dict({
-            "base_url": "http://localhost:1234/v1",
-            "model": "local-model",
-            "api_key": "test-key",
-            "max_tokens": 2048,
-        })
+        config = LLMConfig.from_dict(
+            {
+                "base_url": "http://localhost:1234/v1",
+                "model": "local-model",
+                "api_key": "test-key",
+                "max_tokens": 2048,
+            }
+        )
         assert config.base_url == "http://localhost:1234/v1"
         assert config.model == "local-model"
         assert config.api_key == "test-key"
@@ -91,20 +93,24 @@ class TestLLMProvider:
     def test_parse_response_tool_calls(self) -> None:
         provider = LLMProvider()
         data = {
-            "choices": [{
-                "message": {
-                    "content": None,
-                    "tool_calls": [{
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {
-                            "name": "web_search",
-                            "arguments": json.dumps({"query": "test"}),
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "web_search",
+                                    "arguments": json.dumps({"query": "test"}),
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
             "model": "gpt-4o-mini",
             "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
         }
@@ -128,20 +134,24 @@ class TestLLMProvider:
     def test_parse_response_malformed_tool_args(self) -> None:
         provider = LLMProvider()
         data = {
-            "choices": [{
-                "message": {
-                    "content": "",
-                    "tool_calls": [{
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {
-                            "name": "bad_tool",
-                            "arguments": "not-json",
-                        },
-                    }],
-                },
-                "finish_reason": "tool_calls",
-            }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "bad_tool",
+                                    "arguments": "not-json",
+                                },
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
             "model": "test",
             "usage": {},
         }
@@ -172,6 +182,7 @@ class TestLLMProvider:
     @pytest.mark.asyncio
     async def test_chat_connection_error(self) -> None:
         import httpx
+
         provider = LLMProvider(LLMConfig(base_url="http://fake.api/v1", api_key="test"))
 
         mock_client = AsyncMock()

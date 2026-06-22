@@ -17,6 +17,7 @@ import yaml
 @dataclass
 class ValidationResult:
     """Result of manifest validation."""
+
     passed: bool = False
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -26,6 +27,7 @@ class ValidationResult:
 @dataclass
 class CheckResult:
     """Result of a skill quality/security check."""
+
     passed: bool = False
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -42,9 +44,16 @@ class SkillManifest:
 
     REQUIRED_FIELDS = ["name", "version", "description", "author", "license"]
     OPTIONAL_FIELDS = [
-        "capabilities", "dependencies", "mcp_servers", "permissions",
-        "entry_point", "config_schema", "min_core_version", "tags",
-        "homepage", "repository",
+        "capabilities",
+        "dependencies",
+        "mcp_servers",
+        "permissions",
+        "entry_point",
+        "config_schema",
+        "min_core_version",
+        "tags",
+        "homepage",
+        "repository",
     ]
 
     def __init__(self, manifest_path: Path | str):
@@ -92,8 +101,7 @@ class SkillManifest:
             ep_str = str(entry_point)
             if "/" in ep_str or ep_str.startswith("."):
                 warnings.append(
-                    f"entry_point looks like a relative path ({ep_str!r}); "
-                    "use a dotted module path instead"
+                    f"entry_point looks like a relative path ({ep_str!r}); use a dotted module path instead"
                 )
 
         # --- mcp_servers: each must have name and type ---
@@ -108,9 +116,7 @@ class SkillManifest:
                         continue
                     for key in ("name", "type"):
                         if key not in server:
-                            errors.append(
-                                f"mcp_servers[{i}] missing required key: {key}"
-                            )
+                            errors.append(f"mcp_servers[{i}] missing required key: {key}")
 
         passed = len(errors) == 0
         return ValidationResult(passed=passed, errors=errors, warnings=warnings)

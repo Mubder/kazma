@@ -1,4 +1,5 @@
 """Error coverage tests — edge cases, malformed input, error states."""
+
 from __future__ import annotations
 
 import time
@@ -26,9 +27,12 @@ class TestTraceStoreErrors:
         store = TraceStore()
         entry = TraceEntry(
             timestamp=time.time(),
-            trace_type="llm", label="free",
-            status="success", duration_ms=0,
-            tokens=0, cost=0.0,
+            trace_type="llm",
+            label="free",
+            status="success",
+            duration_ms=0,
+            tokens=0,
+            cost=0.0,
         )
         store.add(entry)
         assert store.stats()["total_cost"] == 0.0
@@ -37,9 +41,12 @@ class TestTraceStoreErrors:
         store = TraceStore()
         entry = TraceEntry(
             timestamp=time.time(),
-            trace_type="llm", label="big",
-            status="success", duration_ms=0,
-            tokens=1_000_000, cost=10.0,
+            trace_type="llm",
+            label="big",
+            status="success",
+            duration_ms=0,
+            tokens=1_000_000,
+            cost=10.0,
         )
         store.add(entry)
         assert store.stats()["total_tokens"] == 1_000_000
@@ -49,8 +56,10 @@ class TestTraceStoreErrors:
         store = TraceStore()
         entry = TraceEntry(
             timestamp=time.time(),
-            trace_type="llm", label="",
-            status="success", duration_ms=0,
+            trace_type="llm",
+            label="",
+            status="success",
+            duration_ms=0,
         )
         store.add(entry)
         assert store.stats()["total_traces"] == 1
@@ -59,8 +68,10 @@ class TestTraceStoreErrors:
         store = TraceStore()
         entry = TraceEntry(
             timestamp=time.time(),
-            trace_type="llm", label="long",
-            status="success", duration_ms=0,
+            trace_type="llm",
+            label="long",
+            status="success",
+            duration_ms=0,
             details="x" * 10_000,
         )
         store.add(entry)
@@ -120,8 +131,10 @@ class TestTraceEntryErrors:
     def test_entry_very_large_duration(self) -> None:
         entry = TraceEntry(
             timestamp=time.time(),
-            trace_type="llm", label="test",
-            status="success", duration_ms=9e9,
+            trace_type="llm",
+            label="test",
+            status="success",
+            duration_ms=9e9,
         )
         assert entry.duration_ms == 9e9
 

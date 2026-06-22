@@ -3,6 +3,7 @@
 Uses the KazmaHub registry for capability-based agent discovery and
 maintains a local reputation cache for ranking discovered agents.
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AgentInfo:
     """Discovered agent information with metadata."""
+
     agent_id: str
     capabilities: list[str]
     endpoint: str = ""
@@ -28,6 +30,7 @@ class AgentInfo:
 @dataclass
 class DiscoveryResult:
     """Result of an agent discovery query."""
+
     agents: list[AgentInfo]
     query_capabilities: list[str]
     total_found: int
@@ -83,9 +86,7 @@ class AgentDiscovery:
 
         # Cache locally
         self.known_agents[self.agent_id] = info
-        logger.info(
-            "Agent announced: %s (caps=%s)", self.agent_id, capabilities
-        )
+        logger.info("Agent announced: %s (caps=%s)", self.agent_id, capabilities)
 
     async def discover(
         self,
@@ -153,9 +154,7 @@ class AgentDiscovery:
         )
         return results
 
-    def _score_agent(
-        self, agent: AgentInfo, required: list[str]
-    ) -> float:
+    def _score_agent(self, agent: AgentInfo, required: list[str]) -> float:
         """Score an agent based on capability match and reputation."""
         if not required:
             return agent.reputation
@@ -220,44 +219,33 @@ class AgentDiscovery:
         if hasattr(self.hub, "update_agent_reputation"):
             await self.hub.update_agent_reputation(agent_id, clamped)
 
-        logger.info(
-            "Reputation updated for %s: %.2f", agent_id, clamped
-        )
+        logger.info("Reputation updated for %s: %.2f", agent_id, clamped)
 
     async def get_available_agents(self) -> list[AgentInfo]:
         """Get all known available agents (excluding self)."""
-        agents = [
-            info
-            for aid, info in self.known_agents.items()
-            if aid != self.agent_id
-        ]
+        agents = [info for aid, info in self.known_agents.items() if aid != self.agent_id]
         # Also include hub-registered agents not in local cache
         if hasattr(self.hub, "list_agents"):
             hub_agents = await self.hub.list_agents()
             known_ids = {a.agent_id for a in agents}
             for ha in hub_agents:
                 if ha.agent_id != self.agent_id and ha.agent_id not in known_ids:
-                    agents.append(AgentInfo(
-                        agent_id=ha.agent_id,
-                        capabilities=ha.capabilities,
-                        endpoint=getattr(ha, "endpoint", ""),
-                        reputation=getattr(ha, "reputation", 1.0),
-                    ))
+                    agents.append(
+                        AgentInfo(
+                            agent_id=ha.agent_id,
+                            capabilities=ha.capabilities,
+                            endpoint=getattr(ha, "endpoint", ""),
+                            reputation=getattr(ha, "reputation", 1.0),
+                        )
+                    )
         return agents
 
     def get_discovery_stats(self) -> dict[str, Any]:
         """Return discovery statistics."""
-        agents = [
-            info for aid, info in self.known_agents.items()
-            if aid != self.agent_id
-        ]
+        agents = [info for aid, info in self.known_agents.items() if aid != self.agent_id]
         return {
             "agent_id": self.agent_id,
             "known_agents": len(agents),
             "local_capabilities": self._local_capabilities,
-            "avg_reputation": (
-                sum(a.reputation for a in agents) / len(agents)
-                if agents
-                else 0.0
-            ),
+            "avg_reputation": (sum(a.reputation for a in agents) / len(agents) if agents else 0.0),
         }

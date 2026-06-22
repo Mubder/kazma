@@ -215,7 +215,7 @@ class DependencyScanner:
         in_deps = False
         for line in text.splitlines():
             stripped = line.strip()
-            if stripped == "[project.dependencies]" or stripped == 'dependencies = [':
+            if stripped == "[project.dependencies]" or stripped == "dependencies = [":
                 in_deps = True
                 continue
             if in_deps:
@@ -226,7 +226,7 @@ class DependencyScanner:
                     in_deps = False
                     continue
                 # Lines like: "requests>=2.28.0",  or  'requests>=2.28.0',
-                cleaned = stripped.strip(chr(39) + chr(34) + ', ')
+                cleaned = stripped.strip(chr(39) + chr(34) + ", ")
                 match = re.match(r"([A-Za-z0-9_.-]+)\s*([><=!~]+)\s*(.+)", cleaned)
                 if match:
                     deps.append((match.group(1), match.group(3)))
@@ -490,9 +490,7 @@ class DependabotStyleScanner:
 
         return report
 
-    async def scan_skill_manifests(
-        self, skills_dir: str = "~/.kazma/skills"
-    ) -> list[SkillScanResult]:
+    async def scan_skill_manifests(self, skills_dir: str = "~/.kazma/skills") -> list[SkillScanResult]:
         """Scan installed skill manifests for vulnerabilities and suspicious configs.
 
         1. Find all skill directories
@@ -557,12 +555,14 @@ class DependabotStyleScanner:
                 osv_results = await self._query_osv(deps)
                 vuln_deps.extend(osv_results)
 
-            results.append(SkillScanResult(
-                skill_name=skill_dir.name,
-                skill_path=str(skill_dir),
-                issues=issues,
-                vulnerable_deps=vuln_deps,
-            ))
+            results.append(
+                SkillScanResult(
+                    skill_name=skill_dir.name,
+                    skill_path=str(skill_dir),
+                    issues=issues,
+                    vulnerable_deps=vuln_deps,
+                )
+            )
 
         return results
 
@@ -590,11 +590,17 @@ class DependabotStyleScanner:
             proc = await asyncio.to_thread(
                 subprocess.run,
                 [
-                    "gh", "issue", "create",
-                    "--title", title,
-                    "--body", body,
-                    "--label", "security",
-                    "--label", "vulnerability",
+                    "gh",
+                    "issue",
+                    "create",
+                    "--title",
+                    title,
+                    "--body",
+                    body,
+                    "--label",
+                    "security",
+                    "--label",
+                    "vulnerability",
                 ],
                 capture_output=True,
                 text=True,
@@ -638,13 +644,15 @@ class DependabotStyleScanner:
             vulns = await self._query_osv_single(pkg, ver)
             for sr in vulns:
                 if sr.fix_available and sr.fix_version:
-                    updates.append({
-                        "package": pkg,
-                        "current_version": ver,
-                        "fix_version": sr.fix_version,
-                        "vuln_id": sr.vulnerability.vuln_id,
-                        "severity": sr.vulnerability.severity,
-                    })
+                    updates.append(
+                        {
+                            "package": pkg,
+                            "current_version": ver,
+                            "fix_version": sr.fix_version,
+                            "vuln_id": sr.vulnerability.vuln_id,
+                            "severity": sr.vulnerability.severity,
+                        }
+                    )
         return updates
 
     def get_scan_history(self, limit: int = 10) -> list:
@@ -660,9 +668,7 @@ class DependabotStyleScanner:
     # Source queries
     # ------------------------------------------------------------------
 
-    async def _query_osv(
-        self, deps: list[tuple[str, str]]
-    ) -> list[ScanResult]:
+    async def _query_osv(self, deps: list[tuple[str, str]]) -> list[ScanResult]:
         """Query OSV for all deps."""
         results: list[ScanResult] = []
         for pkg, ver in deps:
@@ -691,19 +697,19 @@ class DependabotStyleScanner:
             vuln = DependencyScanner._deserialise_vulns([v], pkg, ver)
             if vuln:
                 fixed = vuln[0].fixed_version
-                results.append(ScanResult(
-                    package=pkg,
-                    current_version=ver,
-                    vulnerability=vuln[0],
-                    fix_available=fixed is not None,
-                    fix_version=fixed,
-                    source="osv",
-                ))
+                results.append(
+                    ScanResult(
+                        package=pkg,
+                        current_version=ver,
+                        vulnerability=vuln[0],
+                        fix_available=fixed is not None,
+                        fix_version=fixed,
+                        source="osv",
+                    )
+                )
         return results
 
-    async def _query_github_advisories(
-        self, deps: list[tuple[str, str]]
-    ) -> list[ScanResult]:
+    async def _query_github_advisories(self, deps: list[tuple[str, str]]) -> list[ScanResult]:
         """Query GitHub Security Advisories API for all deps."""
         if httpx is None:  # pragma: no cover
             return []
@@ -734,26 +740,26 @@ class DependabotStyleScanner:
                     if patched:
                         fix_ver = patched
                         break
-                results.append(ScanResult(
-                    package=pkg,
-                    current_version=ver,
-                    vulnerability=Vulnerability(
+                results.append(
+                    ScanResult(
                         package=pkg,
-                        version=ver,
-                        vuln_id=cve_id,
-                        severity=str(severity),
-                        description=summary,
-                        fixed_version=fix_ver,
-                    ),
-                    fix_available=fix_ver is not None,
-                    fix_version=fix_ver,
-                    source="github_advisories",
-                ))
+                        current_version=ver,
+                        vulnerability=Vulnerability(
+                            package=pkg,
+                            version=ver,
+                            vuln_id=cve_id,
+                            severity=str(severity),
+                            description=summary,
+                            fixed_version=fix_ver,
+                        ),
+                        fix_available=fix_ver is not None,
+                        fix_version=fix_ver,
+                        source="github_advisories",
+                    )
+                )
         return results
 
-    async def _query_nvd(
-        self, deps: list[tuple[str, str]]
-    ) -> list[ScanResult]:
+    async def _query_nvd(self, deps: list[tuple[str, str]]) -> list[ScanResult]:
         """Query NVD API for all deps."""
         if httpx is None:  # pragma: no cover
             return []
@@ -791,19 +797,21 @@ class DependabotStyleScanner:
                         severity = cvss.get("baseSeverity", "unknown")
                         break
 
-                results.append(ScanResult(
-                    package=pkg,
-                    current_version=ver,
-                    vulnerability=Vulnerability(
+                results.append(
+                    ScanResult(
                         package=pkg,
-                        version=ver,
-                        vuln_id=cve_id,
-                        severity=str(severity),
-                        description=desc,
-                    ),
-                    fix_available=False,
-                    source="nvd",
-                ))
+                        current_version=ver,
+                        vulnerability=Vulnerability(
+                            package=pkg,
+                            version=ver,
+                            vuln_id=cve_id,
+                            severity=str(severity),
+                            description=desc,
+                        ),
+                        fix_available=False,
+                        source="nvd",
+                    )
+                )
         return results
 
     # ------------------------------------------------------------------
@@ -823,19 +831,21 @@ class DependabotStyleScanner:
                 report.total_packages,
                 report.vulnerable_packages,
                 json.dumps(report.sources_checked),
-                json.dumps([
-                    {
-                        "package": r.package,
-                        "current_version": r.current_version,
-                        "vuln_id": r.vulnerability.vuln_id,
-                        "severity": r.vulnerability.severity,
-                        "description": r.vulnerability.description,
-                        "fix_available": r.fix_available,
-                        "fix_version": r.fix_version,
-                        "source": r.source,
-                    }
-                    for r in report.results
-                ]),
+                json.dumps(
+                    [
+                        {
+                            "package": r.package,
+                            "current_version": r.current_version,
+                            "vuln_id": r.vulnerability.vuln_id,
+                            "severity": r.vulnerability.severity,
+                            "description": r.vulnerability.description,
+                            "fix_available": r.fix_available,
+                            "fix_version": r.fix_version,
+                            "source": r.source,
+                        }
+                        for r in report.results
+                    ]
+                ),
             ),
         )
         scan_id: int = cur.lastrowid or 0  # type: ignore[assignment]

@@ -7,6 +7,7 @@ Covers:
 - Division boundary enforcement
 - User role queries
 """
+
 from __future__ import annotations
 
 import pytest
@@ -29,6 +30,7 @@ async def rbac(tmp_db):
 
 
 # ─── Role Management Tests ────────────────────────────────────────────
+
 
 class TestRoleManagement:
     """Test role assignment and revocation."""
@@ -114,6 +116,7 @@ class TestRoleManagement:
 
 # ─── Permission Check Tests ───────────────────────────────────────────
 
+
 class TestPermissionChecks:
     """Test permission checking logic."""
 
@@ -188,6 +191,7 @@ class TestPermissionChecks:
 
 
 # ─── Division Boundary Tests ──────────────────────────────────────────
+
 
 class TestDivisionBoundaries:
     """Test division isolation and boundaries."""

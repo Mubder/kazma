@@ -3,6 +3,7 @@
 Adapts response tone based on formality level, dialect, and cultural context.
 Preserves dialect authenticity while applying appropriate cultural markers.
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,19 +16,23 @@ logger = logging.getLogger(__name__)
 
 # ── Formality levels ──────────────────────────────────────────────────
 
+
 class FormalityLevel(Enum):
     """Formality levels for conversational responses."""
-    CASUAL = "casual"           # Family, close friends
-    NORMAL = "normal"           # General conversation
-    FORMAL = "formal"           # Business, colleagues
+
+    CASUAL = "casual"  # Family, close friends
+    NORMAL = "normal"  # General conversation
+    FORMAL = "formal"  # Business, colleagues
     VERY_FORMAL = "very_formal"  # Government, official
 
 
 # ── Tone profiles ─────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True, slots=True)
 class ToneProfile:
     """Configuration for a specific tone profile."""
+
     name: str
     prefix: str
     suffix: str
@@ -121,6 +126,7 @@ _KUWAITI_FORMAL_MAP: dict[str, str] = {
 
 
 # ── Public API ────────────────────────────────────────────────────────
+
 
 class ToneAdapter:
     """Adapts response tone based on cultural context.
@@ -226,7 +232,7 @@ class ToneAdapter:
         result = text
         for informal, formal in _KUWAITI_FORMAL_MAP.items():
             # Unicode-aware word boundary: (?<!\w) and (?!\w) support Arabic
-            pattern = re.compile(r'(?<!\w)' + re.escape(informal) + r'(?!\w)')
+            pattern = re.compile(r"(?<!\w)" + re.escape(informal) + r"(?!\w)")
             result = pattern.sub(formal, result)
 
         return result
@@ -244,8 +250,13 @@ class ToneAdapter:
 
         # Very formal indicators
         very_formal_markers = [
-            "سعادة", "سمو", "فخامة", " Excellency",
-            "وزارة", "حكومة", "رسمي",
+            "سعادة",
+            "سمو",
+            "فخامة",
+            " Excellency",
+            "وزارة",
+            "حكومة",
+            "رسمي",
         ]
         for marker in very_formal_markers:
             if marker in text:
@@ -253,9 +264,17 @@ class ToneAdapter:
 
         # Formal indicators
         formal_markers = [
-            "سيدي", "سيدتي", "أخي الكريم", "أختي الكريمة",
-            "بناءً على", "وفقاً", "أود أن", "أرجو",
-            "التقرير", "المذكرة", "الخطاب",
+            "سيدي",
+            "سيدتي",
+            "أخي الكريم",
+            "أختي الكريمة",
+            "بناءً على",
+            "وفقاً",
+            "أود أن",
+            "أرجو",
+            "التقرير",
+            "المذكرة",
+            "الخطاب",
         ]
         for marker in formal_markers:
             if marker in text:
@@ -263,8 +282,15 @@ class ToneAdapter:
 
         # Casual indicators
         casual_markers = [
-            "شلونك", "هلا", "وين", "ليش", "شنو",
-            "تمام", "خوش", "يالله", "اخوي",
+            "شلونك",
+            "هلا",
+            "وين",
+            "ليش",
+            "شنو",
+            "تمام",
+            "خوش",
+            "يالله",
+            "اخوي",
         ]
         casual_count = sum(1 for m in casual_markers if m in text)
         if casual_count >= 2:

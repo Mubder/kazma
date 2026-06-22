@@ -120,10 +120,7 @@ class CertificationBadgeSystem:
             ValueError: If the skill doesn't exist or level is invalid.
         """
         if level not in BADGE_LEVELS:
-            raise ValueError(
-                f"Invalid badge level: {level!r}. "
-                f"Must be one of: {', '.join(sorted(BADGE_LEVELS))}"
-            )
+            raise ValueError(f"Invalid badge level: {level!r}. Must be one of: {', '.join(sorted(BADGE_LEVELS))}")
 
         conn = self._get_conn()
         try:

@@ -1,4 +1,5 @@
 """Tests for DelegationSecurity — cryptographic signing and encryption."""
+
 from __future__ import annotations
 
 import pytest

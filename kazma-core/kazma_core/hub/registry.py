@@ -19,6 +19,7 @@ from kazma_core.hub.manifest_schema import SkillManifest
 @dataclass
 class AgentInfo:
     """Information about a registered agent (for delegation discovery)."""
+
     agent_id: str
     capabilities: list[str]
     endpoint: str = ""
@@ -175,16 +176,13 @@ class KazmaHub:
         assert skill_row is not None  # we just inserted it
         skill_id_int = skill_row["id"]
 
-        await conn.execute(
-            "DELETE FROM skill_dependencies WHERE skill_id=?", (skill_id_int,)
-        )
+        await conn.execute("DELETE FROM skill_dependencies WHERE skill_id=?", (skill_id_int,))
         for dep in data.get("dependencies", []):
             dep_name = dep.get("name", "") if isinstance(dep, dict) else str(dep)
             dep_version = dep.get("version") if isinstance(dep, dict) else None
             is_optional = dep.get("optional", False) if isinstance(dep, dict) else False
             await conn.execute(
-                "INSERT INTO skill_dependencies (skill_id, dep_name, dep_version, is_optional) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO skill_dependencies (skill_id, dep_name, dep_version, is_optional) VALUES (?, ?, ?, ?)",
                 (skill_id_int, dep_name, dep_version, is_optional),
             )
         await conn.commit()
@@ -231,9 +229,7 @@ class KazmaHub:
 
         if query:
             like = f"%{query}%"
-            clauses.append(
-                "(name LIKE ? OR description LIKE ? OR manifest_json LIKE ?)"
-            )
+            clauses.append("(name LIKE ? OR description LIKE ? OR manifest_json LIKE ?)")
             params.extend([like, like, like])
         if capabilities:
             for cap in capabilities:
@@ -258,9 +254,7 @@ class KazmaHub:
     async def list_installed(self) -> list[SkillManifest]:
         """Return manifests for skills that have been installed locally."""
         conn = await self._get_conn()
-        cursor = await conn.execute(
-            "SELECT * FROM skills WHERE installed_path IS NOT NULL"
-        )
+        cursor = await conn.execute("SELECT * FROM skills WHERE installed_path IS NOT NULL")
         rows = await cursor.fetchall()
         return [_row_to_manifest(dict(r)) for r in rows]
 
@@ -276,8 +270,7 @@ class KazmaHub:
 
         conn = await self._get_conn()
         await conn.execute(
-            "UPDATE skills SET installed_path=? "
-            "WHERE name=? AND author=? AND version=?",
+            "UPDATE skills SET installed_path=? WHERE name=? AND author=? AND version=?",
             (str(install_path), name, author, version),
         )
         await conn.commit()
@@ -315,9 +308,7 @@ class KazmaHub:
         await conn.commit()
         return cursor.rowcount > 0
 
-    async def find_agents_by_capabilities(
-        self, required: list[str]
-    ) -> list[AgentInfo]:
+    async def find_agents_by_capabilities(self, required: list[str]) -> list[AgentInfo]:
         """Find agents that have all required capabilities."""
         agents = await self.list_agents()
         results = []
@@ -337,9 +328,7 @@ class KazmaHub:
         """Get a registered agent by ID."""
         conn = await self._get_conn()
         conn.row_factory = aiosqlite.Row
-        cursor = await conn.execute(
-            "SELECT * FROM agents WHERE agent_id = ?", (agent_id,)
-        )
+        cursor = await conn.execute("SELECT * FROM agents WHERE agent_id = ?", (agent_id,))
         row = await cursor.fetchone()
         if row is None:
             return None

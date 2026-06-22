@@ -60,9 +60,7 @@ def optional_fields_manifest_path(tmp_path):
         "license": "Apache-2.0",
         "capabilities": ["audio", "video"],
         "dependencies": {"core": ">=1.0.0", "optional": ["numpy"]},
-        "mcp_servers": [
-            {"name": "my-server", "type": "stdio"}
-        ],
+        "mcp_servers": [{"name": "my-server", "type": "stdio"}],
         "permissions": {"required": ["file_read"]},
         "entry_point": "my_skill.main:run",
         "config_schema": {"type": "object"},
@@ -79,6 +77,7 @@ def optional_fields_manifest_path(tmp_path):
 # ---------------------------------------------------------------------------
 # Valid manifest loading
 # ---------------------------------------------------------------------------
+
 
 class TestValidManifest:
     def test_loads_successfully(self, valid_manifest_path):
@@ -98,6 +97,7 @@ class TestValidManifest:
 # Missing required fields
 # ---------------------------------------------------------------------------
 
+
 class TestMissingRequiredField:
     @pytest.mark.parametrize("field", ["name", "version", "description", "author", "license"])
     def test_missing_field_raises(self, tmp_path, field):
@@ -114,6 +114,7 @@ class TestMissingRequiredField:
 # ---------------------------------------------------------------------------
 # Invalid name (not kebab-case)
 # ---------------------------------------------------------------------------
+
 
 class TestInvalidName:
     @pytest.mark.parametrize("bad_name", ["UpperCase", "has spaces", "has_underscores", "123starts-number"])
@@ -139,6 +140,7 @@ class TestInvalidName:
 # Invalid version (not semver)
 # ---------------------------------------------------------------------------
 
+
 class TestInvalidVersion:
     @pytest.mark.parametrize("bad_version", ["1.0", "v1.0.0", "1.0.0-beta", "not-a-version"])
     def test_invalid_version_rejected(self, tmp_path, bad_version):
@@ -163,6 +165,7 @@ class TestInvalidVersion:
 # Optional fields
 # ---------------------------------------------------------------------------
 
+
 class TestOptionalFields:
     def test_optional_fields_parse(self, optional_fields_manifest_path):
         manifest = SkillManifest(optional_fields_manifest_path)
@@ -179,6 +182,7 @@ class TestOptionalFields:
 # ---------------------------------------------------------------------------
 # Serialization round-trips
 # ---------------------------------------------------------------------------
+
 
 class TestSerialization:
     def test_to_dict_round_trip(self, valid_manifest_path):
@@ -209,6 +213,7 @@ class TestSerialization:
 # ---------------------------------------------------------------------------
 # Example manifest validates
 # ---------------------------------------------------------------------------
+
 
 class TestExampleManifest:
     def test_almuhalab_manifest_validates(self):

@@ -3,6 +3,7 @@
 Provides automatic backend selection based on document count,
 with redundancy through dual indexing.
 """
+
 from __future__ import annotations
 
 import json
@@ -16,14 +17,14 @@ logger = logging.getLogger(__name__)
 
 class SQLiteMemoryBackend:
     """SQLite-based memory backend with vector search support.
-    
+
     Uses sqlite-vec extension for semantic similarity search
     when available, falls back to regex-based text search.
     """
 
     def __init__(self, db_path: str = "kazma-data/memory.db"):
         """Initialize SQLite backend.
-        
+
         Args:
             db_path: Path to the SQLite database file.
         """
@@ -65,7 +66,7 @@ class SQLiteMemoryBackend:
 
         # Create FTS table for text search
         await conn.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts 
+            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
             USING fts5(content, content_rowid UNINDEXED)
         """)
 
@@ -74,14 +75,14 @@ class SQLiteMemoryBackend:
 
     async def search(self, query: str, limit: int = 10, **kwargs) -> list[dict[str, Any]]:
         """Search memories in SQLite.
-        
+
         Uses FTS5 for text search when available.
-        
+
         Args:
             query: Search query string.
             limit: Maximum number of results to return.
             **kwargs: Additional parameters.
-            
+
         Returns:
             List of memory dictionaries.
         """
@@ -98,7 +99,7 @@ class SQLiteMemoryBackend:
                 ORDER BY m.relevance DESC
                 LIMIT ?
                 """,
-                (query, limit)
+                (query, limit),
             )
             rows = await cursor.fetchall()
 
@@ -118,7 +119,7 @@ class SQLiteMemoryBackend:
             # Fallback to simple LIKE search
             cursor = await conn.execute(
                 "SELECT id, content, metadata, timestamp, source, relevance FROM memories WHERE content LIKE ? LIMIT ?",
-                (f"%{query}%", limit)
+                (f"%{query}%", limit),
             )
             rows = await cursor.fetchall()
             return [
@@ -135,10 +136,10 @@ class SQLiteMemoryBackend:
 
     async def index(self, memory: Any) -> str:
         """Index a memory to SQLite.
-        
+
         Args:
             memory: Memory dict or Memory object.
-            
+
         Returns:
             Document ID.
         """
@@ -168,7 +169,7 @@ class SQLiteMemoryBackend:
             INSERT OR REPLACE INTO memories (id, content, metadata, timestamp, source, relevance)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (memory_id, content, metadata, timestamp, source, relevance)
+            (memory_id, content, metadata, timestamp, source, relevance),
         )
 
         # Also index in FTS for search
@@ -178,8 +179,7 @@ class SQLiteMemoryBackend:
             row = await cursor.fetchone()
             if row:
                 await conn.execute(
-                    "INSERT OR REPLACE INTO memories_fts (content, content_rowid) VALUES (?, ?)",
-                    (content, row[0])
+                    "INSERT OR REPLACE INTO memories_fts (content, content_rowid) VALUES (?, ?)", (content, row[0])
                 )
         except Exception as e:
             logger.debug("FTS indexing skipped: %s", e)
@@ -190,11 +190,12 @@ class SQLiteMemoryBackend:
     def _generate_id(self) -> str:
         """Generate a unique memory ID."""
         import uuid
+
         return f"mem_{uuid.uuid4().hex[:16]}"
 
     async def count(self) -> int:
         """Get total document count.
-        
+
         Returns:
             Number of documents in the database.
         """
@@ -212,20 +213,15 @@ class SQLiteMemoryBackend:
 
 class SearchBackendRouter:
     """Routes between SQLite and Tantivy based on workload.
-    
+
     Automatically selects the appropriate backend based on document count:
     - < threshold: Use SQLite (simpler, lighter)
     - >= threshold: Use Tantivy (faster, more scalable)
     """
 
-    def __init__(
-        self,
-        sqlite_backend: SQLiteMemoryBackend,
-        tantivy_backend: Any,
-        threshold_documents: int = 10000
-    ):
+    def __init__(self, sqlite_backend: SQLiteMemoryBackend, tantivy_backend: Any, threshold_documents: int = 10000):
         """Initialize router with backends.
-        
+
         Args:
             sqlite_backend: SQLite memory backend instance.
             tantivy_backend: Tantivy search backend instance.
@@ -238,14 +234,14 @@ class SearchBackendRouter:
 
     async def search(self, query: str, **kwargs) -> list[Any]:
         """Route search to appropriate backend.
-        
+
         - < threshold documents: Use SQLite (simpler, lighter)
         - >= threshold documents: Use Tantivy (faster, more scalable)
-        
+
         Args:
             query: Search query string.
             **kwargs: Additional search parameters.
-            
+
         Returns:
             List of search results.
         """
@@ -260,10 +256,10 @@ class SearchBackendRouter:
 
     async def index(self, memory: Any) -> str:
         """Index to both backends for redundancy.
-        
+
         Args:
             memory: Memory object to index.
-            
+
         Returns:
             Document ID.
         """
@@ -297,7 +293,7 @@ class SearchBackendRouter:
 
     async def migrate_to_tantivy(self) -> bool:
         """One-way migration from SQLite to Tantivy.
-        
+
         Returns:
             True if migration successful.
         """
@@ -305,8 +301,10 @@ class SearchBackendRouter:
             from .migration import SQLiteToTantivyMigration
 
             migration = SQLiteToTantivyMigration(
-                sqlite_path=self.sqlite.db_path if hasattr(self.sqlite, 'db_path') else "kazma-data/memory.db",
-                tantivy_path=self.tantivy.index_path if hasattr(self.tantivy, 'index_path') else "kazma-data/tantivy-index",
+                sqlite_path=self.sqlite.db_path if hasattr(self.sqlite, "db_path") else "kazma-data/memory.db",
+                tantivy_path=self.tantivy.index_path
+                if hasattr(self.tantivy, "index_path")
+                else "kazma-data/tantivy-index",
             )
 
             result = await migration.migrate()
@@ -326,9 +324,9 @@ class SearchBackendRouter:
 
     async def _get_document_count(self) -> int:
         """Get current document count.
-        
+
         Caches the count to avoid repeated queries.
-        
+
         Returns:
             Number of documents in the index.
         """
@@ -342,7 +340,7 @@ class SearchBackendRouter:
         except Exception:
             # Fall back to SQLite
             try:
-                if hasattr(self.sqlite, 'count'):
+                if hasattr(self.sqlite, "count"):
                     self._document_count = await self.sqlite.count()
                 else:
                     self._document_count = 0
@@ -357,7 +355,7 @@ class SearchBackendRouter:
 
     async def get_backend_info(self) -> dict[str, Any]:
         """Get information about current backend selection.
-        
+
         Returns:
             Dictionary with backend selection details.
         """

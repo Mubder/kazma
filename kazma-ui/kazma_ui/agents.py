@@ -68,19 +68,21 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
             hub = KazmaHub()
             hub_agents = await hub.list_agents()
             await hub.close()
-            return JSONResponse({
-                "agents": [
-                    {
-                        "agent_id": a.agent_id,
-                        "capabilities": a.capabilities,
-                        "endpoint": a.endpoint,
-                        "reputation": a.reputation,
-                        "metadata": a.metadata,
-                    }
-                    for a in hub_agents
-                ],
-                "count": len(hub_agents),
-            })
+            return JSONResponse(
+                {
+                    "agents": [
+                        {
+                            "agent_id": a.agent_id,
+                            "capabilities": a.capabilities,
+                            "endpoint": a.endpoint,
+                            "reputation": a.reputation,
+                            "metadata": a.metadata,
+                        }
+                        for a in hub_agents
+                    ],
+                    "count": len(hub_agents),
+                }
+            )
         except Exception as e:
             logger.warning("Failed to list hub agents: %s", e)
             return JSONResponse({"agents": [], "count": 0, "error": str(e)})
@@ -133,7 +135,13 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
         "tools": {
             "count": tool_count,
             "servers": mcp_servers,
-            "list": [{"name": t.get("name", t.get("function", {}).get("name", "?")), "description": t.get("description", t.get("function", {}).get("description", ""))[:80]} for t in tool_list[:20]],
+            "list": [
+                {
+                    "name": t.get("name", t.get("function", {}).get("name", "?")),
+                    "description": t.get("description", t.get("function", {}).get("description", ""))[:80],
+                }
+                for t in tool_list[:20]
+            ],
         },
         "metrics": {
             "total_cost": f"${stats['total_cost']:.4f}",

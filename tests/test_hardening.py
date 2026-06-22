@@ -15,6 +15,7 @@ from kazma_core.security.hardening import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def runner(tmp_path) -> SecurityHardeningRunner:
     """Fresh runner pointing at a temp project directory."""
@@ -25,8 +26,7 @@ def runner(tmp_path) -> SecurityHardeningRunner:
 def project_with_secrets(tmp_path) -> Path:
     """A project containing a hardcoded API key."""
     (tmp_path / "config.py").write_text(
-        'API_KEY = "supersecretkey1234567890"\n'
-        'DATABASE_URL = "postgres://user:pass@host/db"\n'
+        'API_KEY = "supersecretkey1234567890"\nDATABASE_URL = "postgres://user:pass@host/db"\n'
     )
     return tmp_path
 
@@ -34,30 +34,21 @@ def project_with_secrets(tmp_path) -> Path:
 @pytest.fixture
 def project_clean(tmp_path) -> Path:
     """A clean project with no secrets."""
-    (tmp_path / "main.py").write_text(
-        'import os\n'
-        'api_key = os.environ.get("API_KEY")\n'
-        'print("Hello world")\n'
-    )
+    (tmp_path / "main.py").write_text('import os\napi_key = os.environ.get("API_KEY")\nprint("Hello world")\n')
     return tmp_path
 
 
 @pytest.fixture
 def project_with_eval(tmp_path) -> Path:
     """A project with eval() usage (privilege escalation vector)."""
-    (tmp_path / "loader.py").write_text(
-        'def load(code):\n'
-        '    return eval(code)\n'
-    )
+    (tmp_path / "loader.py").write_text("def load(code):\n    return eval(code)\n")
     return tmp_path
 
 
 @pytest.fixture
 def project_with_sandbox(tmp_path) -> Path:
     """A project with sandbox config."""
-    (tmp_path / "kazma.yaml").write_text(
-        "sandbox:\n  enabled: true\n  memory_limit: 512MB\n"
-    )
+    (tmp_path / "kazma.yaml").write_text("sandbox:\n  enabled: true\n  memory_limit: 512MB\n")
     return tmp_path
 
 
@@ -74,6 +65,7 @@ def project_with_manifest(tmp_path) -> Path:
 # ---------------------------------------------------------------------------
 # Dataclass tests
 # ---------------------------------------------------------------------------
+
 
 class TestDataclasses:
     def test_hardening_check_fields(self):
@@ -104,6 +96,7 @@ class TestDataclasses:
 # ---------------------------------------------------------------------------
 # run_all_checks
 # ---------------------------------------------------------------------------
+
 
 class TestRunAllChecks:
     @pytest.mark.asyncio
@@ -147,6 +140,7 @@ class TestRunAllChecks:
 # ---------------------------------------------------------------------------
 # Individual checks
 # ---------------------------------------------------------------------------
+
 
 class TestIndividualChecks:
     @pytest.mark.asyncio
@@ -194,6 +188,7 @@ class TestIndividualChecks:
 # Report generation (markdown)
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateReport:
     def test_report_before_checks(self, runner: SecurityHardeningRunner):
         """Report before running checks should say no checks run."""
@@ -224,6 +219,7 @@ class TestGenerateReport:
 # ---------------------------------------------------------------------------
 # fix_issues
 # ---------------------------------------------------------------------------
+
 
 class TestFixIssues:
     @pytest.mark.asyncio

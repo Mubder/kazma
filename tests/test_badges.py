@@ -1,4 +1,5 @@
 """Tests for the Kazma Hub Badge System (badges.py)."""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -72,8 +73,7 @@ def badge_system_with_skill(badge_system: CertificationBadgeSystem) -> Certifica
         )"""
     )
     conn.execute(
-        "INSERT INTO skills (name, author, version, description, license) "
-        "VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO skills (name, author, version, description, license) VALUES (?, ?, ?, ?, ?)",
         ("test-skill", "test-author", "1.0.0", "A test skill", "MIT"),
     )
     conn.commit()
@@ -300,8 +300,7 @@ class TestBadgeStats:
         conn = _sqlite3.connect(badge_system_with_skill.db_path)
         for i in range(3):
             conn.execute(
-                "INSERT INTO skills (name, author, version, description, license) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO skills (name, author, version, description, license) VALUES (?, ?, ?, ?, ?)",
                 (f"skill-{i}", "author", "1.0.0", "desc", "MIT"),
             )
         conn.commit()
@@ -324,8 +323,7 @@ class TestBadgeStats:
 
         conn = _sqlite3.connect(badge_system_with_skill.db_path)
         conn.execute(
-            "INSERT INTO skills (name, author, version, description, license) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO skills (name, author, version, description, license) VALUES (?, ?, ?, ?, ?)",
             ("extra-skill", "author", "1.0.0", "desc", "MIT"),
         )
         conn.commit()

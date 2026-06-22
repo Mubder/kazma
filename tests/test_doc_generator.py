@@ -267,7 +267,7 @@ class TestGenerateApiDocs:
         (mod_dir / "__init__.py").write_text("")
         (mod_dir / "utils.py").write_text(
             '"""Utility functions."""\n\n'
-            'def greet(name: str) -> str:\n'
+            "def greet(name: str) -> str:\n"
             '    """Greet a user."""\n'
             '    return f"Hello {name}"\n'
         )
@@ -349,11 +349,11 @@ class TestBuildSite:
         (src_dir / "__init__.py").write_text("")
         (src_dir / "sample.py").write_text(
             '"""Sample module."""\n\n'
-            'class SampleSkill:\n'
+            "class SampleSkill:\n"
             '    """A sample skill."""\n\n'
-            '    def run(self):\n'
+            "    def run(self):\n"
             '        """Run the skill."""\n'
-            '        pass\n'
+            "        pass\n"
         )
 
         gen = DocumentationGenerator(source_dir=str(src_dir))

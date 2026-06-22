@@ -60,7 +60,7 @@ MODELS: dict[str, list[ModelSpec]] = {
 
 class Router:
     """Routes LLM requests to appropriate providers.
-    
+
     Supports:
     - Model fallback chains
     - Provider priority ordering
@@ -86,7 +86,7 @@ class Router:
 
     def resolve_model(self, model_hint: str) -> ModelSpec:
         """Resolve a model name to a full spec.
-        
+
         Falls back to default if not found.
         """
         for spec in self._model_chains.get(model_hint, []):

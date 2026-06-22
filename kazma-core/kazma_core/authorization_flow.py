@@ -3,6 +3,7 @@
 Handles the full lifecycle of cross-division access requests:
 creation, notification, approval/denial, and temporary access grants.
 """
+
 from __future__ import annotations
 
 import logging
@@ -138,8 +139,12 @@ class AuthorizationFlow:
         target_div_info = self.rbac.divisions[target_division]
         logger.info(
             "Authorization request %s: user=%s wants '%s' on %s/%s (%s)",
-            request_id[:8], user_id, resource, target_division,
-            target_div_info.get("name", target_division), justification,
+            request_id[:8],
+            user_id,
+            resource,
+            target_division,
+            target_div_info.get("name", target_division),
+            justification,
         )
 
         # Log the request
@@ -232,7 +237,9 @@ class AuthorizationFlow:
 
         logger.info(
             "Request %s approved by %s (expires %s)",
-            request_id[:8], approver_id, expires.isoformat(),
+            request_id[:8],
+            approver_id,
+            expires.isoformat(),
         )
 
         return ApprovalResult(
@@ -315,9 +322,9 @@ class AuthorizationFlow:
     async def get_pending_requests(self, division: str | None = None) -> list[AuthorizationRequest]:
         """Get all pending authorization requests, optionally by division."""
         return [
-            r for r in self._requests.values()
-            if r.status == "pending"
-            and (division is None or r.target_division == division)
+            r
+            for r in self._requests.values()
+            if r.status == "pending" and (division is None or r.target_division == division)
         ]
 
     async def check_expired(self) -> list[str]:

@@ -117,8 +117,8 @@ class TestMSATokenizer:
         # Diacritics should be stripped in normalization
         for w in words:
             if w.dialect_meaning:
-                assert "\u064B" not in w.dialect_meaning  # Fathatan
-                assert "\u064E" not in w.dialect_meaning  # Fatha
+                assert "\u064b" not in w.dialect_meaning  # Fathatan
+                assert "\u064e" not in w.dialect_meaning  # Fatha
 
     def test_alef_unification(self):
         text = "أحمد إبراهيم آمن"
@@ -168,6 +168,7 @@ class TestMSATokenizer:
     def test_performance_batch(self):
         """Tokenization should be fast for batch processing."""
         import time
+
         texts = ["هذا تقرير رسمي"] * 100
         start = time.perf_counter()
         for text in texts:

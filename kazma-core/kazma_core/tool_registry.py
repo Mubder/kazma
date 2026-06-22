@@ -54,6 +54,7 @@ class ToolRegistry:
         """Load skills from kazma-skills/manifests/ directory."""
         try:
             from kazma_skills.manifest import SkillManifest
+
             # Resolve the path to kazma-skills/manifests/
             manifest_path = Path(__file__).resolve().parent.parent.parent / "kazma-skills" / "manifests"
             self._skills_manifest = SkillManifest()
@@ -130,14 +131,16 @@ class ToolRegistry:
         """
         definitions = []
         for tool in self._tools.values():
-            definitions.append({
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.input_schema,
-                },
-            })
+            definitions.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.input_schema,
+                    },
+                }
+            )
         return definitions
 
     async def execute(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -201,6 +204,5 @@ class ToolRegistry:
     def list_tools(self) -> list[dict[str, str]]:
         """Return a summary of all registered tools."""
         return [
-            {"name": t.name, "description": t.description[:100], "server": t.server_name}
-            for t in self._tools.values()
+            {"name": t.name, "description": t.description[:100], "server": t.server_name} for t in self._tools.values()
         ]

@@ -111,11 +111,13 @@ class TestDialectDetector:
 
     def test_detect_batch(self):
         d = DialectDetector()
-        results = d.detect_batch([
-            "شلونك وين",
-            "هذا تقرير رسمي",
-            "أنا عايز أعرف",
-        ])
+        results = d.detect_batch(
+            [
+                "شلونك وين",
+                "هذا تقرير رسمي",
+                "أنا عايز أعرف",
+            ]
+        )
         assert len(results) == 3
         assert results[0].dialect == "kw"
         assert results[2].dialect == "eg"

@@ -100,9 +100,7 @@ class CompactionEngine:
         # Step 4: Build fresh messages list with summary and memories as system context
         system_content = self._build_compacted_system(summary, memories)
 
-        compacted_messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system_content}
-        ]
+        compacted_messages: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
 
         # Step 5: Build and return new state
         new_state: AgentState = {
@@ -178,9 +176,7 @@ class CompactionEngine:
                 content = msg.get("content", "")
                 if isinstance(content, list):
                     # Handle structured content (e.g., multimodal)
-                    parts = [
-                        p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"
-                    ]
+                    parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
                     content = " ".join(parts)
                 last_user_msg = content[:500]  # Cap individual message length
                 break
@@ -278,11 +274,7 @@ class CompactionEngine:
 
             # Handle structured content (multimodal)
             if isinstance(content, list):
-                parts = [
-                    p.get("text", "")
-                    for p in content
-                    if isinstance(p, dict) and p.get("type") == "text"
-                ]
+                parts = [p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text"]
                 content = " ".join(parts)
 
             # Cap each message to avoid exceeding LLM context

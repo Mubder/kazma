@@ -128,18 +128,14 @@ class TestDangerousPatterns:
         client = _make_client()
         sb = ToolSandbox(allowed_tools=["*"])
         with pytest.raises(PermissionError, match="dangerous pattern"):
-            await sb.execute(
-                client, "read_file", {"path": "$(cat /etc/passwd)"}
-            )
+            await sb.execute(client, "read_file", {"path": "$(cat /etc/passwd)"})
 
     @pytest.mark.asyncio
     async def test_dangerous_pipe_rm_in_arg(self) -> None:
         client = _make_client()
         sb = ToolSandbox(allowed_tools=["*"])
         with pytest.raises(PermissionError, match="dangerous pattern"):
-            await sb.execute(
-                client, "search", {"query": "foo | rm -rf /"}
-            )
+            await sb.execute(client, "search", {"query": "foo | rm -rf /"})
 
     @pytest.mark.asyncio
     async def test_dangerous_mkfs_in_name(self) -> None:
@@ -153,9 +149,7 @@ class TestDangerousPatterns:
         """Normal tool calls with safe arguments should pass."""
         client = _make_client()
         sb = ToolSandbox(allowed_tools=["web_search"])
-        result = await sb.execute(
-            client, "web_search", {"query": "hello world"}
-        )
+        result = await sb.execute(client, "web_search", {"query": "hello world"})
         assert result == {"content": "ok"}
 
 

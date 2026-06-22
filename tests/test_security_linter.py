@@ -12,6 +12,7 @@ from kazma_core.security.linter import SECURITY_RULES, LintReport, LintResult, R
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def linter() -> SecurityLinter:
     return SecurityLinter()
@@ -81,6 +82,7 @@ def mcp_skill(tmp_path: Path) -> Path:
 # Rule catalogue tests
 # ---------------------------------------------------------------------------
 
+
 class TestSecurityLinterRules:
     def test_security_rules_count(self):
         assert len(SECURITY_RULES) == 13
@@ -105,6 +107,7 @@ class TestSecurityLinterRules:
 # ---------------------------------------------------------------------------
 # Manifest linting
 # ---------------------------------------------------------------------------
+
 
 class TestLintManifest:
     @pytest.mark.asyncio
@@ -141,6 +144,7 @@ class TestLintManifest:
 # ---------------------------------------------------------------------------
 # Code linting
 # ---------------------------------------------------------------------------
+
 
 class TestLintCode:
     @pytest.mark.asyncio
@@ -218,6 +222,7 @@ class TestLintCode:
 # MCP server linting
 # ---------------------------------------------------------------------------
 
+
 class TestLintMCPServers:
     @pytest.mark.asyncio
     async def test_clean_mcp_server(self, linter: SecurityLinter):
@@ -249,6 +254,7 @@ class TestLintMCPServers:
 # Skill-level linting (integration)
 # ---------------------------------------------------------------------------
 
+
 class TestLintSkill:
     @pytest.mark.asyncio
     async def test_lint_skill_clean(self, linter: SecurityLinter, sample_skill: Path):
@@ -276,6 +282,7 @@ class TestLintSkill:
 # ---------------------------------------------------------------------------
 # LintReport
 # ---------------------------------------------------------------------------
+
 
 class TestLintReport:
     def test_report_counts(self):

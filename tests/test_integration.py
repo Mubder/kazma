@@ -1,4 +1,5 @@
 """Integration tests for the Kazma Web UI using FastAPI TestClient."""
+
 from __future__ import annotations
 
 import pytest

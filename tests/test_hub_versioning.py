@@ -13,6 +13,7 @@ from kazma_core.hub.versioning import SkillVersioning
 # parse_version
 # ---------------------------------------------------------------------------
 
+
 class TestParseVersion:
     def test_parse_simple_version(self):
         assert SkillVersioning.parse_version("1.2.3") == (1, 2, 3)
@@ -35,6 +36,7 @@ class TestParseVersion:
 # ---------------------------------------------------------------------------
 # is_compatible
 # ---------------------------------------------------------------------------
+
 
 class TestIsCompatible:
     def test_equal_versions_compatible(self):
@@ -60,6 +62,7 @@ class TestIsCompatible:
 # get_latest
 # ---------------------------------------------------------------------------
 
+
 class TestGetLatest:
     def test_single_version(self):
         assert SkillVersioning.get_latest(["1.0.0"]) == "1.0.0"
@@ -78,6 +81,7 @@ class TestGetLatest:
 # ---------------------------------------------------------------------------
 # resolve_conflicts
 # ---------------------------------------------------------------------------
+
 
 class TestResolveConflicts:
     def _make_manifest(self, name: str, capabilities: list[str] = None) -> SkillManifest:

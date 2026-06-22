@@ -1,4 +1,5 @@
 """Tests for the in-memory TraceStore and WebSocket broadcasting."""
+
 from __future__ import annotations
 
 import time
@@ -53,15 +54,17 @@ class TestTraceStore:
 
     def test_add_llm_trace(self) -> None:
         store = TraceStore()
-        store.add(TraceEntry(
-            timestamp=time.time(),
-            trace_type="llm",
-            label="gpt-4o-mini",
-            status="success",
-            duration_ms=1200.0,
-            tokens=150,
-            cost=0.0015,
-        ))
+        store.add(
+            TraceEntry(
+                timestamp=time.time(),
+                trace_type="llm",
+                label="gpt-4o-mini",
+                status="success",
+                duration_ms=1200.0,
+                tokens=150,
+                cost=0.0015,
+            )
+        )
         stats = store.stats()
         assert stats["total_cost"] == 0.0015
         assert stats["total_tokens"] == 150
@@ -71,13 +74,15 @@ class TestTraceStore:
 
     def test_add_tool_trace(self) -> None:
         store = TraceStore()
-        store.add(TraceEntry(
-            timestamp=time.time(),
-            trace_type="tool",
-            label="web_search",
-            status="success",
-            duration_ms=800.0,
-        ))
+        store.add(
+            TraceEntry(
+                timestamp=time.time(),
+                trace_type="tool",
+                label="web_search",
+                status="success",
+                duration_ms=800.0,
+            )
+        )
         stats = store.stats()
         assert stats["total_tool_calls"] == 1
         assert stats["total_traces"] == 1
@@ -96,13 +101,15 @@ class TestTraceStore:
     def test_max_entries(self) -> None:
         store = TraceStore(max_entries=5)
         for i in range(10):
-            store.add(TraceEntry(
-                timestamp=float(i),
-                trace_type="llm",
-                label=f"trace_{i}",
-                status="success",
-                duration_ms=0,
-            ))
+            store.add(
+                TraceEntry(
+                    timestamp=float(i),
+                    trace_type="llm",
+                    label=f"trace_{i}",
+                    status="success",
+                    duration_ms=0,
+                )
+            )
         assert len(store.recent()) == 5
         # The last 5 entries should be trace_5 through trace_9
         labels = [e.label for e in store.recent()]
@@ -111,10 +118,22 @@ class TestTraceStore:
 
     def test_mixed_types(self) -> None:
         store = TraceStore()
-        store.add(TraceEntry(timestamp=time.time(), trace_type="llm", label="gpt-4o", status="success", duration_ms=100))
-        store.add(TraceEntry(timestamp=time.time(), trace_type="tool", label="file_read", status="success", duration_ms=50))
-        store.add(TraceEntry(timestamp=time.time(), trace_type="state", label="idle → thinking", status="success", duration_ms=0))
-        store.add(TraceEntry(timestamp=time.time(), trace_type="compaction", label="1000 → 500", status="success", duration_ms=0))
+        store.add(
+            TraceEntry(timestamp=time.time(), trace_type="llm", label="gpt-4o", status="success", duration_ms=100)
+        )
+        store.add(
+            TraceEntry(timestamp=time.time(), trace_type="tool", label="file_read", status="success", duration_ms=50)
+        )
+        store.add(
+            TraceEntry(
+                timestamp=time.time(), trace_type="state", label="idle → thinking", status="success", duration_ms=0
+            )
+        )
+        store.add(
+            TraceEntry(
+                timestamp=time.time(), trace_type="compaction", label="1000 → 500", status="success", duration_ms=0
+            )
+        )
         stats = store.stats()
         assert stats["total_llm_calls"] == 1
         assert stats["total_tool_calls"] == 1

@@ -42,17 +42,19 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
                     if t.server_name == name
                 ]
 
-            result.append({
-                "name": name,
-                "transport": s.get("transport", "stdio"),
-                "command": s.get("command", []),
-                "url": s.get("url", ""),
-                "env": s.get("env", {}),
-                "working_dir": s.get("working_dir"),
-                "status": "running" if is_connected else "stopped",
-                "tool_count": len(tools),
-                "tools": tools,
-            })
+            result.append(
+                {
+                    "name": name,
+                    "transport": s.get("transport", "stdio"),
+                    "command": s.get("command", []),
+                    "url": s.get("url", ""),
+                    "env": s.get("env", {}),
+                    "working_dir": s.get("working_dir"),
+                    "status": "running" if is_connected else "stopped",
+                    "tool_count": len(tools),
+                    "tools": tools,
+                }
+            )
         return result
 
     @router.get("/mcp", response_class=HTMLResponse)
@@ -189,9 +191,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         if not hasattr(agent.tools, "_tools"):
             return []
         return [
-            {"name": t.name, "description": t.description}
-            for t in agent.tools._tools.values()
-            if t.server_name == name
+            {"name": t.name, "description": t.description} for t in agent.tools._tools.values() if t.server_name == name
         ]
 
     return router

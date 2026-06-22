@@ -213,9 +213,7 @@ class TestStepSecurityCheck:
         # Create a minimal skill directory
         skill_dir = tmp_path / "test-skill"
         skill_dir.mkdir()
-        (skill_dir / "skill_manifest.yaml").write_text(
-            "name: test\nversion: 1.0.0\nauthor: test\ndescription: test\n"
-        )
+        (skill_dir / "skill_manifest.yaml").write_text("name: test\nversion: 1.0.0\nauthor: test\ndescription: test\n")
         (skill_dir / "main.py").write_text("class TestSkill: pass\n")
 
         wizard.context.selected_skill = {
@@ -328,9 +326,7 @@ class TestStepInstall:
             captured = capsys.readouterr()
 
             assert "Installing test-skill" in captured.out
-            mock_hub.install.assert_called_once_with(
-                "kazma-hub://author/test-skill@1.0.0"
-            )
+            mock_hub.install.assert_called_once_with("kazma-hub://author/test-skill@1.0.0")
 
     @pytest.mark.asyncio
     async def test_install_not_found(self, capsys):

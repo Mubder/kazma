@@ -188,7 +188,9 @@ class KazmaCertification:
             return VerificationResult(valid=False, level="", expiry="", last_verified=last_verified)
 
         if row["revoked"]:
-            return VerificationResult(valid=False, level=row["level"], expiry=row["valid_until"], last_verified=last_verified)
+            return VerificationResult(
+                valid=False, level=row["level"], expiry=row["valid_until"], last_verified=last_verified
+            )
 
         expiry = row["valid_until"]
         try:

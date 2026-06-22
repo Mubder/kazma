@@ -3,6 +3,7 @@
 Comprehensive tests for the TantivySearchBackend including
 indexing, searching, and performance metrics.
 """
+
 import json
 import tempfile
 import time
@@ -14,6 +15,7 @@ import pytest
 # Check if tantivy is available
 try:
     import tantivy
+
     TANTIVY_AVAILABLE = True
 except ImportError:
     TANTIVY_AVAILABLE = False
@@ -45,15 +47,17 @@ def sample_memories():
     """Create multiple sample memories for batch testing."""
     memories = []
     for i in range(10):
-        memories.append(Memory(
-            id=f"test_memory_{i}",
-            content=f"Test memory content {i} with various topics",
-            metadata=json.dumps({"index": i}),
-            timestamp=int(time.time()),
-            source="test_source",
-            relevance=0.5 + (i * 0.05),
-            division="engineering" if i % 2 == 0 else "finance",
-        ))
+        memories.append(
+            Memory(
+                id=f"test_memory_{i}",
+                content=f"Test memory content {i} with various topics",
+                metadata=json.dumps({"index": i}),
+                timestamp=int(time.time()),
+                source="test_source",
+                relevance=0.5 + (i * 0.05),
+                division="engineering" if i % 2 == 0 else "finance",
+            )
+        )
     return memories
 
 
@@ -87,6 +91,7 @@ class TestTantivySearchBackend:
 
         # Run async test
         import asyncio
+
         doc_id = asyncio.run(backend.index_memory(sample_memory))
 
         assert doc_id == sample_memory.id
@@ -97,6 +102,7 @@ class TestTantivySearchBackend:
         backend = TantivySearchBackend(temp_index_path)
 
         import asyncio
+
         doc_ids = asyncio.run(backend.index_batch(sample_memories))
 
         assert len(doc_ids) == len(sample_memories)
@@ -197,7 +203,7 @@ class TestTantivySearchBackend:
 class TestTantivySearchBackendImportError:
     """Test behavior when tantivy is not available."""
 
-    @patch('kazma_memory.tantivy_backend.TANTIVY_AVAILABLE', False)
+    @patch("kazma_memory.tantivy_backend.TANTIVY_AVAILABLE", False)
     def test_init_raises_import_error(self, temp_index_path):
         """Test that initialization raises ImportError when tantivy not available."""
         with pytest.raises(ImportError) as excinfo:

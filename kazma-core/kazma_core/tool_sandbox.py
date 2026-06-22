@@ -105,9 +105,7 @@ class ToolSandbox:
                 if isinstance(value, str):
                     for pat in _DANGEROUS_PATTERNS:
                         if pat.search(value):
-                            raise PermissionError(
-                                f"Argument '{key}' contains dangerous pattern in tool '{tool_name}'"
-                            )
+                            raise PermissionError(f"Argument '{key}' contains dangerous pattern in tool '{tool_name}'")
 
     def _check_denied(self, tool_name: str) -> None:
         if tool_name in self.denied:

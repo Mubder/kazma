@@ -16,9 +16,11 @@ logger = logging.getLogger(__name__)
 
 # ── Data models ───────────────────────────────────────────────────────
 
+
 @dataclass
 class AgentRequest:
     """Incoming request to the agent."""
+
     text: str
     session_id: str = ""
     user_id: str = ""
@@ -28,6 +30,7 @@ class AgentRequest:
 @dataclass
 class AgentResponse:
     """Response from the agent."""
+
     text: str
     dialect: str  # "kw", "msa", etc.
     confidence: float
@@ -36,6 +39,7 @@ class AgentResponse:
 
 
 # ── Pipelines ─────────────────────────────────────────────────────────
+
 
 class BasePipeline:
     """Base class for dialect-specific pipelines."""
@@ -83,11 +87,7 @@ class KuwaitiPipeline(BasePipeline):
             "total_tokens": len(token_result.tokens),
             "dialect_markers_found": len(dialect_tokens),
             "code_switch_words": len(code_switch),
-            "dialect_meanings": {
-                t.text: t.dialect_meaning
-                for t in dialect_tokens
-                if t.dialect_meaning
-            },
+            "dialect_meanings": {t.text: t.dialect_meaning for t in dialect_tokens if t.dialect_meaning},
         }
 
         return AgentResponse(
@@ -122,10 +122,7 @@ class MSAPipeline(BasePipeline):
         metadata: dict[str, Any] = {
             "pipeline": self.name,
             "total_tokens": len(token_result.tokens),
-            "normalized_words": sum(
-                1 for t in token_result.tokens
-                if t.dialect_meaning is not None
-            ),
+            "normalized_words": sum(1 for t in token_result.tokens if t.dialect_meaning is not None),
         }
 
         return AgentResponse(
@@ -138,6 +135,7 @@ class MSAPipeline(BasePipeline):
 
 
 # ── Router ────────────────────────────────────────────────────────────
+
 
 class DialectRouter:
     """Routes requests to appropriate processing pipeline.

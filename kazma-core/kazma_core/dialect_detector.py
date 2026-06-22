@@ -13,9 +13,11 @@ logger = logging.getLogger(__name__)
 
 # ── Data models ───────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True, slots=True)
 class DialectResult:
     """Result of dialect detection."""
+
     dialect: str  # "kw", "eg", "lb", "ma", "msa"
     confidence: float  # 0.0 – 1.0
     alternatives: list[tuple[str, float]] = field(default_factory=list)
@@ -27,82 +29,122 @@ class DialectResult:
 # the detector uses presence/absence, not translation).
 
 _KUWAITI_MARKERS: dict[str, str] = {
-    "شلونك": "كيف حالك",        # how are you
-    "وين": "أين",               # where
-    "ليش": "لماذا",             # why
-    "هلا": "الآن",              # now
-    "تمام": "جيد",              # okay
-    "اخوي": "أخي",             # my brother (informal address)
-    "ياخوي": "يا أخي",          # hey brother
-    "شنو": "ماذا",             # what (Gulf)
-    "شلون": "كيف",             # how (Gulf)
-    "هجم": "تعال",             # come (Gulf)
-    "يالله": "هيا بنا",            # come on
-    "واجد": "كثير",             # a lot (Gulf)
-    "خوش": "جيد",               # good (Gulf)
-    "زينة": "جميلة",            # beautiful (Gulf)
-    "abaloch": "أمامك",         # in front of you (transliterated)
-    "yalla": "هيا",             # let's go
-    "wallah": "والله",          # I swear
-    "habibi": "حبيبي",          # my love
+    "شلونك": "كيف حالك",  # how are you
+    "وين": "أين",  # where
+    "ليش": "لماذا",  # why
+    "هلا": "الآن",  # now
+    "تمام": "جيد",  # okay
+    "اخوي": "أخي",  # my brother (informal address)
+    "ياخوي": "يا أخي",  # hey brother
+    "شنو": "ماذا",  # what (Gulf)
+    "شلون": "كيف",  # how (Gulf)
+    "هجم": "تعال",  # come (Gulf)
+    "يالله": "هيا بنا",  # come on
+    "واجد": "كثير",  # a lot (Gulf)
+    "خوش": "جيد",  # good (Gulf)
+    "زينة": "جميلة",  # beautiful (Gulf)
+    "abaloch": "أمامك",  # in front of you (transliterated)
+    "yalla": "هيا",  # let's go
+    "wallah": "والله",  # I swear
+    "habibi": "حبيبي",  # my love
     "allah yisa'ak": "الله يساعدك",  # God help you
-    "shay": "شيء",              # something (Gulf)
-    "mako": "لا يوجد",          # there isn't (Gulf)
-    "aku": "يوجد",              # there is (Gulf)
-    "esh": "ماذا",              # what (Gulf short form)
-    "aboush": "أبو",            # father of (Gulf)
-    "daesh": "ماذا",            # what (Gulf variant)
-    "gal": "قال",               # he said (Gulf)
-    "agool": "أقول",            # I say (Gulf)
-    "ba'a": "باع",              # he sold (Gulf)
-    "yishtgil": "يشتغل",       # he works (Gulf pronunciation)
-    "shaghal": "مشغول",         # busy (Gulf)
-    "wain": "أين",              # where (variant)
-    "ainak": "عينك",            # your eye / watch out
-    "thuban": "ثعبان",          # snake
-    "bait": "بيت",              # house (Gulf)
-    "sawalef": "قصص",           # stories (Gulf plural)
-    "rawain": "روائح",          # smells (Gulf)
-    "darse": "درس",             # lesson (Gulf)
-    "jareeda": "جريدة",         # newspaper (Gulf)
-    "ma'ana": "معنا",           # with us
-    "ma'ak": "معك",             # with you
-    "ma'ah": "معه",             # with him
-    "rah": "سأ",                 # I will (Gulf prefix)
-    "aruh": "أذهب",             # I go (Gulf)
-    "arid": "أريد",             # I want (Gulf)
-    "areed": "أريد",            # I want (variant)
-    "ayesh": "عايش",            # living (Gulf)
-    "tawwal": "طويل",           # long (Gulf)
-    "bukrah": "غداً",           # tomorrow (Gulf)
-    "yume": "يوم",              # day (Gulf)
-    "mbarheen": "مبروك",        # congratulations
-    "abrooj": "عباءة",          # abaya (Gulf)
-    "dishdash": "ثوب",          # thobe (Gulf)
+    "shay": "شيء",  # something (Gulf)
+    "mako": "لا يوجد",  # there isn't (Gulf)
+    "aku": "يوجد",  # there is (Gulf)
+    "esh": "ماذا",  # what (Gulf short form)
+    "aboush": "أبو",  # father of (Gulf)
+    "daesh": "ماذا",  # what (Gulf variant)
+    "gal": "قال",  # he said (Gulf)
+    "agool": "أقول",  # I say (Gulf)
+    "ba'a": "باع",  # he sold (Gulf)
+    "yishtgil": "يشتغل",  # he works (Gulf pronunciation)
+    "shaghal": "مشغول",  # busy (Gulf)
+    "wain": "أين",  # where (variant)
+    "ainak": "عينك",  # your eye / watch out
+    "thuban": "ثعبان",  # snake
+    "bait": "بيت",  # house (Gulf)
+    "sawalef": "قصص",  # stories (Gulf plural)
+    "rawain": "روائح",  # smells (Gulf)
+    "darse": "درس",  # lesson (Gulf)
+    "jareeda": "جريدة",  # newspaper (Gulf)
+    "ma'ana": "معنا",  # with us
+    "ma'ak": "معك",  # with you
+    "ma'ah": "معه",  # with him
+    "rah": "سأ",  # I will (Gulf prefix)
+    "aruh": "أذهب",  # I go (Gulf)
+    "arid": "أريد",  # I want (Gulf)
+    "areed": "أريد",  # I want (variant)
+    "ayesh": "عايش",  # living (Gulf)
+    "tawwal": "طويل",  # long (Gulf)
+    "bukrah": "غداً",  # tomorrow (Gulf)
+    "yume": "يوم",  # day (Gulf)
+    "mbarheen": "مبروك",  # congratulations
+    "abrooj": "عباءة",  # abaya (Gulf)
+    "dishdash": "ثوب",  # thobe (Gulf)
 }
 
 # Egyptian dialect markers
 _EGYPTIAN_MARKERS: set[str] = {
-    "أنا عايز", "عايز", "إيه", "ليه", "أيوة", "مفيش", "بتاع",
-    "يا عم", "يا حج", "أهلاً بيك", "ماشي", "حلوة", "يا سلام",
-    "كده", "ألفين", "هنا", "بعدين", "طب", "يلا",
+    "أنا عايز",
+    "عايز",
+    "إيه",
+    "ليه",
+    "أيوة",
+    "مفيش",
+    "بتاع",
+    "يا عم",
+    "يا حج",
+    "أهلاً بيك",
+    "ماشي",
+    "حلوة",
+    "يا سلام",
+    "كده",
+    "ألفين",
+    "هنا",
+    "بعدين",
+    "طب",
+    "يلا",
 }
 
 # Levantine dialect markers
 _LEVANTINE_MARKERS: set[str] = {
-    "شو", "هيك", "عم", "بكرا", "إذا", "خليني", "بده",
-    "كثير", "يا زلمة", "يا عمو", "ما في", "هلق",
-    "هون", "عنجد", "منيح", "زيتونة",
+    "شو",
+    "هيك",
+    "عم",
+    "بكرا",
+    "إذا",
+    "خليني",
+    "بده",
+    "كثير",
+    "يا زلمة",
+    "يا عمو",
+    "ما في",
+    "هلق",
+    "هون",
+    "عنجد",
+    "منيح",
+    "زيتونة",
 }
 
 # Maghrebi dialect markers
 _MAGHREBI_MARKERS: set[str] = {
-    "واش", "باش", "دابا", "شحال", "غادي", "تي", "vere",
-    "درت", "بزاف", "هاك", "واخا", "ساهلة",
+    "واش",
+    "باش",
+    "دابا",
+    "شحال",
+    "غادي",
+    "تي",
+    "vere",
+    "درت",
+    "بزاف",
+    "هاك",
+    "واخا",
+    "ساهلة",
 }
 
 
 # ── Rule-based detector ──────────────────────────────────────────────
+
 
 def _rule_based_detect(text: str) -> DialectResult:
     """Rule-based dialect detection using keyword/pattern matching."""
@@ -144,9 +186,20 @@ def _rule_based_detect(text: str) -> DialectResult:
 
     # Additional MSA indicators: formal constructions
     msa_formal = [
-        "الذي", "التي", "هذا", "هذه", "ذلک", "الذين",
-        "المملكة العربية السعودية", "الجمهورية", "الدولة",
-        "بناءً على", "وفقاً", "إثر", "خلال", "بموجب",
+        "الذي",
+        "التي",
+        "هذا",
+        "هذه",
+        "ذلک",
+        "الذين",
+        "المملكة العربية السعودية",
+        "الجمهورية",
+        "الدولة",
+        "بناءً على",
+        "وفقاً",
+        "إثر",
+        "خلال",
+        "بموجب",
     ]
     for pattern in msa_formal:
         if pattern in text:
@@ -181,6 +234,7 @@ def _rule_based_detect(text: str) -> DialectResult:
 
 # ── Fasttext-based detector ──────────────────────────────────────────
 
+
 def _fasttext_detect(text: str, model) -> DialectResult:
     """Detect dialect using fasttext model."""
     label_scores = model.predict(text, k=5)
@@ -203,6 +257,7 @@ def _fasttext_detect(text: str, model) -> DialectResult:
 
 
 # ── Public API ───────────────────────────────────────────────────────
+
 
 class DialectDetector:
     """Detects Arabic dialect from input text.
@@ -228,6 +283,7 @@ class DialectDetector:
         self._loaded = True
         try:
             import fasttext  # type: ignore[import-untyped]
+
             self._model = fasttext.load_model(self.model_path)
             logger.info("Loaded fasttext dialect model from %s", self.model_path)
         except ImportError:

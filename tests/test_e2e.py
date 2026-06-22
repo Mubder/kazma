@@ -1,4 +1,5 @@
 """End-to-end tests for the Kazma agent — full workflow verification."""
+
 from __future__ import annotations
 
 from kazma_core.agent import KazmaAgent, load_config

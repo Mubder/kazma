@@ -4,6 +4,7 @@ Provides tamper-evident audit trails for RBAC and division sandboxing.
 All entries are timestamped and stored in a SQLite database for
 compliance and forensic review.
 """
+
 from __future__ import annotations
 
 import logging

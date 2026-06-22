@@ -54,17 +54,19 @@ def _get_trace_data() -> list[dict[str, Any]]:
             "warning": "badge-standard",
         }.get(entry.status, "badge-basic")
 
-        traces.append({
-            "time": t,
-            "trace_type": entry.trace_type,
-            "label": entry.label,
-            "status": entry.status,
-            "badge_class": badge_class,
-            "duration_ms": f"{entry.duration_ms:.0f}",
-            "tokens": entry.tokens,
-            "cost": f"${entry.cost:.4f}",
-            "details": entry.details,
-        })
+        traces.append(
+            {
+                "time": t,
+                "trace_type": entry.trace_type,
+                "label": entry.label,
+                "status": entry.status,
+                "badge_class": badge_class,
+                "duration_ms": f"{entry.duration_ms:.0f}",
+                "tokens": entry.tokens,
+                "cost": f"${entry.cost:.4f}",
+                "details": entry.details,
+            }
+        )
     return traces
 
 

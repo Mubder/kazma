@@ -50,11 +50,11 @@ def _fix_arabic(text: str) -> str:
 def _has_arabic(text: str) -> bool:
     """Check if text contains Arabic script characters."""
     return any(
-        '\u0600' <= c <= '\u06FF'
-        or '\u0750' <= c <= '\u077F'
-        or '\u08A0' <= c <= '\u08FF'
-        or '\uFB50' <= c <= '\uFDFF'
-        or '\uFE70' <= c <= '\uFEFF'
+        "\u0600" <= c <= "\u06ff"
+        or "\u0750" <= c <= "\u077f"
+        or "\u08a0" <= c <= "\u08ff"
+        or "\ufb50" <= c <= "\ufdff"
+        or "\ufe70" <= c <= "\ufeff"
         for c in text
     )
 
@@ -74,9 +74,7 @@ class ArabicInput(Input):
     def _value(self) -> RichText:
         """Value rendered with Arabic reshaping for display."""
         if self.password:
-            return RichText(
-                "•" * len(self.value), no_wrap=True, overflow="ignore", end=""
-            )
+            return RichText("•" * len(self.value), no_wrap=True, overflow="ignore", end="")
 
         raw = self.value
         display = _fix_arabic(raw) if _has_arabic(raw) else raw
@@ -194,9 +192,7 @@ class KazmaTUI(App):
             status = self.query_one("#status-bar", Static)
             tool_info = f" 🔧 {n_tools} tools" if n_tools else ""
             model_name = self._agent.llm_config.model
-            status.update(
-                _fix_arabic(f" 🇰🇼 كاظمه v{self._config.version}  •  {model_name}{tool_info}")
-            )
+            status.update(_fix_arabic(f" 🇰🇼 كاظمه v{self._config.version}  •  {model_name}{tool_info}"))
             log.write(_fix_arabic(f"[dim]Connected to {model_name}{tool_info}[/dim]"))
             log.write("")
         except Exception as e:

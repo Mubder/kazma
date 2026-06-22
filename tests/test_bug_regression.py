@@ -3,6 +3,7 @@
 Each test corresponds to a specific bug from the audit report.
 If any of these tests fail, the corresponding bug has regressed.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +31,7 @@ class TestBug01_PruneFetchesAllCheckpoints:
 
         # Create 200 checkpoints
         from kazma_core.state import initial_state
+
         for i in range(200):
             state = initial_state()
             state["messages"] = [{"role": "user", "content": f"msg {i}"}]
@@ -56,6 +58,7 @@ class TestBug02_RecoveryFieldName:
     def test_state_has_last_cp_id_not_checkpoint_id(self):
         """AgentState uses 'last_cp_id', not 'checkpoint_id'."""
         from kazma_core.state import initial_state
+
         state = initial_state()
         assert "last_cp_id" in state
         assert "checkpoint_id" not in state
@@ -77,6 +80,7 @@ class TestBug02_RecoveryFieldName:
 
         with caplog.at_level(logging.INFO):
             from kazma_core.recovery import recover_on_startup
+
             recovered = await recover_on_startup(db_path=db_path)
 
         # Should log the actual checkpoint ID, not None
@@ -92,6 +96,7 @@ class TestBug03_ArabicWordBoundary:
     def test_arabic_slang_is_formalized(self):
         """شلونك must be replaced with كيف حالك."""
         from kazma_core.tone_adapter import ToneAdapter
+
         adapter = ToneAdapter()
         result = adapter._formalize_text("شلونك اليوم", "kw")
         assert "شلونك" not in result
@@ -100,6 +105,7 @@ class TestBug03_ArabicWordBoundary:
     def test_arabic_boundary_does_not_match_substring(self):
         """Must not replace شلونك inside a longer word."""
         from kazma_core.tone_adapter import ToneAdapter
+
         adapter = ToneAdapter()
         # If the word is part of a longer string, it should still match
         # (Arabic doesn't have compound words like Latin)
@@ -110,6 +116,7 @@ class TestBug03_ArabicWordBoundary:
     def test_all_kuwaiti_formalizations_work(self):
         """Every entry in _KUWAITI_FORMAL_MAP must actually be replaced."""
         from kazma_core.tone_adapter import _KUWAITI_FORMAL_MAP, ToneAdapter
+
         adapter = ToneAdapter()
         for informal, formal in _KUWAITI_FORMAL_MAP.items():
             result = adapter._formalize_text(informal, "kw")
@@ -125,21 +132,22 @@ class TestBug04_NoChineseInKuwaitiMarkers:
     def test_no_chinese_characters_in_markers(self):
         """No Chinese characters should appear in _KUWAITI_MARKERS values."""
         from kazma_core.dialect_detector import _KUWAITI_MARKERS
-        chinese_re = re.compile(r'[\u4e00-\u9fff]')
+
+        chinese_re = re.compile(r"[\u4e00-\u9fff]")
         for key, value in _KUWAITI_MARKERS.items():
-            assert not chinese_re.search(value), (
-                f"Chinese character found in _KUWAITI_MARKERS['{key}'] = '{value}'"
-            )
+            assert not chinese_re.search(value), f"Chinese character found in _KUWAITI_MARKERS['{key}'] = '{value}'"
 
     def test_yalla_maps_to_arabic(self):
         """يالله should map to Arabic, not Chinese."""
         from kazma_core.dialect_detector import _KUWAITI_MARKERS
+
         assert "يالله" in _KUWAITI_MARKERS
         assert _KUWAITI_MARKERS["يالله"] == "هيا بنا"
 
     def test_no_chinchin_marker(self):
         """chinchin (Japanese slang) should not be in Kuwaiti markers."""
         from kazma_core.dialect_detector import _KUWAITI_MARKERS
+
         assert "chinchin" not in _KUWAITI_MARKERS
 
 
@@ -151,11 +159,10 @@ class TestBug05_NoChineseInPacingPatterns:
 
     def test_no_chinese_in_transaction_patterns(self):
         from kazma_core.pacing import _TRANSACTION_PATTERNS
-        chinese_re = re.compile(r'[\u4e00-\u9fff]')
+
+        chinese_re = re.compile(r"[\u4e00-\u9fff]")
         for pattern in _TRANSACTION_PATTERNS:
-            assert not chinese_re.search(pattern), (
-                f"Chinese character found in _TRANSACTION_PATTERNS: '{pattern}'"
-            )
+            assert not chinese_re.search(pattern), f"Chinese character found in _TRANSACTION_PATTERNS: '{pattern}'"
 
 
 # ── Bug 6: Dead code _ISLAMIC_EVENTS_GREGORIAN ─────────────────────────────
@@ -166,7 +173,8 @@ class TestBug06_NoDeadGregorianEvents:
 
     def test_dead_code_removed(self):
         import kazma_core.cultural_context as cc
-        assert not hasattr(cc, '_ISLAMIC_EVENTS_GREGORIAN'), (
+
+        assert not hasattr(cc, "_ISLAMIC_EVENTS_GREGORIAN"), (
             "_ISLAMIC_EVENTS_GREGORIAN is dead code — should be removed"
         )
 
@@ -180,6 +188,7 @@ class TestBug07_BusinessAppropriateUsesTestableHour:
     def test_business_appropriate_during_iftar(self):
         """During Ramadan iftar time (18:00 Kuwait), business is not appropriate."""
         from kazma_core.cultural_context import CulturalContext
+
         # Ramadan 2026: approx March 1 - March 30
         ctx = CulturalContext(now=date(2026, 3, 15))
         if ctx.state.is_ramadan:
@@ -188,6 +197,7 @@ class TestBug07_BusinessAppropriateUsesTestableHour:
     def test_business_appropriate_outside_iftar(self):
         """Outside iftar hours, business is appropriate even in Ramadan."""
         from kazma_core.cultural_context import CulturalContext
+
         ctx = CulturalContext(now=date(2026, 3, 15))
         if ctx.state.is_ramadan:
             assert ctx.is_business_appropriate(current_hour=10) is True
@@ -195,6 +205,7 @@ class TestBug07_BusinessAppropriateUsesTestableHour:
     def test_business_appropriate_non_ramadan(self):
         """Outside Ramadan, business is always appropriate."""
         from kazma_core.cultural_context import CulturalContext
+
         ctx = CulturalContext(now=date(2026, 7, 15))
         assert ctx.is_business_appropriate(current_hour=18) is True
 
@@ -207,12 +218,11 @@ class TestBug08_DBPathAligned:
 
     def test_paths_aligned(self):
         from kazma_core.agent import CHECKPOINT_DB
+
         with open("kazma.yaml") as f:
             cfg = yaml.safe_load(f)
         yaml_path = cfg["storage"]["path"]
-        assert yaml_path == CHECKPOINT_DB, (
-            f"YAML path '{yaml_path}' != code path '{CHECKPOINT_DB}'"
-        )
+        assert yaml_path == CHECKPOINT_DB, f"YAML path '{yaml_path}' != code path '{CHECKPOINT_DB}'"
 
 
 # ── Bug 9: MSA score biased to 0 ──────────────────────────────────────────
@@ -224,6 +234,7 @@ class TestBug09_MSAScoreNotZero:
     def test_msa_text_with_one_dialect_marker_not_ignored(self):
         """A primarily MSA text with one Kuwaiti word should still have MSA score."""
         from kazma_core.dialect_detector import _rule_based_detect
+
         # Mostly MSA with one casual Kuwaiti word
         result = _rule_based_detect("الذي قال انه شلونك اليوم")
         # MSA should not be zero — it should at least be competitive
@@ -232,12 +243,14 @@ class TestBug09_MSAScoreNotZero:
     def test_pure_msa_detected(self):
         """Pure MSA text should be detected as MSA."""
         from kazma_core.dialect_detector import _rule_based_detect
+
         result = _rule_based_detect("بناءً على ذلك، المملكة العربية السعودية قررت")
         assert result.dialect == "msa"
 
     def test_pure_kuwaiti_detected(self):
         """Pure Kuwaiti text should be detected as Kuwaiti."""
         from kazma_core.dialect_detector import _rule_based_detect
+
         result = _rule_based_detect("شلونك خوي شنو الاخبار")
         assert result.dialect == "kw"
 
@@ -302,9 +315,7 @@ class TestBug11_RequestIDConcurrency:
 
         tasks = [get_id() for _ in range(100)]
         results = await asyncio.gather(*tasks)
-        assert len(set(results)) == 100, (
-            f"Expected 100 unique IDs from concurrent async, got {len(set(results))}"
-        )
+        assert len(set(results)) == 100, f"Expected 100 unique IDs from concurrent async, got {len(set(results))}"
 
 
 # ── Bug 12: swarm.py type annotation ──────────────────────────────────────
@@ -318,6 +329,7 @@ class TestBug12_SwarmTypeAnnotation:
         import inspect
 
         from kazma_core.delegation.swarm import SwarmIntelligence
+
         source = inspect.getsource(SwarmIntelligence.parallel_execute)
         assert "DelegationResult | None" in source or "Optional[DelegationResult]" in source
 
@@ -330,6 +342,7 @@ class TestBug13_AgentsDictInInit:
 
     def test_agents_exists_after_init(self):
         from kazma_core.hub.registry import KazmaHub
+
         hub = KazmaHub(registry_path="/tmp/test_bug13.db")
         assert hasattr(hub, "_agents")
         assert isinstance(hub._agents, dict)
@@ -339,6 +352,7 @@ class TestBug13_AgentsDictInInit:
     async def test_list_agents_works_before_register(self):
         """list_agents() must return [] before any register_agent() call."""
         from kazma_core.hub.registry import KazmaHub
+
         hub = KazmaHub(registry_path="/tmp/test_bug13.db")
         agents = await hub.list_agents()
         assert agents == []
@@ -352,13 +366,15 @@ class TestBug14_NoGermanEnglishInFarewells:
 
     def test_no_german_in_farewells(self):
         from kazma_core.pacing import _FAREWELL_PATTERNS
+
         for pattern in _FAREWELL_PATTERNS:
             assert "Wiedersehen" not in pattern, f"German found: '{pattern}'"
             assert "ttyl" not in pattern.lower(), f"English slang found: '{pattern}'"
 
     def test_farewells_are_arabic(self):
         from kazma_core.pacing import _FAREWELL_PATTERNS
-        arabic_re = re.compile(r'[\u0600-\u06ff]')
+
+        arabic_re = re.compile(r"[\u0600-\u06ff]")
         for pattern in _FAREWELL_PATTERNS:
             assert arabic_re.search(pattern), f"Non-Arabic farewell: '{pattern}'"
 
@@ -374,6 +390,7 @@ class TestBug15_ImportDetectionWorks:
         import inspect
 
         from kazma_core.hub.validator import SkillValidator
+
         source = inspect.getsource(SkillValidator._scan_for_security_issues)
         # Must use lookaround, not \b
         assert r"(?<!\w)" in source or r"(?<!\w)__import__(?!\w)" in source
@@ -396,15 +413,15 @@ class TestBug16_NoSyncSqliteInConstructor:
         import inspect
 
         from kazma_core.hub.registry import KazmaHub
+
         source = inspect.getsource(KazmaHub.__init__)
-        assert "sqlite3.connect" not in source, (
-            "Constructor still uses synchronous sqlite3.connect"
-        )
+        assert "sqlite3.connect" not in source, "Constructor still uses synchronous sqlite3.connect"
 
     @pytest.mark.asyncio
     async def test_tables_created_on_first_use(self, tmp_path):
         """Tables should be created on first async operation."""
         from kazma_core.hub.registry import KazmaHub
+
         hub = KazmaHub(registry_path=str(tmp_path / "test.db"))
         # This triggers _get_conn which should create tables
         results = await hub.search()
@@ -422,10 +439,9 @@ class TestBug17_NotifyUsesExecutor:
         import inspect
 
         from kazma_core.mcp_client import MCPClient
+
         source = inspect.getsource(MCPClient._notify)
-        assert "run_in_executor" in source, (
-            "_notify() still uses synchronous stdin.write"
-        )
+        assert "run_in_executor" in source, "_notify() still uses synchronous stdin.write"
         assert "proc.stdin.write" in source
 
 
@@ -455,6 +471,7 @@ class TestBug19_TracingReadsConfig:
         import inspect
 
         from kazma_core.tracing import KazmaTracer
+
         sig = inspect.signature(KazmaTracer.__init__)
         assert "config" in sig.parameters
 
@@ -462,6 +479,7 @@ class TestBug19_TracingReadsConfig:
         import inspect
 
         from kazma_core.tracing import create_tracer
+
         sig = inspect.signature(create_tracer)
         assert "config" in sig.parameters
 
@@ -470,10 +488,9 @@ class TestBug19_TracingReadsConfig:
         import inspect
 
         from kazma_core.tracing import KazmaTracer
+
         source = inspect.getsource(KazmaTracer._init_langfuse)
-        assert "self._config.get" in source, (
-            "Langfuse init still only reads from env vars"
-        )
+        assert "self._config.get" in source, "Langfuse init still only reads from env vars"
 
 
 # ── Bug 20: ContextAuthority not wired into agent.py ──────────────────────
@@ -484,21 +501,22 @@ class TestBug20_ContextAuthorityWired:
 
     def test_agent_has_authority_attribute(self):
         from kazma_core.agent import KazmaAgent
+
         agent = KazmaAgent()
         assert hasattr(agent, "authority")
         from kazma_core.authority import ContextAuthority
+
         assert isinstance(agent.authority, ContextAuthority)
 
     @pytest.mark.asyncio
     async def test_run_calls_check_and_enforce(self):
         """run() must invoke the authority check."""
         from kazma_core.agent import KazmaAgent
+
         agent = KazmaAgent()
 
         # Patch check_and_enforce to verify it's called
-        with patch.object(
-            agent.authority, "check_and_enforce", new_callable=AsyncMock
-        ) as mock_check:
+        with patch.object(agent.authority, "check_and_enforce", new_callable=AsyncMock) as mock_check:
             mock_check.return_value = {
                 "messages": [{"role": "user", "content": "test"}],
                 "tool_results": {},

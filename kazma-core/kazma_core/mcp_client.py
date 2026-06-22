@@ -140,11 +140,14 @@ class MCPClient:
             raise MCPConnectionError(f"Unsupported transport: {cfg.transport}")
 
         # MCP handshake: send initialize, then initialized notification
-        result = await self._send("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {"tools": {"listChanged": False}},
-            "clientInfo": {"name": "kazma-mcp-client", "version": "0.1.0"},
-        })
+        result = await self._send(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {"listChanged": False}},
+                "clientInfo": {"name": "kazma-mcp-client", "version": "0.1.0"},
+            },
+        )
         if not isinstance(result, dict):
             raise MCPConnectionError("Server returned non-dict initialize result")
 

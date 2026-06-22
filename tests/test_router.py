@@ -56,11 +56,13 @@ class TestDualEngineTokenizer:
         assert result.dialect.dialect == "msa"
 
     def test_batch_tokenization(self):
-        results = self.tok.tokenize_batch([
-            "شلونك وين",
-            "هذا تقرير",
-            "Meeting الحين",
-        ])
+        results = self.tok.tokenize_batch(
+            [
+                "شلونك وين",
+                "هذا تقرير",
+                "Meeting الحين",
+            ]
+        )
         assert len(results) == 3
         assert results[0].is_kuwaiti
         assert results[1].is_msa
@@ -136,6 +138,7 @@ class TestDialectRouter:
     def test_register_custom_pipeline(self):
         class CustomPipeline(BasePipeline):
             name = "custom"
+
             async def execute(self, request, token_result):
                 return AgentResponse(
                     text=request.text,
@@ -174,6 +177,7 @@ class TestEndToEnd:
     async def test_performance_route(self):
         """Routing should be fast."""
         import time
+
         req = AgentRequest(text="شلونك وين ليش هلا تمام خوش")
         start = time.perf_counter()
         resp = await self.router.route(req)

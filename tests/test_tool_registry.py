@@ -25,10 +25,20 @@ class TestToolRegistry:
 
         mock_client = AsyncMock()
         mock_client.connect = AsyncMock(return_value=True)
-        mock_client.list_tools = AsyncMock(return_value=[
-            {"name": "search", "description": "Search the web", "inputSchema": {"type": "object", "properties": {"q": {"type": "string"}}}},
-            {"name": "fetch", "description": "Fetch a URL", "inputSchema": {"type": "object", "properties": {"url": {"type": "string"}}}},
-        ])
+        mock_client.list_tools = AsyncMock(
+            return_value=[
+                {
+                    "name": "search",
+                    "description": "Search the web",
+                    "inputSchema": {"type": "object", "properties": {"q": {"type": "string"}}},
+                },
+                {
+                    "name": "fetch",
+                    "description": "Fetch a URL",
+                    "inputSchema": {"type": "object", "properties": {"url": {"type": "string"}}},
+                },
+            ]
+        )
         mock_client.connected = True
 
         with patch("kazma_core.tool_registry.MCPClient", return_value=mock_client):
@@ -72,9 +82,11 @@ class TestToolRegistry:
 
         mock_client = AsyncMock()
         mock_client.connected = True
-        mock_client.call_tool = AsyncMock(return_value={
-            "content": [{"type": "text", "text": "Search results here"}],
-        })
+        mock_client.call_tool = AsyncMock(
+            return_value={
+                "content": [{"type": "text", "text": "Search results here"}],
+            }
+        )
 
         registry._clients["web"] = mock_client
         registry._tools["search"] = RegisteredTool(
@@ -103,7 +115,10 @@ class TestToolRegistry:
 
         registry._clients["web"] = mock_client
         registry._tools["search"] = RegisteredTool(
-            name="search", description="", input_schema={}, server_name="web",
+            name="search",
+            description="",
+            input_schema={},
+            server_name="web",
         )
 
         result = await registry.execute("search", {})
@@ -119,7 +134,10 @@ class TestToolRegistry:
 
         registry._clients["web"] = mock_client
         registry._tools["search"] = RegisteredTool(
-            name="search", description="", input_schema={}, server_name="web",
+            name="search",
+            description="",
+            input_schema={},
+            server_name="web",
         )
 
         result = await registry.execute("search", {})
@@ -133,7 +151,10 @@ class TestToolRegistry:
         mock_client.disconnect = AsyncMock()
         registry._clients["web"] = mock_client
         registry._tools["search"] = RegisteredTool(
-            name="search", description="", input_schema={}, server_name="web",
+            name="search",
+            description="",
+            input_schema={},
+            server_name="web",
         )
 
         await registry.disconnect_all()
@@ -144,7 +165,10 @@ class TestToolRegistry:
     def test_list_tools(self) -> None:
         registry = ToolRegistry()
         registry._tools["search"] = RegisteredTool(
-            name="search", description="Search the web for information", input_schema={}, server_name="web",
+            name="search",
+            description="Search the web for information",
+            input_schema={},
+            server_name="web",
         )
         tools = registry.list_tools()
         assert len(tools) == 1

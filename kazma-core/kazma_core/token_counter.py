@@ -29,9 +29,7 @@ class TokenCounter:
                 logger.debug("Using tiktoken encoder for model %s", model)
             except KeyError:
                 # Model not found; fall back to heuristic
-                logger.debug(
-                    "tiktoken has no encoder for model %s; using heuristic", model
-                )
+                logger.debug("tiktoken has no encoder for model %s; using heuristic", model)
 
     def count(self, messages: list[dict]) -> int:
         """Return total token count for a list of messages."""

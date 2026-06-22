@@ -126,16 +126,12 @@ class TestCliSearch:
     def test_search_empty(self, runner: CliRunner, tmp_path: Path) -> None:
         """Search with no results."""
         db_path = tmp_path / "test_registry.db"
-        result = runner.invoke(
-            hub, ["--registry-path", str(db_path), "search", "nonexistent"]
-        )
+        result = runner.invoke(hub, ["--registry-path", str(db_path), "search", "nonexistent"])
         assert result.exit_code == 0
         # Should show header but no data rows
         assert "NAME" in result.output or "no skills found" in result.output.lower()
 
-    def test_search_after_register(
-        self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_search_after_register(self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path) -> None:
         """Search returns registered skills."""
         db_path = tmp_path / "test_registry.db"
         # Register first
@@ -144,9 +140,7 @@ class TestCliSearch:
             ["--registry-path", str(db_path), "register", str(sample_skill_dir)],
         )
         # Search
-        result = runner.invoke(
-            hub, ["--registry-path", str(db_path), "search", "drone"]
-        )
+        result = runner.invoke(hub, ["--registry-path", str(db_path), "search", "drone"])
         assert result.exit_code == 0
         assert "drone-inspection" in result.output
 
@@ -163,9 +157,7 @@ class TestCliList:
         result = runner.invoke(hub, ["--registry-path", str(db_path), "list"])
         assert result.exit_code == 0
 
-    def test_list_after_install(
-        self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_list_after_install(self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path) -> None:
         """List shows installed skills."""
         db_path = tmp_path / "test_registry.db"
         # Register then install
@@ -187,9 +179,7 @@ class TestCliList:
 class TestCliInstall:
     """install command tests."""
 
-    def test_install_skill(
-        self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_install_skill(self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path) -> None:
         """Install a registered skill."""
         db_path = tmp_path / "test_registry.db"
         runner.invoke(
@@ -219,9 +209,7 @@ class TestCliInstall:
 class TestCliInfo:
     """info command tests."""
 
-    def test_info_registered_skill(
-        self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_info_registered_skill(self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path) -> None:
         """Info shows details of a registered skill."""
         db_path = tmp_path / "test_registry.db"
         runner.invoke(
@@ -252,9 +240,7 @@ class TestCliInfo:
 class TestCliUninstall:
     """uninstall command tests."""
 
-    def test_uninstall_skill(
-        self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path
-    ) -> None:
+    def test_uninstall_skill(self, runner: CliRunner, sample_skill_dir: Path, tmp_path: Path) -> None:
         """Uninstall a registered skill."""
         db_path = tmp_path / "test_registry.db"
         runner.invoke(

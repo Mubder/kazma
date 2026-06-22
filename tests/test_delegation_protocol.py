@@ -1,4 +1,5 @@
 """Tests for DelegationProtocol — request lifecycle and execution."""
+
 from __future__ import annotations
 
 import time
@@ -76,9 +77,7 @@ class TestCreateDelegationRequest:
 
     async def test_request_with_payload(self):
         proto = DelegationProtocol(agent_id="agent-1")
-        req = await proto.create_delegation_request(
-            "task", ["cap"], payload={"file_path": "/data/test.csv"}
-        )
+        req = await proto.create_delegation_request("task", ["cap"], payload={"file_path": "/data/test.csv"})
         assert req.payload == {"file_path": "/data/test.csv"}
 
 

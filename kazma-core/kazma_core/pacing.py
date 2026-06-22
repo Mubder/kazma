@@ -3,6 +3,7 @@
 Enforces cultural norms around greeting phases, transition timing,
 and response delays to create natural-feeling conversations.
 """
+
 from __future__ import annotations
 
 import logging
@@ -16,8 +17,10 @@ logger = logging.getLogger(__name__)
 
 # ── Intent detection ──────────────────────────────────────────────────
 
+
 class Intent(Enum):
     """Detected conversational intent."""
+
     GREETING = "greeting"
     INQUIRY = "inquiry"
     TRANSACTION = "transaction"
@@ -27,6 +30,7 @@ class Intent(Enum):
 
 class TransitionDecision(Enum):
     """Decision on whether to transition from social to transactional phase."""
+
     STAY_SOCIAL = "stay_social"
     READY_TO_TRANSITION = "ready_to_transition"
     SKIP_TO_TRANSACTION = "skip_to_transaction"
@@ -66,20 +70,37 @@ _FAREWELL_PATTERNS: list[str] = [
 ]
 
 _TRANSACTION_PATTERNS: list[str] = [
-    "أبي", "أريد", "أبغى", "ابغى", "ممكن", "هل يمكن",
-    "عندي طلب", "ابي اسوي", "أبي أسوي",
-    "ممكن تسوي", "ممكن تسوي لي",
-    "شلون أسوي", "كيف أقدر", "وين أقدر",
-    "بغيت", "أبي أسأل عن", "عندي استفسار",
-    "الطلب", "الفاتورة", "السعر", "كم سعر",
+    "أبي",
+    "أريد",
+    "أبغى",
+    "ابغى",
+    "ممكن",
+    "هل يمكن",
+    "عندي طلب",
+    "ابي اسوي",
+    "أبي أسوي",
+    "ممكن تسوي",
+    "ممكن تسوي لي",
+    "شلون أسوي",
+    "كيف أقدر",
+    "وين أقدر",
+    "بغيت",
+    "أبي أسأل عن",
+    "عندي استفسار",
+    "الطلب",
+    "الفاتورة",
+    "السعر",
+    "كم سعر",
 ]
 
 
 # ── Data models ───────────────────────────────────────────────────────
 
+
 @dataclass
 class ConversationTurn:
     """A single turn in the conversation."""
+
     role: str  # "user" or "assistant"
     text: str
     intent: Intent = Intent.UNKNOWN
@@ -89,6 +110,7 @@ class ConversationTurn:
 @dataclass
 class PacingState:
     """Tracks pacing state for a conversation."""
+
     greeting_count: int = 0
     transaction_attempted: bool = False
     social_phase_complete: bool = False
@@ -102,6 +124,7 @@ class PacingState:
 
 
 # ── Public API ────────────────────────────────────────────────────────
+
 
 class ConversationPacing:
     """Manages conversational flow and timing.
@@ -205,7 +228,9 @@ class ConversationPacing:
         if greeting_count < required_greetings:
             logger.info(
                 "Greeting phase: %d/%d (extension=%d) — staying social",
-                greeting_count, required_greetings, greeting_extension,
+                greeting_count,
+                required_greetings,
+                greeting_extension,
             )
             return TransitionDecision.STAY_SOCIAL
 
@@ -213,7 +238,8 @@ class ConversationPacing:
         self._state.social_phase_complete = True
         logger.info(
             "Greeting phase complete: %d/%d greetings — ready for transaction",
-            greeting_count, required_greetings,
+            greeting_count,
+            required_greetings,
         )
         return TransitionDecision.READY_TO_TRANSITION
 

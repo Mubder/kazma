@@ -11,6 +11,7 @@ import yaml
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _valid_manifest_dict(
     name: str = "valid-skill",
     author: str = "tester",
@@ -57,6 +58,7 @@ def _write_py(tmp_path: Path, name: str, content: str) -> Path:
 # Tests — Valid skill passes validation
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestValidSkill:
     async def test_valid_skill_passes(self, tmp_path):
@@ -75,6 +77,7 @@ class TestValidSkill:
 # ---------------------------------------------------------------------------
 # Tests — Missing manifest
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 class TestMissingManifest:
@@ -95,6 +98,7 @@ class TestMissingManifest:
 # Tests — Invalid manifest
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestInvalidManifest:
     async def test_missing_required_fields_fails(self, tmp_path):
@@ -114,6 +118,7 @@ class TestInvalidManifest:
 # Tests — Security issues detected
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestSecurityScan:
     async def test_eval_detected(self, tmp_path):
@@ -126,10 +131,11 @@ class TestSecurityScan:
         result = await validator.validate(tmp_path)
         assert result.score < 100.0
         # Should flag eval
-        assert any("eval" in (e + w).lower()
-                    for e in result.errors for w in result.warnings) or \
-               any("eval" in w.lower() for w in result.warnings) or \
-               any("eval" in e.lower() for e in result.errors)
+        assert (
+            any("eval" in (e + w).lower() for e in result.errors for w in result.warnings)
+            or any("eval" in w.lower() for w in result.warnings)
+            or any("eval" in e.lower() for e in result.errors)
+        )
 
     async def test_exec_detected(self, tmp_path):
         from kazma_core.hub.validator import SkillValidator
@@ -167,14 +173,13 @@ class TestSecurityScan:
 # Tests — Unknown permissions
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestPermissions:
     async def test_unknown_permission_warns(self, tmp_path):
         from kazma_core.hub.validator import SkillValidator
 
-        _write_manifest(tmp_path, _valid_manifest_dict(
-            permissions=["file_read", "unknown_perm_xyz"]
-        ))
+        _write_manifest(tmp_path, _valid_manifest_dict(permissions=["file_read", "unknown_perm_xyz"]))
         _write_py(tmp_path, "main.py", "pass\n")
 
         validator = SkillValidator()
@@ -187,9 +192,7 @@ class TestPermissions:
     async def test_known_permissions_no_warning(self, tmp_path):
         from kazma_core.hub.validator import SkillValidator
 
-        _write_manifest(tmp_path, _valid_manifest_dict(
-            permissions=["file_read", "network_outbound"]
-        ))
+        _write_manifest(tmp_path, _valid_manifest_dict(permissions=["file_read", "network_outbound"]))
         _write_py(tmp_path, "main.py", "pass\n")
 
         validator = SkillValidator()
@@ -202,6 +205,7 @@ class TestPermissions:
 # Tests — Entry point validation
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestEntryPoint:
     async def test_missing_entry_point_fails(self, tmp_path):
@@ -213,8 +217,7 @@ class TestEntryPoint:
         validator = SkillValidator()
         result = await validator.validate(tmp_path)
         assert result.passed is False
-        assert any("entry_point" in e.lower() or "missing" in e.lower()
-                    for e in result.errors)
+        assert any("entry_point" in e.lower() or "missing" in e.lower() for e in result.errors)
 
     async def test_valid_entry_point_passes(self, tmp_path):
         from kazma_core.hub.validator import SkillValidator
@@ -230,6 +233,7 @@ class TestEntryPoint:
 # ---------------------------------------------------------------------------
 # Tests — Score calculation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 class TestScoreCalculation:
@@ -248,8 +252,7 @@ class TestScoreCalculation:
 
         _write_manifest(tmp_path, _valid_manifest_dict())
         # Multiple security issues
-        _write_py(tmp_path, "main.py",
-                  "eval('bad')\nexec('worse')\nos.system('bad')\napi_key = 'secret'\n")
+        _write_py(tmp_path, "main.py", "eval('bad')\nexec('worse')\nos.system('bad')\napi_key = 'secret'\n")
 
         validator = SkillValidator()
         result = await validator.validate(tmp_path)

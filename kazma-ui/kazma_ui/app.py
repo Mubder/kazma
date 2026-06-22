@@ -92,15 +92,21 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def ws_dashboard(websocket: WebSocket) -> None:
         await websocket.accept()
         from kazma_core.tracing import get_trace_store
+
         store = get_trace_store()
         store.register_ws(websocket)
         try:
             # Keep connection open, sending initial state
             import json
-            await websocket.send_text(json.dumps({
-                "type": "connected",
-                "message": "Real-time dashboard feed active",
-            }))
+
+            await websocket.send_text(
+                json.dumps(
+                    {
+                        "type": "connected",
+                        "message": "Real-time dashboard feed active",
+                    }
+                )
+            )
             # Hold connection until client disconnects
             while True:
                 await websocket.receive_text()

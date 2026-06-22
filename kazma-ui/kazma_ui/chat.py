@@ -154,10 +154,7 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 has_system = any(m.get("role") == "system" for m in session.messages)
                 if not has_system:
                     messages.append({"role": "system", "content": agent.system_prompt})
-                messages.extend(
-                    {k: v for k, v in m.items() if k in ("role", "content")}
-                    for m in session.messages
-                )
+                messages.extend({k: v for k, v in m.items() if k in ("role", "content")} for m in session.messages)
 
                 # Get tool definitions
                 tool_defs = agent.tools.get_tool_definitions()
@@ -165,10 +162,12 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 # Check cost breaker
                 agent.cost_breaker.record_user_interaction()
                 if agent.cost_breaker.should_halt():
-                    await websocket.send_json({
-                        "type": "done",
-                        "content": "⚠️ ميزانية الجلسة انتهت. (Budget exceeded)",
-                    })
+                    await websocket.send_json(
+                        {
+                            "type": "done",
+                            "content": "⚠️ ميزانية الجلسة انتهت. (Budget exceeded)",
+                        }
+                    )
                     continue
 
                 # Stream response
@@ -189,17 +188,21 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 ):
                     if event.type == "token":
                         assistant_content += event.content
-                        await websocket.send_json({
-                            "type": "token",
-                            "content": event.content,
-                        })
+                        await websocket.send_json(
+                            {
+                                "type": "token",
+                                "content": event.content,
+                            }
+                        )
 
                     elif event.type == "tool_call":
-                        await websocket.send_json({
-                            "type": "tool_call",
-                            "name": event.tool_call_name,
-                            "args": event.tool_call_args,
-                        })
+                        await websocket.send_json(
+                            {
+                                "type": "tool_call",
+                                "name": event.tool_call_name,
+                                "args": event.tool_call_args,
+                            }
+                        )
 
                         # Execute the tool
                         try:
@@ -210,36 +213,46 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                         result = await agent.tools.execute(event.tool_call_name, args)
                         result_content = result.get("content", "")
 
-                        tool_calls_executed.append({
-                            "name": event.tool_call_name,
-                            "args": args,
-                            "result": result_content,
-                        })
+                        tool_calls_executed.append(
+                            {
+                                "name": event.tool_call_name,
+                                "args": args,
+                                "result": result_content,
+                            }
+                        )
 
-                        await websocket.send_json({
-                            "type": "tool_result",
-                            "name": event.tool_call_name,
-                            "result": result_content[:500],
-                        })
+                        await websocket.send_json(
+                            {
+                                "type": "tool_result",
+                                "name": event.tool_call_name,
+                                "result": result_content[:500],
+                            }
+                        )
 
                         # Add tool result to messages for next iteration
-                        messages.append({
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [{
-                                "id": event.tool_call_id,
-                                "type": "function",
-                                "function": {
-                                    "name": event.tool_call_name,
-                                    "arguments": event.tool_call_args,
-                                },
-                            }],
-                        })
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": event.tool_call_id,
-                            "content": result_content,
-                        })
+                        messages.append(
+                            {
+                                "role": "assistant",
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": event.tool_call_id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": event.tool_call_name,
+                                            "arguments": event.tool_call_args,
+                                        },
+                                    }
+                                ],
+                            }
+                        )
+                        messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": event.tool_call_id,
+                                "content": result_content,
+                            }
+                        )
 
                     elif event.type == "done":
                         session.total_cost += event.cost_usd
@@ -247,10 +260,12 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
 
                     elif event.type == "error":
                         assistant_content = f"عذراً، حدث خطأ: {event.content}"
-                        await websocket.send_json({
-                            "type": "token",
-                            "content": assistant_content,
-                        })
+                        await websocket.send_json(
+                            {
+                                "type": "token",
+                                "content": assistant_content,
+                            }
+                        )
 
                 # If tool calls were executed, do a follow-up LLM call
                 if tool_calls_executed:
@@ -268,10 +283,12 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                         ):
                             if followup.type == "token":
                                 assistant_content += followup.content
-                                await websocket.send_json({
-                                    "type": "token",
-                                    "content": followup.content,
-                                })
+                                await websocket.send_json(
+                                    {
+                                        "type": "token",
+                                        "content": followup.content,
+                                    }
+                                )
                             elif followup.type == "done":
                                 session.total_cost += followup.cost_usd
                                 session.total_tokens += followup.usage.get("total_tokens", 0)
@@ -288,12 +305,14 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 session.messages.append(assistant_msg)
 
                 # Send done event
-                await websocket.send_json({
-                    "type": "done",
-                    "message_id": str(uuid.uuid4()),
-                    "cost": session.total_cost,
-                    "tokens": session.total_tokens,
-                })
+                await websocket.send_json(
+                    {
+                        "type": "done",
+                        "message_id": str(uuid.uuid4()),
+                        "cost": session.total_cost,
+                        "tokens": session.total_tokens,
+                    }
+                )
 
             elif msg_type == "clear":
                 session.messages.clear()

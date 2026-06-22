@@ -79,6 +79,7 @@ class TestContextAuthority:
     @pytest.mark.asyncio
     async def test_check_and_enforce_with_llm_client(self) -> None:
         """Compaction with LLM should use LLM for summarization."""
+
         class MockLLM:
             async def chat(self, messages: list[dict]) -> str:
                 return "[CONTEXT SUMMARY] LLM summary [/CONTEXT SUMMARY]"
@@ -134,6 +135,7 @@ class TestCreateAuthority:
 
     def test_create_authority_with_llm_client(self) -> None:
         """Factory should wire up LLM client."""
+
         class MockLLM:
             pass
 
@@ -143,6 +145,7 @@ class TestCreateAuthority:
 
     def test_create_authority_with_checkpoint_manager(self) -> None:
         """Factory should wire up checkpoint manager."""
+
         class MockCP:
             pass
 
@@ -152,6 +155,7 @@ class TestCreateAuthority:
 
     def test_create_authority_with_memory_store(self) -> None:
         """Factory should wire up memory store."""
+
         class MockMem:
             pass
 

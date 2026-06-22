@@ -14,6 +14,7 @@ from kazma_core.security.disclosure import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def disclosure(tmp_path) -> VulnerabilityDisclosure:
     """Fresh VulnerabilityDisclosure instance with a temp DB."""
@@ -23,27 +24,31 @@ def disclosure(tmp_path) -> VulnerabilityDisclosure:
 @pytest.fixture
 async def submitted_report(disclosure: VulnerabilityDisclosure) -> str:
     """Submit a report and return its ID."""
-    return await disclosure.submit_report({
-        "title": "XSS in skill loader",
-        "description": "The skill loader does not sanitise user input.",
-        "severity": "high",
-        "steps_to_reproduce": "Load a crafted skill manifest.",
-        "impact": "Arbitrary JS execution in the browser.",
-        "reporter_email": "researcher@example.com",
-    })
+    return await disclosure.submit_report(
+        {
+            "title": "XSS in skill loader",
+            "description": "The skill loader does not sanitise user input.",
+            "severity": "high",
+            "steps_to_reproduce": "Load a crafted skill manifest.",
+            "impact": "Arbitrary JS execution in the browser.",
+            "reporter_email": "researcher@example.com",
+        }
+    )
 
 
 @pytest.fixture
 async def full_lifecycle_report(disclosure: VulnerabilityDisclosure) -> str:
     """Submit and advance a report through the full lifecycle."""
-    report_id = await disclosure.submit_report({
-        "title": "SQL Injection",
-        "description": "Raw query in search endpoint.",
-        "severity": "critical",
-        "steps_to_reproduce": "Send payload to /search.",
-        "impact": "Database compromise.",
-        "reporter_email": "security@example.com",
-    })
+    report_id = await disclosure.submit_report(
+        {
+            "title": "SQL Injection",
+            "description": "Raw query in search endpoint.",
+            "severity": "critical",
+            "steps_to_reproduce": "Send payload to /search.",
+            "impact": "Database compromise.",
+            "reporter_email": "security@example.com",
+        }
+    )
     await disclosure.acknowledge(report_id)
     await disclosure.update_status(report_id, "investigating")
     await disclosure.update_status(report_id, "confirmed")
@@ -54,6 +59,7 @@ async def full_lifecycle_report(disclosure: VulnerabilityDisclosure) -> str:
 # ---------------------------------------------------------------------------
 # Dataclass tests
 # ---------------------------------------------------------------------------
+
 
 class TestDataclasses:
     def test_disclosure_report_fields(self):
@@ -96,30 +102,35 @@ class TestDataclasses:
 # Report submission and storage
 # ---------------------------------------------------------------------------
 
+
 class TestSubmitReport:
     @pytest.mark.asyncio
     async def test_submit_returns_id(self, disclosure: VulnerabilityDisclosure):
-        rid = await disclosure.submit_report({
-            "title": "Test vuln",
-            "description": "Description",
-            "severity": "medium",
-            "steps_to_reproduce": "Steps",
-            "impact": "Impact",
-            "reporter_email": "test@example.com",
-        })
+        rid = await disclosure.submit_report(
+            {
+                "title": "Test vuln",
+                "description": "Description",
+                "severity": "medium",
+                "steps_to_reproduce": "Steps",
+                "impact": "Impact",
+                "reporter_email": "test@example.com",
+            }
+        )
         assert rid.startswith("VR-")
         assert len(rid) > 3
 
     @pytest.mark.asyncio
     async def test_submit_stores_report(self, disclosure: VulnerabilityDisclosure):
-        rid = await disclosure.submit_report({
-            "title": "Stored vuln",
-            "description": "Stored desc",
-            "severity": "low",
-            "steps_to_reproduce": "Steps",
-            "impact": "Impact",
-            "reporter_email": "store@example.com",
-        })
+        rid = await disclosure.submit_report(
+            {
+                "title": "Stored vuln",
+                "description": "Stored desc",
+                "severity": "low",
+                "steps_to_reproduce": "Steps",
+                "impact": "Impact",
+                "reporter_email": "store@example.com",
+            }
+        )
         report = await disclosure.get_report(rid)
         assert report["title"] == "Stored vuln"
         assert report["severity"] == "low"
@@ -127,14 +138,16 @@ class TestSubmitReport:
 
     @pytest.mark.asyncio
     async def test_submit_creates_initial_history(self, disclosure: VulnerabilityDisclosure):
-        rid = await disclosure.submit_report({
-            "title": "History test",
-            "description": "Desc",
-            "severity": "info",
-            "steps_to_reproduce": "Steps",
-            "impact": "Impact",
-            "reporter_email": "hist@example.com",
-        })
+        rid = await disclosure.submit_report(
+            {
+                "title": "History test",
+                "description": "Desc",
+                "severity": "info",
+                "steps_to_reproduce": "Steps",
+                "impact": "Impact",
+                "reporter_email": "hist@example.com",
+            }
+        )
         report = await disclosure.get_report(rid)
         history = report["status_history"]
         assert len(history) == 1
@@ -144,6 +157,7 @@ class TestSubmitReport:
 # ---------------------------------------------------------------------------
 # Acknowledgment flow
 # ---------------------------------------------------------------------------
+
 
 class TestAcknowledge:
     @pytest.mark.asyncio
@@ -174,18 +188,21 @@ class TestAcknowledge:
 # Status transitions
 # ---------------------------------------------------------------------------
 
+
 class TestStatusTransitions:
     @pytest.mark.asyncio
     async def test_full_lifecycle(self, disclosure: VulnerabilityDisclosure):
         """Test submitted -> acknowledged -> investigating -> confirmed -> patched -> closed."""
-        rid = await disclosure.submit_report({
-            "title": "Full lifecycle",
-            "description": "Test",
-            "severity": "high",
-            "steps_to_reproduce": "Steps",
-            "impact": "Impact",
-            "reporter_email": "test@example.com",
-        })
+        rid = await disclosure.submit_report(
+            {
+                "title": "Full lifecycle",
+                "description": "Test",
+                "severity": "high",
+                "steps_to_reproduce": "Steps",
+                "impact": "Impact",
+                "reporter_email": "test@example.com",
+            }
+        )
         await disclosure.acknowledge(rid)
         await disclosure.update_status(rid, "investigating")
         await disclosure.update_status(rid, "confirmed")
@@ -206,14 +223,16 @@ class TestStatusTransitions:
     @pytest.mark.asyncio
     async def test_cannot_transition_from_closed(self, disclosure: VulnerabilityDisclosure):
         """Closed reports cannot be further transitioned."""
-        rid = await disclosure.submit_report({
-            "title": "Closed",
-            "description": "Test",
-            "severity": "low",
-            "steps_to_reproduce": "Steps",
-            "impact": "Impact",
-            "reporter_email": "test@example.com",
-        })
+        rid = await disclosure.submit_report(
+            {
+                "title": "Closed",
+                "description": "Test",
+                "severity": "low",
+                "steps_to_reproduce": "Steps",
+                "impact": "Impact",
+                "reporter_email": "test@example.com",
+            }
+        )
         await disclosure.acknowledge(rid)
         await disclosure.update_status(rid, "investigating")
         await disclosure.update_status(rid, "confirmed")
@@ -228,14 +247,16 @@ class TestStatusTransitions:
         """Closing is allowed from any non-closed status."""
         for status in ["acknowledged", "investigating", "confirmed"]:
             disc = VulnerabilityDisclosure(db_path=str(disclosure._db_path.parent / f"close_{status}.db"))
-            rid = await disc.submit_report({
-                "title": f"Close from {status}",
-                "description": "Test",
-                "severity": "low",
-                "steps_to_reproduce": "Steps",
-                "impact": "Impact",
-                "reporter_email": "test@example.com",
-            })
+            rid = await disc.submit_report(
+                {
+                    "title": f"Close from {status}",
+                    "description": "Test",
+                    "severity": "low",
+                    "steps_to_reproduce": "Steps",
+                    "impact": "Impact",
+                    "reporter_email": "test@example.com",
+                }
+            )
             await disc.acknowledge(rid)
             if status != "acknowledged":
                 next_status = "investigating" if status == "acknowledged" else status
@@ -258,6 +279,7 @@ class TestStatusTransitions:
 # Report retrieval
 # ---------------------------------------------------------------------------
 
+
 class TestGetReport:
     @pytest.mark.asyncio
     async def test_get_report_with_history(self, disclosure: VulnerabilityDisclosure, submitted_report: str):
@@ -276,30 +298,55 @@ class TestGetReport:
 # Report listing with filters
 # ---------------------------------------------------------------------------
 
+
 class TestListReports:
     @pytest.mark.asyncio
     async def test_list_all(self, disclosure: VulnerabilityDisclosure):
-        await disclosure.submit_report({
-            "title": "A", "description": "D", "severity": "high",
-            "steps_to_reproduce": "S", "impact": "I", "reporter_email": "a@b.com",
-        })
-        await disclosure.submit_report({
-            "title": "B", "description": "D", "severity": "low",
-            "steps_to_reproduce": "S", "impact": "I", "reporter_email": "a@b.com",
-        })
+        await disclosure.submit_report(
+            {
+                "title": "A",
+                "description": "D",
+                "severity": "high",
+                "steps_to_reproduce": "S",
+                "impact": "I",
+                "reporter_email": "a@b.com",
+            }
+        )
+        await disclosure.submit_report(
+            {
+                "title": "B",
+                "description": "D",
+                "severity": "low",
+                "steps_to_reproduce": "S",
+                "impact": "I",
+                "reporter_email": "a@b.com",
+            }
+        )
         reports = await disclosure.list_reports()
         assert len(reports) == 2
 
     @pytest.mark.asyncio
     async def test_list_filtered_by_status(self, disclosure: VulnerabilityDisclosure):
-        rid1 = await disclosure.submit_report({
-            "title": "A", "description": "D", "severity": "high",
-            "steps_to_reproduce": "S", "impact": "I", "reporter_email": "a@b.com",
-        })
-        await disclosure.submit_report({
-            "title": "B", "description": "D", "severity": "low",
-            "steps_to_reproduce": "S", "impact": "I", "reporter_email": "a@b.com",
-        })
+        rid1 = await disclosure.submit_report(
+            {
+                "title": "A",
+                "description": "D",
+                "severity": "high",
+                "steps_to_reproduce": "S",
+                "impact": "I",
+                "reporter_email": "a@b.com",
+            }
+        )
+        await disclosure.submit_report(
+            {
+                "title": "B",
+                "description": "D",
+                "severity": "low",
+                "steps_to_reproduce": "S",
+                "impact": "I",
+                "reporter_email": "a@b.com",
+            }
+        )
         await disclosure.acknowledge(rid1)
 
         submitted = await disclosure.list_reports(status="submitted")
@@ -319,6 +366,7 @@ class TestListReports:
 # ---------------------------------------------------------------------------
 # Advisory generation
 # ---------------------------------------------------------------------------
+
 
 class TestAdvisory:
     @pytest.mark.asyncio
@@ -341,20 +389,24 @@ class TestAdvisory:
             await disclosure.publish_advisory("VR-NOPE")
 
     @pytest.mark.asyncio
-    async def test_publish_advisory_twice_rejected(self, disclosure: VulnerabilityDisclosure, full_lifecycle_report: str):
+    async def test_publish_advisory_twice_rejected(
+        self, disclosure: VulnerabilityDisclosure, full_lifecycle_report: str
+    ):
         """Cannot publish advisory twice for the same report."""
         await disclosure.publish_advisory(full_lifecycle_report)
         with pytest.raises(ValueError, match="already published"):
             await disclosure.publish_advisory(full_lifecycle_report)
 
     def test_generate_advisory_template(self, disclosure: VulnerabilityDisclosure):
-        template = disclosure.generate_advisory_template({
-            "id": "VR-001",
-            "title": "XSS",
-            "severity": "high",
-            "description": "Cross-site scripting",
-            "impact": "Data theft",
-        })
+        template = disclosure.generate_advisory_template(
+            {
+                "id": "VR-001",
+                "title": "XSS",
+                "severity": "high",
+                "description": "Cross-site scripting",
+                "impact": "Data theft",
+            }
+        )
         assert "Security Advisory" in template
         assert "VR-001" in template
         assert "high" in template
@@ -363,6 +415,7 @@ class TestAdvisory:
 # ---------------------------------------------------------------------------
 # Encryption
 # ---------------------------------------------------------------------------
+
 
 class TestEncrypt:
     @pytest.mark.asyncio

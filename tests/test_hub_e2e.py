@@ -3,6 +3,7 @@
 Tests the full lifecycle: submit -> status -> badge -> install,
 using in-memory registries and mock HTTP where needed.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -21,6 +22,7 @@ from kazma_core.hub.registry import KazmaHub
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_manifest(
     name: str = "test-skill",
@@ -187,8 +189,7 @@ class TestBadgeIssuanceFlow:
         """Badge system with a skill pre-registered."""
         conn = sqlite3.connect(badge_system.db_path)
         conn.execute(
-            "INSERT INTO skills (name, author, version, description, license) "
-            "VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO skills (name, author, version, description, license) VALUES (?, ?, ?, ?, ?)",
             ("e2e-badge-skill", "e2e-author", "1.0.0", "E2E badge skill", "MIT"),
         )
         conn.commit()

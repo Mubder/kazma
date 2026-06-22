@@ -3,6 +3,7 @@
 Comprehensive tests for the SearchBenchmark including
 benchmarking performance and report generation.
 """
+
 import time
 
 import pytest
@@ -137,7 +138,7 @@ class TestSearchBenchmark:
         assert len(documents) == 10
         assert all(isinstance(doc, str) for doc in documents)
         # Should contain Arabic characters
-        assert any("\u0600" <= char <= "\u06FF" for doc in documents for char in doc)
+        assert any("\u0600" <= char <= "\u06ff" for doc in documents for char in doc)
 
     @pytest.mark.asyncio
     async def test_benchmark_indexing(self, benchmark):

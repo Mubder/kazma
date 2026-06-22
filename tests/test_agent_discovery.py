@@ -1,4 +1,5 @@
 """Tests for AgentDiscovery — capability-based agent discovery."""
+
 from __future__ import annotations
 
 import pytest
@@ -118,9 +119,7 @@ class TestGetAgentInfo:
         assert info.agent_id == "r1"
 
     async def test_get_from_local_cache(self, discovery):
-        discovery.known_agents["cached"] = AgentInfo(
-            agent_id="cached", capabilities=["cap1"]
-        )
+        discovery.known_agents["cached"] = AgentInfo(agent_id="cached", capabilities=["cap1"])
         info = await discovery.get_agent_info("cached")
         assert info is not None
         assert info.agent_id == "cached"
@@ -148,17 +147,13 @@ class TestUpdateReputation:
             assert info.reputation == pytest.approx(1.24, abs=0.01)
 
     async def test_reputation_clamped(self, discovery):
-        discovery.known_agents["r1"] = AgentInfo(
-            agent_id="r1", capabilities=[], reputation=1.0
-        )
+        discovery.known_agents["r1"] = AgentInfo(agent_id="r1", capabilities=[], reputation=1.0)
         await discovery.update_reputation("r1", 5.0)
         info = discovery.known_agents["r1"]
         assert info.reputation <= 2.0
 
     async def test_reputation_floor(self, discovery):
-        discovery.known_agents["r1"] = AgentInfo(
-            agent_id="r1", capabilities=[], reputation=1.0
-        )
+        discovery.known_agents["r1"] = AgentInfo(agent_id="r1", capabilities=[], reputation=1.0)
         await discovery.update_reputation("r1", -5.0)
         info = discovery.known_agents["r1"]
         assert info.reputation >= 0.0

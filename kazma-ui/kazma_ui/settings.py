@@ -22,9 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def create_settings_router(
-    agent: KazmaAgent, config_store: ConfigStore, templates: Jinja2Templates
-) -> APIRouter:
+def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templates: Jinja2Templates) -> APIRouter:
     """Create the settings router with agent and config store wired in."""
 
     router = APIRouter(tags=["settings"])

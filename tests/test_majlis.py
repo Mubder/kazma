@@ -1,4 +1,5 @@
 """Tests for MajlisProtocol — Cultural conversational protocol orchestration."""
+
 from __future__ import annotations
 
 from datetime import date

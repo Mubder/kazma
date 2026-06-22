@@ -3,6 +3,7 @@
 Provides data migration from SQLite-based storage to Tantivy index
 with verification and rollback capabilities.
 """
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MigrationResult:
     """Result of a migration operation."""
+
     success: bool
     total_migrated: int
     total_failed: int
@@ -32,6 +34,7 @@ class MigrationResult:
 @dataclass
 class VerificationResult:
     """Result of a migration verification."""
+
     sqlite_count: int
     tantivy_count: int
     mismatch: bool
@@ -47,18 +50,14 @@ class VerificationResult:
 
 class SQLiteToTantivyMigration:
     """Migrates existing SQLite memories to Tantivy.
-    
+
     Provides batch migration with progress tracking,
     verification, and rollback capabilities.
     """
 
-    def __init__(
-        self,
-        sqlite_path: str = "kazma-data/memory.db",
-        tantivy_path: str = "kazma-data/tantivy-index"
-    ):
+    def __init__(self, sqlite_path: str = "kazma-data/memory.db", tantivy_path: str = "kazma-data/tantivy-index"):
         """Initialize migration manager.
-        
+
         Args:
             sqlite_path: Path to SQLite database.
             tantivy_path: Path to Tantivy index directory.
@@ -77,27 +76,26 @@ class SQLiteToTantivyMigration:
         """Get or create Tantivy backend instance."""
         if self._tantivy_backend is None:
             from .tantivy_backend import TantivySearchBackend
+
             self._tantivy_backend = TantivySearchBackend(self.tantivy_path)
         return self._tantivy_backend
 
     async def migrate(
-        self,
-        batch_size: int = 1000,
-        progress_callback: Callable[[int, int], None] | None = None
+        self, batch_size: int = 1000, progress_callback: Callable[[int, int], None] | None = None
     ) -> MigrationResult:
         """Migrate all memories from SQLite to Tantivy.
-        
+
         Steps:
         1. Read all memories from SQLite
         2. Transform to Tantivy format
         3. Index in batches
         4. Verify migration completeness
         5. Return result with counts
-        
+
         Args:
             batch_size: Number of records to migrate per batch.
             progress_callback: Optional callback(migrated, total) for progress.
-            
+
         Returns:
             MigrationResult with migration statistics.
         """
@@ -130,10 +128,7 @@ class SQLiteToTantivyMigration:
             # Migrate in batches
             offset = 0
             while offset < total_count:
-                cursor.execute(
-                    "SELECT * FROM memories LIMIT ? OFFSET ?",
-                    (batch_size, offset)
-                )
+                cursor.execute("SELECT * FROM memories LIMIT ? OFFSET ?", (batch_size, offset))
                 rows = cursor.fetchall()
 
                 if not rows:
@@ -145,13 +140,13 @@ class SQLiteToTantivyMigration:
                         from .tantivy_backend import Memory
 
                         memory = Memory(
-                            id=row['id'] if 'id' in row.keys() else str(row[0]),
-                            content=row['content'] if 'content' in row.keys() else str(row[1]),
-                            metadata=row.get('metadata', '') if hasattr(row, 'get') else '',
-                            timestamp=row.get('timestamp', 0) if hasattr(row, 'get') else 0,
-                            source=row.get('source', '') if hasattr(row, 'get') else '',
-                            relevance=row.get('relevance', 1.0) if hasattr(row, 'get') else 1.0,
-                            division=row.get('division', '') if hasattr(row, 'get') else '',
+                            id=row["id"] if "id" in row.keys() else str(row[0]),
+                            content=row["content"] if "content" in row.keys() else str(row[1]),
+                            metadata=row.get("metadata", "") if hasattr(row, "get") else "",
+                            timestamp=row.get("timestamp", 0) if hasattr(row, "get") else 0,
+                            source=row.get("source", "") if hasattr(row, "get") else "",
+                            relevance=row.get("relevance", 1.0) if hasattr(row, "get") else 1.0,
+                            division=row.get("division", "") if hasattr(row, "get") else "",
                         )
 
                         await tantivy.index_memory(memory)
@@ -194,10 +189,10 @@ class SQLiteToTantivyMigration:
 
     async def verify(self) -> VerificationResult:
         """Verify migration completeness.
-        
+
         Compares record counts between SQLite and Tantivy,
         and checks for missing or extra records.
-        
+
         Returns:
             VerificationResult with verification details.
         """
@@ -210,7 +205,7 @@ class SQLiteToTantivyMigration:
 
             # Get SQLite IDs
             cursor.execute("SELECT id FROM memories")
-            sqlite_ids = set(row['id'] for row in cursor.fetchall())
+            sqlite_ids = set(row["id"] for row in cursor.fetchall())
             conn.close()
 
             # Get Tantivy count
@@ -238,9 +233,9 @@ class SQLiteToTantivyMigration:
 
     async def rollback(self) -> bool:
         """Rollback migration if issues found.
-        
+
         Removes the Tantivy index directory.
-        
+
         Returns:
             True if rollback successful.
         """

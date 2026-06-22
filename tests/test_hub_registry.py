@@ -12,6 +12,7 @@ from kazma_core.hub.manifest_schema import SkillManifest
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_manifest(
     name: str = "test-skill",
     author: str = "test-author",
@@ -47,6 +48,7 @@ def _skill_id(author: str, name: str, version: str) -> str:
 # Tests — Skill ID parsing
 # ---------------------------------------------------------------------------
 
+
 class TestSkillIdParsing:
     def test_valid_id(self):
         pattern = re.compile(r"^kazma-hub://([^/]+)/([^@]+)@(.+)$")
@@ -69,6 +71,7 @@ class TestSkillIdParsing:
 # Tests — DB initialisation
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestDbInit:
     async def test_tables_created(self, tmp_path):
@@ -82,10 +85,10 @@ class TestDbInit:
             assert db_path.exists(), "DB file should be created"
             # Check both tables exist via sqlite3 directly
             import sqlite3
+
             conn = sqlite3.connect(str(db_path))
             cur = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name IN ('skills', 'skill_dependencies')"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('skills', 'skill_dependencies')"
             )
             tables = {row[0] for row in cur.fetchall()}
             conn.close()
@@ -98,6 +101,7 @@ class TestDbInit:
 # ---------------------------------------------------------------------------
 # Tests — Register / Get
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 class TestRegisterGet:
@@ -142,6 +146,7 @@ class TestRegisterGet:
 # Tests — Search
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestSearch:
     async def _setup_hub(self, tmp_path):
@@ -149,12 +154,17 @@ class TestSearch:
 
         hub = KazmaHub(registry_path=str(tmp_path / "db.sqlite"))
         skills = [
-            _make_manifest(name="web-scraper", author="alice", version="1.0.0",
-                           capabilities=["http"], tags=["web", "scraping"]),
-            _make_manifest(name="db-writer", author="bob", version="1.0.0",
-                           capabilities=["database"], tags=["db"]),
-            _make_manifest(name="web-monitor", author="alice", version="2.0.0",
-                           capabilities=["http", "alerts"], tags=["web", "monitoring"]),
+            _make_manifest(
+                name="web-scraper", author="alice", version="1.0.0", capabilities=["http"], tags=["web", "scraping"]
+            ),
+            _make_manifest(name="db-writer", author="bob", version="1.0.0", capabilities=["database"], tags=["db"]),
+            _make_manifest(
+                name="web-monitor",
+                author="alice",
+                version="2.0.0",
+                capabilities=["http", "alerts"],
+                tags=["web", "monitoring"],
+            ),
         ]
         for s in skills:
             await hub.register(SkillManifest.from_dict(s))
@@ -211,6 +221,7 @@ class TestSearch:
 # Tests — Unregister
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestUnregister:
     async def test_unregister_removes(self, tmp_path):
@@ -241,6 +252,7 @@ class TestUnregister:
 # Tests — Duplicate registration (upsert)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestDuplicateRegistration:
     async def test_duplicate_updates(self, tmp_path):
@@ -262,6 +274,7 @@ class TestDuplicateRegistration:
 # ---------------------------------------------------------------------------
 # Tests — List installed
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 class TestListInstalled:
@@ -286,6 +299,7 @@ class TestListInstalled:
 # Tests — Install
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 class TestInstall:
     async def test_install_returns_path(self, tmp_path):
@@ -306,6 +320,7 @@ class TestInstall:
 # ---------------------------------------------------------------------------
 # Tests — Full round-trip
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 class TestRoundTrip:

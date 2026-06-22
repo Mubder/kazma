@@ -92,18 +92,10 @@ class SecurityAuditTrail:
                 )
                 """
             )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_se_skill ON security_events(skill_id)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_se_type ON security_events(event_type)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_se_severity ON security_events(severity)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_se_timestamp ON security_events(timestamp)"
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_se_skill ON security_events(skill_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_se_type ON security_events(event_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_se_severity ON security_events(severity)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_se_timestamp ON security_events(timestamp)")
             conn.commit()
 
     # ------------------------------------------------------------------

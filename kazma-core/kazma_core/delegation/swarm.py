@@ -3,6 +3,7 @@
 Provides parallel execution, consensus building, and pipeline (cascade)
 patterns for multi-agent collaboration.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ConsensusResult:
     """Result of consensus-based multi-agent execution."""
+
     task_description: str
     responses: list[DelegationResult] = field(default_factory=list)
     consensus_reached: bool = False
@@ -39,6 +41,7 @@ class ConsensusResult:
 @dataclass
 class CascadeResult:
     """Result of cascade (pipeline) execution."""
+
     pipeline_stages: list[dict[str, Any]] = field(default_factory=list)
     final_output: Any = None
     all_succeeded: bool = True
@@ -146,9 +149,7 @@ class SwarmIntelligence:
         )
 
         # Discover available agents
-        agents = await self.orchestrator.discovery.discover(
-            ["general"], max_results=min_responses * 2
-        )
+        agents = await self.orchestrator.discovery.discover(["general"], max_results=min_responses * 2)
 
         # Early return if no agents available
         if not agents:
@@ -159,16 +160,14 @@ class SwarmIntelligence:
 
         # Execute on multiple agents
         exec_tasks = []
-        for agent in agents[:min_responses * 2]:
+        for agent in agents[: min_responses * 2]:
             request = await self.orchestrator.protocol.create_delegation_request(
                 task_description=task,
                 required_capabilities=[],
                 max_budget=budget_per_response,
                 timeout_seconds=120,
             )
-            exec_tasks.append(
-                self.orchestrator.protocol.execute_delegated_task(request)
-            )
+            exec_tasks.append(self.orchestrator.protocol.execute_delegated_task(request))
 
         # Gather responses with timeout
         try:
@@ -187,9 +186,7 @@ class SwarmIntelligence:
 
         # Check consensus: compare outputs
         if result.responses:
-            outputs = [
-                r.output for r in result.responses if r.output is not None
-            ]
+            outputs = [r.output for r in result.responses if r.output is not None]
             if outputs:
                 # Simple majority consensus
                 from collections import Counter
@@ -197,10 +194,7 @@ class SwarmIntelligence:
                 output_counts = Counter(str(o) for o in outputs)
                 most_common, count = output_counts.most_common(1)[0]
                 result.agreement_ratio = count / len(outputs)
-                result.consensus_reached = (
-                    result.agreement_ratio >= 0.5
-                    and result.actual_responses >= min_responses
-                )
+                result.consensus_reached = result.agreement_ratio >= 0.5 and result.actual_responses >= min_responses
                 result.consensus_output = most_common
 
         result.duration_seconds = time.time() - start
@@ -261,11 +255,7 @@ class SwarmIntelligence:
                     timeout=300,
                 )
 
-                stage_info["status"] = (
-                    "completed"
-                    if exec_result.status == RequestStatus.COMPLETED
-                    else "failed"
-                )
+                stage_info["status"] = "completed" if exec_result.status == RequestStatus.COMPLETED else "failed"
                 stage_info["cost"] = exec_result.cost_incurred
                 result.total_cost += exec_result.cost_incurred
 

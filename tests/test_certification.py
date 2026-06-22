@@ -15,6 +15,7 @@ from kazma_core.security.certification import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def cert_db(tmp_path: Path) -> KazmaCertification:
     """Return a KazmaCertification backed by a temp DB."""
@@ -58,6 +59,7 @@ def premium_skill(tmp_path: Path) -> Path:
 # Certification levels
 # ---------------------------------------------------------------------------
 
+
 class TestCertificationLevels:
     def test_certification_levels_count(self):
         assert len(CERTIFICATION_LEVELS) == 3
@@ -86,6 +88,7 @@ class TestCertificationLevels:
 # ---------------------------------------------------------------------------
 # Certify
 # ---------------------------------------------------------------------------
+
 
 class TestCertify:
     @pytest.mark.asyncio
@@ -138,6 +141,7 @@ class TestCertify:
 # Verify
 # ---------------------------------------------------------------------------
 
+
 class TestVerify:
     @pytest.mark.asyncio
     async def test_verify_valid(self, cert_db: KazmaCertification, basic_skill: Path):
@@ -167,6 +171,7 @@ class TestVerify:
 # ---------------------------------------------------------------------------
 # Revoke
 # ---------------------------------------------------------------------------
+
 
 class TestRevoke:
     @pytest.mark.asyncio
@@ -199,6 +204,7 @@ class TestRevoke:
 # ---------------------------------------------------------------------------
 # DB operations
 # ---------------------------------------------------------------------------
+
 
 class TestDBOperations:
     @pytest.mark.asyncio

@@ -60,6 +60,7 @@ class SkillInstallationWizard:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 import nest_asyncio
+
                 nest_asyncio.apply()
                 return loop.run_until_complete(self.run())
             return loop.run_until_complete(self.run())
@@ -254,9 +255,7 @@ class SkillInstallationWizard:
             return None
 
         try:
-            answer = input(
-                f"\n  Install {skill.get('name')}@{skill.get('version')}? [y/N]: "
-            ).strip().lower()
+            answer = input(f"\n  Install {skill.get('name')}@{skill.get('version')}? [y/N]: ").strip().lower()
             if answer not in ("y", "yes"):
                 print("  Installation cancelled.")
                 return False
@@ -306,10 +305,7 @@ class SkillInstallationWizard:
         hub = KazmaHub(registry_path=self.context.registry_path)
         try:
             installed = await hub.list_installed()
-            found = any(
-                m.data.get("name") == name and m.data.get("author") == author
-                for m in installed
-            )
+            found = any(m.data.get("name") == name and m.data.get("author") == author for m in installed)
             if found:
                 print("  [PASS] Skill verified in registry")
             else:

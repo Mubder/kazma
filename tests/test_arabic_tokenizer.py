@@ -3,6 +3,7 @@
 Comprehensive tests for the ArabicTantivyTokenizer including
 normalization, diacritics removal, stop words filtering, and stemming.
 """
+
 import pytest
 from kazma_memory.arabic_tokenizer import ArabicTantivyTokenizer
 

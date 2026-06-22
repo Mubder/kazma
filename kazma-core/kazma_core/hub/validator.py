@@ -10,16 +10,18 @@ import yaml
 from kazma_core.hub.manifest_schema import SkillManifest, ValidationResult
 
 # Allowed permission names
-_ALLOWED_PERMISSIONS = frozenset({
-    "file_read",
-    "file_write",
-    "network_outbound",
-    "network_inbound",
-    "camera_access",
-    "mqtt_broker",
-    "database_read",
-    "database_write",
-})
+_ALLOWED_PERMISSIONS = frozenset(
+    {
+        "file_read",
+        "file_write",
+        "network_outbound",
+        "network_inbound",
+        "camera_access",
+        "mqtt_broker",
+        "database_read",
+        "database_write",
+    }
+)
 
 # Allowed MCP server types
 _ALLOWED_MCP_TYPES = frozenset({"stdio", "sse", "streamable-http"})
@@ -30,11 +32,9 @@ def _ok(score: float = 0.0) -> ValidationResult:
     return ValidationResult(passed=True, errors=[], warnings=[], score=score)
 
 
-def _fail(errors: list[str], warnings: list[str] | None = None,
-          score: float = 0.0) -> ValidationResult:
+def _fail(errors: list[str], warnings: list[str] | None = None, score: float = 0.0) -> ValidationResult:
     """Shorthand for a failing check."""
-    return ValidationResult(passed=False, errors=errors,
-                           warnings=warnings or [], score=score)
+    return ValidationResult(passed=False, errors=errors, warnings=warnings or [], score=score)
 
 
 class SkillValidator:
@@ -206,7 +206,7 @@ class SkillValidator:
                 warnings.append(f"{py_file.name}: exec() detected")
 
             # __import__  (Unicode-aware word boundary)
-            if re.search(r'(?<!\w)__import__(?!\w)', content):
+            if re.search(r"(?<!\w)__import__(?!\w)", content):
                 delta -= 15.0
                 warnings.append(f"{py_file.name}: __import__ detected")
 

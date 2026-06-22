@@ -10,6 +10,7 @@ from kazma_core.hub.manifest_schema import SkillManifest
 @dataclass
 class ConflictResolution:
     """Result of conflict detection between installed and new skills."""
+
     has_conflicts: bool = False
     conflicts: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
@@ -62,15 +63,11 @@ class SkillVersioning:
             inst_caps = set(inst.data.get("capabilities", []))
 
             if inst_name == new_name:
-                warnings.append(
-                    f"Replacing installed skill '{inst_name}' with new version"
-                )
+                warnings.append(f"Replacing installed skill '{inst_name}' with new version")
 
             overlap = new_caps & inst_caps
             if overlap:
-                warnings.append(
-                    f"Skill '{inst_name}' shares capabilities: {', '.join(sorted(overlap))}"
-                )
+                warnings.append(f"Skill '{inst_name}' shares capabilities: {', '.join(sorted(overlap))}")
 
         return ConflictResolution(
             has_conflicts=len(conflicts) > 0,

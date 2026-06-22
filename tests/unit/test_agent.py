@@ -37,9 +37,7 @@ class TestLoadConfig:
 
     def test_loads_from_yaml(self, tmp_path, monkeypatch) -> None:
         config_file = tmp_path / "kazma.yaml"
-        config_file.write_text(
-            'agent:\n  name: test-agent\n  version: "1.0"\n'
-        )
+        config_file.write_text('agent:\n  name: test-agent\n  version: "1.0"\n')
         monkeypatch.chdir(tmp_path)
         config = load_config(config_file)
         assert config.name == "test-agent"
@@ -92,7 +90,11 @@ class TestKazmaAgent:
         with (
             patch.object(agent.llm, "chat", new_callable=AsyncMock, side_effect=[tool_call_response, final_response]),
             patch.object(agent.tools, "execute", new_callable=AsyncMock, return_value=mock_tool_result),
-            patch.object(agent.tools, "get_tool_definitions", return_value=[{"type": "function", "function": {"name": "test_tool"}}]),
+            patch.object(
+                agent.tools,
+                "get_tool_definitions",
+                return_value=[{"type": "function", "function": {"name": "test_tool"}}],
+            ),
         ):
             result = await agent.run("search for something")
             assert "processed" in result.lower() or "tool" in result.lower()

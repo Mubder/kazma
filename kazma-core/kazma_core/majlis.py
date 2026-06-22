@@ -10,6 +10,7 @@ Orchestrates:
 - Tone adaptation → formality matching
 - Cultural awareness → Ramadan, Eid, National Day modifiers
 """
+
 from __future__ import annotations
 
 import logging
@@ -33,8 +34,10 @@ logger = logging.getLogger(__name__)
 
 # ── Conversation state ────────────────────────────────────────────────
 
+
 class ConversationPhase(Enum):
     """Current phase of the conversation."""
+
     GREETING = "greeting"
     SOCIAL = "social"
     TRANSACTION = "transaction"
@@ -44,6 +47,7 @@ class ConversationPhase(Enum):
 @dataclass
 class ConversationState:
     """Tracks the full state of a Majlis conversation."""
+
     phase: ConversationPhase = ConversationPhase.GREETING
     greeting_count: int = 0
     formality_level: FormalityLevel = FormalityLevel.NORMAL
@@ -65,9 +69,11 @@ class ConversationState:
 
 # ── Response data models ──────────────────────────────────────────────
 
+
 @dataclass
 class MajlisResponse:
     """Response from the Majlis protocol."""
+
     text: str
     phase: ConversationPhase
     formality: FormalityLevel
@@ -80,6 +86,7 @@ class MajlisResponse:
 
 
 # ── Public API ────────────────────────────────────────────────────────
+
 
 class MajlisProtocol:
     """Cultural conversational protocol for Gulf Arabic interactions.

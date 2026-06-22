@@ -4,6 +4,7 @@ Decomposes complex tasks into sub-tasks, discovers capable agents,
 delegates sub-tasks, and synthesizes results. Integrates with the
 cost circuit breaker to prevent runaway delegation spending.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 class SubTaskStatus(StrEnum):
     """Status of a sub-task in orchestration."""
+
     PENDING = "pending"
     ASSIGNED = "assigned"
     EXECUTING = "executing"
@@ -36,6 +38,7 @@ class SubTaskStatus(StrEnum):
 @dataclass
 class SubTask:
     """A decomposed sub-task with assignment and result."""
+
     task_id: str
     description: str
     required_capabilities: list[str]
@@ -50,6 +53,7 @@ class SubTask:
 @dataclass
 class OrchestrationResult:
     """Result of orchestrating multiple sub-tasks."""
+
     task_id: str
     status: RequestStatus
     sub_tasks: list[SubTask] = field(default_factory=list)
@@ -130,9 +134,7 @@ class DelegationOrchestrator:
         assignments = await self._discover_and_assign(sub_tasks, max_agents)
 
         # Step 4: Execute delegations in parallel
-        exec_results = await self._execute_delegations(
-            assignments, budget_per_task, timeout_seconds
-        )
+        exec_results = await self._execute_delegations(assignments, budget_per_task, timeout_seconds)
 
         # Step 5: Collect results
         for sub_task in sub_tasks:
@@ -145,22 +147,12 @@ class DelegationOrchestrator:
                 )
 
         # Step 6: Synthesize
-        result.total_cost = sum(
-            st.result.cost_incurred
-            for st in sub_tasks
-            if st.result is not None
-        )
+        result.total_cost = sum(st.result.cost_incurred for st in sub_tasks if st.result is not None)
         result.duration_seconds = time.time() - start
         result.synthesized_output = self._synthesize_results(sub_tasks)
 
-        completed = sum(
-            1 for st in sub_tasks if st.status == SubTaskStatus.COMPLETED
-        )
-        result.status = (
-            RequestStatus.COMPLETED
-            if completed == len(sub_tasks)
-            else RequestStatus.FAILED
-        )
+        completed = sum(1 for st in sub_tasks if st.status == SubTaskStatus.COMPLETED)
+        result.status = RequestStatus.COMPLETED if completed == len(sub_tasks) else RequestStatus.FAILED
 
         # Record cost
         if self.cost_breaker is not None:
@@ -206,9 +198,7 @@ class DelegationOrchestrator:
         assigned_agents: set[str] = set()
 
         for sub_task in sub_tasks:
-            candidates = await self.discovery.discover(
-                sub_task.required_capabilities, max_results=max_agents
-            )
+            candidates = await self.discovery.discover(sub_task.required_capabilities, max_results=max_agents)
 
             # Pick the best unassigned agent
             for agent in candidates:
@@ -231,9 +221,7 @@ class DelegationOrchestrator:
         results: dict[str, DelegationResult] = {}
         semaphore = asyncio.Semaphore(min(len(assignments), 5))
 
-        async def _execute_one(
-            sub_task_id: str, agent: AgentInfo
-        ) -> tuple[str, DelegationResult]:
+        async def _execute_one(sub_task_id: str, agent: AgentInfo) -> tuple[str, DelegationResult]:
             async with semaphore:
                 request = await self.protocol.create_delegation_request(
                     task_description=f"Sub-task {sub_task_id}",
@@ -263,9 +251,7 @@ class DelegationOrchestrator:
 
         return results
 
-    def _synthesize_results(
-        self, sub_tasks: list[SubTask]
-    ) -> dict[str, Any]:
+    def _synthesize_results(self, sub_tasks: list[SubTask]) -> dict[str, Any]:
         """Synthesize results from all sub-tasks."""
         outputs = {}
         for st in sub_tasks:
@@ -274,9 +260,7 @@ class DelegationOrchestrator:
         return {
             "sub_task_count": len(sub_tasks),
             "outputs": outputs,
-            "completed": sum(
-                1 for st in sub_tasks if st.status == SubTaskStatus.COMPLETED
-            ),
+            "completed": sum(1 for st in sub_tasks if st.status == SubTaskStatus.COMPLETED),
         }
 
     async def handle_timeout(self, request_id: str) -> None:
@@ -291,9 +275,7 @@ class DelegationOrchestrator:
                 if st.assigned_agent and st.result is None:
                     st.status = SubTaskStatus.TIMED_OUT
                     # Penalize reputation
-                    await self.discovery.update_reputation(
-                        st.assigned_agent, 0.5
-                    )
+                    await self.discovery.update_reputation(st.assigned_agent, 0.5)
 
     async def handle_failure(self, request_id: str, error: str) -> None:
         """Handle delegation failure.

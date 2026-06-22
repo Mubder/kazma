@@ -76,9 +76,7 @@ class ConfigStore:
         """Get a setting. DB overrides YAML."""
         with self._lock:
             conn = self._get_conn()
-            row = conn.execute(
-                "SELECT value FROM settings WHERE key = ?", (key,)
-            ).fetchone()
+            row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
             if row is not None:
                 return json.loads(row["value"])
 
@@ -111,18 +109,14 @@ class ConfigStore:
         """Get all settings in a category from DB."""
         with self._lock:
             conn = self._get_conn()
-            rows = conn.execute(
-                "SELECT key, value FROM settings WHERE category = ?", (category,)
-            ).fetchall()
+            rows = conn.execute("SELECT key, value FROM settings WHERE category = ?", (category,)).fetchall()
         return {row["key"]: json.loads(row["value"]) for row in rows}
 
     def get_all(self) -> dict[str, dict[str, Any]]:
         """Get all settings grouped by category."""
         with self._lock:
             conn = self._get_conn()
-            rows = conn.execute(
-                "SELECT key, value, category FROM settings ORDER BY category, key"
-            ).fetchall()
+            rows = conn.execute("SELECT key, value, category FROM settings ORDER BY category, key").fetchall()
         result: dict[str, dict[str, Any]] = {}
         for row in rows:
             cat = row["category"]

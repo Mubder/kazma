@@ -177,6 +177,7 @@ class TestCompactionEngine:
     @pytest.mark.asyncio
     async def test_compact_with_llm_client(self) -> None:
         """compact() should use LLM client for summarization when available."""
+
         class MockLLM:
             async def chat(self, messages: list[dict]) -> str:
                 return "[CONTEXT SUMMARY] LLM summary of the conversation. [/CONTEXT SUMMARY]"
@@ -195,6 +196,7 @@ class TestCompactionEngine:
     @pytest.mark.asyncio
     async def test_compact_with_memory_store(self) -> None:
         """compact() should retrieve memories when store is available."""
+
         class MockMemoryStore:
             async def search(self, query: str, limit: int = 5) -> list[dict]:
                 return [
@@ -224,9 +226,7 @@ class TestCompactionEngine:
     async def test_summarize_heuristic_includes_message_count(self) -> None:
         """Heuristic summary should include message count."""
         engine = CompactionEngine()
-        messages = [
-            {"role": "user", "content": f"message {i}"} for i in range(10)
-        ]
+        messages = [{"role": "user", "content": f"message {i}"} for i in range(10)]
         summary = await engine.summarize(messages)
         assert "10 messages" in summary
 
@@ -240,6 +240,7 @@ class TestCompactionEngine:
     @pytest.mark.asyncio
     async def test_retrieve_memories_with_store(self) -> None:
         """retrieve_memories() should delegate to memory store."""
+
         class MockMemoryStore:
             async def search(self, query: str, limit: int = 5) -> list[dict]:
                 return [{"content": "memory 1"}, {"content": "memory 2"}]

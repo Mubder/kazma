@@ -5,6 +5,7 @@ Manages the lifecycle of responsible vulnerability disclosure reports,
 from submission through acknowledgement, investigation, patching, and
 public advisory publication.
 """
+
 from __future__ import annotations
 
 import json
@@ -219,18 +220,13 @@ class VulnerabilityDisclosure:
 
         with self._lock:
             conn = self._get_conn()
-            row = conn.execute(
-                "SELECT status FROM reports WHERE id = ?", (report_id,)
-            ).fetchone()
+            row = conn.execute("SELECT status FROM reports WHERE id = ?", (report_id,)).fetchone()
             if row is None:
                 raise ValueError(f"Report {report_id} not found")
 
             old_status = row["status"]
             if old_status != "submitted":
-                raise ValueError(
-                    f"Cannot acknowledge report in status '{old_status}'; "
-                    f"must be 'submitted'"
-                )
+                raise ValueError(f"Cannot acknowledge report in status '{old_status}'; must be 'submitted'")
 
             conn.execute(
                 "UPDATE reports SET status = 'acknowledged', acknowledged_at = ? WHERE id = ?",
@@ -251,9 +247,7 @@ class VulnerabilityDisclosure:
             "next_steps": "The security team will investigate and provide updates.",
         }
 
-    async def update_status(
-        self, report_id: str, status: str, notes: str = ""
-    ) -> None:
+    async def update_status(self, report_id: str, status: str, notes: str = "") -> None:
         """Update the status of a report.
 
         Args:
@@ -271,19 +265,14 @@ class VulnerabilityDisclosure:
 
         with self._lock:
             conn = self._get_conn()
-            row = conn.execute(
-                "SELECT status FROM reports WHERE id = ?", (report_id,)
-            ).fetchone()
+            row = conn.execute("SELECT status FROM reports WHERE id = ?", (report_id,)).fetchone()
             if row is None:
                 raise ValueError(f"Report {report_id} not found")
 
             old_status = row["status"]
             allowed = _VALID_TRANSITIONS.get(old_status, [])
             if status not in allowed:
-                raise ValueError(
-                    f"Invalid transition from '{old_status}' to '{status}'; "
-                    f"allowed: {allowed}"
-                )
+                raise ValueError(f"Invalid transition from '{old_status}' to '{status}'; allowed: {allowed}")
 
             patch_fields: dict = {"status": status}
             if status == "patched":
@@ -319,9 +308,7 @@ class VulnerabilityDisclosure:
 
         with self._lock:
             conn = self._get_conn()
-            row = conn.execute(
-                "SELECT * FROM reports WHERE id = ?", (report_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
             if row is None:
                 raise ValueError(f"Report {report_id} not found")
 
@@ -365,9 +352,7 @@ class VulnerabilityDisclosure:
                     (status,),
                 ).fetchall()
             else:
-                rows = conn.execute(
-                    "SELECT * FROM reports ORDER BY created_at DESC"
-                ).fetchall()
+                rows = conn.execute("SELECT * FROM reports ORDER BY created_at DESC").fetchall()
 
         return [dict(r) for r in rows]
 
@@ -389,16 +374,13 @@ class VulnerabilityDisclosure:
 
         with self._lock:
             conn = self._get_conn()
-            row = conn.execute(
-                "SELECT * FROM reports WHERE id = ?", (report_id,)
-            ).fetchone()
+            row = conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
             if row is None:
                 raise ValueError(f"Report {report_id} not found")
 
             if row["status"] not in ("patched", "closed"):
                 raise ValueError(
-                    f"Cannot publish advisory for report in status '{row['status']}'; "
-                    f"must be 'patched' or 'closed'"
+                    f"Cannot publish advisory for report in status '{row['status']}'; must be 'patched' or 'closed'"
                 )
 
             # Check if advisory already exists
@@ -407,9 +389,7 @@ class VulnerabilityDisclosure:
                 (report_id,),
             ).fetchone()
             if existing is not None:
-                raise ValueError(
-                    f"Advisory already published for report {report_id}"
-                )
+                raise ValueError(f"Advisory already published for report {report_id}")
 
             report = dict(row)
 
@@ -461,21 +441,21 @@ class VulnerabilityDisclosure:
         """
         return f"""# Security Advisory
 
-**Report ID:** {report.get('id', 'UNKNOWN')}
-**Severity:** {report.get('severity', 'UNKNOWN')}
-**Status:** {report.get('status', 'UNKNOWN')}
+**Report ID:** {report.get("id", "UNKNOWN")}
+**Severity:** {report.get("severity", "UNKNOWN")}
+**Status:** {report.get("status", "UNKNOWN")}
 
 ## Summary
 
-{report.get('title', 'N/A')}
+{report.get("title", "N/A")}
 
 ## Description
 
-{report.get('description', 'N/A')}
+{report.get("description", "N/A")}
 
 ## Impact
 
-{report.get('impact', 'N/A')}
+{report.get("impact", "N/A")}
 
 ## Affected Versions
 

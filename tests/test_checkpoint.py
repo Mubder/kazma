@@ -151,9 +151,7 @@ class TestCheckpointManager:
     async def test_save_large_state(self, manager: CheckpointManager) -> None:
         """save() should handle large state without errors."""
         state = initial_state()
-        state["messages"] = [
-            {"role": "user", "content": "x" * 1000} for _ in range(100)
-        ]
+        state["messages"] = [{"role": "user", "content": "x" * 1000} for _ in range(100)]
         state["tool_results"] = {f"tool_{i}": {"data": "y" * 500} for i in range(50)}
 
         cp_id = await manager.save(state)
@@ -164,6 +162,7 @@ class TestCheckpointManager:
     @pytest.mark.asyncio
     async def test_concurrent_saves(self, manager: CheckpointManager) -> None:
         """Multiple concurrent saves should not corrupt the database."""
+
         async def save_state(i: int) -> str:
             state = initial_state()
             state["context_tokens"] = i
@@ -184,9 +183,7 @@ class TestCheckpointFileSize:
     """Tests for checkpoint file size constraints."""
 
     @pytest.mark.asyncio
-    async def test_file_size_under_1mb_for_1000_checkpoints(
-        self, db_path: str
-    ) -> None:
+    async def test_file_size_under_1mb_for_1000_checkpoints(self, db_path: str) -> None:
         """Checkpoint file should be <1MB for 1000 checkpoints."""
         manager = CheckpointManager(db_path=db_path)
         try:

@@ -34,14 +34,7 @@ class TestPermissionsLoading:
 
     def test_loads_existing_file(self, tmp_path: Path) -> None:
         config = tmp_path / "perms.yaml"
-        config.write_text(
-            "users:\n"
-            "  alice:\n"
-            "    allowed:\n"
-            "      - read\n"
-            "    denied:\n"
-            "      - write\n"
-        )
+        config.write_text("users:\n  alice:\n    allowed:\n      - read\n    denied:\n      - write\n")
         pm = PermissionManager(config_path=config)
         data = pm.load_permissions()
         assert "alice" in data["users"]

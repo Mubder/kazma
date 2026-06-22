@@ -6,6 +6,7 @@ verify that best practices are followed across secrets management,
 sandboxing, RBAC, dependency health, skill manifests, encryption,
 audit logging, and privilege escalation prevention.
 """
+
 from __future__ import annotations
 
 import re
@@ -140,13 +141,15 @@ class SecurityHardeningRunner:
             passed = sum(1 for c in self.results if c.passed)
             failed = len(self.results) - passed
             crit = sum(1 for c in self.results if not c.passed and c.severity == "critical")
-            lines.extend([
-                f"- **Total checks:** {len(self.results)}",
-                f"- **Passed:** {passed}",
-                f"- **Failed:** {failed}",
-                f"- **Critical failures:** {crit}",
-                "",
-            ])
+            lines.extend(
+                [
+                    f"- **Total checks:** {len(self.results)}",
+                    f"- **Passed:** {passed}",
+                    f"- **Failed:** {failed}",
+                    f"- **Critical failures:** {crit}",
+                    "",
+                ]
+            )
         else:
             lines.append("*No checks have been run yet.*")
             lines.append("")
@@ -157,14 +160,16 @@ class SecurityHardeningRunner:
 
         for check in self.results:
             status = "✅ PASS" if check.passed else "❌ FAIL"
-            lines.extend([
-                f"### {check.name} — {status}",
-                "",
-                f"**Severity:** {check.severity}",
-                f"**Message:** {check.message}",
-                f"**Recommendation:** {check.recommendation}",
-                "",
-            ])
+            lines.extend(
+                [
+                    f"### {check.name} — {status}",
+                    "",
+                    f"**Severity:** {check.severity}",
+                    f"**Message:** {check.message}",
+                    f"**Recommendation:** {check.recommendation}",
+                    "",
+                ]
+            )
 
         return "\n".join(lines)
 
@@ -200,8 +205,7 @@ class SecurityHardeningRunner:
                     try:
                         if not env_file.exists():
                             env_file.write_text(
-                                "# Move hardcoded secrets here\n"
-                                "# API_KEY=\n# SECRET_KEY=\n",
+                                "# Move hardcoded secrets here\n# API_KEY=\n# SECRET_KEY=\n",
                                 encoding="utf-8",
                             )
                         if gitignore.exists():
@@ -219,18 +223,22 @@ class SecurityHardeningRunner:
                 fixes.append(fix)
 
             elif check.name == "check_skill_manifest_validity":
-                fixes.append({
-                    "check": check.name,
-                    "action": "Manually validate and fix skill manifest files under skills/",
-                    "applied": False,
-                })
+                fixes.append(
+                    {
+                        "check": check.name,
+                        "action": "Manually validate and fix skill manifest files under skills/",
+                        "applied": False,
+                    }
+                )
 
             else:
-                fixes.append({
-                    "check": check.name,
-                    "action": f"Manual review required for {check.name}",
-                    "applied": False,
-                })
+                fixes.append(
+                    {
+                        "check": check.name,
+                        "action": f"Manual review required for {check.name}",
+                        "applied": False,
+                    }
+                )
 
         return fixes
 
@@ -352,8 +360,7 @@ class SecurityHardeningRunner:
             severity="high",
             message="No RBAC enforcement configuration detected",
             recommendation=(
-                "Implement role-based access control middleware to restrict "
-                "API endpoint access based on user roles"
+                "Implement role-based access control middleware to restrict API endpoint access based on user roles"
             ),
         )
 
@@ -361,6 +368,7 @@ class SecurityHardeningRunner:
         """Run DependencyScanner on project dependencies."""
         try:
             from .dependency_scanner import DependencyScanner
+
             scanner = DependencyScanner()
             report = await scanner.scan(self.project_root)
             if report.vulnerable_deps > 0:
@@ -499,8 +507,7 @@ class SecurityHardeningRunner:
             severity="high",
             message="No TLS/mTLS configuration detected",
             recommendation=(
-                "Configure TLS for all external communications. "
-                "Use mTLS for inter-service communication where possible"
+                "Configure TLS for all external communications. Use mTLS for inter-service communication where possible"
             ),
         )
 
@@ -508,6 +515,7 @@ class SecurityHardeningRunner:
         """Verify audit trail is configured and functional."""
         try:
             from .audit_trail import SecurityAuditTrail
+
             trail = SecurityAuditTrail()
             # Verify the module is functional by checking it has expected methods
             assert hasattr(trail, "log_event")
@@ -573,8 +581,7 @@ class SecurityHardeningRunner:
                 severity="critical",
                 message=f"Found {len(findings)} potential privilege escalation vectors",
                 recommendation=(
-                    "Review and restrict use of eval/exec/os.system. "
-                    "Affected locations: " + ", ".join(findings[:10])
+                    "Review and restrict use of eval/exec/os.system. Affected locations: " + ", ".join(findings[:10])
                 ),
             )
         return HardeningCheck(

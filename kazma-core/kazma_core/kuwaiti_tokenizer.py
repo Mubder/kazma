@@ -15,6 +15,7 @@ from enum import Enum
 
 class TokenType(Enum):
     """Token classification."""
+
     DIALECT = "dialect"
     WORD = "word"
     NUMBER = "number"
@@ -29,6 +30,7 @@ class TokenType(Enum):
 @dataclass(frozen=True, slots=True)
 class Token:
     """A single token from tokenization."""
+
     text: str
     start: int
     end: int
@@ -53,14 +55,12 @@ DIALECT_MARKERS: dict[str, str] = {
     "ياخوي": "يا أخي",
     "هجم": "تعال",
     "يالله": "هيا",
-
     # Informal address
     "اخو": "أخ",
     "اخوات": "إخوة",
     "اخوكم": "أخوك",
     "اخويا": "أخي",
     "اختك": "أختك",
-
     # Descriptions / adjectives
     "خوش": "جيد",
     "زينة": "جميلة",
@@ -70,7 +70,6 @@ DIALECT_MARKERS: dict[str, str] = {
     "صغير": "صغير",
     "قديم": "قديم",
     "جديد": "جديد",
-
     # Verbs / actions
     " gal ": "قال",
     " agool ": "أقول",
@@ -79,7 +78,6 @@ DIALECT_MARKERS: dict[str, str] = {
     " arid ": "أريد",
     " yishtgil ": "يشتغل",
     " ayesh ": "عايش",
-
     # Prepositions / particles
     " مكو ": "ليس هناك",
     " اكو ": "يوجد",
@@ -91,7 +89,6 @@ DIALECT_MARKERS: dict[str, str] = {
     " عشان ": "من أجل",
     " زاي ": "مثل",
     " هيج ": "هكذا",
-
     # Common Gulf expressions
     " بالعافية ": "بالصحة",
     " يعطيك العافية ": "الله يعطيك العافية",
@@ -101,7 +98,6 @@ DIALECT_MARKERS: dict[str, str] = {
     " ان شاء الله ": "إن شاء الله",
     " الحمد لله ": "الحمد لله",
     "_subhanallah": "سبحان الله",
-
     # Numbers / time
     " buckra ": "غداً",
     " ibaarak ": "مبروك",
@@ -118,15 +114,15 @@ _CODE_SWITCH_PATTERNS: list[re.Pattern[str]] = [
 # Emoji pattern
 _EMOJI_RE = re.compile(
     "["
-    "\U0001F600-\U0001F64F"  # emoticons
-    "\U0001F300-\U0001F5FF"  # symbols & pictographs
-    "\U0001F680-\U0001F6FF"  # transport & map
-    "\U0001F1E0-\U0001F1FF"  # flags
-    "\U00002702-\U000027B0"
-    "\U000024C2-\U0001F251"
-    "\U0001F900-\U0001F9FF"  # supplemental
-    "\U0001FA00-\U0001FA6F"  # chess symbols
-    "\U0001FA70-\U0001FAFF"  # symbols extended
+    "\U0001f600-\U0001f64f"  # emoticons
+    "\U0001f300-\U0001f5ff"  # symbols & pictographs
+    "\U0001f680-\U0001f6ff"  # transport & map
+    "\U0001f1e0-\U0001f1ff"  # flags
+    "\U00002702-\U000027b0"
+    "\U000024c2-\U0001f251"
+    "\U0001f900-\U0001f9ff"  # supplemental
+    "\U0001fa00-\U0001fa6f"  # chess symbols
+    "\U0001fa70-\U0001faff"  # symbols extended
     "]+",
     flags=re.UNICODE,
 )
@@ -136,7 +132,7 @@ def _is_arabic(text: str) -> bool:
     """Check if text is predominantly Arabic."""
     if not text:
         return False
-    arabic_chars = sum(1 for c in text if "\u0600" <= c <= "\u06FF" or "\u0750" <= c <= "\u077F")
+    arabic_chars = sum(1 for c in text if "\u0600" <= c <= "\u06ff" or "\u0750" <= c <= "\u077f")
     return arabic_chars > len(text) * 0.3
 
 
@@ -192,13 +188,15 @@ class KuwaitiTokenizer:
                 found_marker = False
                 for marker in sorted_markers:
                     if text.startswith(marker, pos):
-                        tokens.append(Token(
-                            text=marker,
-                            start=pos,
-                            end=pos + len(marker),
-                            token_type=TokenType.DIALECT,
-                            dialect_meaning=DIALECT_MARKERS.get(marker),
-                        ))
+                        tokens.append(
+                            Token(
+                                text=marker,
+                                start=pos,
+                                end=pos + len(marker),
+                                token_type=TokenType.DIALECT,
+                                dialect_meaning=DIALECT_MARKERS.get(marker),
+                            )
+                        )
                         pos += len(marker)
                         found_marker = True
                         break
@@ -213,12 +211,14 @@ class KuwaitiTokenizer:
             # Emoji
             emoji_match = _EMOJI_RE.match(text, pos)
             if emoji_match:
-                tokens.append(Token(
-                    text=emoji_match.group(),
-                    start=pos,
-                    end=emoji_match.end(),
-                    token_type=TokenType.EMOJI,
-                ))
+                tokens.append(
+                    Token(
+                        text=emoji_match.group(),
+                        start=pos,
+                        end=emoji_match.end(),
+                        token_type=TokenType.EMOJI,
+                    )
+                )
                 pos = emoji_match.end()
                 continue
 
@@ -227,23 +227,27 @@ class KuwaitiTokenizer:
                 end = pos
                 while end < len(text) and text[end] in (" ", "\t", "\n", "\r"):
                     end += 1
-                tokens.append(Token(
-                    text=text[pos:end],
-                    start=pos,
-                    end=end,
-                    token_type=TokenType.WHITESPACE,
-                ))
+                tokens.append(
+                    Token(
+                        text=text[pos:end],
+                        start=pos,
+                        end=end,
+                        token_type=TokenType.WHITESPACE,
+                    )
+                )
                 pos = end
                 continue
 
             # Punctuation
             if char in "،.؟!؛:،،«»\"'()[]{}-/\\":
-                tokens.append(Token(
-                    text=char,
-                    start=pos,
-                    end=pos + 1,
-                    token_type=TokenType.PUNCTUATION,
-                ))
+                tokens.append(
+                    Token(
+                        text=char,
+                        start=pos,
+                        end=pos + 1,
+                        token_type=TokenType.PUNCTUATION,
+                    )
+                )
                 pos += 1
                 continue
 
@@ -252,12 +256,14 @@ class KuwaitiTokenizer:
                 end = pos
                 while end < len(text) and (text[end].isdigit() or text[end] in ".,"):
                     end += 1
-                tokens.append(Token(
-                    text=text[pos:end],
-                    start=pos,
-                    end=end,
-                    token_type=TokenType.NUMBER,
-                ))
+                tokens.append(
+                    Token(
+                        text=text[pos:end],
+                        start=pos,
+                        end=end,
+                        token_type=TokenType.NUMBER,
+                    )
+                )
                 pos = end
                 continue
 
@@ -270,41 +276,47 @@ class KuwaitiTokenizer:
                         end += 1
                     token_text = text[pos:end]
                     token_type = TokenType.CODE_SWITCH if _is_english_word(token_text) else TokenType.WORD
-                    tokens.append(Token(
-                        text=token_text,
-                        start=pos,
-                        end=end,
-                        token_type=token_type,
-                        language="en" if token_type == TokenType.CODE_SWITCH else "ar",
-                    ))
+                    tokens.append(
+                        Token(
+                            text=token_text,
+                            start=pos,
+                            end=end,
+                            token_type=token_type,
+                            language="en" if token_type == TokenType.CODE_SWITCH else "ar",
+                        )
+                    )
                 else:
                     # Arabic word: consume Arabic chars + tatweel + diacritics
                     while end < len(text) and (
-                        "\u0600" <= text[end] <= "\u06FF"
-                        or "\u0750" <= text[end] <= "\u077F"
+                        "\u0600" <= text[end] <= "\u06ff"
+                        or "\u0750" <= text[end] <= "\u077f"
                         or text[end] == "\u0640"  # tatweel
-                        or "\u0610" <= text[end] <= "\u061A"  # diacritics
-                        or "\u064B" <= text[end] <= "\u065F"  # tashkeel
+                        or "\u0610" <= text[end] <= "\u061a"  # diacritics
+                        or "\u064b" <= text[end] <= "\u065f"  # tashkeel
                         or text[end] in "\u0621\u0622\u0623\u0625\u0627"  # alef variants
                     ):
                         end += 1
                     token_text = text[pos:end]
-                    tokens.append(Token(
-                        text=token_text,
-                        start=pos,
-                        end=end,
-                        token_type=TokenType.WORD,
-                    ))
+                    tokens.append(
+                        Token(
+                            text=token_text,
+                            start=pos,
+                            end=end,
+                            token_type=TokenType.WORD,
+                        )
+                    )
                 pos = end
                 continue
 
             # Unknown character
-            tokens.append(Token(
-                text=char,
-                start=pos,
-                end=pos + 1,
-                token_type=TokenType.UNKNOWN,
-            ))
+            tokens.append(
+                Token(
+                    text=char,
+                    start=pos,
+                    end=pos + 1,
+                    token_type=TokenType.UNKNOWN,
+                )
+            )
             pos += 1
 
         return tokens

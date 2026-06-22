@@ -129,9 +129,8 @@ async def stream_chat(
             # Calculate cost
             prompt_tokens = usage.get("prompt_tokens", 0)
             completion_tokens = usage.get("completion_tokens", 0)
-            cost = (
-                (prompt_tokens * input_cost_per_1m / 1_000_000)
-                + (completion_tokens * output_cost_per_1m / 1_000_000)
+            cost = (prompt_tokens * input_cost_per_1m / 1_000_000) + (
+                completion_tokens * output_cost_per_1m / 1_000_000
             )
 
             duration_ms = (time.monotonic() - start) * 1000

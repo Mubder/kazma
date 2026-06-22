@@ -8,6 +8,7 @@ Covers:
 - Expiration checking
 - Audit trail integration
 """
+
 from __future__ import annotations
 
 import pytest
@@ -39,6 +40,7 @@ async def auth_flow(tmp_paths):
 
 # ─── Request Creation Tests ───────────────────────────────────────────
 
+
 class TestRequestCreation:
     """Test authorization request creation."""
 
@@ -64,7 +66,11 @@ class TestRequestCreation:
         """User not in source division cannot request."""
         with pytest.raises(PermissionError):
             await auth_flow.request_access(
-                "alice", "gas_oil", "tourism", "bookings", "reason",
+                "alice",
+                "gas_oil",
+                "tourism",
+                "bookings",
+                "reason",
             )
 
     @pytest.mark.asyncio
@@ -73,7 +79,11 @@ class TestRequestCreation:
         await auth_flow.rbac.assign_role("alice", "gas_oil", "trader")
         with pytest.raises(ValueError):
             await auth_flow.request_access(
-                "alice", "gas_oil", "nonexistent", "bookings", "reason",
+                "alice",
+                "gas_oil",
+                "nonexistent",
+                "bookings",
+                "reason",
             )
 
     @pytest.mark.asyncio
@@ -82,7 +92,11 @@ class TestRequestCreation:
         auth_flow.max_approval_duration_hours = 12
         await auth_flow.rbac.assign_role("alice", "gas_oil", "trader")
         req = await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "reason",
             duration_hours=48,
         )
         assert req.duration_hours == 12
@@ -92,7 +106,11 @@ class TestRequestCreation:
         """Created request can be retrieved by ID."""
         await auth_flow.rbac.assign_role("alice", "gas_oil", "trader")
         req = await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "reason",
         )
         fetched = await auth_flow.get_request(req.id)
         assert fetched is not None
@@ -100,6 +118,7 @@ class TestRequestCreation:
 
 
 # ─── Approval Tests ───────────────────────────────────────────────────
+
 
 class TestApproval:
     """Test approval flow."""
@@ -111,7 +130,11 @@ class TestApproval:
         await auth_flow.rbac.assign_role("admin_bob", "tourism", "admin")
 
         req = await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "reason",
         )
         result = await auth_flow.approve_request(req.id, "admin_bob")
         assert result.success is True
@@ -130,7 +153,11 @@ class TestApproval:
         await auth_flow.rbac.assign_role("admin_bob", "tourism", "admin")
 
         req = await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "reason",
         )
         await auth_flow.approve_request(req.id, "admin_bob")
 
@@ -155,7 +182,11 @@ class TestApproval:
         await auth_flow.rbac.assign_role("admin_carol", "tourism", "admin")
 
         req = await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "reason",
         )
         await auth_flow.approve_request(req.id, "admin_bob")
 
@@ -170,7 +201,11 @@ class TestApproval:
         await auth_flow.rbac.assign_role("viewer_bob", "tourism", "viewer")
 
         req = await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "reason",
         )
         result = await auth_flow.approve_request(req.id, "viewer_bob")
         assert result.success is False
@@ -178,6 +213,7 @@ class TestApproval:
 
 
 # ─── Denial Tests ─────────────────────────────────────────────────────
+
 
 class TestDenial:
     """Test denial flow."""
@@ -189,7 +225,11 @@ class TestDenial:
         await auth_flow.rbac.assign_role("admin_bob", "tourism", "admin")
 
         req = await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "reason",
         )
         result = await auth_flow.deny_request(req.id, "admin_bob", "Not justified")
         assert result.success is True
@@ -213,7 +253,11 @@ class TestDenial:
         await auth_flow.rbac.assign_role("viewer_bob", "tourism", "viewer")
 
         req = await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "reason",
         )
         result = await auth_flow.deny_request(req.id, "viewer_bob", "No")
         assert result.success is False
@@ -221,6 +265,7 @@ class TestDenial:
 
 
 # ─── Query and Expiration Tests ───────────────────────────────────────
+
 
 class TestQueriesAndExpiration:
     """Test request queries and expiration logic."""
@@ -233,10 +278,18 @@ class TestQueriesAndExpiration:
         await auth_flow.rbac.assign_role("admin_carol", "gas_oil", "admin")
 
         await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "reason1",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "reason1",
         )
         await auth_flow.request_access(
-            "alice", "gas_oil", "general_trading", "inventory", "reason2",
+            "alice",
+            "gas_oil",
+            "general_trading",
+            "inventory",
+            "reason2",
         )
 
         pending = await auth_flow.get_pending_requests()
@@ -253,7 +306,11 @@ class TestQueriesAndExpiration:
         await auth_flow.rbac.assign_role("admin_bob", "tourism", "admin")
 
         req = await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "auditable reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "auditable reason",
         )
         await auth_flow.approve_request(req.id, "admin_bob")
 
@@ -271,7 +328,11 @@ class TestQueriesAndExpiration:
         await auth_flow.rbac.assign_role("admin_bob", "tourism", "admin")
 
         req = await auth_flow.request_access(
-            "alice", "gas_oil", "tourism", "bookings", "auditable reason",
+            "alice",
+            "gas_oil",
+            "tourism",
+            "bookings",
+            "auditable reason",
         )
         await auth_flow.deny_request(req.id, "admin_bob", "Policy violation")
 

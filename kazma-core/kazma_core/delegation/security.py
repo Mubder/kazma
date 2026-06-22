@@ -4,6 +4,7 @@ Uses Ed25519 keys for request signing and X25519 for payload encryption.
 All delegation requests must be signed before transmission and verified
 on receipt to ensure authenticity and integrity.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -60,9 +61,7 @@ class DelegationSecurity:
             return Ed25519PrivateKey.from_private_bytes(bytes.fromhex(key_data))
         except (ValueError, TypeError):
             # Assume PEM
-            return serialization.load_pem_private_key(
-                key_data.encode(), password=None
-            )  # type: ignore[return-value]
+            return serialization.load_pem_private_key(key_data.encode(), password=None)  # type: ignore[return-value]
 
     def _load_encryption_key(self, key_data: str) -> X25519PrivateKey:
         """Derive X25519 encryption key from signing key material."""
@@ -72,16 +71,12 @@ class DelegationSecurity:
     @property
     def public_key_hex(self) -> str:
         """Public signing key as hex string (for sharing with peers)."""
-        return self._signing_public.public_bytes(
-            serialization.Encoding.Raw, serialization.PublicFormat.Raw
-        ).hex()
+        return self._signing_public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
 
     @property
     def encryption_public_key_hex(self) -> str:
         """Public encryption key as hex string (for payload encryption)."""
-        return self._encryption_public.public_bytes(
-            serialization.Encoding.Raw, serialization.PublicFormat.Raw
-        ).hex()
+        return self._encryption_public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex()
 
     def sign_request(self, payload: dict[str, Any]) -> str:
         """Sign a delegation request payload.
@@ -123,9 +118,7 @@ class DelegationSecurity:
             )
             return False
 
-    def encrypt_payload(
-        self, payload: dict[str, Any], recipient_public_key_hex: str
-    ) -> bytes:
+    def encrypt_payload(self, payload: dict[str, Any], recipient_public_key_hex: str) -> bytes:
         """Encrypt a payload for secure transmission to a recipient.
 
         Uses X25519 key agreement + AES-256-GCM.
@@ -137,9 +130,7 @@ class DelegationSecurity:
         Returns:
             Encrypted bytes (nonce + ciphertext + tag).
         """
-        recipient_pub = X25519PublicKey.from_public_bytes(
-            bytes.fromhex(recipient_public_key_hex)
-        )
+        recipient_pub = X25519PublicKey.from_public_bytes(bytes.fromhex(recipient_public_key_hex))
         shared_key = self._encryption_key.exchange(recipient_pub)
         # Derive AES key from shared secret
         aes_key = hashlib.sha256(shared_key).digest()
@@ -150,9 +141,7 @@ class DelegationSecurity:
         ciphertext = aesgcm.encrypt(nonce, plaintext, None)
         return nonce + ciphertext
 
-    def decrypt_payload(
-        self, encrypted: bytes, sender_public_key_hex: str
-    ) -> dict[str, Any]:
+    def decrypt_payload(self, encrypted: bytes, sender_public_key_hex: str) -> dict[str, Any]:
         """Decrypt a payload received from a sender.
 
         Args:
@@ -162,9 +151,7 @@ class DelegationSecurity:
         Returns:
             Decrypted payload dict.
         """
-        sender_pub = X25519PublicKey.from_public_bytes(
-            bytes.fromhex(sender_public_key_hex)
-        )
+        sender_pub = X25519PublicKey.from_public_bytes(bytes.fromhex(sender_public_key_hex))
         shared_key = self._encryption_key.exchange(sender_pub)
         aes_key = hashlib.sha256(shared_key).digest()
         nonce = encrypted[:12]
