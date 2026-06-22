@@ -167,37 +167,13 @@ class KazmaAgent:
             if not memory_cfg.get("enabled", True):
                 logger.info("Memory system disabled in config")
                 return
+            # SQLite-only search with FTS5 and Arabic tokenization
+            from kazma_memory import SearchBackend, SQLiteMemoryBackend
 
-            tantivy_available = False
-            try:
-                import tantivy  # noqa: F401
-
-                tantivy_available = True
-            except ImportError:
-                logger.info("tantivy-py not installed — using SQLite-only memory")
-
-            from kazma_memory import (
-                SearchBackendRouter,
-                SQLiteMemoryBackend,
-                TantivySearchBackend,
-            )
-
-            sqlite_backend = SQLiteMemoryBackend(
+            self.memory = SearchBackend(
                 db_path=memory_cfg.get("sqlite_path", "kazma-data/memory.db"),
             )
-
-            if tantivy_available:
-                tantivy_backend = TantivySearchBackend(
-                    index_path=memory_cfg.get("index_path", "kazma-data/memory"),
-                )
-                self.memory = SearchBackendRouter(
-                    sqlite_backend=sqlite_backend,
-                    tantivy_backend=tantivy_backend,
-                )
-                logger.info("Memory system initialized (Tantivy + SQLite)")
-            else:
-                self.memory = sqlite_backend
-                logger.info("Memory system initialized (SQLite-only — install tantivy-py for full-text search)")
+            logger.info("Memory system initialized (SQLite FTS5 + Arabic tokenization)")
 
         except ImportError:
             logger.warning("kazma_memory module not found — memory disabled")

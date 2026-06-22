@@ -1,7 +1,8 @@
-"""Arabic Tokenizer — Custom Arabic tokenizer for Tantivy indexing.
+"""Arabic Tokenizer — Enhanced Arabic text processing for search indexing.
 
 Handles Arabic-specific text normalization including Alef unification,
-diacritics removal, stop words filtering, and stemming.
+diacritics removal, stop words filtering, and stemming for enhanced search.
+Works with both Tantivy and direct string processing.
 """
 
 from __future__ import annotations
@@ -9,14 +10,15 @@ from __future__ import annotations
 import re
 
 
-class ArabicTantivyTokenizer:
-    """Custom Arabic tokenizer for Tantivy.
+class ArabicTokenizer:
+    """Enhanced Arabic tokenizer for general Arabic text processing.
 
     Provides comprehensive Arabic text processing including:
-    - Unicode normalization (Alef, Teh Marbuta)
+    - Unicode normalization (Alef, Teh Marbuta, Yeh variants)
     - Diacritics (tashkeel) removal
     - Stop words filtering
     - Basic stemming
+    - Kuwaiti dialect handling
     """
 
     def __init__(self):
@@ -50,267 +52,171 @@ class ArabicTantivyTokenizer:
             "ما",
             "لم",
             "لن",
-            "قد",
-            "كان",
-            "يكون",
-            "تكون",
-            "كانت",
-            "كانوا",
+            "لكن",
+            "كما",
+            "كلما",
             # Pronouns
             "أنا",
             "أنت",
-            "أنتِ",
-            "هو",
-            "هي",
-            "نحن",
-            "أنتم",
+            "أنتما",
             "هم",
             "هن",
-            "إياي",
-            "إياك",
-            "إياكِ",
-            "إياه",
-            "إياها",
-            "إيانا",
-            "إياكم",
-            "إياهم",
-            # Demonstratives
-            "ذلك",
-            "تلك",
-            "هؤلاء",
-            "هذا",
-            "هذه",
-            "هذان",
-            "هاتان",
-            # Prepositions
-            "حتى",
-            "منذ",
-            "خلال",
-            "دون",
-            "بعد",
-            "قبل",
-            "تحت",
-            "فوق",
-            "أمام",
-            "خلف",
-            "بين",
-            "نحو",
-            "عبر",
-            "حول",
-            "ضد",
-            # Conjunctions
+            "نحن",
+            "أنتم",
+            # Common connectors
             "و",
-            "ف",
-            "ثم",
             "أو",
-            "أم",
-            "بل",
-            "لكن",
-            "غير",
-            "إلا",
-            "سوى",
-            "لولا",
-            "لوما",
-            "عل",
-            "كي",
-            "لما",
-            # Relative pronouns
-            "الذي",
-            "التي",
-            "الذين",
-            "اللذين",
-            "اللتين",
-            "اللواتي",
-            # Interrogatives
-            "من",
-            "ما",
-            "متى",
-            "أين",
-            "كيف",
-            "لماذا",
-            "كم",
-            "أي",
-            # Common verbs (auxiliary)
-            "ليس",
-            "ليست",
-            "ليسوا",
-            "ليسن",
-            "ما",
-            "لا",
-            "لم",
-            "لن",
-            # Numbers (as words)
-            "واحد",
-            "اثنان",
-            "ثلاثة",
-            "أربعة",
-            "خمسة",
-            # Other common words
-            "بل",
-            "بلى",
-            "إذا",
-            "إذ",
+            "ثم",
+            "حتى",
+            "عندما",
             "حين",
-            "وقت",
-            "مرة",
-            "بعض",
-            "كل",
-            "جميع",
-            "أجمع",
-            "كافة",
-            "عموم",
+            "هناك",
+            # Kuwaiti dialect terms
+            "يلا",
+            "يا",
+            "شلون",
+            "عشان",
+            "مو",
+            "ليه",
+            "لازم",
+            "شخ",
+            "ماكو",
+            "فد",
         }
 
     def _init_stemmer(self):
-        """Initialize Arabic stemmer.
+        """Initialize basic Arabic stemmer.
 
         Returns:
-            Stemmer instance or None if not available.
+            Simple stemmer function or None.
         """
-        # Basic Arabic stemmer using suffix/prefix removal
-        # Can be enhanced with libraries like arabic-stemmer
-        return None
+        # Basic stemming rules - can be enhanced
+        stem_rules = {
+            # Common suffixes
+            r"ات$": "",      # feminine plural
+            r"ون$": "",      # masculine plural
+            "ين$": "",      # dual/masculine plural
+            r"ة$": "",       # feminine marker
+            r"ان$": "",       # dual
+            r"نا$": "",       # first person plural
+            # Common prefixes
+            r"^ال": "",       # definite article
+            r"^بـ": "",       # prefixing B
+            r"^كـ": "",       # prefixing K
+        }
 
-    def tokenize(self, text: str) -> list[str]:
-        """Tokenize Arabic text for Tantivy indexing.
+        def stem(word: str) -> str:
+            for pattern, replacement in stem_rules.items():
+                word = re.sub(pattern, replacement, word)
+            return word
 
-        Processing steps:
-        1. Normalize Unicode (Alef unification)
-        2. Remove diacritics
-        3. Remove stop words
-        4. Apply stemming (optional)
-        5. Return tokens
-
-        Args:
-            text: Input Arabic text.
-
-        Returns:
-            List of processed tokens.
-        """
-        if not text:
-            return []
-
-        # Step 1: Normalize text
-        normalized = self.normalize(text)
-
-        # Step 2: Remove diacritics
-        cleaned = self.remove_diacritics(normalized)
-
-        # Step 3: Tokenize into words
-        words = self._split_words(cleaned)
-
-        # Step 4: Remove stop words and short words
-        filtered = [w for w in words if w not in self.stop_words and len(w) > 1]
-
-        # Step 5: Apply stemming
-        if self.stemmer:
-            filtered = [self.stemmer.stem(w) for w in filtered]
-
-        return filtered
+        return stem
 
     def normalize(self, text: str) -> str:
-        """Normalize Arabic text (Alef, Teh Marbuta, etc.).
-
-        Handles:
-        - Alef variants (أ, إ, آ) → ا
-        - Teh Marbuta (ة) → ه
-        - Yeh (ى) → ي
-        - Alef Maqsura (ى) → ي
+        """Normalize Arabic text for better search.
 
         Args:
-            text: Input Arabic text.
+            text: Arabic text to normalize.
 
         Returns:
-            Normalized text.
+            Normalized Arabic text.
         """
+        # Remove diacritics (tashkeel)
+        text = self._remove_diacritics(text)
+
         # Normalize Alef variants
-        text = re.sub(r"[أإآ]", "ا", text)
+        text = self._normalize_alef(text)
 
-        # Normalize Teh Marbuta
-        text = re.sub(r"ة", "ه", text)
+        # normalize Teh Marbuta to Heh
+        text = text.replace("ة", "ه")
 
-        # Normalize Yeh/Alef Maqsura
-        text = re.sub(r"ى", "ي", text)
+        # Normalize Yeh variants
+        text = self._normalize_yeh(text)
 
-        # Normalize Hamza variants
-        text = re.sub(r"[ؤئ]", "ء", text)
+        # Normalize Waw Hamza
+        text = text.replace("ؤ", "و")
 
-        # Remove tatweel (kashida)
-        text = re.sub(r"ـ", "", text)
+        # Normalize Ya Hamza
+        text = text.replace("ئ", "ي")
+
+        # Remove extra spaces
+        text = re.sub(r"\s+", " ", text).strip()
 
         return text
 
-    def remove_diacritics(self, text: str) -> str:
-        """Remove Arabic diacritics (tashkeel).
-
-        Removes:
-        - Fatha (َ)
-        - Damma (ُ)
-        - Kasra (ِ)
-        - Sukun (ْ)
-        - Shadda (ّ)
-        - Tanwin (ً، ٌ، ٍ)
+    def tokenize(self, text: str) -> str:
+        """Tokenize Arabic text for search indexing.
 
         Args:
-            text: Input Arabic text.
+            text: Arabic text to tokenize.
+
+        Returns:
+            Processed Arabic text suitable for search indexing.
+        """
+        if not text:
+            return text
+
+        # Normalize text
+        processed = self.normalize(text)
+
+        # Remove stop words
+        words = processed.split()
+        filtered = [word for word in words if word not in self.stop_words]
+
+        # Apply stemming if available
+        if self.stemmer:
+            filtered = [self.stemmer(word) for word in filtered]
+
+        # Reconstruct processed text
+        return " ".join(filtered)
+
+    def _remove_diacritics(self, text: str) -> str:
+        """Remove Arabic diacritics (harakat).
+
+        Args:
+            text: Arabic text with diacritics.
 
         Returns:
             Text without diacritics.
         """
-        # Arabic diacritics Unicode range: \u064B-\u065F
-        text = re.sub(r"[\u064B-\u065F]", "", text)
+        # Arabic diacritics range: U+064B to U+065F
+        diacritics = re.compile(r"[\u064B-\u065F\u0670]")
+        return diacritics.sub("", text)
 
-        # Also remove other vocalization marks
-        text = re.sub(r"[\u0670]", "", text)  # Superscript Alef
+    def _normalize_alef(self, text: str) -> str:
+        """Normalize Alef variants to ا.
 
+        Args:
+            text: Arabic text with Alef variants.
+
+        Returns:
+            Text with normalized Alef.
+        """
+        alef_variants = ["أ", "إ", "آ"]
+        for variant in alef_variants:
+            text = text.replace(variant, "ا")
         return text
 
-    def _split_words(self, text: str) -> list[str]:
-        """Split text into words.
+    def _normalize_yeh(self, text: str) -> str:
+        """Normalize Yeh variants to ي.
 
         Args:
-            text: Input text.
+            text: Arabic text with Yeh variants.
 
         Returns:
-            List of words.
+            Text with normalized Yeh.
         """
-        # Split on whitespace and punctuation
-        words = re.findall(r"[\w\u0600-\u06FF]+", text)
-        return words
+        yeh_variants = ["ئ", "ؤ", "إي"]
+        for variant in yeh_variants:
+            text = text.replace(variant, "ي")
+        return text
 
-    def stem(self, word: str) -> str:
-        """Apply basic Arabic stemming.
 
-        This is a simple suffix/prefix removal stemmer.
-        For production use, consider a dedicated Arabic stemmer.
+# Maintain backward compatibility with existing code
+class ArabicTantivyTokenizer(ArabicTokenizer):
+    """Backward-compatible wrapper for existing Tantivy code.
 
-        Args:
-            word: Input Arabic word.
-
-        Returns:
-            Stemmed word.
-        """
-        if not word or len(word) <= 3:
-            return word
-
-        # Common prefixes
-        prefixes = ["ال", "و", "ب", "ل", "ك", "سي", "ي", "ن", "ت"]
-
-        # Common suffixes
-        suffixes = ["ون", "ين", "ات", "ية", "ية", "نا", "كم", "هم", "ها", "ه", "ي", "ك", "تم"]
-
-        stemmed = word
-
-        # Remove prefixes (but keep at least 3 chars)
-        for prefix in prefixes:
-            if stemmed.startswith(prefix) and len(stemmed) > len(prefix) + 2:
-                stemmed = stemmed[len(prefix) :]
-                break
-
-        # Remove suffixes (but keep at least 3 chars)
-        for suffix in suffixes:
-            if stemmed.endswith(suffix) and len(stemmed) > len(suffix) + 2:
-                stemmed = stemmed[: -len(suffix)]
-                break
-
-        return stemmed
+    This class now provides the same functionality as ArabicTokenizer
+    but maintains the original class name for compatibility.
+    """
+    pass

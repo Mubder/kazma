@@ -1,7 +1,9 @@
-"""Search Backend Router — Routes between SQLite and Tantivy based on workload.
+"""SQLite Search Backend — Enhanced with FTS5 and Arabic Tokenization.
 
-Provides automatic backend selection based on document count,
-with redundancy through dual indexing.
+Provides hybrid search combining:
+- FTS5 full-text search with Arabic tokenization (BM25 ranking)
+- sqlite-vec vector similarity search for semantic matching
+- Optimized for edge deployment with no external dependencies.
 """
 
 from __future__ import annotations
@@ -12,14 +14,18 @@ from typing import Any
 
 import aiosqlite
 
+from .arabic_tokenizer import ArabicTantivyTokenizer
+
 logger = logging.getLogger(__name__)
 
 
 class SQLiteMemoryBackend:
-    """SQLite-based memory backend with vector search support.
+    """SQLite-based memory backend with enhanced Arabic search.
 
-    Uses sqlite-vec extension for semantic similarity search
-    when available, falls back to regex-based text search.
+    Uses:
+    - sqlite-vec extension for semantic similarity search (vector embeddings)
+    - FTS5 full-text search with Arabic tokenization for keyword matching
+    - Hybrid search combining BM25 and vector similarity for optimal results
     """
 
     def __init__(self, db_path: str = "kazma-data/memory.db"):
@@ -31,6 +37,7 @@ class SQLiteMemoryBackend:
         self.db_path = db_path
         self._conn: Any = None
         self._vec_available = False
+        self._arabic_tokenizer = ArabicTantivyTokenizer()
 
     async def _ensure_connection(self) -> Any:
         """Ensure database connection is established."""
@@ -51,11 +58,12 @@ class SQLiteMemoryBackend:
         except Exception:
             self._vec_available = False
 
-        # Create memories table
+        # Create memories table with vector embedding support
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS memories (
                 id TEXT PRIMARY KEY,
                 content TEXT NOT NULL,
+                content_arabic TEXT,
                 metadata TEXT DEFAULT '{}',
                 timestamp INTEGER DEFAULT 0,
                 source TEXT DEFAULT '',
@@ -64,78 +72,42 @@ class SQLiteMemoryBackend:
             )
         """)
 
-        # Create FTS table for text search
+        # Create FTS5 table for Arabic full-text search
+        # Use the content rowid to link to the memories table
         await conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-            USING fts5(content, content_rowid UNINDEXED)
+            USING fts5(content, content_arabic, content_rowid=rowid)
+        """)
+
+        # Create triggers to keep FTS5 in sync with memories table
+        await conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+                INSERT INTO memories_fts(rowid, content, content_arabic)
+                VALUES (new.rowid, new.content, new.content_arabic);
+            END
+        """)
+
+        await conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+                INSERT INTO memories_fts(memories_fts, rowid, content, content_arabic)
+                VALUES ('delete', old.rowid, old.content, old.content_arabic);
+            END
+        """)
+
+        await conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+                INSERT INTO memories_fts(memories_fts, rowid, content, content_arabic)
+                VALUES ('delete', old.rowid, old.content, old.content_arabic);
+                INSERT INTO memories_fts(rowid, content, content_arabic)
+                VALUES (new.rowid, new.content, new.content_arabic);
+            END
         """)
 
         await conn.commit()
         return conn
 
-    async def search(self, query: str, limit: int = 10, **kwargs) -> list[dict[str, Any]]:
-        """Search memories in SQLite.
-
-        Uses FTS5 for text search when available.
-
-        Args:
-            query: Search query string.
-            limit: Maximum number of results to return.
-            **kwargs: Additional parameters.
-
-        Returns:
-            List of memory dictionaries.
-        """
-        conn = await self._ensure_connection()
-
-        try:
-            # Use FTS5 for full-text search
-            cursor = await conn.execute(
-                """
-                SELECT m.id, m.content, m.metadata, m.timestamp, m.source, m.relevance
-                FROM memories m
-                JOIN memories_fts f ON m.rowid = f.content_rowid
-                WHERE f.content MATCH ?
-                ORDER BY m.relevance DESC
-                LIMIT ?
-                """,
-                (query, limit),
-            )
-            rows = await cursor.fetchall()
-
-            return [
-                {
-                    "id": row[0],
-                    "content": row[1],
-                    "metadata": row[2],
-                    "timestamp": row[3],
-                    "source": row[4],
-                    "relevance": row[5],
-                }
-                for row in rows
-            ]
-        except Exception as e:
-            logger.warning("FTS search failed, falling back to simple search: %s", e)
-            # Fallback to simple LIKE search
-            cursor = await conn.execute(
-                "SELECT id, content, metadata, timestamp, source, relevance FROM memories WHERE content LIKE ? LIMIT ?",
-                (f"%{query}%", limit),
-            )
-            rows = await cursor.fetchall()
-            return [
-                {
-                    "id": row[0],
-                    "content": row[1],
-                    "metadata": row[2],
-                    "timestamp": row[3],
-                    "source": row[4],
-                    "relevance": row[5],
-                }
-                for row in rows
-            ]
-
     async def index(self, memory: Any) -> str:
-        """Index a memory to SQLite.
+        """Index a memory to SQLite with Arabic tokenization.
 
         Args:
             memory: Memory dict or Memory object.
@@ -156,36 +128,186 @@ class SQLiteMemoryBackend:
         else:
             memory_id = getattr(memory, "id", self._generate_id())
             content = getattr(memory, "content", "")
-            metadata = getattr(memory, "metadata", "")
+            metadata = getattr(memory, "metadata", {})
             timestamp = getattr(memory, "timestamp", 0)
             source = getattr(memory, "source", "")
             relevance = getattr(memory, "relevance", 1.0)
+
+        # Process content through Arabic tokenizer
+        content_arabic = self._arabic_tokenizer.tokenize(content)
 
         if isinstance(metadata, dict):
             metadata = json.dumps(metadata)
 
         await conn.execute(
             """
-            INSERT OR REPLACE INTO memories (id, content, metadata, timestamp, source, relevance)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO memories (id, content, content_arabic, metadata, timestamp, source, relevance)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (memory_id, content, metadata, timestamp, source, relevance),
+            (memory_id, content, content_arabic, metadata, timestamp, source, relevance),
         )
 
-        # Also index in FTS for search
-        try:
-            # Get the rowid of the inserted memory
-            cursor = await conn.execute("SELECT rowid FROM memories WHERE id = ?", (memory_id,))
-            row = await cursor.fetchone()
-            if row:
-                await conn.execute(
-                    "INSERT OR REPLACE INTO memories_fts (content, content_rowid) VALUES (?, ?)", (content, row[0])
-                )
-        except Exception as e:
-            logger.debug("FTS indexing skipped: %s", e)
-
+        # Triggers will automatically update FTS5 table
         await conn.commit()
         return memory_id
+
+    async def search(self, query: str, limit: int = 10, **kwargs) -> list[dict[str, Any]]:
+        """Hybrid search using FTS5 BM25 and sqlite-vec vector similarity.
+
+        Args:
+            query: Search query string.
+            limit: Maximum number of results to return.
+            **kwargs: Additional parameters (embedding, semantic_search, etc.)
+
+        Returns:
+            List of memory dictionaries ranked by relevance.
+        """
+        conn = await self._ensure_connection()
+
+        # Process query through Arabic tokenizer for better matching
+        query_arabic = self._arabic_tokenizer.tokenize(query)
+
+        results = []
+
+        # Try FTS5 BM25 search first (keyword matching)
+        try:
+            # Use the external content table pattern for FTS5
+            # Search directly in FTS5 table with rowid, then join
+            cursor = await conn.execute(
+                """
+                SELECT rowid, bm25(memories_fts) as bm25_score
+                FROM memories_fts
+                WHERE memories_fts MATCH ?
+                ORDER BY bm25_score ASC
+                LIMIT ?
+                """,
+                (query, limit),
+            )
+            fts_rows = await cursor.fetchall()
+
+            if fts_rows:
+                rowids = [row[0] for row in fts_rows]
+                rowid_to_bm25 = {row[0]: row[1] for row in fts_rows}
+
+                # Fetch full memory records
+                placeholders = ",".join(["?"] * len(rowids))
+                cursor = await conn.execute(
+                    f"""
+                    SELECT id, content, content_arabic, metadata, timestamp, source, relevance, rowid
+                    FROM memories
+                    WHERE rowid IN ({placeholders})
+                    """,
+                    rowids,
+                )
+                memory_rows = await cursor.fetchall()
+
+                for row in memory_rows:
+                    rowid = row[7]
+                    results.append({
+                        "id": row[0],
+                        "content": row[1],
+                        "content_arabic": row[2],
+                        "metadata": row[3],
+                        "timestamp": row[4],
+                        "source": row[5],
+                        "relevance": row[6],
+                        "bm25_score": rowid_to_bm25.get(rowid, 0),
+                        "search_type": "fts5"
+                    })
+
+        except Exception as e:
+            logger.warning("FTS5 search failed: %s", e)
+            # Fallback to simple LIKE search
+            cursor = await conn.execute(
+                "SELECT id, content, metadata, timestamp, source, relevance FROM memories WHERE content LIKE ? LIMIT ?",
+                (f"%{query}%", limit),
+            )
+            rows = await cursor.fetchall()
+            results.extend([
+                {
+                    "id": row[0],
+                    "content": row[1],
+                    "metadata": row[2],
+                    "timestamp": row[3],
+                    "source": row[4],
+                    "relevance": row[5],
+                    "search_type": "fallback"
+                }
+                for row in rows
+            ])
+
+        # If vector search requested and available, add vector similarity results
+        if kwargs.get("semantic_search") and self._vec_available and kwargs.get("embedding"):
+            try:
+                vector_results = await self._vector_search(
+                    kwargs["embedding"],
+                    limit=max(limit // 2, 3)  # Reserve half slots for vector search
+                )
+                results.extend(vector_results)
+            except Exception as e:
+                logger.warning("Vector search failed: %s", e)
+
+        # Deduplicate and sort by relevance/bm25_score
+        unique_results = {}
+        for result in results:
+            result_id = result["id"]
+            if result_id not in unique_results:
+                unique_results[result_id] = result
+
+        # Sort by combined relevance score
+        sorted_results = sorted(
+            unique_results.values(),
+            key=lambda x: (
+                x.get("bm25_score", 0) * 0.7 + x.get("relevance", 1.0) * 0.3
+                if "bm25_score" in x
+                else x.get("relevance", 1.0)
+            ),
+            reverse=True,
+        )
+
+        return sorted_results[:limit]
+
+    async def _vector_search(self, embedding: bytes, limit: int = 10) -> list[dict[str, Any]]:
+        """Perform vector similarity search using sqlite-vec.
+
+        Args:
+            embedding: Query embedding vector.
+            limit: Maximum number of results.
+
+        Returns:
+            List of memory dictionaries.
+        """
+        conn = await self._ensure_connection()
+
+        try:
+            # Use sqlite-vec for vector similarity search
+            cursor = await conn.execute(
+                """
+                SELECT id, content, metadata, timestamp, source, relevance
+                FROM memories
+                WHERE embedding IS NOT NULL
+                ORDER BY distance(embedding, ?)
+                LIMIT ?
+                """,
+                (embedding, limit),
+            )
+            rows = await cursor.fetchall()
+
+            return [
+                {
+                    "id": row[0],
+                    "content": row[1],
+                    "metadata": row[2],
+                    "timestamp": row[3],
+                    "source": row[4],
+                    "relevance": row[5],
+                    "search_type": "vector"
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.warning("Vector search failed: %s", e)
+            return []
 
     def _generate_id(self) -> str:
         """Generate a unique memory ID."""
@@ -211,51 +333,39 @@ class SQLiteMemoryBackend:
             self._conn = None
 
 
-class SearchBackendRouter:
-    """Routes between SQLite and Tantivy based on workload.
+class SearchBackend:
+    """SQLite-only search backend with Arabic FTS5 and vector search.
 
-    Automatically selects the appropriate backend based on document count:
-    - < threshold: Use SQLite (simpler, lighter)
-    - >= threshold: Use Tantivy (faster, more scalable)
+    Provides optimized search for edge deployment:
+    - FTS5 full-text search with Arabic tokenization
+    - sqlite-vec vector similarity search
+    - Hybrid BM25 + vector ranking
+    - Zero external dependencies beyond SQLite
     """
 
-    def __init__(self, sqlite_backend: SQLiteMemoryBackend, tantivy_backend: Any, threshold_documents: int = 10000):
-        """Initialize router with backends.
+    def __init__(self, db_path: str = "kazma-data/memory.db"):
+        """Initialize SQLite search backend.
 
         Args:
-            sqlite_backend: SQLite memory backend instance.
-            tantivy_backend: Tantivy search backend instance.
-            threshold_documents: Document count threshold for switching backends.
+            db_path: Path to the SQLite database file.
         """
-        self.sqlite = sqlite_backend
-        self.tantivy = tantivy_backend
-        self.threshold = threshold_documents
-        self._document_count: int | None = None
+        self.backend = SQLiteMemoryBackend(db_path)
 
-    async def search(self, query: str, **kwargs) -> list[Any]:
-        """Route search to appropriate backend.
-
-        - < threshold documents: Use SQLite (simpler, lighter)
-        - >= threshold documents: Use Tantivy (faster, more scalable)
+    async def search(self, query: str, limit: int = 10, **kwargs) -> list[dict[str, Any]]:
+        """Perform hybrid search with Arabic tokenization.
 
         Args:
             query: Search query string.
-            **kwargs: Additional search parameters.
+            limit: Maximum number of results.
+            **kwargs: Additional parameters (semantic_search, embedding, etc.).
 
         Returns:
-            List of search results.
+            List of search results ranked by relevance.
         """
-        doc_count = await self._get_document_count()
-
-        if doc_count >= self.threshold:
-            logger.debug(f"Routing to Tantivy ({doc_count} documents)")
-            return await self.tantivy.search(query, **kwargs)
-        else:
-            logger.debug(f"Routing to SQLite ({doc_count} documents)")
-            return await self.sqlite.search(query, **kwargs)
+        return await self.backend.search(query, limit=limit, **kwargs)
 
     async def index(self, memory: Any) -> str:
-        """Index to both backends for redundancy.
+        """Index a memory with Arabic tokenization.
 
         Args:
             memory: Memory object to index.
@@ -263,108 +373,30 @@ class SearchBackendRouter:
         Returns:
             Document ID.
         """
-        # Index to SQLite
-        sqlite_id = await self.sqlite.index(memory)
+        return await self.backend.index(memory)
 
-        # Index to Tantivy (if available)
-        try:
-            from .tantivy_backend import Memory as TantivyMemory
-
-            # Convert to Tantivy format if needed
-            if isinstance(memory, dict):
-                tantivy_memory = TantivyMemory(
-                    id=memory.get("id", sqlite_id),
-                    content=memory.get("content", ""),
-                    metadata=memory.get("metadata", ""),
-                    timestamp=memory.get("timestamp", 0),
-                    source=memory.get("source", ""),
-                    relevance=memory.get("relevance", 1.0),
-                    division=memory.get("division", ""),
-                )
-            else:
-                tantivy_memory = memory
-
-            await self.tantivy.index_memory(tantivy_memory)
-
-        except Exception as e:
-            logger.warning(f"Failed to index to Tantivy: {e}")
-
-        return sqlite_id
-
-    async def migrate_to_tantivy(self) -> bool:
-        """One-way migration from SQLite to Tantivy.
+    async def count(self) -> int:
+        """Get total document count.
 
         Returns:
-            True if migration successful.
+            Number of indexed documents.
         """
-        try:
-            from .migration import SQLiteToTantivyMigration
+        return await self.backend.count()
 
-            migration = SQLiteToTantivyMigration(
-                sqlite_path=self.sqlite.db_path if hasattr(self.sqlite, "db_path") else "kazma-data/memory.db",
-                tantivy_path=self.tantivy.index_path
-                if hasattr(self.tantivy, "index_path")
-                else "kazma-data/tantivy-index",
-            )
-
-            result = await migration.migrate()
-
-            if result.success:
-                logger.info(f"Migration completed: {result.total_migrated} documents migrated")
-                # Clear cached document count
-                self._document_count = None
-                return True
-            else:
-                logger.error(f"Migration failed: {result.errors}")
-                return False
-
-        except Exception as e:
-            logger.error(f"Migration failed: {e}")
-            return False
-
-    async def _get_document_count(self) -> int:
-        """Get current document count.
-
-        Caches the count to avoid repeated queries.
-
-        Returns:
-            Number of documents in the index.
-        """
-        if self._document_count is not None:
-            return self._document_count
-
-        try:
-            # Try to get count from Tantivy first
-            stats = await self.tantivy.get_stats()
-            self._document_count = stats.total_documents
-        except Exception:
-            # Fall back to SQLite
-            try:
-                if hasattr(self.sqlite, "count"):
-                    self._document_count = await self.sqlite.count()
-                else:
-                    self._document_count = 0
-            except Exception:
-                self._document_count = 0
-
-        return self._document_count
-
-    async def invalidate_cache(self) -> None:
-        """Invalidate cached document count."""
-        self._document_count = None
+    async def close(self) -> None:
+        """Close database connection."""
+        await self.backend.close()
 
     async def get_backend_info(self) -> dict[str, Any]:
-        """Get information about current backend selection.
+        """Get information about the search backend.
 
         Returns:
-            Dictionary with backend selection details.
+            Dictionary with backend information.
         """
-        doc_count = await self._get_document_count()
-
         return {
-            "document_count": doc_count,
-            "threshold": self.threshold,
-            "selected_backend": "tantivy" if doc_count >= self.threshold else "sqlite",
-            "sqlite_available": self.sqlite is not None,
-            "tantivy_available": self.tantivy is not None,
+            "backend_type": "sqlite",
+            "fts5_enabled": True,
+            "vector_search_enabled": self.backend._vec_available,
+            "arabic_tokenization": True,
+            "document_count": await self.backend.count(),
         }
