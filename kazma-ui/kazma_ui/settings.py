@@ -10,7 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from kazma_ui.models import MCPServerTestRequest, ModelTestRequest, SettingsUpdate
@@ -62,15 +62,33 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
 
     # ── Settings CRUD ─────────────────────────────────────────────────
 
-    @router.get("/api/settings/{category}")
-    async def api_get_category(category: str) -> dict[str, Any]:
-        """Get all settings for a category."""
-        return config_store.get_category(category)
-
     @router.get("/api/settings")
     async def api_get_all_settings() -> dict[str, dict[str, Any]]:
         """Get all settings grouped by category."""
         return config_store.get_all()
+
+    @router.get("/api/settings/export")
+    async def api_export_yaml() -> Response:
+        """Export settings as YAML file download."""
+        try:
+            yaml_content = config_store.export_yaml()
+            return Response(
+                content=yaml_content,
+                media_type="text/yaml; charset=utf-8",
+                headers={"Content-Disposition": "attachment; filename=kazma.yaml"},
+            )
+        except Exception as e:
+            logger.error(f"Failed to export YAML: {e}")
+            return Response(
+                content=f"Error: {str(e)}",
+                media_type="text/plain",
+                status_code=500,
+            )
+
+    @router.get("/api/settings/{category}")
+    async def api_get_category(category: str) -> dict[str, Any]:
+        """Get all settings for a category."""
+        return config_store.get_category(category)
 
     @router.put("/api/settings")
     async def api_update_settings(updates: list[SettingsUpdate]) -> dict[str, str]:
@@ -153,16 +171,6 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
             return {"success": False, "error": str(e)}
 
     # ── YAML import/export ────────────────────────────────────────────
-
-    @router.get("/api/settings/export")
-    async def api_export_yaml() -> StreamingResponse:
-        """Export settings as YAML file download."""
-        yaml_content = config_store.export_yaml()
-        return StreamingResponse(
-            iter([yaml_content.encode()]),
-            media_type="text/yaml",
-            headers={"Content-Disposition": "attachment; filename=kazma.yaml"},
-        )
 
     @router.post("/api/settings/import")
     async def api_import_yaml(request: Request) -> dict[str, str]:

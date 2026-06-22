@@ -5,6 +5,7 @@ Uses langgraph-checkpoint-sqlite for WAL-mode SQLite with crash-safe writes.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -34,16 +35,18 @@ class CheckpointManager:
         self._db_path = str(db_path or DEFAULT_DB_PATH)
         self._saver: AsyncSqliteSaver | None = None
         self._conn: aiosqlite.Connection | None = None
+        self._lock = asyncio.Lock()
 
     async def _ensure_saver(self) -> AsyncSqliteSaver:
         """Lazily initialize the AsyncSqliteSaver with direct connection."""
-        if self._saver is None:
-            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-            self._conn = await aiosqlite.connect(self._db_path)
-            await self._conn.execute("PRAGMA journal_mode=WAL")
-            await self._conn.execute("PRAGMA synchronous=NORMAL")
-            self._saver = AsyncSqliteSaver(self._conn)
-            await self._saver.setup()
+        async with self._lock:
+            if self._saver is None:
+                Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+                self._conn = await aiosqlite.connect(self._db_path)
+                await self._conn.execute("PRAGMA journal_mode=WAL")
+                await self._conn.execute("PRAGMA synchronous=NORMAL")
+                self._saver = AsyncSqliteSaver(self._conn)
+                await self._saver.setup()
         return self._saver
 
     def _config(self, thread_id: str) -> dict[str, Any]:
