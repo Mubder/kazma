@@ -175,8 +175,8 @@ fi
 
 log_header "2. Sync Handshake (uv sync)"
 
-if uv sync --extra dev --extra cli 2>&1 | tail -5; then
-    log_ok "Environment synced from pyproject.toml (with dev + cli extras)"
+if uv sync --extra dev --extra cli --extra tui --extra tantivy 2>&1 | tail -5; then
+    log_ok "Environment synced from pyproject.toml (with dev + cli + tui + tantivy extras)"
 else
     SYNC_EXIT=$?
     log_fail "uv sync failed (exit code $SYNC_EXIT)"
@@ -207,7 +207,7 @@ else
 
     echo ""
     log_info "Fallback — install without uv:"
-    log_info "  $PYTHON_CMD -m pip install -e '.[dev,cli]'"
+    log_info "  $PYTHON_CMD -m pip install -e '.[dev,cli,tui,tantivy]'"
     exit 1
 fi
 
@@ -227,11 +227,16 @@ INTRO_ERRORS=0
 check_import() {
     local module="$1"
     local label="$2"
+    local optional="${3:-false}"
     if $VENV_PYTHON -c "import $module" 2>/dev/null; then
         log_ok "$label loaded"
     else
-        log_fail "$label not importable"
-        INTRO_ERRORS=$((INTRO_ERRORS + 1))
+        if [[ "$optional" == "true" ]]; then
+            log_warn "$label not importable (optional, continuing)"
+        else
+            log_fail "$label not importable"
+            INTRO_ERRORS=$((INTRO_ERRORS + 1))
+        fi
     fi
 }
 
@@ -241,6 +246,8 @@ check_import "langgraph"        "LangGraph"
 check_import "langgraph.checkpoint.sqlite.aio" "LangGraph SQLite checkpointer"
 check_import "yaml"             "PyYAML"
 check_import "httpx"            "httpx"
+check_import "textual"          "textual (TUI)"
+check_import "tantivy"          "tantivy (Arabic search)" "true"
 
 if [[ "$INTRO_ERRORS" -gt 0 ]]; then
     echo ""
@@ -266,6 +273,8 @@ log_ok "Kazma is ready"
 echo ""
 log_info "Run tests:      .venv/bin/python -m pytest tests/ -q"
 log_info "Run agent:      .venv/bin/python -m kazma_core.agent"
+log_info "Run TUI:        .venv/bin/python -m kazma_tui.tui"
+log_info "Run Web UI:     .venv/bin/python serve.py"
 log_info "Configuration:  kazma.yaml"
 log_info "Documentation:  https://github.com/Mubder/kazma"
 echo ""
