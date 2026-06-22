@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import logging
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from kazma_core.tracing import KazmaTracer, TracingBackend, create_tracer
 

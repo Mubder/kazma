@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, TypedDict
 
 
@@ -33,7 +33,7 @@ class AgentState(TypedDict, total=False):
 
 def initial_state() -> AgentState:
     """Create a fresh initial state with sensible defaults."""
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     return AgentState(
         messages=[],
         tool_results={},

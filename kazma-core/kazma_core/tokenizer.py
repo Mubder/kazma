@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass
 
 from kazma_core.dialect_detector import DialectDetector, DialectResult
 from kazma_core.kuwaiti_tokenizer import KuwaitiTokenizer, Token

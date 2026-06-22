@@ -5,9 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 import yaml
-
 
 # ---------------------------------------------------------------------------
 # Helpers

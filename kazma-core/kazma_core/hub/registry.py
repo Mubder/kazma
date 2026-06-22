@@ -5,10 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -96,7 +95,7 @@ class KazmaHub:
     def __init__(self, registry_path: str = "~/.kazma/hub/registry.db"):
         self.db_path = Path(registry_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[aiosqlite.Connection] = None
+        self._conn: aiosqlite.Connection | None = None
         self._initialized = False
         self._agents: dict[str, AgentInfo] = {}
 
@@ -206,7 +205,7 @@ class KazmaHub:
     # Query
     # ------------------------------------------------------------------
 
-    async def get(self, skill_id: str) -> Optional[SkillManifest]:
+    async def get(self, skill_id: str) -> SkillManifest | None:
         """Fetch a single skill by kazma-hub:// ID."""
         author, name, version = _parse_skill_id(skill_id)
         conn = await self._get_conn()
@@ -225,7 +224,7 @@ class KazmaHub:
         capabilities: list[str] | None = None,
         tags: list[str] | None = None,
         author: str | None = None,
-    ) -> List[SkillManifest]:
+    ) -> list[SkillManifest]:
         """Search skills by text query, capabilities, tags, or author."""
         clauses: list[str] = []
         params: list = []
@@ -256,7 +255,7 @@ class KazmaHub:
         rows = await cursor.fetchall()
         return [_row_to_manifest(dict(r)) for r in rows]
 
-    async def list_installed(self) -> List[SkillManifest]:
+    async def list_installed(self) -> list[SkillManifest]:
         """Return manifests for skills that have been installed locally."""
         conn = await self._get_conn()
         cursor = await conn.execute(
@@ -284,7 +283,7 @@ class KazmaHub:
         await conn.commit()
         return install_path
 
-    async def update(self, skill_id: str) -> Optional[SkillManifest]:
+    async def update(self, skill_id: str) -> SkillManifest | None:
         """Stub: return latest version of the given skill."""
         # For now, just return the current version.
         return await self.get(skill_id)
@@ -334,7 +333,7 @@ class KazmaHub:
         )
         return results
 
-    async def get_agent(self, agent_id: str) -> Optional[AgentInfo]:
+    async def get_agent(self, agent_id: str) -> AgentInfo | None:
         """Get a registered agent by ID."""
         conn = await self._get_conn()
         conn.row_factory = aiosqlite.Row

@@ -7,11 +7,10 @@ trading intelligence reports.
 from __future__ import annotations
 
 import logging
-import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +48,8 @@ class DivisionTradeData:
     supplier_lead_days: float = 0.0       # Average supplier lead time
     revenue_ytd: float = 0.0             # Year-to-date revenue
     expense_ytd: float = 0.0            # Year-to-date expenses
-    operational_issues: List[str] = field(default_factory=list)
-    custom_metrics: Dict[str, Any] = field(default_factory=dict)
+    operational_issues: list[str] = field(default_factory=list)
+    custom_metrics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -63,7 +62,7 @@ class DroneInsight:
     critical_findings: int = 0
     asset_condition: str = "unknown"      # "good", "degraded", "critical"
     supply_chain_risk: str = "low"        # "low", "medium", "high"
-    affected_assets: List[str] = field(default_factory=list)
+    affected_assets: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -84,22 +83,22 @@ class CorrelationResult:
     """Complete correlation result for a division."""
     division: Division
     period: str
-    factors: List[CorrelatedFactor] = field(default_factory=list)
+    factors: list[CorrelatedFactor] = field(default_factory=list)
     overall_impact: ImpactSeverity = ImpactSeverity.NEUTRAL
     overall_direction: CorrelationDirection = CorrelationDirection.NEUTRAL
     summary_en: str = ""
     summary_ar: str = ""
     correlated_at: str = ""
-    oil_price: Optional[float] = None
-    gold_price: Optional[float] = None
-    boursa_index: Optional[float] = None
+    oil_price: float | None = None
+    gold_price: float | None = None
+    boursa_index: float | None = None
 
     @property
-    def critical_factors(self) -> List[CorrelatedFactor]:
+    def critical_factors(self) -> list[CorrelatedFactor]:
         return [f for f in self.factors if f.severity == ImpactSeverity.CRITICAL]
 
     @property
-    def risk_factors(self) -> List[CorrelatedFactor]:
+    def risk_factors(self) -> list[CorrelatedFactor]:
         return [f for f in self.factors
                 if f.severity in (ImpactSeverity.CRITICAL, ImpactSeverity.HIGH)]
 
@@ -127,14 +126,14 @@ class TradeDataCorrelator:
 
     async def correlate(
         self,
-        boursa_index: Optional[float] = None,
-        boursa_change_pct: Optional[float] = None,
-        oil_price: Optional[float] = None,
-        oil_change_pct: Optional[float] = None,
-        gold_price_kwd: Optional[float] = None,
-        gold_change_pct: Optional[float] = None,
-        division_data: Optional[DivisionTradeData] = None,
-        drone_insights: Optional[List[DroneInsight]] = None,
+        boursa_index: float | None = None,
+        boursa_change_pct: float | None = None,
+        oil_price: float | None = None,
+        oil_change_pct: float | None = None,
+        gold_price_kwd: float | None = None,
+        gold_change_pct: float | None = None,
+        division_data: DivisionTradeData | None = None,
+        drone_insights: list[DroneInsight] | None = None,
     ) -> CorrelationResult:
         """Correlate market movements with division-specific factors.
 
@@ -152,12 +151,12 @@ class TradeDataCorrelator:
             CorrelationResult with factor-level analysis.
         """
         division = division_data.division if division_data else Division.GENERAL_TRADING
-        period = division_data.period if division_data else datetime.now(timezone.utc).strftime("%Y-%m")
+        period = division_data.period if division_data else datetime.now(UTC).strftime("%Y-%m")
 
         result = CorrelationResult(
             division=division,
             period=period,
-            correlated_at=datetime.now(timezone.utc).isoformat(),
+            correlated_at=datetime.now(UTC).isoformat(),
             oil_price=oil_price,
             gold_price=gold_price_kwd,
             boursa_index=boursa_index,
@@ -179,10 +178,10 @@ class TradeDataCorrelator:
     def _correlate_gas_oil(
         self,
         result: CorrelationResult,
-        oil_price: Optional[float],
-        oil_change_pct: Optional[float],
-        division_data: Optional[DivisionTradeData],
-        drone_insights: Optional[List[DroneInsight]],
+        oil_price: float | None,
+        oil_change_pct: float | None,
+        division_data: DivisionTradeData | None,
+        drone_insights: list[DroneInsight] | None,
     ) -> None:
         """Gas & Oil specific correlations."""
         if oil_price is not None:
@@ -255,10 +254,10 @@ class TradeDataCorrelator:
     def _correlate_tourism(
         self,
         result: CorrelationResult,
-        boursa_index: Optional[float],
-        boursa_change_pct: Optional[float],
-        gold_price_kwd: Optional[float],
-        division_data: Optional[DivisionTradeData],
+        boursa_index: float | None,
+        boursa_change_pct: float | None,
+        gold_price_kwd: float | None,
+        division_data: DivisionTradeData | None,
     ) -> None:
         """Tourism division specific correlations."""
         if boursa_change_pct is not None:
@@ -302,12 +301,12 @@ class TradeDataCorrelator:
     def _correlate_general(
         self,
         result: CorrelationResult,
-        boursa_index: Optional[float],
-        boursa_change_pct: Optional[float],
-        oil_price: Optional[float],
-        gold_price_kwd: Optional[float],
-        gold_change_pct: Optional[float],
-        division_data: Optional[DivisionTradeData],
+        boursa_index: float | None,
+        boursa_change_pct: float | None,
+        oil_price: float | None,
+        gold_price_kwd: float | None,
+        gold_change_pct: float | None,
+        division_data: DivisionTradeData | None,
     ) -> None:
         """General Trading division correlations."""
         # Boursa broad market impact

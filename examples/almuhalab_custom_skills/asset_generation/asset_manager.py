@@ -7,14 +7,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +33,8 @@ class AssetMetadata:
     prompt_used: str = ""
     backend: str = ""
     version: int = 1
-    tags: List[str] = field(default_factory=list)
-    extra: Dict[str, Any] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -56,7 +54,7 @@ class AssetMetadata:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "AssetMetadata":
+    def from_dict(cls, data: dict) -> AssetMetadata:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
@@ -75,7 +73,7 @@ class AssetManager:
     def __init__(self, storage_path: str = "kazma-data/assets") -> None:
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
-        self._index: Dict[str, AssetMetadata] = {}
+        self._index: dict[str, AssetMetadata] = {}
         self._load_index()
 
     def _index_path(self) -> Path:
@@ -86,7 +84,7 @@ class AssetManager:
         idx_path = self._index_path()
         if idx_path.exists():
             try:
-                with open(idx_path, "r") as f:
+                with open(idx_path) as f:
                     data = json.load(f)
                 self._index = {
                     k: AssetMetadata.from_dict(v) for k, v in data.items()
@@ -129,7 +127,7 @@ class AssetManager:
         asset: Any,
         division: str,
         asset_type: str,
-        metadata: Optional[dict] = None,
+        metadata: dict | None = None,
     ) -> str:
         """Store asset with metadata, return asset_id.
 
@@ -212,7 +210,7 @@ class AssetManager:
         )
         return asset_id
 
-    async def get_asset(self, asset_id: str) -> Optional[AssetMetadata]:
+    async def get_asset(self, asset_id: str) -> AssetMetadata | None:
         """Retrieve asset metadata by ID.
 
         Args:
@@ -232,10 +230,10 @@ class AssetManager:
 
     async def list_assets(
         self,
-        division: Optional[str] = None,
-        asset_type: Optional[str] = None,
-        created_after: Optional[datetime] = None,
-    ) -> List[AssetMetadata]:
+        division: str | None = None,
+        asset_type: str | None = None,
+        created_after: datetime | None = None,
+    ) -> list[AssetMetadata]:
         """List assets with optional filters.
 
         Args:
@@ -246,7 +244,7 @@ class AssetManager:
         Returns:
             List of matching AssetMetadata objects.
         """
-        results: List[AssetMetadata] = []
+        results: list[AssetMetadata] = []
         cutoff_ts = created_after.timestamp() if created_after else 0.0
 
         for meta in self._index.values():
@@ -275,7 +273,7 @@ class AssetManager:
         """
         cutoff_ts = time.time() - (max_age_days * 86400)
         removed = 0
-        to_remove: List[str] = []
+        to_remove: list[str] = []
 
         for asset_id, meta in self._index.items():
             if meta.created_at < cutoff_ts:
@@ -308,7 +306,7 @@ class AssetManager:
         return removed
 
     async def get_asset_count(
-        self, division: Optional[str] = None
+        self, division: str | None = None
     ) -> int:
         """Get total count of assets, optionally filtered by division."""
         if division is None:
@@ -316,7 +314,7 @@ class AssetManager:
         return sum(1 for m in self._index.values() if m.division == division)
 
     async def get_total_size_bytes(
-        self, division: Optional[str] = None
+        self, division: str | None = None
     ) -> int:
         """Get total size of stored assets in bytes."""
         total = 0

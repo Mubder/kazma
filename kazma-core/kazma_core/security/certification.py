@@ -10,12 +10,10 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
 
-
-CERTIFICATION_LEVELS: Dict[str, Dict] = {
+CERTIFICATION_LEVELS: dict[str, dict] = {
     "basic": {
         "min_requirements": ["manifest_valid", "no_critical_violations"],
         "badge": "basic-certified",
@@ -48,8 +46,8 @@ class CertificationResult:
     level: str
     badge: str
     valid_until: str
-    requirements_met: List[str] = field(default_factory=list)
-    requirements_failed: List[str] = field(default_factory=list)
+    requirements_met: list[str] = field(default_factory=list)
+    requirements_failed: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -65,7 +63,7 @@ class VerificationResult:
 class KazmaCertification:
     """Manage skill certification lifecycle with SQLite-backed storage."""
 
-    def __init__(self, db_path: Optional[Path | str] = None) -> None:
+    def __init__(self, db_path: Path | str | None = None) -> None:
         """Initialise the certification store.
 
         Args:
@@ -76,7 +74,7 @@ class KazmaCertification:
             db_path = Path("kazma-data/certifications.db")
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._db_lock = __import__("threading").Lock()
 
     # ------------------------------------------------------------------
@@ -138,7 +136,7 @@ class KazmaCertification:
         met, failed = await self._check_requirements(skill_path, level, required)
 
         certified = len(failed) == 0
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         valid_until = (now + timedelta(days=level_cfg["validity_days"])).isoformat() if certified else ""
 
         skill_id = await self._extract_skill_id(skill_path)
@@ -176,7 +174,7 @@ class KazmaCertification:
             :class:`VerificationResult` indicating validity.
         """
         self._init_db()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         last_verified = now.isoformat()
 
         with self._db_lock:
@@ -226,11 +224,11 @@ class KazmaCertification:
     # ------------------------------------------------------------------
 
     async def _check_requirements(
-        self, skill_path: Path, level: str, requirements: List[str]
-    ) -> tuple[List[str], List[str]]:
+        self, skill_path: Path, level: str, requirements: list[str]
+    ) -> tuple[list[str], list[str]]:
         """Evaluate which requirements are met and which are not."""
-        met: List[str] = []
-        failed: List[str] = []
+        met: list[str] = []
+        failed: list[str] = []
 
         for req in requirements:
             ok = await self._evaluate_requirement(skill_path, req)

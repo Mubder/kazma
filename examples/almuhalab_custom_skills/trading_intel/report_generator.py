@@ -9,14 +9,13 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from almuhalab_custom_skills.trading_intel.correlator import (
-    CorrelatedFactor,
-    CorrelationResult,
     CorrelationDirection,
+    CorrelationResult,
     Division,
     ImpactSeverity,
 )
@@ -91,18 +90,18 @@ class TradingIntelReport:
     # Market Overview section
     market_overview_en: str = ""
     market_overview_ar: str = ""
-    oil_price: Optional[float] = None
-    gold_price_kwd: Optional[float] = None
-    boursa_index: Optional[float] = None
+    oil_price: float | None = None
+    gold_price_kwd: float | None = None
+    boursa_index: float | None = None
 
     # Risk Assessment section
-    risks: List[RiskItem] = field(default_factory=list)
+    risks: list[RiskItem] = field(default_factory=list)
 
     # Opportunities section
-    opportunities: List[OpportunityItem] = field(default_factory=list)
+    opportunities: list[OpportunityItem] = field(default_factory=list)
 
     # Recommended Actions section
-    actions: List[ActionItem] = field(default_factory=list)
+    actions: list[ActionItem] = field(default_factory=list)
 
     # Overall
     overall_severity: ImpactSeverity = ImpactSeverity.NEUTRAL
@@ -115,7 +114,7 @@ class TradingIntelReport:
 # ── Report Generator ───────────────────────────────────────────────────
 
 # Market overview templates (Kuwaiti Arabic)
-_MARKET_TEMPLATES: Dict[str, Dict[str, str]] = {
+_MARKET_TEMPLATES: dict[str, dict[str, str]] = {
     "gas_oil": {
         "oil_high": (
             "سعر النفط مرتفع عند ${price:.1f} — بيئة م有利 للتعهدات. "
@@ -199,7 +198,7 @@ class TradingIntelReportGenerator:
             division=division,
             division_ar=division_ar_map.get(division, division),
             period=correlation.period,
-            generated_at=datetime.now(timezone.utc).isoformat(),
+            generated_at=datetime.now(UTC).isoformat(),
             language=language,
             oil_price=correlation.oil_price,
             gold_price_kwd=correlation.gold_price,
@@ -371,7 +370,7 @@ class TradingIntelReportGenerator:
         presentation in a Majlis (meeting) setting.
         """
         lines = []
-        lines.append(f"═══ تقرير الاستخبارات التجارية ═══")
+        lines.append("═══ تقرير الاستخبارات التجارية ═══")
         lines.append(f"القسم: {report.division_ar}")
         lines.append(f"الفترة: {report.period}")
         lines.append(f"التاريخ: {report.generated_at[:10]}")
@@ -411,7 +410,7 @@ class TradingIntelReportGenerator:
             lines.append("")
 
         # Summary
-        lines.append(f"── الملخص ──")
+        lines.append("── الملخص ──")
         lines.append(report.summary_ar)
 
         return "\n".join(lines)

@@ -10,13 +10,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import List, Optional
-
 
 # Regex patterns that suggest hardcoded secrets
-_SECRET_PATTERNS: List[re.Pattern] = [
+_SECRET_PATTERNS: list[re.Pattern] = [
     re.compile(r"""(?:api[_-]?key|apikey)\s*[=:]\s*['"][A-Za-z0-9_\-]{16,}['"]""", re.I),
     re.compile(r"""(?:secret|secret[_-]?key)\s*[=:]\s*['"][A-Za-z0-9_\-]{16,}['"]""", re.I),
     re.compile(r"""(?:token|access[_-]?token|auth[_-]?token)\s*[=:]\s*['"][A-Za-z0-9_\-]{16,}['"]""", re.I),
@@ -41,7 +39,7 @@ class HardeningCheck:
 class HardeningReport:
     """Aggregated report from all hardening checks."""
 
-    checks: List[HardeningCheck] = field(default_factory=list)
+    checks: list[HardeningCheck] = field(default_factory=list)
     total: int = 0
     passed: int = 0
     failed: int = 0
@@ -58,7 +56,7 @@ class SecurityHardeningRunner:
     :class:`HardeningReport`.
     """
 
-    CHECKS: List[str] = [
+    CHECKS: list[str] = [
         "check_no_hardcoded_secrets",
         "check_mcp_sandboxing",
         "check_rbac_enforcement",
@@ -77,7 +75,7 @@ class SecurityHardeningRunner:
                           Defaults to ``Path.cwd()``.
         """
         self.project_root = Path(project_root) if project_root else Path.cwd()
-        self.results: List[HardeningCheck] = []
+        self.results: list[HardeningCheck] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -102,7 +100,7 @@ class SecurityHardeningRunner:
             passed=sum(1 for c in self.results if c.passed),
             failed=len(failed),
             critical_failures=sum(1 for c in failed if c.severity == "critical"),
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
     async def run_check(self, check_name: str) -> HardeningCheck:
@@ -132,7 +130,7 @@ class SecurityHardeningRunner:
             "# Security Hardening Report",
             "",
             f"**Project:** `{self.project_root}`",
-            f"**Timestamp:** {datetime.now(timezone.utc).isoformat()}",
+            f"**Timestamp:** {datetime.now(UTC).isoformat()}",
             "",
             "## Summary",
             "",

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Tuple
 
 from kazma_core.hub.manifest_schema import SkillManifest
 
@@ -12,8 +11,8 @@ from kazma_core.hub.manifest_schema import SkillManifest
 class ConflictResolution:
     """Result of conflict detection between installed and new skills."""
     has_conflicts: bool = False
-    conflicts: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     can_proceed: bool = True
 
 
@@ -21,7 +20,7 @@ class SkillVersioning:
     """Version parsing and compatibility checking for skill manifests."""
 
     @staticmethod
-    def parse_version(version: str) -> Tuple[int, int, int]:
+    def parse_version(version: str) -> tuple[int, int, int]:
         """Parse 'X.Y.Z' into (X, Y, Z). Raises ValueError on bad input."""
         parts = version.split(".")
         if len(parts) != 3:
@@ -37,7 +36,7 @@ class SkillVersioning:
         return SkillVersioning.parse_version(skill_version) >= SkillVersioning.parse_version(min_core_version)
 
     @staticmethod
-    def get_latest(versions: List[str]) -> str:
+    def get_latest(versions: list[str]) -> str:
         """Return the highest semver string from a list. Raises ValueError if empty."""
         if not versions:
             raise ValueError("Cannot get latest from empty version list")
@@ -45,7 +44,7 @@ class SkillVersioning:
 
     @staticmethod
     def resolve_conflicts(
-        installed: List[SkillManifest],
+        installed: list[SkillManifest],
         new: SkillManifest,
     ) -> ConflictResolution:
         """Check if *new* skill conflicts with any *installed* skills.
@@ -53,8 +52,8 @@ class SkillVersioning:
         Same name = replacement (allowed, with warning).
         Same capabilities = warning.
         """
-        conflicts: List[str] = []
-        warnings: List[str] = []
+        conflicts: list[str] = []
+        warnings: list[str] = []
         new_name = new.data.get("name", "")
         new_caps = set(new.data.get("capabilities", []))
 

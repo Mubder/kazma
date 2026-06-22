@@ -8,12 +8,7 @@ Handles formal Arabic with:
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
-from typing import List, Optional
-
 from kazma_core.kuwaiti_tokenizer import Token, TokenType
-
 
 # ── Alef normalization map ────────────────────────────────────────────
 _ALEF_VARIANTS = {

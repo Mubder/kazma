@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
-
 import pytest
-
 
 from almuhalab_custom_skills.drone_inspection.fleet_manager import (
     DroneFleetManager,
     DroneState,
     DroneStatus,
-    FleetStatus,
     InspectionMission,
     MissionStatus,
 )

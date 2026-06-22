@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-
-from kazma_core.tool_registry import ToolRegistry, RegisteredTool
 from kazma_core.mcp_client import MCPError
+from kazma_core.tool_registry import RegisteredTool, ToolRegistry
 
 
 class TestToolRegistry:

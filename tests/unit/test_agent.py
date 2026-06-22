@@ -5,7 +5,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from kazma_core.agent import AgentConfig, KazmaAgent, load_config
 from kazma_core.llm_provider import LLMResponse
 

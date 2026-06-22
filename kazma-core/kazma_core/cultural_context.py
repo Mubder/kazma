@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from enum import Enum
 from typing import Any
 
@@ -101,7 +101,7 @@ def _gregorian_to_hijri_approx(g: date) -> tuple[int, int, int]:
     hijri_year = cycle * 30 + year_in_cycle + 1  # 1-indexed
 
     # --- month / day ---
-    is_leap = year_in_cycle in _LEAP_YEARS
+    is_leap = year_in_cycle in _leap_years
     month = 1
     for m in range(12):
         month_len = (30 if is_leap else 29) if m == 11 else (30 if m % 2 == 0 else 29)
@@ -339,7 +339,7 @@ class CulturalContext:
         # During Ramadan, iftar is around Maghrib time (approximately 6-7 PM in Kuwait)
         # We approximate: business is less appropriate between 5:30 PM and 7:30 PM
         if current_hour is None:
-            now_utc = datetime.now(timezone.utc)
+            now_utc = datetime.now(UTC)
             current_hour = (now_utc.hour + 3) % 24  # UTC+3 for Kuwait
 
         # Kuwait iftar is around 18:00-19:00 local time

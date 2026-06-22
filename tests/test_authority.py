@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from kazma_core.token_counter import TokenCounter
-from kazma_core.compaction import CompactionEngine
 from kazma_core.authority import ContextAuthority, create_authority
-from kazma_core.state import AgentState, initial_state
+from kazma_core.compaction import CompactionEngine
+from kazma_core.state import initial_state
+from kazma_core.token_counter import TokenCounter
 
 
 class TestContextAuthority:

@@ -9,10 +9,9 @@ import json
 import logging
 import os
 import sqlite3
-import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +58,7 @@ class ReportStore:
     for efficient filtering.
     """
 
-    def __init__(self, db_path: Optional[str] = None) -> None:
+    def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path or _DEFAULT_DB
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
@@ -167,7 +166,7 @@ class ReportStore:
         finally:
             conn.close()
 
-    async def get_latest(self, division: str) -> Optional[Dict[str, Any]]:
+    async def get_latest(self, division: str) -> dict[str, Any] | None:
         """Get the most recent report for a division."""
         sql = """
             SELECT report_json FROM trading_reports
@@ -185,12 +184,12 @@ class ReportStore:
 
     async def search(
         self,
-        division: Optional[str] = None,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
-        severity: Optional[str] = None,
+        division: str | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        severity: str | None = None,
         limit: int = 50,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Search reports with optional filters.
 
         Args:
@@ -204,7 +203,7 @@ class ReportStore:
             List of report dicts.
         """
         conditions = []
-        params: List[Any] = []
+        params: list[Any] = []
 
         if division:
             conditions.append("division = ?")
@@ -236,7 +235,7 @@ class ReportStore:
         finally:
             conn.close()
 
-    async def get_report_by_id(self, report_id: str) -> Optional[Dict[str, Any]]:
+    async def get_report_by_id(self, report_id: str) -> dict[str, Any] | None:
         """Get a specific report by ID."""
         sql = "SELECT report_json FROM trading_reports WHERE report_id = ?"
         conn = sqlite3.connect(self.db_path)
@@ -247,7 +246,7 @@ class ReportStore:
         finally:
             conn.close()
 
-    async def count(self, division: Optional[str] = None) -> int:
+    async def count(self, division: str | None = None) -> int:
         """Count reports, optionally filtered by division."""
         if division:
             sql = "SELECT COUNT(*) FROM trading_reports WHERE division = ?"
@@ -264,7 +263,7 @@ class ReportStore:
     async def delete_old(self, days: int = 90) -> int:
         """Delete reports older than N days. Returns count deleted."""
         from datetime import timedelta
-        cutoff_dt = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_dt = datetime.now(UTC) - timedelta(days=days)
         cutoff = cutoff_dt.isoformat()
         sql = "DELETE FROM trading_reports WHERE generated_at < ?"
         conn = sqlite3.connect(self.db_path)

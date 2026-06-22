@@ -2,29 +2,20 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
-
 import pytest
 
-
 from almuhalab_custom_skills.trading_intel.correlator import (
-    TradeDataCorrelator,
-    CorrelationResult,
-    DivisionTradeData,
     CorrelatedFactor,
+    CorrelationDirection,
+    CorrelationResult,
     Division,
     ImpactSeverity,
-    CorrelationDirection,
 )
 from almuhalab_custom_skills.trading_intel.report_generator import (
-    TradingIntelReportGenerator,
-    TradingIntelReport,
     ReportSection,
+    TradingIntelReport,
+    TradingIntelReportGenerator,
     UrgencyTag,
-    RiskItem,
-    OpportunityItem,
-    ActionItem,
 )
 
 

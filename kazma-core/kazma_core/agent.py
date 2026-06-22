@@ -17,19 +17,19 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import aiosqlite
 import yaml
-from langgraph.graph import END, StateGraph
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.graph import END, StateGraph
 
-from kazma_core.state import AgentState, initial_state
 from kazma_core.authority import ContextAuthority, create_authority
-from kazma_core.llm_provider import LLMProvider, LLMConfig, LLMResponse
+from kazma_core.cost_breaker import create_cost_breaker
+from kazma_core.llm_provider import LLMConfig, LLMProvider
+from kazma_core.state import AgentState, initial_state
 from kazma_core.tool_registry import ToolRegistry
-from kazma_core.cost_breaker import CostCircuitBreaker, create_cost_breaker
-from kazma_core.tracing import KazmaTracer, create_tracer
+from kazma_core.tracing import create_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -176,9 +176,9 @@ class KazmaAgent:
                 logger.info("tantivy-py not installed — using SQLite-only memory")
 
             from kazma_memory import (
-                TantivySearchBackend,
                 SearchBackendRouter,
                 SQLiteMemoryBackend,
+                TantivySearchBackend,
             )
 
             sqlite_backend = SQLiteMemoryBackend(
@@ -438,7 +438,7 @@ async def main() -> None:
     agent._running = True
     print(f"🇰🇼 كاظمه — {config.name} v{config.version}")
     print(f"   Model: {agent.llm_config.model} @ {agent.llm_config.base_url}")
-    print(f"   Type 'quit' to exit\n")
+    print("   Type 'quit' to exit\n")
 
     try:
         while agent._running:

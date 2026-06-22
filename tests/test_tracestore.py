@@ -1,10 +1,7 @@
 """Tests for the in-memory TraceStore and WebSocket broadcasting."""
 from __future__ import annotations
 
-import json
 import time
-
-import pytest
 
 from kazma_core.tracing import TraceEntry, TraceStore, get_trace_store
 

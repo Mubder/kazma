@@ -5,10 +5,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from kazma_core.mcp_client import MCPClient, MCPError
+from kazma_core.mcp_client import MCPClient
 from kazma_core.tool_sandbox import ToolSandbox
-
 
 # ---------------------------------------------------------------------------
 # Helpers

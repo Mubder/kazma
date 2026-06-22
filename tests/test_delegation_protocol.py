@@ -1,9 +1,8 @@
 """Tests for DelegationProtocol — request lifecycle and execution."""
 from __future__ import annotations
 
-import asyncio
 import time
-import pytest
+
 from kazma_core.delegation.protocol import (
     DelegationProtocol,
     DelegationRequest,

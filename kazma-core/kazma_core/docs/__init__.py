@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import ast
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
 
 
 @dataclass
@@ -41,7 +39,7 @@ class DocumentationGenerator:
         self.source_dir = Path(source_dir)
         self._module_cache: dict[str, ast.Module] = {}
 
-    def _parse_module(self, path: Path) -> Optional[ast.Module]:
+    def _parse_module(self, path: Path) -> ast.Module | None:
         """Parse a Python file into an AST module."""
         try:
             source = path.read_text(encoding="utf-8")
@@ -51,7 +49,7 @@ class DocumentationGenerator:
 
     def _get_docstring(
         self, node: ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
-    ) -> Optional[str]:
+    ) -> str | None:
         """Extract docstring from an AST node."""
         return ast.get_docstring(node)
 
@@ -133,9 +131,9 @@ class DocumentationGenerator:
                 })
         return functions
 
-    async def generate_api_docs(self) -> List[DocPage]:
+    async def generate_api_docs(self) -> list[DocPage]:
         """Generate API documentation from source code docstrings."""
-        pages: List[DocPage] = []
+        pages: list[DocPage] = []
 
         # Discover Python modules
         py_files = sorted(self.source_dir.glob("**/*.py"))
@@ -401,4 +399,4 @@ Skills are automatically scanned for:
             print(f"Build failed: {result.stderr}")
             return
 
-        print(f"Documentation built successfully. Deploy with: npm run deploy")
+        print("Documentation built successfully. Deploy with: npm run deploy")

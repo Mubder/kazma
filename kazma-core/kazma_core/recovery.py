@@ -70,8 +70,8 @@ async def resume_agent(
     Returns:
         Dict with 'state' (recovered AgentState) and 'app' (compiled graph).
     """
+
     from kazma_core.agent import create_app
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
     state = await recover_on_startup(db_path=db_path)
     actual_db = db_path or "kazma-data/checkpoints.db"

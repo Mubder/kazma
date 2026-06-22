@@ -6,10 +6,8 @@ TDD: These tests should FAIL before any implementation exists.
 from __future__ import annotations
 
 import pytest
-
 from kazma_core.hub.manifest_schema import SkillManifest
-from kazma_core.hub.versioning import ConflictResolution, SkillVersioning
-
+from kazma_core.hub.versioning import SkillVersioning
 
 # ---------------------------------------------------------------------------
 # parse_version

@@ -9,14 +9,15 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable, Awaitable, Optional
+from enum import StrEnum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-class RequestStatus(str, Enum):
+class RequestStatus(StrEnum):
     """Status of a delegation request."""
     PENDING = "pending"
     ACCEPTED = "accepted"

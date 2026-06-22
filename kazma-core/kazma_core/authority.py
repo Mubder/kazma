@@ -10,9 +10,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kazma_core.compaction import CompactionEngine
 from kazma_core.state import AgentState
 from kazma_core.token_counter import TokenCounter
-from kazma_core.compaction import CompactionEngine
 
 logger = logging.getLogger(__name__)
 

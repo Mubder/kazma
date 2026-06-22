@@ -5,15 +5,12 @@ with verification and rollback capabilities.
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
 import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +22,7 @@ class MigrationResult:
     total_migrated: int
     total_failed: int
     duration_seconds: float
-    errors: Optional[List[str]] = None
+    errors: list[str] | None = None
 
     def __post_init__(self):
         if self.errors is None:
@@ -38,8 +35,8 @@ class VerificationResult:
     sqlite_count: int
     tantivy_count: int
     mismatch: bool
-    missing_in_tantivy: Optional[List[str]] = None
-    extra_in_tantivy: Optional[List[str]] = None
+    missing_in_tantivy: list[str] | None = None
+    extra_in_tantivy: list[str] | None = None
 
     def __post_init__(self):
         if self.missing_in_tantivy is None:
@@ -86,7 +83,7 @@ class SQLiteToTantivyMigration:
     async def migrate(
         self,
         batch_size: int = 1000,
-        progress_callback: Optional[Callable[[int, int], None]] = None
+        progress_callback: Callable[[int, int], None] | None = None
     ) -> MigrationResult:
         """Migrate all memories from SQLite to Tantivy.
         
@@ -107,17 +104,17 @@ class SQLiteToTantivyMigration:
         start_time = time.time()
         total_migrated = 0
         total_failed = 0
-        errors: List[str] = []
-        
+        errors: list[str] = []
+
         try:
             # Connect to SQLite
             conn = self._get_sqlite_conn()
             cursor = conn.cursor()
-            
+
             # Get total count
             cursor.execute("SELECT COUNT(*) FROM memories")
             total_count = cursor.fetchone()[0]
-            
+
             if total_count == 0:
                 conn.close()
                 return MigrationResult(
@@ -126,10 +123,10 @@ class SQLiteToTantivyMigration:
                     total_failed=0,
                     duration_seconds=time.time() - start_time,
                 )
-            
+
             # Get Tantivy backend
             tantivy = self._get_tantivy_backend()
-            
+
             # Migrate in batches
             offset = 0
             while offset < total_count:
@@ -138,15 +135,15 @@ class SQLiteToTantivyMigration:
                     (batch_size, offset)
                 )
                 rows = cursor.fetchall()
-                
+
                 if not rows:
                     break
-                
+
                 # Transform and index batch
                 for row in rows:
                     try:
                         from .tantivy_backend import Memory
-                        
+
                         memory = Memory(
                             id=row['id'] if 'id' in row.keys() else str(row[0]),
                             content=row['content'] if 'content' in row.keys() else str(row[1]),
@@ -156,27 +153,27 @@ class SQLiteToTantivyMigration:
                             relevance=row.get('relevance', 1.0) if hasattr(row, 'get') else 1.0,
                             division=row.get('division', '') if hasattr(row, 'get') else '',
                         )
-                        
+
                         await tantivy.index_memory(memory)
                         total_migrated += 1
-                        
+
                     except Exception as e:
                         total_failed += 1
                         error_msg = f"Failed to migrate record: {e}"
                         errors.append(error_msg)
                         logger.error(error_msg)
-                
+
                 # Progress callback
                 if progress_callback:
                     progress_callback(total_migrated, total_count)
-                
+
                 offset += batch_size
-            
+
             # Commit all changes
             await tantivy.optimize()
-            
+
             conn.close()
-            
+
             return MigrationResult(
                 success=total_failed == 0,
                 total_migrated=total_migrated,
@@ -184,7 +181,7 @@ class SQLiteToTantivyMigration:
                 duration_seconds=time.time() - start_time,
                 errors=errors,
             )
-            
+
         except Exception as e:
             logger.error(f"Migration failed: {e}")
             return MigrationResult(
@@ -210,26 +207,26 @@ class SQLiteToTantivyMigration:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM memories")
             sqlite_count = cursor.fetchone()[0]
-            
+
             # Get SQLite IDs
             cursor.execute("SELECT id FROM memories")
             sqlite_ids = set(row['id'] for row in cursor.fetchall())
             conn.close()
-            
+
             # Get Tantivy count
             tantivy = self._get_tantivy_backend()
             stats = await tantivy.get_stats()
             tantivy_count = stats.total_documents
-            
+
             # Compare
             mismatch = sqlite_count != tantivy_count
-            
+
             return VerificationResult(
                 sqlite_count=sqlite_count,
                 tantivy_count=tantivy_count,
                 mismatch=mismatch,
             )
-            
+
         except Exception as e:
             logger.error(f"Verification failed: {e}")
             return VerificationResult(
@@ -249,20 +246,20 @@ class SQLiteToTantivyMigration:
         """
         try:
             import shutil
-            
+
             # Close backend if open
             if self._tantivy_backend:
                 await self._tantivy_backend.close()
                 self._tantivy_backend = None
-            
+
             # Remove Tantivy index directory
             tantivy_dir = Path(self.tantivy_path)
             if tantivy_dir.exists():
                 shutil.rmtree(tantivy_dir)
                 logger.info(f"Rollback: Removed Tantivy index at {self.tantivy_path}")
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Rollback failed: {e}")
             return False

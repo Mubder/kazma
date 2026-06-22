@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable, Optional
+from typing import Any
 
 from kazma_core.tokenizer import DualEngineTokenizer, TokenResult
 

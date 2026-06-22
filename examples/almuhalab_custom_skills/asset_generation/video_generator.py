@@ -6,15 +6,14 @@ Kuwaiti Arabic narration.
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from almuhalab_custom_skills.branding.almuhalab_guidelines import BrandGuidelines
 from almuhalab_custom_skills.asset_generation.image_generator import DivisionImageGenerator
+from almuhalab_custom_skills.branding.almuhalab_guidelines import BrandGuidelines
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +24,9 @@ class VideoFrame:
 
     frame_index: int
     timestamp_ms: int
-    image_id: Optional[str] = None  # Reference to GeneratedImage
-    overlay_text: Optional[str] = None
-    overlay_data: Dict[str, Any] = field(default_factory=dict)
+    image_id: str | None = None  # Reference to GeneratedImage
+    overlay_text: str | None = None
+    overlay_data: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -42,12 +41,12 @@ class GeneratedVideo:
     height: int
     fps: int
     frame_count: int
-    frames: List[VideoFrame] = field(default_factory=list)
+    frames: list[VideoFrame] = field(default_factory=list)
     created_at: float = field(default_factory=time.time)
-    file_path: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    narration_text: Optional[str] = None
-    narration_language: Optional[str] = None
+    file_path: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    narration_text: str | None = None
+    narration_language: str | None = None
 
     @property
     def total_overlay_frames(self) -> int:
@@ -77,8 +76,8 @@ class VideoSummaryGenerator:
         return f"{prefix}-{ts}-{rand}"
 
     def _compute_gps_bounds(
-        self, gps_track: List[Dict[str, float]]
-    ) -> Dict[str, float]:
+        self, gps_track: list[dict[str, float]]
+    ) -> dict[str, float]:
         """Compute bounding box for GPS track."""
         if not gps_track:
             return {"min_lat": 0, "max_lat": 0, "min_lon": 0, "max_lon": 0}
@@ -140,8 +139,8 @@ class VideoSummaryGenerator:
     async def generate_inspection_summary(
         self,
         division: str,
-        detection_batches: List[Any],
-        telemetry_history: List[dict],
+        detection_batches: list[Any],
+        telemetry_history: list[dict],
         report: Any,
         duration_seconds: int = 60,
     ) -> GeneratedVideo:
@@ -191,7 +190,7 @@ class VideoSummaryGenerator:
                     critical_count += 1
 
         # Generate key frames at detection events
-        frames: List[VideoFrame] = []
+        frames: list[VideoFrame] = []
         event_interval = max(1, frame_count // max(1, total_detections + 1))
         frame_idx = 0
 
@@ -295,7 +294,7 @@ class VideoSummaryGenerator:
         frame_count = duration_seconds * fps
         width, height = 1080, 1080  # Square for social media
 
-        frames: List[VideoFrame] = []
+        frames: list[VideoFrame] = []
 
         # Opening frame with branding
         frames.append(VideoFrame(

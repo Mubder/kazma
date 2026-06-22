@@ -7,12 +7,13 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 from kazma_core.audit_logger import AuditLogger
-from kazma_core.rbac import RBACEngine, PermissionResult
+from kazma_core.rbac import RBACEngine
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +226,7 @@ class DivisionSandbox:
             raise PermissionError(f"User '{user_id}' is not in source division '{source_division}'")
 
         request_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         request = CrossDivisionRequest(
             id=request_id,

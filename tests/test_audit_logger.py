@@ -8,11 +8,11 @@ Covers:
 """
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 import pytest_asyncio
-from datetime import datetime, timezone, timedelta
-
-from kazma_core.audit_logger import AuditLogger, AuditEntry
+from kazma_core.audit_logger import AuditLogger
 
 
 @pytest.fixture
@@ -164,7 +164,7 @@ class TestAuditTrail:
         """Can filter by date range."""
         await audit.log_access_attempt("alice", "gas_oil", "x", "r", "allowed")
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         trail = await audit.get_audit_trail(
             start_date=now - timedelta(hours=1),
             end_date=now + timedelta(hours=1),
@@ -176,7 +176,7 @@ class TestAuditTrail:
         """Empty result when date range doesn't match."""
         await audit.log_access_attempt("alice", "gas_oil", "x", "r", "allowed")
 
-        past = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        past = datetime(2020, 1, 1, tzinfo=UTC)
         trail = await audit.get_audit_trail(start_date=past, end_date=past)
         assert len(trail) == 0
 

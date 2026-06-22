@@ -10,8 +10,9 @@ import asyncio
 import logging
 import os
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 class Detection:
     """A single detection result from YOLO inference."""
 
-    bbox: Tuple[int, int, int, int]  # x1, y1, x2, y2
+    bbox: tuple[int, int, int, int]  # x1, y1, x2, y2
     class_id: int
     class_name: str
     confidence: float
@@ -44,7 +45,7 @@ class Detection:
 class DetectionBatch:
     """A batch of detections from processing one or more frames."""
 
-    detections: List[Detection]
+    detections: list[Detection]
     frame_id: int
     timestamp: float = field(default_factory=time.time)
     inference_time_ms: float = 0.0
@@ -54,8 +55,8 @@ class DetectionBatch:
         return any(d.severity == "critical" for d in self.detections)
 
     @property
-    def by_severity(self) -> Dict[str, List[Detection]]:
-        result: Dict[str, List[Detection]] = {}
+    def by_severity(self) -> dict[str, list[Detection]]:
+        result: dict[str, list[Detection]] = {}
         for det in self.detections:
             result.setdefault(det.severity, []).append(det)
         return result
@@ -74,7 +75,7 @@ class YOLODetector:
     domain-specific target classes and severity classification.
     """
 
-    OIL_GAS_TARGETS: Dict[str, dict] = {
+    OIL_GAS_TARGETS: dict[str, dict] = {
         "pipeline_leak": {"class_id": 0, "severity": "critical"},
         "valve_damage": {"class_id": 1, "severity": "high"},
         "corrosion_spot": {"class_id": 2, "severity": "medium"},
@@ -83,7 +84,7 @@ class YOLODetector:
         "fire_smoke": {"class_id": 5, "severity": "critical"},
     }
 
-    CLASS_NAMES: Dict[int, str] = {
+    CLASS_NAMES: dict[int, str] = {
         0: "pipeline_leak",
         1: "valve_damage",
         2: "corrosion_spot",
@@ -148,9 +149,9 @@ class YOLODetector:
         if not self._loaded:
             self.load_model()
 
-    def _map_detections(self, raw_results: Any) -> List[Detection]:
+    def _map_detections(self, raw_results: Any) -> list[Detection]:
         """Map raw YOLO results to Detection objects."""
-        detections: List[Detection] = []
+        detections: list[Detection] = []
 
         if raw_results is None:
             return detections
@@ -186,7 +187,7 @@ class YOLODetector:
 
         return detections
 
-    async def detect(self, frame: np.ndarray) -> List[Detection]:
+    async def detect(self, frame: np.ndarray) -> list[Detection]:
         """Run YOLOv11 inference on a single frame.
 
         Returns List[Detection] with bounding boxes, class info,
@@ -229,7 +230,7 @@ class YOLODetector:
             frame_id += 1
             yield batch
 
-    def detect_sync(self, frame: np.ndarray) -> List[Detection]:
+    def detect_sync(self, frame: np.ndarray) -> list[Detection]:
         """Synchronous detection for non-async contexts."""
         self._ensure_loaded()
 
@@ -239,7 +240,7 @@ class YOLODetector:
         results = self._model.predict(frame, verbose=False)
         return self._map_detections(results)
 
-    def get_target_info(self, class_name: str) -> Optional[dict]:
+    def get_target_info(self, class_name: str) -> dict | None:
         """Get info about a specific inspection target."""
         return self.OIL_GAS_TARGETS.get(class_name)
 

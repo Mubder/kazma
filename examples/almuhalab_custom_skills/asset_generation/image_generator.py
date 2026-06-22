@@ -11,7 +11,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from almuhalab_custom_skills.branding.almuhalab_guidelines import BrandGuidelines
 
@@ -32,9 +32,9 @@ class GeneratedImage:
     backend: str
     created_at: float = field(default_factory=time.time)
     # Raw pixel data or file path (backend-dependent)
-    data: Optional[bytes] = None
-    file_path: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    data: bytes | None = None
+    file_path: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def size_bytes(self) -> int:
@@ -66,7 +66,7 @@ class DivisionImageGenerator:
         return f"{prefix}-{ts}-{rand}"
 
     def _build_logo_prompt(
-        self, division: str, variant: str, size: Tuple[int, int]
+        self, division: str, variant: str, size: tuple[int, int]
     ) -> str:
         """Build diffusion prompt for logo generation."""
         brand = self.guidelines.get_branding(division)
@@ -182,7 +182,7 @@ class DivisionImageGenerator:
         self,
         division: str,
         variant: str = "standard",
-        size: Tuple[int, int] = (1024, 1024),
+        size: tuple[int, int] = (1024, 1024),
     ) -> GeneratedImage:
         """Generate division logo variant.
 

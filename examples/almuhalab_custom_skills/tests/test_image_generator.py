@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import pytest
 
-from almuhalab_custom_skills.branding.almuhalab_guidelines import BrandGuidelines
 from almuhalab_custom_skills.asset_generation.image_generator import (
     DivisionImageGenerator,
     GeneratedImage,
 )
+from almuhalab_custom_skills.branding.almuhalab_guidelines import BrandGuidelines
 
 
 @pytest.fixture

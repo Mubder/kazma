@@ -3,7 +3,6 @@
 
 import subprocess
 import sys
-from pathlib import Path
 
 # Use the same Python that's running this script
 python_exe = sys.executable

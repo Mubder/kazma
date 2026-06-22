@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import importlib
-import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 import yaml
-
-from kazma_core.hub.loader import SkillError, SkillLoadError, SkillLoader, SkillNotFoundError
-
+from kazma_core.hub.loader import SkillError, SkillLoader, SkillLoadError, SkillNotFoundError
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────
 

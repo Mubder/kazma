@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import pytest
 
-from almuhalab_custom_skills.branding.almuhalab_guidelines import BrandGuidelines
 from almuhalab_custom_skills.asset_generation.image_generator import DivisionImageGenerator
 from almuhalab_custom_skills.asset_generation.video_generator import (
-    VideoSummaryGenerator,
     GeneratedVideo,
     VideoFrame,
+    VideoSummaryGenerator,
 )
+from almuhalab_custom_skills.branding.almuhalab_guidelines import BrandGuidelines
 from almuhalab_custom_skills.drone_inspection.yolo_detector import Detection, DetectionBatch
 
 

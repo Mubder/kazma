@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import List
 
 import yaml
 
@@ -31,7 +30,7 @@ def _ok(score: float = 0.0) -> ValidationResult:
     return ValidationResult(passed=True, errors=[], warnings=[], score=score)
 
 
-def _fail(errors: List[str], warnings: List[str] | None = None,
+def _fail(errors: list[str], warnings: list[str] | None = None,
           score: float = 0.0) -> ValidationResult:
     """Shorthand for a failing check."""
     return ValidationResult(passed=False, errors=errors,
@@ -57,8 +56,8 @@ class SkillValidator:
         *delta* (zero or negative).  The base score is 100; deltas are summed
         and clamped to [0, 100].
         """
-        errors: List[str] = []
-        warnings: List[str] = []
+        errors: list[str] = []
+        warnings: list[str] = []
         delta = 0.0
 
         for check in self.checks:
@@ -140,7 +139,7 @@ class SkillValidator:
         if not permissions or not isinstance(permissions, list):
             return _ok()
 
-        warnings: List[str] = []
+        warnings: list[str] = []
         delta = 0.0
         for perm in permissions:
             if perm not in _ALLOWED_PERMISSIONS:
@@ -165,7 +164,7 @@ class SkillValidator:
         if not mcp_servers or not isinstance(mcp_servers, list):
             return _ok()
 
-        errors: List[str] = []
+        errors: list[str] = []
         for i, server in enumerate(mcp_servers):
             if not isinstance(server, dict):
                 errors.append(f"mcp_servers[{i}] must be a dict")
@@ -186,7 +185,7 @@ class SkillValidator:
 
     async def _scan_for_security_issues(self, path: Path) -> ValidationResult:
         """Scan .py files for dangerous patterns."""
-        warnings: List[str] = []
+        warnings: list[str] = []
         delta = 0.0
 
         py_files = list(path.glob("**/*.py"))

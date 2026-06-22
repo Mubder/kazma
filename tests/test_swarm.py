@@ -1,22 +1,19 @@
 """Tests for SwarmIntelligence — parallel, consensus, and cascade execution."""
 from __future__ import annotations
 
-import asyncio
 import pytest
-from kazma_core.delegation.swarm import (
-    SwarmIntelligence,
-    ConsensusResult,
-    CascadeResult,
-)
+from kazma_core.delegation.discovery import AgentDiscovery
 from kazma_core.delegation.orchestrator import DelegationOrchestrator
 from kazma_core.delegation.protocol import (
     DelegationProtocol,
-    DelegationResult,
-    DelegationRequest,
-    RequestStatus,
 )
-from kazma_core.delegation.discovery import AgentDiscovery, AgentInfo
-from kazma_core.hub import KazmaHub, AgentInfo as HubInfo
+from kazma_core.delegation.swarm import (
+    CascadeResult,
+    ConsensusResult,
+    SwarmIntelligence,
+)
+from kazma_core.hub import AgentInfo as HubInfo
+from kazma_core.hub import KazmaHub
 
 
 @pytest.fixture

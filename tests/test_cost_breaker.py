@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import patch
 
 import pytest
-
 from kazma_core.cost_breaker import (
     DEFAULT_MAX_COST,
     DEFAULT_SILENCE_WINDOW_SECONDS,

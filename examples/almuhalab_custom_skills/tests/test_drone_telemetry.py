@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
-import os
 
 import pytest
 
 # Ensure kazma packages are importable
-
 from almuhalab_custom_skills.drone_inspection.telemetry import (
     DroneTelemetryIngestor,
     StreamProtocol,

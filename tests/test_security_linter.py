@@ -6,9 +6,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
-
-from kazma_core.security.linter import LintReport, LintResult, Rule, SecurityLinter, SECURITY_RULES
-
+from kazma_core.security.linter import SECURITY_RULES, LintReport, LintResult, Rule, SecurityLinter
 
 # ---------------------------------------------------------------------------
 # Fixtures

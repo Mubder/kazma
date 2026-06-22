@@ -2,21 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
-
 import pytest
 
-
-from almuhalab_custom_skills.drone_inspection.yolo_detector import Detection, DetectionBatch
 from almuhalab_custom_skills.drone_inspection.inspection_report import (
-    Finding,
-    InspectionReport,
-    InspectionReportGenerator,
     KUWAITI_ARABIC_RECOMMENDATIONS,
     SEVERITY_COLORS,
-    VideoSummary,
+    InspectionReportGenerator,
 )
+from almuhalab_custom_skills.drone_inspection.yolo_detector import Detection, DetectionBatch
 
 
 def make_detection(

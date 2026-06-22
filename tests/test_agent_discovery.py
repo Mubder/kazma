@@ -1,7 +1,6 @@
 """Tests for AgentDiscovery — capability-based agent discovery."""
 from __future__ import annotations
 
-import time
 import pytest
 from kazma_core.delegation.discovery import AgentDiscovery, AgentInfo
 from kazma_core.hub import KazmaHub
@@ -94,7 +93,6 @@ class TestDiscover:
         assert len(found) == 0
 
     async def test_discover_includes_local_cache(self, discovery, hub):
-        from kazma_core.hub import AgentInfo as HubInfo
 
         # Add to local cache directly
         discovery.known_agents["cached-agent"] = AgentInfo(

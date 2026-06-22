@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from kazma_core.mcp_client import (
     MCPClient,
     MCPConnectionError,
@@ -16,7 +14,6 @@ from kazma_core.mcp_client import (
     _jsonrpc_request,
     _jsonrpc_response,
 )
-
 
 # ---------------------------------------------------------------------------
 # JSON-RPC helpers

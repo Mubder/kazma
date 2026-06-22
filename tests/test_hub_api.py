@@ -1,12 +1,9 @@
 """Tests for the Kazma Hub REST API (api.py)."""
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 from kazma_core.hub.api import app
-from kazma_core.hub.manifest_schema import SkillManifest
 
 
 def _make_skill_row(name: str = "test-skill", author: str = "test-author", version: str = "1.0.0"):

@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import aiosqlite
 
@@ -70,7 +69,7 @@ class AuditLogger:
 
     def __init__(self, db_path: str | None = None) -> None:
         self.db_path = db_path or _DEFAULT_DB
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: aiosqlite.Connection | None = None
 
     async def _get_db(self) -> aiosqlite.Connection:
         if self._db is None:
@@ -116,7 +115,7 @@ class AuditLogger:
         db = await self._get_db()
         entry = AuditEntry(
             id=str(uuid.uuid4()),
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             event_type="access_attempt",
             user_id=user_id,
             division=division,
@@ -175,7 +174,7 @@ class AuditLogger:
         db = await self._get_db()
         entry = AuditEntry(
             id=str(uuid.uuid4()),
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             event_type="authorization_decision",
             user_id=user_id,
             division=division,

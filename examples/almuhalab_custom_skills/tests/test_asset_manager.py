@@ -3,14 +3,15 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from almuhalab_custom_skills.asset_generation.asset_manager import AssetManager, AssetMetadata
-from almuhalab_custom_skills.asset_generation.image_generator import DivisionImageGenerator, GeneratedImage
+from almuhalab_custom_skills.asset_generation.image_generator import (
+    DivisionImageGenerator,
+)
 
 
 @pytest.fixture
@@ -193,13 +194,13 @@ class TestAssetListing:
 
         # All assets created after an hour ago should include it
         recent = await asset_manager.list_assets(
-            created_after=datetime.now(timezone.utc) - timedelta(hours=1)
+            created_after=datetime.now(UTC) - timedelta(hours=1)
         )
         assert len(recent) == 1
 
         # No assets created after next hour
         future = await asset_manager.list_assets(
-            created_after=datetime.now(timezone.utc) + timedelta(hours=1)
+            created_after=datetime.now(UTC) + timedelta(hours=1)
         )
         assert len(future) == 0
 

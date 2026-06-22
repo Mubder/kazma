@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
-import pytest
 import yaml
-
 from kazma_skills.manifest import SkillManifest
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
-
 from kazma_core.cultural_context import CulturalContext
 from kazma_core.majlis import (
     ConversationPhase,
@@ -12,7 +11,6 @@ from kazma_core.majlis import (
     MajlisProtocol,
     MajlisResponse,
 )
-from kazma_core.pacing import Intent
 from kazma_core.tone_adapter import FormalityLevel
 
 

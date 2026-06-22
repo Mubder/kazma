@@ -6,10 +6,9 @@ import importlib
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import yaml
-
 
 # ─── Custom Exceptions ────────────────────────────────────────────────────
 
@@ -88,7 +87,7 @@ class SkillLoader:
 
         return await self._import_entry_point(skill_dir, entry_point, skill_name)
 
-    async def load_all(self) -> Dict[str, Any]:
+    async def load_all(self) -> dict[str, Any]:
         """Scan skills directory and load every valid skill.
 
         Returns ``{name: instance_or_module}`` for each skill that has a
@@ -97,7 +96,7 @@ class SkillLoader:
         if not self.skills_dir.is_dir():
             return {}
 
-        loaded: Dict[str, Any] = {}
+        loaded: dict[str, Any] = {}
         for child in sorted(self.skills_dir.iterdir()):
             if not child.is_dir():
                 continue
@@ -129,12 +128,12 @@ class SkillLoader:
 
         return await self.load_skill(skill_name)
 
-    async def list_available(self) -> List[str]:
+    async def list_available(self) -> list[str]:
         """Return names of skill directories that contain a valid manifest."""
         if not self.skills_dir.is_dir():
             return []
 
-        available: List[str] = []
+        available: list[str] = []
         for child in sorted(self.skills_dir.iterdir()):
             if not child.is_dir():
                 continue

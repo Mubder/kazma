@@ -9,10 +9,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +35,12 @@ class LoopMetrics:
     last_cycle_at: str = ""
     last_error: str = ""
     avg_cycle_duration_ms: float = 0.0
-    _cycle_durations: List[float] = field(default_factory=list)
+    _cycle_durations: list[float] = field(default_factory=list)
 
     def record_cycle(self, duration_ms: float, reports: int = 0) -> None:
         self.cycles_completed += 1
         self.reports_generated += reports
-        self.last_cycle_at = datetime.now(timezone.utc).isoformat()
+        self.last_cycle_at = datetime.now(UTC).isoformat()
         self._cycle_durations.append(duration_ms)
         if len(self._cycle_durations) > 100:
             self._cycle_durations = self._cycle_durations[-100:]
@@ -83,9 +84,9 @@ class TradingIntelligenceLoop:
         self.tracer = tracer
         self._running = False
         self._status = LoopStatus.STOPPED
-        self._task: Optional[asyncio.Task[None]] = None
+        self._task: asyncio.Task[None] | None = None
         self._metrics = LoopMetrics()
-        self._on_report_callbacks: List[Callable[..., Coroutine]] = []
+        self._on_report_callbacks: list[Callable[..., Coroutine]] = []
 
     @property
     def status(self) -> LoopStatus:
@@ -167,7 +168,7 @@ class TradingIntelligenceLoop:
             # Wait for next cycle
             await asyncio.sleep(interval_minutes * 60)
 
-    async def _run_cycle(self) -> List[Any]:
+    async def _run_cycle(self) -> list[Any]:
         """Execute one cycle of intelligence generation.
 
         Returns list of generated reports.
@@ -221,7 +222,7 @@ class TradingIntelligenceLoop:
 
         return reports
 
-    async def run_once(self) -> List[Any]:
+    async def run_once(self) -> list[Any]:
         """Run a single cycle (useful for testing)."""
         cycle_start = time.time()
         reports = await self._run_cycle()

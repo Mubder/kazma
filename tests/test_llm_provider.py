@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from kazma_core.llm_provider import LLMConfig, LLMProvider, LLMResponse, LLMError, ToolCall
+from kazma_core.llm_provider import LLMConfig, LLMError, LLMProvider, LLMResponse, ToolCall
 
 
 class TestLLMConfig:

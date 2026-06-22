@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
-
 import pytest
 
-
 from almuhalab_custom_skills.trading_intel.correlator import (
-    TradeDataCorrelator,
-    CorrelationResult,
-    DivisionTradeData,
     CorrelatedFactor,
-    Division,
-    ImpactSeverity,
     CorrelationDirection,
+    CorrelationResult,
+    Division,
+    DivisionTradeData,
     DroneInsight,
+    ImpactSeverity,
+    TradeDataCorrelator,
 )
 
 

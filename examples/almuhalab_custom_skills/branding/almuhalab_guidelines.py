@@ -7,8 +7,7 @@ Provides prompt prefix generation for diffusion-based image generation.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -17,9 +16,9 @@ class DivisionBranding:
 
     name_en: str
     name_ar: str
-    colors: Dict[str, str]
-    fonts: List[str]
-    logo_elements: List[str]
+    colors: dict[str, str]
+    fonts: list[str]
+    logo_elements: list[str]
     imagery_style: str
     tagline_ar: str
     tagline_en: str
@@ -41,7 +40,7 @@ class BrandGuidelines:
     - Division taglines in Arabic and English
     """
 
-    DIVISIONS: Dict[str, DivisionBranding] = {
+    DIVISIONS: dict[str, DivisionBranding] = {
         "gas_oil": DivisionBranding(
             name_en="Gas & Oil Trading",
             name_ar="تجارة الغاز والنفط",
@@ -93,7 +92,7 @@ class BrandGuidelines:
     WATERMARK_TEXT = "ALMuhalab"
 
     @classmethod
-    def get_palette(cls, division: str) -> Dict[str, str]:
+    def get_palette(cls, division: str) -> dict[str, str]:
         """Get color palette for division.
 
         Args:
@@ -145,7 +144,7 @@ class BrandGuidelines:
         )
 
     @classmethod
-    def get_logo_elements(cls, division: str) -> List[str]:
+    def get_logo_elements(cls, division: str) -> list[str]:
         """Get logo element keywords for a division.
 
         Args:
@@ -171,7 +170,7 @@ class BrandGuidelines:
         return brand.tagline_ar if language == "ar" else brand.tagline_en
 
     @classmethod
-    def get_fonts(cls, division: str) -> List[str]:
+    def get_fonts(cls, division: str) -> list[str]:
         """Get approved fonts for a division.
 
         Args:
@@ -195,7 +194,7 @@ class BrandGuidelines:
         return bool(re.match(r"^#[0-9A-Fa-f]{6}$", hex_color))
 
     @classmethod
-    def get_all_divisions(cls) -> List[str]:
+    def get_all_divisions(cls) -> list[str]:
         """Get list of all division identifiers.
 
         Returns:
@@ -204,7 +203,7 @@ class BrandGuidelines:
         return list(cls.DIVISIONS.keys())
 
     @classmethod
-    def get_marketing_dimensions(cls, material_type: str) -> Dict[str, int]:
+    def get_marketing_dimensions(cls, material_type: str) -> dict[str, int]:
         """Get recommended pixel dimensions for marketing material types.
 
         Args:
@@ -222,7 +221,7 @@ class BrandGuidelines:
         return dimensions.get(material_type, {"width": 1024, "height": 1024})
 
     @classmethod
-    def get_logo_placement(cls) -> Dict[str, any]:
+    def get_logo_placement(cls) -> dict[str, any]:
         """Get logo placement rules.
 
         Returns:

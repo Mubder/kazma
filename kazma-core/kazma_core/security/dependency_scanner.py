@@ -15,9 +15,8 @@ import re
 import sqlite3
 import subprocess
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 try:
     import httpx
@@ -37,7 +36,7 @@ class Vulnerability:
     vuln_id: str
     severity: str
     description: str
-    fixed_version: Optional[str] = None
+    fixed_version: str | None = None
 
 
 @dataclass
@@ -47,13 +46,13 @@ class DependencyReport:
     skill_path: str
     total_deps: int
     vulnerable_deps: int
-    results: List[Vulnerability] = field(default_factory=list)
+    results: list[Vulnerability] = field(default_factory=list)
 
 
 class DependencyScanner:
     """Scan skill dependencies against the OSV vulnerability database."""
 
-    def __init__(self, cache_path: Optional[Path | str] = None) -> None:
+    def __init__(self, cache_path: Path | str | None = None) -> None:
         """Initialise the scanner.
 
         Args:
@@ -63,7 +62,7 @@ class DependencyScanner:
         if cache_path is None:
             cache_path = Path("kazma-data/vuln_cache.json")
         self._cache_path = Path(cache_path)
-        self._cache: dict[str, List[dict]] = {}
+        self._cache: dict[str, list[dict]] = {}
         self._load_cache()
 
     # ------------------------------------------------------------------
@@ -85,7 +84,7 @@ class DependencyScanner:
         """
         deps = self._parse_dependencies(skill_path)
         total = len(deps)
-        all_vulns: List[Vulnerability] = []
+        all_vulns: list[Vulnerability] = []
 
         for pkg, ver in deps:
             vulns = await self.check_single(pkg, ver)
@@ -98,7 +97,7 @@ class DependencyScanner:
             results=all_vulns,
         )
 
-    async def check_single(self, package: str, version: str) -> List[Vulnerability]:
+    async def check_single(self, package: str, version: str) -> list[Vulnerability]:
         """Query the OSV API for vulnerabilities in a single package.
 
         Args:
@@ -133,7 +132,7 @@ class DependencyScanner:
         except Exception:  # pragma: no cover — network / parse errors
             return []
 
-        vulns_raw: List[dict] = data.get("vulns", [])
+        vulns_raw: list[dict] = data.get("vulns", [])
         vulns = self._deserialise_vulns(vulns_raw, package, version)
 
         # Store in cache
@@ -156,13 +155,13 @@ class DependencyScanner:
     # Dependency parsing
     # ------------------------------------------------------------------
 
-    def _parse_dependencies(self, skill_path: Path) -> List[tuple[str, str]]:
+    def _parse_dependencies(self, skill_path: Path) -> list[tuple[str, str]]:
         """Parse dependency files from a skill directory.
 
         Returns:
             List of ``(package_name, version)`` tuples.
         """
-        deps: List[tuple[str, str]] = []
+        deps: list[tuple[str, str]] = []
 
         # requirements.txt
         req_file = skill_path / "requirements.txt"
@@ -177,12 +176,12 @@ class DependencyScanner:
         return deps
 
     @staticmethod
-    def _parse_requirements_txt(path: Path) -> List[tuple[str, str]]:
+    def _parse_requirements_txt(path: Path) -> list[tuple[str, str]]:
         """Parse a ``requirements.txt`` file.
 
         Recognises formats: ``pkg>=1.0``, ``pkg==1.2.3``, ``pkg~=1.0``, ``pkg``.
         """
-        deps: List[tuple[str, str]] = []
+        deps: list[tuple[str, str]] = []
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
@@ -205,9 +204,9 @@ class DependencyScanner:
         return deps
 
     @staticmethod
-    def _parse_pyproject_toml(path: Path) -> List[tuple[str, str]]:
+    def _parse_pyproject_toml(path: Path) -> list[tuple[str, str]]:
         """Parse dependencies from ``pyproject.toml`` (basic parsing, no tomllib dependency)."""
-        deps: List[tuple[str, str]] = []
+        deps: list[tuple[str, str]] = []
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
@@ -263,9 +262,9 @@ class DependencyScanner:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _deserialise_vulns(raw: List[dict], package: str, version: str) -> List[Vulnerability]:
+    def _deserialise_vulns(raw: list[dict], package: str, version: str) -> list[Vulnerability]:
         """Convert raw OSV vulnerability dicts into :class:`Vulnerability` objects."""
-        results: List[Vulnerability] = []
+        results: list[Vulnerability] = []
         for v in raw:
             severity = "UNKNOWN"
             sev_list = v.get("severity", [])
@@ -275,7 +274,7 @@ class DependencyScanner:
                 severity = sev_list
 
             # Determine fixed version from affected ranges
-            fixed: Optional[str] = None
+            fixed: str | None = None
             for aff in v.get("affected", []):
                 for rng in aff.get("ranges", []):
                     for evt in rng.get("events", []):
@@ -310,7 +309,7 @@ class ScanResult:
     current_version: str
     vulnerability: Vulnerability
     fix_available: bool
-    fix_version: Optional[str] = None
+    fix_version: str | None = None
     source: str = "osv"  # "osv", "github_advisories", "nvd"
 
 
@@ -321,8 +320,8 @@ class ScanReport:
     scan_time: str
     total_packages: int
     vulnerable_packages: int
-    results: List[ScanResult] = field(default_factory=list)
-    sources_checked: List[str] = field(default_factory=list)
+    results: list[ScanResult] = field(default_factory=list)
+    sources_checked: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -331,8 +330,8 @@ class SkillScanResult:
 
     skill_name: str
     skill_path: str
-    issues: List[str] = field(default_factory=list)
-    vulnerable_deps: List[ScanResult] = field(default_factory=list)
+    issues: list[str] = field(default_factory=list)
+    vulnerable_deps: list[ScanResult] = field(default_factory=list)
 
 
 class DependabotStyleScanner:
@@ -354,7 +353,7 @@ class DependabotStyleScanner:
         self.scan_interval_hours = 24
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._init_db()
 
     def close(self) -> None:
@@ -411,18 +410,18 @@ class DependabotStyleScanner:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _parse_requirements_txt(path: Path) -> List[tuple[str, str]]:
+    def _parse_requirements_txt(path: Path) -> list[tuple[str, str]]:
         """Parse a ``requirements.txt`` file."""
         return DependencyScanner._parse_requirements_txt(path)
 
     @staticmethod
-    def _parse_pyproject_toml(path: Path) -> List[tuple[str, str]]:
+    def _parse_pyproject_toml(path: Path) -> list[tuple[str, str]]:
         """Parse dependencies from ``pyproject.toml``."""
         return DependencyScanner._parse_pyproject_toml(path)
 
-    def _parse_dependencies(self, project_root: Path) -> List[tuple[str, str]]:
+    def _parse_dependencies(self, project_root: Path) -> list[tuple[str, str]]:
         """Parse dependency files from a project directory."""
-        deps: List[tuple[str, str]] = []
+        deps: list[tuple[str, str]] = []
         req_file = project_root / "requirements.txt"
         if req_file.exists():
             deps.extend(self._parse_requirements_txt(req_file))
@@ -446,8 +445,8 @@ class DependabotStyleScanner:
         """
         deps = self._parse_dependencies(project_root)
         total = len(deps)
-        all_results: List[ScanResult] = []
-        sources_checked: List[str] = []
+        all_results: list[ScanResult] = []
+        sources_checked: list[str] = []
 
         # Query OSV
         osv_results = await self._query_osv(deps)
@@ -469,7 +468,7 @@ class DependabotStyleScanner:
 
         # Deduplicate by (package, vuln_id)
         seen: set[tuple[str, str]] = set()
-        deduped: List[ScanResult] = []
+        deduped: list[ScanResult] = []
         for r in all_results:
             key = (r.package, r.vulnerability.vuln_id)
             if key not in seen:
@@ -479,7 +478,7 @@ class DependabotStyleScanner:
         vulnerable_packages = len({r.package for r in deduped})
 
         report = ScanReport(
-            scan_time=datetime.now(timezone.utc).isoformat(),
+            scan_time=datetime.now(UTC).isoformat(),
             total_packages=total,
             vulnerable_packages=vulnerable_packages,
             results=deduped,
@@ -493,7 +492,7 @@ class DependabotStyleScanner:
 
     async def scan_skill_manifests(
         self, skills_dir: str = "~/.kazma/skills"
-    ) -> List[SkillScanResult]:
+    ) -> list[SkillScanResult]:
         """Scan installed skill manifests for vulnerabilities and suspicious configs.
 
         1. Find all skill directories
@@ -503,7 +502,7 @@ class DependabotStyleScanner:
         5. Detect permission escalation attempts
         """
         resolved = Path(skills_dir).expanduser()
-        results: List[SkillScanResult] = []
+        results: list[SkillScanResult] = []
 
         if not resolved.exists():
             return results
@@ -527,7 +526,7 @@ class DependabotStyleScanner:
             except OSError:
                 continue
 
-            issues: List[str] = []
+            issues: list[str] = []
 
             # Check for suspicious MCP server configs
             suspicious_patterns = [
@@ -551,7 +550,7 @@ class DependabotStyleScanner:
                     issues.append(msg)
 
             # Check for vulnerable deps if skill has requirements.txt
-            vuln_deps: List[ScanResult] = []
+            vuln_deps: list[ScanResult] = []
             req_file = skill_dir / "requirements.txt"
             if req_file.exists():
                 deps = self._parse_requirements_txt(req_file)
@@ -611,7 +610,7 @@ class DependabotStyleScanner:
 
     async def generate_advisory(self, vulnerability: Vulnerability) -> dict:
         """Generate a security advisory document for publication."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         cve_id = f"CVE-{now[:4]}-{abs(hash(vulnerability.vuln_id)) % 10**7:07d}"
         return {
             "cve_id": cve_id,
@@ -662,15 +661,15 @@ class DependabotStyleScanner:
     # ------------------------------------------------------------------
 
     async def _query_osv(
-        self, deps: List[tuple[str, str]]
-    ) -> List[ScanResult]:
+        self, deps: list[tuple[str, str]]
+    ) -> list[ScanResult]:
         """Query OSV for all deps."""
-        results: List[ScanResult] = []
+        results: list[ScanResult] = []
         for pkg, ver in deps:
             results.extend(await self._query_osv_single(pkg, ver))
         return results
 
-    async def _query_osv_single(self, pkg: str, ver: str) -> List[ScanResult]:
+    async def _query_osv_single(self, pkg: str, ver: str) -> list[ScanResult]:
         """Query OSV API for a single package."""
         if httpx is None:  # pragma: no cover
             return []
@@ -687,7 +686,7 @@ class DependabotStyleScanner:
         except Exception:  # pragma: no cover
             return []
 
-        results: List[ScanResult] = []
+        results: list[ScanResult] = []
         for v in data.get("vulns", []):
             vuln = DependencyScanner._deserialise_vulns([v], pkg, ver)
             if vuln:
@@ -703,13 +702,13 @@ class DependabotStyleScanner:
         return results
 
     async def _query_github_advisories(
-        self, deps: List[tuple[str, str]]
-    ) -> List[ScanResult]:
+        self, deps: list[tuple[str, str]]
+    ) -> list[ScanResult]:
         """Query GitHub Security Advisories API for all deps."""
         if httpx is None:  # pragma: no cover
             return []
 
-        results: List[ScanResult] = []
+        results: list[ScanResult] = []
         for pkg, ver in deps:
             try:
                 async with httpx.AsyncClient(timeout=15.0) as client:
@@ -753,13 +752,13 @@ class DependabotStyleScanner:
         return results
 
     async def _query_nvd(
-        self, deps: List[tuple[str, str]]
-    ) -> List[ScanResult]:
+        self, deps: list[tuple[str, str]]
+    ) -> list[ScanResult]:
         """Query NVD API for all deps."""
         if httpx is None:  # pragma: no cover
             return []
 
-        results: List[ScanResult] = []
+        results: list[ScanResult] = []
         for pkg, ver in deps:
             try:
                 async with httpx.AsyncClient(timeout=15.0) as client:

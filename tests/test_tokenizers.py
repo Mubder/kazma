@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-from kazma_core.kuwaiti_tokenizer import KuwaitiTokenizer, Token, TokenType
+from kazma_core.kuwaiti_tokenizer import KuwaitiTokenizer, TokenType
 from kazma_core.msa_tokenizer import MSATokenizer, _strip_diacritics, _unify_alef
 
 

@@ -11,9 +11,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-
-from kazma_core.hub.manifest_schema import SkillManifest, ValidationResult
-
+from kazma_core.hub.manifest_schema import SkillManifest
 
 # ---------------------------------------------------------------------------
 # Fixtures

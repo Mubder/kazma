@@ -9,9 +9,8 @@ Handles Gulf Arabic tokenization with special attention to:
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional
 
 
 class TokenType(Enum):
@@ -34,7 +33,7 @@ class Token:
     start: int
     end: int
     token_type: TokenType
-    dialect_meaning: Optional[str] = None  # MSA meaning for dialect tokens
+    dialect_meaning: str | None = None  # MSA meaning for dialect tokens
     language: str = "ar"  # "ar" or "en" for code-switched tokens
 
 

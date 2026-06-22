@@ -10,8 +10,7 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
@@ -40,7 +39,7 @@ class ChatSession:
 
     def __post_init__(self) -> None:
         if not self.created_at:
-            self.created_at = datetime.now(timezone.utc).isoformat()
+            self.created_at = datetime.now(UTC).isoformat()
 
 
 _sessions: dict[str, ChatSession] = {}
@@ -146,7 +145,7 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 user_msg = {
                     "role": "user",
                     "content": user_input,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
                 session.messages.append(user_msg)
 
@@ -283,7 +282,7 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 assistant_msg = {
                     "role": "assistant",
                     "content": assistant_content,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                     "tool_calls": tool_calls_executed,
                 }
                 session.messages.append(assistant_msg)

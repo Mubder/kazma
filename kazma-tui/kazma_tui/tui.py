@@ -11,14 +11,12 @@ Features:
 from __future__ import annotations
 
 import logging
-from typing import Any
 
+from kazma_core.agent import AgentConfig, KazmaAgent, load_config
 from rich.text import Text as RichText
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Input, Label, RichLog, Static
-
-from kazma_core.agent import AgentConfig, KazmaAgent, load_config
 
 logger = logging.getLogger(__name__)
 

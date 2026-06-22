@@ -3,18 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 class WizardContext:
     """Shared state for wizard steps."""
 
     def __init__(self) -> None:
-        self.selected_skill: Optional[dict[str, Any]] = None
-        self.manifest_data: Optional[dict[str, Any]] = None
-        self.security_results: Optional[dict[str, Any]] = None
+        self.selected_skill: dict[str, Any] | None = None
+        self.manifest_data: dict[str, Any] | None = None
+        self.security_results: dict[str, Any] | None = None
         self.registry_path: str = "~/.kazma/hub/registry.db"
         self.skills_dir: Path = Path("~/.kazma/skills").expanduser()
 
@@ -220,7 +219,7 @@ class SkillInstallationWizard:
             "warnings": ["Skill not installed locally; manifest-only validation"],
         }
         print("  [INFO] Skill not installed locally — manifest-only validation")
-        print(f"  Security Score: 85/100")
+        print("  Security Score: 85/100")
         print("  Status: PASS (no local files to scan)")
 
     def _print_security_results(self, result: Any) -> None:
@@ -301,8 +300,6 @@ class SkillInstallationWizard:
 
         name = skill.get("name", "")
         author = skill.get("author", "")
-        version = skill.get("version", "")
-        skill_id = f"kazma-hub://{author}/{name}@{version}"
 
         print("\n  Verifying installation...")
 

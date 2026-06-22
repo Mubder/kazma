@@ -1,13 +1,10 @@
 """Error coverage tests — edge cases, malformed input, error states."""
 from __future__ import annotations
 
-import json
 import time
 
-import pytest
-
+from kazma_core.llm_provider import LLMConfig
 from kazma_core.tracing import TraceEntry, TraceStore, get_trace_store
-from kazma_core.llm_provider import LLMConfig, LLMProvider
 
 
 class TestTraceStoreErrors:

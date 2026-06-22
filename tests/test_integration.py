@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-
 from kazma_ui.app import create_app
 
 

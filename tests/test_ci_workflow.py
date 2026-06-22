@@ -5,14 +5,11 @@ reviewing a submitted skill for certification.
 """
 from __future__ import annotations
 
-import os
-import textwrap
 from pathlib import Path
 
 import pytest
 import yaml
-
-from kazma_core.hub.manifest_schema import SkillManifest, ValidationResult
+from kazma_core.hub.manifest_schema import SkillManifest
 from kazma_core.hub.validator import SkillValidator
 
 

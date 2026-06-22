@@ -10,21 +10,20 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Optional
+from enum import StrEnum
+from typing import Any
 
+from kazma_core.delegation.discovery import AgentDiscovery, AgentInfo
 from kazma_core.delegation.protocol import (
     DelegationProtocol,
-    DelegationRequest,
     DelegationResult,
     RequestStatus,
 )
-from kazma_core.delegation.discovery import AgentDiscovery, AgentInfo
 
 logger = logging.getLogger(__name__)
 
 
-class SubTaskStatus(str, Enum):
+class SubTaskStatus(StrEnum):
     """Status of a sub-task in orchestration."""
     PENDING = "pending"
     ASSIGNED = "assigned"

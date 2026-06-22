@@ -7,11 +7,10 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -136,7 +135,7 @@ class RBACEngine:
     ) -> None:
         self.db_path = db_path or _DEFAULT_DB
         self.divisions = divisions or DIVISIONS
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: aiosqlite.Connection | None = None
 
     async def _get_db(self) -> aiosqlite.Connection:
         if self._db is None:
@@ -193,7 +192,7 @@ class RBACEngine:
             return False
 
         db = await self._get_db()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         await db.execute(
             """INSERT OR REPLACE INTO user_roles (user_id, division, role, granted_at, granted_by)

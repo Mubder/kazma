@@ -7,14 +7,13 @@ backoff, and graceful degradation when APIs are unavailable.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ class MarketIndex:
     change_pct: float
     currency: str = "KWD"
     timestamp: str = ""
-    raw: Dict[str, Any] = field(default_factory=dict)
+    raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -62,14 +61,14 @@ class GoldPrice:
 @dataclass
 class MarketIndices:
     """Aggregated market indices from all sources."""
-    indices: List[MarketIndex] = field(default_factory=list)
-    oil: Optional[OilPrice] = None
-    gold: Optional[GoldPrice] = None
+    indices: list[MarketIndex] = field(default_factory=list)
+    oil: OilPrice | None = None
+    gold: GoldPrice | None = None
     fetched_at: str = ""
-    errors: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
-    def boursa_index(self) -> Optional[MarketIndex]:
+    def boursa_index(self) -> MarketIndex | None:
         """Get Boursa Kuwait main index."""
         for idx in self.indices:
             if idx.source == MarketSource.BOURSA_KUWAIT:
@@ -77,7 +76,7 @@ class MarketIndices:
         return None
 
     @property
-    def brent_price(self) -> Optional[float]:
+    def brent_price(self) -> float | None:
         """Get Brent crude price in USD."""
         return self.oil.price_usd if self.oil else None
 
@@ -99,7 +98,7 @@ class MarketDataIngestor:
     Retry policy: exponential backoff up to 3 retries per source.
     """
 
-    MARKET_SOURCES: Dict[str, str] = {
+    MARKET_SOURCES: dict[str, str] = {
         "boursa_kuwait": "https://api.boursakuwait.com.kw/v1/indices",
         "dubai_finance": "https://api.difc.ae/v1/market",
         "oil_prices": "https://api.oilprice.com/v1/brent",
@@ -129,9 +128,9 @@ class MarketDataIngestor:
         self.max_retries = max_retries
         self.retry_base_delay = retry_base_delay
         self.stub_mode = stub_mode or os.getenv("KAZMA_MARKET_STUB", "0") == "1"
-        self._cache: Dict[str, Any] = {}
-        self._cache_timestamps: Dict[str, float] = {}
-        self._last_fetch: Optional[float] = None
+        self._cache: dict[str, Any] = {}
+        self._cache_timestamps: dict[str, float] = {}
+        self._last_fetch: float | None = None
 
     def _is_cache_valid(self, key: str) -> bool:
         """Check if cached data is still fresh."""
@@ -145,7 +144,7 @@ class MarketDataIngestor:
         self._cache[key] = value
         self._cache_timestamps[key] = time.time()
 
-    def _get_cache(self, key: str) -> Optional[Any]:
+    def _get_cache(self, key: str) -> Any | None:
         """Retrieve value from cache if valid."""
         if self._is_cache_valid(key):
             return self._cache[key]
@@ -153,7 +152,7 @@ class MarketDataIngestor:
 
     async def _fetch_with_retry(
         self, url: str, source_name: str
-    ) -> Optional[Dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Fetch URL with exponential backoff retry."""
         import aiohttp
 
@@ -187,7 +186,7 @@ class MarketDataIngestor:
         Returns MarketIndices with whatever data was successfully retrieved.
         Errors are captured in the errors list rather than raising.
         """
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         indices = MarketIndices(fetched_at=now)
 
         if self.stub_mode:
@@ -286,7 +285,7 @@ class MarketDataIngestor:
         price = OilPrice(
             price_usd=float(data.get("price_usd", 0)),
             change_pct=float(data.get("change_pct", 0)),
-            timestamp=data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+            timestamp=data.get("timestamp", datetime.now(UTC).isoformat()),
         )
         self._set_cache("oil", price)
         return price
@@ -311,12 +310,12 @@ class MarketDataIngestor:
             price_kwd=float(data.get("price_kwd", 0)),
             price_usd=float(data.get("price_usd", 0)),
             change_pct=float(data.get("change_pct", 0)),
-            timestamp=data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+            timestamp=data.get("timestamp", datetime.now(UTC).isoformat()),
         )
         self._set_cache("gold", price)
         return price
 
-    async def get_cache_status(self) -> Dict[str, Any]:
+    async def get_cache_status(self) -> dict[str, Any]:
         """Return cache freshness info for observability."""
         status = {}
         for key in ["indices", "oil", "gold"]:

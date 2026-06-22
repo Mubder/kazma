@@ -2,16 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from kazma_core.cli.wizard import SkillInstallationWizard, WizardContext
-from kazma_core.hub.registry import KazmaHub as RealKazmaHub
-from kazma_core.hub.validator import SkillValidator as RealSkillValidator
-
 
 # ── WizardContext ──────────────────────────────────────────────────────────────
 

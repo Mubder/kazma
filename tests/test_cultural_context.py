@@ -3,11 +3,8 @@ from __future__ import annotations
 
 from datetime import date
 
-import pytest
-
 from kazma_core.cultural_context import (
     CulturalContext,
-    CulturalContextState,
     CulturalEvent,
     _gregorian_to_hijri_approx,
     _hijri_month_name,

@@ -8,8 +8,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any, Optional
+from datetime import UTC, datetime, timedelta
 
 from kazma_core.audit_logger import AuditLogger
 from kazma_core.rbac import RBACEngine
@@ -118,7 +117,7 @@ class AuthorizationFlow:
         duration_hours = min(duration_hours, self.max_approval_duration_hours)
 
         request_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         request = AuthorizationRequest(
             id=request_id,
@@ -204,7 +203,7 @@ class AuthorizationFlow:
         effective_duration = duration_hours or request.duration_hours
         effective_duration = min(effective_duration, self.max_approval_duration_hours)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires = now + timedelta(hours=effective_duration)
 
         request.status = "approved"
@@ -284,7 +283,7 @@ class AuthorizationFlow:
                 message=f"Approver '{approver_id}' is not an admin in division '{request.target_division}'",
             )
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         request.status = "denied"
         request.resolved_at = now.isoformat()
         request.approver_id = approver_id
@@ -327,7 +326,7 @@ class AuthorizationFlow:
         Returns:
             List of request IDs that were expired.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expired = []
         for req in self._requests.values():
             if req.status == "approved":

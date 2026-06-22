@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import pytest
-
 from kazma_core.tone_adapter import (
+    TONE_PROFILES,
     FormalityLevel,
     ToneAdapter,
     ToneProfile,
-    TONE_PROFILES,
 )
 
 

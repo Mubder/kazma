@@ -8,11 +8,10 @@ from __future__ import annotations
 import json
 import logging
 import random
-import string
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +29,17 @@ class BenchmarkResult:
     min_latency_ms: float
     max_latency_ms: float
     backend: str = "sqlite"
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class BenchmarkReport:
     """Complete benchmark report."""
     timestamp: str
-    results: List[BenchmarkResult]
-    sqlite_results: List[BenchmarkResult] = field(default_factory=list)
-    tantivy_results: List[BenchmarkResult] = field(default_factory=list)
-    comparison: Dict[str, Any] = field(default_factory=dict)
+    results: list[BenchmarkResult]
+    sqlite_results: list[BenchmarkResult] = field(default_factory=list)
+    tantivy_results: list[BenchmarkResult] = field(default_factory=list)
+    comparison: dict[str, Any] = field(default_factory=dict)
 
 
 class SearchBenchmark:
@@ -49,12 +48,12 @@ class SearchBenchmark:
     Provides comprehensive performance comparison across different
     dataset sizes and query patterns.
     """
-    
+
     SIZES = [1000, 10000, 100000, 1000000]
-    
+
     def __init__(self):
         """Initialize benchmark suite."""
-        self.results: List[BenchmarkResult] = []
+        self.results: list[BenchmarkResult] = []
         self._arabic_sample_queries = [
             "السوق السعودي",
             "سعر النفط اليوم",
@@ -80,15 +79,15 @@ class SearchBenchmark:
             BenchmarkResult with indexing performance metrics.
         """
         latencies = []
-        
+
         # Generate sample documents
         documents = self._generate_documents(size)
-        
+
         # Benchmark SQLite indexing
         sqlite_start = time.time()
         sqlite_latencies = await self._benchmark_sqlite_indexing(documents)
         sqlite_duration = time.time() - sqlite_start
-        
+
         # Benchmark Tantivy indexing (if available)
         try:
             tantivy_start = time.time()
@@ -97,17 +96,17 @@ class SearchBenchmark:
         except ImportError:
             tantivy_latencies = []
             tantivy_duration = 0
-        
+
         # Calculate metrics for SQLite
         sqlite_ops_per_sec = size / sqlite_duration if sqlite_duration > 0 else 0
         sqlite_avg = sum(sqlite_latencies) / len(sqlite_latencies) if sqlite_latencies else 0
         sqlite_sorted = sorted(sqlite_latencies) if sqlite_latencies else [0]
-        
+
         # Calculate metrics for Tantivy
         tantivy_ops_per_sec = size / tantivy_duration if tantivy_duration > 0 else 0
         tantivy_avg = sum(tantivy_latencies) / len(tantivy_latencies) if tantivy_latencies else 0
         tantivy_sorted = sorted(tantivy_latencies) if tantivy_latencies else [0]
-        
+
         result = BenchmarkResult(
             test_name="indexing",
             size=size,
@@ -126,7 +125,7 @@ class SearchBenchmark:
                 "tantivy_ops_per_sec": tantivy_ops_per_sec,
             },
         )
-        
+
         self.results.append(result)
         return result
 
@@ -142,23 +141,23 @@ class SearchBenchmark:
         """
         # Benchmark SQLite search
         sqlite_latencies = await self._benchmark_sqlite_search(size, queries)
-        
+
         # Benchmark Tantivy search (if available)
         try:
             tantivy_latencies = await self._benchmark_tantivy_search(size, queries)
         except ImportError:
             tantivy_latencies = []
-        
+
         # Calculate metrics
         sqlite_avg = sum(sqlite_latencies) / len(sqlite_latencies) if sqlite_latencies else 0
         sqlite_sorted = sorted(sqlite_latencies) if sqlite_latencies else [0]
-        
+
         tantivy_avg = sum(tantivy_latencies) / len(tantivy_latencies) if tantivy_latencies else 0
         tantivy_sorted = sorted(tantivy_latencies) if tantivy_latencies else [0]
-        
+
         # Calculate improvement factor
         improvement = sqlite_avg / tantivy_avg if tantivy_avg > 0 else 0
-        
+
         result = BenchmarkResult(
             test_name="search",
             size=size,
@@ -177,7 +176,7 @@ class SearchBenchmark:
                 "queries_executed": queries,
             },
         )
-        
+
         self.results.append(result)
         return result
 
@@ -192,15 +191,16 @@ class SearchBenchmark:
         """
         # Generate Arabic documents
         arabic_docs = self._generate_arabic_documents(size)
-        
+
         # Index Arabic documents
         try:
-            from .tantivy_backend import TantivySearchBackend, Memory
             import tempfile
-            
+
+            from .tantivy_backend import Memory, TantivySearchBackend
+
             with tempfile.TemporaryDirectory() as tmpdir:
                 backend = TantivySearchBackend(tmpdir)
-                
+
                 # Index documents
                 for i, doc in enumerate(arabic_docs):
                     memory = Memory(
@@ -210,7 +210,7 @@ class SearchBenchmark:
                         source="arabic_test",
                     )
                     await backend.index_memory(memory)
-                
+
                 # Benchmark Arabic search
                 latencies = []
                 for query in self._arabic_sample_queries:
@@ -218,15 +218,15 @@ class SearchBenchmark:
                         start = time.time()
                         await backend.search(query, limit=10)
                         latencies.append((time.time() - start) * 1000)
-                
+
                 await backend.close()
         except ImportError:
             latencies = []
-        
+
         # Calculate metrics
         avg_latency = sum(latencies) / len(latencies) if latencies else 0
         sorted_latencies = sorted(latencies) if latencies else [0]
-        
+
         result = BenchmarkResult(
             test_name="arabic_search",
             size=size,
@@ -243,7 +243,7 @@ class SearchBenchmark:
                 "total_queries": len(latencies),
             },
         )
-        
+
         self.results.append(result)
         return result
 
@@ -254,28 +254,28 @@ class SearchBenchmark:
             BenchmarkReport with all benchmark results.
         """
         logger.info("Starting full benchmark suite...")
-        
+
         all_results = []
-        
+
         for size in self.SIZES:
             logger.info(f"Benchmarking size {size}...")
-            
+
             # Run benchmarks
             indexing_result = await self.benchmark_indexing(size)
             search_result = await self.benchmark_search(size)
             arabic_result = await self.benchmark_arabic_search(size)
-            
+
             all_results.extend([indexing_result, search_result, arabic_result])
-        
+
         # Generate comparison
         comparison = self._generate_comparison()
-        
+
         report = BenchmarkReport(
             timestamp=datetime.now().isoformat(),
             results=all_results,
             comparison=comparison,
         )
-        
+
         logger.info("Benchmark suite completed.")
         return report
 
@@ -287,7 +287,7 @@ class SearchBenchmark:
         """
         if not self.results:
             return "No benchmark results available."
-        
+
         lines = [
             "=" * 80,
             "KAZMA SEARCH BENCHMARK REPORT",
@@ -295,19 +295,19 @@ class SearchBenchmark:
             f"Generated: {datetime.now().isoformat()}",
             "",
         ]
-        
+
         # Group by test type
         test_types = {}
         for result in self.results:
             if result.test_name not in test_types:
                 test_types[result.test_name] = []
             test_types[result.test_name].append(result)
-        
+
         for test_name, results in test_types.items():
             lines.append(f"\n{'─' * 60}")
             lines.append(f"TEST: {test_name.upper()}")
             lines.append(f"{'─' * 60}")
-            
+
             for result in results:
                 lines.append(f"\n  Size: {result.size:,} documents")
                 lines.append(f"  Backend: {result.backend}")
@@ -318,39 +318,39 @@ class SearchBenchmark:
                 lines.append(f"  P99 Latency: {result.p99_latency_ms:.3f}ms")
                 lines.append(f"  Min Latency: {result.min_latency_ms:.3f}ms")
                 lines.append(f"  Max Latency: {result.max_latency_ms:.3f}ms")
-                
+
                 if "improvement_factor" in result.metadata:
                     improvement = result.metadata["improvement_factor"]
                     lines.append(f"  Improvement: {improvement:.2f}x over SQLite")
-        
+
         # Summary
         lines.append(f"\n{'=' * 80}")
         lines.append("SUMMARY")
         lines.append(f"{'=' * 80}")
-        
+
         if self.results:
             # Find best improvement
             improvements = [
-                r.metadata.get("improvement_factor", 0) 
-                for r in self.results 
+                r.metadata.get("improvement_factor", 0)
+                for r in self.results
                 if "improvement_factor" in r.metadata
             ]
-            
+
             if improvements:
                 best_improvement = max(improvements)
                 lines.append(f"Best improvement over SQLite: {best_improvement:.2f}x")
-            
+
             # Find lowest latency
             all_latencies = [r.avg_latency_ms for r in self.results if r.avg_latency_ms > 0]
             if all_latencies:
                 min_latency = min(all_latencies)
                 lines.append(f"Lowest average latency: {min_latency:.3f}ms")
-        
+
         lines.append("=" * 80)
-        
+
         return "\n".join(lines)
 
-    def _generate_documents(self, count: int) -> List[Dict[str, Any]]:
+    def _generate_documents(self, count: int) -> list[dict[str, Any]]:
         """Generate sample English documents for benchmarking."""
         documents = []
         for i in range(count):
@@ -365,7 +365,7 @@ class SearchBenchmark:
             documents.append(doc)
         return documents
 
-    def _generate_arabic_documents(self, count: int) -> List[str]:
+    def _generate_arabic_documents(self, count: int) -> list[str]:
         """Generate sample Arabic documents for benchmarking."""
         arabic_topics = [
             "السوق السعودي للأسهم",
@@ -377,7 +377,7 @@ class SearchBenchmark:
             "الاستقرار الاقتصادي الإقليمي",
             "قطاع الطاقة والبترول",
         ]
-        
+
         documents = []
         for i in range(count):
             base_topic = random.choice(arabic_topics)
@@ -385,7 +385,7 @@ class SearchBenchmark:
             documents.append(doc)
         return documents
 
-    async def _benchmark_sqlite_indexing(self, documents: List[Dict[str, Any]]) -> List[float]:
+    async def _benchmark_sqlite_indexing(self, documents: list[dict[str, Any]]) -> list[float]:
         """Benchmark SQLite indexing performance."""
         latencies = []
         # SQLite indexing would go here
@@ -394,16 +394,17 @@ class SearchBenchmark:
             latencies.append(random.uniform(0.1, 1.0))
         return latencies
 
-    async def _benchmark_tantivy_indexing(self, documents: List[Dict[str, Any]]) -> List[float]:
+    async def _benchmark_tantivy_indexing(self, documents: list[dict[str, Any]]) -> list[float]:
         """Benchmark Tantivy indexing performance."""
         latencies = []
         try:
-            from .tantivy_backend import TantivySearchBackend, Memory
             import tempfile
-            
+
+            from .tantivy_backend import Memory, TantivySearchBackend
+
             with tempfile.TemporaryDirectory() as tmpdir:
                 backend = TantivySearchBackend(tmpdir)
-                
+
                 for doc in documents:
                     memory = Memory(
                         id=doc["id"],
@@ -413,17 +414,17 @@ class SearchBenchmark:
                         source=doc.get("source", ""),
                         relevance=doc.get("relevance", 1.0),
                     )
-                    
+
                     start = time.time()
                     await backend.index_memory(memory)
                     latencies.append((time.time() - start) * 1000)
-                
+
                 await backend.close()
         except ImportError:
             pass
         return latencies
 
-    async def _benchmark_sqlite_search(self, size: int, queries: int) -> List[float]:
+    async def _benchmark_sqlite_search(self, size: int, queries: int) -> list[float]:
         """Benchmark SQLite search performance."""
         latencies = []
         # SQLite search would go here
@@ -431,16 +432,17 @@ class SearchBenchmark:
             latencies.append(random.uniform(1.0, 10.0))
         return latencies
 
-    async def _benchmark_tantivy_search(self, size: int, queries: int) -> List[float]:
+    async def _benchmark_tantivy_search(self, size: int, queries: int) -> list[float]:
         """Benchmark Tantivy search performance."""
         latencies = []
         try:
-            from .tantivy_backend import TantivySearchBackend, Memory
             import tempfile
-            
+
+            from .tantivy_backend import Memory, TantivySearchBackend
+
             with tempfile.TemporaryDirectory() as tmpdir:
                 backend = TantivySearchBackend(tmpdir)
-                
+
                 # Index sample documents
                 for i in range(min(size, 1000)):  # Index up to 1000 for benchmark
                     memory = Memory(
@@ -450,47 +452,47 @@ class SearchBenchmark:
                         source="benchmark",
                     )
                     await backend.index_memory(memory)
-                
+
                 # Search
                 for _ in range(queries):
                     start = time.time()
                     await backend.search("sample", limit=10)
                     latencies.append((time.time() - start) * 1000)
-                
+
                 await backend.close()
         except ImportError:
             pass
         return latencies
 
-    def _generate_comparison(self) -> Dict[str, Any]:
+    def _generate_comparison(self) -> dict[str, Any]:
         """Generate comparison summary."""
         comparison = {
             "sqlite_avg_latency": 0,
             "tantivy_avg_latency": 0,
             "improvement_factor": 0,
         }
-        
+
         sqlite_latencies = [
-            r.metadata.get("sqlite_avg_ms", 0) 
-            for r in self.results 
+            r.metadata.get("sqlite_avg_ms", 0)
+            for r in self.results
             if "sqlite_avg_ms" in r.metadata
         ]
-        
+
         tantivy_latencies = [
-            r.metadata.get("tantivy_avg_ms", 0) 
-            for r in self.results 
+            r.metadata.get("tantivy_avg_ms", 0)
+            for r in self.results
             if "tantivy_avg_ms" in r.metadata
         ]
-        
+
         if sqlite_latencies:
             comparison["sqlite_avg_latency"] = sum(sqlite_latencies) / len(sqlite_latencies)
-        
+
         if tantivy_latencies:
             comparison["tantivy_avg_latency"] = sum(tantivy_latencies) / len(tantivy_latencies)
-        
+
         if comparison["tantivy_avg_latency"] > 0:
             comparison["improvement_factor"] = (
                 comparison["sqlite_avg_latency"] / comparison["tantivy_avg_latency"]
             )
-        
+
         return comparison

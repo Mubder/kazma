@@ -9,12 +9,9 @@ Covers:
 """
 from __future__ import annotations
 
-import os
-import tempfile
 import pytest
 import pytest_asyncio
-
-from kazma_core.rbac import RBACEngine, PermissionResult, DIVISIONS
+from kazma_core.rbac import DIVISIONS, RBACEngine
 
 
 @pytest.fixture

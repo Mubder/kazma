@@ -1,8 +1,9 @@
 """Tests for DelegationOrchestrator — task decomposition and coordination."""
 from __future__ import annotations
 
-import asyncio
 import pytest
+from kazma_core.cost_breaker import CostCircuitBreaker
+from kazma_core.delegation.discovery import AgentDiscovery
 from kazma_core.delegation.orchestrator import (
     DelegationOrchestrator,
     OrchestrationResult,
@@ -11,12 +12,10 @@ from kazma_core.delegation.orchestrator import (
 )
 from kazma_core.delegation.protocol import (
     DelegationProtocol,
-    DelegationResult,
     RequestStatus,
 )
-from kazma_core.delegation.discovery import AgentDiscovery, AgentInfo
-from kazma_core.hub import KazmaHub, AgentInfo as HubInfo
-from kazma_core.cost_breaker import CostCircuitBreaker
+from kazma_core.hub import AgentInfo as HubInfo
+from kazma_core.hub import KazmaHub
 
 
 @pytest.fixture

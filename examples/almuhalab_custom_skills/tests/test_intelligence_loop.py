@@ -2,22 +2,24 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import sys
-import tempfile
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "kazma-memory"))
 
-from almuhalab_custom_skills.trading_intel.market_data import MarketDataIngestor
-from almuhalab_custom_skills.trading_intel.correlator import TradeDataCorrelator
-from almuhalab_custom_skills.trading_intel.report_generator import TradingIntelReportGenerator
-from almuhalab_custom_skills.trading_intel.intelligence_loop import TradingIntelligenceLoop, LoopStatus, LoopMetrics
 from kazma_memory.report_store import ReportStore
 
+from almuhalab_custom_skills.trading_intel.correlator import TradeDataCorrelator
+from almuhalab_custom_skills.trading_intel.intelligence_loop import (
+    LoopMetrics,
+    LoopStatus,
+    TradingIntelligenceLoop,
+)
+from almuhalab_custom_skills.trading_intel.market_data import MarketDataIngestor
+from almuhalab_custom_skills.trading_intel.report_generator import TradingIntelReportGenerator
 
 # ── Cost Breaker Stub ──────────────────────────────────────────────────
 
@@ -47,7 +49,10 @@ class TestReportStore:
 
     @pytest.mark.asyncio
     async def test_store_and_retrieve(self, store):
-        from almuhalab_custom_skills.trading_intel.report_generator import TradingIntelReport, ImpactSeverity
+        from almuhalab_custom_skills.trading_intel.report_generator import (
+            ImpactSeverity,
+            TradingIntelReport,
+        )
         report = TradingIntelReport(
             report_id="rpt-test-001",
             division="gas_oil",
@@ -68,7 +73,10 @@ class TestReportStore:
 
     @pytest.mark.asyncio
     async def test_count(self, store):
-        from almuhalab_custom_skills.trading_intel.report_generator import TradingIntelReport, ImpactSeverity
+        from almuhalab_custom_skills.trading_intel.report_generator import (
+            ImpactSeverity,
+            TradingIntelReport,
+        )
         for i in range(5):
             await store.store(TradingIntelReport(
                 report_id=f"rpt-count-{i}",
@@ -85,7 +93,10 @@ class TestReportStore:
 
     @pytest.mark.asyncio
     async def test_search_by_severity(self, store):
-        from almuhalab_custom_skills.trading_intel.report_generator import TradingIntelReport, ImpactSeverity
+        from almuhalab_custom_skills.trading_intel.report_generator import (
+            ImpactSeverity,
+            TradingIntelReport,
+        )
         await store.store(TradingIntelReport(
             report_id="rpt-sev-crit",
             division="gas_oil",
@@ -107,7 +118,9 @@ class TestReportStore:
 
     @pytest.mark.asyncio
     async def test_search_by_division(self, store):
-        from almuhalab_custom_skills.trading_intel.report_generator import TradingIntelReport, ImpactSeverity
+        from almuhalab_custom_skills.trading_intel.report_generator import (
+            TradingIntelReport,
+        )
         await store.store(TradingIntelReport(
             report_id="rpt-div-tourism",
             division="tourism",
@@ -120,7 +133,9 @@ class TestReportStore:
 
     @pytest.mark.asyncio
     async def test_search_by_date_range(self, store):
-        from almuhalab_custom_skills.trading_intel.report_generator import TradingIntelReport, ImpactSeverity
+        from almuhalab_custom_skills.trading_intel.report_generator import (
+            TradingIntelReport,
+        )
         await store.store(TradingIntelReport(
             report_id="rpt-date-old",
             division="gas_oil",
@@ -322,7 +337,8 @@ class TestFullPipeline:
         assert market_data.gold is not None
 
         # Correlate for each division
-        from almuhalab_custom_skills.trading_intel.correlator import DivisionTradeData, Division as CorrDivision
+        from almuhalab_custom_skills.trading_intel.correlator import Division as CorrDivision
+        from almuhalab_custom_skills.trading_intel.correlator import DivisionTradeData
         for division in ["gas_oil", "tourism", "general_trading"]:
             div_data = DivisionTradeData(
                 division=CorrDivision(division),

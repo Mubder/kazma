@@ -8,13 +8,12 @@ permission changes, etc.) to a SQLite store and generates aggregate reports.
 from __future__ import annotations
 
 import sqlite3
+import threading
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional
-import threading
 
 
 @dataclass
@@ -35,9 +34,9 @@ class SecurityReport:
 
     period_days: int
     total_events: int
-    by_severity: Dict[str, int] = field(default_factory=dict)
-    by_type: Dict[str, int] = field(default_factory=dict)
-    events: List[SecurityEvent] = field(default_factory=list)
+    by_severity: dict[str, int] = field(default_factory=dict)
+    by_type: dict[str, int] = field(default_factory=dict)
+    events: list[SecurityEvent] = field(default_factory=list)
 
 
 class SecurityAuditTrail:
@@ -54,7 +53,7 @@ class SecurityAuditTrail:
             db_path = Path("kazma-data/security_audit.db")
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._lock = threading.RLock()
 
     def close(self) -> None:
@@ -138,7 +137,7 @@ class SecurityAuditTrail:
             skill_id=skill_id,
             details=details,
             severity=severity,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
         with self._lock:
@@ -156,11 +155,11 @@ class SecurityAuditTrail:
 
     async def get_events(
         self,
-        skill_id: Optional[str] = None,
-        event_type: Optional[str] = None,
-        severity: Optional[str] = None,
-        since: Optional[str] = None,
-    ) -> List[SecurityEvent]:
+        skill_id: str | None = None,
+        event_type: str | None = None,
+        severity: str | None = None,
+        since: str | None = None,
+    ) -> list[SecurityEvent]:
         """Query events with optional filters.
 
         Args:
@@ -174,8 +173,8 @@ class SecurityAuditTrail:
         """
         await self._init_db()
 
-        clauses: List[str] = []
-        params: List[str] = []
+        clauses: list[str] = []
+        params: list[str] = []
 
         if skill_id is not None:
             clauses.append("skill_id = ?")
@@ -218,11 +217,11 @@ class SecurityAuditTrail:
         Returns:
             :class:`SecurityReport` with aggregated statistics.
         """
-        since = (datetime.now(timezone.utc) - timedelta(days=period_days)).isoformat()
+        since = (datetime.now(UTC) - timedelta(days=period_days)).isoformat()
         events = await self.get_events(since=since)
 
-        by_severity: Dict[str, int] = defaultdict(int)
-        by_type: Dict[str, int] = defaultdict(int)
+        by_severity: dict[str, int] = defaultdict(int)
+        by_type: dict[str, int] = defaultdict(int)
 
         for ev in events:
             by_severity[ev.severity] += 1

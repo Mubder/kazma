@@ -13,9 +13,9 @@ from __future__ import annotations
 
 import ast
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +23,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DocPage:
     """Represents a documentation page."""
-    
+
     title: str
     category: str
     filename: str
     content: str
-    frontmatter: Optional[dict[str, Any]] = None
+    frontmatter: dict[str, Any] | None = None
 
     def render(self) -> str:
         """Render as markdown with frontmatter."""
@@ -52,11 +52,11 @@ class DocPage:
 
 class DocumentationGenerator:
     """Generates documentation from Python source."""
-    
+
     def __init__(self, source_dir: str = "kazma-core/kazma_core"):
         self.source_dir = Path(source_dir)
 
-    def _parse_module(self, py_file: Path) -> Optional[ast.Module]:
+    def _parse_module(self, py_file: Path) -> ast.Module | None:
         """Parse a Python file into an AST module."""
         try:
             source = py_file.read_text()
@@ -64,7 +64,7 @@ class DocumentationGenerator:
         except SyntaxError:
             return None
 
-    def _get_docstring(self, node: ast.AST) -> Optional[str]:
+    def _get_docstring(self, node: ast.AST) -> str | None:
         """Extract docstring from an AST node."""
         return ast.get_docstring(node)
 
@@ -77,7 +77,7 @@ class DocumentationGenerator:
                     args.append(f"{arg.arg}: {ast.unparse(arg.annotation)}")
                 else:
                     args.append(arg.arg)
-        
+
         defaults = node.args.defaults
         if defaults:
             for i, default in enumerate(defaults):
@@ -85,11 +85,11 @@ class DocumentationGenerator:
                 if arg_idx >= 0:
                     default_val = ast.unparse(default)
                     args[arg_idx] = f"{args[arg_idx]} = {default_val}"
-        
+
         returns = ""
         if node.returns:
             returns = f" -> {ast.unparse(node.returns)}"
-        
+
         prefix = "async " if isinstance(node, ast.AsyncFunctionDef) else ""
         return f"{prefix}def {node.name}({', '.join(args)}){returns}"
 
@@ -106,7 +106,7 @@ class DocumentationGenerator:
                             "signature": self._get_signature(item),
                             "docstring": self._get_docstring(item) or "",
                         })
-                
+
                 classes.append({
                     "name": node.name,
                     "docstring": self._get_docstring(node) or "",
@@ -131,37 +131,37 @@ class DocumentationGenerator:
     async def generate_api_docs(self) -> list[DocPage]:
         """Generate API documentation pages."""
         pages = []
-        
+
         for py_file in self.source_dir.glob("*.py"):
             if py_file.name == "__init__.py":
                 continue
-            
+
             module = self._parse_module(py_file)
             if module is None:
                 continue
-            
+
             content_parts = []
             docstring = self._get_docstring(module)
             if docstring:
                 content_parts.append(f"## {py_file.stem}\n\n{docstring}\n")
-            
+
             classes = self._extract_classes(module)
             for cls in classes:
                 content_parts.append(f"\n### class {cls['name']}\n\n{cls['docstring']}\n")
                 for method in cls["methods"]:
                     content_parts.append(f"\n#### {method['name']}\n\n```python\n{method['signature']}\n```\n\n{method['docstring']}\n")
-            
+
             functions = self._extract_functions(module)
             for func in functions:
                 content_parts.append(f"\n### {func['name']}\n\n```python\n{func['signature']}\n```\n\n{func['docstring']}\n")
-            
+
             pages.append(DocPage(
                 title=py_file.stem.replace("_", " ").title(),
                 category="api-reference",
                 filename=f"{py_file.stem}.md",
                 content="\n".join(content_parts),
             ))
-        
+
         return pages
 
     async def generate_skill_guide(self) -> DocPage:
@@ -289,19 +289,19 @@ File access requires explicit permission grants.
             content=content,
         )
 
-    async def build_site(self, output_dir: Optional[Path] = None) -> None:
+    async def build_site(self, output_dir: Path | None = None) -> None:
         """Build complete documentation site."""
         if output_dir is None:
             output_dir = Path("docs/docs")
-        
+
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Generate and write all pages
         for page in await self.generate_api_docs():
             page_dir = output_dir / page.category
             page_dir.mkdir(parents=True, exist_ok=True)
             (page_dir / page.filename).write_text(page.render())
-        
+
         (output_dir / "skill-development" / "skill-guide.md").write_text(
             (await self.generate_skill_guide()).render()
         )

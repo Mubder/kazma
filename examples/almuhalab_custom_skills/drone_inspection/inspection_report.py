@@ -7,17 +7,16 @@ with annotated images, GPS coordinates, and Kuwaiti Arabic recommendations.
 from __future__ import annotations
 
 import logging
-import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 from almuhalab_custom_skills.drone_inspection.yolo_detector import Detection, DetectionBatch
 
 logger = logging.getLogger(__name__)
 
 # Kuwaiti Arabic recommendations per detection class
-KUWAITI_ARABIC_RECOMMENDATIONS: Dict[str, dict] = {
+KUWAITI_ARABIC_RECOMMENDATIONS: dict[str, dict] = {
     "pipeline_leak": {
         "ar": "تسريب في خط الأنابيب — تدخل فوري مطلوب. أوقف التدفق واحضر فريق الإصلاح.",
         "en": "Pipeline leak detected — immediate intervention required. Shut off flow and dispatch repair team.",
@@ -50,7 +49,7 @@ KUWAITI_ARABIC_RECOMMENDATIONS: Dict[str, dict] = {
     },
 }
 
-SEVERITY_COLORS: Dict[str, tuple] = {
+SEVERITY_COLORS: dict[str, tuple] = {
     "critical": (255, 0, 0),  # Red
     "high": (255, 165, 0),    # Orange
     "medium": (255, 255, 0),  # Yellow
@@ -80,13 +79,13 @@ class InspectionReport:
     drone_id: str
     division: str
     timestamp: str
-    findings: List[Finding]
+    findings: list[Finding]
     total_detections: int = 0
     critical_count: int = 0
     high_count: int = 0
     medium_count: int = 0
     low_count: int = 0
-    gps_center: Optional[Dict[str, float]] = None
+    gps_center: dict[str, float] | None = None
     recommendations_summary_ar: str = ""
     recommendations_summary_en: str = ""
 
@@ -114,10 +113,10 @@ class VideoSummary:
 
     total_frames: int
     total_detections: int
-    unique_targets: List[str]
+    unique_targets: list[str]
     duration_seconds: float
-    critical_events: List[dict]
-    gps_track: List[Dict[str, float]]
+    critical_events: list[dict]
+    gps_track: list[dict[str, float]]
     recommendations_ar: str
     recommendations_en: str
 
@@ -145,7 +144,7 @@ class InspectionReportGenerator:
 
     def _generate_report_id(self) -> str:
         self._report_counter += 1
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         return f"IR-{ts}-{self._report_counter:04d}"
 
     def _get_recommendation(self, class_name: str) -> dict:
@@ -159,8 +158,8 @@ class InspectionReportGenerator:
         )
 
     def _compute_gps_center(
-        self, findings: List[Finding]
-    ) -> Optional[Dict[str, float]]:
+        self, findings: list[Finding]
+    ) -> dict[str, float] | None:
         if not findings:
             return None
         lat = sum(f.latitude for f in findings) / len(findings)
@@ -168,7 +167,7 @@ class InspectionReportGenerator:
         return {"latitude": lat, "longitude": lon}
 
     def _build_summary(
-        self, findings: List[Finding]
+        self, findings: list[Finding]
     ) -> tuple[str, str]:
         """Build summary recommendations in Arabic and English."""
         if not findings:
@@ -191,7 +190,7 @@ class InspectionReportGenerator:
         return (" | ".join(ar_lines), " | ".join(en_lines))
 
     def _annotate_frame(
-        self, frame: Any, detections: List[Detection]
+        self, frame: Any, detections: list[Detection]
     ) -> Any:
         """Draw bounding boxes and labels on frame.
 
@@ -219,7 +218,7 @@ class InspectionReportGenerator:
 
     async def generate_report(
         self,
-        detections: List[Detection],
+        detections: list[Detection],
         telemetry: dict,
         drone_id: str,
         division: str = "gas_oil",
@@ -234,7 +233,7 @@ class InspectionReportGenerator:
         """
         report_id = self._generate_report_id()
 
-        findings: List[Finding] = []
+        findings: list[Finding] = []
         lat = telemetry.get("latitude", 0.0)
         lon = telemetry.get("longitude", 0.0)
         alt = telemetry.get("altitude_m", 0.0)
@@ -265,7 +264,7 @@ class InspectionReportGenerator:
             report_id=report_id,
             drone_id=drone_id,
             division=division,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
             findings=findings,
             total_detections=len(findings),
             critical_count=critical,
@@ -287,8 +286,8 @@ class InspectionReportGenerator:
 
     async def generate_video_summary(
         self,
-        detection_batches: List[DetectionBatch],
-        telemetry_history: List[dict],
+        detection_batches: list[DetectionBatch],
+        telemetry_history: list[dict],
     ) -> VideoSummary:
         """Generate time-lapse summary with overlaid detections.
 
@@ -296,10 +295,10 @@ class InspectionReportGenerator:
         into a single summary with critical events highlighted.
         """
         total_frames = len(detection_batches)
-        all_detections: List[Detection] = []
+        all_detections: list[Detection] = []
         unique_targets: set = set()
-        critical_events: List[dict] = []
-        gps_track: List[Dict[str, float]] = []
+        critical_events: list[dict] = []
+        gps_track: list[dict[str, float]] = []
 
         for batch in detection_batches:
             for det in batch.detections:
@@ -360,7 +359,7 @@ class InspectionReportGenerator:
         return summary
 
     def annotate_frame(
-        self, frame: Any, detections: List[Detection]
+        self, frame: Any, detections: list[Detection]
     ) -> Any:
         """Public sync wrapper for frame annotation."""
         return self._annotate_frame(frame, detections)

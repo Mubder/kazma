@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import signal
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-
 from kazma_core.checkpoint import CheckpointManager
 from kazma_core.recovery import recover_on_startup, resume_agent
-from kazma_core.state import AgentState, initial_state
+from kazma_core.state import initial_state
 
 
 @pytest.fixture

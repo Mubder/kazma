@@ -11,10 +11,9 @@ import json
 import sqlite3
 import threading
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 
 @dataclass
@@ -30,8 +29,8 @@ class DisclosureReport:
     reporter_email: str
     status: str
     created_at: str
-    acknowledged_at: Optional[str] = None
-    patched_at: Optional[str] = None
+    acknowledged_at: str | None = None
+    patched_at: str | None = None
 
 
 @dataclass
@@ -56,7 +55,7 @@ class Advisory:
 
 
 # Allowed status transitions for the disclosure lifecycle
-_VALID_TRANSITIONS: Dict[str, List[str]] = {
+_VALID_TRANSITIONS: dict[str, list[str]] = {
     "submitted": ["acknowledged", "closed"],
     "acknowledged": ["investigating", "closed"],
     "investigating": ["confirmed", "closed"],
@@ -87,7 +86,7 @@ class VulnerabilityDisclosure:
             db_path = Path("kazma-data/disclosure.db")
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[sqlite3.Connection] = None
+        self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
         self._db_initialised = False
 
@@ -166,7 +165,7 @@ class VulnerabilityDisclosure:
         """
         self._init_db_sync()
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         report_id = f"VR-{uuid.uuid4().hex[:12].upper()}"
 
         with self._lock:
@@ -216,7 +215,7 @@ class VulnerabilityDisclosure:
                         acknowledged from its current status.
         """
         self._init_db_sync()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         with self._lock:
             conn = self._get_conn()
@@ -268,7 +267,7 @@ class VulnerabilityDisclosure:
                         invalid, or the transition is not allowed.
         """
         self._init_db_sync()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         with self._lock:
             conn = self._get_conn()
@@ -386,7 +385,7 @@ class VulnerabilityDisclosure:
             ValueError: If the report does not exist or has not been patched.
         """
         self._init_db_sync()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         with self._lock:
             conn = self._get_conn()

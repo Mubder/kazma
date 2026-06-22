@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
 import time
 
 import pytest
 
-
 from almuhalab_custom_skills.trading_intel.market_data import (
-    MarketDataError,
+    GoldPrice,
     MarketDataIngestor,
+    MarketIndex,
     MarketIndices,
     MarketSource,
     OilPrice,
-    GoldPrice,
-    MarketIndex,
 )
 
 
@@ -86,7 +82,6 @@ class TestMarketDataIngestor:
         ingestor._set_cache("test_key", "test_value")
         # With 0-second interval, cache should be invalid immediately
         # (unless checked in the same sub-second window)
-        import time
         time.sleep(0.01)
         assert ingestor._is_cache_valid("test_key") is False
         assert ingestor._get_cache("test_key") is None

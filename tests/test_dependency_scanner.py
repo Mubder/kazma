@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import json
+from datetime import UTC
 from pathlib import Path
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from kazma_core.security.dependency_scanner import (
+    DependabotStyleScanner,
     DependencyReport,
     DependencyScanner,
-    Vulnerability,
-    ScanResult,
     ScanReport,
+    ScanResult,
     SkillScanResult,
-    DependabotStyleScanner,
+    Vulnerability,
 )
 
 # ---------------------------------------------------------------------------
@@ -501,8 +502,8 @@ class TestDependabotStyleScanner:
         assert dep_scanner.get_scan_history() == []
 
         # Add some history manually
-        from datetime import datetime, timezone
-        now = datetime.now(timezone.utc).isoformat()
+        from datetime import datetime
+        now = datetime.now(UTC).isoformat()
         conn = dep_scanner._get_conn()
         conn.execute(
             "INSERT INTO scan_history (scan_time, total_packages, vulnerable_packages, sources_checked, results_json) VALUES (?, ?, ?, ?, ?)",

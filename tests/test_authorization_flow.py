@@ -12,10 +12,9 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
-
-from kazma_core.rbac import RBACEngine
 from kazma_core.audit_logger import AuditLogger
-from kazma_core.authorization_flow import AuthorizationFlow, AuthorizationRequest
+from kazma_core.authorization_flow import AuthorizationFlow
+from kazma_core.rbac import RBACEngine
 
 
 @pytest.fixture

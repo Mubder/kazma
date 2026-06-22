@@ -1,8 +1,6 @@
 """Tests for Brand Guidelines Engine."""
 from __future__ import annotations
 
-import pytest
-
 from almuhalab_custom_skills.branding.almuhalab_guidelines import BrandGuidelines, DivisionBranding
 
 

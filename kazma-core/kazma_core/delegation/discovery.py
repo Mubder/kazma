@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +167,7 @@ class AgentDiscovery:
         # Weight: 70% capability, 30% reputation
         return 0.7 * capability_score + 0.3 * agent.reputation
 
-    async def get_agent_info(self, agent_id: str) -> Optional[AgentInfo]:
+    async def get_agent_info(self, agent_id: str) -> AgentInfo | None:
         """Get detailed info about a specific agent.
 
         Args:

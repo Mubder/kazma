@@ -12,7 +12,6 @@ import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
 
 
 @dataclass(frozen=True)
@@ -31,8 +30,8 @@ class LintResult:
     rule_id: str
     severity: str
     message: str
-    file_path: Optional[str] = None
-    line_number: Optional[int] = None
+    file_path: str | None = None
+    line_number: int | None = None
     passed: bool = True
 
 
@@ -45,14 +44,14 @@ class LintReport:
     high: int = 0
     medium: int = 0
     low: int = 0
-    results: List[LintResult] = field(default_factory=list)
+    results: list[LintResult] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
 # Security rules catalogue — 13 rules across 4 severity levels
 # ---------------------------------------------------------------------------
 
-SECURITY_RULES: List[Rule] = [
+SECURITY_RULES: list[Rule] = [
     # Critical
     Rule("SEC001", "Hardcoded secrets or passwords detected", "critical"),
     Rule("SEC002", "Hardcoded API keys or tokens detected", "critical"),
@@ -101,7 +100,7 @@ class SecurityLinter:
         Returns:
             Aggregated :class:`LintReport`.
         """
-        results: List[LintResult] = []
+        results: list[LintResult] = []
 
         # Lint manifest
         manifest = await self._load_manifest(skill_path)
@@ -112,12 +111,12 @@ class SecurityLinter:
         results.extend(await self.lint_code(skill_path))
 
         # Lint MCP servers
-        servers: List[dict] = manifest.get("mcp_servers", []) if manifest else []
+        servers: list[dict] = manifest.get("mcp_servers", []) if manifest else []
         results.extend(await self.lint_mcp_servers(servers))
 
         return self._build_report(results)
 
-    async def lint_manifest(self, manifest: dict) -> List[LintResult]:
+    async def lint_manifest(self, manifest: dict) -> list[LintResult]:
         """Check a manifest dict for security issues.
 
         Args:
@@ -126,7 +125,7 @@ class SecurityLinter:
         Returns:
             List of :class:`LintResult` items.
         """
-        results: List[LintResult] = []
+        results: list[LintResult] = []
 
         # SEC001 / SEC002 — secrets in env vars
         env: dict = manifest.get("env", {}) or manifest.get("environment", {})
@@ -182,7 +181,7 @@ class SecurityLinter:
 
         return results
 
-    async def lint_code(self, code_path: Path) -> List[LintResult]:
+    async def lint_code(self, code_path: Path) -> list[LintResult]:
         """AST-based static analysis on Python source files under *code_path*.
 
         Checks for eval/exec, os.system, subprocess shell=True, hardcoded
@@ -194,7 +193,7 @@ class SecurityLinter:
         Returns:
             List of :class:`LintResult` items.
         """
-        results: List[LintResult] = []
+        results: list[LintResult] = []
         py_files = list(code_path.rglob("*.py"))
 
         for py_file in py_files:
@@ -350,7 +349,7 @@ class SecurityLinter:
 
         return results
 
-    async def lint_mcp_servers(self, servers: List[dict]) -> List[LintResult]:
+    async def lint_mcp_servers(self, servers: list[dict]) -> list[LintResult]:
         """Validate MCP server configurations for security issues.
 
         Args:
@@ -359,7 +358,7 @@ class SecurityLinter:
         Returns:
             List of :class:`LintResult` items.
         """
-        results: List[LintResult] = []
+        results: list[LintResult] = []
 
         for idx, server in enumerate(servers):
             name = server.get("name", f"server-{idx}")
@@ -399,7 +398,7 @@ class SecurityLinter:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    async def _load_manifest(self, skill_path: Path) -> Optional[dict]:
+    async def _load_manifest(self, skill_path: Path) -> dict | None:
         """Attempt to load a manifest from common locations."""
         import json
 
@@ -420,7 +419,7 @@ class SecurityLinter:
     def _simple_yaml(text: str) -> dict:
         """Minimal YAML-like parser for manifests (top-level scalars and dicts)."""
         result: dict = {}
-        current_key: Optional[str] = None
+        current_key: str | None = None
         current_sub: dict = {}
         in_sub = False
 
@@ -460,7 +459,7 @@ class SecurityLinter:
         return result
 
     @staticmethod
-    def _build_report(results: List[LintResult]) -> LintReport:
+    def _build_report(results: list[LintResult]) -> LintReport:
         """Build an aggregated report from individual results."""
         counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         for r in results:

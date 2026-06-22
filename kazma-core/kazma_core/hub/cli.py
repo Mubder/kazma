@@ -9,10 +9,10 @@ from pathlib import Path
 
 import click
 import yaml
+
 from kazma_core.hub.manifest_schema import SkillManifest
 from kazma_core.hub.registry import KazmaHub
 from kazma_core.hub.validator import SkillValidator
-
 
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -61,8 +61,9 @@ def _http_request(
     Uses httpx for async-capable HTTP calls, wrapped synchronously.
     Returns parsed JSON dict or None on failure.
     """
-    import httpx
     import time
+
+    import httpx
 
     last_error = None
     for attempt in range(retries):
@@ -590,7 +591,6 @@ def check_certification(path: str, output_json: bool = False) -> None:
     Shows which certification requirements are met and unmet
     for the skill at the given path.
     """
-    from kazma_core.hub.badges import BADGE_LEVELS
 
     skill_dir = Path(path)
     manifest_path = skill_dir / "skill_manifest.yaml"

@@ -4,7 +4,6 @@ Comprehensive tests for the ArabicTantivyTokenizer including
 normalization, diacritics removal, stop words filtering, and stemming.
 """
 import pytest
-
 from kazma_memory.arabic_tokenizer import ArabicTantivyTokenizer
 
 
@@ -73,7 +72,7 @@ class TestArabicTantivyTokenizer:
         """Test diacritics removal."""
         text = "مَرْحَبًا"  # With diacritics
         cleaned = tokenizer.remove_diacritics(text)
-        
+
         # Should not contain diacritics
         assert "َ" not in cleaned
         assert "ْ" not in cleaned
@@ -89,7 +88,7 @@ class TestArabicTantivyTokenizer:
         """Test that stop words are removed."""
         text = "الكتاب في المكتبة"  # "The book in the library"
         result = tokenizer.tokenize(text)
-        
+
         # Stop words like "في" and "ال" should be removed
         # (ال is prefix, في is stop word)
         assert "في" not in result
@@ -98,7 +97,7 @@ class TestArabicTantivyTokenizer:
         """Test that very short words are removed."""
         text = "أنا هو هي نحن"  # Pronouns
         result = tokenizer.tokenize(text)
-        
+
         # Single char words should be removed
         for word in result:
             assert len(word) > 1
@@ -107,7 +106,7 @@ class TestArabicTantivyTokenizer:
         """Test that content words are preserved."""
         text = "المكتبة كبيرة جداً"  # "The library is very big"
         result = tokenizer.tokenize(text)
-        
+
         # Content words should be present
         assert any("مكتب" in word for word in result)  # Root of "مكتبة"
 
@@ -115,7 +114,7 @@ class TestArabicTantivyTokenizer:
         """Test normalizing multiple characters at once."""
         text = "أحمد إبراهيم آدم"
         normalized = tokenizer.normalize(text)
-        
+
         # All Alef variants should be normalized
         assert "أ" not in normalized
         assert "إ" not in normalized
@@ -125,10 +124,10 @@ class TestArabicTantivyTokenizer:
         """Test tokenizing a complete Arabic sentence."""
         text = "السوق السعودي يشهد ارتفاعاً في أسعار النفط"
         result = tokenizer.tokenize(text)
-        
+
         assert isinstance(result, list)
         assert len(result) > 0
-        
+
         # All tokens should be strings
         for token in result:
             assert isinstance(token, str)
@@ -138,7 +137,7 @@ class TestArabicTantivyTokenizer:
         """Test that numbers are preserved."""
         text = "الصفحة 42 تحتوي على 100 معلومة"
         result = tokenizer.tokenize(text)
-        
+
         # Should contain numbers
         assert any("42" in token or "100" in token for token in result)
 
@@ -151,7 +150,7 @@ class TestArabicTantivyTokenizerStemmer:
         # These are simple cases
         words = ["كتاب", "مكتب", "مكتبة"]
         stemmed = [tokenizer.stem(w) for w in words]
-        
+
         # All should be stemmed versions
         assert all(isinstance(s, str) for s in stemmed)
 
@@ -159,7 +158,7 @@ class TestArabicTantivyTokenizerStemmer:
         """Test that short words are not stemmed."""
         short_words = ["من", "على", "في"]
         stemmed = [tokenizer.stem(w) for w in short_words]
-        
+
         # Short words should remain unchanged
         for original, stemmed_word in zip(short_words, stemmed):
             assert stemmed_word == original
@@ -209,7 +208,7 @@ class TestArabicTantivyTokenizerEdgeCases:
         # Create long text
         text = " ".join(["كلمة"] * 10000)
         result = tokenizer.tokenize(text)
-        
+
         assert isinstance(result, list)
         assert len(result) > 0
 
@@ -217,7 +216,7 @@ class TestArabicTantivyTokenizerEdgeCases:
         """Test tokenizing text with Unicode edge cases."""
         text = "مرحبا\u200bبالعالم"  # With zero-width space
         result = tokenizer.tokenize(text)
-        
+
         assert isinstance(result, list)
 
 
@@ -227,41 +226,41 @@ class TestArabicTantivyTokenizerPerformance:
     def test_tokenize_speed(self, tokenizer):
         """Test that tokenization is reasonably fast."""
         import time
-        
+
         text = "السوق السعودي يشهد ارتفاعاً في أسعار النفط اليوم"
-        
+
         start = time.time()
         for _ in range(1000):
             tokenizer.tokenize(text)
         duration = time.time() - start
-        
+
         # Should process 1000 tokenizations in under 1 second
         assert duration < 1.0
 
     def test_normalize_speed(self, tokenizer):
         """Test that normalization is reasonably fast."""
         import time
-        
+
         text = "أحمد إبراهيم آدم كتب رسالة"
-        
+
         start = time.time()
         for _ in range(1000):
             tokenizer.normalize(text)
         duration = time.time() - start
-        
+
         # Should process 1000 normalizations in under 1 second
         assert duration < 1.0
 
     def test_remove_diacritics_speed(self, tokenizer):
         """Test that diacritics removal is reasonably fast."""
         import time
-        
+
         text = "مَرْحَبًا بِالعَالَمِ"
-        
+
         start = time.time()
         for _ in range(1000):
             tokenizer.remove_diacritics(text)
         duration = time.time() - start
-        
+
         # Should process 1000 removals in under 1 second
         assert duration < 1.0

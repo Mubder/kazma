@@ -139,7 +139,7 @@ class SkillManifest:
 
     def _load(self) -> None:
         if self._path.exists():
-            with open(self._path, "r", encoding="utf-8") as fh:
+            with open(self._path, encoding="utf-8") as fh:
                 self.manifest = yaml.safe_load(fh) or {}
             logger.debug("Loaded manifest from %s (%d tools)", self._path, len(self.list_tools()))
         else:
@@ -158,7 +158,7 @@ class SkillManifest:
 
         for yaml_file in dir_path.glob("*.yaml"):
             try:
-                with open(yaml_file, "r", encoding="utf-8") as fh:
+                with open(yaml_file, encoding="utf-8") as fh:
                     file_manifest = yaml.safe_load(fh) or {}
                     if "tools" in file_manifest:
                         self.manifest["tools"].update(file_manifest["tools"])
@@ -166,7 +166,7 @@ class SkillManifest:
             except Exception as e:
                 logger.error("Failed to load manifest %s: %s", yaml_file, e)
 
-        logger.info("Loaded %d tools from %d manifest files in %s", 
+        logger.info("Loaded %d tools from %d manifest files in %s",
                     loaded_count, len(list(dir_path.glob("*.yaml"))), dir_path)
 
     def _get_tool(self, tool_name: str) -> dict[str, Any]:

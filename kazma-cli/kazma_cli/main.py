@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import sys
 
 
@@ -53,8 +52,8 @@ def main() -> None:
 def _run_serve(port: int) -> None:
     """Start the Kazma WebUI server."""
     try:
-        from kazma_ui.app import create_app
         import uvicorn
+        from kazma_ui.app import create_app
     except ImportError as e:
         print(f"Error: WebUI dependencies not installed: {e}")
         print("Install with: pip install 'kazma[ui]' or pip install jinja2 python-multipart")

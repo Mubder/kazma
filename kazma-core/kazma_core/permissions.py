@@ -53,7 +53,7 @@ class PermissionManager:
             The full permissions dict with ``users`` key.
         """
         if self.config_path.exists():
-            with open(self.config_path, "r", encoding="utf-8") as fh:
+            with open(self.config_path, encoding="utf-8") as fh:
                 self._data = yaml.safe_load(fh) or {}
             logger.debug("Loaded permissions from %s", self.config_path)
         else:

@@ -9,7 +9,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 import yaml
 
@@ -18,8 +18,8 @@ import yaml
 class ValidationResult:
     """Result of manifest validation."""
     passed: bool = False
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     score: float = 100.0  # 0-100, security/quality score
 
 
@@ -27,8 +27,8 @@ class ValidationResult:
 class CheckResult:
     """Result of a skill quality/security check."""
     passed: bool = False
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     score: float = 100.0  # 0-100, security/quality score
 
 
@@ -49,16 +49,16 @@ class SkillManifest:
 
     def __init__(self, manifest_path: Path | str):
         self.path = Path(manifest_path)
-        with open(self.path, "r") as f:
-            self.data: Dict[str, Any] = yaml.safe_load(f)
+        with open(self.path) as f:
+            self.data: dict[str, Any] = yaml.safe_load(f)
 
     # ------------------------------------------------------------------
     # Validation
     # ------------------------------------------------------------------
 
     def validate(self) -> ValidationResult:
-        errors: List[str] = []
-        warnings: List[str] = []
+        errors: list[str] = []
+        warnings: list[str] = []
 
         # --- Required fields ---
         for field_name in self.REQUIRED_FIELDS:

@@ -6,18 +6,16 @@ inspection missions, and emergency landing protocols.
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from almuhalab_custom_skills.drone_inspection.telemetry import (
     DroneTelemetryIngestor,
-    TelemetryValidationError,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,12 +45,12 @@ class DroneState:
 
     drone_id: str
     status: DroneStatus = DroneStatus.IDLE
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
     registered_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
-    last_telemetry: Optional[dict] = None
-    current_mission_id: Optional[str] = None
+    last_telemetry: dict | None = None
+    current_mission_id: str | None = None
     battery_pct: float = 100.0
     signal_strength_dbm: int = -50
 
@@ -85,13 +83,13 @@ class InspectionMission:
 
     mission_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
     name: str = ""
-    area_coordinates: List[Dict[str, float]] = field(default_factory=list)
-    targets: List[str] = field(default_factory=list)
+    area_coordinates: list[dict[str, float]] = field(default_factory=list)
+    targets: list[str] = field(default_factory=list)
     max_duration_seconds: int = 3600
     status: MissionStatus = MissionStatus.PENDING
-    started_at: Optional[str] = None
-    completed_at: Optional[str] = None
-    drone_id: Optional[str] = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    drone_id: str | None = None
     findings_count: int = 0
 
     def to_dict(self) -> dict:
@@ -118,7 +116,7 @@ class FleetStatus:
     offline: int = 0
     active_missions: int = 0
     total_battery_avg: float = 0.0
-    drones: List[dict] = field(default_factory=list)
+    drones: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -141,10 +139,10 @@ class DroneFleetManager:
     """
 
     def __init__(self) -> None:
-        self.active_drones: Dict[str, DroneState] = {}
-        self.ingestors: Dict[str, DroneTelemetryIngestor] = {}
-        self.missions: Dict[str, InspectionMission] = {}
-        self._telemetry_callbacks: List[Callable[[str, dict], Any]] = []
+        self.active_drones: dict[str, DroneState] = {}
+        self.ingestors: dict[str, DroneTelemetryIngestor] = {}
+        self.missions: dict[str, InspectionMission] = {}
+        self._telemetry_callbacks: list[Callable[[str, dict], Any]] = []
 
     def on_telemetry(self, callback: Callable[[str, dict], Any]) -> None:
         """Register a callback for telemetry updates (drone_id, telemetry)."""
@@ -216,7 +214,7 @@ class DroneFleetManager:
 
         mission.drone_id = drone_id
         mission.status = MissionStatus.ACTIVE
-        mission.started_at = datetime.now(timezone.utc).isoformat()
+        mission.started_at = datetime.now(UTC).isoformat()
 
         state.status = DroneStatus.INSPECTING
         state.current_mission_id = mission.mission_id
@@ -245,14 +243,14 @@ class DroneFleetManager:
 
     async def complete_mission(
         self, mission_id: str, findings_count: int = 0
-    ) -> Optional[InspectionMission]:
+    ) -> InspectionMission | None:
         """Mark a mission as completed."""
         mission = self.missions.get(mission_id)
         if not mission:
             return None
 
         mission.status = MissionStatus.COMPLETED
-        mission.completed_at = datetime.now(timezone.utc).isoformat()
+        mission.completed_at = datetime.now(UTC).isoformat()
         mission.findings_count = findings_count
 
         # Return drone to idle
@@ -342,18 +340,18 @@ class DroneFleetManager:
             "drone_id": drone_id,
             "status": "emergency_landing",
             "message": "Emergency landing initiated. All streams stopped.",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
-    def get_drone(self, drone_id: str) -> Optional[DroneState]:
+    def get_drone(self, drone_id: str) -> DroneState | None:
         """Get state of a specific drone."""
         return self.active_drones.get(drone_id)
 
-    def get_mission(self, mission_id: str) -> Optional[InspectionMission]:
+    def get_mission(self, mission_id: str) -> InspectionMission | None:
         """Get a specific mission."""
         return self.missions.get(mission_id)
 
-    def get_drone_missions(self, drone_id: str) -> List[InspectionMission]:
+    def get_drone_missions(self, drone_id: str) -> list[InspectionMission]:
         """Get all missions for a drone."""
         return [
             m for m in self.missions.values() if m.drone_id == drone_id

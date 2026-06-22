@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from kazma_core.dialect_detector import DialectDetector
-from kazma_core.tokenizer import DualEngineTokenizer, TokenResult
+from kazma_core.kuwaiti_tokenizer import TokenType
 from kazma_core.router import (
     AgentRequest,
     AgentResponse,
@@ -13,7 +12,7 @@ from kazma_core.router import (
     KuwaitiPipeline,
     MSAPipeline,
 )
-from kazma_core.kuwaiti_tokenizer import TokenType
+from kazma_core.tokenizer import DualEngineTokenizer
 
 
 class TestDualEngineTokenizer:

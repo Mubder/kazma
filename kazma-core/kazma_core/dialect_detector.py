@@ -7,9 +7,7 @@ Uses fasttext when available, falls back to rule-based detection.
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass, field
-from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +18,7 @@ class DialectResult:
     """Result of dialect detection."""
     dialect: str  # "kw", "eg", "lb", "ma", "msa"
     confidence: float  # 0.0 – 1.0
-    alternatives: List[Tuple[str, float]] = field(default_factory=list)
+    alternatives: list[tuple[str, float]] = field(default_factory=list)
 
 
 # ── Kuwaiti dialect lexicon ───────────────────────────────────────────

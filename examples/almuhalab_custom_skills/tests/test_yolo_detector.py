@@ -2,19 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
-import os
-from typing import List
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 
-
 from almuhalab_custom_skills.drone_inspection.yolo_detector import (
     Detection,
     DetectionBatch,
-    ModelNotLoadedError,
     YOLODetector,
 )
 

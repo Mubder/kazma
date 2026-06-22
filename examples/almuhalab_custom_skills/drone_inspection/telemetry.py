@@ -9,11 +9,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from collections import deque
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Coroutine, Deque, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +62,11 @@ class DroneTelemetryIngestor:
     ) -> None:
         self.source = stream_source
         self.max_buffer_size = max_buffer_size
-        self._buffer: Deque[dict] = deque(maxlen=max_buffer_size)
-        self._latest_by_drone: Dict[str, dict] = {}
+        self._buffer: deque[dict] = deque(maxlen=max_buffer_size)
+        self._latest_by_drone: dict[str, dict] = {}
         self._streaming = False
-        self._stream_task: Optional[asyncio.Task[None]] = None
-        self._callbacks: List[Callable[[dict], Any]] = []
+        self._stream_task: asyncio.Task[None] | None = None
+        self._callbacks: list[Callable[[dict], Any]] = []
         self._protocol = self._parse_protocol(stream_source)
 
     @staticmethod
@@ -94,7 +94,7 @@ class DroneTelemetryIngestor:
         ts = data.get("timestamp")
         if isinstance(ts, (int, float)):
             data["timestamp"] = (
-                datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+                datetime.fromtimestamp(ts, tz=UTC).isoformat()
             )
         elif isinstance(ts, str):
             try:
@@ -177,15 +177,15 @@ class DroneTelemetryIngestor:
         logger.info("Telemetry stream stopped")
         self._callbacks.clear()
 
-    def get_latest_telemetry(self, drone_id: str) -> Optional[dict]:
+    def get_latest_telemetry(self, drone_id: str) -> dict | None:
         """Get most recent telemetry for a drone."""
         return self._latest_by_drone.get(drone_id)
 
-    def get_all_latest(self) -> Dict[str, dict]:
+    def get_all_latest(self) -> dict[str, dict]:
         """Get latest telemetry for all known drones."""
         return dict(self._latest_by_drone)
 
-    def get_buffer(self, limit: Optional[int] = None) -> List[dict]:
+    def get_buffer(self, limit: int | None = None) -> list[dict]:
         """Return buffer contents, optionally limited to most recent N."""
         if limit is None:
             return list(self._buffer)

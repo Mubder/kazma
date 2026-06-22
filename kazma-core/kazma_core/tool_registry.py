@@ -12,13 +12,12 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from kazma_core.mcp_client import MCPClient, MCPServerConfig, MCPError
+from kazma_core.mcp_client import MCPClient, MCPError
 
 logger = logging.getLogger(__name__)
 

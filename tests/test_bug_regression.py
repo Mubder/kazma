@@ -6,14 +6,9 @@ If any of these tests fail, the corresponding bug has regressed.
 from __future__ import annotations
 
 import asyncio
-import itertools
-import json
 import re
-import time
-from datetime import date, datetime, timezone
-from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import date
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
@@ -69,6 +64,7 @@ class TestBug02_RecoveryFieldName:
     async def test_recovery_logs_correct_field(self, tmp_path, caplog):
         """recovery.py should log last_cp_id, not None."""
         import logging
+
         from kazma_core.checkpoint import CheckpointManager
         from kazma_core.state import initial_state
 
@@ -113,7 +109,7 @@ class TestBug03_ArabicWordBoundary:
 
     def test_all_kuwaiti_formalizations_work(self):
         """Every entry in _KUWAITI_FORMAL_MAP must actually be replaced."""
-        from kazma_core.tone_adapter import ToneAdapter, _KUWAITI_FORMAL_MAP
+        from kazma_core.tone_adapter import _KUWAITI_FORMAL_MAP, ToneAdapter
         adapter = ToneAdapter()
         for informal, formal in _KUWAITI_FORMAL_MAP.items():
             result = adapter._formalize_text(informal, "kw")
@@ -319,8 +315,9 @@ class TestBug12_SwarmTypeAnnotation:
 
     def test_results_list_accepts_none(self):
         """The type annotation list[DelegationResult | None] must be valid."""
-        from kazma_core.delegation.swarm import SwarmIntelligence
         import inspect
+
+        from kazma_core.delegation.swarm import SwarmIntelligence
         source = inspect.getsource(SwarmIntelligence.parallel_execute)
         assert "DelegationResult | None" in source or "Optional[DelegationResult]" in source
 
@@ -374,8 +371,9 @@ class TestBug15_ImportDetectionWorks:
 
     def test_import_detected_in_code(self):
         """The security scanner must detect __import__ usage."""
-        from kazma_core.hub.validator import SkillValidator
         import inspect
+
+        from kazma_core.hub.validator import SkillValidator
         source = inspect.getsource(SkillValidator._scan_for_security_issues)
         # Must use lookaround, not \b
         assert r"(?<!\w)" in source or r"(?<!\w)__import__(?!\w)" in source
@@ -396,6 +394,7 @@ class TestBug16_NoSyncSqliteInConstructor:
 
     def test_constructor_has_no_sync_sqlite(self):
         import inspect
+
         from kazma_core.hub.registry import KazmaHub
         source = inspect.getsource(KazmaHub.__init__)
         assert "sqlite3.connect" not in source, (
@@ -421,6 +420,7 @@ class TestBug17_NotifyUsesExecutor:
 
     def test_notify_uses_run_in_executor(self):
         import inspect
+
         from kazma_core.mcp_client import MCPClient
         source = inspect.getsource(MCPClient._notify)
         assert "run_in_executor" in source, (
@@ -452,20 +452,23 @@ class TestBug19_TracingReadsConfig:
     """KazmaTracer must accept config dict and use it for Langfuse keys."""
 
     def test_tracer_accepts_config_param(self):
-        from kazma_core.tracing import KazmaTracer
         import inspect
+
+        from kazma_core.tracing import KazmaTracer
         sig = inspect.signature(KazmaTracer.__init__)
         assert "config" in sig.parameters
 
     def test_factory_accepts_config_param(self):
-        from kazma_core.tracing import create_tracer
         import inspect
+
+        from kazma_core.tracing import create_tracer
         sig = inspect.signature(create_tracer)
         assert "config" in sig.parameters
 
     def test_langfuse_uses_config_keys(self):
         """_init_langfuse should read from self._config with env var fallback."""
         import inspect
+
         from kazma_core.tracing import KazmaTracer
         source = inspect.getsource(KazmaTracer._init_langfuse)
         assert "self._config.get" in source, (
@@ -509,7 +512,6 @@ class TestBug20_ContextAuthorityWired:
     async def test_run_actually_compacts_when_threshold_exceeded(self):
         """When tokens exceed 80%, compaction must be triggered."""
         from kazma_core.agent import KazmaAgent
-        from kazma_core.token_counter import TokenCounter
 
         agent = KazmaAgent()
 

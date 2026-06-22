@@ -1,18 +1,15 @@
 """Tests for the Kazma Hub Badge System (badges.py)."""
 from __future__ import annotations
 
-import sqlite3
-import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
 import pytest
 from kazma_core.hub.badges import (
+    _CREATE_BADGES,
     BADGE_LEVELS,
     Badge,
-    BadgeStats,
-    BadgeVerification,
     CertificationBadgeSystem,
-    _CREATE_BADGES,
 )
 
 
@@ -91,7 +88,7 @@ class TestBadgeDataclass:
     """Test Badge dataclass construction."""
 
     def test_badge_creation(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         badge = Badge(skill_id="test", level="basic", issued_at=now, expires_at=None)
         assert badge.skill_id == "test"
         assert badge.level == "basic"
@@ -99,7 +96,7 @@ class TestBadgeDataclass:
         assert badge.revoke_reason is None
 
     def test_badge_with_expiry(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires = now + timedelta(days=365)
         badge = Badge(skill_id="test", level="premium", issued_at=now, expires_at=expires)
         assert badge.expires_at == expires
@@ -159,7 +156,7 @@ class TestVerifyBadge:
         import sqlite3 as _sqlite3
 
         conn = _sqlite3.connect(badge_system_with_skill.db_path)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expired = now - timedelta(days=1)
         conn.execute(
             "INSERT INTO badges (skill_id, level, issued_at, expires_at) VALUES (?, ?, ?, ?)",
@@ -190,7 +187,7 @@ class TestVerifyBadge:
         import sqlite3 as _sqlite3
 
         conn = _sqlite3.connect(badge_system_with_skill.db_path)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         almost_expired = now + timedelta(seconds=1)
         conn.execute(
             "INSERT INTO badges (skill_id, level, issued_at, expires_at) VALUES (?, ?, ?, ?)",

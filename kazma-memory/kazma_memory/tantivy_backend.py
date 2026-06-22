@@ -5,14 +5,12 @@ agent memories via the tantivy-py bindings.
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +20,12 @@ try:
         Index,
         IndexWriter,
         QueryParser,
+        ReloadPolicy,
         Schema,
         SchemaBuilder,
+    )
+    from tantivy import (
         SearchResult as TantivySearchResult,
-        ReloadPolicy,
     )
     TANTIVY_AVAILABLE = True
 except ImportError:
@@ -65,7 +65,7 @@ class IndexStats:
     """Statistics about the Tantivy index."""
     total_documents: int = 0
     index_size_bytes: int = 0
-    last_optimized: Optional[str] = None
+    last_optimized: str | None = None
     avg_search_latency_ms: float = 0.0
     total_searches: int = 0
 
@@ -88,17 +88,17 @@ class TantivySearchBackend:
                 "tantivy-py is required for TantivySearchBackend. "
                 "Install with: pip install tantivy-py"
             )
-        
+
         self.index_path = Path(index_path)
         self.index_path.mkdir(parents=True, exist_ok=True)
-        
+
         self._tokenizer = ArabicTantivyTokenizer()
         self._schema = self._create_schema()
-        self._index: Optional[Index] = None
-        self._writer: Optional[IndexWriter] = None
+        self._index: Index | None = None
+        self._writer: IndexWriter | None = None
         self._search_latency_sum: float = 0.0
         self._search_count: int = 0
-        
+
         self._init_index()
 
     def _create_schema(self) -> Schema:
@@ -121,16 +121,16 @@ class TantivySearchBackend:
         """Initialize or open the Tantivy index."""
         index_dir = self.index_path / "index"
         index_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Check if index exists
         if (index_dir / "meta.json").exists():
             self._index = Index.open(str(index_dir))
         else:
             self._index = Index(self._schema, str(index_dir))
-        
+
         # Register Arabic tokenizer
         self._register_arabic_tokenizer()
-        
+
         # Open writer
         self._writer = self._index.writer(
             memory_budget_mb=50,
@@ -141,7 +141,7 @@ class TantivySearchBackend:
         """Register the Arabic tokenizer with Tantivy index."""
         if self._index is None:
             return
-        
+
         # Create a tokenizer instance for Tantivy
         # This uses the built-in text tokenizer with our custom configuration
         pass  # Arabic tokenizer is configured at schema level
@@ -157,7 +157,7 @@ class TantivySearchBackend:
         """
         if self._writer is None:
             raise RuntimeError("Index writer not initialized")
-        
+
         doc = Document()
         doc.add_text("id", memory.id)
         doc.add_text("content", memory.content)
@@ -165,14 +165,14 @@ class TantivySearchBackend:
         doc.add_i64("timestamp", memory.timestamp)
         doc.add_text("source", memory.source)
         doc.add_f64("relevance", memory.relevance)
-        
+
         if memory.division:
             doc.add_facet("division", f"/{memory.division}")
-        
+
         self._writer.add_document(doc)
         return memory.id
 
-    async def index_batch(self, memories: List[Memory]) -> List[str]:
+    async def index_batch(self, memories: list[Memory]) -> list[str]:
         """Index multiple memories in batch (10x faster than single).
         
         Args:
@@ -183,7 +183,7 @@ class TantivySearchBackend:
         """
         if self._writer is None:
             raise RuntimeError("Index writer not initialized")
-        
+
         doc_ids = []
         for memory in memories:
             doc = Document()
@@ -193,13 +193,13 @@ class TantivySearchBackend:
             doc.add_i64("timestamp", memory.timestamp)
             doc.add_text("source", memory.source)
             doc.add_f64("relevance", memory.relevance)
-            
+
             if memory.division:
                 doc.add_facet("division", f"/{memory.division}")
-            
+
             self._writer.add_document(doc)
             doc_ids.append(memory.id)
-        
+
         # Commit batch
         self._writer.commit()
         return doc_ids
@@ -208,8 +208,8 @@ class TantivySearchBackend:
         self,
         query: str,
         limit: int = 10,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> List[SearchResult]:
+        filters: dict[str, Any] | None = None
+    ) -> list[SearchResult]:
         """Search indexed memories.
         
         Supports:
@@ -227,23 +227,23 @@ class TantivySearchBackend:
         """
         if self._index is None:
             raise RuntimeError("Index not initialized")
-        
+
         start_time = time.time()
-        
+
         # Build query
         search_query = self._build_query(query, filters)
-        
+
         # Create searcher
         searcher = self._index.searcher()
-        
+
         # Execute search
         results = searcher.search(search_query, limit)
-        
+
         # Process results
         search_results = []
         for hit in results.hits:
             doc = searcher.doc(hit.doc_addr)
-            
+
             result = SearchResult(
                 id=doc.get_first("id") or "",
                 content=doc.get_first("content") or "",
@@ -255,15 +255,15 @@ class TantivySearchBackend:
                 division=doc.get_first("division") or "",
             )
             search_results.append(result)
-        
+
         # Track latency
         latency_ms = (time.time() - start_time) * 1000
         self._search_latency_sum += latency_ms
         self._search_count += 1
-        
+
         return search_results
 
-    def _build_query(self, query: str, filters: Optional[Dict[str, Any]] = None) -> Any:
+    def _build_query(self, query: str, filters: dict[str, Any] | None = None) -> Any:
         """Build Tantivy query from search parameters.
         
         Args:
@@ -275,19 +275,19 @@ class TantivySearchBackend:
         """
         if self._index is None:
             raise RuntimeError("Index not initialized")
-        
+
         # Use query parser for content field
         query_parser = QueryParser.for_index(self._index, "content")
-        
+
         # Parse the query
         search_query = query_parser.parse_query(query)
-        
+
         # Add filters if provided
         if filters:
             # For now, we'll use the basic query parser
             # Advanced filtering can be added with TermQuery and RangeQuery
             pass
-        
+
         return search_query
 
     async def delete_memory(self, memory_id: str) -> bool:
@@ -301,13 +301,13 @@ class TantivySearchBackend:
         """
         if self._writer is None:
             raise RuntimeError("Index writer not initialized")
-        
+
         from tantivy import Term
-        
+
         # Create term query for ID
         term = Term(self._schema.get_field("id"), memory_id)
         self._writer.delete_term(term)
-        
+
         return True
 
     async def optimize(self) -> None:
@@ -317,10 +317,10 @@ class TantivySearchBackend:
         """
         if self._writer is None:
             raise RuntimeError("Index writer not initialized")
-        
+
         # Commit pending changes
         self._writer.commit()
-        
+
         # Optimize index
         self._writer.optimize(3)  # merge up to 3 segments
 
@@ -332,21 +332,21 @@ class TantivySearchBackend:
         """
         if self._index is None:
             return IndexStats()
-        
+
         searcher = self._index.searcher()
-        
+
         # Get index size
         index_size = 0
         if self.index_path.exists():
             for file in self.index_path.rglob("*"):
                 if file.is_file():
                     index_size += file.stat().st_size
-        
+
         # Calculate average search latency
         avg_latency = 0.0
         if self._search_count > 0:
             avg_latency = self._search_latency_sum / self._search_count
-        
+
         return IndexStats(
             total_documents=searcher.num_docs(),
             index_size_bytes=index_size,
@@ -360,5 +360,5 @@ class TantivySearchBackend:
         if self._writer:
             self._writer.commit()
             self._writer = None
-        
+
         self._index = None

@@ -5,14 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from kazma_core.security.certification import (
     CERTIFICATION_LEVELS,
     CertificationResult,
     KazmaCertification,
-    VerificationResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

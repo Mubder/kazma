@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import pytest
 from kazma_core.security.disclosure import (
-    VulnerabilityDisclosure,
+    Advisory,
     DisclosureReport,
     StatusTransition,
-    Advisory,
-    _VALID_TRANSITIONS,
+    VulnerabilityDisclosure,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

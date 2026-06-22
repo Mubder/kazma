@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -132,7 +132,7 @@ class CertificationBadgeSystem:
             if cursor.fetchone() is None:
                 raise ValueError(f"Skill '{skill_id}' not found in registry")
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             expires = now + timedelta(days=365)
 
             conn.execute(
@@ -183,7 +183,7 @@ class CertificationBadgeSystem:
                     expires = datetime.fromisoformat(row["expires_at"])
                 except (ValueError, TypeError):
                     return BadgeVerification(valid=False, level=row["level"], reason="Invalid expiry date")
-                if datetime.now(timezone.utc) > expires:
+                if datetime.now(UTC) > expires:
                     return BadgeVerification(
                         valid=False,
                         level=row["level"],
@@ -256,7 +256,7 @@ class CertificationBadgeSystem:
             total = sum(by_level.values())
 
             # Recent issuances (last 30 days)
-            thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+            thirty_days_ago = (datetime.now(UTC) - timedelta(days=30)).isoformat()
             cursor = conn.execute(
                 "SELECT COUNT(*) as cnt FROM badges WHERE issued_at >= ? AND revoked = 0",
                 (thirty_days_ago,),

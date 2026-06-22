@@ -22,24 +22,24 @@ __all__ = [
     "Memory",
     "SearchResult",
     "IndexStats",
-    
+
     # Arabic Tokenizer
     "ArabicTantivyTokenizer",
-    
+
     # Migration
     "SQLiteToTantivyMigration",
     "MigrationResult",
     "VerificationResult",
-    
+
     # Benchmark
     "SearchBenchmark",
     "BenchmarkResult",
     "BenchmarkReport",
-    
+
     # Search Backend Router
     "SearchBackendRouter",
     "SQLiteMemoryBackend",
-    
+
     # Existing
     "ReportStore",
     "ReportStoreError",

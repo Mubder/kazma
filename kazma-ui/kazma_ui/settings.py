@@ -13,7 +13,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from kazma_ui.models import ModelTestRequest, MCPServerTestRequest, SettingsUpdate
+from kazma_ui.models import MCPServerTestRequest, ModelTestRequest, SettingsUpdate
 
 if TYPE_CHECKING:
     from kazma_core.agent import KazmaAgent

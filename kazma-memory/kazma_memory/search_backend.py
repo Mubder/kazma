@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -20,7 +20,7 @@ class SQLiteMemoryBackend:
     Uses sqlite-vec extension for semantic similarity search
     when available, falls back to regex-based text search.
     """
-    
+
     def __init__(self, db_path: str = "kazma-data/memory.db"):
         """Initialize SQLite backend.
         
@@ -42,14 +42,14 @@ class SQLiteMemoryBackend:
         conn = await aiosqlite.connect(self.db_path)
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA synchronous=NORMAL")
-        
+
         # Check for sqlite-vec extension
         try:
             await conn.execute("SELECT sqlite_version()")
             self._vec_available = True
         except Exception:
             self._vec_available = False
-        
+
         # Create memories table
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS memories (
@@ -62,17 +62,17 @@ class SQLiteMemoryBackend:
                 embedding BLOB
             )
         """)
-        
+
         # Create FTS table for text search
         await conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts 
             USING fts5(content, content_rowid UNINDEXED)
         """)
-        
+
         await conn.commit()
         return conn
 
-    async def search(self, query: str, limit: int = 10, **kwargs) -> List[Dict[str, Any]]:
+    async def search(self, query: str, limit: int = 10, **kwargs) -> list[dict[str, Any]]:
         """Search memories in SQLite.
         
         Uses FTS5 for text search when available.
@@ -86,7 +86,7 @@ class SQLiteMemoryBackend:
             List of memory dictionaries.
         """
         conn = await self._ensure_connection()
-        
+
         try:
             # Use FTS5 for full-text search
             cursor = await conn.execute(
@@ -101,7 +101,7 @@ class SQLiteMemoryBackend:
                 (query, limit)
             )
             rows = await cursor.fetchall()
-            
+
             return [
                 {
                     "id": row[0],
@@ -143,7 +143,7 @@ class SQLiteMemoryBackend:
             Document ID.
         """
         conn = await self._ensure_connection()
-        
+
         # Extract fields from memory
         if isinstance(memory, dict):
             memory_id = memory.get("id", self._generate_id())
@@ -159,10 +159,10 @@ class SQLiteMemoryBackend:
             timestamp = getattr(memory, "timestamp", 0)
             source = getattr(memory, "source", "")
             relevance = getattr(memory, "relevance", 1.0)
-        
+
         if isinstance(metadata, dict):
             metadata = json.dumps(metadata)
-        
+
         await conn.execute(
             """
             INSERT OR REPLACE INTO memories (id, content, metadata, timestamp, source, relevance)
@@ -170,7 +170,7 @@ class SQLiteMemoryBackend:
             """,
             (memory_id, content, metadata, timestamp, source, relevance)
         )
-        
+
         # Also index in FTS for search
         try:
             # Get the rowid of the inserted memory
@@ -183,7 +183,7 @@ class SQLiteMemoryBackend:
                 )
         except Exception as e:
             logger.debug("FTS indexing skipped: %s", e)
-        
+
         await conn.commit()
         return memory_id
 
@@ -217,7 +217,7 @@ class SearchBackendRouter:
     - < threshold: Use SQLite (simpler, lighter)
     - >= threshold: Use Tantivy (faster, more scalable)
     """
-    
+
     def __init__(
         self,
         sqlite_backend: SQLiteMemoryBackend,
@@ -234,9 +234,9 @@ class SearchBackendRouter:
         self.sqlite = sqlite_backend
         self.tantivy = tantivy_backend
         self.threshold = threshold_documents
-        self._document_count: Optional[int] = None
+        self._document_count: int | None = None
 
-    async def search(self, query: str, **kwargs) -> List[Any]:
+    async def search(self, query: str, **kwargs) -> list[Any]:
         """Route search to appropriate backend.
         
         - < threshold documents: Use SQLite (simpler, lighter)
@@ -250,7 +250,7 @@ class SearchBackendRouter:
             List of search results.
         """
         doc_count = await self._get_document_count()
-        
+
         if doc_count >= self.threshold:
             logger.debug(f"Routing to Tantivy ({doc_count} documents)")
             return await self.tantivy.search(query, **kwargs)
@@ -269,11 +269,11 @@ class SearchBackendRouter:
         """
         # Index to SQLite
         sqlite_id = await self.sqlite.index(memory)
-        
+
         # Index to Tantivy (if available)
         try:
             from .tantivy_backend import Memory as TantivyMemory
-            
+
             # Convert to Tantivy format if needed
             if isinstance(memory, dict):
                 tantivy_memory = TantivyMemory(
@@ -287,12 +287,12 @@ class SearchBackendRouter:
                 )
             else:
                 tantivy_memory = memory
-            
+
             await self.tantivy.index_memory(tantivy_memory)
-            
+
         except Exception as e:
             logger.warning(f"Failed to index to Tantivy: {e}")
-        
+
         return sqlite_id
 
     async def migrate_to_tantivy(self) -> bool:
@@ -303,14 +303,14 @@ class SearchBackendRouter:
         """
         try:
             from .migration import SQLiteToTantivyMigration
-            
+
             migration = SQLiteToTantivyMigration(
                 sqlite_path=self.sqlite.db_path if hasattr(self.sqlite, 'db_path') else "kazma-data/memory.db",
                 tantivy_path=self.tantivy.index_path if hasattr(self.tantivy, 'index_path') else "kazma-data/tantivy-index",
             )
-            
+
             result = await migration.migrate()
-            
+
             if result.success:
                 logger.info(f"Migration completed: {result.total_migrated} documents migrated")
                 # Clear cached document count
@@ -319,7 +319,7 @@ class SearchBackendRouter:
             else:
                 logger.error(f"Migration failed: {result.errors}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"Migration failed: {e}")
             return False
@@ -334,7 +334,7 @@ class SearchBackendRouter:
         """
         if self._document_count is not None:
             return self._document_count
-        
+
         try:
             # Try to get count from Tantivy first
             stats = await self.tantivy.get_stats()
@@ -348,21 +348,21 @@ class SearchBackendRouter:
                     self._document_count = 0
             except Exception:
                 self._document_count = 0
-        
+
         return self._document_count
 
     async def invalidate_cache(self) -> None:
         """Invalidate cached document count."""
         self._document_count = None
 
-    async def get_backend_info(self) -> Dict[str, Any]:
+    async def get_backend_info(self) -> dict[str, Any]:
         """Get information about current backend selection.
         
         Returns:
             Dictionary with backend selection details.
         """
         doc_count = await self._get_document_count()
-        
+
         return {
             "document_count": doc_count,
             "threshold": self.threshold,
