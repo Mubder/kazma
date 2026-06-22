@@ -9,6 +9,7 @@ Comprehensive tests for the SQLite-only search backend including:
 
 import tempfile
 import time
+
 from pathlib import Path
 
 import pytest
