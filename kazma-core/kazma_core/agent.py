@@ -168,7 +168,7 @@ class KazmaAgent:
                 logger.info("Memory system disabled in config")
                 return
             # SQLite-only search with FTS5 and Arabic tokenization
-            from kazma_memory import SearchBackend, SQLiteMemoryBackend
+            from kazma_memory import SearchBackend
 
             self.memory = SearchBackend(
                 db_path=memory_cfg.get("sqlite_path", "kazma-data/memory.db"),

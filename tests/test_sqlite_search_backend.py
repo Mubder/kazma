@@ -151,9 +151,30 @@ class TestSQLiteMemoryBackend:
         """Test FTS5 full-text search."""
         # Index some memories
         memories = [
-            {"id": "m1", "content": "Python programming is awesome", "metadata": {}, "timestamp": int(time.time()), "source": "test", "relevance": 0.9},
-            {"id": "m2", "content": "JavaScript frameworks are popular", "metadata": {}, "timestamp": int(time.time()), "source": "test", "relevance": 0.8},
-            {"id": "m3", "content": "Machine learning with Python", "metadata": {}, "timestamp": int(time.time()), "source": "test", "relevance": 0.95},
+            {
+                "id": "m1",
+                "content": "Python programming is awesome",
+                "metadata": {},
+                "timestamp": int(time.time()),
+                "source": "test",
+                "relevance": 0.9,
+            },
+            {
+                "id": "m2",
+                "content": "JavaScript frameworks are popular",
+                "metadata": {},
+                "timestamp": int(time.time()),
+                "source": "test",
+                "relevance": 0.8,
+            },
+            {
+                "id": "m3",
+                "content": "Machine learning with Python",
+                "metadata": {},
+                "timestamp": int(time.time()),
+                "source": "test",
+                "relevance": 0.95,
+            },
         ]
 
         for mem in memories:
@@ -170,9 +191,30 @@ class TestSQLiteMemoryBackend:
         """Test Arabic text search with tokenization."""
         # Index Arabic memories
         memories = [
-            {"id": "ar1", "content": "التعليم مهم جدا للطلاب", "metadata": {}, "timestamp": int(time.time()), "source": "test", "relevance": 0.9},
-            {"id": "ar2", "content": "الصحة هي أهم شيء في الحياة", "metadata": {}, "timestamp": int(time.time()), "source": "test", "relevance": 0.8},
-            {"id": "ar3", "content": "التعليم يفتح آفاقا جديدة", "metadata": {}, "timestamp": int(time.time()), "source": "test", "relevance": 0.95},
+            {
+                "id": "ar1",
+                "content": "التعليم مهم جدا للطلاب",
+                "metadata": {},
+                "timestamp": int(time.time()),
+                "source": "test",
+                "relevance": 0.9,
+            },
+            {
+                "id": "ar2",
+                "content": "الصحة هي أهم شيء في الحياة",
+                "metadata": {},
+                "timestamp": int(time.time()),
+                "source": "test",
+                "relevance": 0.8,
+            },
+            {
+                "id": "ar3",
+                "content": "التعليم يفتح آفاقا جديدة",
+                "metadata": {},
+                "timestamp": int(time.time()),
+                "source": "test",
+                "relevance": 0.95,
+            },
         ]
 
         for mem in memories:
@@ -188,7 +230,13 @@ class TestSQLiteMemoryBackend:
         # Index some memories
         for i in range(5):
             await sqlite_backend.index(
-                {"content": f"Memory {i}", "metadata": {}, "timestamp": int(time.time()), "source": "test", "relevance": 1.0}
+                {
+                    "content": f"Memory {i}",
+                    "metadata": {},
+                    "timestamp": int(time.time()),
+                    "source": "test",
+                    "relevance": 1.0,
+                }
             )
 
         count = await sqlite_backend.count()
@@ -312,7 +360,13 @@ class TestEdgeDeployment:
         start = time.time()
         for i in range(10):
             await search_backend.index(
-                {"content": f"Performance test {i}", "metadata": {}, "timestamp": int(time.time()), "source": "test", "relevance": 1.0}
+                {
+                    "content": f"Performance test {i}",
+                    "metadata": {},
+                    "timestamp": int(time.time()),
+                    "source": "test",
+                    "relevance": 1.0,
+                }
             )
         index_time = time.time() - start
 
