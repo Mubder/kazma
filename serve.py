@@ -3,9 +3,7 @@
 
 import subprocess
 import sys
-import signal
 import time
-from pathlib import Path
 
 # Use the same Python that's running this script
 python_exe = sys.executable
