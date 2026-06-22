@@ -203,17 +203,19 @@ class SQLiteMemoryBackend:
 
                 for row in memory_rows:
                     rowid = row[7]
-                    results.append({
-                        "id": row[0],
-                        "content": row[1],
-                        "content_arabic": row[2],
-                        "metadata": row[3],
-                        "timestamp": row[4],
-                        "source": row[5],
-                        "relevance": row[6],
-                        "bm25_score": rowid_to_bm25.get(rowid, 0),
-                        "search_type": "fts5"
-                    })
+                    results.append(
+                        {
+                            "id": row[0],
+                            "content": row[1],
+                            "content_arabic": row[2],
+                            "metadata": row[3],
+                            "timestamp": row[4],
+                            "source": row[5],
+                            "relevance": row[6],
+                            "bm25_score": rowid_to_bm25.get(rowid, 0),
+                            "search_type": "fts5",
+                        }
+                    )
 
         except Exception as e:
             logger.warning("FTS5 search failed: %s", e)
@@ -223,25 +225,27 @@ class SQLiteMemoryBackend:
                 (f"%{query}%", limit),
             )
             rows = await cursor.fetchall()
-            results.extend([
-                {
-                    "id": row[0],
-                    "content": row[1],
-                    "metadata": row[2],
-                    "timestamp": row[3],
-                    "source": row[4],
-                    "relevance": row[5],
-                    "search_type": "fallback"
-                }
-                for row in rows
-            ])
+            results.extend(
+                [
+                    {
+                        "id": row[0],
+                        "content": row[1],
+                        "metadata": row[2],
+                        "timestamp": row[3],
+                        "source": row[4],
+                        "relevance": row[5],
+                        "search_type": "fallback",
+                    }
+                    for row in rows
+                ]
+            )
 
         # If vector search requested and available, add vector similarity results
         if kwargs.get("semantic_search") and self._vec_available and kwargs.get("embedding"):
             try:
                 vector_results = await self._vector_search(
                     kwargs["embedding"],
-                    limit=max(limit // 2, 3)  # Reserve half slots for vector search
+                    limit=max(limit // 2, 3),  # Reserve half slots for vector search
                 )
                 results.extend(vector_results)
             except Exception as e:
@@ -301,7 +305,7 @@ class SQLiteMemoryBackend:
                     "timestamp": row[3],
                     "source": row[4],
                     "relevance": row[5],
-                    "search_type": "vector"
+                    "search_type": "vector",
                 }
                 for row in rows
             ]

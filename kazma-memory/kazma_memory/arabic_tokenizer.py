@@ -93,16 +93,16 @@ class ArabicTokenizer:
         # Basic stemming rules - can be enhanced
         stem_rules = {
             # Common suffixes
-            r"ات$": "",      # feminine plural
-            r"ون$": "",      # masculine plural
-            "ين$": "",      # dual/masculine plural
-            r"ة$": "",       # feminine marker
-            r"ان$": "",       # dual
-            r"نا$": "",       # first person plural
+            r"ات$": "",  # feminine plural
+            r"ون$": "",  # masculine plural
+            "ين$": "",  # dual/masculine plural
+            r"ة$": "",  # feminine marker
+            r"ان$": "",  # dual
+            r"نا$": "",  # first person plural
             # Common prefixes
-            r"^ال": "",       # definite article
-            r"^بـ": "",       # prefixing B
-            r"^كـ": "",       # prefixing K
+            r"^ال": "",  # definite article
+            r"^بـ": "",  # prefixing B
+            r"^كـ": "",  # prefixing K
         }
 
         def stem(word: str) -> str:
@@ -219,4 +219,5 @@ class ArabicTantivyTokenizer(ArabicTokenizer):
     This class now provides the same functionality as ArabicTokenizer
     but maintains the original class name for compatibility.
     """
+
     pass
