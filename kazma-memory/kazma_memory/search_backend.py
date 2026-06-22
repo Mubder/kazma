@@ -14,7 +14,7 @@ from typing import Any
 
 import aiosqlite
 
-from .arabic_tokenizer import ArabicTantivyTokenizer
+from .arabic_tokenizer import ArabicTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class SQLiteMemoryBackend:
         self.db_path = db_path
         self._conn: Any = None
         self._vec_available = False
-        self._arabic_tokenizer = ArabicTantivyTokenizer()
+        self._arabic_tokenizer = ArabicTokenizer()
 
     async def _ensure_connection(self) -> Any:
         """Ensure database connection is established."""

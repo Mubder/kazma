@@ -55,14 +55,27 @@ class ArabicTokenizer:
             "لكن",
             "كما",
             "كلما",
-            # Pronouns
+            # Pronouns (with and without hamza for normalization compatibility)
             "أنا",
-            "أنت",
-            "أنتما",
+            "انت",
+            "انتما",
             "هم",
             "هن",
             "نحن",
-            "أنتم",
+            "انتم",
+            "هو",
+            "هي",
+            "هيا",
+            "انا",
+            "انت",
+            "انتما",
+            "هم",
+            "هن",
+            "نحن",
+            "انتم",
+            "هو",
+            "هي",
+            "هيا",
             # Common connectors
             "و",
             "أو",
@@ -139,6 +152,9 @@ class ArabicTokenizer:
         # Normalize Ya Hamza
         text = text.replace("ئ", "ي")
 
+        # Remove Kashida (tatweel)
+        text = text.replace("ـ", "")
+
         # Remove extra spaces
         text = re.sub(r"\s+", " ", text).strip()
 
@@ -206,7 +222,7 @@ class ArabicTokenizer:
         Returns:
             Text with normalized Yeh.
         """
-        yeh_variants = ["ئ", "ؤ", "إي"]
+        yeh_variants = ["ئ", "ؤ", "إي", "ى"]
         for variant in yeh_variants:
             text = text.replace(variant, "ي")
         return text
@@ -220,4 +236,53 @@ class ArabicTantivyTokenizer(ArabicTokenizer):
     but maintains the original class name for compatibility.
     """
 
-    pass
+    def tokenize(self, text: str) -> list[str]:
+        """Tokenize Arabic text for search indexing (returns list for backward compat).
+
+        Args:
+            text: Arabic text to tokenize.
+
+        Returns:
+            List of processed tokens.
+        """
+        if not text:
+            return []
+
+        # Normalize text
+        processed = self.normalize(text)
+
+        # Remove stop words
+        words = processed.split()
+        filtered = [word for word in words if word not in self.stop_words and len(word) > 1]
+
+        # Apply stemming if available
+        if self.stemmer:
+            filtered = [self.stemmer(word) for word in filtered]
+
+        return filtered
+
+    def remove_diacritics(self, text: str) -> str:
+        """Remove Arabic diacritics (harakat) - public backward compat method.
+
+        Args:
+            text: Arabic text with diacritics.
+
+        Returns:
+            Text without diacritics.
+        """
+        return self._remove_diacritics(text)
+
+    def stem(self, word: str) -> str:
+        """Apply stemming to a single word.
+
+        Args:
+            word: Arabic word to stem.
+
+        Returns:
+            Stemmed word.
+        """
+        if not word or len(word) <= 1:
+            return word
+        if self.stemmer:
+            return self.stemmer(word)
+        return word
