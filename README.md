@@ -40,13 +40,14 @@ Kazma is a production-grade, domain-agnostic, open-source framework for building
 
 ```
 kazma-core/          Agent loop (ReAct), checkpointing, compaction, authority
-kazma-memory/        sqlite-vec vector store, retrieval, provenance tagging
+kazma-memory/        sqlite-vec + SQLite FTS5, Arabic tokenizer
 kazma-skills/        YAML manifests wrapping MCP tools, certified servers
 kazma-connectors/    Telegram, Discord, Slack adapters
 kazma-providers/     LiteLLM router, model switching, provider abstraction
 kazma-ui/            FastAPI + HTMX dashboard (Arabic RTL, Linear design)
+kazma-tui/           Textual TUI with Arabic/RTL support
 kazma-cli/           CLI entry point: install, diagnostics, hub commands
-tests/               1082 tests — pytest + asyncio
+tests/               1000+ tests — pytest + asyncio
 ```
 
 ---
@@ -92,9 +93,6 @@ pip install -e ".[dev,cli]"
 ### Optional Dependencies
 
 ```bash
-# Tantivy high-performance search (Rust-backed FTS)
-pip install -e ".[tantivy]"
-
 # Langfuse observability dashboard
 pip install langfuse
 
@@ -149,20 +147,18 @@ For local overrides, copy to `kazma.local.yaml` (git-ignored). Environment varia
 ### Running Tests
 
 ```bash
-# Full test suite (1082 tests, 14 skipped — tantivy, 2 deselected — bug fixes)
+# Full test suite
 pytest tests/
 
+# With coverage
 # With coverage
 pytest --cov=kazma_core --cov-report=html tests/
 
 # Specific test file
 pytest tests/test_checkpoint.py -v
 
-# Run only regression tests (bug fixes)
-pytest tests/test_bug_regression.py -v
-
-# Run only our new tests (TraceStore, ConfigStore, Integration, E2E, Error coverage)
-pytest tests/test_tracestore.py tests/test_config_store.py tests/test_integration.py tests/test_e2e.py tests/test_error_coverage.py -v
+# Key test modules
+pytest tests/test_sqlite_search_backend.py tests/test_arabic_tokenizer.py tests/test_integration.py -v
 ```
 
 ### Development
@@ -178,6 +174,45 @@ mypy kazma-core/kazma_core/
 # Run the agent (interactive)
 python -m kazma_core.agent
 ```
+
+### Running the Web UI
+
+```bash
+# Default port 8000
+uv run kazma-web
+
+# Custom port (if 8000 is in use)
+uv run kazma-web --port 8080
+
+# Or via Python directly
+uv run python -m kazma_ui.app --port 8080
+```
+
+Then open http://localhost:8080 (or your chosen port).
+
+**Web UI Features:**
+- Chat interface with real-time agent responses
+- Dashboard with live traces, metrics, cost tracking
+- Settings panel (model, MCP servers, language, RTL)
+- Skills management (install from Kazma Hub)
+- MCP server management
+- Agent monitoring
+
+### Running the TUI (Terminal UI)
+
+```bash
+# Start TUI
+uv run kazma-tui
+
+# Or via Python directly
+uv run python -m kazma_tui.tui
+```
+
+**TUI Features:**
+- Full Arabic/RTL text rendering
+- Real-time chat with Kazma agent
+- Status bar showing model, tools, session info
+- Keyboard-driven interface
 
 ### Project Structure
 
@@ -195,18 +230,18 @@ kazma-core/              Agent loop (ReAct), checkpointing, compaction, authorit
 │       ├── hub/             # Kazma Hub skill registry
 │       ├── delegation/      # Agent-to-agent delegation protocol
 │       └── security/        # Security linter + certification
-├── kazma-memory/            # sqlite-vec vector memory + Arabic tokenizer
+├── kazma-memory/            # sqlite-vec + SQLite FTS5 + Arabic tokenizer
 ├── kazma-skills/            # Skill manifests + certified MCP servers
 ├── kazma-connectors/        # Platform adapters (Telegram, Discord, Slack)
 ├── kazma-providers/         # LiteLLM router (multi-provider failover)
 ├── kazma-ui/                # FastAPI + HTMX dashboard (RTL, Linear design)
+├── kazma-tui/               # Textual TUI with Arabic/RTL
 ├── kazma-cli/               # CLI (`kazma` command)
-├── tests/                   # 1082 tests (pytest + asyncio)
+├── tests/                   # 1000+ tests (pytest + asyncio)
 ├── docs/                    # Documentation
 ├── kazma.yaml               # Root configuration
 └── KAZMA_PROJECT_SUMMARY.md # Full project summary
 ```
-└── KAZMA_PROJECT_SUMMARY.md # Full project summary
 
 ## 🆕 Latest Features (Hermes_API_2 Merge)
 
@@ -214,7 +249,7 @@ kazma-core/              Agent loop (ReAct), checkpointing, compaction, authorit
 |---------|-------------|
 | **LiteLLM Router** | Multi-provider failover (OpenAI, Anthropic, local) |
 | **Skills Framework** | YAML manifests + certified MCP servers |
-| **Memory System** | sqlite-vec + Tantivy full-text search + Arabic tokenizer |
+| **Memory System** | sqlite-vec + SQLite FTS5 full-text search + Arabic tokenizer |
 | **Real-time Dashboard** | WebSocket live traces, metrics, cost tracking |
 | **Multi-Agent Monitoring** | Hub agent discovery, network visualization |
 | **Notification System** | Toast notifications with WebSocket feed |
@@ -226,20 +261,17 @@ kazma-core/              Agent loop (ReAct), checkpointing, compaction, authorit
 ## 🧪 Latest Test Coverage
 
 ```
-1082 passed  ✅
-  14 skipped (tantivy — optional Rust dependency)
-   2 deselected (pre-existing bug fixes)
-  ─────────────────────────────────
-1098 total tests
+1000+ tests passing ✅
+  (Tantivy tests removed — replaced with SQLite FTS5)
 ```
 
-New test files added:
-- `test_tracestore.py` — 15 tests for in-memory TraceStore
-- `test_config_store.py` — 9 tests for ConfigStore
-- `test_integration.py` — 21 tests for FastAPI routes
-- `test_e2e.py` — 14 end-to-end agent lifecycle tests
-- `test_error_coverage.py` — 27 edge case tests
-```
+Key test modules:
+- `test_sqlite_search_backend.py` — 20 tests for SQLite FTS5 + Arabic tokenizer
+- `test_arabic_tokenizer.py` — 31 tests for Arabic text processing
+- `test_integration.py` — 21 tests for FastAPI Web UI routes
+- `test_checkpoint.py` — Durable execution checkpointing
+- `test_tone_adapter.py` — Majlis protocol tone adaptation
+- `test_tracing.py` — Langfuse/OTel/TraceStore observability
 
 ---
 
