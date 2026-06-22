@@ -9,10 +9,9 @@ Comprehensive tests for the SQLite-only search backend including:
 
 import tempfile
 import time
+from pathlib import Path
 
 import pytest
-
-from pathlib import Path
 
 from kazma_memory import ArabicTokenizer, SearchBackend, SQLiteMemoryBackend
 
