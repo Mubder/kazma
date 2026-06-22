@@ -14,7 +14,7 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "0.11"
-      - run: uv sync --all-extras --no-extra tantivy
+      - run: uv sync --all-extras
       - name: Ruff check
         run: uv run ruff check .
       - name: Ruff format check
@@ -28,6 +28,6 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "0.11"
-      - run: uv sync --all-extras --no-extra tantivy
+      - run: uv sync --all-extras
       - name: Run tests
         run: uv run pytest tests/ -v --tb=short --cov=kazma_core --cov-report=term-missing
