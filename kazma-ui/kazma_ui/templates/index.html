@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kazma — Orchestration Workspace</title>
+
+    <!-- ─── Tailwind CSS (CDN) ─── -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        surface:   '#0f1117',
+                        card:      '#161822',
+                        border:    '#262838',
+                        'border-active': '#3b82f6',
+                        accent:    '#3b82f6',
+                        'accent-dim': '#1e3a5f',
+                        'text-primary': '#e2e8f0',
+                        'text-secondary': '#94a3b8',
+                        'text-muted': '#64748b',
+                        success:   '#22c55e',
+                        warning:   '#eab308',
+                        error:     '#ef4444',
+                        'code-bg': '#0d1117',
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'monospace'],
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                    animation: {
+                        'pulse-dot': 'pulse-dot 1.4s infinite ease-in-out',
+                    },
+                    keyframes: {
+                        'pulse-dot': {
+                            '0%, 80%, 100%': { transform: 'scale(0.6)', opacity: '0.4' },
+                            '40%': { transform: 'scale(1)', opacity: '1' },
+                        },
+                    },
+                },
+            },
+        }
+    </script>
+
+    <!-- ─── Alpine.js (state management) ─── -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- ─── Alpine.js Collapse plugin ─── -->
+    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- ─── HTMX (telemetry polling) ─── -->
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+
+    <!-- ─── marked.js (Markdown render) ─── -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@15.0.4/marked.min.js"></script>
+
+    <!-- ─── highlight.js (code syntax highlight) ─── -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+
+    <!-- ─── Chart.js (telemetry graphs) ─── -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0f1117;
+            color: #e2e8f0;
+            font-family: 'Inter', system-ui, sans-serif;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #262838; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
+
+        /* ── Thinking dots ── */
+        .thinking-dot {
+            display: inline-block;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #3b82f6;
+            animation: pulse-dot 1.4s infinite ease-in-out;
+        }
+        .thinking-dot:nth-child(2) { animation-delay: 0.16s; }
+        .thinking-dot:nth-child(3) { animation-delay: 0.32s; }
+
+        /* ── Chat messages ── */
+        .msg-in { animation: slideIn 0.2s ease-out; }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Code blocks in markdown ── */
+        .message-content pre {
+            background: #0d1117 !important;
+            border: 1px solid #262838;
+            border-radius: 8px;
+            padding: 16px;
+            overflow-x: auto;
+            margin: 8px 0;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+        .message-content code {
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 0.85em;
+        }
+        .message-content p > code,
+        .message-content li > code {
+            background: #1a1d2e;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid #262838;
+        }
+        .message-content table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 12px 0;
+        }
+        .message-content th,
+        .message-content td {
+            border: 1px solid #262838;
+            padding: 8px 12px;
+            text-align: left;
+        }
+        .message-content th {
+            background: #1a1d2e;
+            color: #94a3b8;
+            font-weight: 600;
+        }
+        .message-content blockquote {
+            border-left: 3px solid #3b82f6;
+            padding-left: 12px;
+            color: #94a3b8;
+            margin: 8px 0;
+        }
+        .message-content a {
+            color: #60a5fa;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+        .message-content a:hover { color: #93bbfd; }
+
+        /* ── Telemetry chart containers ── */
+        .chart-container { position: relative; height: 120px; width: 100%; }
+
+        /* ── Collapsible thought log ── */
+        .thought-toggle {
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s;
+        }
+        .thought-toggle:hover { background: rgba(59,130,246,0.08); }
+        .thought-toggle .chevron { transition: transform 0.2s; }
+        .thought-toggle.open .chevron { transform: rotate(90deg); }
+
+        /* ── Glow effect on active streaming ── */
+        @keyframes borderGlow {
+            0%, 100% { border-color: #3b82f6; box-shadow: 0 0 8px rgba(59,130,246,0.15); }
+            50%       { border-color: #60a5fa; box-shadow: 0 0 16px rgba(59,130,246,0.3); }
+        }
+        .streaming-active textarea {
+            animation: borderGlow 1.5s ease-in-out infinite;
+        }
+
+        /* ── Telemetry panel collapse ── */
+        .telemetry-body { overflow: hidden; transition: max-height 0.35s ease, opacity 0.25s ease; }
+        .telemetry-body.collapsed { max-height: 0 !important; opacity: 0; padding: 0 !important; }
+
+        /* ── Keyboard shortcut badge ── */
+        kbd {
+            display: inline-block;
+            padding: 2px 6px;
+            font-size: 0.7rem;
+            font-family: inherit;
+            color: #94a3b8;
+            background: #1a1d2e;
+            border: 1px solid #262838;
+            border-radius: 4px;
+            line-height: 1;
+        }
+    </style>
+</head>
+<body>
+
+<!-- ┌───────────────────────────────────────────────────────────────────┐
+     │  x-data="appState" — root Alpine component                       │
+     └───────────────────────────────────────────────────────────────────┘ -->
+<div x-data="appState()" x-init="init()"
+     @keydown.window="handleKeydown($event)"
+     class="h-screen flex flex-col">
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TELEMETRY BAR — collapsible top panel
+         ═══════════════════════════════════════════════════════════════ -->
+    <div class="flex-shrink-0 border-b" :class="telemetryOpen ? 'border-border-active' : 'border-border'">
+        <!-- Toggle header -->
+        <div class="flex items-center justify-between px-4 py-2 bg-card cursor-pointer select-none"
+             @click="telemetryOpen = !telemetryOpen">
+            <div class="flex items-center gap-3">
+                <svg class="w-4 h-4 transition-transform duration-200"
+                     :class="telemetryOpen ? 'rotate-90' : ''"
+                     fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                    <polyline points="9 18 15 12 9 6"/>
+                </svg>
+                <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">Telemetry</span>
+                <div class="flex items-center gap-4 text-xs text-text-secondary">
+                    <span>Tokens: <span class="text-accent font-mono" x-text="totalTokens.toLocaleString()">0</span></span>
+                    <span>Cost: <span class="text-success font-mono" x-text="'$' + totalCost.toFixed(4)">$0.00</span></span>
+                    <span>Model: <span class="text-text-primary font-mono text-[0.7rem]">{{ config.default_model }}</span></span>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-[0.6rem] text-text-muted uppercase tracking-wider"><kbd>Ctrl</kbd> <kbd>K</kbd> clear · <kbd>Ctrl</kbd> <kbd>/</kbd> focus</span>
+            </div>
+        </div>
+
+        <!-- Telemetry body (Chart.js) — polls /api/telemetry every 3s via Alpine.js -->
+        <div class="telemetry-body"
+             :class="telemetryOpen ? '' : 'collapsed'"
+             x-ref="telemetryBody">
+            <div class="grid grid-cols-2 gap-3 px-4 py-3 bg-surface">
+                <div class="bg-card rounded-lg border border-border p-3">
+                    <div class="text-[0.65rem] uppercase tracking-wider text-text-muted mb-1">Token Usage <span class="text-accent font-mono ml-1 text-[0.6rem]" x-text="telemetry.tokens + ' tok'"></span></div>
+                    <div class="chart-container"><canvas x-ref="tokenChart"></canvas></div>
+                </div>
+                <div class="bg-card rounded-lg border border-border p-3">
+                    <div class="text-[0.65rem] uppercase tracking-wider text-text-muted mb-1">VRAM Allocation <span class="text-success font-mono ml-1 text-[0.6rem]" x-text="telemetry.vram + ' MB'"></span></div>
+                    <div class="chart-container"><canvas x-ref="vramChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         MAIN CONTENT — sidebar + chat
+         ═══════════════════════════════════════════════════════════════ -->
+    <div class="flex flex-1 min-h-0">
+
+        <!-- ─── Sidebar ─── -->
+        <div class="w-56 flex-shrink-0 bg-card border-r border-border flex flex-col">
+            <!-- New Chat button -->
+            <div class="p-3 border-b border-border">
+                <button @click="newSession()"
+                        class="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg
+                               bg-accent-dim/40 border border-border hover:bg-accent-dim
+                               text-text-primary text-sm font-medium transition-all duration-150
+                               hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    New Session
+                </button>
+            </div>
+
+            <!-- Session list -->
+            <div class="flex-1 overflow-y-auto p-2 space-y-1">
+                <template x-for="s in sessions" :key="s.session_id">
+                    <div @click="switchSession(s.session_id)"
+                         class="px-3 py-2 rounded-lg cursor-pointer text-sm transition-colors duration-100"
+                         :class="s.session_id === activeSessionId
+                             ? 'bg-accent-dim/30 border border-border-active text-text-primary'
+                             : 'text-text-secondary hover:bg-card/50 border border-transparent'">
+                        <div class="truncate font-medium" x-text="s.label"></div>
+                        <div class="text-[0.65rem] text-text-muted mt-0.5 flex items-center gap-2">
+                            <span x-text="s.msgCount + ' msgs'"></span>
+                            <span x-show="s.tokens > 0" x-text="s.tokens.toLocaleString() + ' tok'"></span>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="sessions.length === 0" class="text-center py-8 text-text-muted text-xs">
+                    No sessions yet
+                </div>
+            </div>
+
+            <!-- Sidebar footer -->
+            <div class="p-3 border-t border-border text-[0.6rem] text-text-muted flex items-center justify-between">
+                <span>Kazma v0.1.0</span>
+                <span :class="wsConnected ? 'text-success' : 'text-error'" class="flex items-center gap-1">
+                    <span class="w-1.5 h-1.5 rounded-full inline-block"
+                          :class="wsConnected ? 'bg-success' : 'bg-error'"></span>
+                    <span x-text="wsConnected ? 'Live' : 'Offline'"></span>
+                </span>
+            </div>
+        </div>
+
+        <!-- ─── Chat Area ─── -->
+        <div class="flex-1 flex flex-col min-w-0 bg-surface">
+            <!-- Messages container -->
+            <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4" x-ref="messagesContainer">
+                <!-- Welcome message when empty -->
+                <template x-if="messages.length === 0">
+                    <div class="flex flex-col items-center justify-center h-full text-center py-16">
+                        <div class="w-16 h-16 rounded-2xl bg-accent-dim/20 border border-accent/20
+                                    flex items-center justify-center mb-4">
+                            <svg class="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                                <path d="M12 2a10 10 0 0 1 7.07 17.07A10 10 0 0 1 12 22v-4a6 6 0 0 1 0-12v4a2 2 0 1 0 0 4v-4a6 6 0 0 1-6 6H4a10 10 0 0 1 8-18z"/>
+                            </svg>
+                        </div>
+                        <h2 class="text-lg font-semibold text-text-primary mb-1">Kazma Orchestration Workspace</h2>
+                        <p class="text-sm text-text-muted max-w-md">Send a message to start a conversation. The agent will stream its response in real-time with live telemetry and thought traces.</p>
+                    </div>
+                </template>
+
+                <!-- Messages rendered dynamically -->
+                <template x-for="(msg, idx) in messages" :key="msg.id">
+                    <div class="msg-in flex gap-3"
+                         :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+
+                        <!-- Assistant avatar -->
+                        <template x-if="msg.role === 'assistant'">
+                            <div class="w-8 h-8 rounded-full bg-accent-dim/30 border border-accent/20
+                                        flex items-center justify-center flex-shrink-0 mt-1">
+                                <span class="text-xs font-bold text-accent">K</span>
+                            </div>
+                        </template>
+
+                        <!-- Message bubble -->
+                        <div class="max-w-[80%] rounded-2xl px-4 py-3"
+                             :class="msg.role === 'user'
+                                 ? 'bg-accent/15 border border-accent/20 rounded-tr-md'
+                                 : 'bg-card border border-border rounded-tl-md'">
+
+                            <!-- User message — plain text -->
+                            <template x-if="msg.role === 'user'">
+                                <div class="text-sm text-text-primary whitespace-pre-wrap" x-text="msg.content"></div>
+                            </template>
+
+                            <!-- Assistant message — Markdown rendered -->
+                            <template x-if="msg.role === 'assistant'">
+                                <div>
+                                    <!-- Collapsible thought logs (tool traces) -->
+                                    <template x-if="msg.thoughts && msg.thoughts.length > 0">
+                                        <div class="mb-3">
+                                            <template x-for="(thought, ti) in msg.thoughts" :key="ti">
+                                                <div class="rounded-lg border border-border overflow-hidden mb-1.5">
+                                                    <!-- Thought toggle header -->
+                                                    <div class="thought-toggle flex items-center gap-2 px-3 py-1.5
+                                                                text-xs font-mono text-text-secondary"
+                                                         :class="thought.open ? 'open' : ''"
+                                                         @click="thought.open = !thought.open">
+                                                        <svg class="chevron w-3 h-3 flex-shrink-0" fill="none"
+                                                             stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                                            <polyline points="9 18 15 12 9 6"/>
+                                                        </svg>
+                                                        <span class="text-accent font-semibold">⦿</span>
+                                                        <span x-text="thought.name"></span>
+                                                        <span class="text-[0.6rem] text-text-muted ml-auto"
+                                                              x-text="(thought.result.length > 60 ? thought.result.slice(0,60) + '...' : thought.result)"></span>
+                                                    </div>
+                                                    <!-- Thought body (collapsible) -->
+                                                    <div x-show="thought.open"
+                                                         x-collapse
+                                                         class="border-t border-border">
+                                                        <pre class="text-[0.75rem] leading-relaxed p-3 overflow-x-auto"
+                                                             style="background:#0d1117;color:#e2e8f0;font-family:'JetBrains Mono',monospace;"><code x-text="thought.result"></code></pre>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+
+                                    <!-- Streaming content or final markdown -->
+                                    <div class="message-content text-sm leading-relaxed"
+                                         x-html="renderMarkdown(
+                                             msg.id === streamingMsgId && isStreaming
+                                                 ? msg.displayContent
+                                                 : msg.content
+                                         )"></div>
+
+                                    <!-- Streaming status indicator -->
+                                    <template x-if="msg.id === streamingMsgId && isStreaming">
+                                        <div class="flex items-center gap-2 mt-2 pt-2 border-t border-border/50">
+                                            <span class="thinking-dot"></span>
+                                            <span class="thinking-dot"></span>
+                                            <span class="thinking-dot"></span>
+                                            <span class="text-[0.65rem] text-text-muted ml-1">Streaming…</span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+
+                            <!-- Message meta (timestamp + stats) -->
+                            <div class="flex items-center gap-3 mt-1.5 text-[0.6rem] text-text-muted"
+                                 x-show="msg.role === 'assistant' && (msg.tokens > 0 || msg.cost > 0)">
+                                <span x-show="msg.tokens > 0" x-text="msg.tokens + ' tok'"></span>
+                                <span x-show="msg.cost > 0" x-text="'$' + msg.cost.toFixed(4)"></span>
+                            </div>
+                        </div>
+
+                        <!-- User avatar -->
+                        <template x-if="msg.role === 'user'">
+                            <div class="w-8 h-8 rounded-full bg-accent flex items-center justify-center flex-shrink-0 mt-1">
+                                <span class="text-xs font-bold text-white">U</span>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- Empty space at bottom so scroll works nicely -->
+                <div x-ref="scrollAnchor"></div>
+            </div>
+
+            <!-- ─── Input Area ─── -->
+            <div class="flex-shrink-0 border-t border-border px-4 py-3 bg-card"
+                 :class="isStreaming ? 'streaming-active' : ''">
+                <div class="max-w-4xl mx-auto flex items-end gap-2">
+                    <div class="flex-1 relative">
+                        <textarea
+                            x-ref="chatInput"
+                            x-model="inputText"
+                            @keydown="handleInputKeydown"
+                            placeholder="Type your message…"
+                            rows="1"
+                            class="w-full bg-surface border border-border rounded-xl px-4 py-3 pr-12
+                                   text-sm text-text-primary placeholder-text-muted
+                                   focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20
+                                   resize-none transition-colors duration-150 font-sans"
+                            :disabled="isStreaming"
+                        ></textarea>
+                        <button @click="sendMessage()"
+                                :disabled="!inputText.trim() || isStreaming || !wsConnected"
+                                class="absolute right-1.5 bottom-1.5 p-2 rounded-lg transition-all duration-150
+                                       flex items-center justify-center"
+                                :class="inputText.trim() && !isStreaming && wsConnected
+                                    ? 'bg-accent text-white hover:bg-accent/80 cursor-pointer'
+                                    : 'bg-border text-text-muted cursor-not-allowed'">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="max-w-4xl mx-auto flex items-center justify-between mt-1.5 px-1">
+                    <div class="flex items-center gap-3 text-[0.6rem] text-text-muted">
+                        <span><kbd>Enter</kbd> send · <kbd>Shift</kbd> <kbd>Enter</kbd> newline</span>
+                        <span><kbd>Ctrl</kbd> <kbd>K</kbd> clear</span>
+                        <span><kbd>Ctrl</kbd> <kbd>/</kbd> focus</span>
+                    </div>
+                    <div class="text-[0.6rem] text-text-muted">
+                        <span x-show="wsConnected" class="text-success">● Connected</span>
+                        <span x-show="!wsConnected" class="text-error">● Disconnected</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ───────────────────────────────────────────────────────────────────
+     JAVASCRIPT — Alpine.js component + helpers
+     ─────────────────────────────────────────────────────────────────── -->
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   CONFIGURATION
+   ═══════════════════════════════════════════════════════════════════ */
+const CONFIG = {
+    model: '{{ config.default_model|default("gpt-4o-mini") }}',
+    wsReconnectDelay: 2000,
+    maxThoughtResultPreview: 120,
+};
+
+/* ═══════════════════════════════════════════════════════════════════
+   UTILITY: Escape HTML
+   ═══════════════════════════════════════════════════════════════════ */
+function escapeHtml(str) {
+    if (!str) return '';
+    var el = document.createElement('span');
+    el.textContent = str;
+    return el.innerHTML;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   UTILITY: Render Markdown → HTML (safe, with code highlighting)
+   ═══════════════════════════════════════════════════════════════════ */
+function renderMarkdown(text) {
+    if (!text) return '';
+
+    // Escape HTML first to prevent XSS
+    var safe = escapeHtml(text);
+
+    // Configure marked for safe rendering
+    if (typeof marked !== 'undefined') {
+        marked.setOptions({
+            breaks: true,
+            gfm: true,
+            smartLists: true,
+            xhtml: false,
+        });
+
+        try {
+            var html = marked.parse(safe);
+
+            // Post-process code blocks with highlight.js
+            if (typeof hljs !== 'undefined') {
+                var temp = document.createElement('div');
+                temp.innerHTML = html;
+                temp.querySelectorAll('pre code').forEach(function(block) {
+                    try {
+                        hljs.highlightElement(block);
+                    } catch(e) {
+                        // highlight.js can throw on partial/incomplete code during streaming
+                        // — silently skip highlighting for that block
+                    }
+                });
+                html = temp.innerHTML;
+            }
+
+            return html;
+        } catch (e) {
+            // Fallback: render as plain text with line breaks
+            return safe.replace(/\n/g, '<br>');
+        }
+    }
+
+    // No marked.js — basic fallback
+    return safe
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br>');
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   CHART.JS — Telemetry chart setup and update
+   ═══════════════════════════════════════════════════════════════════ */
+var telemetryCharts = { tokenChart: null, vramChart: null };
+var telemetryHistory = { tokens: [], vram: [] };
+var MAX_TELEMETRY_POINTS = 20;
+
+function initTelemetryCharts() {
+    var tokenCtx = document.querySelector('[x-ref="tokenChart"]');
+    var vramCtx   = document.querySelector('[x-ref="vramChart"]');
+    if (!tokenCtx || !vramCtx || typeof Chart === 'undefined') return;
+
+    // Line chart defaults
+    var lineOpts = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 300 },
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                backgroundColor: '#161822',
+                borderColor: '#262838',
+                borderWidth: 1,
+                titleColor: '#e2e8f0',
+                bodyColor: '#94a3b8',
+                cornerRadius: 8,
+            },
+        },
+        scales: {
+            x: {
+                display: false,
+                grid: { display: false },
+            },
+            y: {
+                display: true,
+                grid: { color: 'rgba(38,40,56,0.5)', drawBorder: false },
+                ticks: { color: '#64748b', font: { size: 9 }, maxTicksLimit: 4 },
+                beginAtZero: true,
+            },
+        },
+    };
+
+    // Token chart
+    telemetryCharts.tokenChart = new Chart(tokenCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Tokens',
+                data: [],
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59,130,246,0.1)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0,
+                borderWidth: 2,
+            }],
+        },
+        options: Object.assign({}, lineOpts, {
+            scales: Object.assign({}, lineOpts.scales, {
+                y: Object.assign({}, lineOpts.scales.y, {
+                    title: { display: true, text: 'tokens', color: '#64748b', font: { size: 9 } },
+                }),
+            }),
+        }),
+    });
+
+    // VRAM chart
+    telemetryCharts.vramChart = new Chart(vramCtx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'VRAM (MB)',
+                data: [],
+                borderColor: '#22c55e',
+                backgroundColor: 'rgba(34,197,94,0.1)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0,
+                borderWidth: 2,
+            }],
+        },
+        options: Object.assign({}, lineOpts, {
+            scales: Object.assign({}, lineOpts.scales, {
+                y: Object.assign({}, lineOpts.scales.y, {
+                    title: { display: true, text: 'MB', color: '#64748b', font: { size: 9 } },
+                }),
+            }),
+        }),
+    });
+}
+
+function updateTelemetryChart(chart, history, value, label) {
+    if (!chart) return;
+    history.push(value);
+    if (history.length > MAX_TELEMETRY_POINTS) history.shift();
+
+    chart.data.labels = history.map(function(_, i) { return ''; });
+    chart.data.datasets[0].data = history.slice();
+    chart.update('none');
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   HTMX — Intercept telemetry responses to update Chart.js data
+   ═══════════════════════════════════════════════════════════════════ */
+document.addEventListener('htmx:afterSwap', function(evt) {
+    if (evt.detail.target && evt.detail.target.id === 'telemetry-charts') {
+        var raw = evt.detail.xhr ? evt.detail.xhr.responseText : '';
+        if (!raw) return;
+        try {
+            var data = JSON.parse(raw);
+            if (data.tokens !== undefined) {
+                updateTelemetryChart(
+                    telemetryCharts.tokenChart,
+                    telemetryHistory.tokens,
+                    data.tokens,
+                    ''
+                );
+            }
+            if (data.vram_mb !== undefined) {
+                updateTelemetryChart(
+                    telemetryCharts.vramChart,
+                    telemetryHistory.vram,
+                    data.vram_mb,
+                    ''
+                );
+            }
+        } catch(e) {
+            // HTMX swapped the HTML from the server — we keep charts,
+            // the HTML content is just a placeholder that gets replaced
+            // but we re-init charts if needed
+            initTelemetryCharts();
+        }
+    }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   ALPINE.JS — Root application state
+   ═══════════════════════════════════════════════════════════════════ */
+function appState() {
+    return {
+        // ── Core state ──
+        inputText: '',
+        messages: [],
+        sessions: [],
+        activeSessionId: null,
+        isStreaming: false,
+        wsConnected: false,
+        streamingMsgId: null,
+        totalTokens: 0,
+        totalCost: 0,
+        telemetryOpen: true,
+        telemetry: { tokens: 0, vram: 0 },
+        _telemetryTimer: null,
+
+        // WebSocket reference
+        _ws: null,
+        _wsReconnectTimer: null,
+        _sessionCounter: 0,
+
+        // ── Init ──
+        init() {
+            var self = this;
+            self.connectWs();
+            self.$nextTick(function() {
+                initTelemetryCharts();
+            });
+            // Start telemetry polling every 3s
+            self._telemetryTimer = setInterval(function() {
+                self.pollTelemetry();
+            }, 3000);
+        },
+
+        // ── WebSocket connection ──
+        connectWs() {
+            var self = this;
+            var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            var wsUrl = protocol + '//' + location.host + '/ws/chat';
+
+            self._ws = new WebSocket(wsUrl);
+
+            self._ws.onopen = function() {
+                self.wsConnected = true;
+            };
+
+            self._ws.onmessage = function(event) {
+                var data;
+                try {
+                    data = JSON.parse(event.data);
+                } catch(e) {
+                    return;
+                }
+                self.handleWsEvent(data);
+            };
+
+            self._ws.onclose = function() {
+                self.wsConnected = false;
+                self._wsReconnectTimer = setTimeout(function() {
+                    self.connectWs();
+                }, CONFIG.wsReconnectDelay);
+            };
+
+            self._ws.onerror = function() {
+                // onclose will fire next
+            };
+        },
+
+        // ── Handle WebSocket events ──
+        handleWsEvent(data) {
+            var self = this;
+
+            switch (data.type) {
+                case 'session':
+                    self.activeSessionId = data.session_id;
+                    break;
+
+                case 'thinking':
+                    // Create a new assistant message for streaming
+                    var msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+                    self.streamingMsgId = msgId;
+                    self.isStreaming = true;
+
+                    self.messages.push({
+                        id: msgId,
+                        role: 'assistant',
+                        content: '',
+                        displayContent: '',
+                        thoughts: [],
+                        tokens: 0,
+                        cost: 0,
+                    });
+                    self.scrollDown();
+                    break;
+
+                case 'token':
+                    var lastMsg = self._lastAssistantMsg();
+                    if (lastMsg) {
+                        lastMsg.displayContent += data.content;
+                        // The content will be fully set on 'done'
+                        self.scrollDown();
+                    }
+                    break;
+
+                case 'tool_call':
+                    // Add a thought log entry
+                    var lastMsg = self._lastAssistantMsg();
+                    if (lastMsg) {
+                        lastMsg.thoughts.push({
+                            name: data.name,
+                            args: typeof data.args === 'object' ? JSON.stringify(data.args, null, 2) : String(data.args || ''),
+                            result: '⏳ Executing…',
+                            open: true,
+                        });
+                        self.scrollDown();
+                    }
+                    break;
+
+                case 'tool_result':
+                    // Update the last thought with actual result
+                    var lastMsg = self._lastAssistantMsg();
+                    if (lastMsg && lastMsg.thoughts.length > 0) {
+                        var lastThought = lastMsg.thoughts[lastMsg.thoughts.length - 1];
+                        lastThought.result = data.result || '(empty result)';
+                    }
+                    break;
+
+                case 'done':
+                    var lastMsg = self._lastAssistantMsg();
+                    if (lastMsg) {
+                        // Finalize content: displayContent is the streaming buffer,
+                        // now we set the final content for proper markdown render
+                        lastMsg.content = lastMsg.displayContent;
+                        lastMsg.tokens = data.tokens || 0;
+                        lastMsg.cost = data.cost || 0;
+                        self.totalTokens = data.tokens || self.totalTokens;
+                        self.totalCost = data.cost || self.totalCost;
+                    }
+                    self.isStreaming = false;
+                    self.streamingMsgId = null;
+                    self._addSession();
+                    self.scrollDown();
+                    break;
+
+                case 'error':
+                    var lastMsg = self._lastAssistantMsg();
+                    if (lastMsg) {
+                        lastMsg.displayContent += '\n\n**Error:** ' + escapeHtml(data.content);
+                        lastMsg.content = lastMsg.displayContent;
+                    } else {
+                        self.messages.push({
+                            id: 'err_' + Date.now(),
+                            role: 'assistant',
+                            content: '⚠️ **Error:** ' + escapeHtml(data.content),
+                            displayContent: '',
+                            thoughts: [],
+                            tokens: 0,
+                            cost: 0,
+                        });
+                    }
+                    self.isStreaming = false;
+                    self.streamingMsgId = null;
+                    self.scrollDown();
+                    break;
+            }
+        },
+
+        // ── Get the last assistant message (for streaming) ──
+        _lastAssistantMsg() {
+            for (var i = this.messages.length - 1; i >= 0; i--) {
+                if (this.messages[i].role === 'assistant') return this.messages[i];
+            }
+            return null;
+        },
+
+        // ── Send message ──
+        sendMessage() {
+            var text = this.inputText.trim();
+            if (!text || this.isStreaming || !this._ws || this._ws.readyState !== WebSocket.OPEN) return;
+
+            // Add user message
+            this.messages.push({
+                id: 'user_' + Date.now(),
+                role: 'user',
+                content: text,
+            });
+
+            // Send via WebSocket
+            this._ws.send(JSON.stringify({
+                type: 'message',
+                content: text,
+                session_id: this.activeSessionId,
+            }));
+
+            this.inputText = '';
+            this.scrollDown();
+        },
+
+        // ── Handle keyboard in input ──
+        handleInputKeydown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                this.sendMessage();
+            }
+            // Auto-resize
+            var el = this.$refs.chatInput;
+            if (el) {
+                el.style.height = 'auto';
+                el.style.height = Math.min(el.scrollHeight, 150) + 'px';
+            }
+        },
+
+        // ── Global keyboard shortcuts ──
+        handleKeydown(e) {
+            // Ctrl + K: clear chat/memory
+            if (e.ctrlKey && e.key === 'k') {
+                e.preventDefault();
+                this.clearSession();
+            }
+            // Ctrl + /: focus chat input
+            if (e.ctrlKey && e.key === '/') {
+                e.preventDefault();
+                if (this.$refs.chatInput) {
+                    this.$refs.chatInput.focus();
+                }
+            }
+        },
+
+        // ── Clear current session ──
+        clearSession() {
+            this.messages = [];
+            this.totalTokens = 0;
+            this.totalCost = 0;
+            this.isStreaming = false;
+            this.streamingMsgId = null;
+
+            // Notify backend
+            if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+                this._ws.send(JSON.stringify({ type: 'clear' }));
+            }
+        },
+
+        // ── New session ──
+        newSession() {
+            this.clearSession();
+            // A new WS session ID will arrive when server responds to 'clear'
+        },
+
+        // ── Switch to a past session ──
+        switchSession(sessionId) {
+            // Mark as active
+            this.activeSessionId = sessionId;
+            // Load messages via API
+            var self = this;
+            fetch('/api/chat/sessions/' + sessionId + '/messages')
+                .then(function(r) { return r.json(); })
+                .then(function(msgs) {
+                    self.messages = msgs.map(function(m, i) {
+                        return {
+                            id: 'hist_' + i + '_' + Date.now(),
+                            role: m.role,
+                            content: m.content || '',
+                            displayContent: '',
+                            thoughts: (m.tool_calls || []).map(function(tc) {
+                                return {
+                                    name: tc.name || 'tool',
+                                    args: JSON.stringify(tc.args || {}, null, 2),
+                                    result: typeof tc.result === 'string' ? tc.result : JSON.stringify(tc.result || ''),
+                                    open: false,
+                                };
+                            }),
+                            tokens: m.tokens || 0,
+                            cost: m.cost || 0,
+                        };
+                    });
+                    self.scrollDown();
+                });
+        },
+
+        // ── Track session in sidebar ──
+        _addSession() {
+            var self = this;
+            // Find or create session entry
+            var existing = self.sessions.find(function(s) { return s.session_id === self.activeSessionId; });
+            if (!existing) {
+                self._sessionCounter++;
+                self.sessions.unshift({
+                    session_id: self.activeSessionId,
+                    label: 'Session ' + self._sessionCounter,
+                    msgCount: self.messages.filter(function(m) { return m.role === 'user'; }).length,
+                    tokens: self.totalTokens,
+                });
+            } else {
+                existing.msgCount = self.messages.filter(function(m) { return m.role === 'user'; }).length;
+                existing.tokens = self.totalTokens;
+            }
+        },
+
+        // ── Scroll to bottom ──
+        scrollDown() {
+            this.$nextTick(function() {
+                var container = document.querySelector('[x-ref="messagesContainer"]');
+                if (container) container.scrollTop = container.scrollHeight;
+            });
+        },
+
+        // ── Poll telemetry endpoint ──
+        pollTelemetry() {
+            var self = this;
+            fetch('/api/telemetry')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    self.telemetry.tokens = data.tokens || 0;
+                    self.telemetry.vram = data.vram_mb || 0;
+                    updateTelemetryChart(telemetryCharts.tokenChart, telemetryHistory.tokens, data.tokens || 0, '');
+                    updateTelemetryChart(telemetryCharts.vramChart, telemetryHistory.vram, data.vram_mb || 0, '');
+                })
+                .catch(function() {});
+        },
+
+        // ── Markdown render helper (exposed to template) ──
+        renderMarkdown(text) {
+            return renderMarkdown(text);
+        },
+    };
+}
+</script>
+
+</body>
+</html>

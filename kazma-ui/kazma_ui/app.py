@@ -125,6 +125,49 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def root() -> RedirectResponse:
         return RedirectResponse("/chat")
 
+    # ── /workspace — Orchestration Workspace (new SSE streaming UI) ──
+    @app.get("/workspace", response_class=HTMLResponse)
+    async def workspace_page(request: Request) -> HTMLResponse:
+        """Render the real-time orchestration workspace with telemetry and streaming."""
+        return templates.TemplateResponse(
+            request,
+            "index.html",
+            {
+                "config": agent.config,
+            },
+        )
+
+    # ── /api/telemetry — Mock telemetry data for Chart.js dashboard ──
+    import random
+    import time as time_module
+
+    _telemetry_state = {
+        "tokens_base": 1200,
+        "vram_base": 3072,
+        "last_tick": time_module.time(),
+    }
+
+    @app.get("/api/telemetry")
+    async def get_telemetry() -> dict:
+        """Return mock telemetry data: token usage and VRAM allocation.
+
+        Simulates a local-edge inference setup (RTX 4090, 24GB VRAM).
+        Token counts vary to produce a realistic scrolling chart.
+        """
+        now = time_module.time()
+        # Drift the base values smoothly every tick
+        if now - _telemetry_state["last_tick"] > 2.5:
+            _telemetry_state["tokens_base"] = max(200, _telemetry_state["tokens_base"] + random.randint(-150, 200))
+            _telemetry_state["vram_base"] = max(512, min(20480, _telemetry_state["vram_base"] + random.randint(-128, 128)))
+            _telemetry_state["last_tick"] = now
+
+        return {
+            "tokens": _telemetry_state["tokens_base"],
+            "vram_mb": _telemetry_state["vram_base"],
+            "model": agent.llm_config.model if hasattr(agent, "llm_config") else "local",
+            "timestamp": now,
+        }
+
     # Lifecycle events
     @app.on_event("startup")
     async def on_startup() -> None:
