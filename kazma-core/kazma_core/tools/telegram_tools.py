@@ -36,8 +36,10 @@ TELEGRAM_SEND_TIMEOUT = 15.0  # seconds
 
 # ── Error types ────────────────────────────────────────────────────────
 
+
 class TelegramError(Exception):
     """Base exception for Telegram API errors."""
+
     def __init__(self, message: str, code: int = 0) -> None:
         super().__init__(message)
         self.code = code
@@ -52,6 +54,7 @@ class TelegramBlockedError(TelegramError):
 
 
 # ── Helpers ────────────────────────────────────────────────────────────
+
 
 def _resolve_token(token: str | None = None) -> str:
     """Resolve the bot token from argument or environment.
@@ -129,6 +132,7 @@ async def _post_telegram(
 
 # ── Core tool ──────────────────────────────────────────────────────────
 
+
 async def send_telegram_message(
     chat_id: str,
     text: str,
@@ -186,6 +190,7 @@ async def send_telegram_message(
             data.get("result", {}).get("message_id", "?"),
         )
         import json
+
         return json.dumps(data, ensure_ascii=False, indent=2)
     except TelegramRateLimitError as exc:
         logger.warning("[TelegramTool] Rate limited for chat_id=%s: %s", chat_id, exc)

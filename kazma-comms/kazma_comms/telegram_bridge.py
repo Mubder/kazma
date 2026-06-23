@@ -73,7 +73,6 @@ Usage
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -143,6 +142,7 @@ def _get_session_messages(thread_id: str) -> list[dict[str, Any]]:
 # Webhook payload parsing
 # ══════════════════════════════════════════════════════════════════════════
 
+
 class TelegramUpdate:
     """Normalized representation of a Telegram Update.
 
@@ -188,11 +188,7 @@ class TelegramUpdate:
     def username(self) -> str:
         """Best-effort user identifier."""
         from_user = self.message.get("from", {})
-        return (
-            from_user.get("username", "")
-            or from_user.get("first_name", "")
-            or f"tg_{self.chat_id}"
-        )
+        return from_user.get("username", "") or from_user.get("first_name", "") or f"tg_{self.chat_id}"
 
     @property
     def text(self) -> str:
@@ -215,6 +211,7 @@ class TelegramUpdate:
 # ══════════════════════════════════════════════════════════════════════════
 # Background message processor
 # ══════════════════════════════════════════════════════════════════════════
+
 
 async def _process_message(
     update: TelegramUpdate,
@@ -317,6 +314,7 @@ async def _process_message(
 # ══════════════════════════════════════════════════════════════════════════
 # Router factory
 # ══════════════════════════════════════════════════════════════════════════
+
 
 def create_telegram_webhook_router(
     *,
@@ -464,6 +462,7 @@ def create_telegram_webhook_router(
 # ══════════════════════════════════════════════════════════════════════════
 # Session management helpers (public API)
 # ══════════════════════════════════════════════════════════════════════════
+
 
 def list_telegram_sessions() -> list[dict[str, Any]]:
     """Return all active Telegram session mappings."""

@@ -149,6 +149,22 @@ class LLMProvider:
         """Lazy-init the HTTP client."""
         if self._http is None or self._http.is_closed:
             base = self.config.base_url.rstrip("/")
+
+            # HARD ASSERT: /v1 must be in the path for OpenAI-compatible APIs
+            # This prevents the "empty bubble" bug where requests go to
+            # /chat/completions instead of /v1/chat/completions
+            from urllib.parse import urlparse as _up
+
+            parsed = _up(base)
+            if parsed.path not in ("/v1", "/v1/"):
+                port = parsed.port
+                # Skip assertion for Ollama (11434) and LiteLLM (4000)
+                if port not in (11434, 4000):
+                    # Force /v1
+                    base = base.rstrip("/") + "/v1"
+                    self.config.base_url = base
+                    logger.warning("LLMProvider: /v1 was missing — forced to %s", base)
+
             logger.debug("Creating httpx client: base_url=%s", base)
             self._http = httpx.AsyncClient(
                 base_url=base,
@@ -281,14 +297,16 @@ class LLMProvider:
         changed = False
         if base_url is not None:
             normalized = normalize_provider_url(base_url)
-            if normalized and not normalized.rstrip("/").endswith("/v1"):
-                # Force /v1 for non-Ollama endpoints
-                parsed_port = None
+            logger.info("reconfigure: raw=%s normalized=%s", base_url, normalized)
+            # HARD FORCE /v1 for non-Ollama endpoints
+            if normalized:
                 from urllib.parse import urlparse as _up
 
-                parsed_port = _up(normalized).port
-                if parsed_port != 11434:
+                parsed = _up(normalized)
+                port = parsed.port
+                if port != 11434 and not normalized.rstrip("/").endswith("/v1"):
                     normalized = normalized.rstrip("/") + "/v1"
+                    logger.info("reconfigure: forced /v1 → %s", normalized)
             self.config.base_url = normalized
             changed = True
         if model is not None:
@@ -302,9 +320,10 @@ class LLMProvider:
             # Force client recreation on next request (old client will be GC'd)
             self._http = None
             logger.info(
-                "LLMProvider reconfigured: base_url=%s model=%s",
+                "LLMProvider reconfigured: base_url=%s model=%s api_key=%s",
                 self.config.base_url,
                 self.config.model,
+                self.config.api_key[:10] + "..." if self.config.api_key else "(empty)",
             )
 
 

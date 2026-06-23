@@ -181,7 +181,11 @@ async def get_webhook_info(
 
     if data.get("ok"):
         result = data.get("result", {})
-        logger.info("[Setup] Webhook info: url=%s, pending=%d", result.get("url", "(none)"), result.get("pending_update_count", 0))
+        logger.info(
+            "[Setup] Webhook info: url=%s, pending=%d",
+            result.get("url", "(none)"),
+            result.get("pending_update_count", 0),
+        )
     return data
 
 
@@ -268,6 +272,7 @@ Examples:
 
     try:
         import asyncio
+
         asyncio.run(run())
     except Exception as exc:
         logger.error("Setup failed: %s", exc)
