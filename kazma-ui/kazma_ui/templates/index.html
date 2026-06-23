@@ -436,7 +436,31 @@
                             <span x-show="wsConnected" class="text-success">● Connected</span>
                             <span x-show="!wsConnected" class="text-error">● Disconnected</span>
                         </div>
-                    </div>
+                        </div>
+                        <!-- Model selector bar -->
+                        <div class="max-w-4xl mx-auto flex items-center justify-between mt-1 px-1">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[0.55rem] text-text-muted uppercase tracking-wider">Model</span>
+                            <select x-model="selectedModel"
+                                    @change="onModelChange()"
+                                    class="bg-surface border border-border rounded-md px-2 py-0.5 text-[0.65rem]
+                                           text-text-secondary font-mono focus:outline-none focus:border-accent/50
+                                           cursor-pointer min-w-[140px]">
+                                <option value="" x-text="'Default (' + defaultModel + ')'"></option>
+                                <template x-for="(provider, pi) in availableProviders" :key="pi">
+                                    <optgroup :label="provider.label" x-show="provider.models.length > 0">
+                                        <template x-for="m in provider.models" :key="m">
+                                            <option :value="m" x-text="m.split('/').pop()"></option>
+                                        </template>
+                                    </optgroup>
+                                </template>
+                                <option x-show="availableProviders.length === 0" disabled value="">No local providers found</option>
+                            </select>
+                        </div>
+                        <div class="text-[0.55rem] text-text-muted">
+                            <span x-show="availableProviders.length > 0" x-text="availableProviders.length + ' provider(s)'"></span>
+                        </div>
+                        </div>
                 </div>
             </div>
         </div>
@@ -824,6 +848,9 @@ function appState() {
         telemetryOpen: true,
         telemetry: { tokens: 0, vram: 0 },
         currentTab: 'workspace',
+        selectedModel: '',
+        defaultModel: '{{ config.default_model|default("gpt-4o-mini") }}',
+        availableProviders: [],
         skillList: [
             { name: 'web_search', description: 'Search the web via Exa API', type: 'python', version: '1.2.0', active: true },
             { name: 'file_ops', description: 'Read, write, and manage local files', type: 'python', version: '2.0.1', active: true },
@@ -854,6 +881,8 @@ function appState() {
             self._telemetryTimer = setInterval(function() {
                 self.pollTelemetry();
             }, 3000);
+            // Fetch available models from local providers
+            self.fetchModels();
         },
 
         // ── WebSocket connection ──
@@ -1014,6 +1043,7 @@ function appState() {
                 type: 'message',
                 content: text,
                 session_id: this.activeSessionId,
+                model: this.selectedModel,
             }));
 
             this.inputText = '';
@@ -1126,6 +1156,28 @@ function appState() {
                 var container = document.querySelector('[x-ref="messagesContainer"]');
                 if (container) container.scrollTop = container.scrollHeight;
             });
+        },
+
+        // ── Fetch available local models from backend ──
+        fetchModels() {
+            var self = this;
+            fetch('/api/models')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    self.availableProviders = data.online || [];
+                    if (self.availableProviders.length > 0) {
+                        self.selectedModel = '';
+                    }
+                })
+                .catch(function() {
+                    self.availableProviders = [];
+                });
+        },
+
+        // ── Called when user changes model in selector ──
+        onModelChange() {
+            // The model will be applied on the next sendMessage()
+            // via the activeModel getter
         },
 
         // ── Toggle MCP server enabled state ──

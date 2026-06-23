@@ -184,6 +184,15 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def workspace_redirect() -> RedirectResponse:
         return RedirectResponse("/", status_code=307)
 
+    # ── /api/models — Auto-discover local LLM providers and models ──
+    @app.get("/api/models")
+    async def get_models() -> dict:
+        """Probe Ollama, LM Studio, and other local providers for available models."""
+        from kazma_core.models.discovery import get_active_local_models
+
+        result = await get_active_local_models()
+        return result
+
     # ── /api/telemetry — Mock telemetry data for Chart.js dashboard ──
     import random
     import time as time_module

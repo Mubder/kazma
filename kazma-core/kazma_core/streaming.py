@@ -41,10 +41,12 @@ async def stream_chat(
     temperature: float = 0.7,
     input_cost_per_1m: float = 0.15,
     output_cost_per_1m: float = 0.60,
+    base_url: str | None = None,
 ) -> AsyncGenerator[StreamEvent, None]:
     """Stream a chat completion, yielding tokens as they arrive.
 
     Uses the OpenAI streaming API (stream=true) with SSE parsing.
+    If base_url is provided, creates a dedicated client for that endpoint.
     """
     payload: dict[str, Any] = {
         "model": model,
@@ -58,10 +60,19 @@ async def stream_chat(
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
 
+    # If a custom base_url is specified (e.g. Ollama / LM Studio),
+    # create a dedicated client for this call
+    stream_client = client
+    if base_url is not None:
+        stream_client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=httpx.Timeout(60.0, connect=10.0),
+        )
+
     start = time.monotonic()
 
     try:
-        async with client.stream("POST", "/chat/completions", json=payload) as resp:
+        async with stream_client.stream("POST", "/chat/completions", json=payload) as resp:
             resp.raise_for_status()
 
             # Accumulate tool calls across chunks

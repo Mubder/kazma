@@ -141,6 +141,9 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 if not user_input:
                     continue
 
+                # Resolve model override from client, fall back to config default
+                active_model = data.get("model", "") or agent.llm_config.model
+
                 # Store user message
                 user_msg = {
                     "role": "user",
@@ -176,9 +179,19 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 assistant_content = ""
                 tool_calls_executed: list[dict[str, Any]] = []
 
+                # If a non-default model is active, resolve its base_url
+                chat_base_url = agent.llm_config.base_url
+                if active_model != agent.llm_config.model and "/" in active_model:
+                    from kazma_core.models.discovery import get_model_base_url
+
+                    resolved = await get_model_base_url(active_model)
+                    if resolved:
+                        chat_base_url = resolved
+
                 async for event in stream_chat(
                     client=await agent.llm._get_client(),
-                    model=agent.llm_config.model,
+                    model=active_model,
+                    base_url=chat_base_url,
                     messages=messages,
                     tools=tool_defs if tool_defs else None,
                     max_tokens=agent.llm_config.max_tokens,
