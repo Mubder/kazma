@@ -6,6 +6,7 @@ WebSocket endpoints, static files, and template engine.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -146,12 +147,12 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.websocket("/ws/dashboard")
     async def ws_dashboard(websocket: WebSocket) -> None:
         await websocket.accept()
+        from kazma_core.shutdown import is_shutting_down
         from kazma_core.tracing import get_trace_store
 
         store = get_trace_store()
         store.register_ws(websocket)
         try:
-            # Keep connection open, sending initial state
             import json
 
             await websocket.send_text(
@@ -162,9 +163,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
                     }
                 )
             )
-            # Hold connection until client disconnects
-            while True:
-                await websocket.receive_text()
+            # Hold connection until client disconnects or shutdown
+            while not is_shutting_down():
+                try:
+                    await asyncio.wait_for(websocket.receive_text(), timeout=2.0)
+                except TimeoutError:
+                    continue
+                except Exception:
+                    break
         except Exception:
             pass
         finally:
@@ -203,6 +209,24 @@ def create_app(config_path: str | None = None) -> FastAPI:
     models_router = create_models_router()
     app.include_router(models_router)
     logger.info("Models router mounted at /api/models, /api/ollama/*")
+
+    # ── Telegram Webhook Router ──────────────────────────────────
+    try:
+        from kazma_connectors.telegram_bridge import create_telegram_webhook_router
+
+        telegram_token = config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
+        telegram_router = create_telegram_webhook_router(
+            graph=locals().get("sse_graph"),
+            token=telegram_token,
+            system_prompt=agent.system_prompt,
+            cost_breaker=agent.cost_breaker,
+            authority=agent.authority,
+            tracer=agent.tracer,
+        )
+        app.include_router(telegram_router)
+        logger.info("Telegram webhook router mounted at /api/telegram/webhook")
+    except Exception as e:
+        logger.warning("Telegram router failed to initialize: %s", e)
 
     # ── /api/telemetry — Mock telemetry data for Chart.js dashboard ──
     import random
@@ -247,10 +271,12 @@ def create_app(config_path: str | None = None) -> FastAPI:
         import asyncio
         import json as json_mod
 
+        from kazma_core.shutdown import is_shutting_down
+
         async def event_generator():
             tokens_base = 1200
             vram_base = 3072
-            while True:
+            while not is_shutting_down():
                 try:
                     # Simulate drifting metrics
                     tokens_base = max(200, tokens_base + random.randint(-80, 120))
@@ -284,6 +310,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     @app.on_event("shutdown")
     async def on_shutdown() -> None:
+        from kazma_core.shutdown import signal_shutdown
+
+        signal_shutdown()
+        # Give loops time to exit cleanly
+        await asyncio.sleep(0.5)
         await agent.shutdown()
         config_store.close()
         logger.info("Kazma WebUI shut down.")

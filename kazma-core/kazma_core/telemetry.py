@@ -197,13 +197,20 @@ class HardwareMonitor:
         Yields:
             TelemetrySnapshot objects at the configured interval.
 
-        Raises:
-            asyncio.CancelledError: When the consumer disconnects.
+        Exits cleanly on:
+            - asyncio.CancelledError (client disconnect)
+            - shutdown signal (server shutdown)
         """
-        while True:
+        from kazma_core.shutdown import is_shutting_down
+
+        while not is_shutting_down():
             snapshot = await self.get_stats()
             yield snapshot
-            await asyncio.sleep(interval)
+            try:
+                await asyncio.wait_for(asyncio.sleep(interval), timeout=interval + 1.0)
+            except asyncio.CancelledError:
+                break
+        logger.debug("Telemetry stream exited (shutdown=%s)", is_shutting_down())
 
     # ── CPU & RAM (psutil) ──────────────────────────────────────────
 
