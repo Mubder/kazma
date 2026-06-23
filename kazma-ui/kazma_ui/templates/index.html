@@ -288,24 +288,19 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <!-- Base URL input + Model selector dropdown -->
+                    <!-- Model selector dropdown (bound to global store) -->
                     <div class="flex items-center gap-1.5">
-                        <span class="text-[0.55rem] text-text-muted uppercase tracking-wider hidden sm:inline">Endpoint</span>
-                        <input type="text" x-model="selectedBaseUrl"
-                               placeholder="http://127.0.0.1:1234/v1"
-                               class="bg-surface border border-border rounded-md px-1.5 py-0.5 text-[0.6rem]
-                                      text-text-secondary font-mono focus:outline-none focus:border-accent/50
-                                      w-[120px] hidden sm:inline"
-                               title="Set custom base URL then select a model">
-                        <select x-model="selectedModel"
+                        <span class="text-[0.55rem] text-text-muted uppercase tracking-wider hidden sm:inline">Model</span>
+                        <select x-model="$store.kazma.selectedModel"
+                                x-effect="__kazmaPersist()"
                                 class="bg-surface border border-border rounded-md px-2 py-0.5 text-[0.6rem]
                                        text-text-secondary font-mono focus:outline-none focus:border-accent/50
                                        cursor-pointer min-w-[100px] max-w-[160px]">
-                            <option value="" x-text="'Default (' + defaultModel + ')'"></option>
-                            <template x-for="m in availableModels" :key="m">
+                            <option value="" x-text="'Default (gpt-4o-mini)'"></option>
+                            <template x-for="m in $store.kazma.availableModels" :key="m">
                                 <option :value="m" x-text="m.split('/').pop()"></option>
                             </template>
-                            <option x-show="availableModels.length === 0" disabled value="">No local providers found</option>
+                            <option x-show="$store.kazma.availableModels.length === 0" disabled value="">Set Endpoint in Settings</option>
                         </select>
                     </div>
                     <span class="text-[0.6rem] text-text-muted uppercase tracking-wider hidden sm:inline"><kbd>Ctrl</kbd> <kbd>K</kbd> clear · <kbd>Ctrl</kbd> <kbd>/</kbd> focus</span>
@@ -690,7 +685,11 @@
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Base URL</label>
-                            <input type="text" x-model="form.base_url" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50" placeholder="https://api.openai.com/v1">
+                            <input type="text" x-model="$store.kazma.baseUrl"
+                                   @input.debounce.500ms="__kazmaFormatBaseUrl($store.kazma); __kazmaPersist(); window.fetchModels && fetchModels()"
+                                   class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50"
+                                   placeholder="127.0.0.1:1234">
+                            <p class="text-[0.55rem] text-text-muted mt-1">Auto-formatted to http://.../v1 on save</p>
                         </div>
                         <div>
                             <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">API Key</label>
@@ -701,7 +700,14 @@
                         </div>
                         <div>
                             <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Model</label>
-                            <input type="text" x-model="form.model" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50" placeholder="gpt-4o-mini">
+                            <select x-model="$store.kazma.selectedModel"
+                                    @change="__kazmaPersist()"
+                                    class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
+                                <option value="">Default (gpt-4o-mini)</option>
+                                <template x-for="m in $store.kazma.availableModels" :key="m">
+                                    <option :value="m" x-text="m"></option>
+                                </template>
+                            </select>
                         </div>
                         <div>
                             <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Max Tokens</label>
@@ -802,6 +808,30 @@ const CONFIG = {
     wsReconnectDelay: 2000,
     maxThoughtResultPreview: 120,
 };
+
+/* ═══════════════════════════════════════════════════════════════════
+   UTILITY: Auto-format Base URL
+   ── "127.0.0.1:1234"     → "http://127.0.0.1:1234/v1"
+   ── "localhost:11434"     → "http://localhost:11434/v1"
+   ── "http://foo:1234/v1"  → unchanged (already valid)
+   ═══════════════════════════════════════════════════════════════════ */
+function __kazmaFormatBaseUrl(store) {
+    if (!store || !store.baseUrl) return;
+    var url = store.baseUrl.trim();
+
+    // Already has scheme and /v1 — leave it
+    if (/^https?:\/\/.+\/v1$/.test(url)) return;
+
+    // Has scheme but no /v1 — append it
+    if (/^https?:\/\//.test(url)) {
+        url = url.replace(/\/+$/, '') + '/v1';
+        store.baseUrl = url;
+        return;
+    }
+
+    // Bare host:port — prepend http://, append /v1
+    store.baseUrl = 'http://' + url.replace(/\/+$/, '') + '/v1';
+}
 
 /* ═══════════════════════════════════════════════════════════════════
    UTILITY: Escape HTML
@@ -1001,6 +1031,39 @@ document.addEventListener('htmx:afterSwap', function(evt) {
 });
 
 /* ═══════════════════════════════════════════════════════════════════
+   ALPINE STORE — global shared state for model config
+   ═══════════════════════════════════════════════════════════════════ */
+document.addEventListener('alpine:init', function() {
+    // Load from localStorage or use defaults
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem('kazma-config') || '{}'); } catch(e) {}
+
+    Alpine.store('kazma', {
+        // Base URL — auto-formatted on write
+        baseUrl: saved.baseUrl || '',
+        // Selected model (e.g. "ollama/qwen2.5-coder")
+        selectedModel: saved.selectedModel || '',
+        // Available models from discovery
+        availableModels: [],
+    });
+
+    // Patch setter: persist to localStorage on change
+    var _baseUrl = Alpine.store('kazma').baseUrl;
+    var _selectedModel = Alpine.store('kazma').selectedModel;
+    var _availableModels = Alpine.store('kazma').availableModels;
+
+    // Expose persist helper
+    window.__kazmaPersist = function() {
+        try {
+            localStorage.setItem('kazma-config', JSON.stringify({
+                baseUrl: Alpine.store('kazma').baseUrl,
+                selectedModel: Alpine.store('kazma').selectedModel,
+            }));
+        } catch(e) {}
+    };
+});
+
+/* ═══════════════════════════════════════════════════════════════════
    ALPINE.JS — Root application state
    ═══════════════════════════════════════════════════════════════════ */
 function appState() {
@@ -1021,11 +1084,6 @@ function appState() {
         currentArtifactContent: '',
         currentArtifactName: '',
         currentTab: 'workspace',
-        selectedModel: '',
-        defaultModel: '{{ config.default_model|default("gpt-4o-mini") }}',
-        availableModels: [],
-        selectedBaseUrl: '',
-        _baseUrlWatch: null,
         skillList: [
             { name: 'web_search', description: 'Search the web via Exa API', type: 'python', version: '1.2.0', active: true },
             { name: 'file_ops', description: 'Read, write, and manage local files', type: 'python', version: '2.0.1', active: true },
@@ -1071,9 +1129,9 @@ function appState() {
             };
             // Fetch available models from local providers
             self.fetchModels();
-            // Watch baseUrl changes — refetch models automatically
-            self.$watch('selectedBaseUrl', function(val) {
-                self.fetchModels(val);
+            // Auto-fetch whenever baseUrl changes in store
+            self.$watch('$store.kazma.baseUrl', function() {
+                self.fetchModels();
             });
         },
 
@@ -1235,8 +1293,8 @@ function appState() {
                 type: 'message',
                 content: text,
                 session_id: this.activeSessionId,
-                model: this.selectedModel,
-                base_url: this.selectedBaseUrl,
+                model: Alpine.store('kazma').selectedModel,
+                base_url: Alpine.store('kazma').baseUrl,
             }));
 
             this.inputText = '';
@@ -1352,8 +1410,9 @@ function appState() {
         },
 
         // ── Fetch available local models from backend ──
-        fetchModels(baseUrl) {
+        fetchModels() {
             var self = this;
+            var baseUrl = Alpine.store('kazma').baseUrl;
             var url = '/api/models';
             if (baseUrl) {
                 url += '?base_url=' + encodeURIComponent(baseUrl);
@@ -1361,21 +1420,22 @@ function appState() {
             fetch(url)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    self.availableModels = data.models || [];
+                    Alpine.store('kazma').availableModels = data.models || [];
                 })
                 .catch(function() {
-                    self.availableModels = [];
+                    Alpine.store('kazma').availableModels = [];
                 });
         },
 
         // ── Human-readable label for the active model ──
         get activeModelLabel() {
-            if (this.selectedBaseUrl) {
-                var shortUrl = this.selectedBaseUrl.replace(/^https?:\/\//, '').replace(/\/v1$/, '');
-                return this.selectedModel ? this.selectedModel.split('/').pop() + ' @ ' + shortUrl : shortUrl;
+            var store = Alpine.store('kazma');
+            if (store.baseUrl) {
+                var shortUrl = store.baseUrl.replace(/^https?:\/\//, '').replace(/\/v1$/, '');
+                return store.selectedModel ? store.selectedModel.split('/').pop() + ' @ ' + shortUrl : shortUrl;
             }
-            if (this.selectedModel) return this.selectedModel.split('/').pop();
-            return this.defaultModel;
+            if (store.selectedModel) return store.selectedModel.split('/').pop();
+            return '{{ config.default_model|default("gpt-4o-mini") }}';
         },
 
         // ── Toggle MCP server enabled state ──
@@ -1452,13 +1512,19 @@ function settingsState() {
 
         saveModel() {
             var self = this;
+            var store = Alpine.store('kazma');
+
+            // Auto-format the URL before saving
+            __kazmaFormatBaseUrl(store);
+            __kazmaPersist();
+
             fetch('/api/settings', {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify([
-                    {key: 'base_url', value: self.form.base_url, category: 'llm'},
+                    {key: 'base_url', value: store.baseUrl, category: 'llm'},
                     {key: 'api_key', value: self.form.api_key, category: 'llm'},
-                    {key: 'model', value: self.form.model, category: 'llm'},
+                    {key: 'model', value: store.selectedModel || self.form.model, category: 'llm'},
                     {key: 'max_tokens', value: self.form.max_tokens, category: 'llm'},
                     {key: 'temperature', value: self.form.temperature, category: 'llm'},
                     {key: 'timeout', value: self.form.timeout, category: 'llm'},
