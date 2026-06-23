@@ -288,9 +288,15 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <!-- Model selector dropdown -->
+                    <!-- Base URL input + Model selector dropdown -->
                     <div class="flex items-center gap-1.5">
-                        <span class="text-[0.55rem] text-text-muted uppercase tracking-wider hidden sm:inline">Model</span>
+                        <span class="text-[0.55rem] text-text-muted uppercase tracking-wider hidden sm:inline">Endpoint</span>
+                        <input type="text" x-model="selectedBaseUrl"
+                               placeholder="http://127.0.0.1:1234/v1"
+                               class="bg-surface border border-border rounded-md px-1.5 py-0.5 text-[0.6rem]
+                                      text-text-secondary font-mono focus:outline-none focus:border-accent/50
+                                      w-[120px] hidden sm:inline"
+                               title="Set custom base URL then select a model">
                         <select x-model="selectedModel"
                                 class="bg-surface border border-border rounded-md px-2 py-0.5 text-[0.6rem]
                                        text-text-secondary font-mono focus:outline-none focus:border-accent/50
@@ -1018,6 +1024,8 @@ function appState() {
         selectedModel: '',
         defaultModel: '{{ config.default_model|default("gpt-4o-mini") }}',
         availableModels: [],
+        selectedBaseUrl: '',
+        _baseUrlWatch: null,
         skillList: [
             { name: 'web_search', description: 'Search the web via Exa API', type: 'python', version: '1.2.0', active: true },
             { name: 'file_ops', description: 'Read, write, and manage local files', type: 'python', version: '2.0.1', active: true },
@@ -1063,6 +1071,10 @@ function appState() {
             };
             // Fetch available models from local providers
             self.fetchModels();
+            // Watch baseUrl changes — refetch models automatically
+            self.$watch('selectedBaseUrl', function(val) {
+                self.fetchModels(val);
+            });
         },
 
         // ── WebSocket connection ──
@@ -1224,6 +1236,7 @@ function appState() {
                 content: text,
                 session_id: this.activeSessionId,
                 model: this.selectedModel,
+                base_url: this.selectedBaseUrl,
             }));
 
             this.inputText = '';
@@ -1339,9 +1352,13 @@ function appState() {
         },
 
         // ── Fetch available local models from backend ──
-        fetchModels() {
+        fetchModels(baseUrl) {
             var self = this;
-            fetch('/api/models')
+            var url = '/api/models';
+            if (baseUrl) {
+                url += '?base_url=' + encodeURIComponent(baseUrl);
+            }
+            fetch(url)
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     self.availableModels = data.models || [];
@@ -1353,6 +1370,10 @@ function appState() {
 
         // ── Human-readable label for the active model ──
         get activeModelLabel() {
+            if (this.selectedBaseUrl) {
+                var shortUrl = this.selectedBaseUrl.replace(/^https?:\/\//, '').replace(/\/v1$/, '');
+                return this.selectedModel ? this.selectedModel.split('/').pop() + ' @ ' + shortUrl : shortUrl;
+            }
             if (this.selectedModel) return this.selectedModel.split('/').pop();
             return this.defaultModel;
         },
