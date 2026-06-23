@@ -218,11 +218,22 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
 
 def main() -> None:
-    """Entry point for `kazma-web` command."""
+    """Entry point for `kazma-web` command.
+
+    Usage:
+        kazma-web              # port 8000
+        kazma-web --port 8080  # custom port
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Kazma Web UI")
+    parser.add_argument("--port", "-p", type=int, default=8000, help="Port to bind (default: 8000)")
+    args, _ = parser.parse_known_args()
+
     import uvicorn
 
     app = create_app()
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info")
 
 
 if __name__ == "__main__":
