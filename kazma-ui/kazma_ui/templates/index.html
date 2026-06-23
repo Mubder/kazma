@@ -526,7 +526,7 @@
                         <h2 class="text-lg font-semibold text-text-primary">Skills & Plugins</h2>
                         <p class="text-sm text-text-muted mt-0.5">Manage installed skills, Lua macros, and custom Python routines.</p>
                     </div>
-                    <button class="px-3 py-1.5 rounded-lg bg-accent-dim/40 border border-border hover:bg-accent-dim text-text-primary text-xs font-medium transition-all duration-150 hover:border-accent/50">
+                    <button @click="showToast('Skills are installed via kazma-skills/manifests/ or the Skills Hub API', 'info')" class="px-3 py-1.5 rounded-lg bg-accent-dim/40 border border-border hover:bg-accent-dim text-text-primary text-xs font-medium transition-all duration-150 hover:border-accent/50">
                         + Install Skill
                     </button>
                 </div>
@@ -576,7 +576,7 @@
                         <h2 class="text-lg font-semibold text-text-primary">MCP Configurator</h2>
                         <p class="text-sm text-text-muted mt-0.5">Model Context Protocol servers and driver configurations.</p>
                     </div>
-                    <button class="px-3 py-1.5 rounded-lg bg-accent-dim/40 border border-border hover:bg-accent-dim text-text-primary text-xs font-medium transition-all duration-150 hover:border-accent/50">
+                    <button @click="showToast('MCP servers are configured in kazma.yaml under mcp.servers', 'info')" class="px-3 py-1.5 rounded-lg bg-accent-dim/40 border border-border hover:bg-accent-dim text-text-primary text-xs font-medium transition-all duration-150 hover:border-accent/50">
                         + Add Server
                     </button>
                 </div>
@@ -1331,7 +1331,7 @@ function appState() {
             }
         },
 
-        // ── Clear current session ──
+        // ── Clear current session (keeps same session_id) ──
         clearSession() {
             this.messages = [];
             this.totalTokens = 0;
@@ -1345,10 +1345,17 @@ function appState() {
             }
         },
 
-        // ── New session ──
+        // ── New session (creates fresh session_id on server) ──
         newSession() {
-            this.clearSession();
-            // A new WS session ID will arrive when server responds to 'clear'
+            this.messages = [];
+            this.totalTokens = 0;
+            this.totalCost = 0;
+            this.isStreaming = false;
+            this.streamingMsgId = null;
+
+            if (this._ws && this._ws.readyState === WebSocket.OPEN) {
+                this._ws.send(JSON.stringify({ type: 'new_session' }));
+            }
         },
 
         // ── Switch to a past session ──

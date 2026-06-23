@@ -339,6 +339,13 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 session.total_tokens = 0
                 await websocket.send_json({"type": "session", "session_id": session_id})
 
+            elif msg_type == "new_session":
+                # Create an entirely new session with a fresh UUID
+                session_id = str(uuid.uuid4())
+                session = get_or_create_session(session_id)
+                logger.info("New session created: %s", session_id)
+                await websocket.send_json({"type": "session", "session_id": session_id})
+
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected: session=%s", session_id)
     except Exception as e:
