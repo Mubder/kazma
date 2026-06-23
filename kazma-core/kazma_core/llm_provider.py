@@ -46,6 +46,11 @@ class LLMConfig:
     router: str | None = None
     fallback_model: str | None = None
 
+    def __post_init__(self) -> None:
+        """Normalize base_url on construction — catches ALL code paths."""
+        if self.base_url:
+            self.base_url = normalize_provider_url(self.base_url)
+
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> LLMConfig:
         """Create config from a dict (e.g. from kazma.yaml).
@@ -117,8 +122,16 @@ class LLMProvider:
 
     def __init__(self, config: LLMConfig | None = None) -> None:
         self.config = config or LLMConfig()
+        # Safety net: normalize base_url even if LLMConfig.__post_init__ was bypassed
+        if self.config.base_url:
+            self.config.base_url = normalize_provider_url(self.config.base_url)
         self._resolve_api_key()
         self._http: httpx.AsyncClient | None = None
+        logger.info(
+            "LLMProvider initialized: base_url=%s model=%s",
+            self.config.base_url,
+            self.config.model,
+        )
 
     def _resolve_api_key(self) -> None:
         """Resolve API key from config or environment."""
@@ -135,8 +148,10 @@ class LLMProvider:
     async def _get_client(self) -> httpx.AsyncClient:
         """Lazy-init the HTTP client."""
         if self._http is None or self._http.is_closed:
+            base = self.config.base_url.rstrip("/")
+            logger.debug("Creating httpx client: base_url=%s", base)
             self._http = httpx.AsyncClient(
-                base_url=self.config.base_url,
+                base_url=base,
                 headers={
                     "Authorization": f"Bearer {self.config.api_key}",
                     "Content-Type": "application/json",

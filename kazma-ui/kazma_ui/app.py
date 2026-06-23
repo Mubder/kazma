@@ -204,7 +204,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(models_router)
     logger.info("Models router mounted at /api/models, /api/ollama/*")
 
-
     # ── /api/telemetry — Mock telemetry data for Chart.js dashboard ──
     import random
     import time as time_module
