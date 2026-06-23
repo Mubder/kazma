@@ -82,6 +82,48 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(mcp_router)
     app.include_router(agents_router)
 
+    # ── SSE Chat Router (LangGraph astream_events → HTMX/Alpine) ──
+    try:
+        from kazma_core.agent.graph_builder import build_supervisor_graph
+        from kazma_core.agent.tool_registry import LocalToolRegistry
+
+        # Build the Supervisor graph for SSE streaming
+        sse_tools = LocalToolRegistry(include_builtins=True)
+        # Also register MCP tools if any were connected
+        for tool_def in agent.tools.get_tool_definitions():
+            fname = tool_def.get("function", {})
+            sse_tools.register_function(
+                name=fname.get("name", ""),
+                func=lambda **kw: {"content": "MCP tool (use WebSocket)", "is_error": False},
+                description=fname.get("description", ""),
+                category="mcp",
+            )
+
+        sse_graph = build_supervisor_graph(
+            llm=agent.llm,
+            system_prompt=agent.system_prompt,
+            tool_definitions=sse_tools.get_tool_definitions(),
+            tool_executor=sse_tools,
+            cost_breaker=agent.cost_breaker,
+            authority=agent.authority,
+            tracer=agent.tracer,
+        )
+
+        from kazma_ui.sse_chat import create_sse_chat_router
+
+        sse_router = create_sse_chat_router(
+            graph=sse_graph,
+            checkpointer=None,
+            system_prompt=agent.system_prompt,
+            cost_breaker=agent.cost_breaker,
+            authority=agent.authority,
+            tracer=agent.tracer,
+        )
+        app.include_router(sse_router)
+        logger.info("SSE chat router mounted at /api/chat/stream")
+    except Exception as e:
+        logger.warning("SSE chat router failed to initialize: %s", e)
+
     # Dashboard (legacy)
     from kazma_ui.dashboard import router as dashboard_router
 
