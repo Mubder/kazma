@@ -22,6 +22,8 @@ from typing import Any
 
 import httpx
 
+from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
+
 logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────
@@ -46,11 +48,23 @@ class LLMConfig:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> LLMConfig:
-        """Create config from a dict (e.g. from kazma.yaml)."""
+        """Create config from a dict (e.g. from kazma.yaml).
+
+        Automatically normalizes base_url and model for local providers.
+        """
+        raw_url = d.get("base_url", cls.base_url)
+        normalized_url = normalize_provider_url(raw_url)
+
+        raw_model = d.get("model", cls.model)
+        normalized_model = normalize_model_name(raw_model, normalized_url)
+
+        raw_key = d.get("api_key", cls.api_key)
+        resolved_key = get_dummy_api_key(normalized_url, raw_key)
+
         return cls(
-            base_url=d.get("base_url", cls.base_url),
-            api_key=d.get("api_key", cls.api_key),
-            model=d.get("model", cls.model),
+            base_url=normalized_url,
+            api_key=resolved_key,
+            model=normalized_model,
             max_tokens=d.get("max_tokens", cls.max_tokens),
             temperature=d.get("temperature", cls.temperature),
             timeout=d.get("timeout", cls.timeout),

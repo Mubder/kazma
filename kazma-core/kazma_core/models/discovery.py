@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 
+from kazma_core.url_utils import normalize_provider_url
+
 logger = logging.getLogger(__name__)
 
 # ── Known local provider endpoints ─────────────────────────────────────
@@ -68,13 +70,18 @@ async def _probe_provider(
     info = ProviderInfo(
         name=provider_cfg["name"],
         label=provider_cfg["label"],
-        base_url=provider_cfg["base_url"],
+        base_url=normalize_provider_url(provider_cfg["base_url"]),
     )
 
     try:
+        # Normalize the models_url too
+        models_url = provider_cfg["models_url"]
+        if not models_url.startswith("http"):
+            models_url = normalize_provider_url(models_url)
+
         # Build a fresh client with a short per-request timeout
         async with httpx.AsyncClient(timeout=httpx.Timeout(provider_cfg["timeout"], connect=2.0)) as probe:
-            resp = await probe.get(provider_cfg["models_url"])
+            resp = await probe.get(models_url)
             resp.raise_for_status()
             data = resp.json()
 
@@ -172,7 +179,7 @@ async def get_model_base_url(model_name: str) -> str | None:
         prefix = model_name.split("/")[0]
         for cfg in _LOCAL_PROVIDERS:
             if cfg["name"] == prefix:
-                return cfg["base_url"]
+                return normalize_provider_url(cfg["base_url"])
 
     # Otherwise probe all active providers
     discovered = await get_active_local_models()

@@ -29,8 +29,8 @@ class TestLLMConfig:
             }
         )
         assert config.base_url == "http://localhost:1234/v1"
-        assert config.model == "local-model"
-        assert config.api_key == "test-key"
+        assert config.model == "openai/local-model"  # normalized for LM Studio
+        assert config.api_key == "test-key"  # explicit key preserved
         assert config.max_tokens == 2048
 
     def test_from_dict_defaults(self) -> None:

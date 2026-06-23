@@ -475,6 +475,7 @@ async def create_supervisor_app(
     from kazma_core.authority import create_authority
     from kazma_core.cost_breaker import create_cost_breaker
     from kazma_core.tracing import KazmaTracer
+    from kazma_core.url_utils import normalize_model_name, normalize_provider_url
 
     # Load config
     if config is None:
@@ -487,6 +488,19 @@ async def create_supervisor_app(
 
     llm_cfg = config.get("llm", {})
     system_prompt = config.get("system_prompt", "You are Kazma (كاظمه).")
+
+    # Normalize LLM config URLs
+    if "base_url" in llm_cfg:
+        llm_cfg["base_url"] = normalize_provider_url(llm_cfg["base_url"])
+    if "model" in llm_cfg:
+        llm_cfg["model"] = normalize_model_name(llm_cfg["model"], llm_cfg.get("base_url", ""))
+
+    logger.info(
+        "LLM config: base_url=%s model=%s router=%s",
+        llm_cfg.get("base_url", "(default)"),
+        llm_cfg.get("model", "(default)"),
+        llm_cfg.get("router", "none"),
+    )
 
     # LLM
     if llm is None:
