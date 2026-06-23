@@ -187,11 +187,41 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # ── /api/models — Auto-discover local LLM providers and models ──
     @app.get("/api/models")
     async def get_models() -> dict:
-        """Probe Ollama, LM Studio, and other local providers for available models."""
-        from kazma_core.models.discovery import get_active_local_models
+        """Fetch active local models from Ollama and LM Studio.
+        Returns flat list so the frontend can populate a selector dynamically.
+        """
+        import httpx
 
-        result = await get_active_local_models()
-        return result
+        logger = logging.getLogger("kazma.ui.models")
+        models = []
+
+        # 1. Try Ollama
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get("http://localhost:11434/api/tags", timeout=1.0)
+                if response.status_code == 200:
+                    data = response.json()
+                    for m in data.get("models", []):
+                        models.append(f"ollama/{m['name']}")
+            except Exception:
+                logger.debug("Ollama not running or unreachable.")
+
+        # 2. Try LM Studio / Local OpenAI-Compatible
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get("http://localhost:1234/v1/models", timeout=1.0)
+                if response.status_code == 200:
+                    data = response.json()
+                    for m in data.get("data", []):
+                        models.append(f"openai/{m['id']}")
+            except Exception:
+                logger.debug("LM Studio/Local OpenAI endpoint not running or unreachable.")
+
+        # Fallback default if nothing is online
+        if not models:
+            models = ["ollama/qwen2.5-coder"]
+
+        return {"models": models}
 
     # ── /api/telemetry — Mock telemetry data for Chart.js dashboard ──
     import random

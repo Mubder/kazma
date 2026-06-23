@@ -275,11 +275,25 @@
                     <div class="flex items-center gap-4 text-xs text-text-secondary">
                         <span>Tokens: <span class="text-accent font-mono" x-text="totalTokens.toLocaleString()">0</span></span>
                         <span>Cost: <span class="text-success font-mono" x-text="'$' + totalCost.toFixed(4)">$0.00</span></span>
-                        <span>Model: <span class="text-text-primary font-mono text-[0.7rem]">{{ config.default_model }}</span></span>
+                        <span>Model: <span class="text-text-primary font-mono text-[0.7rem]" x-text="activeModelLabel">default</span></span>
                     </div>
                 </div>
                 <div class="flex items-center gap-2">
-                    <span class="text-[0.6rem] text-text-muted uppercase tracking-wider"><kbd>Ctrl</kbd> <kbd>K</kbd> clear · <kbd>Ctrl</kbd> <kbd>/</kbd> focus</span>
+                    <!-- Model selector dropdown -->
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-[0.55rem] text-text-muted uppercase tracking-wider hidden sm:inline">Model</span>
+                        <select x-model="selectedModel"
+                                class="bg-surface border border-border rounded-md px-2 py-0.5 text-[0.6rem]
+                                       text-text-secondary font-mono focus:outline-none focus:border-accent/50
+                                       cursor-pointer min-w-[100px] max-w-[160px]">
+                            <option value="" x-text="'Default (' + defaultModel + ')'"></option>
+                            <template x-for="m in availableModels" :key="m">
+                                <option :value="m" x-text="m.split('/').pop()"></option>
+                            </template>
+                            <option x-show="availableModels.length === 0" disabled value="">No local providers found</option>
+                        </select>
+                    </div>
+                    <span class="text-[0.6rem] text-text-muted uppercase tracking-wider hidden sm:inline"><kbd>Ctrl</kbd> <kbd>K</kbd> clear · <kbd>Ctrl</kbd> <kbd>/</kbd> focus</span>
                 </div>
             </div>
             <div class="telemetry-body" :class="telemetryOpen ? '' : 'collapsed'" x-ref="telemetryBody">
@@ -436,29 +450,6 @@
                             <span x-show="wsConnected" class="text-success">● Connected</span>
                             <span x-show="!wsConnected" class="text-error">● Disconnected</span>
                         </div>
-                        </div>
-                        <!-- Model selector bar -->
-                        <div class="max-w-4xl mx-auto flex items-center justify-between mt-1 px-1">
-                        <div class="flex items-center gap-2">
-                            <span class="text-[0.55rem] text-text-muted uppercase tracking-wider">Model</span>
-                            <select x-model="selectedModel"
-                                    @change="onModelChange()"
-                                    class="bg-surface border border-border rounded-md px-2 py-0.5 text-[0.65rem]
-                                           text-text-secondary font-mono focus:outline-none focus:border-accent/50
-                                           cursor-pointer min-w-[140px]">
-                                <option value="" x-text="'Default (' + defaultModel + ')'"></option>
-                                <template x-for="(provider, pi) in availableProviders" :key="pi">
-                                    <optgroup :label="provider.label" x-show="provider.models.length > 0">
-                                        <template x-for="m in provider.models" :key="m">
-                                            <option :value="m" x-text="m.split('/').pop()"></option>
-                                        </template>
-                                    </optgroup>
-                                </template>
-                                <option x-show="availableProviders.length === 0" disabled value="">No local providers found</option>
-                            </select>
-                        </div>
-                        <div class="text-[0.55rem] text-text-muted">
-                            <span x-show="availableProviders.length > 0" x-text="availableProviders.length + ' provider(s)'"></span>
                         </div>
                         </div>
                 </div>
@@ -850,7 +841,7 @@ function appState() {
         currentTab: 'workspace',
         selectedModel: '',
         defaultModel: '{{ config.default_model|default("gpt-4o-mini") }}',
-        availableProviders: [],
+        availableModels: [],
         skillList: [
             { name: 'web_search', description: 'Search the web via Exa API', type: 'python', version: '1.2.0', active: true },
             { name: 'file_ops', description: 'Read, write, and manage local files', type: 'python', version: '2.0.1', active: true },
@@ -1164,20 +1155,17 @@ function appState() {
             fetch('/api/models')
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    self.availableProviders = data.online || [];
-                    if (self.availableProviders.length > 0) {
-                        self.selectedModel = '';
-                    }
+                    self.availableModels = data.models || [];
                 })
                 .catch(function() {
-                    self.availableProviders = [];
+                    self.availableModels = [];
                 });
         },
 
-        // ── Called when user changes model in selector ──
-        onModelChange() {
-            // The model will be applied on the next sendMessage()
-            // via the activeModel getter
+        // ── Human-readable label for the active model ──
+        get activeModelLabel() {
+            if (this.selectedModel) return this.selectedModel.split('/').pop();
+            return this.defaultModel;
         },
 
         // ── Toggle MCP server enabled state ──
