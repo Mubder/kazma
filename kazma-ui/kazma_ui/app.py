@@ -124,6 +124,18 @@ def create_app(config_path: str | None = None) -> FastAPI:
     except Exception as e:
         logger.warning("SSE chat router failed to initialize: %s", e)
 
+    # ── Telemetry SSE Route (real hardware metrics) ───────────────
+    try:
+        from kazma_core.telemetry import HardwareMonitor
+        from kazma_ui.telemetry_route import create_telemetry_router
+
+        hw_monitor = HardwareMonitor()
+        telemetry_router = create_telemetry_router(monitor=hw_monitor)
+        app.include_router(telemetry_router)
+        logger.info("Telemetry SSE router mounted at /api/telemetry/stream")
+    except Exception as e:
+        logger.warning("Telemetry router failed to initialize: %s", e)
+
     # Dashboard (legacy)
     from kazma_ui.dashboard import router as dashboard_router
 
