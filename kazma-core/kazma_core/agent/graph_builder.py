@@ -443,6 +443,7 @@ async def create_supervisor_app(
     config: dict[str, Any] | None = None,
     llm: LLMProvider | None = None,
     tool_executor: Any = None,
+    mcp_manager: Any = None,
     db_path: str = "kazma-data/checkpoints.db",
 ) -> tuple[Any, AsyncSqliteSaver]:
     """Create a fully-wired Supervisor graph with SQLite checkpointer.
@@ -453,7 +454,10 @@ async def create_supervisor_app(
     Args:
         config: Raw kazma.yaml dict (loads from disk if None).
         llm: Pre-built LLMProvider (created from config if None).
-        tool_executor: Tool registry (created empty if None).
+        tool_executor: Tool registry (created with builtins if None).
+        mcp_manager: Optional AsyncMCPManager for MCP tools.
+            If provided and config has ``mcp.servers``, the manager is
+            connected and a UnifiedToolExecutor wraps both backends.
         db_path: Path to the SQLite checkpoint database.
 
     Returns:
@@ -483,12 +487,27 @@ async def create_supervisor_app(
     if llm is None:
         llm = LLMProvider(LLMConfig.from_dict(llm_cfg))
 
-    # Tool executor
+    # Local tool executor
     if tool_executor is None:
         from kazma_core.agent.tool_registry import LocalToolRegistry
-        tool_executor = LocalToolRegistry()
+        tool_executor = LocalToolRegistry(include_builtins=True)
 
-    tool_definitions = tool_executor.get_tool_definitions()
+    # MCP manager — connect to configured servers if provided
+    if mcp_manager is not None:
+        mcp_servers = config.get("mcp", {}).get("servers", [])
+        if mcp_servers:
+            try:
+                count = await mcp_manager.connect_from_config(mcp_servers)
+                logger.info("MCP manager connected %d tools from %d servers",
+                            count, len(mcp_servers))
+            except Exception as exc:
+                logger.warning("MCP manager failed to connect: %s", exc)
+
+    # Wrap local + MCP into a unified executor
+    from kazma_core.mcp.manager import UnifiedToolExecutor
+    unified = UnifiedToolExecutor(local=tool_executor, mcp=mcp_manager)
+
+    tool_definitions = unified.get_tool_definitions()
 
     # Cost breaker
     cost_breaker = create_cost_breaker()
@@ -518,7 +537,7 @@ async def create_supervisor_app(
         llm=llm,
         system_prompt=system_prompt,
         tool_definitions=tool_definitions,
-        tool_executor=tool_executor,
+        tool_executor=unified,
         cost_breaker=cost_breaker,
         authority=authority,
         tracer=tracer,
