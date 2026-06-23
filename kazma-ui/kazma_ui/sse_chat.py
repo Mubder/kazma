@@ -206,6 +206,7 @@ def create_sse_chat_router(
     cost_breaker: Any = None,
     authority: Any = None,
     tracer: Any = None,
+    provider_profile: dict[str, Any] | None = None,
 ) -> APIRouter:
     """Create the SSE chat router wired to the compiled Supervisor graph.
 
@@ -219,6 +220,11 @@ def create_sse_chat_router(
         cost_breaker: CostCircuitBreaker instance.
         authority: ContextAuthority for 80% compaction.
         tracer: KazmaTracer for observability.
+        provider_profile: Active provider config dict with keys:
+            - provider: str ("ollama", "lm-studio", "custom", "openai")
+            - base_url: str (normalized)
+            - model: str (normalized)
+            - api_key: str (real or dummy)
 
     Returns:
         APIRouter with POST /api/chat/stream registered.
@@ -387,5 +393,89 @@ def create_sse_chat_router(
         """Delete an SSE chat session."""
         _sessions.pop(session_id, None)
         return {"status": "ok"}
+
+    # ── Provider profile management ───────────────────────────────
+
+    # Mutable provider profile (can be switched at runtime)
+    _active_profile: dict[str, Any] = provider_profile or {}
+
+    @r.get("/api/provider/active")
+    async def get_active_provider() -> dict[str, Any]:
+        """Return the currently active provider profile.
+
+        Returns:
+            {"provider": "ollama", "base_url": "...", "model": "...", "api_key": "..."}
+        """
+        if not _active_profile:
+            return {"provider": "none", "base_url": "", "model": "", "api_key": ""}
+        # Don't expose real API keys
+        safe = {**_active_profile}
+        if safe.get("api_key") and not safe["api_key"].startswith(("sk-lm", "sk-lit", "ollama", "not-needed")):
+            safe["api_key"] = "***"
+        return safe
+
+    @r.post("/api/provider/switch")
+    async def switch_provider(request: Request) -> dict[str, Any]:
+        """Switch the active provider profile at runtime.
+
+        Request body:
+            {"provider": "ollama", "model": "llama3.2"}
+            {"provider": "lm-studio", "base_url": "http://localhost:1234/v1", "model": "local-model"}
+            {"provider": "custom", "base_url": "http://my-server:8080/v1", "model": "gpt-4o", "api_key": "sk-..."}
+
+        Returns:
+            The normalized provider profile.
+        """
+        from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
+
+        try:
+            body = await request.json()
+        except Exception:
+            return {"error": "Invalid JSON"}
+
+        prov = body.get("provider", "").lower().strip()
+        raw_url = body.get("base_url", "")
+        raw_model = body.get("model", "")
+        raw_key = body.get("api_key", "")
+
+        # Normalize URL based on provider
+        if prov in ("ollama",):
+            url = "http://127.0.0.1:11434/v1"
+        elif prov in ("lm-studio", "lm_studio", "lmstudio"):
+            url = normalize_provider_url(raw_url or "http://localhost:1234/v1")
+        elif prov in ("custom", "openai"):
+            url = normalize_provider_url(raw_url)
+        else:
+            url = normalize_provider_url(raw_url) if raw_url else ""
+
+        # Normalize model name
+        model = normalize_model_name(raw_model, url)
+
+        # Resolve API key
+        api_key = get_dummy_api_key(url, raw_key)
+
+        _active_profile.clear()
+        _active_profile.update(
+            {
+                "provider": prov,
+                "base_url": url,
+                "model": model,
+                "api_key": api_key,
+            }
+        )
+
+        logger.info(
+            "Provider switched: %s model=%s base_url=%s",
+            prov,
+            model,
+            url,
+        )
+
+        return {
+            "provider": prov,
+            "base_url": url,
+            "model": model,
+            "status": "ok",
+        }
 
     return r

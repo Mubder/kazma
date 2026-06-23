@@ -1,7 +1,12 @@
-"""Kazma Provider Discovery — Auto-detect local LLM endpoints.
+"""Kazma Provider Discovery — Multi-provider model discovery engine.
 
-Queries active local provider APIs (Ollama, LM Studio, etc.) to discover
-available models at runtime. Fails gracefully when a provider is offline.
+Provides strict, explicit routing for LM Studio, Ollama, and
+Custom/Cloud endpoints. No generic fallback arrays.
+
+Usage:
+    models = await discover_models("ollama")
+    models = await discover_models("lm-studio", base_url="http://localhost:1234/v1")
+    health = await check_ollama_health()
 """
 
 from __future__ import annotations
@@ -17,27 +22,12 @@ from kazma_core.url_utils import normalize_provider_url
 
 logger = logging.getLogger(__name__)
 
-# ── Known local provider endpoints ─────────────────────────────────────
+# ── Constants ──────────────────────────────────────────────────────────
 
-_LOCAL_PROVIDERS: list[dict[str, Any]] = [
-    {
-        "name": "ollama",
-        "label": "Ollama",
-        "models_url": "http://localhost:11434/api/tags",
-        "base_url": "http://localhost:11434/v1",
-        "model_key": lambda data: [m["name"] for m in data.get("models", [])] if isinstance(data, dict) else [],
-        "timeout": 3.0,
-    },
-    {
-        "name": "lm_studio",
-        "label": "LM Studio",
-        "models_url": "http://localhost:1234/v1/models",
-        "base_url": "http://localhost:1234/v1",
-        "model_key": lambda data: [m["id"] for m in data.get("data", [])] if isinstance(data, dict) else [],
-        "timeout": 3.0,
-    },
-    # Extensible — add more local providers here (e.g. vLLM, LocalAI, etc.)
-]
+_OLLAMA_BASE = "http://127.0.0.1:11434"
+_OLLAMA_TAGS_URL = f"{_OLLAMA_BASE}/api/tags"
+_LM_STUDIO_DEFAULT_URL = "http://localhost:1234/v1"
+_TIMEOUT = 3.0
 
 
 # ── Data model ─────────────────────────────────────────────────────────
@@ -55,93 +45,314 @@ class ProviderInfo:
     error: str | None = None
 
 
-# ── Discovery engine ───────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Provider-specific discovery
+# ══════════════════════════════════════════════════════════════════════════
 
 
-async def _probe_provider(
-    provider_cfg: dict[str, Any],
-    client: httpx.AsyncClient,
-) -> ProviderInfo:
-    """Probe a single local provider and return its model list.
+async def discover_ollama_models() -> ProviderInfo:
+    """Discover models from the local Ollama daemon.
 
-    Uses a short timeout so a single offline provider doesn't block
-    the whole discovery.
+    Queries http://127.0.0.1:11434/api/tags and strips :latest suffixes.
+
+    Returns:
+        ProviderInfo with model list (e.g. ["ollama/llama3.2", "ollama/qwen2.5"]).
     """
     info = ProviderInfo(
-        name=provider_cfg["name"],
-        label=provider_cfg["label"],
-        base_url=normalize_provider_url(provider_cfg["base_url"]),
+        name="ollama",
+        label="Ollama",
+        base_url=f"{_OLLAMA_BASE}/v1",
     )
 
     try:
-        # Normalize the models_url too
-        models_url = provider_cfg["models_url"]
-        if not models_url.startswith("http"):
-            models_url = normalize_provider_url(models_url)
-
-        # Build a fresh client with a short per-request timeout
-        async with httpx.AsyncClient(timeout=httpx.Timeout(provider_cfg["timeout"], connect=2.0)) as probe:
-            resp = await probe.get(models_url)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0)) as client:
+            resp = await client.get(_OLLAMA_TAGS_URL)
             resp.raise_for_status()
             data = resp.json()
 
-        model_key_fn = provider_cfg["model_key"]
-        raw_models = model_key_fn(data)
+        raw_models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
 
-        info.models = [f"{provider_cfg['name']}/{m}" if "/" not in m else m for m in raw_models]
+        # Clean: strip :latest suffix
+        cleaned = []
+        for m in raw_models:
+            if ":" in m:
+                tag = m.split(":")[-1]
+                if tag == "latest":
+                    m = m.rsplit(":", 1)[0]
+            cleaned.append(f"ollama/{m}")
+
+        info.models = cleaned
         info.online = True
-        logger.info(
-            "Discovered %s (%s): %d models",
-            info.label,
-            provider_cfg["models_url"],
-            len(info.models),
-        )
+        logger.info("Discovered Ollama: %d models", len(cleaned))
 
     except httpx.ConnectError:
-        info.error = "Connection refused — provider may be offline"
-        logger.debug("Provider %s offline: %s", info.label, info.error)
+        info.error = "Ollama not running (port 11434)"
+        logger.debug("Ollama offline: %s", info.error)
 
     except httpx.TimeoutException:
-        info.error = "Request timed out"
-        logger.debug("Provider %s timed out", info.label)
+        info.error = "Ollama timed out"
+        logger.debug("Ollama timed out")
 
     except httpx.HTTPStatusError as e:
-        info.error = f"HTTP {e.response.status_code}"
-        logger.debug("Provider %s HTTP error: %s", info.label, info.error)
+        info.error = f"Ollama HTTP {e.response.status_code}"
+        logger.debug("Ollama HTTP error: %s", info.error)
 
     except Exception as e:
         info.error = str(e)[:120]
-        logger.debug("Provider %s error: %s", info.label, info.error)
+        logger.debug("Ollama error: %s", info.error)
 
     return info
+
+
+async def discover_lm_studio_models(
+    base_url: str | None = None,
+) -> ProviderInfo:
+    """Discover models from LM Studio (or any OpenAI-compatible server).
+
+    Queries {base_url}/models and extracts model IDs.
+
+    Args:
+        base_url: The base URL (default http://localhost:1234/v1).
+            Auto-normalized: scheme added, /v1 appended if missing.
+
+    Returns:
+        ProviderInfo with model list (e.g. ["openai/local-model"]).
+    """
+    url = normalize_provider_url(base_url or _LM_STUDIO_DEFAULT_URL)
+    info = ProviderInfo(
+        name="lm_studio",
+        label="LM Studio",
+        base_url=url,
+    )
+
+    # Build the models endpoint: /v1/models
+    models_url = f"{url}/models"
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0)) as client:
+            resp = await client.get(models_url)
+            resp.raise_for_status()
+            data = resp.json()
+
+        raw_models = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+
+        info.models = [f"openai/{m}" for m in raw_models]
+        info.online = True
+        logger.info("Discovered LM Studio (%s): %d models", url, len(info.models))
+
+    except httpx.ConnectError:
+        info.error = "LM Studio not running"
+        logger.debug("LM Studio offline: %s", info.error)
+
+    except httpx.TimeoutException:
+        info.error = "LM Studio timed out"
+
+    except httpx.HTTPStatusError as e:
+        info.error = f"LM Studio HTTP {e.response.status_code}"
+
+    except Exception as e:
+        info.error = str(e)[:120]
+
+    return info
+
+
+async def discover_custom_models(base_url: str) -> ProviderInfo:
+    """Discover models from a custom OpenAI-compatible endpoint.
+
+    Args:
+        base_url: The endpoint base URL (auto-normalized).
+
+    Returns:
+        ProviderInfo with model list.
+    """
+    url = normalize_provider_url(base_url)
+    info = ProviderInfo(
+        name="custom",
+        label="Custom",
+        base_url=url,
+    )
+
+    models_url = f"{url}/models"
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0)) as client:
+            resp = await client.get(models_url)
+            resp.raise_for_status()
+            data = resp.json()
+
+        raw_models = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+
+        info.models = raw_models
+        info.online = True
+        logger.info("Discovered Custom (%s): %d models", url, len(raw_models))
+
+    except Exception as e:
+        info.error = str(e)[:120]
+
+    return info
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Unified discovery entry point
+# ══════════════════════════════════════════════════════════════════════════
+
+
+async def discover_models(
+    provider: str,
+    base_url: str | None = None,
+) -> ProviderInfo:
+    """Discover models from a specific provider.
+
+    Routes to the correct discovery function based on provider name.
+
+    Args:
+        provider: One of "ollama", "lm-studio", "custom".
+        base_url: Optional override URL (used by lm-studio and custom).
+
+    Returns:
+        ProviderInfo with discovered models.
+    """
+    provider = provider.lower().strip()
+
+    if provider == "ollama":
+        return await discover_ollama_models()
+
+    if provider in ("lm-studio", "lm_studio", "lmstudio"):
+        return await discover_lm_studio_models(base_url)
+
+    if provider == "custom":
+        if not base_url:
+            return ProviderInfo(
+                name="custom",
+                label="Custom",
+                base_url="",
+                error="base_url is required for custom provider",
+            )
+        return await discover_custom_models(base_url)
+
+    # Unknown provider — try all concurrently
+    logger.warning("Unknown provider '%s', probing all", provider)
+    results = await asyncio.gather(
+        discover_ollama_models(),
+        discover_lm_studio_models(base_url),
+        return_exceptions=True,
+    )
+
+    # Merge results
+    merged = ProviderInfo(name="all", label="All Providers", base_url="")
+    for r in results:
+        if isinstance(r, ProviderInfo) and r.online:
+            merged.models.extend(r.models)
+            merged.online = True
+
+    if not merged.models:
+        merged.error = "No providers responded"
+
+    return merged
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Ollama health check
+# ══════════════════════════════════════════════════════════════════════════
+
+
+async def check_ollama_health() -> dict[str, Any]:
+    """Check if Ollama is running and responsive.
+
+    Pings http://127.0.0.1:11434/api/tags with a short timeout.
+
+    Returns:
+        Dict with "online" (bool), "models" (int), "error" (str|None).
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=1.0)) as client:
+            resp = await client.get(_OLLAMA_TAGS_URL)
+            resp.raise_for_status()
+            data = resp.json()
+
+        model_count = len(data.get("models", []))
+        logger.info("Ollama health check: online, %d models", model_count)
+        return {"online": True, "models": model_count, "error": None}
+
+    except httpx.ConnectError:
+        return {"online": False, "models": 0, "error": "Connection refused (port 11434)"}
+
+    except httpx.TimeoutException:
+        return {"online": False, "models": 0, "error": "Timed out"}
+
+    except Exception as e:
+        return {"online": False, "models": 0, "error": str(e)[:120]}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Ollama pull (background task)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+async def pull_ollama_model(model: str) -> dict[str, Any]:
+    """Pull a model via `ollama pull` as an async subprocess.
+
+    Runs in the background — does NOT block the event loop.
+
+    Args:
+        model: Model name (e.g. "llama3.2", "qwen2.5-coder:7b").
+
+    Returns:
+        Dict with "status", "model", "pid", and optionally "error".
+    """
+    if not model or not model.strip():
+        return {"status": "error", "model": model, "error": "Empty model name"}
+
+    model = model.strip()
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ollama",
+            "pull",
+            model,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        logger.info("Ollama pull started: model=%s pid=%d", model, proc.pid)
+        return {
+            "status": "pulling",
+            "model": model,
+            "pid": proc.pid,
+        }
+
+    except FileNotFoundError:
+        return {
+            "status": "error",
+            "model": model,
+            "error": "ollama command not found — is Ollama installed?",
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "model": model,
+            "error": str(e)[:120],
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Backward-compatible helpers
+# ══════════════════════════════════════════════════════════════════════════
 
 
 async def get_active_local_models(
     custom_providers: list[dict[str, Any]] | None = None,
 ) -> dict[str, list[ProviderInfo]]:
-    """Discover all active local LLM providers and their models.
+    """Discover all active local LLM providers (backward-compatible).
 
-    Probes all known provider endpoints *concurrently* so that a single
-    slow/offline provider does not block the whole discovery. Returns a
-    categorized dict with online and offline providers.
-
-    Args:
-        custom_providers: Optional list of additional provider dicts to
-            probe alongside the built-in ones. Each dict must have at
-            least: name, label, models_url, base_url, model_key (callable).
+    Probes Ollama and LM Studio concurrently.
 
     Returns:
-        A dict with two keys:
-          - "online": list of ProviderInfo for reachable providers
-          - "offline": list of ProviderInfo for unreachable ones
+        Dict with "online" and "offline" lists of ProviderInfo.
     """
-    providers = list(_LOCAL_PROVIDERS)
-    if custom_providers:
-        providers.extend(custom_providers)
-
-    # Probe all providers concurrently
     results = await asyncio.gather(
-        *[_probe_provider(cfg, None) for cfg in providers],  # type: ignore[arg-type]
+        discover_ollama_models(),
+        discover_lm_studio_models(),
         return_exceptions=True,
     )
 
@@ -155,33 +366,28 @@ async def get_active_local_models(
             else:
                 offline.append(r)
         elif isinstance(r, Exception):
-            logger.warning("Provider probe raised unexpected exception: %s", r)
+            logger.warning("Provider probe raised: %s", r)
 
-    return {
-        "online": online,
-        "offline": offline,
-    }
+    return {"online": online, "offline": offline}
 
 
 async def get_model_base_url(model_name: str) -> str | None:
-    """Resolve a model string (e.g. 'ollama/llama3.2') to its provider base URL.
-
-    Probes all providers to find which one serves the given model prefix.
+    """Resolve a model string to its provider base URL.
 
     Args:
-        model_name: Model string in the form 'provider_name/model' or plain name.
+        model_name: "ollama/llama3.2" or "openai/local-model".
 
     Returns:
-        The base_url of the matching provider, or None if not found.
+        Base URL string, or None if not found.
     """
-    # If it has a provider prefix, match directly
     if "/" in model_name:
         prefix = model_name.split("/")[0]
-        for cfg in _LOCAL_PROVIDERS:
-            if cfg["name"] == prefix:
-                return normalize_provider_url(cfg["base_url"])
+        if prefix == "ollama":
+            return f"{_OLLAMA_BASE}/v1"
+        if prefix == "openai":
+            return normalize_provider_url(_LM_STUDIO_DEFAULT_URL)
 
-    # Otherwise probe all active providers
+    # Probe all
     discovered = await get_active_local_models()
     for provider in discovered["online"]:
         for m in provider.models:
