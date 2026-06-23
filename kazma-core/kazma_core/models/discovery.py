@@ -113,12 +113,17 @@ async def discover_lm_studio_models(
 
     Args:
         base_url: The base URL (default http://localhost:1234/v1).
-            Auto-normalized: scheme added, /v1 appended if missing.
+            Auto-normalized: scheme added, /v1 FORCED if missing.
 
     Returns:
         ProviderInfo with model list (e.g. ["openai/local-model"]).
     """
     url = normalize_provider_url(base_url or _LM_STUDIO_DEFAULT_URL)
+
+    # HARD ENFORCE: /v1 suffix for OpenAI-compatible endpoints
+    if url and not url.rstrip("/").endswith("/v1"):
+        url = url.rstrip("/") + "/v1"
+
     info = ProviderInfo(
         name="lm_studio",
         label="LM Studio",

@@ -207,6 +207,7 @@ def create_sse_chat_router(
     authority: Any = None,
     tracer: Any = None,
     provider_profile: dict[str, Any] | None = None,
+    llm_provider: Any = None,
 ) -> APIRouter:
     """Create the SSE chat router wired to the compiled Supervisor graph.
 
@@ -225,6 +226,7 @@ def create_sse_chat_router(
             - base_url: str (normalized)
             - model: str (normalized)
             - api_key: str (real or dummy)
+        llm_provider: LLMProvider instance — reconfigured on provider switch.
 
     Returns:
         APIRouter with POST /api/chat/stream registered.
@@ -463,6 +465,10 @@ def create_sse_chat_router(
                 "api_key": api_key,
             }
         )
+
+        # Reconfigure the graph's LLM provider at runtime
+        if llm_provider is not None:
+            llm_provider.reconfigure(base_url=url, model=model, api_key=api_key)
 
         logger.info(
             "Provider switched: %s model=%s base_url=%s",

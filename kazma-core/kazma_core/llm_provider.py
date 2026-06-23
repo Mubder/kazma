@@ -267,6 +267,46 @@ class LLMProvider:
             await self._http.aclose()
             self._http = None
 
+    def reconfigure(
+        self,
+        base_url: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
+        """Reconfigure the provider at runtime (e.g. after provider switch).
+
+        Closes the existing HTTP client so the next request uses the new config.
+        All parameters are optional — only provided values are updated.
+        """
+        changed = False
+        if base_url is not None:
+            normalized = normalize_provider_url(base_url)
+            if normalized and not normalized.rstrip("/").endswith("/v1"):
+                # Force /v1 for non-Ollama endpoints
+                parsed_port = None
+                from urllib.parse import urlparse as _up
+
+                parsed_port = _up(normalized).port
+                if parsed_port != 11434:
+                    normalized = normalized.rstrip("/") + "/v1"
+            self.config.base_url = normalized
+            changed = True
+        if model is not None:
+            self.config.model = normalize_model_name(model, self.config.base_url)
+            changed = True
+        if api_key is not None:
+            self.config.api_key = api_key
+            changed = True
+
+        if changed:
+            # Force client recreation on next request (old client will be GC'd)
+            self._http = None
+            logger.info(
+                "LLMProvider reconfigured: base_url=%s model=%s",
+                self.config.base_url,
+                self.config.model,
+            )
+
 
 class LLMError(Exception):
     """Raised when an LLM API call fails."""

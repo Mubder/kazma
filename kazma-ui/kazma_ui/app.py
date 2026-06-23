@@ -119,6 +119,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             cost_breaker=agent.cost_breaker,
             authority=agent.authority,
             tracer=agent.tracer,
+            llm_provider=agent.llm,
         )
         app.include_router(sse_router)
         logger.info("SSE chat router mounted at /api/chat/stream")
