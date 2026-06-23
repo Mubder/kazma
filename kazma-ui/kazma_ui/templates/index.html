@@ -246,6 +246,15 @@
             </svg>
             <span>MCP</span>
         </div>
+        <!-- Settings -->
+        <div class="nav-btn" :class="currentTab === 'settings' ? 'active' : ''"
+             @click="currentTab = 'settings'" title="Settings">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+                <circle cx="12" cy="12" r="3"/>
+            </svg>
+            <span>Settings</span>
+        </div>
         <!-- Spacer + status at bottom -->
         <div class="flex-1"></div>
         <div class="pb-2" :class="wsConnected ? 'text-success' : 'text-error'" title="Connection status">
@@ -651,6 +660,122 @@
                                 <button class="text-accent hover:underline">Edit</button>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════════════════
+             TAB: SETTINGS
+             ══════════════════════════════════════════════════════════ -->
+        <div x-show="currentTab === 'settings'"
+             x-transition:enter.duration.200ms.opacity
+             class="flex-1 overflow-y-auto px-6 py-6 bg-surface"
+             x-data="settingsState()" x-init="loadSettings()">
+            <div class="max-w-3xl mx-auto">
+                <h2 class="text-lg font-semibold text-text-primary mb-6">Settings</h2>
+
+                <!-- ── LLM Provider ── -->
+                <div class="bg-card border border-border rounded-xl p-5 mb-4">
+                    <h3 class="text-sm font-medium text-text-primary mb-4 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+                        LLM Provider
+                    </h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Base URL</label>
+                            <input type="text" x-model="form.base_url" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50" placeholder="https://api.openai.com/v1">
+                        </div>
+                        <div>
+                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">API Key</label>
+                            <div class="relative mt-1">
+                                <input :type="showKey ? 'text' : 'password'" x-model="form.api_key" class="w-full bg-surface border border-border rounded-lg px-3 py-2 pr-14 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50" placeholder="sk-...">
+                                <button @click="showKey = !showKey" class="absolute right-2 top-1/2 -translate-y-1/2 text-[0.6rem] text-accent hover:underline" x-text="showKey ? 'Hide' : 'Show'"></button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Model</label>
+                            <input type="text" x-model="form.model" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50" placeholder="gpt-4o-mini">
+                        </div>
+                        <div>
+                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Max Tokens</label>
+                            <input type="number" x-model.number="form.max_tokens" min="256" max="128000" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
+                        </div>
+                        <div>
+                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Temperature <span class="text-text-secondary" x-text="form.temperature"></span></label>
+                            <input type="range" x-model.number="form.temperature" min="0" max="2" step="0.1" class="w-full mt-1 accent-accent">
+                        </div>
+                        <div>
+                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Timeout (s)</label>
+                            <input type="number" x-model.number="form.timeout" min="5" max="300" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-3 mt-4">
+                        <button @click="saveModel()" class="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent/80 transition-colors">Save Provider</button>
+                        <button @click="testModel()" class="px-4 py-1.5 rounded-lg border border-border text-text-secondary text-xs font-medium hover:bg-surface transition-colors" :disabled="testing">Test Connection</button>
+                        <span x-show="testing" class="text-xs text-text-muted">Testing…</span>
+                        <span x-show="testResult !== null" class="text-xs" :class="testResult?.success ? 'text-success' : 'text-error'" x-text="testResult?.success ? '✓ Connected — ' + testResult.model : '✗ ' + testResult?.error"></span>
+                    </div>
+                </div>
+
+                <!-- ── Agent ── -->
+                <div class="bg-card border border-border rounded-xl p-5 mb-4">
+                    <h3 class="text-sm font-medium text-text-primary mb-4 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                        Agent
+                    </h3>
+                    <div class="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Name</label>
+                            <input type="text" x-model="form.agent_name" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary focus:outline-none focus:border-accent/50">
+                        </div>
+                        <div>
+                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Language</label>
+                            <select x-model="form.language" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary focus:outline-none focus:border-accent/50">
+                                <option value="ar">Arabic (العربية)</option>
+                                <option value="en">English</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">System Prompt</label>
+                        <textarea x-model="form.system_prompt" rows="4" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50"></textarea>
+                    </div>
+                    <div class="mt-3">
+                        <button @click="saveAgent()" class="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent/80 transition-colors">Save Agent</button>
+                    </div>
+                </div>
+
+                <!-- ── Cost ── -->
+                <div class="bg-card border border-border rounded-xl p-5 mb-4">
+                    <h3 class="text-sm font-medium text-text-primary mb-4 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                        Cost Controls
+                    </h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Max Budget ($)</label>
+                            <input type="number" x-model.number="form.max_cost" min="0.01" step="0.01" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
+                        </div>
+                        <div>
+                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Silence Window (s)</label>
+                            <input type="number" x-model.number="form.silence_window" min="30" step="10" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <button @click="saveCost()" class="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent/80 transition-colors">Save Cost</button>
+                    </div>
+                </div>
+
+                <!-- ── Import / Export ── -->
+                <div class="bg-card border border-border rounded-xl p-5">
+                    <h3 class="text-sm font-medium text-text-primary mb-4 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 11l5 5 5-5M12 4v12"/></svg>
+                        Import / Export
+                    </h3>
+                    <div class="flex items-center gap-3">
+                        <a href="/api/settings/export" class="px-4 py-1.5 rounded-lg border border-border text-text-secondary text-xs font-medium hover:bg-surface transition-colors">Export YAML</a>
+                        <span class="text-xs text-text-muted">Download current settings</span>
                     </div>
                 </div>
             </div>
@@ -1255,6 +1380,123 @@ function appState() {
         // ── Markdown render helper (exposed to template) ──
         renderMarkdown(text) {
             return renderMarkdown(text);
+        },
+    };
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SETTINGS STATE — manages provider, agent, and cost settings
+   ═══════════════════════════════════════════════════════════════════ */
+function settingsState() {
+    return {
+        form: {
+            base_url: '',
+            api_key: '',
+            model: '',
+            max_tokens: 4096,
+            temperature: 0.7,
+            timeout: 60,
+            agent_name: 'kazma',
+            language: 'ar',
+            system_prompt: '',
+            max_cost: 0.50,
+            silence_window: 300,
+        },
+        showKey: false,
+        testing: false,
+        testResult: null,
+
+        loadSettings() {
+            var self = this;
+            fetch('/api/settings')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var llm = data.llm || {};
+                    var agent = data.agent || {};
+                    var cost = data.cost || {};
+                    self.form.base_url = llm.base_url || 'https://api.openai.com/v1';
+                    self.form.api_key = llm.api_key || '';
+                    self.form.model = llm.model || 'gpt-4o-mini';
+                    self.form.max_tokens = llm.max_tokens || 4096;
+                    self.form.temperature = llm.temperature || 0.7;
+                    self.form.timeout = llm.timeout || 60;
+                    self.form.agent_name = agent.name || 'kazma';
+                    self.form.language = agent.language || 'ar';
+                    self.form.system_prompt = agent.system_prompt || '';
+                    self.form.max_cost = cost.max_cost || 0.50;
+                    self.form.silence_window = cost.silence_window || 300;
+                })
+                .catch(function() {});
+        },
+
+        saveModel() {
+            var self = this;
+            fetch('/api/settings', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify([
+                    {key: 'base_url', value: self.form.base_url, category: 'llm'},
+                    {key: 'api_key', value: self.form.api_key, category: 'llm'},
+                    {key: 'model', value: self.form.model, category: 'llm'},
+                    {key: 'max_tokens', value: self.form.max_tokens, category: 'llm'},
+                    {key: 'temperature', value: self.form.temperature, category: 'llm'},
+                    {key: 'timeout', value: self.form.timeout, category: 'llm'},
+                ]),
+            }).then(function(r) { return r.json(); })
+              .then(function() { showToast('Provider settings saved', 'success'); })
+              .catch(function() { showToast('Failed to save provider settings', 'error'); });
+        },
+
+        saveAgent() {
+            var self = this;
+            fetch('/api/settings', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify([
+                    {key: 'name', value: self.form.agent_name, category: 'agent'},
+                    {key: 'language', value: self.form.language, category: 'agent'},
+                    {key: 'system_prompt', value: self.form.system_prompt, category: 'agent'},
+                ]),
+            }).then(function(r) { return r.json(); })
+              .then(function() { showToast('Agent settings saved', 'success'); })
+              .catch(function() { showToast('Failed to save agent settings', 'error'); });
+        },
+
+        saveCost() {
+            var self = this;
+            fetch('/api/settings', {
+                method: 'PUT',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify([
+                    {key: 'max_cost', value: self.form.max_cost, category: 'cost'},
+                    {key: 'silence_window', value: self.form.silence_window, category: 'cost'},
+                ]),
+            }).then(function(r) { return r.json(); })
+              .then(function() { showToast('Cost settings saved', 'success'); })
+              .catch(function() { showToast('Failed to save cost settings', 'error'); });
+        },
+
+        testModel() {
+            var self = this;
+            self.testing = true;
+            self.testResult = null;
+            fetch('/api/settings/test-model', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    base_url: self.form.base_url,
+                    api_key: self.form.api_key,
+                    model: self.form.model,
+                }),
+            }).then(function(r) { return r.json(); })
+              .then(function(data) {
+                  self.testResult = data;
+                  self.testing = false;
+              })
+              .catch(function() {
+                  self.testResult = {success: false, error: 'Network error'};
+                  self.testing = false;
+              });
         },
     };
 }
