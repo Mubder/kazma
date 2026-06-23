@@ -199,59 +199,71 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     # ── /api/models — Auto-discover local LLM providers and models ──
     @app.get("/api/models")
-    async def get_models(base_url: str | None = None) -> dict:
-        """Fetch active local models.
+    async def get_models(
+        provider: str | None = None,
+        base_url: str | None = None,
+    ) -> dict:
+        """Fetch models from a specific provider or auto-detect.
 
-        If ?base_url= is provided, append /v1/models (strip trailing slash)
-        and fetch from that custom endpoint first. Otherwise fall back to
-        probing standard ports (Ollama 11434, LM Studio 1234).
+        Query params:
+          provider=lm-studio  → fetch from base_url (or default 1234)
+          provider=ollama     → fetch from http://127.0.0.1:11434/api/tags
+          provider=custom     → fetch from base_url + /v1/models
+          base_url=...        → override the default endpoint URL
+          (no params)         → probe all standard ports, return everything
 
-        Returns a flat list of model identifier strings, e.g.:
-        {"models": ["ollama/llama3.2", "openai/local-model", "ollama/qwen2.5-coder"]}
+        Returns: {"models": ["ollama/llama3.2", "openai/local-model", ...]}
         """
         import httpx
 
         logger = logging.getLogger("kazma.ui.models")
         models: list[str] = []
 
-        # 1. Try custom base_url if provided
-        if base_url:
+        if provider == "ollama":
+            url = "http://127.0.0.1:11434/api/tags"
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as c:
+                    resp = await c.get(url)
+                    if resp.status_code == 200:
+                        for m in resp.json().get("models", []):
+                            models.append(f"ollama/{m['name']}")
+            except Exception as e:
+                logger.debug("Ollama probe failed: %s", e)
+            return {"models": models, "provider": "ollama"}
+
+        if provider in ("lm-studio", "custom") and base_url:
             url = base_url.rstrip("/") + "/v1/models"
             try:
-                async with httpx.AsyncClient(timeout=3.0) as client:
-                    resp = await client.get(url)
+                async with httpx.AsyncClient(timeout=3.0) as c:
+                    resp = await c.get(url)
                     if resp.status_code == 200:
-                        data = resp.json()
-                        for m in data.get("data", []):
+                        for m in resp.json().get("data", []):
                             models.append(f"openai/{m['id']}")
-                        if models:
-                            return {"models": models}
-            except Exception:
-                logger.debug("Custom base_url %s not reachable, falling back…", base_url)
+            except Exception as e:
+                logger.debug("Provider %s at %s failed: %s", provider, url, e)
+            return {"models": models, "provider": provider, "base_url": base_url}
 
-        # 2. Try Ollama (standard port)
-        async with httpx.AsyncClient(timeout=1.0) as client:
-            try:
-                resp = await client.get("http://127.0.0.1:11434/api/tags")
+        # No provider specified → probe all standard ports (auto-detect)
+        # 1. Ollama
+        try:
+            async with httpx.AsyncClient(timeout=1.0) as c:
+                resp = await c.get("http://127.0.0.1:11434/api/tags")
                 if resp.status_code == 200:
-                    data = resp.json()
-                    for m in data.get("models", []):
+                    for m in resp.json().get("models", []):
                         models.append(f"ollama/{m['name']}")
-            except Exception:
-                logger.debug("Ollama not running or unreachable.")
+        except Exception:
+            logger.debug("Ollama not reachable (auto-detect).")
 
-        # 3. Try LM Studio (standard port)
-        async with httpx.AsyncClient(timeout=1.0) as client:
-            try:
-                resp = await client.get("http://127.0.0.1:1234/v1/models")
+        # 2. LM Studio (default port)
+        try:
+            async with httpx.AsyncClient(timeout=1.0) as c:
+                resp = await c.get("http://127.0.0.1:1234/v1/models")
                 if resp.status_code == 200:
-                    data = resp.json()
-                    for m in data.get("data", []):
+                    for m in resp.json().get("data", []):
                         models.append(f"openai/{m['id']}")
-            except Exception:
-                logger.debug("LM Studio not running or unreachable.")
+        except Exception:
+            logger.debug("LM Studio not reachable (auto-detect).")
 
-        # Fallback default
         if not models:
             models = ["ollama/qwen2.5-coder"]
 

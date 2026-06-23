@@ -295,12 +295,14 @@
                                 x-effect="__kazmaPersist()"
                                 class="bg-surface border border-border rounded-md px-2 py-0.5 text-[0.6rem]
                                        text-text-secondary font-mono focus:outline-none focus:border-accent/50
-                                       cursor-pointer min-w-[100px] max-w-[160px]">
+                                       cursor-pointer min-w-[100px] max-w-[180px]">
                             <option value="" x-text="'Default (gpt-4o-mini)'"></option>
                             <template x-for="m in $store.kazma.availableModels" :key="m">
                                 <option :value="m" x-text="m.split('/').pop()"></option>
                             </template>
-                            <option x-show="$store.kazma.availableModels.length === 0" disabled value="">Set Endpoint in Settings</option>
+                            <option x-show="$store.kazma.availableModels.length === 0" disabled value="">
+                                <span x-text="$store.kazma.providerType === 'cloud' ? 'No cloud profile active' : ($store.kazma.localProvider === 'ollama' ? 'Ollama unreachable' : 'Configure in Settings')"></span>
+                            </option>
                         </select>
                     </div>
                     <span class="text-[0.6rem] text-text-muted uppercase tracking-wider hidden sm:inline"><kbd>Ctrl</kbd> <kbd>K</kbd> clear · <kbd>Ctrl</kbd> <kbd>/</kbd> focus</span>
@@ -676,30 +678,182 @@
             <div class="max-w-3xl mx-auto">
                 <h2 class="text-lg font-semibold text-text-primary mb-6">Settings</h2>
 
-                <!-- ── LLM Provider ── -->
-                <div class="bg-card border border-border rounded-xl p-5 mb-4">
+                <!-- ── Provider & Model Manager ── -->
+                <div class="bg-card border border-border rounded-xl p-5 mb-4"
+                     x-data="{ fetching: false, fetchError: '', cloudName: '', cloudUrl: '', cloudKey: '' }"
+                     x-init="fetching = $store.kazma.fetchingModels; $watch('$store.kazma.fetchingModels', v => fetching = v)">
                     <h3 class="text-sm font-medium text-text-primary mb-4 flex items-center gap-2">
                         <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-                        LLM Provider
+                        Provider &amp; Models
                     </h3>
-                    <div class="grid grid-cols-2 gap-3">
-                        <div>
-                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Base URL</label>
-                            <input type="text" x-model="$store.kazma.baseUrl"
-                                   @input.debounce.500ms="__kazmaFormatBaseUrl($store.kazma); __kazmaPersist(); window.fetchModels && fetchModels()"
-                                   class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50"
-                                   placeholder="127.0.0.1:1234">
-                            <p class="text-[0.55rem] text-text-muted mt-1">Auto-formatted to http://.../v1 on save</p>
+
+                    <!-- ── Provider Type Toggle ── -->
+                    <div class="flex items-center gap-3 mb-5 bg-surface rounded-lg p-1 border border-border w-fit">
+                        <button @click="$store.kazma.providerType = 'local'; __kazmaPersist(); __kazmaFetchModels()"
+                                class="px-4 py-1.5 rounded-md text-xs font-medium transition-all duration-150"
+                                :class="$store.kazma.providerType === 'local' ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'">
+                            Local
+                        </button>
+                        <button @click="$store.kazma.providerType = 'cloud'; __kazmaPersist(); __kazmaFetchModels()"
+                                class="px-4 py-1.5 rounded-md text-xs font-medium transition-all duration-150"
+                                :class="$store.kazma.providerType === 'cloud' ? 'bg-accent text-white' : 'text-text-secondary hover:text-text-primary'">
+                            Cloud API
+                        </button>
+                    </div>
+
+                    <!-- ── LOCAL PROVIDERS ── -->
+                    <div x-show="$store.kazma.providerType === 'local'" x-transition:enter.duration.200ms.opacity>
+                        <!-- Provider radio row -->
+                        <div class="flex items-center gap-4 mb-4">
+                            <label class="flex items-center gap-2 cursor-pointer text-xs text-text-secondary">
+                                <input type="radio" value="ollama" x-model="$store.kazma.localProvider"
+                                       @change="__kazmaPersist(); __kazmaFetchModels()"
+                                       class="accent-accent">
+                                Ollama
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer text-xs text-text-secondary">
+                                <input type="radio" value="lm-studio" x-model="$store.kazma.localProvider"
+                                       @change="__kazmaPersist(); __kazmaFetchModels()"
+                                       class="accent-accent">
+                                LM Studio
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer text-xs text-text-secondary">
+                                <input type="radio" value="custom" x-model="$store.kazma.localProvider"
+                                       @change="__kazmaPersist(); __kazmaFetchModels()"
+                                       class="accent-accent">
+                                Custom
+                            </label>
                         </div>
-                        <div>
-                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">API Key</label>
-                            <div class="relative mt-1">
-                                <input :type="showKey ? 'text' : 'password'" x-model="form.api_key" class="w-full bg-surface border border-border rounded-lg px-3 py-2 pr-14 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50" placeholder="sk-...">
-                                <button @click="showKey = !showKey" class="absolute right-2 top-1/2 -translate-y-1/2 text-[0.6rem] text-accent hover:underline" x-text="showKey ? 'Hide' : 'Show'"></button>
+
+                        <!-- LM Studio URL -->
+                        <div x-show="$store.kazma.localProvider === 'lm-studio'"
+                             class="mb-3 flex items-end gap-2">
+                            <div class="flex-1">
+                                <label class="text-[0.6rem] uppercase tracking-wider text-text-muted">Endpoint URL</label>
+                                <input type="text" x-model="$store.kazma.baseUrls['lm-studio']"
+                                       @input.debounce.500ms="__kazmaPersist(); __kazmaFetchModels()"
+                                       class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50"
+                                       placeholder="http://127.0.0.1:1234">
+                            </div>
+                            <button @click="__kazmaFetchModels()"
+                                    class="px-3 py-2 rounded-lg bg-accent/10 border border-accent/30 text-accent text-xs font-medium hover:bg-accent/20 transition-colors flex items-center gap-1.5"
+                                    :disabled="$store.kazma.fetchingModels">
+                                <svg class="w-3.5 h-3.5" :class="$store.kazma.fetchingModels ? 'animate-spin' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                    <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                                </svg>
+                                <span x-text="$store.kazma.fetchingModels ? 'Fetching…' : 'Fetch Models'"></span>
+                            </button>
+                        </div>
+
+                        <!-- Ollama info -->
+                        <div x-show="$store.kazma.localProvider === 'ollama'" class="mb-3">
+                            <p class="text-xs text-text-muted">Auto-detects models from Ollama at <code class="text-accent font-mono text-[0.65rem]">http://127.0.0.1:11434</code></p>
+                        </div>
+
+                        <!-- Custom URL -->
+                        <div x-show="$store.kazma.localProvider === 'custom'"
+                             class="mb-3 flex items-end gap-2">
+                            <div class="flex-1">
+                                <label class="text-[0.6rem] uppercase tracking-wider text-text-muted">Endpoint URL</label>
+                                <input type="text" x-model="$store.kazma.baseUrls['custom']"
+                                       @input.debounce.500ms="__kazmaPersist(); __kazmaFetchModels()"
+                                       class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50"
+                                       placeholder="http://localhost:8080/v1">
+                            </div>
+                            <button @click="__kazmaFetchModels()"
+                                    class="px-3 py-2 rounded-lg bg-accent/10 border border-accent/30 text-accent text-xs font-medium hover:bg-accent/20 transition-colors"
+                                    :disabled="$store.kazma.fetchingModels">
+                                <span x-text="$store.kazma.fetchingModels ? 'Fetching…' : 'Fetch Models'"></span>
+                            </button>
+                        </div>
+
+                        <!-- Model dropdown + status -->
+                        <div class="flex items-center gap-3 mt-4">
+                            <div class="flex-1">
+                                <label class="text-[0.6rem] uppercase tracking-wider text-text-muted">Active Model</label>
+                                <select x-model="$store.kazma.selectedModel"
+                                        @change="__kazmaPersist()"
+                                        class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
+                                    <option value="">Default (gpt-4o-mini)</option>
+                                    <template x-for="m in $store.kazma.availableModels" :key="m">
+                                        <option :value="m" x-text="m"></option>
+                                    </template>
+                                </select>
                             </div>
                         </div>
-                        <div>
-                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Model</label>
+
+                        <!-- Fetch status -->
+                        <div class="flex items-center gap-2 mt-2 text-[0.6rem]">
+                            <span x-show="$store.kazma.fetchingModels" class="text-text-muted animate-pulse">⟳ Fetching models…</span>
+                            <span x-show="!$store.kazma.fetchingModels && $store.kazma.availableModels.length > 0" class="text-success">✓ <span x-text="$store.kazma.availableModels.length"></span> models available</span>
+                            <span x-show="!$store.kazma.fetchingModels && $store.kazma.availableModels.length === 0 && $store.kazma.modelFetchError" class="text-error">✗ <span x-text="$store.kazma.modelFetchError"></span></span>
+                        </div>
+                    </div>
+
+                    <!-- ── CLOUD API PROVIDERS ── -->
+                    <div x-show="$store.kazma.providerType === 'cloud'" x-transition:enter.duration.200ms.opacity>
+                        <!-- Saved profiles -->
+                        <template x-if="$store.kazma.cloudProfiles.length > 0">
+                            <div class="mb-4">
+                                <label class="text-[0.6rem] uppercase tracking-wider text-text-muted mb-2 block">Saved Profiles</label>
+                                <div class="space-y-1.5">
+                                    <template x-for="(profile, idx) in $store.kazma.cloudProfiles" :key="idx">
+                                        <div class="flex items-center justify-between bg-surface rounded-lg border border-border px-3 py-2"
+                                             :class="$store.kazma.activeCloudProfile === idx ? 'border-accent/50' : ''">
+                                            <div class="flex items-center gap-2 min-w-0">
+                                                <div class="w-2 h-2 rounded-full flex-shrink-0"
+                                                     :class="$store.kazma.activeCloudProfile === idx ? 'bg-success' : 'bg-border'"></div>
+                                                <div class="min-w-0">
+                                                    <div class="text-xs text-text-primary truncate font-medium" x-text="profile.name"></div>
+                                                    <div class="text-[0.6rem] text-text-muted truncate" x-text="profile.baseUrl"></div>
+                                                </div>
+                                                <span class="text-[0.55rem] text-text-muted ml-1" x-text="(profile.models || []).length + ' models'"></span>
+                                            </div>
+                                            <div class="flex items-center gap-1.5 flex-shrink-0">
+                                                <button @click="$store.kazma.activeCloudProfile = idx; __kazmaPersist(); __kazmaFetchModels()"
+                                                        class="px-2 py-1 rounded text-[0.6rem]"
+                                                        :class="$store.kazma.activeCloudProfile === idx ? 'bg-accent text-white' : 'bg-border text-text-secondary hover:bg-accent/20'"
+                                                        x-text="$store.kazma.activeCloudProfile === idx ? 'Active' : 'Switch'"></button>
+                                                <button @click="$store.kazma.cloudProfiles.splice(idx,1); $store.kazma.activeCloudProfile = $store.kazma.cloudProfiles.length ? 0 : null; __kazmaPersist()"
+                                                        class="p-1 rounded text-text-muted hover:text-error hover:bg-error/10 transition-colors">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                                                    </svg>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+
+                        <!-- Add new profile form -->
+                        <div class="bg-surface rounded-lg border border-border p-3">
+                            <label class="text-[0.6rem] uppercase tracking-wider text-text-muted mb-2 block">Add Cloud Profile</label>
+                            <div class="grid grid-cols-3 gap-2 mb-2">
+                                <input type="text" x-model="cloudName" placeholder="Profile name"
+                                       class="bg-card border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary font-mono focus:outline-none focus:border-accent/50"
+                                       @keydown.enter="cloudUrl && cloudName && addCloudProfile()">
+                                <input type="text" x-model="cloudUrl" placeholder="https://api.openai.com/v1"
+                                       class="bg-card border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary font-mono focus:outline-none focus:border-accent/50"
+                                       @keydown.enter="cloudUrl && cloudName && addCloudProfile()">
+                                <input type="text" x-model="cloudKey" placeholder="API key (optional)"
+                                       class="bg-card border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary font-mono focus:outline-none focus:border-accent/50"
+                                       @keydown.enter="cloudUrl && cloudName && addCloudProfile()">
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button @click="if(cloudName && cloudUrl) { $store.kazma.cloudProfiles.push({name: cloudName, baseUrl: cloudUrl.replace(/\/+$/,'') + '/v1', apiKey: cloudKey, models: []}); $store.kazma.activeCloudProfile = $store.kazma.cloudProfiles.length - 1; cloudName = ''; cloudUrl = ''; cloudKey = ''; __kazmaPersist(); __kazmaFetchModels(); }"
+                                        class="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent/80 transition-colors"
+                                        :disabled="!cloudName || !cloudUrl">
+                                    Add &amp; Fetch
+                                </button>
+                                <span class="text-[0.55rem] text-text-muted">Auto-appends /v1 to endpoint</span>
+                            </div>
+                        </div>
+
+                        <!-- Cloud model selector -->
+                        <div class="mt-4" x-show="$store.kazma.activeCloudProfile != null && $store.kazma.cloudProfiles.length > 0">
+                            <label class="text-[0.6rem] uppercase tracking-wider text-text-muted">Active Model</label>
                             <select x-model="$store.kazma.selectedModel"
                                     @change="__kazmaPersist()"
                                     class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
@@ -708,25 +862,12 @@
                                     <option :value="m" x-text="m"></option>
                                 </template>
                             </select>
+                            <div class="mt-2 text-[0.6rem]">
+                                <span x-show="$store.kazma.fetchingModels" class="text-text-muted animate-pulse">⟳ Fetching models…</span>
+                                <span x-show="!$store.kazma.fetchingModels && $store.kazma.availableModels.length > 0" class="text-success">✓ <span x-text="$store.kazma.availableModels.length"></span> models</span>
+                                <span x-show="$store.kazma.modelFetchError" class="text-error">✗ <span x-text="$store.kazma.modelFetchError"></span></span>
+                            </div>
                         </div>
-                        <div>
-                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Max Tokens</label>
-                            <input type="number" x-model.number="form.max_tokens" min="256" max="128000" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
-                        </div>
-                        <div>
-                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Temperature <span class="text-text-secondary" x-text="form.temperature"></span></label>
-                            <input type="range" x-model.number="form.temperature" min="0" max="2" step="0.1" class="w-full mt-1 accent-accent">
-                        </div>
-                        <div>
-                            <label class="text-[0.65rem] uppercase tracking-wider text-text-muted">Timeout (s)</label>
-                            <input type="number" x-model.number="form.timeout" min="5" max="300" class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-3 mt-4">
-                        <button @click="saveModel()" class="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent/80 transition-colors">Save Provider</button>
-                        <button @click="testModel()" class="px-4 py-1.5 rounded-lg border border-border text-text-secondary text-xs font-medium hover:bg-surface transition-colors" :disabled="testing">Test Connection</button>
-                        <span x-show="testing" class="text-xs text-text-muted">Testing…</span>
-                        <span x-show="testResult !== null" class="text-xs" :class="testResult?.success ? 'text-success' : 'text-error'" x-text="testResult?.success ? '✓ Connected — ' + testResult.model : '✗ ' + testResult?.error"></span>
                     </div>
                 </div>
 
@@ -1031,35 +1172,107 @@ document.addEventListener('htmx:afterSwap', function(evt) {
 });
 
 /* ═══════════════════════════════════════════════════════════════════
-   ALPINE STORE — global shared state for model config
+   ALPINE STORE — global shared state for provider + model config
    ═══════════════════════════════════════════════════════════════════ */
 document.addEventListener('alpine:init', function() {
-    // Load from localStorage or use defaults
     var saved = {};
     try { saved = JSON.parse(localStorage.getItem('kazma-config') || '{}'); } catch(e) {}
 
     Alpine.store('kazma', {
-        // Base URL — auto-formatted on write
-        baseUrl: saved.baseUrl || '',
-        // Selected model (e.g. "ollama/qwen2.5-coder")
+        // ── Provider type ──
+        providerType: saved.providerType || 'local',   // 'local' | 'cloud'
+
+        // ── Local provider selection ──
+        localProvider: saved.localProvider || 'ollama', // 'lm-studio' | 'ollama' | 'custom'
+
+        // ── Per-provider base URLs (persisted separately) ──
+        baseUrls: Object.assign({
+            'lm-studio': 'http://127.0.0.1:1234',
+            'custom': '',
+        }, saved.baseUrls || {}),
+
+        // ── Selected model ──
         selectedModel: saved.selectedModel || '',
-        // Available models from discovery
+
+        // ── Available models from current provider ──
         availableModels: [],
+
+        // ── Cloud API profiles ──
+        cloudProfiles: Array.isArray(saved.cloudProfiles) ? saved.cloudProfiles : [],
+
+        // ── Active cloud profile index ──
+        activeCloudProfile: saved.activeCloudProfile != null ? saved.activeCloudProfile : null,
+
+        // ── UI state ──
+        fetchingModels: false,
+        modelFetchError: '',
     });
 
-    // Patch setter: persist to localStorage on change
-    var _baseUrl = Alpine.store('kazma').baseUrl;
-    var _selectedModel = Alpine.store('kazma').selectedModel;
-    var _availableModels = Alpine.store('kazma').availableModels;
-
-    // Expose persist helper
+    // ── Persist helper ──
     window.__kazmaPersist = function() {
+        var s = Alpine.store('kazma');
         try {
             localStorage.setItem('kazma-config', JSON.stringify({
-                baseUrl: Alpine.store('kazma').baseUrl,
-                selectedModel: Alpine.store('kazma').selectedModel,
+                providerType: s.providerType,
+                localProvider: s.localProvider,
+                baseUrls: s.baseUrls,
+                selectedModel: s.selectedModel,
+                cloudProfiles: s.cloudProfiles,
+                activeCloudProfile: s.activeCloudProfile,
             }));
         } catch(e) {}
+    };
+
+    // ── Helper: resolve current effective base URL ──
+    window.__kazmaEffectiveBaseUrl = function() {
+        var s = Alpine.store('kazma');
+        if (s.providerType === 'cloud') {
+            if (s.activeCloudProfile != null && s.cloudProfiles[s.activeCloudProfile]) {
+                return s.cloudProfiles[s.activeCloudProfile].baseUrl || '';
+            }
+            return '';
+        }
+        if (s.localProvider === 'ollama') return '';
+        return s.baseUrls[s.localProvider] || '';
+    };
+
+    // ── Helper: fetch models for current provider ──
+    window.__kazmaFetchModels = function() {
+        var s = Alpine.store('kazma');
+        s.fetchingModels = true;
+        s.modelFetchError = '';
+
+        var url;
+        if (s.providerType === 'cloud') {
+            if (s.activeCloudProfile != null && s.cloudProfiles[s.activeCloudProfile]) {
+                var profile = s.cloudProfiles[s.activeCloudProfile];
+                url = '/api/models?provider=custom&base_url=' + encodeURIComponent(profile.baseUrl);
+            } else {
+                s.fetchingModels = false;
+                return;
+            }
+        } else {
+            if (s.localProvider === 'ollama') {
+                url = '/api/models?provider=ollama';
+            } else {
+                var bu = s.baseUrls[s.localProvider] || '';
+                if (!bu) { s.fetchingModels = false; return; }
+                url = '/api/models?provider=' + s.localProvider + '&base_url=' + encodeURIComponent(bu);
+            }
+        }
+
+        fetch(url)
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                s.availableModels = data.models || [];
+                s.fetchingModels = false;
+                if (!s.availableModels.length) s.modelFetchError = 'No models returned';
+            })
+            .catch(function() {
+                s.availableModels = [];
+                s.fetchingModels = false;
+                s.modelFetchError = 'Connection failed';
+            });
     };
 });
 
@@ -1129,8 +1342,11 @@ function appState() {
             };
             // Fetch available models from local providers
             self.fetchModels();
-            // Auto-fetch whenever baseUrl changes in store
-            self.$watch('$store.kazma.baseUrl', function() {
+            // Auto-fetch whenever provider config changes
+            self.$watch('$store.kazma.providerType', function() {
+                self.fetchModels();
+            });
+            self.$watch('$store.kazma.localProvider', function() {
                 self.fetchModels();
             });
         },
@@ -1294,7 +1510,7 @@ function appState() {
                 content: text,
                 session_id: this.activeSessionId,
                 model: Alpine.store('kazma').selectedModel,
-                base_url: Alpine.store('kazma').baseUrl,
+                base_url: __kazmaEffectiveBaseUrl(),
             }));
 
             this.inputText = '';
@@ -1418,30 +1634,26 @@ function appState() {
 
         // ── Fetch available local models from backend ──
         fetchModels() {
-            var self = this;
-            var baseUrl = Alpine.store('kazma').baseUrl;
-            var url = '/api/models';
-            if (baseUrl) {
-                url += '?base_url=' + encodeURIComponent(baseUrl);
-            }
-            fetch(url)
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    Alpine.store('kazma').availableModels = data.models || [];
-                })
-                .catch(function() {
-                    Alpine.store('kazma').availableModels = [];
-                });
+            __kazmaFetchModels();
         },
 
         // ── Human-readable label for the active model ──
         get activeModelLabel() {
-            var store = Alpine.store('kazma');
-            if (store.baseUrl) {
-                var shortUrl = store.baseUrl.replace(/^https?:\/\//, '').replace(/\/v1$/, '');
-                return store.selectedModel ? store.selectedModel.split('/').pop() + ' @ ' + shortUrl : shortUrl;
+            var s = Alpine.store('kazma');
+            if (s.selectedModel) {
+                var label = s.selectedModel.split('/').pop();
+                if (s.providerType === 'cloud') {
+                    var profile = s.activeCloudProfile != null ? s.cloudProfiles[s.activeCloudProfile] : null;
+                    if (profile) label += ' ☁ ' + profile.name;
+                } else if (s.localProvider === 'ollama') {
+                    label += ' (Ollama)';
+                } else {
+                    var url = s.baseUrls[s.localProvider] || '';
+                    var short = url.replace(/^https?:\/\//, '').replace(/\/v1$/, '');
+                    if (short) label += ' @ ' + short;
+                }
+                return label;
             }
-            if (store.selectedModel) return store.selectedModel.split('/').pop();
             return '{{ config.default_model|default("gpt-4o-mini") }}';
         },
 
