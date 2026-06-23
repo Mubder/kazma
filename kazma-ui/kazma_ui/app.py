@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -213,9 +214,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     # ── Telegram Webhook Router ──────────────────────────────────
     try:
-        from kazma_connectors.telegram_bridge import create_telegram_webhook_router
+        from kazma_comms.telegram_bridge import create_telegram_webhook_router
 
         telegram_token = config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
+        if not telegram_token:
+            telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
         telegram_router = create_telegram_webhook_router(
             graph=locals().get("sse_graph"),
             token=telegram_token,
@@ -225,7 +228,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             tracer=agent.tracer,
         )
         app.include_router(telegram_router)
-        logger.info("Telegram webhook router mounted at /api/telegram/webhook")
+        logger.info("Telegram webhook router mounted at /api/webhooks/telegram/{token}")
     except Exception as e:
         logger.warning("Telegram router failed to initialize: %s", e)
 

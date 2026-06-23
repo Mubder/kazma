@@ -321,6 +321,9 @@ def create_telegram_webhook_router(
     graph: Any,
     system_prompt: str = "",
     token: str | None = None,
+    cost_breaker: Any = None,
+    authority: Any = None,
+    tracer: Any = None,
 ) -> APIRouter:
     """Create a FastAPI router for the Telegram webhook endpoint.
 
