@@ -64,7 +64,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     # Create routers
     from kazma_ui.agents import create_agents_router
-    from kazma_ui.chat import chat_websocket_handler, create_chat_router
+    from kazma_ui.chat import chat_websocket_handler, create_chat_router, list_sessions
     from kazma_ui.mcp_ui import create_mcp_router
     from kazma_ui.settings import create_settings_router
     from kazma_ui.skills_ui import create_skills_router
@@ -162,22 +162,27 @@ def create_app(config_path: str | None = None) -> FastAPI:
     async def ws_chat(websocket: WebSocket) -> None:
         await chat_websocket_handler(websocket, agent)
 
-    # Root redirect
-    @app.get("/")
-    async def root() -> RedirectResponse:
-        return RedirectResponse("/chat")
-
-    # ── /workspace — Orchestration Workspace (new SSE streaming UI) ──
-    @app.get("/workspace", response_class=HTMLResponse)
-    async def workspace_page(request: Request) -> HTMLResponse:
-        """Render the real-time orchestration workspace with telemetry and streaming."""
+    # ── Root — Unified Master Workspace ──
+    @app.get("/", response_class=HTMLResponse)
+    async def root(request: Request) -> HTMLResponse:
+        """Serve the unified orchestration workspace."""
         return templates.TemplateResponse(
             request,
             "index.html",
             {
                 "config": agent.config,
+                "sessions": list_sessions(),
             },
         )
+
+    # ── Legacy routes -> redirect to / ──
+    @app.get("/chat", response_class=HTMLResponse)
+    async def chat_redirect() -> RedirectResponse:
+        return RedirectResponse("/", status_code=307)
+
+    @app.get("/workspace", response_class=HTMLResponse)
+    async def workspace_redirect() -> RedirectResponse:
+        return RedirectResponse("/", status_code=307)
 
     # ── /api/telemetry — Mock telemetry data for Chart.js dashboard ──
     import random
