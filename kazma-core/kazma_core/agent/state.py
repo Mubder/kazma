@@ -15,14 +15,14 @@ Design principles:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any, TypedDict
-
 
 # ── Node names (used in conditional routing) ────────────────────────────
 
-class NodeName(str, Enum):
+
+class NodeName(StrEnum):
     """Canonical names for every node in the Supervisor graph."""
 
     SUPERVISOR = "supervisor"
@@ -33,6 +33,7 @@ class NodeName(str, Enum):
 
 # ── Pending tool call (fan-out item) ───────────────────────────────────
 
+
 class PendingToolCall(TypedDict):
     """A single tool call queued for execution by the Tool Worker."""
 
@@ -42,6 +43,7 @@ class PendingToolCall(TypedDict):
 
 
 # ── Completed tool result (fan-in item) ────────────────────────────────
+
 
 class ToolResult(TypedDict, total=False):
     """Result of a single tool execution."""
@@ -54,6 +56,7 @@ class ToolResult(TypedDict, total=False):
 
 
 # ── Supervisor State ────────────────────────────────────────────────────
+
 
 class SupervisorState(TypedDict, total=False):
     """Core state that flows through the Supervisor graph.
@@ -113,6 +116,7 @@ class SupervisorState(TypedDict, total=False):
 
 # ── Factory ─────────────────────────────────────────────────────────────
 
+
 def initial_supervisor_state(
     *,
     thread_id: str | None = None,
@@ -124,7 +128,7 @@ def initial_supervisor_state(
         thread_id: Stable conversation thread ID.  Auto-generated if omitted.
         max_iterations: ReAct loop ceiling (default 10).
     """
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     return SupervisorState(
         messages=[],
         next_node=NodeName.SUPERVISOR,

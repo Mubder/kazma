@@ -127,6 +127,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # ── Telemetry SSE Route (real hardware metrics) ───────────────
     try:
         from kazma_core.telemetry import HardwareMonitor
+
         from kazma_ui.telemetry_route import create_telemetry_router
 
         hw_monitor = HardwareMonitor()
@@ -256,7 +257,9 @@ def create_app(config_path: str | None = None) -> FastAPI:
         # Drift the base values smoothly every tick
         if now - _telemetry_state["last_tick"] > 2.5:
             _telemetry_state["tokens_base"] = max(200, _telemetry_state["tokens_base"] + random.randint(-150, 200))
-            _telemetry_state["vram_base"] = max(512, min(20480, _telemetry_state["vram_base"] + random.randint(-128, 128)))
+            _telemetry_state["vram_base"] = max(
+                512, min(20480, _telemetry_state["vram_base"] + random.randint(-128, 128))
+            )
             _telemetry_state["last_tick"] = now
 
         return {

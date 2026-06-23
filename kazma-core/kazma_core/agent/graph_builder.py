@@ -40,8 +40,8 @@ import logging
 import time
 from typing import Any
 
-from langgraph.graph import END, StateGraph
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.graph import END, StateGraph
 
 from kazma_core.agent.state import (
     NodeName,
@@ -49,7 +49,7 @@ from kazma_core.agent.state import (
     SupervisorState,
     ToolResult,
 )
-from kazma_core.llm_provider import LLMProvider, LLMConfig
+from kazma_core.llm_provider import LLMConfig, LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +66,9 @@ async def supervisor_node(
     system_prompt: str,
     tool_definitions: list[dict[str, Any]],
     tool_executor: Any,  # LocalToolRegistry or ToolRegistry
-    cost_breaker: Any,   # CostCircuitBreaker
-    authority: Any,       # ContextAuthority
-    tracer: Any,          # KazmaTracer
+    cost_breaker: Any,  # CostCircuitBreaker
+    authority: Any,  # ContextAuthority
+    tracer: Any,  # KazmaTracer
 ) -> dict[str, Any]:
     """Supervisor node — the brain of the ReAct loop.
 
@@ -88,10 +88,13 @@ async def supervisor_node(
         logger.warning("[Supervisor] Cost breaker tripped — forcing respond")
         return {
             "next_node": NodeName.RESPOND,
-            "messages": messages + [{
-                "role": "assistant",
-                "content": "⚠️ ميزانية الجلسة انتهت. أعد التشغيل أو اتصل بالمسؤول.",
-            }],
+            "messages": messages
+            + [
+                {
+                    "role": "assistant",
+                    "content": "⚠️ ميزانية الجلسة انتهت. أعد التشغيل أو اتصل بالمسؤول.",
+                }
+            ],
         }
 
     # ── 80% context compaction check ───────────────────────────────
@@ -138,8 +141,7 @@ async def supervisor_node(
     )
 
     logger.info(
-        "[Supervisor] LLM responded: model=%s tokens=%d cost=$%.4f "
-        "duration=%.0fms tool_calls=%d",
+        "[Supervisor] LLM responded: model=%s tokens=%d cost=$%.4f duration=%.0fms tool_calls=%d",
         response.model,
         response.usage.get("total_tokens", 0),
         response.cost_usd,
@@ -176,10 +178,7 @@ async def supervisor_node(
         ],
     }
 
-    pending = [
-        PendingToolCall(id=tc.id, name=tc.name, arguments=tc.arguments)
-        for tc in response.tool_calls
-    ]
+    pending = [PendingToolCall(id=tc.id, name=tc.name, arguments=tc.arguments) for tc in response.tool_calls]
 
     return {
         "messages": messages + [assistant_msg],
@@ -228,7 +227,9 @@ async def tool_worker_node(
 
         logger.info(
             "[ToolWorker] %s → %.0fms (error=%s)",
-            tc["name"], duration_ms, result.get("is_error", False),
+            tc["name"],
+            duration_ms,
+            result.get("is_error", False),
         )
 
         return ToolResult(
@@ -245,11 +246,13 @@ async def tool_worker_node(
     messages = list(state.get("messages", []))
     tool_messages: list[dict[str, Any]] = []
     for tr in results:
-        tool_messages.append({
-            "role": "tool",
-            "tool_call_id": tr["tool_call_id"],
-            "content": tr["content"],
-        })
+        tool_messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tr["tool_call_id"],
+                "content": tr["content"],
+            }
+        )
 
     # Merge into cumulative tool_results
     cumulative = dict(state.get("tool_results", {}))
@@ -276,7 +279,8 @@ async def respond_node(state: SupervisorState) -> dict[str, Any]:
 
     logger.info(
         "[Respond] Finalizing turn (iteration=%d, messages=%d)",
-        iteration, len(messages),
+        iteration,
+        len(messages),
     )
 
     return {
@@ -463,13 +467,14 @@ async def create_supervisor_app(
     Returns:
         (compiled_graph, AsyncSqliteSaver)
     """
+    from pathlib import Path
+
     import aiosqlite
     import yaml
-    from pathlib import Path
 
     from kazma_core.authority import create_authority
     from kazma_core.cost_breaker import create_cost_breaker
-    from kazma_core.tracing import KazmaTracer, get_trace_store
+    from kazma_core.tracing import KazmaTracer
 
     # Load config
     if config is None:
@@ -490,6 +495,7 @@ async def create_supervisor_app(
     # Local tool executor
     if tool_executor is None:
         from kazma_core.agent.tool_registry import LocalToolRegistry
+
         tool_executor = LocalToolRegistry(include_builtins=True)
 
     # MCP manager — connect to configured servers if provided
@@ -498,13 +504,13 @@ async def create_supervisor_app(
         if mcp_servers:
             try:
                 count = await mcp_manager.connect_from_config(mcp_servers)
-                logger.info("MCP manager connected %d tools from %d servers",
-                            count, len(mcp_servers))
+                logger.info("MCP manager connected %d tools from %d servers", count, len(mcp_servers))
             except Exception as exc:
                 logger.warning("MCP manager failed to connect: %s", exc)
 
     # Wrap local + MCP into a unified executor
     from kazma_core.mcp.manager import UnifiedToolExecutor
+
     unified = UnifiedToolExecutor(local=tool_executor, mcp=mcp_manager)
 
     tool_definitions = unified.get_tool_definitions()

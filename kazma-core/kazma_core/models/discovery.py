@@ -23,9 +23,7 @@ _LOCAL_PROVIDERS: list[dict[str, Any]] = [
         "label": "Ollama",
         "models_url": "http://localhost:11434/api/tags",
         "base_url": "http://localhost:11434/v1",
-        "model_key": lambda data: [
-            m["name"] for m in data.get("models", [])
-        ] if isinstance(data, dict) else [],
+        "model_key": lambda data: [m["name"] for m in data.get("models", [])] if isinstance(data, dict) else [],
         "timeout": 3.0,
     },
     {
@@ -33,9 +31,7 @@ _LOCAL_PROVIDERS: list[dict[str, Any]] = [
         "label": "LM Studio",
         "models_url": "http://localhost:1234/v1/models",
         "base_url": "http://localhost:1234/v1",
-        "model_key": lambda data: [
-            m["id"] for m in data.get("data", [])
-        ] if isinstance(data, dict) else [],
+        "model_key": lambda data: [m["id"] for m in data.get("data", [])] if isinstance(data, dict) else [],
         "timeout": 3.0,
     },
     # Extensible — add more local providers here (e.g. vLLM, LocalAI, etc.)
@@ -85,10 +81,7 @@ async def _probe_provider(
         model_key_fn = provider_cfg["model_key"]
         raw_models = model_key_fn(data)
 
-        info.models = [
-            f"{provider_cfg['name']}/{m}" if "/" not in m else m
-            for m in raw_models
-        ]
+        info.models = [f"{provider_cfg['name']}/{m}" if "/" not in m else m for m in raw_models]
         info.online = True
         logger.info(
             "Discovered %s (%s): %d models",

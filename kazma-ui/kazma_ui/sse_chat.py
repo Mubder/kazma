@@ -20,7 +20,8 @@ import json
 import logging
 import time
 import uuid
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
@@ -126,11 +127,15 @@ async def _stream_langgraph_events(
                 # data.input can be the raw args dict or nested
                 if isinstance(inputs, dict) and "input" in inputs:
                     inputs = inputs["input"]
-                yield _sse_frame("tool_call", {
-                    "tool_name": name,
-                    "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
-                        if isinstance(inputs, dict) else str(inputs)[:2000],
-                })
+                yield _sse_frame(
+                    "tool_call",
+                    {
+                        "tool_name": name,
+                        "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
+                        if isinstance(inputs, dict)
+                        else str(inputs)[:2000],
+                    },
+                )
 
             # ── on_tool_end: tool execution finished ───────────────
             elif kind == "on_tool_end":
@@ -139,10 +144,13 @@ async def _stream_langgraph_events(
                     output = output.content
                 elif isinstance(output, dict):
                     output = output.get("content", json.dumps(output, ensure_ascii=False))
-                yield _sse_frame("tool_result", {
-                    "tool_name": name,
-                    "result": str(output)[:5000],
-                })
+                yield _sse_frame(
+                    "tool_result",
+                    {
+                        "tool_name": name,
+                        "result": str(output)[:5000],
+                    },
+                )
 
             # ── on_chain_end at __end__: graph finished ────────────
             elif kind == "on_chain_end" and name == "__end__":
@@ -161,13 +169,19 @@ async def _stream_langgraph_events(
         duration_ms = (time.monotonic() - turn_start) * 1000
         logger.info(
             "SSE turn complete: tokens=%d cost=$%.4f duration=%.0fms content_len=%d",
-            total_tokens, total_cost, duration_ms, len(content_acc),
+            total_tokens,
+            total_cost,
+            duration_ms,
+            len(content_acc),
         )
-        yield _sse_frame("done", {
-            "tokens": total_tokens,
-            "cost": round(total_cost, 6),
-            "duration_ms": round(duration_ms, 0),
-        })
+        yield _sse_frame(
+            "done",
+            {
+                "tokens": total_tokens,
+                "cost": round(total_cost, 6),
+                "duration_ms": round(duration_ms, 0),
+            },
+        )
 
     except asyncio.CancelledError:
         logger.warning("SSE stream cancelled by client disconnect")
@@ -262,9 +276,7 @@ def create_sse_chat_router(
         # ── Cost breaker gate ──────────────────────────────────────
         if cost_breaker and cost_breaker.should_halt():
             return StreamingResponse(
-                iter([_sse_frame("error", {
-                    "content": "⚠️ ميزانية الجلسة انتهت. أعد التشغيل. (Budget exceeded)"
-                })]),
+                iter([_sse_frame("error", {"content": "⚠️ ميزانية الجلسة انتهت. أعد التشغيل. (Budget exceeded)"})]),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
@@ -305,7 +317,9 @@ def create_sse_chat_router(
 
         logger.info(
             "SSE chat: session=%s thread=%s msg_len=%d",
-            session_id, thread_id[:12], len(user_message),
+            session_id,
+            thread_id[:12],
+            len(user_message),
         )
 
         # ── Stream the response ────────────────────────────────────
@@ -330,10 +344,12 @@ def create_sse_chat_router(
 
                 # Store assistant response in session history
                 if content_acc:
-                    session["messages"].append({
-                        "role": "assistant",
-                        "content": content_acc,
-                    })
+                    session["messages"].append(
+                        {
+                            "role": "assistant",
+                            "content": content_acc,
+                        }
+                    )
 
             except asyncio.CancelledError:
                 logger.warning("SSE generator cancelled for session=%s", session_id)

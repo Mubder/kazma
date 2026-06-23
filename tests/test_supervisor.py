@@ -9,22 +9,16 @@ Covers:
 
 from __future__ import annotations
 
-import json
 import tempfile
 from pathlib import Path
 from typing import Any
 
 import pytest
-
 from kazma_core.agent.state import (
     NodeName,
-    PendingToolCall,
-    SupervisorState,
-    ToolResult,
     initial_supervisor_state,
 )
-from kazma_core.agent.tool_registry import LocalToolRegistry, tool, _generate_schema
-
+from kazma_core.agent.tool_registry import LocalToolRegistry, _generate_schema
 
 # ═══════════════════════════════════════════════════════════════════
 # SupervisorState
@@ -281,12 +275,15 @@ class TestBuiltinTools:
     @pytest.mark.asyncio
     async def test_file_search(self):
         registry = LocalToolRegistry(include_builtins=True)
-        result = await registry.execute("file_search", {
-            "pattern": "def ",
-            "path": "/home/balfaris/kazma/kazma-core/kazma_core",
-            "glob": "*.py",
-            "limit": 5,
-        })
+        result = await registry.execute(
+            "file_search",
+            {
+                "pattern": "def ",
+                "path": "/home/balfaris/kazma/kazma-core/kazma_core",
+                "glob": "*.py",
+                "limit": 5,
+            },
+        )
         assert result["is_error"] is False
         lines = result["content"].strip().split("\n")
         assert len(lines) <= 5
@@ -294,16 +291,22 @@ class TestBuiltinTools:
     @pytest.mark.asyncio
     async def test_sqlite_query_select_only(self):
         registry = LocalToolRegistry(include_builtins=True)
-        result = await registry.execute("sqlite_query", {
-            "query": "SELECT 1 as val",
-            "db_path": ":memory:",
-        })
+        result = await registry.execute(
+            "sqlite_query",
+            {
+                "query": "SELECT 1 as val",
+                "db_path": ":memory:",
+            },
+        )
         # :memory: doesn't work across connections, but SELECT check passes
         # Test the safety check instead
-        result = await registry.execute("sqlite_query", {
-            "query": "DROP TABLE users",
-            "db_path": ":memory:",
-        })
+        result = await registry.execute(
+            "sqlite_query",
+            {
+                "query": "DROP TABLE users",
+                "db_path": ":memory:",
+            },
+        )
         assert result["is_error"] is True
         assert "Only SELECT" in result["content"]
 
@@ -338,9 +341,9 @@ class TestGraphBuilder:
 
     def test_graph_compiles(self):
         from kazma_core.agent.graph_builder import build_supervisor_graph
-        from kazma_core.llm_provider import LLMProvider, LLMConfig
         from kazma_core.authority import create_authority
         from kazma_core.cost_breaker import create_cost_breaker
+        from kazma_core.llm_provider import LLMConfig, LLMProvider
         from kazma_core.tracing import KazmaTracer
 
         registry = LocalToolRegistry(include_builtins=True)
@@ -368,10 +371,11 @@ class TestGraphBuilder:
 
     def test_graph_with_checkpointer(self):
         import asyncio
+
         from kazma_core.agent.graph_builder import build_supervisor_graph
-        from kazma_core.llm_provider import LLMProvider, LLMConfig
         from kazma_core.authority import create_authority
         from kazma_core.cost_breaker import create_cost_breaker
+        from kazma_core.llm_provider import LLMConfig, LLMProvider
         from kazma_core.tracing import KazmaTracer
 
         async def _build():

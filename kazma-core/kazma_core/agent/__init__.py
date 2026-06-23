@@ -8,24 +8,24 @@ Also re-exports backward-compatible names from the legacy agent module
 """
 
 # ── New Supervisor components ───────────────────────────────────────
-from kazma_core.agent.state import SupervisorState, NodeName, initial_supervisor_state
 from kazma_core.agent.graph_builder import build_supervisor_graph, create_supervisor_app
+from kazma_core.agent.state import NodeName, SupervisorState, initial_supervisor_state
 from kazma_core.agent.tool_registry import LocalToolRegistry, tool
 
 # ── Backward-compatible re-exports from the legacy agent module ─────
 # The old kazma_core/agent.py was moved to kazma_core/_legacy_agent.py
 # to avoid circular imports when this package was created.
 try:
-    from kazma_core._legacy_agent import (
-        AgentConfig,
-        KazmaAgent,
-        load_config,
-        build_graph,
-        create_app,
-        run_agent,
-        main,
+    from kazma_core._legacy_agent import (  # noqa: F401
         CHECKPOINT_DB,
         MAX_ITERATIONS,
+        AgentConfig,
+        KazmaAgent,
+        build_graph,
+        create_app,
+        load_config,
+        main,
+        run_agent,
     )
 except ImportError:
     # If the legacy module hasn't been moved yet, try importing directly

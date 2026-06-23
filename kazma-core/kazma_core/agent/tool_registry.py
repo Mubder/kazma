@@ -47,9 +47,11 @@ import json
 import logging
 import sqlite3
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC
 from pathlib import Path
-from typing import Any, Callable, get_type_hints
+from typing import Any, get_type_hints
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +219,7 @@ class LocalToolRegistry:
             async def file_read(path: str) -> str:
                 ...
         """
+
         def decorator(func: Callable) -> Callable:
             tool_name = name or func.__name__
             schema = _generate_schema(func)
@@ -232,6 +235,7 @@ class LocalToolRegistry:
             )
             logger.debug("Registered tool '%s' (category=%s, async=%s)", tool_name, category, is_async)
             return func
+
         return decorator
 
     def register_function(
@@ -266,14 +270,16 @@ class LocalToolRegistry:
         """
         definitions = []
         for tool in self._tools.values():
-            definitions.append({
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.input_schema,
-                },
-            })
+            definitions.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.input_schema,
+                    },
+                }
+            )
         return definitions
 
     # ── Execution ───────────────────────────────────────────────────
@@ -398,8 +404,7 @@ class LocalToolRegistry:
 
         @self.register(
             description=(
-                "Search for text inside files using regex. "
-                "Returns matching lines with file paths and line numbers."
+                "Search for text inside files using regex. Returns matching lines with file paths and line numbers."
             ),
             category="filesystem",
         )
@@ -410,6 +415,7 @@ class LocalToolRegistry:
             limit: int = 20,
         ) -> str:
             import re
+
             root = Path(path).expanduser().resolve()
             if not root.exists():
                 return f"Error: Path not found: {path}"
@@ -476,19 +482,22 @@ class LocalToolRegistry:
         )
         async def memory_search(query: str, limit: int = 5) -> str:
             # Placeholder — will be wired to kazma_memory at runtime
-            return json.dumps({
-                "query": query,
-                "results": [],
-                "note": "Memory search not yet wired. Connect kazma_memory backend.",
-            })
+            return json.dumps(
+                {
+                    "query": query,
+                    "results": [],
+                    "note": "Memory search not yet wired. Connect kazma_memory backend.",
+                }
+            )
 
         @self.register(
             description="Get the current date, time, and timezone in ISO-8601 format.",
             category="utility",
         )
         async def current_datetime() -> str:
-            from datetime import datetime, timezone
-            now = datetime.now(timezone.utc)
+            from datetime import datetime
+
+            now = datetime.now(UTC)
             return now.isoformat()
 
         @self.register(
@@ -503,7 +512,7 @@ class LocalToolRegistry:
             )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 return f"Error: Command timed out after {timeout}s"
 

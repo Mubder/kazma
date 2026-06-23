@@ -10,16 +10,12 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from kazma_ui.sse_chat import _sse_frame, create_sse_chat_router
-
 
 # ═══════════════════════════════════════════════════════════════════
 # SSE frame formatting
@@ -185,8 +181,9 @@ class TestStreamContent:
 
     def test_token_streaming(self):
         """Verify token events are yielded as SSE frames."""
-        from kazma_ui.sse_chat import _stream_langgraph_events
         import asyncio
+
+        from kazma_ui.sse_chat import _stream_langgraph_events
 
         # Mock AIMessageChunk
         class FakeChunk:
@@ -195,7 +192,11 @@ class TestStreamContent:
         events = [
             {"event": "on_chat_model_stream", "data": {"chunk": FakeChunk()}, "name": "llm"},
             {"event": "on_chat_model_stream", "data": {"chunk": FakeChunk()}, "name": "llm"},
-            {"event": "on_chain_end", "data": {"output": {"last_tokens": 10, "last_cost_usd": 0.001}}, "name": "__end__"},
+            {
+                "event": "on_chain_end",
+                "data": {"output": {"last_tokens": 10, "last_cost_usd": 0.001}},
+                "name": "__end__",
+            },
         ]
 
         graph = MagicMock()
@@ -204,7 +205,9 @@ class TestStreamContent:
         frames = []
 
         async def _collect():
-            async for frame in _stream_langgraph_events(graph, {"messages": []}, {"configurable": {"thread_id": "test"}}):
+            async for frame in _stream_langgraph_events(
+                graph, {"messages": []}, {"configurable": {"thread_id": "test"}}
+            ):
                 frames.append(frame)
 
         asyncio.run(_collect())
@@ -218,8 +221,9 @@ class TestStreamContent:
 
     def test_tool_call_events(self):
         """Verify tool_call and tool_result events are yielded."""
-        from kazma_ui.sse_chat import _stream_langgraph_events
         import asyncio
+
+        from kazma_ui.sse_chat import _stream_langgraph_events
 
         events = [
             {"event": "on_tool_start", "data": {"input": {"path": "/tmp"}}, "name": "file_list"},
@@ -233,7 +237,9 @@ class TestStreamContent:
         frames = []
 
         async def _collect():
-            async for frame in _stream_langgraph_events(graph, {"messages": []}, {"configurable": {"thread_id": "test"}}):
+            async for frame in _stream_langgraph_events(
+                graph, {"messages": []}, {"configurable": {"thread_id": "test"}}
+            ):
                 frames.append(frame)
 
         asyncio.run(_collect())
@@ -247,8 +253,9 @@ class TestStreamContent:
 
     def test_error_handling_in_stream(self):
         """Verify exceptions yield an error SSE frame."""
-        from kazma_ui.sse_chat import _stream_langgraph_events
         import asyncio
+
+        from kazma_ui.sse_chat import _stream_langgraph_events
 
         async def _failing_gen(*args, **kwargs):
             raise RuntimeError("LLM crashed")
@@ -260,7 +267,9 @@ class TestStreamContent:
         frames = []
 
         async def _collect():
-            async for frame in _stream_langgraph_events(graph, {"messages": []}, {"configurable": {"thread_id": "test"}}):
+            async for frame in _stream_langgraph_events(
+                graph, {"messages": []}, {"configurable": {"thread_id": "test"}}
+            ):
                 frames.append(frame)
 
         asyncio.run(_collect())

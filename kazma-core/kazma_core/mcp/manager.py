@@ -161,7 +161,7 @@ class AsyncMCPManager:
                     handle.process.terminate()
                     try:
                         await asyncio.wait_for(handle.process.wait(), timeout=5.0)
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         handle.process.kill()
                         await handle.process.wait()
                     logger.info("[MCP] Terminated stdio process '%s'", name)
@@ -205,15 +205,17 @@ class AsyncMCPManager:
                 if "type" not in input_schema:
                     input_schema["type"] = "object"
 
-                schemas.append({
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "description": desc,
-                        "parameters": input_schema,
-                    },
-                    "_mcp_server": handle.name,  # routing hint (stripped before sending to LLM)
-                })
+                schemas.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": name,
+                            "description": desc,
+                            "parameters": input_schema,
+                        },
+                        "_mcp_server": handle.name,  # routing hint (stripped before sending to LLM)
+                    }
+                )
         return schemas
 
     def get_tool_server_map(self) -> dict[str, str]:
@@ -293,7 +295,10 @@ class AsyncMCPManager:
 
             logger.info(
                 "[MCP] Tool '%s' on '%s' → %.0fms (error=%s)",
-                tool_name, server_name, duration_ms, is_error,
+                tool_name,
+                server_name,
+                duration_ms,
+                is_error,
             )
             return {"content": content, "is_error": is_error}
 
@@ -379,11 +384,15 @@ class AsyncMCPManager:
 
         # MCP handshake
         try:
-            await self._send(handle, "initialize", {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {"listChanged": False}},
-                "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
-            })
+            await self._send(
+                handle,
+                "initialize",
+                {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {"listChanged": False}},
+                    "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
+                },
+            )
             await self._notify(handle, "notifications/initialized", {})
         except Exception as exc:
             process.terminate()
@@ -427,11 +436,15 @@ class AsyncMCPManager:
 
         # MCP handshake
         try:
-            await self._send(handle, "initialize", {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {"tools": {"listChanged": False}},
-                "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
-            })
+            await self._send(
+                handle,
+                "initialize",
+                {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {"listChanged": False}},
+                    "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
+                },
+            )
             await self._notify(handle, "notifications/initialized", {})
         except Exception as exc:
             await http.aclose()
@@ -497,12 +510,9 @@ class AsyncMCPManager:
                     try:
                         stderr_bytes = await asyncio.wait_for(proc.stderr.read(4096), timeout=2.0)
                         stderr = stderr_bytes.decode(errors="replace")
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         pass
-                raise MCPBridgeError(
-                    f"Server '{handle.name}' exited with code {retcode}. "
-                    f"stderr: {stderr[:500]}"
-                )
+                raise MCPBridgeError(f"Server '{handle.name}' exited with code {retcode}. stderr: {stderr[:500]}")
             raise MCPBridgeError(f"Server '{handle.name}' closed stdout (EOF)")
 
         return _jsonrpc_parse(line.decode().strip())
@@ -636,21 +646,21 @@ class UnifiedToolExecutor:
             for server in self._mcp.list_servers():
                 for tool_name in self._mcp.get_tool_server_map():
                     if self._mcp.get_server_for_tool(tool_name) == server["name"]:
-                        tools.append({
-                            "name": tool_name,
-                            "description": "",
-                            "category": "mcp",
-                            "backend": f"mcp:{server['name']}",
-                        })
+                        tools.append(
+                            {
+                                "name": tool_name,
+                                "description": "",
+                                "category": "mcp",
+                                "backend": f"mcp:{server['name']}",
+                            }
+                        )
         return tools
 
     @property
     def connected(self) -> bool:
         """True if at least one backend has tools."""
         has_local = self._local is not None and self._local.tool_count > 0
-        has_mcp = self._mcp is not None and any(
-            s["connected"] for s in self._mcp.list_servers()
-        )
+        has_mcp = self._mcp is not None and any(s["connected"] for s in self._mcp.list_servers())
         return has_local or has_mcp
 
     async def disconnect_all(self) -> None:

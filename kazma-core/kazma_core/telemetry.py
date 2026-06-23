@@ -19,11 +19,11 @@ Usage::
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -215,7 +215,6 @@ class HardwareMonitor:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, _sync_cpu_ram)
 
-
     # ── GPU & VRAM (nvidia-smi) ────────────────────────────────────
 
     async def _get_gpu_vram(self) -> tuple[float, float, float]:
@@ -233,14 +232,12 @@ class HardwareMonitor:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=5.0
-            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5.0)
         except FileNotFoundError:
             self._nvidia_available = False
             logger.info("nvidia-smi not found — GPU telemetry disabled")
             return (0.0, 0.0, 0.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("nvidia-smi timed out after 5s")
             return (0.0, 0.0, 0.0)
         except Exception as exc:
@@ -261,7 +258,7 @@ class HardwareMonitor:
 
         return (
             gpu_pct,
-            vram_used_mb / 1024.0,   # MB → GB
+            vram_used_mb / 1024.0,  # MB → GB
             vram_total_mb / 1024.0,  # MB → GB
         )
 
@@ -281,7 +278,7 @@ def _sync_cpu_ram() -> tuple[float, float, float]:
 
     cpu = psutil.cpu_percent(interval=0.1)
     mem = psutil.virtual_memory()
-    ram_used = mem.used / (1024 ** 3)
-    ram_total = mem.total / (1024 ** 3)
+    ram_used = mem.used / (1024**3)
+    ram_total = mem.total / (1024**3)
 
     return (cpu, ram_used, ram_total)

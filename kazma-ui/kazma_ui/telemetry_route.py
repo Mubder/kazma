@@ -20,7 +20,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -47,6 +48,7 @@ def create_telemetry_router(monitor: Any = None) -> APIRouter:
         nonlocal _monitor
         if _monitor is None:
             from kazma_core.telemetry import HardwareMonitor
+
             _monitor = HardwareMonitor()
         return _monitor
 

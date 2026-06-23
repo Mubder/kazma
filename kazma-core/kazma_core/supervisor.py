@@ -173,24 +173,61 @@ async def supervisor_node(state: SupervisorState) -> dict[str, object]:
 
     # Simple query indicators
     simple_indicators = [
-        "شلونك", "شخبارك", "مرحبا", "السلام", "اهلا", "هلا",
-        "how are you", "hello", "hi", "hey",
-        "شكرا", "thanks", "thank you",
-        "مع السلامة", "bye", "goodbye",
-        "صباح", "مساء", "morning", "evening",
+        "شلونك",
+        "شخبارك",
+        "مرحبا",
+        "السلام",
+        "اهلا",
+        "هلا",
+        "how are you",
+        "hello",
+        "hi",
+        "hey",
+        "شكرا",
+        "thanks",
+        "thank you",
+        "مع السلامة",
+        "bye",
+        "goodbye",
+        "صباح",
+        "مساء",
+        "morning",
+        "evening",
     ]
 
     # Complex query indicators
     complex_indicators = [
-        "بحث", "search", "find", "look up",
-        "ملف", "file", "read", "write", "save",
-        "كود", "code", "برمجة", "programming",
-        "تحليل", "analyze", "analysis",
-        "حساب", "calculate", "compute",
-        "قاعدة بيانات", "database", "api",
-        "تنزيل", "download", "upload",
-        "تقرير", "report", "document",
-        "قائمة", "list", "directory",
+        "بحث",
+        "search",
+        "find",
+        "look up",
+        "ملف",
+        "file",
+        "read",
+        "write",
+        "save",
+        "كود",
+        "code",
+        "برمجة",
+        "programming",
+        "تحليل",
+        "analyze",
+        "analysis",
+        "حساب",
+        "calculate",
+        "compute",
+        "قاعدة بيانات",
+        "database",
+        "api",
+        "تنزيل",
+        "download",
+        "upload",
+        "تقرير",
+        "report",
+        "document",
+        "قائمة",
+        "list",
+        "directory",
     ]
 
     # Determine complexity
@@ -216,7 +253,7 @@ async def supervisor_node(state: SupervisorState) -> dict[str, object]:
         reason = "Query is ambiguous - defaulting to worker path for safety"
 
     # Check if query is in Arabic to activate cultural context
-    has_arabic = any("\u0600" <= char <= "\u06FF" for char in user_content)
+    has_arabic = any("\u0600" <= char <= "\u06ff" for char in user_content)
     cultural_active = state.get("cultural_context_active", True) and has_arabic
 
     logger.info(
@@ -264,7 +301,7 @@ async def simple_llm_node(state: SupervisorState) -> dict[str, object]:
     user_content = last_message.get("content", "") if isinstance(last_message, dict) else str(last_message)
 
     # Simple response logic (placeholder - would use actual LLM in production)
-    has_arabic = any("\u0600" <= char <= "\u06FF" for char in user_content)
+    has_arabic = any("\u0600" <= char <= "\u06ff" for char in user_content)
 
     if has_arabic:
         response = "أهلاً وسهلاً! أنا كاظمه، مساعدك الذكي. كيف يمكنني مساعدتك اليوم؟"
@@ -310,7 +347,7 @@ async def worker_node(state: SupervisorState) -> dict[str, object]:
     last_message = messages[-1]
     user_content = last_message.get("content", "") if isinstance(last_message, dict) else str(last_message)
 
-    has_arabic = any("\u0600" <= char <= "\u06FF" for char in user_content)
+    has_arabic = any("\u0600" <= char <= "\u06ff" for char in user_content)
 
     # Placeholder response - in production, this would:
     # 1. Analyze the task

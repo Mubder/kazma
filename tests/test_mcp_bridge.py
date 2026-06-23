@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
+from kazma_core.agent.tool_registry import LocalToolRegistry
 from kazma_core.mcp.manager import (
     AsyncMCPManager,
     MCPBridgeError,
@@ -23,8 +21,6 @@ from kazma_core.mcp.manager import (
     _jsonrpc_parse,
     _jsonrpc_request,
 )
-from kazma_core.agent.tool_registry import LocalToolRegistry
-
 
 # ═══════════════════════════════════════════════════════════════════
 # JSON-RPC helpers
@@ -51,11 +47,13 @@ class TestJsonRpcHelpers:
         assert result == {"tools": []}
 
     def test_parse_error(self):
-        raw = json.dumps({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": {"code": -32600, "message": "Invalid request"},
-        })
+        raw = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "error": {"code": -32600, "message": "Invalid request"},
+            }
+        )
         with pytest.raises(MCPBridgeError, match="Invalid request"):
             _jsonrpc_parse(raw)
 
@@ -293,11 +291,13 @@ class TestUnifiedToolExecutor:
             name="test",
             transport="stdio",
             connected=True,
-            tools=[{
-                "name": "mcp_tool",
-                "description": "MCP tool",
-                "inputSchema": {"type": "object", "properties": {"q": {"type": "string"}}},
-            }],
+            tools=[
+                {
+                    "name": "mcp_tool",
+                    "description": "MCP tool",
+                    "inputSchema": {"type": "object", "properties": {"q": {"type": "string"}}},
+                }
+            ],
         )
         mcp._servers["test"] = handle
 
@@ -402,7 +402,7 @@ class TestToolWorkerIntegration:
     async def test_worker_routes_to_local(self):
         """tool_worker_node correctly executes local tools via UnifiedToolExecutor."""
         from kazma_core.agent.graph_builder import tool_worker_node
-        from kazma_core.agent.state import initial_supervisor_state, PendingToolCall, NodeName
+        from kazma_core.agent.state import NodeName, PendingToolCall, initial_supervisor_state
         from kazma_core.tracing import KazmaTracer
 
         local = LocalToolRegistry(include_builtins=False)
@@ -437,7 +437,7 @@ class TestToolWorkerIntegration:
     async def test_worker_routes_to_mcp(self):
         """tool_worker_node correctly routes unknown tools to MCP."""
         from kazma_core.agent.graph_builder import tool_worker_node
-        from kazma_core.agent.state import initial_supervisor_state, PendingToolCall, NodeName
+        from kazma_core.agent.state import NodeName, PendingToolCall, initial_supervisor_state
         from kazma_core.tracing import KazmaTracer
 
         mcp = AsyncMCPManager()
@@ -472,7 +472,7 @@ class TestToolWorkerIntegration:
     async def test_worker_parallel_execution(self):
         """Multiple tool calls execute concurrently via asyncio.gather."""
         from kazma_core.agent.graph_builder import tool_worker_node
-        from kazma_core.agent.state import initial_supervisor_state, PendingToolCall
+        from kazma_core.agent.state import PendingToolCall, initial_supervisor_state
         from kazma_core.tracing import KazmaTracer
 
         local = LocalToolRegistry(include_builtins=False)
@@ -513,7 +513,7 @@ class TestToolWorkerIntegration:
     async def test_worker_handles_tool_crash(self):
         """A crashing tool doesn't take down the whole worker."""
         from kazma_core.agent.graph_builder import tool_worker_node
-        from kazma_core.agent.state import initial_supervisor_state, PendingToolCall
+        from kazma_core.agent.state import PendingToolCall, initial_supervisor_state
         from kazma_core.tracing import KazmaTracer
 
         local = LocalToolRegistry(include_builtins=False)

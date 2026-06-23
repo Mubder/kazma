@@ -14,13 +14,11 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from kazma_core.telemetry import (
     HardwareMonitor,
     TelemetrySnapshot,
     parse_nvidia_smi_output,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════
 # parse_nvidia_smi_output
@@ -98,8 +96,12 @@ class TestTelemetrySnapshot:
 
     def test_to_dict_basic(self):
         snap = TelemetrySnapshot(
-            cpu=45.2, ram_used_gb=16.4, ram_total_gb=32.0,
-            gpu=88.0, vram_used_gb=14.2, vram_total_gb=24.0,
+            cpu=45.2,
+            ram_used_gb=16.4,
+            ram_total_gb=32.0,
+            gpu=88.0,
+            vram_used_gb=14.2,
+            vram_total_gb=24.0,
             timestamp=1719162000.0,
         )
         d = snap.to_dict()
@@ -179,8 +181,8 @@ class TestHardwareMonitor:
         monitor._nvidia_available = False  # skip GPU
 
         mock_mem = MagicMock()
-        mock_mem.used = 16 * (1024 ** 3)  # 16 GB
-        mock_mem.total = 32 * (1024 ** 3)  # 32 GB
+        mock_mem.used = 16 * (1024**3)  # 16 GB
+        mock_mem.total = 32 * (1024**3)  # 32 GB
 
         with patch("kazma_core.telemetry._sync_cpu_ram", return_value=(45.5, 16.0, 32.0)):
             stats = await monitor.get_stats()
@@ -232,9 +234,7 @@ class TestHardwareMonitor:
         monitor = HardwareMonitor()
 
         mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(
-            return_value=(b"88, 14200, 24576\n", b"")
-        )
+        mock_process.communicate = AsyncMock(return_value=(b"88, 14200, 24576\n", b""))
         mock_process.returncode = 0
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
@@ -284,9 +284,7 @@ class TestHardwareMonitor:
         monitor._nvidia_available = None  # reset
 
         mock_process = AsyncMock()
-        mock_process.communicate = AsyncMock(
-            return_value=(b"", b"No devices were found")
-        )
+        mock_process.communicate = AsyncMock(return_value=(b"", b"No devices were found"))
         mock_process.returncode = 6
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
