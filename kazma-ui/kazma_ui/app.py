@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse
@@ -266,7 +266,43 @@ def create_app(config_path: str | None = None) -> FastAPI:
             "timestamp": now,
         }
 
-    # Lifecycle events
+    # ── /api/telemetry/stream — SSE stream for live Chart.js metrics ──
+    @app.get("/api/telemetry/stream")
+    async def telemetry_stream(request: Request):
+        """Server-Sent Events endpoint pushing hardware metrics every 1.5s.
+
+        Yields JSON payloads: {"cpu": 23, "ram_used_gb": 4.2, "gpu": 45, "vram_used_gb": 3.1}
+        """
+        import asyncio
+        import json as json_mod
+
+        async def event_generator():
+            tokens_base = 1200
+            vram_base = 3072
+            while True:
+                try:
+                    # Simulate drifting metrics
+                    tokens_base = max(200, tokens_base + random.randint(-80, 120))
+                    vram_base = max(512, min(20480, vram_base + random.randint(-64, 64)))
+                    cpu = random.randint(10, 85)
+                    ram = round(random.uniform(1.5, 12.0), 1)
+                    gpu = random.randint(5, 95)
+                    vram = round(vram_base / 1024, 1)  # MB -> GB
+
+                    payload = {
+                        "cpu": cpu,
+                        "ram_used_gb": ram,
+                        "gpu": gpu,
+                        "vram_used_gb": vram,
+                    }
+                    yield f"data: {json_mod.dumps(payload)}\n\n"
+                    await asyncio.sleep(1.5)
+                except asyncio.CancelledError:
+                    break
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    # ── Lifecycle events
     @app.on_event("startup")
     async def on_startup() -> None:
         try:

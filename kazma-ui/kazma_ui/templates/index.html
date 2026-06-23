@@ -350,109 +350,157 @@
                 <div class="p-2.5 border-t border-border text-[0.55rem] text-text-muted text-center">Kazma v0.1.0</div>
             </div>
 
-            <!-- ─── Chat area ─── -->
-            <div class="flex-1 flex flex-col min-w-0 bg-surface">
-                <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4" x-ref="messagesContainer">
-                    <template x-if="messages.length === 0">
-                        <div class="flex flex-col items-center justify-center h-full text-center py-16">
-                            <div class="w-16 h-16 rounded-2xl bg-accent-dim/20 border border-accent/20 flex items-center justify-center mb-4">
-                                <svg class="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                                    <path d="M12 2a10 10 0 0 1 7.07 17.07A10 10 0 0 1 12 22v-4a6 6 0 0 1 0-12v4a2 2 0 1 0 0 4v-4a6 6 0 0 1-6 6H4a10 10 0 0 1 8-18z"/>
-                                </svg>
-                            </div>
-                            <h2 class="text-lg font-semibold text-text-primary mb-1">Kazma Orchestration Workspace</h2>
-                            <p class="text-sm text-text-muted max-w-md">Send a message to start a conversation. The agent will stream its response in real-time with live telemetry and thought traces.</p>
-                        </div>
-                    </template>
-                    <template x-for="(msg, idx) in messages" :key="msg.id">
-                        <div class="msg-in flex gap-3" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
-                            <template x-if="msg.role === 'assistant'">
-                                <div class="w-8 h-8 rounded-full bg-accent-dim/30 border border-accent/20 flex items-center justify-center flex-shrink-0 mt-1">
-                                    <span class="text-xs font-bold text-accent">K</span>
+            <!-- ─── Split Pane: Chat (left) + Artifacts (right) ─── -->
+            <div class="flex-1 flex min-w-0">
+
+                <!-- ─── Chat area (left pane) ─── -->
+                <div class="flex flex-col min-w-0"
+                     :class="showArtifacts ? 'w-3/5' : 'flex-1'">
+                    <div class="flex-1 overflow-y-auto px-4 py-4 space-y-4" x-ref="messagesContainer">
+                        <template x-if="messages.length === 0">
+                            <div class="flex flex-col items-center justify-center h-full text-center py-16">
+                                <div class="w-16 h-16 rounded-2xl bg-accent-dim/20 border border-accent/20 flex items-center justify-center mb-4">
+                                    <svg class="w-8 h-8 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                                        <path d="M12 2a10 10 0 0 1 7.07 17.07A10 10 0 0 1 12 22v-4a6 6 0 0 1 0-12v4a2 2 0 1 0 0 4v-4a6 6 0 0 1-6 6H4a10 10 0 0 1 8-18z"/>
+                                    </svg>
                                 </div>
-                            </template>
-                            <div class="max-w-[80%] rounded-2xl px-4 py-3"
-                                 :class="msg.role === 'user' ? 'bg-accent/15 border border-accent/20 rounded-tr-md' : 'bg-card border border-border rounded-tl-md'">
-                                <template x-if="msg.role === 'user'">
-                                    <div class="text-sm text-text-primary whitespace-pre-wrap" x-text="msg.content"></div>
-                                </template>
+                                <h2 class="text-lg font-semibold text-text-primary mb-1">Kazma Orchestration Workspace</h2>
+                                <p class="text-sm text-text-muted max-w-md">Send a message to start a conversation. The agent will stream its response in real-time with live telemetry and thought traces.</p>
+                            </div>
+                        </template>
+                        <template x-for="(msg, idx) in messages" :key="msg.id">
+                            <div class="msg-in flex gap-3" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
                                 <template x-if="msg.role === 'assistant'">
-                                    <div>
-                                        <template x-if="msg.thoughts && msg.thoughts.length > 0">
-                                            <div class="mb-3">
-                                                <template x-for="(thought, ti) in msg.thoughts" :key="ti">
-                                                    <div class="rounded-lg border border-border overflow-hidden mb-1.5">
-                                                        <div class="thought-toggle flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-secondary"
-                                                             :class="thought.open ? 'open' : ''"
-                                                             @click="thought.open = !thought.open">
-                                                            <svg class="chevron w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                                                                <polyline points="9 18 15 12 9 6"/>
-                                                            </svg>
-                                                            <span class="text-accent font-semibold">⦿</span>
-                                                            <span x-text="thought.name"></span>
-                                                            <span class="text-[0.6rem] text-text-muted ml-auto" x-text="(thought.result.length > 60 ? thought.result.slice(0,60) + '...' : thought.result)"></span>
-                                                        </div>
-                                                        <div x-show="thought.open" x-collapse class="border-t border-border">
-                                                            <pre class="text-[0.75rem] leading-relaxed p-3 overflow-x-auto" style="background:#0d1117;color:#e2e8f0;font-family:'JetBrains Mono',monospace;"><code x-text="thought.result"></code></pre>
-                                                        </div>
-                                                    </div>
-                                                </template>
-                                            </div>
-                                        </template>
-                                        <div class="message-content text-sm leading-relaxed"
-                                             x-html="renderMarkdown(msg.id === streamingMsgId && isStreaming ? msg.displayContent : msg.content)"></div>
-                                        <template x-if="msg.id === streamingMsgId && isStreaming">
-                                            <div class="flex items-center gap-2 mt-2 pt-2 border-t border-border/50">
-                                                <span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span>
-                                                <span class="text-[0.65rem] text-text-muted ml-1">Streaming…</span>
-                                            </div>
-                                        </template>
+                                    <div class="w-8 h-8 rounded-full bg-accent-dim/30 border border-accent/20 flex items-center justify-center flex-shrink-0 mt-1">
+                                        <span class="text-xs font-bold text-accent">K</span>
                                     </div>
                                 </template>
-                                <div class="flex items-center gap-3 mt-1.5 text-[0.6rem] text-text-muted"
-                                     x-show="msg.role === 'assistant' && (msg.tokens > 0 || msg.cost > 0)">
-                                    <span x-show="msg.tokens > 0" x-text="msg.tokens + ' tok'"></span>
-                                    <span x-show="msg.cost > 0" x-text="'$' + msg.cost.toFixed(4)"></span>
+                                <div class="max-w-[85%] rounded-2xl px-4 py-3"
+                                     :class="msg.role === 'user' ? 'bg-accent/15 border border-accent/20 rounded-tr-md' : 'bg-card border border-border rounded-tl-md'">
+                                    <template x-if="msg.role === 'user'">
+                                        <div class="text-sm text-text-primary whitespace-pre-wrap" x-text="msg.content"></div>
+                                    </template>
+                                    <template x-if="msg.role === 'assistant'">
+                                        <div>
+                                            <!-- Collapsible thought logs with artifact panel trigger -->
+                                            <template x-if="msg.thoughts && msg.thoughts.length > 0">
+                                                <div class="mb-3">
+                                                    <template x-for="(thought, ti) in msg.thoughts" :key="ti">
+                                                        <div class="rounded-lg border border-border overflow-hidden mb-1.5">
+                                                            <!-- Thought header: toggle inline OR open full artifact panel -->
+                                                            <div class="thought-toggle flex items-center gap-2 px-3 py-1.5 text-xs font-mono text-text-secondary"
+                                                                 :class="thought.open ? 'open' : ''">
+                                                                <span @click="thought.open = !thought.open" class="flex items-center gap-1 cursor-pointer">
+                                                                    <svg class="chevron w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                                                        <polyline points="9 18 15 12 9 6"/>
+                                                                    </svg>
+                                                                </span>
+                                                                <span class="text-accent font-semibold">⦿</span>
+                                                                <!-- Click name/result to open in artifacts panel -->
+                                                                <span @click="openArtifact(thought.name, thought.result)"
+                                                                      class="cursor-pointer hover:text-text-primary truncate min-w-0 flex-1">
+                                                                    <span x-text="thought.name"></span>
+                                                                    <span class="text-[0.6rem] text-text-muted ml-1.5"
+                                                                          x-text="'(click to expand)'"></span>
+                                                                </span>
+                                                                <span class="text-[0.6rem] text-text-muted ml-auto flex-shrink-0"
+                                                                      x-text="(thought.result.length > 50 ? thought.result.slice(0,50) + '…' : thought.result)"></span>
+                                                            </div>
+                                                            <!-- Inline collapse (quick peek) -->
+                                                            <div x-show="thought.open" x-collapse class="border-t border-border">
+                                                                <pre class="text-[0.75rem] leading-relaxed p-3 overflow-x-auto max-h-48" style="background:#0d1117;color:#e2e8f0;font-family:'JetBrains Mono',monospace;"><code x-text="thought.result"></code></pre>
+                                                            </div>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </template>
+                                            <div class="message-content text-sm leading-relaxed"
+                                                 x-html="renderMarkdown(msg.id === streamingMsgId && isStreaming ? msg.displayContent : msg.content)"></div>
+                                            <template x-if="msg.id === streamingMsgId && isStreaming">
+                                                <div class="flex items-center gap-2 mt-2 pt-2 border-t border-border/50">
+                                                    <span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span>
+                                                    <span class="text-[0.65rem] text-text-muted ml-1">Streaming…</span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <div class="flex items-center gap-3 mt-1.5 text-[0.6rem] text-text-muted"
+                                         x-show="msg.role === 'assistant' && (msg.tokens > 0 || msg.cost > 0)">
+                                        <span x-show="msg.tokens > 0" x-text="msg.tokens + ' tok'"></span>
+                                        <span x-show="msg.cost > 0" x-text="'$' + msg.cost.toFixed(4)"></span>
+                                    </div>
                                 </div>
+                                <template x-if="msg.role === 'user'">
+                                    <div class="w-8 h-8 rounded-full bg-accent flex items-center justify-center flex-shrink-0 mt-1">
+                                        <span class="text-xs font-bold text-white">U</span>
+                                    </div>
+                                </template>
                             </div>
-                            <template x-if="msg.role === 'user'">
-                                <div class="w-8 h-8 rounded-full bg-accent flex items-center justify-center flex-shrink-0 mt-1">
-                                    <span class="text-xs font-bold text-white">U</span>
-                                </div>
-                            </template>
+                        </template>
+                        <div x-ref="scrollAnchor"></div>
+                    </div>
+                    <!-- ─── Input Area ─── -->
+                    <div class="flex-shrink-0 border-t border-border px-4 py-3 bg-card" :class="isStreaming ? 'streaming-active' : ''">
+                        <div class="flex items-end gap-2">
+                            <div class="flex-1 relative">
+                                <textarea x-ref="chatInput" x-model="inputText" @keydown="handleInputKeydown"
+                                    placeholder="Type your message…" rows="1"
+                                    class="w-full bg-surface border border-border rounded-xl px-4 py-3 pr-12 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 resize-none transition-colors duration-150 font-sans"
+                                    :disabled="isStreaming"></textarea>
+                                <button @click="sendMessage()" :disabled="!inputText.trim() || isStreaming || !wsConnected"
+                                    class="absolute right-1.5 bottom-1.5 p-2 rounded-lg transition-all duration-150 flex items-center justify-center"
+                                    :class="inputText.trim() && !isStreaming && wsConnected ? 'bg-accent text-white hover:bg-accent/80 cursor-pointer' : 'bg-border text-text-muted cursor-not-allowed'">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
-                    </template>
-                    <div x-ref="scrollAnchor"></div>
-                </div>
-                <div class="flex-shrink-0 border-t border-border px-4 py-3 bg-card" :class="isStreaming ? 'streaming-active' : ''">
-                    <div class="max-w-4xl mx-auto flex items-end gap-2">
-                        <div class="flex-1 relative">
-                            <textarea x-ref="chatInput" x-model="inputText" @keydown="handleInputKeydown"
-                                placeholder="Type your message…" rows="1"
-                                class="w-full bg-surface border border-border rounded-xl px-4 py-3 pr-12 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 resize-none transition-colors duration-150 font-sans"
-                                :disabled="isStreaming"></textarea>
-                            <button @click="sendMessage()" :disabled="!inputText.trim() || isStreaming || !wsConnected"
-                                class="absolute right-1.5 bottom-1.5 p-2 rounded-lg transition-all duration-150 flex items-center justify-center"
-                                :class="inputText.trim() && !isStreaming && wsConnected ? 'bg-accent text-white hover:bg-accent/80 cursor-pointer' : 'bg-border text-text-muted cursor-not-allowed'">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-                                    <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                                </svg>
-                            </button>
+                        <div class="flex items-center justify-between mt-1.5 px-1">
+                            <div class="flex items-center gap-3 text-[0.6rem] text-text-muted">
+                                <span><kbd>Enter</kbd> send · <kbd>Shift</kbd> <kbd>Enter</kbd> newline</span>
+                                <span><kbd>Ctrl</kbd> <kbd>K</kbd> clear</span>
+                                <span><kbd>Ctrl</kbd> <kbd>/</kbd> focus</span>
+                            </div>
+                            <div class="text-[0.6rem] text-text-muted">
+                                <span x-show="wsConnected" class="text-success">● Connected</span>
+                                <span x-show="!wsConnected" class="text-error">● Disconnected</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="max-w-4xl mx-auto flex items-center justify-between mt-1.5 px-1">
-                        <div class="flex items-center gap-3 text-[0.6rem] text-text-muted">
-                            <span><kbd>Enter</kbd> send · <kbd>Shift</kbd> <kbd>Enter</kbd> newline</span>
-                            <span><kbd>Ctrl</kbd> <kbd>K</kbd> clear</span>
-                            <span><kbd>Ctrl</kbd> <kbd>/</kbd> focus</span>
-                        </div>
-                        <div class="text-[0.6rem] text-text-muted">
-                            <span x-show="wsConnected" class="text-success">● Connected</span>
-                            <span x-show="!wsConnected" class="text-error">● Disconnected</span>
-                        </div>
-                        </div>
-                        </div>
                 </div>
+
+                <!-- ─── Artifacts & Memory Panel (right pane) ─── -->
+                <div x-show="showArtifacts"
+                     x-transition:enter.duration.250ms.opacity
+                     class="w-2/5 flex-shrink-0 border-l border-border bg-card flex flex-col min-w-0">
+                    <!-- Artifacts header -->
+                    <div class="flex items-center justify-between px-4 py-2.5 border-b border-border">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <svg class="w-4 h-4 flex-shrink-0 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                            </svg>
+                            <span class="text-sm font-medium text-text-primary truncate" x-text="currentArtifactName || 'Artifact'"></span>
+                        </div>
+                        <button @click="closeArtifact()"
+                                class="p-1 rounded-lg hover:bg-surface text-text-muted hover:text-text-primary transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <!-- Artifacts body — rendered markdown -->
+                    <div class="flex-1 overflow-y-auto p-4">
+                        <div class="message-content text-sm leading-relaxed"
+                             x-html="renderMarkdown(currentArtifactContent)"></div>
+                    </div>
+                    <!-- Artifacts footer -->
+                    <div class="flex-shrink-0 px-4 py-2 border-t border-border text-[0.6rem] text-text-muted flex items-center justify-between">
+                        <span>Rendered via marked.js + highlight.js</span>
+                        <button @click="closeArtifact()" class="text-accent hover:underline">Close</button>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -837,7 +885,10 @@ function appState() {
         totalTokens: 0,
         totalCost: 0,
         telemetryOpen: true,
-        telemetry: { tokens: 0, vram: 0 },
+        telemetry: { tokens: 0, vram: 0, cpu: 0, ram: 0, gpu: 0 },
+        showArtifacts: false,
+        currentArtifactContent: '',
+        currentArtifactName: '',
         currentTab: 'workspace',
         selectedModel: '',
         defaultModel: '{{ config.default_model|default("gpt-4o-mini") }}',
@@ -854,7 +905,7 @@ function appState() {
             { name: 'filesystem', transport: 'stdio', tools: 4, status: 'connected', enabled: true },
             { name: 'web-search', transport: 'sse', tools: 1, status: 'disconnected', enabled: false },
         ],
-        _telemetryTimer: null,
+        _eventSource: null,
 
         // WebSocket reference
         _ws: null,
@@ -868,10 +919,23 @@ function appState() {
             self.$nextTick(function() {
                 initTelemetryCharts();
             });
-            // Start telemetry polling every 3s
-            self._telemetryTimer = setInterval(function() {
-                self.pollTelemetry();
-            }, 3000);
+            // Connect to SSE telemetry stream (replaces old HTTP polling)
+            self._eventSource = new EventSource('/api/telemetry/stream');
+            self._eventSource.onmessage = function(event) {
+                try {
+                    var data = JSON.parse(event.data);
+                    self.telemetry.cpu = data.cpu || 0;
+                    self.telemetry.ram = data.ram_used_gb || 0;
+                    self.telemetry.gpu = data.gpu || 0;
+                    self.telemetry.vram = data.vram_used_gb || 0;
+                    // Push to Chart.js — use GPU% as token proxy, VRAM for VRAM
+                    updateTelemetryChart(telemetryCharts.tokenChart, telemetryHistory.tokens, data.gpu || 0, '');
+                    updateTelemetryChart(telemetryCharts.vramChart, telemetryHistory.vram, (data.vram_used_gb || 0) * 1024, '');
+                } catch(e) {}
+            };
+            self._eventSource.onerror = function() {
+                // Browser will auto-reconnect
+            };
             // Fetch available models from local providers
             self.fetchModels();
         },
@@ -1174,18 +1238,18 @@ function appState() {
             if (server) server.enabled = !server.enabled;
         },
 
-        // ── Poll telemetry endpoint ──
-        pollTelemetry() {
-            var self = this;
-            fetch('/api/telemetry')
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    self.telemetry.tokens = data.tokens || 0;
-                    self.telemetry.vram = data.vram_mb || 0;
-                    updateTelemetryChart(telemetryCharts.tokenChart, telemetryHistory.tokens, data.tokens || 0, '');
-                    updateTelemetryChart(telemetryCharts.vramChart, telemetryHistory.vram, data.vram_mb || 0, '');
-                })
-                .catch(function() {});
+        // ── Open artifact in right-side panel ──
+        openArtifact(name, content) {
+            this.currentArtifactName = name;
+            this.currentArtifactContent = content || '(empty result)';
+            this.showArtifacts = true;
+        },
+
+        // ── Close artifact panel ──
+        closeArtifact() {
+            this.showArtifacts = false;
+            this.currentArtifactContent = '';
+            this.currentArtifactName = '';
         },
 
         // ── Markdown render helper (exposed to template) ──
