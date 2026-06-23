@@ -272,9 +272,8 @@
              TELEMETRY BAR — appears in all tabs
              ══════════════════════════════════════════════════════════ -->
         <div class="flex-shrink-0 border-b" :class="telemetryOpen ? 'border-border-active' : 'border-border'">
-            <div class="flex items-center justify-between px-4 py-2 bg-card cursor-pointer select-none"
-                 @click="telemetryOpen = !telemetryOpen">
-                <div class="flex items-center gap-3">
+            <div class="flex items-center justify-between px-4 py-2 bg-card select-none">
+                <div class="flex items-center gap-3 cursor-pointer" @click.stop="telemetryOpen = !telemetryOpen">
                     <svg class="w-4 h-4 transition-transform duration-200"
                          :class="telemetryOpen ? 'rotate-90' : ''"
                          fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
@@ -296,7 +295,7 @@
                                 class="bg-surface border border-border rounded-md px-2 py-0.5 text-[0.6rem]
                                        text-text-secondary font-mono focus:outline-none focus:border-accent/50
                                        cursor-pointer min-w-[100px] max-w-[180px]">
-                            <option value="" x-text="'Default (gpt-4o-mini)'"></option>
+                            <option value="" x-text="'Default'"></option>
                             <template x-for="m in $store.kazma.availableModels" :key="m">
                                 <option :value="m" x-text="m.split('/').pop()"></option>
                             </template>
@@ -774,7 +773,7 @@
                                 <select x-model="$store.kazma.selectedModel"
                                         @change="__kazmaPersist()"
                                         class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
-                                    <option value="">Default (gpt-4o-mini)</option>
+                                    <option value="">Default</option>
                                     <template x-for="m in $store.kazma.availableModels" :key="m">
                                         <option :value="m" x-text="m"></option>
                                     </template>
@@ -857,7 +856,7 @@
                             <select x-model="$store.kazma.selectedModel"
                                     @change="__kazmaPersist()"
                                     class="w-full bg-surface border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50">
-                                <option value="">Default (gpt-4o-mini)</option>
+                                <option value="">Default</option>
                                 <template x-for="m in $store.kazma.availableModels" :key="m">
                                     <option :value="m" x-text="m"></option>
                                 </template>
@@ -931,6 +930,49 @@
                         <span class="text-xs text-text-muted">Download current settings</span>
                     </div>
                 </div>
+
+                <!-- ── Omnichannel Comms ── -->
+                <div class="bg-card border border-border rounded-xl p-5 mb-4"
+                     x-data="{ telegramToken: '', webhookEnabled: false, tgStatus: 'Disconnected' }">
+                    <h3 class="text-sm font-medium text-text-primary mb-4 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+                        Omnichannel Comms
+                    </h3>
+                    <div class="space-y-3">
+                        <!-- Telegram -->
+                        <div class="bg-surface rounded-lg border border-border p-3">
+                            <div class="flex items-center justify-between mb-3">
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-5 h-5 text-[#229ED9]" fill="currentColor" viewBox="0 0 24 24"><path d="M11.944 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0012 0a12 12 0 00-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 01.171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.063 3.345-.479.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+                                    <span class="text-sm font-medium text-text-primary">Telegram</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-[0.6rem] px-2 py-0.5 rounded font-mono"
+                                          :class="tgStatus === 'Connected' ? 'bg-success/20 text-success' : 'bg-error/20 text-error'"
+                                          x-text="tgStatus"></span>
+                                    <label class="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" class="sr-only peer" x-model="webhookEnabled" @change="if(webhookEnabled) { tgStatus = 'Connected'; showToast('Webhook enabled — bot will receive updates', 'success'); } else { tgStatus = 'Disconnected'; showToast('Webhook disabled', 'info'); }">
+                                        <div class="w-8 h-4 rounded-full peer peer-checked:bg-accent bg-border after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-4"></div>
+                                    </label>
+                                    <span class="text-[0.55rem] text-text-muted" x-text="webhookEnabled ? 'On' : 'Off'"></span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="text-[0.6rem] uppercase tracking-wider text-text-muted">Bot Token</label>
+                                <input type="password" x-model="telegramToken" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
+                                       class="w-full bg-card border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50"
+                                       @input.debounce.500ms="if(telegramToken.length > 30) tgStatus = 'Token set — enable webhook to connect'">
+                            </div>
+                            <p class="text-[0.55rem] text-text-muted mt-2">Set bot token from <a href="https://t.me/BotFather" target="_blank" class="text-accent hover:underline">@BotFather</a>, then toggle webhook to activate.</p>
+                        </div>
+
+                        <!-- Placeholder for future channels -->
+                        <div class="text-[0.6rem] text-text-muted text-center py-2 border border-dashed border-border rounded-lg">
+                            Discord, Slack, and WhatsApp connectors coming soon.
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </div>
 
@@ -945,7 +987,7 @@
    CONFIGURATION
    ═══════════════════════════════════════════════════════════════════ */
 const CONFIG = {
-    model: '{{ config.default_model|default("gpt-4o-mini") }}',
+    model: '',
     wsReconnectDelay: 2000,
     maxThoughtResultPreview: 120,
 };
@@ -1654,7 +1696,7 @@ function appState() {
                 }
                 return label;
             }
-            return '{{ config.default_model|default("gpt-4o-mini") }}';
+            return 'No model selected — configure in Settings';
         },
 
         // ── Toggle MCP server enabled state ──
