@@ -35,6 +35,7 @@ def create_models_router() -> APIRouter:
     _pull_tasks: dict[str, dict[str, Any]] = {}
 
     @r.get("/api/models")
+    @r.get("/v1/models")
     async def get_models(
         provider: str = Query("all", description="Provider: ollama, lm-studio, custom, all"),
         base_url: str | None = Query(None, description="Custom base URL for lm-studio or custom"),
