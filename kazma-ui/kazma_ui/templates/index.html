@@ -1330,6 +1330,35 @@
                     </div>
                 </template>
 
+                <!-- ── System Health ── -->
+                <div class="mb-4 flex items-center justify-between px-4 py-2 bg-card border border-border rounded-xl"
+                     x-data="{ healthPing: 0, healthStatus: 'pending', healthTimer: null }"
+                     x-init="healthTimer = setInterval(function() {
+                         fetch('/api/gateway/status', { signal: AbortSignal.timeout(5000) })
+                             .then(function(r) {
+                                 if (!r.ok) throw new Error('status ' + r.status);
+                                 return r.json();
+                             })
+                             .then(function(d) {
+                                 healthStatus = d.adapters && d.adapters.length > 0 && d.adapters.some(function(a){return a.status==='running'}) ? 'healthy' : 'degraded';
+                                 healthPing = Date.now();
+                             })
+                             .catch(function() { healthStatus = 'unreachable'; healthPing = Date.now(); });
+                     }, 15000)">
+                    <div class="flex items-center gap-2 text-[0.6rem]">
+                        <span class="text-xs font-semibold uppercase tracking-wider text-text-muted">System Health</span>
+                    </div>
+                    <div class="flex items-center gap-2.5">
+                        <span class="flex items-center gap-1.5 text-[0.55rem] font-medium"
+                              :class="healthStatus === 'healthy' ? 'text-success' : healthStatus === 'degraded' ? 'text-warning' : healthStatus === 'unreachable' ? 'text-error' : 'text-text-muted'">
+                            <span class="inline-block w-2 h-2 rounded-full"
+                                  :class="healthStatus === 'healthy' ? 'bg-success animate-pulse' : healthStatus === 'degraded' ? 'bg-warning' : healthStatus === 'unreachable' ? 'bg-error' : 'bg-border'"
+                                  x-text="''"></span>
+                            <span x-text="healthStatus === 'healthy' ? '🟢 Healthy' : healthStatus === 'degraded' ? '🟡 Degraded' : healthStatus === 'unreachable' ? '🔴 Unreachable' : '⋯ Pending'"></span>
+                        </span>
+                    </div>
+                </div>
+
                 <!-- ── Loading skeleton for main content ── -->
 
                 <!-- ── Global Stats Bar ── -->
@@ -2098,6 +2127,8 @@ function appState() {
         // WebSocket reference
         _ws: null,
         _wsReconnectTimer: null,
+        _wsRetryCount: 0,
+        _wsMaxRetries: 10,
         _sessionCounter: 0,
         _resumedMsgCount: 0,
         sessionStartTime: null,
@@ -2117,23 +2148,35 @@ function appState() {
             self.$nextTick(function() {
                 initTelemetryCharts();
             });
-            // Connect to SSE telemetry stream (replaces old HTTP polling)
-            self._eventSource = new EventSource('/api/telemetry/stream');
-            self._eventSource.onmessage = function(event) {
-                try {
-                    var data = JSON.parse(event.data);
-                    self.telemetry.cpu = data.cpu || 0;
-                    self.telemetry.ram = data.ram_used_gb || 0;
-                    self.telemetry.gpu = data.gpu || 0;
-                    self.telemetry.vram = data.vram_used_gb || 0;
-                    // Push to Chart.js — use GPU% as token proxy, VRAM for VRAM
-                    updateTelemetryChart(telemetryCharts.tokenChart, telemetryHistory.tokens, data.gpu || 0, '');
-                    updateTelemetryChart(telemetryCharts.vramChart, telemetryHistory.vram, (data.vram_used_gb || 0) * 1024, '');
-                } catch(e) {}
+            // Connect to SSE telemetry stream with auto-reconnect
+            self._sseRetryCount = 0;
+            self._sseMaxRetries = 10;
+            self._connectTelemetrySSE = function() {
+                if (self._sseRetryCount >= self._sseMaxRetries) {
+                    return;
+                }
+                var es = new EventSource('/api/telemetry/stream');
+                es.onmessage = function(event) {
+                    try {
+                        var data = JSON.parse(event.data);
+                        self.telemetry.cpu = data.cpu || 0;
+                        self.telemetry.ram = data.ram_used_gb || 0;
+                        self.telemetry.gpu = data.gpu || 0;
+                        self.telemetry.vram = data.vram_used_gb || 0;
+                        updateTelemetryChart(telemetryCharts.tokenChart, telemetryHistory.tokens, data.gpu || 0, '');
+                        updateTelemetryChart(telemetryCharts.vramChart, telemetryHistory.vram, (data.vram_used_gb || 0) * 1024, '');
+                        self._sseRetryCount = 0;
+                    } catch(e) {}
+                };
+                es.onerror = function() {
+                    es.close();
+                    self._sseRetryCount++;
+                    var delay = Math.min(1000 * Math.pow(2, self._sseRetryCount - 1), 30000);
+                    setTimeout(self._connectTelemetrySSE, delay);
+                };
+                self._eventSource = es;
             };
-            self._eventSource.onerror = function() {
-                // Browser will auto-reconnect
-            };
+            self._connectTelemetrySSE();
             // Fetch available models from local providers
             self.fetchModels();
             // Auto-fetch whenever provider config changes
@@ -2145,16 +2188,22 @@ function appState() {
             });
         },
 
-        // ── WebSocket connection ──
+        // ── WebSocket connection with exponential backoff ──
         connectWs() {
             var self = this;
             var protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
             var wsUrl = protocol + '//' + location.host + '/ws/chat';
 
+            if (self._wsRetryCount >= self._wsMaxRetries) {
+                self.showToast('Connection lost — refresh page', 'error');
+                return;
+            }
+
             self._ws = new WebSocket(wsUrl);
 
             self._ws.onopen = function() {
                 self.wsConnected = true;
+                self._wsRetryCount = 0;  // reset on success
             };
 
             self._ws.onmessage = function(event) {
@@ -2169,9 +2218,12 @@ function appState() {
 
             self._ws.onclose = function() {
                 self.wsConnected = false;
+                self._wsRetryCount++;
+                // Exponential backoff: 1s, 2s, 4s, 8s, ... up to 30s
+                var delay = Math.min(1000 * Math.pow(2, self._wsRetryCount - 1), 30000);
                 self._wsReconnectTimer = setTimeout(function() {
                     self.connectWs();
-                }, CONFIG.wsReconnectDelay);
+                }, delay);
             };
 
             self._ws.onerror = function() {
