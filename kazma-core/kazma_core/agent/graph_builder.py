@@ -259,7 +259,7 @@ async def tool_worker_node(
 
     async def _exec_one(tc: PendingToolCall) -> ToolResult:
         start = time.monotonic()
-        result = await tool_executor.execute(tc["name"], tc["arguments"])
+        result = await tool_executor.execute(tc["name"], tc.get("arguments") or {})
         duration_ms = (time.monotonic() - start) * 1000
 
         tracer.trace_tool_execution(

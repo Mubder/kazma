@@ -800,7 +800,7 @@
                         <h2 class="text-lg font-semibold text-text-primary">Skills & Plugins</h2>
                         <p class="text-sm text-text-muted mt-0.5">Manage installed skills, Lua macros, and custom Python routines.</p>
                     </div>
-                    <button @click="showToast('Skills are installed via kazma-skills/manifests/ or the Skills Hub API', 'info')" class="px-3 py-1.5 rounded-lg bg-accent-dim/40 border border-border hover:bg-accent-dim text-text-primary text-xs font-medium transition-all duration-150 hover:border-accent/50">
+                    <button onclick="window.location.href='/skills'" class="px-3 py-1.5 rounded-lg bg-accent-dim/40 border border-border hover:bg-accent-dim text-text-primary text-xs font-medium transition-all duration-150 hover:border-accent/50">
                         + Install Skill
                     </button>
                 </div>
@@ -850,7 +850,7 @@
                         <h2 class="text-lg font-semibold text-text-primary">MCP Configurator</h2>
                         <p class="text-sm text-text-muted mt-0.5">Model Context Protocol servers and driver configurations.</p>
                     </div>
-                    <button @click="showToast('MCP servers are configured in kazma.yaml under mcp.servers', 'info')" class="px-3 py-1.5 rounded-lg bg-accent-dim/40 border border-border hover:bg-accent-dim text-text-primary text-xs font-medium transition-all duration-150 hover:border-accent/50">
+                    <button onclick="window.location.href='/mcp'" class="px-3 py-1.5 rounded-lg bg-accent-dim/40 border border-border hover:bg-accent-dim text-text-primary text-xs font-medium transition-all duration-150 hover:border-accent/50">
                         + Add Server
                     </button>
                 </div>
@@ -1206,7 +1206,34 @@
 
                 <!-- ── Omnichannel Comms ── -->
                 <div class="bg-card border border-border rounded-xl p-5 mb-4"
-                     x-data="{ telegramToken: '', webhookEnabled: false, tgStatus: 'Disconnected' }">
+                     x-data="{ telegramToken: '', webhookEnabled: false, tgStatus: 'Disconnected',
++                              init() {
++                                  var self = this;
++                                  fetch('/api/settings/connectors')
++                                    .then(function(r) { return r.json(); })
++                                    .then(function(data) {
++                                        var token = (data && data['connectors.telegram.token']) || '';
++                                        if (token) { self.telegramToken = token; self.tgStatus = 'Token set — enable webhook to connect'; }
++                                    })
++                                    .catch(function() {});
++                              },
+                              saveConnectors() {
+                                  var token = this.telegramToken;
+                                  if (!token || token.length < 20) { showToast('Please enter a valid Telegram bot token', 'error'); return; }
+                                  fetch('/api/settings', {
+                                      method: 'PUT',
+                                      headers: {'Content-Type': 'application/json'},
+                                      body: JSON.stringify([
+                                          {key: 'connectors.telegram.token', value: token, category: 'connectors'},
+                                      ]),
+                                  }).then(function(r) { return r.json(); })
+                                    .then(function() { showToast('Token saved', 'success'); })
+                                    .then(function() { return fetch('/api/gateway/refresh-adapters', {method: 'POST'}); })
+                                    .then(function(r) { return r.json(); })
+                                    .then(function(data) { showToast(data.adapters_count + ' adapter(s) registered', 'success'); })
+                                    .catch(function() { showToast('Failed to save connectors', 'error'); });
+                              }
+                             }">
                     <h3 class="text-sm font-medium text-text-primary mb-4 flex items-center gap-2">
                         <svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
                         Omnichannel Comms
@@ -1236,7 +1263,11 @@
                                        class="w-full bg-card border border-border rounded-lg px-3 py-2 mt-1 text-sm text-text-primary font-mono focus:outline-none focus:border-accent/50"
                                        @input.debounce.500ms="if(telegramToken.length > 30) tgStatus = 'Token set — enable webhook to connect'">
                             </div>
-                            <p class="text-[0.55rem] text-text-muted mt-2">Set bot token from <a href="https://t.me/BotFather" target="_blank" class="text-accent hover:underline">@BotFather</a>, then toggle webhook to activate.</p>
+                            <p class="text-[0.55rem] text-text-muted mt-2">Set bot token from <a href="https://t.me/BotFather" target="_blank" class="text-accent hover:underline">@BotFather</a>, then save and toggle webhook to activate.</p>
+                            <div class="mt-2 flex gap-2">
+                                <button @click="saveConnectors()" class="px-4 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent/80 transition-colors">Save Connectors</button>
+                                <span class="text-[0.55rem] text-text-muted self-center">Saves token & registers adapter</span>
+                            </div>
                         </div>
 
                         <!-- Placeholder for future channels -->

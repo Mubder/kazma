@@ -224,8 +224,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
         gateway = GatewayManager(max_queue_size=100)
 
-        # Resolve Telegram token from config or environment
-        telegram_token = config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
+        # Resolve Telegram token from config store, YAML config, or environment
+        # (config_store is SQLite-backed, updated via Settings page saves)
+        telegram_token = config_store.get("connectors.telegram.token", "") or \
+                         config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
         if not telegram_token:
             telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
@@ -310,6 +312,42 @@ def create_app(config_path: str | None = None) -> FastAPI:
         )
         app.include_router(monitor_router)
         logger.info("[Gateway] Monitor router mounted at /api/gateway/*")
+
+        # ── Dynamic Adapter Refresh ──────────────────────────────────────
+        @app.post("/api/gateway/refresh-adapters")
+        async def refresh_gateway_adapters() -> dict[str, Any]:
+            """Re-read connector tokens from config_store and re-register adapters.
+
+            Call this after saving connector settings to hot-reload adapters
+            without restarting the server.
+            """
+            # Remove existing adapters (keep gateway running)
+            gateway.adapters.clear()
+
+            # Re-resolve Telegram token from config_store > YAML > env
+            telegram_token = config_store.get("connectors.telegram.token", "") or \
+                             config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
+            if not telegram_token:
+                telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+
+            if telegram_token:
+                tg_adapter = TelegramAdapter(token=telegram_token)
+                gateway.add_adapter(tg_adapter)
+                logger.info("[Gateway] Telegram adapter re-registered via refresh")
+
+            # Discord adapter
+            discord_token = os.environ.get("DISCORD_BOT_TOKEN", "")
+            if discord_token:
+                from kazma_gateway.adapters.discord import DiscordAdapter
+                discord_adapter = DiscordAdapter(token=discord_token)
+                gateway.add_adapter(discord_adapter)
+                logger.info("[Gateway] Discord adapter re-registered via refresh")
+
+            return {
+                "status": "ok",
+                "adapters_count": len(gateway.adapters),
+                "adapters": [a.name for a in gateway.adapters],
+            }
 
         # ── Prometheus Metrics Endpoint ───────────────────────────
         from kazma_ui.metrics import create_metrics_router

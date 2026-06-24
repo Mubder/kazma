@@ -268,9 +268,7 @@ class AsyncMCPManager:
 
         start = time.monotonic()
         try:
-            params: dict[str, Any] = {"name": tool_name}
-            if arguments:
-                params["arguments"] = arguments
+            params: dict[str, Any] = {"name": tool_name, "arguments": arguments if arguments is not None else {}}
 
             result = await self._send(handle, "tools/call", params)
 
@@ -607,6 +605,8 @@ class UnifiedToolExecutor:
             Dict with ``content`` (str) and ``is_error`` (bool).
         """
         # ── Try local first ────────────────────────────────────────
+        if arguments is None:
+            arguments = {}
         if self._local is not None:
             local_tool = self._local.get_tool(tool_name)
             if local_tool is not None:
