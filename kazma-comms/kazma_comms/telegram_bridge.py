@@ -217,22 +217,15 @@ async def _process_message(
     update: TelegramUpdate,
     thread_id: str,
     graph: Any,
+    agent: Any = None,
     system_prompt: str = "",
 ) -> None:
-    """Process an incoming Telegram message through the LangGraph agent.
+    """Process an incoming Telegram message through the Kazma agent.
 
-    This runs in the background after the webhook responds 200 OK.
-    The function:
-      1. Builds the initial SupervisorState with the user's message.
-      2. Invokes the compiled graph with the thread_id checkpoint config.
-      3. Extracts the assistant's response from the final state.
-      4. Sends the response back to Telegram via the send_telegram_message tool.
-
-    Args:
-        update: The parsed TelegramUpdate.
-        thread_id: Kazma session (thread_id) for checkpointing.
-        graph: The compiled LangGraph graph (from build_supervisor_graph).
-        system_prompt: System prompt for the agent.
+    If a compiled LangGraph ``graph`` is provided, invokes it directly.
+    If ``graph`` is None but ``agent`` is provided, falls back to
+    ``agent.run()`` (the ReAct loop).  If neither is available, sends
+    an error message to the user.
     """
     try:
         logger.info(
@@ -258,14 +251,19 @@ async def _process_message(
         state = initial_supervisor_state(thread_id=thread_id)
         state["messages"] = [user_msg]
 
-        # ── Invoke the graph ────────────────────────────────────────
+        # ── Invoke the graph or fall back to agent.run() ────────────
         config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
 
         start = time.monotonic()
-        result_state = await graph.ainvoke(state, config)
+        if graph is not None:
+            result_state = await graph.ainvoke(state, config)
+            messages = result_state.get("messages", [])
+        elif agent is not None:
+            response_text = await agent.run(update.text)
+            messages = [{"role": "assistant", "content": response_text}]
+        else:
+            raise RuntimeError("Neither graph nor agent available — cannot process message")
         duration_ms = (time.monotonic() - start) * 1000
-
-        messages = result_state.get("messages", [])
 
         logger.info(
             "[TelegramBridge] Graph completed in %.0fms (thread=%s, messages=%d)",
@@ -319,6 +317,7 @@ async def _process_message(
 def create_telegram_webhook_router(
     *,
     graph: Any,
+    agent: Any = None,
     system_prompt: str = "",
     token: str | None = None,
     cost_breaker: Any = None,
@@ -405,6 +404,7 @@ def create_telegram_webhook_router(
                 update=update,
                 thread_id=thread_id,
                 graph=graph,
+                agent=agent,
                 system_prompt=system_prompt,
             )
         )

@@ -221,6 +221,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
         telegram_router = create_telegram_webhook_router(
             graph=locals().get("sse_graph"),
+            agent=agent,
             token=telegram_token,
             system_prompt=agent.system_prompt,
             cost_breaker=agent.cost_breaker,
