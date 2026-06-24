@@ -42,11 +42,13 @@ async def stream_chat(
     input_cost_per_1m: float = 0.15,
     output_cost_per_1m: float = 0.60,
     base_url: str | None = None,
+    api_key: str | None = None,
 ) -> AsyncGenerator[StreamEvent, None]:
     """Stream a chat completion, yielding tokens as they arrive.
 
     Uses the OpenAI streaming API (stream=true) with SSE parsing.
     If base_url is provided, creates a dedicated client for that endpoint.
+    If api_key is provided (for custom endpoints), uses it for auth.
     """
     payload: dict[str, Any] = {
         "model": model,
@@ -64,8 +66,12 @@ async def stream_chat(
     # create a dedicated client for this call
     stream_client = client
     if base_url is not None:
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         stream_client = httpx.AsyncClient(
             base_url=base_url,
+            headers=headers,
             timeout=httpx.Timeout(60.0, connect=10.0),
         )
 

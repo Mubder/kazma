@@ -193,10 +193,35 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                     if resolved:
                         chat_base_url = resolved
 
+                # ── FORCE SANITIZATION ──
+                # Ensure base_url ends with /v1 and prepend scheme if bare
+                if chat_base_url and chat_base_url != agent.llm_config.base_url:
+                    chat_base_url = chat_base_url.rstrip("/")
+                    if not chat_base_url.startswith("http"):
+                        chat_base_url = "http://" + chat_base_url
+                    if not chat_base_url.endswith("/v1"):
+                        chat_base_url += "/v1"
+
+                # If using a custom endpoint, force openai/ model prefix and dummy key
+                chat_model = active_model
+                chat_api_key = agent.llm_config.api_key
+                if chat_base_url and chat_base_url != agent.llm_config.base_url:
+                    if not chat_model.startswith("openai/"):
+                        chat_model = f"openai/{chat_model}"
+                    chat_api_key = "sk-local-dev"  # Prevent cloud fallback
+
+                # Fallback to LM Studio if base_url is empty but model is local
+                if not chat_base_url or chat_base_url == agent.llm_config.base_url:
+                    if active_model and not active_model.startswith("openai/"):
+                        chat_base_url = "http://127.0.0.1:1234/v1"
+                        chat_model = f"openai/{active_model}"
+                        chat_api_key = "sk-local-dev"
+
                 async for event in stream_chat(
                     client=await agent.llm._get_client(),
-                    model=active_model,
+                    model=chat_model,
                     base_url=chat_base_url,
+                    api_key=chat_api_key,
                     messages=messages,
                     tools=tool_defs if tool_defs else None,
                     max_tokens=agent.llm_config.max_tokens,
@@ -292,8 +317,9 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
 
                         async for followup in _stream(
                             client=await agent.llm._get_client(),
-                            model=active_model,
+                            model=chat_model,
                             base_url=chat_base_url,
+                            api_key=chat_api_key,
                             messages=messages,
                             max_tokens=agent.llm_config.max_tokens,
                             temperature=agent.llm_config.temperature,
