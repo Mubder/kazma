@@ -55,6 +55,20 @@ from typing import Any, get_type_hints
 
 logger = logging.getLogger(__name__)
 
+# ── VectorMemory singleton for RAG tools ─────────────────────────────
+_vector_memory: Any = None
+
+
+def set_vector_memory(vm: Any) -> None:
+    """Set the global VectorMemory instance (called by app.py at startup)."""
+    global _vector_memory
+    _vector_memory = vm
+
+
+def get_vector_memory() -> Any:
+    """Get the global VectorMemory instance."""
+    return _vector_memory
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # Schema generation from type hints
@@ -481,9 +495,9 @@ class LocalToolRegistry:
             category="memory",
         )
         async def memory_search(query: str, limit: int = 5) -> str:
-            from kazma_core.memory.vector_store import VectorMemory
-
-            mem = VectorMemory()
+            mem = get_vector_memory()
+            if mem is None:
+                return "Error: VectorMemory not initialized. RAG not available."
             results = mem.search(query=query, n_results=limit)
             if not results:
                 return "No relevant memories found."
@@ -498,9 +512,9 @@ class LocalToolRegistry:
             category="memory",
         )
         async def memory_store(text: str, metadata: str = "{}") -> str:
-            from kazma_core.memory.vector_store import VectorMemory
-
-            mem = VectorMemory()
+            mem = get_vector_memory()
+            if mem is None:
+                return "Error: VectorMemory not initialized. RAG not available."
             try:
                 meta = json.loads(metadata) if isinstance(metadata, str) else metadata
             except json.JSONDecodeError:

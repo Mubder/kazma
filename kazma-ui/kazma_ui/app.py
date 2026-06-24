@@ -259,6 +259,29 @@ def create_app(config_path: str | None = None) -> FastAPI:
             session_store=session_store,
             session_store_path="kazma-data/sessions.db",
         )
+
+        # ── Vector Memory (RAG) ───────────────────────────────────
+        try:
+            from kazma_core.agent.tool_registry import set_vector_memory
+            from kazma_core.memory.vector_store import VectorMemory
+
+            vector_memory_path = os.environ.get("KAZMA_VECTOR_PATH", "~/.kazma/vector_memory")
+            vector_memory_collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
+            vector_memory_model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
+
+            vector_memory = VectorMemory(
+                path=vector_memory_path,
+                collection_name=vector_memory_collection,
+                model_name=vector_memory_model,
+            )
+            set_vector_memory(vector_memory)
+            logger.info(
+                "[VectorMemory] Initialized at %s (collection=%s, model=%s)",
+                vector_memory_path, vector_memory_collection, vector_memory_model,
+            )
+        except Exception as e:
+            logger.warning("[VectorMemory] Not available: %s", e)
+
         try:
             # Use the SSE graph built above if available
             sse_graph_ref = locals().get("sse_graph")
@@ -288,16 +311,35 @@ def create_app(config_path: str | None = None) -> FastAPI:
         app.include_router(monitor_router)
         logger.info("[Gateway] Monitor router mounted at /api/gateway/*")
 
+        # ── Prometheus Metrics Endpoint ───────────────────────────
+        from kazma_ui.metrics import create_metrics_router
+
+        metrics_router = create_metrics_router(gateway=gateway, session_store=session_store)
+        app.include_router(metrics_router)
+        logger.info("[Metrics] Prometheus /metrics endpoint mounted")
+
         # ── HITL Approval Endpoint ────────────────────────────────
         from fastapi import Request as _Request
         from fastapi.responses import JSONResponse as _JSONResponse
+
+        # HITL auth — shared secret validation
+        _KAZMA_SECRET = os.environ.get("KAZMA_SECRET", "")
 
         @app.post("/api/approve/{thread_id}")
         async def approve_tool(thread_id: str, _request: _Request) -> _JSONResponse:
             """Resume a paused graph after HITL approval/deny.
 
             Body: {"action": "approve" | "deny", "reason": "optional"}
+            Headers: X-Kazma-Secret (required if KAZMA_SECRET env var is set)
             """
+            # Validate shared secret (timing-safe)
+            if _KAZMA_SECRET:
+                import secrets as _secrets
+
+                provided = _request.headers.get("X-Kazma-Secret", "")
+                if not _secrets.compare_digest(provided, _KAZMA_SECRET):
+                    return _JSONResponse({"error": "Unauthorized"}, status_code=401)
+
             try:
                 body = await _request.json()
             except Exception:
