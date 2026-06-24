@@ -1,8 +1,12 @@
-"""Telegram Adapter — Manual getUpdates polling with jitter.
+"""Telegram Adapter — Manual getUpdates polling with jitter + webhook ingress.
 
 Headless: pure polling against the Telegram Bot API.
-No webhooks, no aiogram Dispatcher, no public IP required.
+No webhooks required, no aiogram Dispatcher, no public IP needed.
 Full control over poll timing, jitter, and rate-limit handling.
+
+An optional webhook ingress router is available via create_webhook_router()
+for testing or deployments with a public URL. Both polling and webhook
+feed into the same asyncio.Queue — the Brain sees no difference.
 
 All incoming messages are normalized to IncomingMessage with context_metadata
 carrying raw Telegram IDs so the Brain never imports Telegram-specific code.
@@ -23,6 +27,8 @@ import random
 from typing import Any
 
 import httpx
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 from kazma_gateway.gateway import (
     BaseAdapter,
@@ -47,6 +53,9 @@ class TelegramAdapter(BaseAdapter):
 
     Every poll cycle includes a 1-3 second randomized jitter delay
     to prevent rate-limiting and API hammering (mandate requirement).
+
+    Optionally exposes a webhook ingress router via create_webhook_router()
+    for testing or when a public URL is available.
 
     Args:
         token:          Telegram Bot API token.
@@ -79,6 +88,17 @@ class TelegramAdapter(BaseAdapter):
         self._poll_timeout = poll_timeout
         self._offset: int = 0
         self._http: httpx.AsyncClient | None = None
+        # Queue ref stored for webhook ingress (set by start() in BaseAdapter)
+        self._queue: asyncio.Queue[IncomingMessage] | None = None
+
+    async def start(
+        self,
+        queue: asyncio.Queue[IncomingMessage],
+        shutdown_event: asyncio.Event,
+    ) -> None:
+        """Start the adapter and store queue reference for webhook ingress."""
+        self._queue = queue
+        await super().start(queue, shutdown_event)
 
     async def listen(
         self,
@@ -246,6 +266,79 @@ class TelegramAdapter(BaseAdapter):
                 "update_id": update.get("update_id", 0),
             },
         )
+
+    def create_webhook_router(self) -> Any:
+        """Create a FastAPI router for optional webhook ingress.
+
+        This is NOT the primary message path — polling is. The webhook
+        endpoint exists for testing (curl) and deployments with a public URL.
+        Both paths feed into the same asyncio.Queue.
+
+        Returns:
+            FastAPI APIRouter with POST /telegram endpoint.
+
+        Usage:
+            adapter = TelegramAdapter(token="...")
+            router = adapter.create_webhook_router()
+            app.include_router(router, prefix="/api/webhooks/telegram")
+        """
+        router = APIRouter(tags=["telegram-webhook"])
+
+        @router.post("")
+        async def handle_update(request: Request) -> JSONResponse:
+            """Accept a Telegram update via webhook POST.
+
+            Parses the update using the same _parse_update() as polling,
+            and enqueues it on the unified message bus.
+            """
+            try:
+                update = await request.json()
+            except Exception:
+                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+            msg = self._parse_update(update)
+            if msg is None:
+                return JSONResponse({"status": "ignored", "reason": "no_text"})
+
+            # User whitelist
+            if self._allowed_users:
+                user_id = msg.context_metadata.get("user_id", 0)
+                if user_id not in self._allowed_users:
+                    return JSONResponse({"status": "ignored", "reason": "not_whitelisted"})
+
+            if self._queue is None:
+                logger.error("[telegram-webhook] Queue not initialized — adapter not started")
+                return JSONResponse({"error": "Gateway not ready"}, status_code=503)
+
+            try:
+                self._queue.put_nowait(msg)
+                logger.info(
+                    "[telegram-webhook] Enqueued from %s (chat=%d): %.80s",
+                    msg.context_metadata.get("username", "?"),
+                    msg.context_metadata.get("chat_id", 0),
+                    msg.text,
+                )
+                return JSONResponse(
+                    {
+                        "status": "accepted",
+                        "sender_id": msg.sender_id,
+                    }
+                )
+            except asyncio.QueueFull:
+                logger.warning("[telegram-webhook] Queue full — dropping message")
+                return JSONResponse({"error": "Queue full"}, status_code=503)
+
+        @router.get("/health")
+        async def webhook_health() -> dict[str, Any]:
+            """Health check for the webhook endpoint."""
+            return {
+                "status": "ok",
+                "adapter": self.name,
+                "queue_initialized": self._queue is not None,
+                "queue_size": self._queue.qsize() if self._queue else 0,
+            }
+
+        return router
 
     async def send(self, outbound: OutboundMessage) -> bool:
         """Send a message back to Telegram with 429 retry.

@@ -212,55 +212,89 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(models_router)
     logger.info("Models router mounted at /api/models, /api/ollama/*")
 
-    # ── Gateway (Omnichannel Message Bus + Brain Consumer) ──────────
+    # ── Gateway (Omnichannel Message Bus) ────────────────────────────
+    _gateway: Any = None  # module-level ref for shutdown handler
+
     try:
-        from kazma_gateway import get_gateway
+        from kazma_gateway import GatewayManager
         from kazma_gateway.adapters.telegram import TelegramAdapter
-        from kazma_gateway.consumer import start_gateway_consumer
+        from kazma_gateway.agent_handler import create_graph_handler
 
-        gateway = get_gateway()
+        gateway = GatewayManager(max_queue_size=100)
 
-        # Register Telegram polling adapter (no tunnels, no webhooks)
+        # Resolve Telegram token from config or environment
         telegram_token = config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
         if not telegram_token:
             telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+
+        tg_adapter: TelegramAdapter | None = None
         if telegram_token:
             tg_adapter = TelegramAdapter(token=telegram_token)
-            gateway.register(tg_adapter)
+            gateway.add_adapter(tg_adapter)
             logger.info("[Gateway] Telegram adapter registered (polling mode)")
+
+            # Mount webhook ingress for testing / optional push mode
+            webhook_router = tg_adapter.create_webhook_router()
+            app.include_router(webhook_router, prefix="/api/webhooks/telegram")
+            logger.info("[Gateway] Webhook ingress mounted at /api/webhooks/telegram")
+        else:
+            logger.info("[Gateway] No Telegram token — Telegram adapter skipped")
+
+        # Register the Brain handler (IncomingMessage → LangGraph → reply)
+        try:
+            # Use the SSE graph built above if available
+            sse_graph_ref = locals().get("sse_graph")
+            if sse_graph_ref:
+                brain_handler = create_graph_handler(
+                    graph=sse_graph_ref,
+                    manager=gateway,
+                    system_prompt=agent.system_prompt,
+                    cost_breaker=agent.cost_breaker,
+                )
+                gateway.on_message(brain_handler)
+                logger.info("[Gateway] Brain handler registered")
+            else:
+                logger.warning("[Gateway] No graph available — Brain handler not registered")
+        except Exception as e:
+            logger.warning("[Gateway] Brain handler failed to register: %s", e)
 
         # Mount the gateway monitor router
         from kazma_ui.gateway_monitor import create_gateway_router
 
-        gateway_router = create_gateway_router(gateway)
-        app.include_router(gateway_router)
+        monitor_router = create_gateway_router(gateway)
+        app.include_router(monitor_router)
         logger.info("[Gateway] Monitor router mounted at /api/gateway/*")
 
-        # Start gateway on startup
-        original_startup = None
-        for e_h in app.router.on_startup:
-            original_startup = e_h
-            break
+        _gateway = gateway
 
         @app.on_event("startup")
         async def _start_gateway() -> None:
+            """Start the gateway bus and all adapters."""
+            nonlocal _gateway
+            if _gateway is None:
+                return
             try:
-                await gateway.start_all()
-                logger.info("[Gateway] All adapters started")
-                # Brain consumer: pulls messages from gateway queue → agent.run()
-                consumer_task = asyncio.create_task(
-                    start_gateway_consumer(gateway, agent),
-                    name="gateway-consumer",
+                await _gateway.start()
+                logger.info(
+                    "[Gateway] Started — adapters: [%s], queue maxsize=%d",
+                    ", ".join(a.name for a in _gateway.adapters),
+                    _gateway.queue.maxsize,
                 )
-                logger.info("[Gateway] Brain consumer started")
             except Exception as e:
                 logger.warning("[Gateway] Failed to start: %s", e)
 
-        # Stop gateway on shutdown
         @app.on_event("shutdown")
         async def _stop_gateway() -> None:
-            await gateway.stop_all()
-            logger.info("[Gateway] All adapters stopped")
+            """Stop the gateway and drain remaining messages."""
+            nonlocal _gateway
+            if _gateway is None:
+                return
+            try:
+                await _gateway.stop()
+                logger.info("[Gateway] Stopped cleanly")
+            except Exception as e:
+                logger.warning("[Gateway] Error during shutdown: %s", e)
+            _gateway = None
 
     except Exception as e:
         logger.warning("Gateway failed to initialize: %s", e)
