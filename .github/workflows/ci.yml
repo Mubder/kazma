@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install './kazma-core[rag]' ./kazma-gateway ./kazma-memory ./kazma-ui ./kazma-cli
+          pip install -e '.[rag]'
           pip install pytest pytest-asyncio httpx
 
       - name: Lint
