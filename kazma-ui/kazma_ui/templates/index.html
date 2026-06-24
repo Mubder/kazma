@@ -597,7 +597,7 @@
                             </div>
                             <!-- Tool list -->
                             <div class="max-h-48 overflow-y-auto px-4 pb-2 space-y-1"
-                                 x-data="{ toolIcons: { memory_search: '🔍', memory_store: '💾', memory_retrieve: '🔍', file_read: '📁', file_write: '📝', file_search: '🔎', shell_exec: '⚡', send_message: '✉️', web_search: '🌐', python_repl: '🐍' } }">
+                                 x-data="{ toolIcons: { memory_search: '🔍', memory_store: '💾', memory_retrieve: '🔍', file_read: '📁', file_write: '📝', file_search: '🔎', shell_exec: '⚡', send_message: '✉️', web_search: '🌐', python_repl: '🐍', spawn_agent: '🤖', spawn_agents: '🤖' } }">
                                 <template x-if="_lastAssistantMsg() && _lastAssistantMsg().thoughts.length > 0">
                                     <template x-for="(thought, ti) in _lastAssistantMsg().thoughts" :key="ti">
                                         <div class="rounded-lg border border-border overflow-hidden">
@@ -635,14 +635,62 @@
                                                         <span class="text-text-muted"># args</span>
                                                         <pre class="text-text-secondary mt-0.5 whitespace-pre-wrap break-words"><code x-text="thought.args"></code></pre>
                                                     </div>
-                                                    <!-- Result / RAG citations -->
-                                                    <div>
-                                                        <span class="text-text-muted"
-                                                              :class="thought.name === 'memory_search' || thought.name === 'memory_retrieve' ? 'text-accent' : ''"># <span x-text="thought.name === 'memory_search' || thought.name === 'memory_retrieve' ? 'sources' : 'result'"></span></span>
-                                                        <pre class="mt-0.5 whitespace-pre-wrap break-words max-h-32 overflow-y-auto"
-                                                             :class="thought.result === '⏳ Executing…' ? 'text-accent' : thought.result.startsWith('Error') || thought.result.startsWith('🛑') ? 'text-error' : 'text-text-secondary'"><code x-text="thought.result.slice(0,2000)"></code></pre>
-                                                        <div x-show="thought.result.length > 2000" class="text-[0.45rem] text-text-muted mt-0.5">(truncated, click artifact to view full)</div>
-                                                    </div>
+                                                    <!-- Result / RAG citations / Sub-agent -->
+                                                    <template x-if="thought.name === 'spawn_agent' || thought.name === 'spawn_agents'">
+                                                        <div>
+                                                            <template x-if="thought.name === 'spawn_agent'">
+                                                                <div class="space-y-2">
+                                                                    <div class="flex items-center gap-2 p-2 rounded-lg border"
+                                                                         :class="thought.result && !thought.result.startsWith('Error') ? 'border-accent/30 bg-accent/5' : 'border-error/30 bg-error/5'">
+                                                                        <span class="text-base">🤖</span>
+                                                                        <div class="min-w-0 flex-1">
+                                                                            <div class="text-[0.55rem] font-medium text-text-primary truncate" x-text="'Sub-agent: ' + (extractSubField(thought.result, 'goal') || 'unknown')"></div>
+                                                                            <div class="flex items-center gap-2 text-[0.5rem] text-text-muted mt-0.5">
+                                                                                <span x-text="(extractSubField(thought.result, 'status') === 'success' ? '✅' : '❌') + ' ' + (extractSubField(thought.result, 'status') || '?')"></span>
+                                                                                <span x-show="extractSubField(thought.result, 'duration_ms')" x-text="'(' + extractSubField(thought.result, 'duration_ms') + 'ms)'"></span>
+                                                                            </div>
+                                                                            <div x-show="extractSubField(thought.result, 'summary')" class="text-[0.5rem] text-text-secondary mt-1 line-clamp-3" x-text="extractSubField(thought.result, 'summary')"></div>
+                                                                            <div x-show="extractSubField(thought.result, 'artifacts')" class="mt-1 space-y-0.5">
+                                                                                <template x-for="art in (extractSubArray(thought.result, 'artifacts') || [])" :key="art">
+                                                                                    <div class="flex items-center gap-1 text-[0.45rem] text-text-muted">
+                                                                                        <span>📄</span>
+                                                                                        <span class="font-mono truncate" x-text="art"></span>
+                                                                                    </div>
+                                                                                </template>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </template>
+                                                            <template x-if="thought.name === 'spawn_agents'">
+                                                                <div class="space-y-1.5">
+                                                                    <div class="text-[0.5rem] text-text-muted mb-1">Parallel sub-agents:</div>
+                                                                    <template x-for="(sub, si) in (parseSubArray(thought.result) || [])" :key="si">
+                                                                        <div class="flex items-center gap-2 p-2 rounded-lg border"
+                                                                             :class="sub.status === 'success' ? 'border-accent/30 bg-accent/5' : 'border-error/30 bg-error/5'">
+                                                                            <span class="text-base">🤖</span>
+                                                                            <div class="min-w-0 flex-1">
+                                                                                <div class="text-[0.55rem] font-medium text-text-primary truncate" x-text="'Sub-agent ' + (si + 1) + ': ' + (sub.goal || '?')"></div>
+                                                                                <div class="flex items-center gap-2 text-[0.5rem] text-text-muted mt-0.5">
+                                                                                    <span x-text="(sub.status === 'success' ? '✅' : '❌') + ' ' + (sub.status || '?')"></span>
+                                                                                </div>
+                                                                                <div x-show="sub.summary" class="text-[0.5rem] text-text-secondary mt-1 line-clamp-2" x-text="sub.summary"></div>
+                                                                            </div>
+                                                                        </div>
+                                                                    </template>
+                                                                </div>
+                                                            </template>
+                                                        </div>
+                                                    </template>
+                                                    <template x-if="thought.name !== 'spawn_agent' && thought.name !== 'spawn_agents'">
+                                                        <div>
+                                                            <span class="text-text-muted"
+                                                                  :class="thought.name === 'memory_search' || thought.name === 'memory_retrieve' ? 'text-accent' : ''"># <span x-text="thought.name === 'memory_search' || thought.name === 'memory_retrieve' ? 'sources' : 'result'"></span></span>
+                                                            <pre class="mt-0.5 whitespace-pre-wrap break-words max-h-32 overflow-y-auto"
+                                                                 :class="thought.result === '⏳ Executing…' ? 'text-accent' : thought.result.startsWith('Error') || thought.result.startsWith('🛑') ? 'text-error' : 'text-text-secondary'"><code x-text="thought.result.slice(0,2000)"></code></pre>
+                                                            <div x-show="thought.result && thought.result.length > 2000" class="text-[0.45rem] text-text-muted mt-0.5">(truncated, click artifact to view full)</div>
+                                                        </div>
+                                                    </template>
                                                 </div>
                                             </div>
                                         </div>
@@ -2494,6 +2542,31 @@ function appState() {
         hitlToolIcon(tool) {
             var icons = { shell_exec: '⚡', file_write: '📝', file_delete: '🗑', file_read: '📁', memory_store: '💾', memory_search: '🔍', send_message: '✉️', web_search: '🌐' };
             return icons[tool] || '⚙';
+        },
+
+        // ── Sub-agent result helpers (JSON parsing helpers for Alpine templates) ──
+        extractSubField(result, field) {
+            if (!result || result === '⏳ Executing…') return null;
+            try {
+                var obj = JSON.parse(result);
+                if (field === 'duration_ms' && obj.duration_ms === undefined) return null;
+                return obj[field] !== undefined ? String(obj[field]) : null;
+            } catch(e) { return null; }
+        },
+        extractSubArray(result, field) {
+            if (!result || result === '⏳ Executing…') return null;
+            try {
+                var obj = JSON.parse(result);
+                var arr = obj[field];
+                return Array.isArray(arr) && arr.length > 0 ? arr : null;
+            } catch(e) { return null; }
+        },
+        parseSubArray(result) {
+            if (!result || result === '⏳ Executing…') return [];
+            try {
+                var arr = JSON.parse(result);
+                return Array.isArray(arr) ? arr : [arr];
+            } catch(e) { return []; }
         },
 
         // ── Toast notification system ──
