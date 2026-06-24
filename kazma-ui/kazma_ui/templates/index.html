@@ -513,6 +513,56 @@
                                 </template>
                             </div>
                         </template>
+                        <!-- ── HITL Approval Card ── -->
+                        <template x-if="pendingApproval">
+                            <div class="flex justify-start mb-3">
+                                <div class="max-w-[85%] w-full rounded-2xl border-2 px-4 py-3"
+                                     :class="pendingApproval.status === 'approved' ? 'border-success/50 bg-success/5' : pendingApproval.status === 'denied' ? 'border-border bg-surface' : 'border-warning/50 bg-warning/5'">
+                                    <!-- Header -->
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <span class="text-base" x-text="hitlToolIcon(pendingApproval.tool)"></span>
+                                        <span class="text-xs font-semibold uppercase tracking-wider"
+                                              :class="pendingApproval.status === 'approved' ? 'text-success' : pendingApproval.status === 'denied' ? 'text-text-muted' : 'text-warning'">
+                                            <span x-text="pendingApproval.status === 'approved' ? '✅ Approved' : pendingApproval.status === 'denied' ? '❌ Denied' : '⚠ Agent Needs Approval'"></span>
+                                        </span>
+                                    </div>
+                                    <!-- Tool name -->
+                                    <div class="text-xs text-text-primary font-medium mb-1">The agent wants to run:</div>
+                                    <div class="flex items-center gap-1.5 mb-2">
+                                        <span class="text-xs" x-text="hitlToolIcon(pendingApproval.tool)"></span>
+                                        <span class="text-xs font-mono font-medium text-text-primary" x-text="pendingApproval.tool"></span>
+                                    </div>
+                                    <!-- Args preview -->
+                                    <div class="rounded-lg overflow-hidden mb-3 border border-border" style="background:#0d1117">
+                                        <pre class="text-[0.65rem] leading-relaxed p-3 overflow-x-auto font-mono text-text-secondary"><code x-text="pendingApproval.preview"></code></pre>
+                                    </div>
+                                    <!-- Action buttons (only when pending) -->
+                                    <template x-if="pendingApproval.status === 'pending'">
+                                        <div class="space-y-2">
+                                            <div class="flex items-center gap-2">
+                                                <button @click="sendApproval('approve')"
+                                                        class="flex-1 px-3 py-1.5 rounded-lg bg-success text-white text-xs font-medium hover:bg-success/80 transition-colors">
+                                                    ✅ Approve
+                                                </button>
+                                                <button @click="sendApproval('deny')"
+                                                        class="flex-1 px-3 py-1.5 rounded-lg border border-border text-text-secondary text-xs font-medium hover:bg-surface transition-colors">
+                                                    ❌ Deny
+                                                </button>
+                                            </div>
+                                            <div class="flex items-center gap-1.5 text-[0.55rem]">
+                                                <span class="text-text-muted">⏱ Auto-deny in</span>
+                                                <span class="font-mono font-semibold"
+                                                      :class="pendingApproval.remaining <= 10 ? 'text-error' : 'text-text-primary'"
+                                                      x-text="pendingApproval.remaining + 's'"></span>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <template x-if="pendingApproval.status !== 'pending'">
+                                        <div class="text-[0.6rem] text-text-muted" x-text="'· ' + pendingApproval.reason"></div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
                         <div x-ref="scrollAnchor"></div>
                     </div>
 
@@ -603,6 +653,21 @@
                                      class="text-center py-4 text-[0.55rem] text-text-muted">
                                     Agent responded directly — no tools used.
                                 </div>
+                                <!-- ── Approval History ── -->
+                                <template x-if="approvalHistory.length > 0">
+                                    <div class="mt-2 pt-2 border-t border-border/50">
+                                        <div class="text-[0.5rem] text-text-muted uppercase tracking-wider mb-1.5 font-semibold">Approval History</div>
+                                        <div class="space-y-1">
+                                            <template x-for="(h, hi) in approvalHistory" :key="hi">
+                                                <div class="flex items-center gap-1.5 text-[0.5rem] text-text-muted">
+                                                    <span x-text="h.action === 'approve' ? '✅' : '❌'"></span>
+                                                    <span class="font-mono" x-text="h.tool"></span>
+                                                    <span class="truncate flex-1" x-text="'— ' + (h.preview ? h.preview.slice(0, 60) : '')"></span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
                             </div>
                         </div>
                     </div>
@@ -1993,6 +2058,9 @@ function appState() {
         thoughtPanelOpen: false,
         thoughtPanelPinned: false,
         _thoughtAutoCollapseTimer: null,
+        pendingApproval: null,
+        approvalHistory: [],
+        _approvalCountdownTimer: null,
 
         // ── Init ──
         init() {
@@ -2147,6 +2215,44 @@ function appState() {
                     }
                     self._addSession();
                     self.scrollDown();
+                    break;
+
+                case 'interrupt':
+                    var self = this;
+                    var approval = {
+                        thread_id: data.thread_id || data.data?.thread_id || 'unknown',
+                        tool: data.tool || data.data?.tool || 'unknown',
+                        args: data.args || data.data?.args || {},
+                        message: data.message || data.data?.message || '',
+                        timeout: data.approval_timeout_seconds || 60,
+                        remaining: data.approval_timeout_seconds || 60,
+                        status: 'pending',
+                    };
+                    // Extract command preview
+                    if (approval.tool === 'shell_exec' && approval.args.command) {
+                        approval.preview = approval.args.command;
+                    } else if (approval.tool === 'file_write') {
+                        approval.preview = approval.args.path || approval.args.file_path || '(file)';
+                    } else if (approval.tool === 'file_delete') {
+                        approval.preview = approval.args.path || approval.args.file_path || '(file)';
+                    } else {
+                        approval.preview = JSON.stringify(approval.args);
+                    }
+                    self.pendingApproval = approval;
+                    // Start countdown
+                    if (self._approvalCountdownTimer) clearInterval(self._approvalCountdownTimer);
+                    self._approvalCountdownTimer = setInterval(function() {
+                        if (self.pendingApproval && self.pendingApproval.remaining > 0) {
+                            self.pendingApproval.remaining--;
+                            if (self.pendingApproval.remaining <= 0) {
+                                // Auto-deny
+                                clearInterval(self._approvalCountdownTimer);
+                                self._approvalCountdownTimer = null;
+                                self._resolveApproval('deny', 'Auto-denied (timeout)');
+                            }
+                        }
+                    }, 1000);
+                    self.isStreaming = false;
                     break;
 
                 case 'error':
@@ -2339,6 +2445,55 @@ function appState() {
                 .catch(function(err) {
                     self.showToast('Failed to reset: ' + err.message, 'error');
                 });
+        },
+
+        // ── HITL Approval: send decision to backend ──
+        sendApproval(action, reason) {
+            var self = this;
+            var approval = self.pendingApproval;
+            if (!approval) return;
+            if (self._approvalCountdownTimer) {
+                clearInterval(self._approvalCountdownTimer);
+                self._approvalCountdownTimer = null;
+            }
+            fetch('/api/approve/' + approval.thread_id, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: action, reason: reason || '' }),
+            })
+            .then(function(r) {
+                if (!r.ok && r.status !== 404) throw new Error('Approval API error: ' + r.status);
+            })
+            .then(function() {
+                self._resolveApproval(action, reason || (action === 'approve' ? 'Approved' : 'Denied'));
+            })
+            .catch(function(err) {
+                self._resolveApproval(action, reason || (action === 'approve' ? 'Approved (offline)' : 'Denied (offline)'));
+            });
+        },
+
+        _resolveApproval(action, reason) {
+            var self = this;
+            var approval = self.pendingApproval;
+            if (!approval) return;
+            approval.status = action === 'approve' ? 'approved' : 'denied';
+            approval.resolved_at = Date.now();
+            approval.reason = reason;
+            self.approvalHistory.unshift({
+                tool: approval.tool,
+                action: action,
+                reason: reason,
+                preview: approval.preview,
+                time: Date.now(),
+            });
+            if (self.approvalHistory.length > 20) self.approvalHistory.length = 20;
+            self.pendingApproval = null;
+            self.scrollDown();
+        },
+
+        hitlToolIcon(tool) {
+            var icons = { shell_exec: '⚡', file_write: '📝', file_delete: '🗑', file_read: '📁', memory_store: '💾', memory_search: '🔍', send_message: '✉️', web_search: '🌐' };
+            return icons[tool] || '⚙';
         },
 
         // ── Toast notification system ──
