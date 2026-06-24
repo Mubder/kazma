@@ -14,6 +14,7 @@ Usage:
     await manager.start()
 """
 
+from kazma_gateway.dispatcher import MessageDispatcher
 from kazma_gateway.gateway import (
     BaseAdapter,
     GatewayManager,
@@ -21,8 +22,6 @@ from kazma_gateway.gateway import (
     OutboundMessage,
     SessionStore,
 )
-
-from kazma_gateway.dispatcher import MessageDispatcher
 
 __all__ = [
     "BaseAdapter",

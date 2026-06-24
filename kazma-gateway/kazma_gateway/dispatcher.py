@@ -33,7 +33,7 @@ class MessageDispatcher:
         # → routes to correct adapter.send()
     """
 
-    def __init__(self, gateway: "GatewayManager") -> None:
+    def __init__(self, gateway: GatewayManager) -> None:
         self._gateway = gateway
 
     async def reply(
