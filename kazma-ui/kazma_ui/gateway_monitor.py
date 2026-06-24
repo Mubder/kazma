@@ -59,6 +59,9 @@ def _adapter_info(adapter: Any) -> dict[str, Any]:
 def create_gateway_router(gateway: Any) -> APIRouter:
     """Create the gateway monitor router."""
 
+    # ── Accumulated metrics ──
+    _prev_counts: dict[str, int] = {"inbound": 0, "outbound": 0, "errors": 0}
+
     router = APIRouter(prefix="/api/gateway", tags=["gateway"])
 
     @router.get("/status")
@@ -67,11 +70,22 @@ def create_gateway_router(gateway: Any) -> APIRouter:
         adapters = [_adapter_info(a) for a in gateway.adapters]
         queue = getattr(gateway, "queue", None)
 
+        # Aggregate metrics from all adapters
+        inbound_total = sum(a.get("message_count", 0) for a in adapters)
+        errors_total = sum(a.get("error_count", 0) for a in adapters)
+        # Outbound approximates inbound minus errors (one reply per msg)
+        outbound_total = max(0, inbound_total - errors_total)
+
         return {
             "started": getattr(gateway, "_started", False),
             "queue_size": queue.qsize() if queue else 0,
             "queue_max": queue.maxsize if queue and hasattr(queue, "maxsize") else 100,
             "adapters": adapters,
+            "metrics": {
+                "inbound_total": inbound_total,
+                "outbound_total": outbound_total,
+                "errors_total": errors_total,
+            },
             "persistence": _MOCK_PERSISTENCE,
             "threads": _MOCK_THREADS,
             "server_time": time.time(),

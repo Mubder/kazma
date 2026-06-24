@@ -1380,6 +1380,72 @@
                     </div>
                 </div>
 
+                <!-- ── Metrics ── -->
+                <div class="mb-8">
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Metrics</h3>
+                    <template x-if="gatewayData.metrics">
+                        <div>
+                            <!-- Health banner -->
+                            <template x-if="gatewayData.metrics.errors_total !== undefined">
+                                <div class="mb-3 px-3 py-2 rounded-lg border text-xs flex items-center gap-2"
+                                     :class="gatewayData.metrics.errors_total === 0
+                                         ? 'bg-success/10 border-success/30 text-success'
+                                         : ((gatewayData.metrics.inbound_total + gatewayData.metrics.outbound_total) > 0
+                                             ? ((gatewayData.metrics.errors_total / (gatewayData.metrics.inbound_total + gatewayData.metrics.outbound_total)) < 0.05
+                                                 ? 'bg-warning/10 border-warning/30 text-warning'
+                                                 : 'bg-error/10 border-error/30 text-error')
+                                             : 'bg-warning/10 border-warning/30 text-warning')">
+                                    <template x-if="gatewayData.metrics.errors_total === 0">
+                                        <span>● All systems healthy</span>
+                                    </template>
+                                    <template x-if="gatewayData.metrics.errors_total > 0">
+                                        <span>
+                                            <span x-text="(gatewayData.metrics.inbound_total + gatewayData.metrics.outbound_total) > 0
+                                                ? ((gatewayData.metrics.errors_total / (gatewayData.metrics.inbound_total + gatewayData.metrics.outbound_total) * 100) >= 5
+                                                    ? '●'
+                                                    : '⚠')
+                                                : '⚠'"></span>
+                                            <span x-text="' ' + gatewayData.metrics.errors_total + ' errors'"></span>
+                                            <span x-show="(gatewayData.metrics.inbound_total + gatewayData.metrics.outbound_total) > 0"
+                                                  x-text="' (' + (gatewayData.metrics.errors_total / (gatewayData.metrics.inbound_total + gatewayData.metrics.outbound_total) * 100).toFixed(1) + '% error rate)'"></span>
+                                        </span>
+                                    </template>
+                                </div>
+                            </template>
+
+                            <!-- Metrics row grid -->
+                            <div class="grid grid-cols-3 gap-3">
+                                <div class="bg-card border border-border rounded-xl p-3 flex items-center gap-3">
+                                    <span class="text-success text-lg font-mono font-bold">▼</span>
+                                    <div>
+                                        <div class="text-lg font-semibold text-text-primary font-mono" x-text="gatewayData.metrics.inbound_total ?? '—'"></div>
+                                        <div class="text-[0.55rem] uppercase tracking-wider text-text-muted">Inbound</div>
+                                    </div>
+                                </div>
+                                <div class="bg-card border border-border rounded-xl p-3 flex items-center gap-3">
+                                    <span class="text-accent text-lg font-mono font-bold">▲</span>
+                                    <div>
+                                        <div class="text-lg font-semibold text-text-primary font-mono" x-text="gatewayData.metrics.outbound_total ?? '—'"></div>
+                                        <div class="text-[0.55rem] uppercase tracking-wider text-text-muted">Outbound</div>
+                                    </div>
+                                </div>
+                                <div class="bg-card border border-border rounded-xl p-3 flex items-center gap-3">
+                                    <span class="text-lg font-mono font-bold" :class="(gatewayData.metrics.errors_total || 0) > 0 ? 'text-error' : 'text-text-muted'">✕</span>
+                                    <div>
+                                        <div class="text-lg font-semibold text-text-primary font-mono" x-text="gatewayData.metrics.errors_total ?? '—'"></div>
+                                        <div class="text-[0.55rem] uppercase tracking-wider text-text-muted">Errors</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+                    <template x-if="!gatewayData.metrics">
+                        <div class="bg-card border border-border rounded-xl p-4 text-center text-[0.6rem] text-text-muted">
+                            Metrics unavailable — not yet provided by backend.
+                        </div>
+                    </template>
+                </div>
+
                 <!-- ── Project Roadmap ── -->
                 <div>
                     <div class="flex items-center justify-between mb-3">
