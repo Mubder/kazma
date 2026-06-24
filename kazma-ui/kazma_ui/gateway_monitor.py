@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 logger = logging.getLogger(__name__)
 
-_ROADMAP_PATH = Path(__file__).resolve().parent.parent.parent.parent / "data" / "roadmaps.json"
+_ROADMAP_PATH = Path(__file__).resolve().parent.parent / "data" / "roadmaps.json"
 
 
 def create_gateway_router(gateway: Any) -> APIRouter:
