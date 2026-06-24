@@ -33,4 +33,4 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest tests/ -q --tb=short
+          PYTEST_ASYNCIO_MODE=auto python -m pytest tests/ -q --tb=short
