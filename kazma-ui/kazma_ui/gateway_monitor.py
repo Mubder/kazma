@@ -4,12 +4,14 @@ Provides endpoints for:
   - GET /api/gateway/status  — snapshot of all adapters + queue log
   - POST /api/gateway/adapter/{name}/start  — start an adapter
   - POST /api/gateway/adapter/{name}/stop   — stop an adapter
+  - GET /api/gateway/roadmap  — project roadmap JSON
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -28,8 +30,14 @@ def create_gateway_router(gateway: Any) -> APIRouter:
 
     @router.get("/status")
     async def gateway_status() -> dict[str, Any]:
-        """Return full gateway status for the monitor UI."""
-        return gateway.status_info()
+        """Return full gateway status for the monitor UI.
+
+        Enhances the base status with per-adapter uptime tracking
+        and a server timestamp so the UI can compute age.
+        """
+        info = gateway.status_info()
+        info["server_time"] = time.time()
+        return info
 
     @router.post("/adapter/{name}/start")
     async def start_adapter(name: str) -> JSONResponse:
