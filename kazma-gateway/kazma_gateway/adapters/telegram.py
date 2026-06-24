@@ -1,9 +1,11 @@
-"""Telegram Adapter — aiogram-based long-polling, zero tunnels.
+"""Telegram Adapter — Manual getUpdates polling with jitter.
 
-Uses aiogram's Dispatcher with polling (no webhooks, no public IP needed).
+Headless: pure polling against the Telegram Bot API.
+No webhooks, no aiogram Dispatcher, no public IP required.
+Full control over poll timing, jitter, and rate-limit handling.
+
 All incoming messages are normalized to IncomingMessage with context_metadata
-carrying raw Telegram IDs (chat_id, user_id, message_id) so the Brain
-never imports anything Telegram-specific.
+carrying raw Telegram IDs so the Brain never imports Telegram-specific code.
 
 Configuration (kazma.yaml):
     connectors:
@@ -17,10 +19,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
+from typing import Any
 
-from aiogram import Bot, Dispatcher
-from aiogram.enums import ParseMode
-from aiogram.types import Message
+import httpx
 
 from kazma_gateway.gateway import (
     BaseAdapter,
@@ -30,23 +32,34 @@ from kazma_gateway.gateway import (
 
 logger = logging.getLogger(__name__)
 
+_TELEGRAM_API = "https://api.telegram.org/bot{token}"
+
+# Rate-limit constants
+_SEND_MAX_RETRIES = 3
+_SEND_BASE_DELAY = 1.0  # base delay for exponential backoff on 429
+
 
 class TelegramAdapter(BaseAdapter):
-    """Telegram Bot API adapter using aiogram long-polling.
+    """Telegram Bot API adapter using manual getUpdates polling.
 
-    Headless: uses aiogram's built-in polling — no webhooks,
+    Headless: direct HTTP polling — no webhooks, no aiogram Dispatcher,
     no ngrok, no public IP required.
+
+    Every poll cycle includes a 1-3 second randomized jitter delay
+    to prevent rate-limiting and API hammering (mandate requirement).
 
     Args:
         token:          Telegram Bot API token.
         allowed_users:  Optional whitelist of user IDs (empty = allow all).
         parse_mode:     Default parse_mode for outbound messages.
+        poll_timeout:   Long-poll timeout in seconds for getUpdates (default 5).
 
     context_metadata keys (carried in every IncomingMessage):
         chat_id:    int — Telegram chat ID (group, private, channel)
         user_id:    int — Sender's user ID
         username:   str — Sender's username or first_name
         message_id: int — Telegram message ID (for reply threading)
+        chat_type:  str — "private", "group", "supergroup", "channel"
     """
 
     name = "telegram"
@@ -56,143 +69,210 @@ class TelegramAdapter(BaseAdapter):
         token: str,
         allowed_users: list[int] | None = None,
         parse_mode: str = "Markdown",
+        poll_timeout: int = 5,
     ) -> None:
         super().__init__()
         self._token = token
+        self._api_base = _TELEGRAM_API.format(token=token)
         self._allowed_users = set(allowed_users or [])
-        self._parse_mode = ParseMode(parse_mode) if parse_mode else None
-        self._bot: Bot | None = None
-        self._dp: Dispatcher | None = None
+        self._parse_mode = parse_mode or ""
+        self._poll_timeout = poll_timeout
+        self._offset: int = 0
+        self._http: httpx.AsyncClient | None = None
 
     async def listen(
         self,
         queue: asyncio.Queue[IncomingMessage],
         shutdown_event: asyncio.Event,
     ) -> None:
-        """Start aiogram polling and enqueue normalized messages.
+        """Poll Telegram getUpdates in a loop with 1-3s jitter.
 
-        Runs until shutdown_event is set, then cleanly stops polling.
+        Manual polling gives us full control over timing:
+          - getUpdates with long-poll (5s timeout) reduces idle requests
+          - Offset tracking ensures no message is processed twice
+          - 1-3s randomized jitter between cycles (mandate requirement)
+          - Clean exit on shutdown_event
 
         Args:
             queue:          The unified message bus.
             shutdown_event: Signals when to stop.
         """
-        self._bot = Bot(token=self._token)
-        self._dp = Dispatcher()
+        self._http = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0))
 
-        # Register the message handler on the dispatcher
-        @self._dp.message()
-        async def handle_message(message: Message) -> None:
-            """Normalize and enqueue every incoming text message."""
-            # Skip empty messages
-            text = message.text or message.caption
-            if not text or not text.strip():
-                return
-
-            # Extract sender info
-            from_user = message.from_user
-            user_id = from_user.id if from_user else 0
-            username = (
-                (from_user.username if from_user else "")
-                or (from_user.first_name if from_user else "")
-                or f"tg_{user_id}"
-            )
-
-            # User whitelist
-            if self._allowed_users and user_id not in self._allowed_users:
-                logger.debug(
-                    "[telegram] Ignoring user %d (not whitelisted)",
-                    user_id,
-                )
-                return
-
-            chat_id = message.chat.id
-            message_id = message.message_id
-
-            # Build the normalized message — context_metadata carries
-            # everything the adapter's send() needs to route the reply
-            msg = IncomingMessage(
-                platform="telegram",
-                sender_id=f"telegram:{chat_id}",
-                text=text.strip(),
-                context_metadata={
-                    "chat_id": chat_id,
-                    "user_id": user_id,
-                    "username": username,
-                    "message_id": message_id,
-                    "chat_type": message.chat.type,
-                },
-            )
-
-            try:
-                queue.put_nowait(msg)
-                logger.info(
-                    "[telegram] Enqueued from %s (chat=%d): %.80s",
-                    username,
-                    chat_id,
-                    text,
-                )
-            except asyncio.QueueFull:
-                logger.warning(
-                    "[telegram] Queue full — dropping message from chat=%d",
-                    chat_id,
-                )
-
-        # Start polling. aiogram's start_polling blocks until stopped,
-        # so we wrap it and watch the shutdown event.
-        logger.info("[telegram] Starting aiogram long-polling...")
-
-        # Create a task for the polling loop
-        polling_task = asyncio.create_task(
-            self._dp.start_polling(
-                self._bot,
-                handle_signals=False,  # we handle shutdown ourselves
-            ),
-            name="telegram-polling",
-        )
-
-        # Wait until shutdown is signalled
-        await shutdown_event.wait()
-
-        # Stop polling gracefully
-        logger.info("[telegram] Shutdown signalled — stopping polling...")
-        polling_task.cancel()
         try:
-            await polling_task
-        except asyncio.CancelledError:
-            pass
+            logger.info("[telegram] Starting getUpdates polling loop")
 
-        # Close the bot session
-        if self._bot:
-            await self._bot.session.close()
+            while not shutdown_event.is_set():
+                # ── Poll ────────────────────────────────────────────
+                try:
+                    updates = await self._poll()
+                except asyncio.CancelledError:
+                    raise
+                except httpx.TimeoutException:
+                    # Normal for long-poll — just jitter and retry
+                    if await self.jitter_sleep(shutdown_event):
+                        break
+                    continue
+                except httpx.ConnectError:
+                    logger.warning("[telegram] Connection failed — retrying after jitter")
+                    if await self.jitter_sleep(shutdown_event):
+                        break
+                    continue
+                except Exception:
+                    logger.exception("[telegram] Poll error")
+                    if await self.jitter_sleep(shutdown_event):
+                        break
+                    continue
 
-        logger.info("[telegram] Polling stopped")
+                # ── Process updates ─────────────────────────────────
+                for update in updates:
+                    if shutdown_event.is_set():
+                        break
 
-    async def send(self, outbound: OutboundMessage) -> bool:
-        """Send a message back to Telegram.
+                    msg = self._parse_update(update)
+                    if msg is None:
+                        continue
 
-        Extracts chat_id from outbound.context_metadata (carried
-        verbatim from the original IncomingMessage).
+                    # User whitelist
+                    if self._allowed_users:
+                        user_id = msg.context_metadata.get("user_id", 0)
+                        if user_id not in self._allowed_users:
+                            logger.debug(
+                                "[telegram] Ignoring user %d (not whitelisted)",
+                                user_id,
+                            )
+                            continue
+
+                    try:
+                        queue.put_nowait(msg)
+                        logger.info(
+                            "[telegram] Enqueued from %s (chat=%d): %.80s",
+                            msg.context_metadata.get("username", "?"),
+                            msg.context_metadata.get("chat_id", 0),
+                            msg.text,
+                        )
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "[telegram] Queue full — dropping message from chat=%d",
+                            msg.context_metadata.get("chat_id", 0),
+                        )
+
+                # ── Jitter (mandatory 1-3s delay) ───────────────────
+                if await self.jitter_sleep(shutdown_event):
+                    break
+
+        finally:
+            if self._http:
+                await self._http.aclose()
+                self._http = None
+            logger.info("[telegram] Polling stopped")
+
+    async def _poll(self) -> list[dict[str, Any]]:
+        """Execute a single getUpdates call with long-poll.
+
+        Uses Telegram's built-in long-polling (timeout parameter)
+        to reduce idle requests. Advances the offset after each batch.
+
+        Returns:
+            List of Telegram Update objects.
+        """
+        assert self._http is not None
+
+        params: dict[str, Any] = {"timeout": self._poll_timeout}
+        if self._offset:
+            params["offset"] = self._offset
+
+        resp = await self._http.get(
+            f"{self._api_base}/getUpdates",
+            params=params,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data.get("ok"):
+            logger.error("[telegram] getUpdates returned ok=false: %s", data)
+            return []
+
+        updates = data.get("result", [])
+
+        # Advance offset to avoid re-processing
+        if updates:
+            self._offset = max(u["update_id"] for u in updates) + 1
+
+        return updates
+
+    def _parse_update(self, update: dict[str, Any]) -> IncomingMessage | None:
+        """Parse a Telegram Update into an IncomingMessage.
+
+        Extracts the message from various update types (message,
+        channel_post, edited_message) and normalizes into IncomingMessage
+        with all raw platform data in context_metadata.
 
         Args:
-            outbound: The OutboundMessage with context_metadata["chat_id"].
+            update: Raw Telegram Update object.
+
+        Returns:
+            IncomingMessage or None if not a text message.
+        """
+        # Extract message from various update shapes
+        message = update.get("message") or update.get("channel_post") or update.get("edited_message")
+        if not message:
+            return None
+
+        chat_id = message.get("chat", {}).get("id")
+        if not chat_id:
+            return None
+
+        # Extract text (prefer text, fall back to caption for media)
+        text = (message.get("text") or message.get("caption") or "").strip()
+        if not text:
+            return None
+
+        # Build sender info
+        from_user = message.get("from", {})
+        user_id = from_user.get("id", 0)
+        username = from_user.get("username", "") or from_user.get("first_name", "") or f"tg_{user_id}"
+
+        return IncomingMessage(
+            platform="telegram",
+            sender_id=f"telegram:{chat_id}",
+            text=text,
+            context_metadata={
+                "chat_id": chat_id,
+                "user_id": user_id,
+                "username": username,
+                "message_id": message.get("message_id", 0),
+                "chat_type": message.get("chat", {}).get("type", "private"),
+                "update_id": update.get("update_id", 0),
+            },
+        )
+
+    async def send(self, outbound: OutboundMessage) -> bool:
+        """Send a message back to Telegram with 429 retry.
+
+        Extracts chat_id from outbound.context_metadata (preferred)
+        or falls back to parsing from outbound.target_id.
+
+        Handles Telegram rate-limits (HTTP 429) with exponential backoff.
+
+        Args:
+            outbound: The OutboundMessage to deliver.
 
         Returns:
             True if sent successfully.
         """
-        if not self._bot:
-            logger.error("[telegram] Bot not initialized — cannot send")
-            return False
+        if not self._http:
+            self._http = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0))
 
+        # Resolve chat_id
         chat_id = outbound.context_metadata.get("chat_id")
         if not chat_id:
-            # Fallback: try parsing from target_id
             if ":" in outbound.target_id:
                 try:
                     chat_id = int(outbound.target_id.split(":", 1)[1])
                 except (ValueError, IndexError):
                     logger.error(
-                        "[telegram] No chat_id in context_metadata and cannot parse target_id: %s",
+                        "[telegram] Cannot parse chat_id from target_id: %s",
                         outbound.target_id,
                     )
                     return False
@@ -200,14 +280,69 @@ class TelegramAdapter(BaseAdapter):
                 logger.error("[telegram] No chat_id available for send()")
                 return False
 
-        try:
-            await self._bot.send_message(
-                chat_id=chat_id,
-                text=outbound.text[:4096],
-                parse_mode=self._parse_mode,
-            )
-            logger.debug("[telegram] Sent to %d: %.80s", chat_id, outbound.text)
-            return True
-        except Exception:
-            logger.exception("[telegram] Failed to send to %d", chat_id)
-            return False
+        # Send with 429 retry (exponential backoff)
+        payload = {
+            "chat_id": chat_id,
+            "text": outbound.text[:4096],
+        }
+        if self._parse_mode:
+            payload["parse_mode"] = self._parse_mode
+
+        for attempt in range(_SEND_MAX_RETRIES):
+            try:
+                resp = await self._http.post(
+                    f"{self._api_base}/sendMessage",
+                    json=payload,
+                )
+
+                if resp.status_code == 429:
+                    # Rate-limited — extract retry_after or use backoff
+                    try:
+                        body = resp.json()
+                        retry_after = body.get("parameters", {}).get(
+                            "retry_after",
+                            _SEND_BASE_DELAY * (2**attempt),
+                        )
+                    except Exception:
+                        retry_after = _SEND_BASE_DELAY * (2**attempt)
+
+                    jitter = random.uniform(0.5, 1.5)
+                    wait = retry_after + jitter
+                    logger.warning(
+                        "[telegram] Rate-limited (429) on send to %d — retrying in %.1fs (attempt %d/%d)",
+                        chat_id,
+                        wait,
+                        attempt + 1,
+                        _SEND_MAX_RETRIES,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+
+                resp.raise_for_status()
+                result = resp.json()
+
+                if result.get("ok"):
+                    logger.debug("[telegram] Sent to %d: %.80s", chat_id, outbound.text)
+                    return True
+                else:
+                    logger.error("[telegram] sendMessage not ok: %s", result)
+                    return False
+
+            except httpx.HTTPStatusError as exc:
+                logger.error(
+                    "[telegram] HTTP %d on send to %d: %s",
+                    exc.response.status_code,
+                    chat_id,
+                    exc,
+                )
+                return False
+            except Exception:
+                logger.exception("[telegram] Failed to send to %d", chat_id)
+                return False
+
+        logger.error(
+            "[telegram] Rate-limit exceeded after %d retries for chat=%d",
+            _SEND_MAX_RETRIES,
+            chat_id,
+        )
+        return False

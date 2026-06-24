@@ -8,7 +8,8 @@ sees IncomingMessage objects — platform-specific code never leaks.
 Architecture:
     ┌─────────────┐     ┌─────────────┐
     │  Telegram    │     │  Discord    │  ... future adapters
-    │  (aiogram)   │     │  (future)   │
+    │  (manual     │     │  (future)   │
+    │   polling)   │     │             │
     └──────┬───────┘     └──────┬──────┘
            │  listen()          │  listen()
            ▼                    ▼
@@ -23,6 +24,7 @@ Architecture:
     │  - consumes queue                 │
     │  - dispatches to handler          │
     │  - asyncio.Event shutdown signal  │
+    │  - graceful drain on stop()       │
     └──────────────┬───────────────────┘
                    │
                    ▼
@@ -37,6 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -120,6 +123,11 @@ class BaseAdapter(ABC):
     Subclasses MUST implement:
         - listen(queue, shutdown_event): poll loop that enqueues IncomingMessage
         - send(outbound): deliver an OutboundMessage to the platform
+
+    Jitter contract:
+        Every listen() implementation MUST include a randomized 1-3s delay
+        between poll cycles to prevent rate-limiting and API hammering.
+        Use ``await self._jitter_sleep(shutdown_event)`` for this.
     """
 
     name: str = "unknown"
@@ -155,6 +163,31 @@ class BaseAdapter(ABC):
         self._running = False
         logger.info("[%s] Adapter stopped", self.name)
 
+    @staticmethod
+    async def jitter_sleep(shutdown_event: asyncio.Event) -> bool:
+        """Randomized 1-3 second delay between poll cycles.
+
+        This is MANDATORY in every listen() loop to prevent rate-limiting.
+        Returns True if shutdown was signalled during the sleep
+        (caller should exit), False otherwise.
+
+        Args:
+            shutdown_event: The gateway's shutdown signal.
+
+        Returns:
+            True if caller should exit (shutdown signalled).
+        """
+        delay = random.uniform(1.0, 3.0)
+        try:
+            # Use wait_for so we wake up immediately on shutdown
+            await asyncio.wait_for(
+                shutdown_event.wait(),
+                timeout=delay,
+            )
+            return True  # shutdown signalled
+        except TimeoutError:
+            return False  # normal jitter expiry
+
     @abstractmethod
     async def listen(
         self,
@@ -164,8 +197,8 @@ class BaseAdapter(ABC):
         """Poll the platform and enqueue IncomingMessage objects.
 
         MUST check shutdown_event.is_set() and exit cleanly when True.
-        This method runs as a background task — it should loop until
-        the shutdown event is signalled.
+        MUST call ``await self.jitter_sleep(shutdown_event)`` between
+        poll cycles to introduce 1-3s randomized delay.
 
         Args:
             queue:          The unified message bus.
@@ -205,6 +238,7 @@ class GatewayManager:
         - Starts/stops all registered adapters.
         - Consumes the queue and dispatches to the registered handler.
         - Signals shutdown via asyncio.Event (no zombie tasks).
+        - Drains remaining messages on shutdown before exiting.
 
     Usage:
         manager = GatewayManager()
@@ -271,26 +305,44 @@ class GatewayManager:
         )
 
     async def stop(self) -> None:
-        """Signal shutdown and wait for all adapters to exit cleanly."""
+        """Signal shutdown and wait for all adapters to exit cleanly.
+
+        Shutdown sequence:
+            1. Set the asyncio.Event — adapters see this and exit their loops.
+            2. Wait for all adapter tasks to finish (with 5s timeout).
+            3. Drain remaining messages from the queue (best-effort).
+            4. Cancel the consumer task.
+        """
         if not self._started:
             return
 
         logger.info("Gateway shutting down...")
 
-        # Signal all adapters to stop
+        # 1. Signal all adapters to stop
         self._shutdown.set()
 
-        # Stop the consumer first (drain remaining messages)
+        # 2. Wait for all adapters to exit
+        for adapter in self.adapters:
+            await adapter.stop()
+
+        # 3. Drain remaining messages (best-effort, don't block)
+        drained = 0
+        while not self.queue.empty():
+            try:
+                self.queue.get_nowait()
+                drained += 1
+            except asyncio.QueueEmpty:
+                break
+        if drained:
+            logger.info("Drained %d undelivered messages from queue", drained)
+
+        # 4. Stop the consumer
         if self._consumer_task and not self._consumer_task.done():
             self._consumer_task.cancel()
             try:
                 await self._consumer_task
             except asyncio.CancelledError:
                 pass
-
-        # Wait for all adapters to exit
-        for adapter in self.adapters:
-            await adapter.stop()
 
         self._started = False
         logger.info("Gateway stopped cleanly")
