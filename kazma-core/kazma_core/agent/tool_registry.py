@@ -620,6 +620,59 @@ class LocalToolRegistry:
                 indent=2,
             )
 
+        # ── Cron scheduling tools ─────────────────────────────────
+        @self.register(
+            description=(
+                "Schedule a task to run at a future time. The task runs autonomously "
+                "without you needing to be present. Results are delivered to this conversation.\n\n"
+                "Timing: '5m' (5 minutes), '1h' (1 hour), 'daily at 9am', '2026-06-25T09:00:00'"
+            ),
+            category="automation",
+        )
+        async def schedule_task(timing: str, prompt: str) -> str:
+            import json as _json
+
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            scheduler = get_cron_scheduler()
+            if scheduler is None:
+                return "Error: Cron scheduler not initialized."
+
+            result = await scheduler.schedule(timing=timing, prompt=prompt)
+            return _json.dumps(result, ensure_ascii=False, indent=2)
+
+        @self.register(
+            description="List all scheduled tasks and their status.",
+            category="automation",
+        )
+        async def list_scheduled() -> str:
+            import json as _json
+
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            scheduler = get_cron_scheduler()
+            if scheduler is None:
+                return "Error: Cron scheduler not initialized."
+
+            jobs = await scheduler.list_jobs()
+            return _json.dumps(jobs, ensure_ascii=False, indent=2)
+
+        @self.register(
+            description="Cancel a scheduled task by job ID.",
+            category="automation",
+        )
+        async def cancel_scheduled(job_id: str) -> str:
+            import json as _json
+
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            scheduler = get_cron_scheduler()
+            if scheduler is None:
+                return "Error: Cron scheduler not initialized."
+
+            result = await scheduler.cancel(job_id)
+            return _json.dumps(result, ensure_ascii=False, indent=2)
+
         logger.info("Registered %d built-in tools", len(self._tools))
 
 

@@ -358,6 +358,24 @@ def create_app(config_path: str | None = None) -> FastAPI:
         except Exception as e:
             logger.warning("[SubAgent] Manager not available: %s", e)
 
+        # ── Cron Scheduler ────────────────────────────────────────
+        try:
+            from kazma_core.cron.scheduler import CronScheduler, SQLiteCronStore, set_cron_scheduler
+
+            cron_store = SQLiteCronStore("kazma-data/cron.db")
+            # Init is async — defer to startup
+            _cron_store_ref = cron_store
+
+            cron_scheduler = CronScheduler(
+                store=cron_store,
+                poll_interval=30.0,
+            )
+            set_cron_scheduler(cron_scheduler)
+            logger.info("[Cron] Scheduler initialized")
+        except Exception as e:
+            logger.warning("[Cron] Scheduler not available: %s", e)
+            _cron_store_ref = None
+
         _gateway = gateway
         _sse_tools_ref = locals().get("sse_tools")
         _sse_graph_ref = locals().get("sse_graph")
@@ -415,6 +433,19 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 )
             except Exception as e:
                 logger.warning("[Gateway] Failed to start: %s", e)
+
+            # Initialize cron store and start scheduler
+            if _cron_store_ref is not None:
+                try:
+                    await _cron_store_ref.init()
+                    from kazma_core.cron.scheduler import get_cron_scheduler
+
+                    cron_sched = get_cron_scheduler()
+                    if cron_sched:
+                        await cron_sched.start()
+                        logger.info("[Cron] Scheduler started")
+                except Exception as e:
+                    logger.warning("[Cron] Failed to start: %s", e)
 
         @app.on_event("shutdown")
         async def _stop_gateway() -> None:
