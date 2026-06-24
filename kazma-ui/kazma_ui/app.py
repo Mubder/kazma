@@ -545,14 +545,65 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     @app.on_event("shutdown")
     async def on_shutdown() -> None:
+        """Graceful shutdown — drain queues, close DBs, flush traces."""
         from kazma_core.shutdown import signal_shutdown
 
+        logger.info("[Shutdown] Starting graceful shutdown...")
+
+        # 1. Signal all background tasks to stop
         signal_shutdown()
-        # Give loops time to exit cleanly
+
+        # 2. Stop gateway (drains message queue, closes adapter connections)
+        if _gateway is not None:
+            try:
+                await _gateway.stop()
+                logger.info("[Shutdown] Gateway stopped")
+            except Exception as e:
+                logger.warning("[Shutdown] Gateway stop error: %s", e)
+
+        # 3. Stop cron scheduler (stops poll loop, saves pending jobs)
+        try:
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            cron_sched = get_cron_scheduler()
+            if cron_sched:
+                await cron_sched.stop()
+                logger.info("[Shutdown] Cron scheduler stopped")
+        except Exception as e:
+            logger.warning("[Shutdown] Cron stop error: %s", e)
+
+        # 4. Close session store (flush WAL, close DB connection)
+        try:
+            store_ref = locals().get("_cron_store_ref") or globals().get("_cron_store_ref")
+            if store_ref is not None:
+                await store_ref.close()
+        except Exception:
+            pass
+
+        # 5. Give loops time to exit cleanly
         await asyncio.sleep(0.5)
-        await agent.shutdown()
-        config_store.close()
-        logger.info("Kazma WebUI shut down.")
+
+        # 6. Shutdown agent
+        try:
+            await agent.shutdown()
+        except Exception:
+            pass
+
+        # 7. Close config store
+        try:
+            config_store.close()
+        except Exception:
+            pass
+
+        # 8. Flush Langfuse tracer
+        try:
+            if hasattr(agent, "tracer") and hasattr(agent.tracer, "flush"):
+                agent.tracer.flush()
+                logger.info("[Shutdown] Tracer flushed")
+        except Exception:
+            pass
+
+        logger.info("[Shutdown] Graceful shutdown complete")
 
     # ── Global Error Handlers ──────────────────────────────────────────
 
