@@ -62,7 +62,7 @@ def _run_serve(port: int) -> None:
     app = create_app()
     print(f"Starting Kazma WebUI on http://0.0.0.0:{port}")
     print("Press Ctrl+C to stop")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info", timeout_graceful_shutdown=15)
 
 
 def _run_wizard() -> None:
