@@ -393,7 +393,7 @@ class TestTelegramAdapter:
         msg = adapter._parse_update(update)
         assert msg is not None
         assert msg.platform == "telegram"
-        assert msg.sender_id == "telegram:12345"
+        assert msg.sender_id == "telegram:999"  # user_id, not chat_id — unique per-user sessions
         assert msg.text == "Hello Kazma"
         assert msg.context_metadata["chat_id"] == 12345
         assert msg.context_metadata["user_id"] == 999

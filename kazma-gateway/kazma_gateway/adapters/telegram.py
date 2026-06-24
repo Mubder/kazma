@@ -259,9 +259,13 @@ class TelegramAdapter(BaseAdapter):
         user_id = from_user.get("id", 0)
         username = from_user.get("username", "") or from_user.get("first_name", "") or f"tg_{user_id}"
 
+        # sender_id uses user_id for unique per-user sessions.
+        # Fallback to chat_id for channel posts (no 'from' field).
+        sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
+
         return IncomingMessage(
             platform="telegram",
-            sender_id=f"telegram:{chat_id}",
+            sender_id=sender_id,
             text=text,
             context_metadata={
                 "chat_id": chat_id,

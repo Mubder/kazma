@@ -45,6 +45,38 @@
     Uptime: {{ metrics.uptime }}
   </div>
 
+  <!-- Session Management -->
+  <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 1.5rem;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle);">
+      <h2 style="font-size: 0.875rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500;">
+        Session Management
+      </h2>
+      <button id="clear-all-btn" style="padding: 6px 12px; font-size: 0.75rem; background: var(--error); color: white; border: none; border-radius: 4px; cursor: pointer; transition: opacity 0.15s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+        Clear All Sessions
+      </button>
+    </div>
+    <div style="padding: 16px 20px;">
+      <div id="sessions-loading" style="text-align: center; padding: 20px; color: var(--text-muted);">Loading sessions...</div>
+      <div id="sessions-empty" style="display: none; text-align: center; padding: 20px; color: var(--text-muted);">No active sessions</div>
+      <div style="overflow-x: auto;">
+        <table id="sessions-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem; display: none;">
+          <thead>
+            <tr style="border-bottom: 1px solid var(--border-subtle);">
+              <th style="padding: 10px 16px; text-align: left; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Thread ID</th>
+              <th style="padding: 10px 16px; text-align: left; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Platform</th>
+              <th style="padding: 10px 16px; text-align: left; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">User</th>
+              <th style="padding: 10px 16px; text-align: right; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Messages</th>
+              <th style="padding: 10px 16px; text-align: right; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Tokens</th>
+              <th style="padding: 10px 16px; text-align: left; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Created</th>
+              <th style="padding: 10px 16px; text-align: center; font-weight: 500; color: var(--text-tertiary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="sessions-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <!-- Traces Table -->
   <div class="card" style="padding: 0; overflow: hidden;">
     <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border-subtle);">
@@ -168,6 +200,114 @@
   } else {
     connect();
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Session Management
+  // ══════════════════════════════════════════════════════════════════════════
+
+  async function loadSessions() {
+    try {
+      const response = await fetch('/api/sessions');
+      const data = await response.json();
+      
+      document.getElementById('sessions-loading').style.display = 'none';
+      
+      if (data.error) {
+        document.getElementById('sessions-empty').style.display = 'block';
+        document.getElementById('sessions-empty').textContent = 'Error: ' + data.error;
+        return;
+      }
+      
+      if (!data.sessions || data.sessions.length === 0) {
+        document.getElementById('sessions-empty').style.display = 'block';
+        document.getElementById('sessions-table').style.display = 'none';
+        return;
+      }
+      
+      document.getElementById('sessions-empty').style.display = 'none';
+      document.getElementById('sessions-table').style.display = 'table';
+      
+      const tbody = document.getElementById('sessions-tbody');
+      tbody.innerHTML = '';
+      
+      data.sessions.forEach(session => {
+        const tr = document.createElement('tr');
+        tr.style.cssText = 'border-bottom: 1px solid var(--border-subtle); transition: background 0.15s;';
+        
+        const threadId = session.thread_id || 'unknown';
+        const platform = session.platform || 'unknown';
+        const displayName = session.display_name || 'anonymous';
+        const messageCount = session.message_count || 0;
+        const tokens = session.context_tokens || 0;
+        const createdAt = session.created_at ? new Date(session.created_at).toLocaleString() : 'N/A';
+        
+        tr.innerHTML = `
+          <td style="padding: 10px 16px; font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${threadId}">${threadId}</td>
+          <td style="padding: 10px 16px;"><span class="badge badge-basic" style="font-size: 0.7rem;">${platform}</span></td>
+          <td style="padding: 10px 16px; font-weight: 500;">${displayName}</td>
+          <td style="padding: 10px 16px; text-align: right; font-family: var(--font-mono); font-size: 0.8rem;">${messageCount}</td>
+          <td style="padding: 10px 16px; text-align: right; font-family: var(--font-mono); font-size: 0.8rem;">${tokens}</td>
+          <td style="padding: 10px 16px; font-size: 0.75rem; color: var(--text-muted);">${createdAt}</td>
+          <td style="padding: 10px 16px; text-align: center;">
+            <button onclick="deleteSession('${threadId}')" style="padding: 4px 8px; font-size: 0.7rem; background: var(--error); color: white; border: none; border-radius: 3px; cursor: pointer; transition: opacity 0.15s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">Delete</button>
+          </td>
+        `;
+        
+        tbody.appendChild(tr);
+      });
+    } catch (e) {
+      console.error('Failed to load sessions:', e);
+      document.getElementById('sessions-loading').style.display = 'none';
+      document.getElementById('sessions-empty').style.display = 'block';
+      document.getElementById('sessions-empty').textContent = 'Error loading sessions';
+    }
+  }
+
+  async function deleteSession(threadId) {
+    if (!confirm(`Delete session ${threadId}? This cannot be undone.`)) {
+      return;
+    }
+    
+    try {
+      const response = await fetch(`/api/sessions/${threadId}`, { method: 'DELETE' });
+      const data = await response.json();
+      
+      if (data.deleted) {
+        loadSessions(); // Reload the list
+      } else {
+        alert('Failed to delete session: ' + (data.error || 'Unknown error'));
+      }
+    } catch (e) {
+      console.error('Failed to delete session:', e);
+      alert('Error deleting session');
+    }
+  }
+
+  async function clearAllSessions() {
+    if (!confirm('Delete ALL sessions? This cannot be undone.')) {
+      return;
+    }
+    
+    try {
+      const response = await fetch('/api/sessions/clear-all', { method: 'POST' });
+      const data = await response.json();
+      
+      if (data.deleted) {
+        loadSessions(); // Reload the list
+      } else {
+        alert('Failed to clear sessions: ' + (data.error || 'Unknown error'));
+      }
+    } catch (e) {
+      console.error('Failed to clear sessions:', e);
+      alert('Error clearing sessions');
+    }
+  }
+
+  // Wire up the clear-all button
+  document.getElementById('clear-all-btn').addEventListener('click', clearAllSessions);
+
+  // Load sessions on page load
+  loadSessions();
 })();
 </script>
 <style>

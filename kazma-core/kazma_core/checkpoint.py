@@ -36,6 +36,7 @@ class CheckpointManager:
         self._saver: AsyncSqliteSaver | None = None
         self._conn: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
+        self._thread_locks: dict[str, asyncio.Lock] = {}  # Per-thread locks for save()
 
     async def _ensure_saver(self) -> AsyncSqliteSaver:
         """Lazily initialize the AsyncSqliteSaver with direct connection."""
@@ -57,7 +58,10 @@ class CheckpointManager:
         """Save state to SQLite, return checkpoint ID (last_cp_id).
 
         Generates a new UUID checkpoint_id and stores the full state
-        as JSON. Uses langgraph's checkpoint protocol under the hood.
+        as JSON. Uses langgraph's checkpoint protocols under the hood.
+        
+        Uses per-thread locking to prevent race conditions when multiple
+        messages for the same thread_id checkpoint simultaneously.
         """
         saver = await self._ensure_saver()
 
@@ -65,29 +69,33 @@ class CheckpointManager:
         state["last_cp_id"] = cp_id
 
         thread_id = state.get("provenance", {}).get("thread_id", str(uuid.uuid4()))
-        config = self._config(thread_id)
+        
+        # Per-thread lock to serialize checkpoint writes
+        thread_lock = self._thread_locks.setdefault(thread_id, asyncio.Lock())
+        async with thread_lock:
+            config = self._config(thread_id)
 
-        # Serialize the full state as the checkpoint payload
-        checkpoint: dict[str, Any] = {
-            "v": 1,
-            "id": cp_id,
-            "ts": state.get("created_at", ""),
-            "channel_values": {
-                "agent_state": json.dumps(state, default=str),
-            },
-            "channel_versions": {},
-            "versions_seen": {},
-        }
+            # Serialize the full state as the checkpoint payload
+            checkpoint: dict[str, Any] = {
+                "v": 1,
+                "id": cp_id,
+                "ts": state.get("created_at", ""),
+                "channel_values": {
+                    "agent_state": json.dumps(state, default=str),
+                },
+                "channel_versions": {},
+                "versions_seen": {},
+            }
 
-        metadata: dict[str, Any] = {
-            "checkpoint_id": cp_id,
-            "created_at": state.get("created_at", ""),
-            "context_tokens": state.get("context_tokens", 0),
-            "message_count": len(state.get("messages", [])),
-        }
+            metadata: dict[str, Any] = {
+                "checkpoint_id": cp_id,
+                "created_at": state.get("created_at", ""),
+                "context_tokens": state.get("context_tokens", 0),
+                "message_count": len(state.get("messages", [])),
+            }
 
-        await saver.aput(config, checkpoint, metadata, {})
-        logger.info("Checkpoint saved: %s (thread=%s)", cp_id, thread_id)
+            await saver.aput(config, checkpoint, metadata, {})
+            logger.info("Checkpoint saved: %s (thread=%s)", cp_id, thread_id)
         return cp_id
 
     async def load(self, checkpoint_id: str) -> AgentState:
