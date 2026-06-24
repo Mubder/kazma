@@ -1,277 +1,225 @@
-# Kazma - 🇰🇼 - كاظمة
+# Kazma — 🇰🇼 كاظمة
 
-**Status: ALPHA — Stable Architecture, Experimental API**
+**Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
-Autonomous AI agent framework — Python 3.11+, asyncio-native, sqlite-vec only.
-
-![Tests](https://img.shields.io/badge/tests-1082_passing-brightgreen)
-![Version](https://img.shields.io/badge/version-0.1.0--alpha-orange)
+![Tests](https://img.shields.io/badge/tests-1353_passing-brightgreen)
+![Version](https://img.shields.io/badge/version-0.1.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-blue)
+![Docker](https://img.shields.io/badge/docker-ready-blue)
+![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
 
 ---
 
 ## 🌍 Overview
 
-Kazma is a production-grade, domain-agnostic, open-source framework for building reliable AI agents. We built Kazma because the gap between "cool demo" and "reliable agent" is enormous.
+Kazma is an open-source framework for building reliable, culturally-aware AI agents. Built on LangGraph with SQLite checkpointing, it survives crashes, remembers across sessions, and enforces safety boundaries.
 
-**Core Pillars:**
+**Pillars:**
 
-*   **Durable Execution**: Built on LangGraph/SQLite, Kazma supports checkpointing that survives SIGKILL. Your agents resume mid-task, never losing state.
-*   **Context Authority**: Implements a strict 80% compaction loop, preventing context window exhaustion and hallucination spirals.
-*   **Cultural Moat**: Native support for Arabic (MSA/Gulf dialects) with a "Majlis Mode" protocol for culturally appropriate conversational pacing.
-*   **MCP Interoperability**: Native Model Context Protocol (MCP) support — access 177,000+ ecosystem tools with zero vendor lock-in.
-
----
-
-## 🇰🇼 نظرة عامة (Arabic Overview)
-
-كاظمة هو إطار عمل مفتوح المصدر ومستقل لبناء وكلاء ذكاء اصطناعي (AI Agents) موثوقين وقابلين للتطوير. تم تصميم كاظمة للبيئات التي تتطلب دقة عالية وتوافقاً ثقافياً.
-
-**لماذا كاظمة؟**
-
-*   **التنفيذ المتين**: حفظ تلقائي للحالة؛ إذا تعطل النظام، يكمل الوكيل عمله من نفس النقطة.
-*   **سلطة السياق**: آلية ذكية لتلخيص المحادثات والحفاظ على المعلومات المهمة.
-*   **هوية ثقافية**: دعم أصيل للغة العربية (الفصحى واللهجة الكويتية) مع بروتوكول "المجلس".
-*   **تكامل MCP**: توافق كامل مع بروتوكول سياق النموذج (MCP).
+| Pillar | Description |
+|:---|:---|
+| **Headless Gateway** | Telegram + Discord adapters with rate limiting, session isolation, and platform-agnostic backend registry |
+| **Durable Execution** | LangGraph + SQLite checkpointing — agents resume mid-task after SIGKILL |
+| **RAG Memory** | VectorMemory (ChromaDB + sentence-transformers) — store/retrieve facts with provenance |
+| **Human-in-the-Loop** | Approval gate for dangerous tools + shared-secret authenticated endpoint |
+| **Sub-Agent Spawning** | Delegate tasks to child graphs with isolated contexts |
+| **Cron Autonomy** | Scheduled agent actions with SQLite-backed persistence |
+| **Cultural Moat** | Native Arabic support (MSA/Gulf dialects) with "Majlis Mode" protocol |
+| **Docker Deployable** | Single `docker compose up` — 2 volumes, graceful shutdown |
 
 ---
 
 ## 🏗 Architecture
 
 ```
-kazma-core/          Agent loop (ReAct), checkpointing, compaction, authority
-kazma-memory/        sqlite-vec + SQLite FTS5, Arabic tokenizer
-kazma-skills/        YAML manifests wrapping MCP tools, certified servers
-kazma-connectors/    Telegram, Discord, Slack adapters
-kazma-providers/     LiteLLM router, model switching, provider abstraction
-kazma-ui/            FastAPI + HTMX dashboard (Arabic RTL, Linear design)
-kazma-tui/           Textual TUI with Arabic/RTL support
-kazma-cli/           CLI entry point: install, diagnostics, hub commands
-tests/               1000+ tests — pytest + asyncio
+kazma-core/              Agent graph, ReAct supervisor, sub-agents, model router, cron
+│   └── kazma_core/
+│       ├── agent/            Graph builder, tool registry, sub-agent manager
+│       ├── memory/           VectorMemory (ChromaDB RAG)
+│       ├── models/           ModelRouter (deepseek, openrouter)
+│       ├── safety/           HITL approval gate
+│       └── cron/             CronScheduler (SQLite)
+├── kazma-gateway/        Headless Gateway — adapters, SessionStore, rate limiting
+│   └── kazma_gateway/
+│       ├── adapters/         TelegramAdapter, DiscordAdapter
+│       ├── stores/           SQLiteSessionStore, checkpoint store
+│       └── gateway.py        GatewayManager, MessageMetrics, RateLimiter
+├── kazma-ui/             FastAPI + Jinja2 dashboard (Arabic RTL)
+│   └── kazma_ui/
+│       ├── app.py            FastAPI app, shutdown handler
+│       ├── gateway_monitor.py /api/gateway/status endpoint
+│       ├── metrics.py        Prometheus /metrics endpoint
+│       └── templates/        index.html (SSE chat, metrics, HITL cards)
+├── kazma-tui/            Textual TUI with Arabic/RTL support
+├── kazma-cli/            CLI entry point (status, serve, hub, docs)
+├── kazma-memory/         SQLite FTS5 + Arabic tokenizer
+├── kazma-skills/         YAML skill manifests + MCP server registry
+├── kazma-providers/      LiteLLM router (multi-provider failover)
+├── tests/                1,353 tests (pytest + asyncio)
+├── docker-compose.yml    Single-command deployment
+└── archive/              Deprecated (kazma-comms, kazma-connectors)
 ```
 
 ---
 
-## 📦 Installation & Setup
+## 📦 Quick Start
 
 ### Prerequisites
 
-- **Python 3.11+** (3.11 or 3.12 recommended)
-- **uv** (preferred) or **pip**
-- **SQLite 3.35+** (included with Python)
-- **Git**
+- **Python 3.11+**
+- **uv** (recommended) or pip
+- **Docker** (optional, for production)
 
-### Quick Install
+### Install
 
 ```bash
-# Clone the repository
 git clone https://github.com/Mubder/kazma.git
 cd kazma
 
-# Run the certified bootstrap script
-chmod +x setup.sh && ./setup.sh
-```
-
-The `setup.sh` script performs a deterministic, fail-fast initialization:
-1. Verifies Python 3.11+ and uv are installed
-2. Syncs all dependencies from `pyproject.toml`
-3. Validates sqlite-vec, aiosqlite, and LangGraph are loadable
-4. Reports the total test count
-
-If any step fails, the script exits immediately with an actionable error message.
-
-#### Manual Install (alternative)
-
-```bash
-# Install with uv (recommended)
+# Install with uv
 uv sync
+uv pip install -e ".[dev]"
 
-# Or with pip
-pip install -e ".[dev,cli]"
+# Run tests
+uv run pytest tests/ -q
 ```
 
-### Optional Dependencies
+### Run
 
 ```bash
-# Langfuse observability dashboard
-pip install langfuse
+# Web UI (default port 8000)
+uv run kazma-web
 
-# Arabic dialect detection (fastText)
-pip install fasttext
+# Web UI with custom port
+uv run kazma-web --port 8080
+
+# Via Python module
+uv run python -m kazma_ui.app --port 8080
+
+# Terminal UI
+uv run kazma-tui
+
+# CLI
+uv run kazma status
+uv run kazma serve 8080
+uv run kazma hub search <query>
 ```
 
-### Configuration
+Then open http://localhost:8000 (or your chosen port).
 
-Kazma is configured via `kazma.yaml` at the project root:
+### Docker (Production)
+
+```bash
+cp .env.example .env   # fill in API keys
+docker compose up -d
+```
+
+---
+
+## ⚙️ Configuration
+
+Kazma uses `kazma.yaml` at the project root:
 
 ```yaml
 agent:
   name: "kazma"
   version: "0.1.0"
-  language: "ar"          # default interface language
+  language: "ar"
   rtl: true
 
+gateway:
+  rate_limits:
+    telegram: 30     # requests/second
+    discord: 5
+
+safety:
+  hitl:
+    enabled: true
+    tiers:
+      safe: [read_file, search_files, memory_search]
+      warning: [write_file, patch]
+      danger: [shell_exec, file_delete]
+
 models:
-  default: "gpt-4o-mini"  # default LLM
-  router: "litellm"        # model router
+  providers:
+    - name: deepseek
+      base_url: https://api.deepseek.com/v1
+      models: [deepseek-chat, deepseek-reasoner]
+    - name: openrouter
+      base_url: https://openrouter.ai/api/v1
+      models: [openai/gpt-4o-mini]
 
 storage:
-  engine: "sqlite-vec"
-  path: "kazma-data/checkpoints.db"
-
-memory:
-  enabled: true
-  max_context_tokens: 128000
-  retrieval_top_k: 5
+  session_store_path: "kazma-data/sessions.db"
+  checkpoint_path: "kazma-data/checkpoints.db"
+  cron_path: "kazma-data/cron.db"
 
 logging:
-  langfuse:
-    enabled: false
-    public_key: ""         # or set LANGFUSE_PUBLIC_KEY env var
-    secret_key: ""         # or set LANGFUSE_SECRET_KEY env var
+  level: info
+  format: console
 ```
 
-For local overrides, copy to `kazma.local.yaml` (git-ignored). Environment variables take precedence over YAML.
+For overrides, copy to `kazma.local.yaml` (git-ignored). Env vars take precedence.
 
 ### Environment Variables
 
 | Variable | Description | Default |
-|----------|-------------|---------|
-| `KAZMA_TRACING_BACKEND` | Tracing backend (`langfuse`, `opentelemetry`, `console`) | `console` |
+|:---|:---|:---|
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token | — |
+| `DISCORD_BOT_TOKEN` | Discord bot token | — |
+| `DEEPSEEK_API_KEY` | DeepSeek API key | — |
+| `OPENROUTER_API_KEY` | OpenRouter API key | — |
+| `KAZMA_SECRET` | HITL approval shared secret (optional) | — |
+| `KAZMA_VECTOR_PATH` | VectorMemory storage path | `~/.kazma/vector_memory` |
+| `KAZMA_VECTOR_COLLECTION` | ChromaDB collection name | `agent_memory` |
+| `KAZMA_VECTOR_MODEL` | Sentence-transformers model | `all-MiniLM-L6-v2` |
 | `LANGFUSE_PUBLIC_KEY` | Langfuse public key | — |
 | `LANGFUSE_SECRET_KEY` | Langfuse secret key | — |
-| `LANGFUSE_HOST` | Langfuse server URL | `http://localhost:3000` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OpenTelemetry collector endpoint | `localhost:4317` |
-| `KAZMA_HUB_URL` | Kazma Hub registry URL | `https://hub.kazma.dev` |
 
-### Running Tests
+---
+
+## 🧪 Tests
 
 ```bash
-# Full test suite
-pytest tests/
+# Full suite
+uv run pytest tests/ -q
 
 # With coverage
-# With coverage
-pytest --cov=kazma_core --cov-report=html tests/
+uv run pytest --cov=kazma_core --cov-report=html tests/
 
-# Specific test file
-pytest tests/test_checkpoint.py -v
+# Specific modules
+uv run pytest tests/integration/test_rag_pipeline.py -v
+uv run pytest tests/ -k "gateway" -v
 
-# Key test modules
-pytest tests/test_sqlite_search_backend.py tests/test_arabic_tokenizer.py tests/test_integration.py -v
+# Docker smoke test
+docker compose up --build -d
+curl http://localhost:8000/api/gateway/status
 ```
 
-### Development
+### Test Modules
+
+| Module | Tests | Coverage Area |
+|:---|:---:|:---|
+| `test_gateway.py` | 61 | GatewayManager, sessions, adapters, status |
+| `test_rag_pipeline.py` | 6 | VectorMemory store → agent retrieve → response |
+| `test_queue_processor.py` | — | Message queue processing |
+| Integration tests | 6 | RAG end-to-end pipeline |
+
+---
+
+## 📐 Development
 
 ```bash
-# Lint
+# Lint & format
 ruff check .
 ruff format .
 
 # Type check
 mypy kazma-core/kazma_core/
 
-# Run the agent (interactive)
-python -m kazma_core.agent
+# Watch mode
+uv run pytest tests/ -f
 ```
-
-### Running the Web UI
-
-```bash
-# Default port 8000
-uv run kazma-web
-
-# Custom port (if 8000 is in use)
-uv run kazma-web --port 8080
-
-# Or via Python directly
-uv run python -m kazma_ui.app --port 8080
-```
-
-Then open http://localhost:8080 (or your chosen port).
-
-**Web UI Features:**
-- Chat interface with real-time agent responses
-- Dashboard with live traces, metrics, cost tracking
-- Settings panel (model, MCP servers, language, RTL)
-- Skills management (install from Kazma Hub)
-- MCP server management
-- Agent monitoring
-
-### Running the TUI (Terminal UI)
-
-```bash
-# Start TUI
-uv run kazma-tui
-
-# Or via Python directly
-uv run python -m kazma_tui.tui
-```
-
-**TUI Features:**
-- Full Arabic/RTL text rendering
-- Real-time chat with Kazma agent
-- Status bar showing model, tools, session info
-- Keyboard-driven interface
-
-### Project Structure
-
-```
-kazma-core/              Agent loop (ReAct), checkpointing, compaction, authority
-│   └── kazma_core/
-│       ├── agent.py         # Main ReAct loop + LangGraph state machine
-│       ├── checkpoint.py    # SQLite checkpointing (SIGKILL-safe)
-│       ├── compaction.py    # Context compaction engine
-│       ├── authority.py     # 80% context authority enforcer
-│       ├── tracing.py       # Langfuse + OpenTelemetry + TraceStore
-│       ├── cost_breaker.py  # Cost circuit breaker ($0.50 threshold)
-│       ├── tone_adapter.py  # Cultural tone (Majlis protocol)
-│       ├── dialect_detector.py  # Gulf dialect detection
-│       ├── hub/             # Kazma Hub skill registry
-│       ├── delegation/      # Agent-to-agent delegation protocol
-│       └── security/        # Security linter + certification
-├── kazma-memory/            # sqlite-vec + SQLite FTS5 + Arabic tokenizer
-├── kazma-skills/            # Skill manifests + certified MCP servers
-├── kazma-connectors/        # Platform adapters (Telegram, Discord, Slack)
-├── kazma-providers/         # LiteLLM router (multi-provider failover)
-├── kazma-ui/                # FastAPI + HTMX dashboard (RTL, Linear design)
-├── kazma-tui/               # Textual TUI with Arabic/RTL
-├── kazma-cli/               # CLI (`kazma` command)
-├── tests/                   # 1000+ tests (pytest + asyncio)
-├── docs/                    # Documentation
-├── kazma.yaml               # Root configuration
-└── KAZMA_PROJECT_SUMMARY.md # Full project summary
-```
-
-## 🆕 Latest Features (Hermes_API_2 Merge)
-
-| Feature | Description |
-|---------|-------------|
-| **LiteLLM Router** | Multi-provider failover (OpenAI, Anthropic, local) |
-| **Skills Framework** | YAML manifests + certified MCP servers |
-| **Memory System** | sqlite-vec + SQLite FTS5 full-text search + Arabic tokenizer |
-| **Real-time Dashboard** | WebSocket live traces, metrics, cost tracking |
-| **Multi-Agent Monitoring** | Hub agent discovery, network visualization |
-| **Notification System** | Toast notifications with WebSocket feed |
-| **Light/Dark Theme** | Linear design system with theme toggle |
-| **Arabic RTL** | Full RTL support with dynamic language switching |
-| **Circuit Breaker** | Auto-halt on $0.50 cost threshold |
-| **Error Handling** | Global 404/500 handlers with friendly error pages |
-
-## 🧪 Latest Test Coverage
-
-```
-1000+ tests passing ✅
-  (Tantivy tests removed — replaced with SQLite FTS5)
-```
-
-Key test modules:
-- `test_sqlite_search_backend.py` — 20 tests for SQLite FTS5 + Arabic tokenizer
-- `test_arabic_tokenizer.py` — 31 tests for Arabic text processing
-- `test_integration.py` — 21 tests for FastAPI Web UI routes
-- `test_checkpoint.py` — Durable execution checkpointing
-- `test_tone_adapter.py` — Majlis protocol tone adaptation
-- `test_tracing.py` — Langfuse/OTel/TraceStore observability
 
 ---
 
