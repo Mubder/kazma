@@ -1092,13 +1092,36 @@
                     </div>
                 </template>
 
-                <!-- ── Warning: no adapters connected ── -->
-                <template x-if="!gatewayLoading && !gatewayError && (!gatewayData.adapters || gatewayData.adapters.length === 0 || gatewayData.adapters.every(function(a){return a.status!=='running'}))">
-                    <div class="mb-4 flex items-center gap-3 px-4 py-3 rounded-lg bg-warning/10 border border-warning/30 text-warning text-xs">
-                        <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                            <path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
-                        </svg>
-                        <span x-text="(gatewayData.adapters && gatewayData.adapters.length > 0) ? 'All adapters are offline. Add a bot token to enable platform connectors.' : 'No adapters registered. Configure a platform connector in Settings.'"></span>
+                <!-- ── Adapter Status Banner (multi-platform aware) ── -->
+                <template x-if="!gatewayLoading && !gatewayError && gatewayData.adapters">
+                    <div>
+                        <template x-if="gatewayData.adapters.length === 0 || gatewayData.adapters.every(function(a){return a.status !== 'running'})">
+                            <div class="mb-4 flex items-center gap-3 px-4 py-3 rounded-lg border text-xs"
+                                 :class="gatewayData.adapters.length === 0 ? 'bg-error/10 border-error/30 text-error' : 'bg-warning/10 border-warning/30 text-warning'">
+                                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                                    <path d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+                                </svg>
+                                <span class="flex-1" x-text="gatewayData.adapters.length === 0 ? 'No adapters registered. Configure a platform connector in Settings.' : 'All adapters are offline — ' + gatewayData.adapters.map(function(a){return a.platform}).join(', ')"></span>
+                            </div>
+                        </template>
+                        <template x-if="gatewayData.adapters.length > 0 && gatewayData.adapters.some(function(a){return a.status === 'running'})">
+                            <div class="mb-4 flex items-center gap-3 px-4 py-3 rounded-lg border text-xs"
+                                 :class="gatewayData.adapters.every(function(a){return a.status === 'running'}) ? 'bg-success/10 border-success/30 text-success' : 'bg-warning/10 border-warning/30 text-warning'">
+                                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                                    <path d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                                <span class="flex-1">
+                                    ✅ <span x-text="gatewayData.adapters.filter(function(a){return a.status==='running'}).length"></span> connected
+                                    <span x-text="'(' + gatewayData.adapters.filter(function(a){return a.status==='running'}).map(function(a){return a.platform}).join(', ') + ')'"></span>
+                                    <template x-if="gatewayData.adapters.some(function(a){return a.status!=='running'})">
+                                        <span>
+                                            · ⚠️ <span x-text="gatewayData.adapters.filter(function(a){return a.status!=='running'}).length"></span> offline
+                                            <span x-text="'(' + gatewayData.adapters.filter(function(a){return a.status!=='running'}).map(function(a){return a.platform}).join(', ') + ')'"></span>
+                                        </span>
+                                    </template>
+                                </span>
+                            </div>
+                        </template>
                     </div>
                 </template>
 
@@ -1340,7 +1363,9 @@
                                                 <span class="text-text-secondary truncate font-mono" x-text="thread.display_name || (thread.thread_id ? thread.thread_id.slice(0,8) : '?')"></span>
                                             </div>
                                             <div class="flex items-center gap-2 flex-shrink-0">
-                                                <span class="text-text-muted" x-text="thread.platform || ''"></span>
+                                                <span class="text-[0.5rem] px-1.5 py-0.5 rounded font-mono uppercase tracking-wider font-medium"
+                                                      :class="thread.platform === 'telegram' ? 'text-[#229ED9] bg-[#229ED9]/10' : thread.platform === 'discord' ? 'text-[#5865F2] bg-[#5865F2]/10' : 'text-text-muted bg-border/50'"
+                                                      x-text="thread.platform || '?'"></span>
                                                 <span class="text-text-muted" x-text="thread.last_active_seconds ? (thread.last_active_seconds < 120 ? Math.floor(thread.last_active_seconds) + 's ago' : Math.floor(thread.last_active_seconds / 60) + 'm ago') : '—'"></span>
                                             </div>
                                         </div>
