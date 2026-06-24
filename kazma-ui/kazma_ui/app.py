@@ -213,62 +213,31 @@ def create_app(config_path: str | None = None) -> FastAPI:
     logger.info("Models router mounted at /api/models, /api/ollama/*")
 
     # ── Gateway (Omnichannel Message Bus) ────────────────────────────
-    _gateway: Any = None  # module-level ref for shutdown handler
+    _gateway: Any = None
 
     try:
         from kazma_gateway import GatewayManager
         from kazma_gateway.adapters.telegram import TelegramAdapter
-<<<<<<< HEAD
-        from kazma_gateway.agent_handler import create_graph_handler
-
-        gateway = GatewayManager(max_queue_size=100)
-=======
         from kazma_gateway.consumer import make_agent_handler
 
         gateway = GatewayManager()
->>>>>>> d7c7d00 (feat(ui): persistence-aware resume indicator + reset + gateway panel)
+        _gateway = gateway
 
         # Resolve Telegram token from config or environment
         telegram_token = config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
         if not telegram_token:
             telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
-        tg_adapter: TelegramAdapter | None = None
         if telegram_token:
             tg_adapter = TelegramAdapter(token=telegram_token)
             gateway.add_adapter(tg_adapter)
             logger.info("[Gateway] Telegram adapter registered (polling mode)")
-
-<<<<<<< HEAD
-            # Mount webhook ingress for testing / optional push mode
-            webhook_router = tg_adapter.create_webhook_router()
-            app.include_router(webhook_router, prefix="/api/webhooks/telegram")
-            logger.info("[Gateway] Webhook ingress mounted at /api/webhooks/telegram")
         else:
             logger.info("[Gateway] No Telegram token — Telegram adapter skipped")
 
-        # Register the Brain handler (IncomingMessage → LangGraph → reply)
-        try:
-            # Use the SSE graph built above if available
-            sse_graph_ref = locals().get("sse_graph")
-            if sse_graph_ref:
-                brain_handler = create_graph_handler(
-                    graph=sse_graph_ref,
-                    manager=gateway,
-                    system_prompt=agent.system_prompt,
-                    cost_breaker=agent.cost_breaker,
-                )
-                gateway.on_message(brain_handler)
-                logger.info("[Gateway] Brain handler registered")
-            else:
-                logger.warning("[Gateway] No graph available — Brain handler not registered")
-        except Exception as e:
-            logger.warning("[Gateway] Brain handler failed to register: %s", e)
-=======
         # Register the agent brain handler
         gateway.on_message(make_agent_handler(agent))
         logger.info("[Gateway] Agent handler registered")
->>>>>>> d7c7d00 (feat(ui): persistence-aware resume indicator + reset + gateway panel)
 
         # Mount the gateway monitor router
         from kazma_ui.gateway_monitor import create_gateway_router
@@ -277,37 +246,19 @@ def create_app(config_path: str | None = None) -> FastAPI:
         app.include_router(monitor_router)
         logger.info("[Gateway] Monitor router mounted at /api/gateway/*")
 
-<<<<<<< HEAD
-        _gateway = gateway
-
-=======
-        # Start gateway on startup
->>>>>>> d7c7d00 (feat(ui): persistence-aware resume indicator + reset + gateway panel)
         @app.on_event("startup")
         async def _start_gateway() -> None:
-            """Start the gateway bus and all adapters."""
             nonlocal _gateway
             if _gateway is None:
                 return
             try:
-<<<<<<< HEAD
                 await _gateway.start()
-                logger.info(
-                    "[Gateway] Started — adapters: [%s], queue maxsize=%d",
-                    ", ".join(a.name for a in _gateway.adapters),
-                    _gateway.queue.maxsize,
-                )
-=======
-                await gateway.start()
-                logger.info("[Gateway] Gateway started (adapters + consumer)")
->>>>>>> d7c7d00 (feat(ui): persistence-aware resume indicator + reset + gateway panel)
+                logger.info("[Gateway] Started — adapters: [%s]", ", ".join(a.name for a in _gateway.adapters))
             except Exception as e:
                 logger.warning("[Gateway] Failed to start: %s", e)
 
         @app.on_event("shutdown")
         async def _stop_gateway() -> None:
-<<<<<<< HEAD
-            """Stop the gateway and drain remaining messages."""
             nonlocal _gateway
             if _gateway is None:
                 return
@@ -317,10 +268,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
             except Exception as e:
                 logger.warning("[Gateway] Error during shutdown: %s", e)
             _gateway = None
-=======
-            await gateway.stop()
-            logger.info("[Gateway] Gateway stopped")
->>>>>>> d7c7d00 (feat(ui): persistence-aware resume indicator + reset + gateway panel)
 
     except Exception as e:
         logger.warning("Gateway failed to initialize: %s", e)

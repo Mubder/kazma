@@ -1055,11 +1055,20 @@
                         <p class="text-sm text-text-muted mt-0.5">Omnichannel message bus — platform-agnostic agent communication.</p>
                     </div>
                     <div class="flex items-center gap-3">
-                        <span class="flex items-center gap-1.5 text-[0.6rem] text-text-muted">
-                            <span class="w-1.5 h-1.5 rounded-full"
-                                  :class="gatewayData.started ? 'bg-success animate-pulse' : 'bg-error'"></span>
-                            <span x-text="gatewayData.started ? 'Live' : 'Offline'"></span>
-                        </span>
+                        <!-- Loading skeleton for header indicators -->
+                        <template x-if="gatewayLoading">
+                            <div class="flex items-center gap-2 animate-pulse">
+                                <div class="w-12 h-3 bg-border rounded"></div>
+                                <div class="w-20 h-3 bg-border rounded"></div>
+                            </div>
+                        </template>
+                        <template x-if="!gatewayLoading">
+                            <span class="flex items-center gap-1.5 text-[0.6rem] text-text-muted">
+                                <span class="w-1.5 h-1.5 rounded-full"
+                                      :class="gatewayData.started ? 'bg-success animate-pulse' : 'bg-error'"></span>
+                                <span x-text="gatewayData.started ? 'Live' : 'Offline'"></span>
+                            </span>
+                        </template>
                         <span class="text-[0.6rem] text-text-muted font-mono" x-text="'Queue: ' + (gatewayData.queue_size || 0) + '/' + (gatewayData.queue_max || 5000)"></span>
                         <button @click="fetchGatewayStatus()"
                                 class="px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-accent text-xs font-medium hover:bg-accent/20 transition-colors flex items-center gap-1.5"
@@ -1072,20 +1081,67 @@
                     </div>
                 </div>
 
+                <!-- ── Error state (fetch failed) ── -->
+                <template x-if="gatewayError">
+                    <div class="mb-4 flex items-center gap-3 px-4 py-3 rounded-lg bg-error/10 border border-error/30 text-error text-xs">
+                        <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                        </svg>
+                        <span class="flex-1" x-text="gatewayError"></span>
+                        <button @click="fetchGatewayStatus()" class="px-3 py-1 rounded bg-error/20 hover:bg-error/30 transition-colors font-medium">Retry</button>
+                    </div>
+                </template>
+
+                <!-- ── Warning: no adapters connected ── -->
+                <template x-if="!gatewayLoading && !gatewayError && (!gatewayData.adapters || gatewayData.adapters.length === 0 || gatewayData.adapters.every(function(a){return a.status!=='running'}))">
+                    <div class="mb-4 flex items-center gap-3 px-4 py-3 rounded-lg bg-warning/10 border border-warning/30 text-warning text-xs">
+                        <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                            <path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
+                        </svg>
+                        <span x-text="(gatewayData.adapters && gatewayData.adapters.length > 0) ? 'All adapters are offline. Add a bot token to enable platform connectors.' : 'No adapters registered. Configure a platform connector in Settings.'"></span>
+                    </div>
+                </template>
+
+                <!-- ── Loading skeleton for main content ── -->
+
                 <!-- ── Global Stats Bar ── -->
                 <div class="grid grid-cols-3 gap-3 mb-6">
-                    <div class="bg-card border border-border rounded-xl p-3 text-center">
-                        <div class="text-lg font-semibold text-accent font-mono" x-text="gatewayData.adapters ? gatewayData.adapters.length : 0"></div>
-                        <div class="text-[0.55rem] uppercase tracking-wider text-text-muted mt-0.5">Adapters</div>
-                    </div>
-                    <div class="bg-card border border-border rounded-xl p-3 text-center">
-                        <div class="text-lg font-semibold text-success font-mono" x-text="(gatewayData.adapters || []).filter(function(a){return a.status==='running'}).length"></div>
-                        <div class="text-[0.55rem] uppercase tracking-wider text-text-muted mt-0.5">Active</div>
-                    </div>
-                    <div class="bg-card border border-border rounded-xl p-3 text-center">
-                        <div class="text-lg font-semibold text-text-primary font-mono" x-text="(gatewayData.queue_log || []).length"></div>
-                        <div class="text-[0.55rem] uppercase tracking-wider text-text-muted mt-0.5">Queue Events</div>
-                    </div>
+                    <template x-if="gatewayLoading">
+                        <div class="bg-card border border-border rounded-xl p-3 text-center animate-pulse">
+                            <div class="h-6 bg-border rounded w-12 mx-auto mb-1"></div>
+                            <div class="h-3 bg-border rounded w-16 mx-auto"></div>
+                        </div>
+                    </template>
+                    <template x-if="!gatewayLoading">
+                        <div class="bg-card border border-border rounded-xl p-3 text-center">
+                            <div class="text-lg font-semibold text-accent font-mono" x-text="gatewayData.adapters ? gatewayData.adapters.length : 0"></div>
+                            <div class="text-[0.55rem] uppercase tracking-wider text-text-muted mt-0.5">Adapters</div>
+                        </div>
+                    </template>
+                    <template x-if="gatewayLoading">
+                        <div class="bg-card border border-border rounded-xl p-3 text-center animate-pulse">
+                            <div class="h-6 bg-border rounded w-12 mx-auto mb-1"></div>
+                            <div class="h-3 bg-border rounded w-16 mx-auto"></div>
+                        </div>
+                    </template>
+                    <template x-if="!gatewayLoading">
+                        <div class="bg-card border border-border rounded-xl p-3 text-center">
+                            <div class="text-lg font-semibold text-success font-mono" x-text="(gatewayData.adapters || []).filter(function(a){return a.status==='running'}).length"></div>
+                            <div class="text-[0.55rem] uppercase tracking-wider text-text-muted mt-0.5">Active</div>
+                        </div>
+                    </template>
+                    <template x-if="gatewayLoading">
+                        <div class="bg-card border border-border rounded-xl p-3 text-center animate-pulse">
+                            <div class="h-6 bg-border rounded w-12 mx-auto mb-1"></div>
+                            <div class="h-3 bg-border rounded w-16 mx-auto"></div>
+                        </div>
+                    </template>
+                    <template x-if="!gatewayLoading">
+                        <div class="bg-card border border-border rounded-xl p-3 text-center">
+                            <div class="text-lg font-semibold text-text-primary font-mono" x-text="(gatewayData.queue_log || []).length"></div>
+                            <div class="text-[0.55rem] uppercase tracking-wider text-text-muted mt-0.5">Queue Events</div>
+                        </div>
+                    </template>
                 </div>
 
                 <!-- ── Active Adapters ── -->
@@ -1225,28 +1281,38 @@
                                     <span class="text-xs font-medium text-text-primary">Datastores</span>
                                 </div>
                             </div>
-                            <div class="space-y-2">
-                                <div class="flex items-center justify-between text-[0.6rem]">
-                                    <span class="text-text-muted">Session Store</span>
-                                    <span class="font-mono text-text-secondary">
-                                        <span class="text-success">●</span>
-                                        SQLite
-                                        <span class="text-text-muted" x-text="'(' + (_mockPersistence.persistence.session_store.size_kb || '?') + ' KB)'"></span>
-                                    </span>
+                            <!-- Loading skeleton -->
+                            <template x-if="gatewayLoading">
+                                <div class="space-y-2 animate-pulse">
+                                    <div class="h-5 bg-border rounded w-full"></div>
+                                    <div class="h-5 bg-border rounded w-3/4"></div>
+                                    <div class="h-5 bg-border rounded w-1/2"></div>
                                 </div>
-                                <div class="flex items-center justify-between text-[0.6rem]">
-                                    <span class="text-text-muted">Checkpointer</span>
-                                    <span class="font-mono text-text-secondary">
-                                        <span class="text-success">●</span>
-                                        SQLite
-                                        <span class="text-text-muted" x-text="'(' + (_mockPersistence.persistence.checkpointer.size_kb || '?') + ' KB)'"></span>
-                                    </span>
+                            </template>
+                            <template x-if="!gatewayLoading">
+                                <div class="space-y-2">
+                                    <div class="flex items-center justify-between text-[0.6rem]">
+                                        <span class="text-text-muted">Session Store</span>
+                                        <span class="font-mono text-text-secondary">
+                                            <span class="text-success">●</span>
+                                            <span x-text="(gatewayData.persistence || {}).session_store ? (gatewayData.persistence.session_store.type || 'SQLite') : 'SQLite'"></span>
+                                            <span class="text-text-muted" x-text="'(' + ((gatewayData.persistence || {}).session_store ? (gatewayData.persistence.session_store.size_kb || '?') : '?') + ' KB)'"></span>
+                                        </span>
+                                    </div>
+                                    <div class="flex items-center justify-between text-[0.6rem]">
+                                        <span class="text-text-muted">Checkpointer</span>
+                                        <span class="font-mono text-text-secondary">
+                                            <span class="text-success">●</span>
+                                            <span x-text="(gatewayData.persistence || {}).checkpointer ? (gatewayData.persistence.checkpointer.type || 'SQLite') : 'SQLite'"></span>
+                                            <span class="text-text-muted" x-text="'(' + ((gatewayData.persistence || {}).checkpointer ? (gatewayData.persistence.checkpointer.size_kb || '?') : '?') + ' KB)'"></span>
+                                        </span>
+                                    </div>
+                                    <div class="flex items-center justify-between text-[0.6rem] pt-2 border-t border-border/50">
+                                        <span class="text-text-muted font-medium">Active Threads</span>
+                                        <span class="text-accent font-mono font-semibold" x-text="(gatewayData.persistence || {}).active_threads || 0"></span>
+                                    </div>
                                 </div>
-                                <div class="flex items-center justify-between text-[0.6rem] pt-2 border-t border-border/50">
-                                    <span class="text-text-muted font-medium">Active Threads</span>
-                                    <span class="text-accent font-mono font-semibold" x-text="_mockPersistence.persistence.active_threads || 0"></span>
-                                </div>
-                            </div>
+                            </template>
                         </div>
                         <!-- Right: Active thread list -->
                         <div class="bg-card border border-border rounded-xl p-4 space-y-3">
@@ -1258,28 +1324,33 @@
                                     <span class="text-xs font-medium text-text-primary">Active Threads</span>
                                 </div>
                             </div>
-                            <!-- Thread list (mock data) -->
-                            <div class="space-y-1.5 max-h-36 overflow-y-auto">
-                                <template x-for="thread in _mockPersistence.threads" :key="thread.thread_id">
-                                    <div class="flex items-center justify-between text-[0.55rem] py-1 px-2 rounded-lg hover:bg-surface/50 transition-colors">
-                                        <div class="flex items-center gap-2 min-w-0">
-                                            <span class="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                                                  :class="thread.status === 'active' ? 'bg-success' : 'bg-border'"></span>
-                                            <span class="text-text-secondary truncate font-mono" x-text="thread.display_name || thread.thread_id.slice(0,8)"></span>
-                                        </div>
-                                        <div class="flex items-center gap-2 flex-shrink-0">
-                                            <span class="text-text-muted" x-text="thread.platform"></span>
-                                            <span class="text-text-muted" x-text="thread.last_active_seconds ? Math.floor(thread.last_active_seconds / 60) + 'm ago' : '—'"></span>
-                                        </div>
-                                    </div>
-                                </template>
-                                <!-- Empty state -->
-                                <div x-show="!(_mockPersistence.threads && _mockPersistence.threads.length)"
-                                     class="text-center py-6 text-[0.55rem] text-text-muted">
-                                    <p>No active threads.</p>
-                                    <p class="mt-0.5">Threads appear here once the gateway consumer processes messages.</p>
+                            <!-- Loading skeleton -->
+                            <template x-if="gatewayLoading">
+                                <div class="space-y-2 animate-pulse">
+                                    <div class="h-6 bg-border rounded w-full"></div>
+                                    <div class="h-6 bg-border rounded w-full"></div>
                                 </div>
-                            </div>
+                            </template>
+                            <template x-if="!gatewayLoading">
+                                <div class="space-y-1.5 max-h-48 overflow-y-auto">
+                                    <template x-for="thread in (gatewayData.threads || [])" :key="thread.thread_id">
+                                        <div class="flex items-center justify-between text-[0.55rem] py-1 px-2 rounded-lg hover:bg-surface/50 transition-colors">
+                                            <div class="flex items-center gap-2 min-w-0">
+                                                <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" :class="thread.status === 'active' ? 'bg-success' : 'bg-border'"></span>
+                                                <span class="text-text-secondary truncate font-mono" x-text="thread.display_name || (thread.thread_id ? thread.thread_id.slice(0,8) : '?')"></span>
+                                            </div>
+                                            <div class="flex items-center gap-2 flex-shrink-0">
+                                                <span class="text-text-muted" x-text="thread.platform || ''"></span>
+                                                <span class="text-text-muted" x-text="thread.last_active_seconds ? (thread.last_active_seconds < 120 ? Math.floor(thread.last_active_seconds) + 's ago' : Math.floor(thread.last_active_seconds / 60) + 'm ago') : '—'"></span>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <div x-show="!(gatewayData.threads && gatewayData.threads.length)" class="text-center py-6 text-[0.55rem] text-text-muted">
+                                        <p>No active sessions.</p>
+                                        <p class="mt-0.5">Threads appear here once the gateway consumer processes messages.</p>
+                                    </div>
+                                </div>
+                            </template>
                         </div>
                     </div>
                 </div>
@@ -1327,8 +1398,8 @@
                 </div>
             </div>
 
-            <!-- Auto-refresh: poll every 3s while visible -->
-            <div x-init="var gwInterval = setInterval(function(){ if(currentTab === 'gateway') fetchGatewayStatus(); }, 3000); var gwCleanup = function(){ clearInterval(gwInterval); }; document.addEventListener('alpine:destroy', gwCleanup);"></div>
+            <!-- Auto-refresh: poll every 10s while visible -->
+            <div x-init="var gwInterval = setInterval(function(){ if(currentTab === 'gateway') fetchGatewayStatus(); }, 10000); var gwCleanup = function(){ clearInterval(gwInterval); }; document.addEventListener('alpine:destroy', gwCleanup);"></div>
         </div>
 
         <!-- ── Toast container ── -->
@@ -1734,16 +1805,8 @@ function appState() {
         _sessionCounter: 0,
         _resumedMsgCount: 0,
         sessionStartTime: null,
-
-        // Mock persistence data (swap with real API when gw-012 ships)
-        _mockPersistence: {
-            persistence: {
-                session_store: { type: "sqlite", size_kb: 124, path: "~/.kazma/sessions.db" },
-                checkpointer: { type: "sqlite", size_kb: 2100, path: "~/.kazma/checkpoints.db" },
-                active_threads: 0,
-            },
-            threads: [],
-        },
+        gatewayLoading: true,
+        gatewayError: null,
 
         // ── Init ──
         init() {
@@ -2048,36 +2111,38 @@ function appState() {
             return 'user';
         },
 
-        // ── Reset conversation ──
+        // ── Reset conversation (wire delete session) ──
         resetConversation() {
             var self = this;
             if (!confirm('Forget this entire conversation?')) return;
-            // Optimistic clear
             self.messages = [];
             self.totalTokens = 0;
             self.totalCost = 0;
             self._resumedMsgCount = 0;
             self.sessionStartTime = null;
-            // Call DELETE endpoint (falls back to mock 200ms delay if 404)
-            if (self.activeSessionId) {
-                var sessionId = self.activeSessionId;
-                fetch('/api/sessions/' + sessionId, { method: 'DELETE' })
-                    .then(function(r) {
-                        if (r.status === 404) {
-                            // Mock fallback — backend not yet implemented
-                            return new Promise(function(resolve) { setTimeout(resolve, 200); });
-                        }
-                    })
-                    .then(function() {
-                        // Regenerate session
-                        self.activeSessionId = null;
-                        self.newSession();
-                        self.showToast('Conversation reset', 'info');
-                    });
-            } else {
+            var sessionId = self.activeSessionId;
+            if (!sessionId) {
                 self.newSession();
                 self.showToast('Conversation reset', 'info');
+                return;
             }
+            fetch('/api/sessions/' + sessionId, { method: 'DELETE' })
+                .then(function(r) {
+                    if (r.status === 204) return; // success
+                    if (r.status === 404) {
+                        // Backend not yet implemented — mock it
+                        return new Promise(function(resolve) { setTimeout(resolve, 200); });
+                    }
+                    throw new Error('Delete failed: ' + r.status);
+                })
+                .then(function() {
+                    self.activeSessionId = null;
+                    self.newSession();
+                    self.showToast('Conversation reset', 'info');
+                })
+                .catch(function(err) {
+                    self.showToast('Failed to reset: ' + err.message, 'error');
+                });
         },
 
         // ── Toast notification system ──
@@ -2122,15 +2187,28 @@ function appState() {
             __kazmaFetchModels();
         },
 
-        // ── Fetch gateway status for monitor ──
+        // ── Fetch gateway status for monitor (live from API) ──
         fetchGatewayStatus() {
             var self = this;
             self.gatewayRefreshing = true;
+            self.gatewayError = null;
+
             fetch('/api/gateway/status')
-                .then(function(r) { return r.json(); })
-                .then(function(data) { self.gatewayData = data; })
-                .catch(function() {})
+                .then(function(r) {
+                    if (!r.ok) throw new Error('Gateway status failed: ' + r.status);
+                    return r.json();
+                })
+                .then(function(data) {
+                    self.gatewayData = data;
+                    self.gatewayLoading = false;
+                    self.gatewayError = null;
+                })
+                .catch(function(err) {
+                    self.gatewayError = err.message || 'Failed to fetch gateway status';
+                    self.gatewayLoading = false;
+                })
                 .finally(function() { self.gatewayRefreshing = false; });
+
             fetch('/api/gateway/roadmap')
                 .then(function(r) { return r.json(); })
                 .then(function(data) { self.roadmapData = data; })
