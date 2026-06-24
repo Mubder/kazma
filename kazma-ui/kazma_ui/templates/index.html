@@ -1359,6 +1359,64 @@
                     </div>
                 </div>
 
+                <!-- ── System Metrics (from Prometheus /metrics) ── -->
+                <div class="mb-6"
+                     x-data="{ sysMetrics: { inbound: 0, outbound: 0, errors: 0, threads: 0 }, sysTimer: null }"
+                     x-init="sysTimer = setInterval(function() {
+                         fetch('/metrics', { signal: AbortSignal.timeout(5000) })
+                             .then(function(r) { return r.text(); })
+                             .then(function(text) {
+                                 var m = {};
+                                 var re = /^kazma_(\w+)_(?:total|current)\{?[^}]*\}?\s+(\d+)/gm;
+                                 var match;
+                                 while ((match = re.exec(text)) !== null) {
+                                     var key = match[1].replace(/_total$/, '').replace('active_threads', 'threads').replace('adapters_connected', 'adapters');
+                                     m[key] = parseInt(match[2], 10);
+                                 }
+                                 sysMetrics.inbound = m.messages_inbound || 0;
+                                 sysMetrics.outbound = m.messages_outbound || 0;
+                                 sysMetrics.errors = m.messages_errors || 0;
+                                 sysMetrics.threads = m.active_threads || 0;
+                             })
+                             .catch(function() {});
+                     }, 10000)">
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">System Metrics</h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="bg-card border border-border rounded-xl p-3">
+                            <div class="text-[0.55rem] uppercase tracking-wider text-text-muted mb-1">Inbound</div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-lg font-semibold text-text-primary font-mono" x-text="sysMetrics.inbound.toLocaleString()"></span>
+                                <span class="text-lg opacity-60">📨</span>
+                            </div>
+                        </div>
+                        <div class="bg-card border border-border rounded-xl p-3">
+                            <div class="text-[0.55rem] uppercase tracking-wider text-text-muted mb-1">Outbound</div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-lg font-semibold text-text-primary font-mono" x-text="sysMetrics.outbound.toLocaleString()"></span>
+                                <span class="text-lg opacity-60">📤</span>
+                            </div>
+                        </div>
+                        <div class="bg-card border border-border rounded-xl p-3"
+                             :class="sysMetrics.errors > 10 ? 'bg-error/5 border-error/30' : sysMetrics.errors > 0 ? 'bg-warning/5 border-warning/30' : ''">
+                            <div class="text-[0.55rem] uppercase tracking-wider text-text-muted mb-1">Errors</div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-lg font-semibold font-mono"
+                                      :class="sysMetrics.errors > 10 ? 'text-error' : sysMetrics.errors > 0 ? 'text-warning' : 'text-text-primary'"
+                                      x-text="sysMetrics.errors.toLocaleString()"></span>
+                                <span class="text-lg opacity-60">⚠️</span>
+                            </div>
+                        </div>
+                        <div class="bg-card border border-border rounded-xl p-3"
+                             :class="sysMetrics.threads > 50 ? 'bg-warning/5 border-warning/30' : ''">
+                            <div class="text-[0.55rem] uppercase tracking-wider text-text-muted mb-1">Active Threads</div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-lg font-semibold font-mono text-text-primary" x-text="sysMetrics.threads.toLocaleString()"></span>
+                                <span class="text-lg opacity-60">🧵</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- ── Loading skeleton for main content ── -->
 
                 <!-- ── Global Stats Bar ── -->
@@ -1520,6 +1578,38 @@
                                 <p>No messages yet.</p>
                                 <p class="mt-1">Queue will populate when an adapter receives inbound messages.</p>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Security Config ── -->
+                <div class="mb-8">
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Security</h3>
+                    <div class="bg-card border border-border rounded-xl p-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                                <svg class="w-4 h-4" :class="gatewayData.auth_enabled ? 'text-success' : 'text-text-muted'" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                                    <path d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"/>
+                                </svg>
+                                <span class="text-sm font-medium text-text-primary">API Security</span>
+                            </div>
+                            <span class="text-[0.55rem] px-1.5 py-0.5 rounded-full font-mono font-medium"
+                                  :class="gatewayData.auth_enabled ? 'bg-success/15 text-success border border-success/30' : 'bg-border/50 text-text-muted border border-border'">
+                                <span x-text="gatewayData.auth_enabled ? '🔒 Enabled' : '🔓 Disabled'"></span>
+                            </span>
+                        </div>
+                        <div x-show="gatewayData.auth_enabled" class="space-y-2">
+                            <div class="flex items-center justify-between text-[0.6rem]">
+                                <span class="text-text-muted">KAZMA_SECRET</span>
+                                <span class="font-mono text-text-secondary">••••••••</span>
+                            </div>
+                            <p class="text-[0.55rem] text-text-muted">To change the secret, edit the <code class="text-accent">KAZMA_SECRET</code> environment variable and restart.</p>
+                        </div>
+                        <div x-show="!gatewayData.auth_enabled && gatewayData.auth_enabled !== undefined" class="text-[0.55rem] text-text-muted">
+                            No API secret configured. Approval endpoints are unprotected in dev mode.
+                        </div>
+                        <div x-show="gatewayData.auth_enabled === undefined" class="text-[0.55rem] text-text-muted">
+                            Status unavailable — auth information not yet provided by backend.
                         </div>
                     </div>
                 </div>
