@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from kazma_gateway import IncomingMessage, OutboundMessage
+from kazma_gateway.gateway import IncomingMessage, OutboundMessage
 
 if TYPE_CHECKING:
     from kazma_gateway.gateway import GatewayManager
