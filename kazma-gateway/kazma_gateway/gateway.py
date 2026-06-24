@@ -41,6 +41,7 @@ import asyncio
 import logging
 import random
 import time
+import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
@@ -72,6 +73,7 @@ class IncomingMessage:
                           routing replies. The Brain passes this back
                           verbatim in send().
         timestamp:      Unix time when the message was received.
+        correlation_id: UUID4 tracing ID injected at ingress.
     """
 
     platform: str
@@ -79,6 +81,7 @@ class IncomingMessage:
     text: str
     context_metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
+    correlation_id: str = field(default_factory=lambda: f"cid-{uuid.uuid4().hex[:12]}")
 
     def reply_target(self) -> str:
         """Build a platform-prefixed reply target from context_metadata."""

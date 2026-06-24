@@ -29,7 +29,7 @@ class TestCheckpointer:
 
             assert Path(db_path).exists()
 
-            await saver.conn.close()
+            await saver.close()
 
     @pytest.mark.asyncio
     async def test_checkpoint_roundtrip(self) -> None:
@@ -66,7 +66,7 @@ class TestCheckpointer:
             assert result is None  # No checkpoint yet without graph invocation
 
             await store.close()
-            await saver.conn.close()
+            await saver.close()
 
     @pytest.mark.asyncio
     async def test_different_threads_isolated(self) -> None:
@@ -84,7 +84,7 @@ class TestCheckpointer:
             assert result_a is None
             assert result_b is None
 
-            await saver.conn.close()
+            await saver.close()
 
     @pytest.mark.asyncio
     async def test_survives_new_instance(self) -> None:
@@ -94,14 +94,14 @@ class TestCheckpointer:
 
             # Instance 1: create and close
             saver1 = await create_checkpointer(db_path)
-            await saver1.conn.close()
+            await saver1.close()
 
             # Instance 2: reopen same file
             saver2 = await create_checkpointer(db_path)
             result = await saver2.aget({"configurable": {"thread_id": "any", "checkpoint_ns": ""}})
             assert result is None  # Empty, but no crash — DB survived
 
-            await saver2.conn.close()
+            await saver2.close()
 
     @pytest.mark.asyncio
     async def test_gateway_block_clean_in_state(self) -> None:

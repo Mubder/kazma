@@ -5,12 +5,12 @@ Headless, polling-based architecture. No public IP, no tunnels, no webhooks.
 Usage:
     from kazma_gateway import GatewayManager, IncomingMessage, OutboundMessage
     from kazma_gateway.adapters.telegram import TelegramAdapter
-    from kazma_gateway.consumer import make_agent_handler
-    from kazma_gateway.dispatcher import MessageDispatcher
+    from kazma_gateway.agent_handler import create_graph_handler
 
-    manager = GatewayManager()
+    manager = GatewayManager(max_queue_size=100)
     manager.add_adapter(TelegramAdapter(token="..."))
-    manager.on_message(make_agent_handler(my_agent))
+    handler = create_graph_handler(graph=..., manager=manager)
+    manager.on_message(handler)
     await manager.start()
 """
 
@@ -27,7 +27,6 @@ __all__ = [
     "BaseAdapter",
     "GatewayManager",
     "IncomingMessage",
-    "MessageDispatcher",
     "OutboundMessage",
     "SessionStore",
 ]

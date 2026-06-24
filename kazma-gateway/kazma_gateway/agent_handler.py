@@ -40,6 +40,40 @@ _PLATFORM_KEYS = frozenset(
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# Standardized thread_id resolver
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _resolve_thread(msg: IncomingMessage) -> str:
+    """Resolve or generate a stable thread_id for a message.
+
+    Resolution order:
+        1. Existing thread_id in context_metadata (from session store)
+        2. Platform-prefixed deterministic ID from sender_id
+        3. Fresh UUID4 (last resort)
+
+    Args:
+        msg: The incoming message.
+
+    Returns:
+        A stable thread_id string.
+    """
+    ctx = msg.context_metadata
+
+    # 1. Already resolved (e.g. from a previous message in the session)
+    if ctx.get("thread_id"):
+        return ctx["thread_id"]
+
+    # 2. Deterministic from sender_id (e.g. "telegram:12345" → "gw-telegram-12345")
+    if msg.sender_id and ":" in msg.sender_id:
+        platform, sender = msg.sender_id.split(":", 1)
+        return f"gw-{platform}-{sender}"
+
+    # 3. Fallback UUID
+    return f"gw-{uuid.uuid4().hex[:12]}"
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # In-memory fallback store (for when no persistent store is provided)
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -81,8 +115,8 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     """
     ctx = msg.context_metadata
 
-    # Resolve or generate a stable thread_id
-    thread_id = ctx.get("thread_id") or str(uuid.uuid4())
+    # Resolve thread_id using standardized resolver
+    thread_id = _resolve_thread(msg)
 
     # Store full platform context in SessionStore (NEVER enters the graph)
     await store.put(thread_id, dict(ctx))
@@ -142,10 +176,9 @@ def create_graph_handler(
         """Process a single IncomingMessage through the agent graph."""
         sender = msg.sender_id
 
-        # Resolve or create session
+        # Resolve thread_id using standardized resolver
         if sender not in _sessions:
-            chat_id = msg.context_metadata.get("chat_id", sender)
-            _sessions[sender] = f"gateway-{msg.platform}-{chat_id}"
+            _sessions[sender] = _resolve_thread(msg)
 
         thread_id = _sessions[sender]
 
