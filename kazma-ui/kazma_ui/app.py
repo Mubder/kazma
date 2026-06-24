@@ -212,31 +212,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(models_router)
     logger.info("Models router mounted at /api/models, /api/ollama/*")
 
-    # ── Telegram Webhook Router ──────────────────────────────────
-    try:
-        from kazma_comms.telegram_bridge import create_telegram_webhook_router
-
-        telegram_token = config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
-        if not telegram_token:
-            telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        telegram_router = create_telegram_webhook_router(
-            graph=locals().get("sse_graph"),
-            agent=agent,
-            token=telegram_token,
-            system_prompt=agent.system_prompt,
-            cost_breaker=agent.cost_breaker,
-            authority=agent.authority,
-            tracer=agent.tracer,
-        )
-        app.include_router(telegram_router)
-        logger.info("Telegram webhook router mounted at /api/webhooks/telegram/{token}")
-    except Exception as e:
-        logger.warning("Telegram router failed to initialize: %s", e)
-
-    # ── Gateway (Omnichannel Message Bus) ───────────────────────────
+    # ── Gateway (Omnichannel Message Bus + Brain Consumer) ──────────
     try:
         from kazma_gateway import get_gateway
         from kazma_gateway.adapters.telegram import TelegramAdapter
+        from kazma_gateway.consumer import start_gateway_consumer
 
         gateway = get_gateway()
 
@@ -267,8 +247,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
             try:
                 await gateway.start_all()
                 logger.info("[Gateway] All adapters started")
+                # Brain consumer: pulls messages from gateway queue → agent.run()
+                consumer_task = asyncio.create_task(
+                    start_gateway_consumer(gateway, agent),
+                    name="gateway-consumer",
+                )
+                logger.info("[Gateway] Brain consumer started")
             except Exception as e:
-                logger.warning("[Gateway] Failed to start adapters: %s", e)
+                logger.warning("[Gateway] Failed to start: %s", e)
 
         # Stop gateway on shutdown
         @app.on_event("shutdown")

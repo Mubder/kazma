@@ -5,56 +5,55 @@
     {
       "id": "phase-1",
       "name": "Core Gateway Infrastructure",
-      "description": "GatewayManager, asyncio Queue, and BaseAdapter setup — the backbone for all platform adapters.",
+      "description": "GatewayManager, asyncio Queue, and BaseAdapter setup.",
       "icon": "gateway",
       "status": "DONE",
       "tasks": [
-        {"id": "1.1", "name": "GatewayManager with asyncio.Queue", "status": "DONE", "description": "Central message bus that routes inbound messages from adapters to the agent brain."},
-        {"id": "1.2", "name": "BaseAdapter abstract class", "status": "DONE", "description": "Interface every platform adapter must implement (send, _poll, start, stop)."},
-        {"id": "1.3", "name": "Universal Message Format (UMF)", "status": "DONE", "description": "Normalized Message dataclass with sender_id, content, platform, metadata."},
-        {"id": "1.4", "name": "Singleton GatewayManager (get_gateway)", "status": "DONE", "description": "Global gateway instance accessible from any module."},
-        {"id": "1.5", "name": "Gateway Monitor view in Web UI", "status": "IN_PROGRESS", "description": "Dashboard tab showing adapter status, queue log, and start/stop toggles."}
+        {"id": "1.1", "name": "GatewayManager with asyncio.Queue", "status": "DONE", "description": "Central message bus."},
+        {"id": "1.2", "name": "BaseAdapter ABC", "status": "DONE", "description": "Interface for platform adapters."},
+        {"id": "1.3", "name": "Universal Message Format", "status": "DONE", "description": "Normalized Message dataclass."},
+        {"id": "1.4", "name": "Singleton GatewayManager", "status": "DONE", "description": "Global gateway instance."},
+        {"id": "1.5", "name": "Gateway Monitor UI", "status": "DONE", "description": "Dashboard with status, queue log, toggles."}
       ]
     },
     {
       "id": "phase-2",
       "name": "Telegram Polling Adapter",
-      "description": "Stable, headless Telegram integration that works behind NAT with no tunnels, no webhooks, no public IP.",
+      "description": "Stable, headless Telegram integration — no tunnels, no webhooks.",
       "icon": "telegram",
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "tasks": [
-        {"id": "2.1", "name": "TelegramAdapter with getUpdates polling", "status": "DONE", "description": "Background task that long-polls Telegram's getUpdates API every 1s."},
-        {"id": "2.2", "name": "Universal Message normalization", "status": "DONE", "description": "Telegram update → Message(sender_id='telegram:chat_id', content='...')"},
-        {"id": "2.3", "name": "send() — outbound reply routing", "status": "DONE", "description": "send(target_id, content) → Telegram sendMessage API."},
-        {"id": "2.4", "name": "Token from env + config", "status": "DONE", "description": "Reads TELEGRAM_BOT_TOKEN from env or kazma.yaml."},
-        {"id": "2.5", "name": "Connectivity check on start (getMe)", "status": "DONE", "description": "Verifies the bot token is valid before starting the poll loop."},
-        {"id": "2.6", "name": "Error recovery & reconnection", "status": "TODO", "description": "Exponential backoff on connection loss, auto-restart polling."}
+        {"id": "2.1", "name": "getUpdates long-polling", "status": "DONE", "description": "Background task polling every 1s."},
+        {"id": "2.2", "name": "Message normalization", "status": "DONE", "description": "Telegram update → UMF Message."},
+        {"id": "2.3", "name": "send() outbound routing", "status": "DONE", "description": "sendMessage API integration."},
+        {"id": "2.4", "name": "Connectivity check on start", "status": "DONE", "description": "getMe validation before polling."}
       ]
     },
     {
       "id": "phase-3",
       "name": "Unified Agent Logic (Queue Consumer)",
-      "description": "The agent brain consumes from the gateway queue instead of routing webhooks directly.",
+      "description": "The agent brain consumes from the gateway queue — completely platform agnostic.",
       "icon": "brain",
-      "status": "TODO",
+      "status": "DONE",
       "tasks": [
-        {"id": "3.1", "name": "Gateway consumer background task", "status": "TODO", "description": "asyncio task that calls gateway.consume() and feeds messages to agent.run()."},
-        {"id": "3.2", "name": "send_message() tool uses gateway.send()", "status": "TODO", "description": "Agent's send_message tool routes replies via the gateway's platform-aware send()."},
-        {"id": "3.3", "name": "Session mapping via sender_id", "status": "TODO", "description": "Map sender_id to Kazma thread_id for conversation continuity."},
-        {"id": "3.4", "name": "Deprecate telegram_bridge.py webhooks", "status": "TODO", "description": "Remove old tunnel-based webhook code once polling is stable."}
+        {"id": "3.1", "name": "Gateway consumer background task", "status": "DONE", "description": "asyncio task: queue → agent.run() → reply."},
+        {"id": "3.2", "name": "MessageDispatcher reply contract", "status": "DONE", "description": "reply(sender_id, content) routes by platform prefix."},
+        {"id": "3.3", "name": "Session mapping via sender_id", "status": "DONE", "description": "sender_id → thread_id for conversation continuity."},
+        {"id": "3.4", "name": "Deprecate kazma-comms webhooks", "status": "DONE", "description": "Removed webhook-based telegram_bridge."},
+        {"id": "3.5", "name": "send_message ReAct tool", "status": "DONE", "description": "Agent calls send_message(sender_id, content) — platform agnostic."}
       ]
     },
     {
       "id": "phase-4",
       "name": "Expansion (Discord / WhatsApp)",
-      "description": "Adding new platform adapters using the BaseAdapter interface — each takes ~1 day.",
+      "description": "New platform adapters using BaseAdapter.",
       "icon": "expand",
-      "status": "TODO",
+      "status": "IN_PROGRESS",
       "tasks": [
-        {"id": "4.1", "name": "Discord adapter (gateway bot)", "status": "TODO", "description": "Discord.py-based adapter using intents for message events."},
-        {"id": "4.2", "name": "WhatsApp adapter (Cloud API)", "status": "TODO", "description": "WhatsApp Business API webhook consumer (requires public URL for webhook)."},
-        {"id": "4.3", "name": "Slack adapter (Socket Mode)", "status": "TODO", "description": "Slack Socket Mode — no public URL needed, like Telegram polling."},
-        {"id": "4.4", "name": "Adapter auto-discovery", "status": "TODO", "description": "Gateway scans config for enabled adapters and starts them automatically."}
+        {"id": "4.1", "name": "Discord adapter", "status": "TODO", "description": "Discord.py-based gateway bot."},
+        {"id": "4.2", "name": "WhatsApp adapter", "status": "TODO", "description": "WhatsApp Business API webhook."},
+        {"id": "4.3", "name": "Slack adapter (Socket Mode)", "status": "TODO", "description": "No public URL needed."},
+        {"id": "4.4", "name": "Adapter auto-discovery", "status": "TODO", "description": "Scan kazma.yaml for enabled adapters."}
       ]
     }
   ]
