@@ -182,6 +182,7 @@ class LLMProvider:
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int | None = None,
         temperature: float | None = None,
+        model: str | None = None,
     ) -> LLMResponse:
         """Send a chat completion request.
 
@@ -190,6 +191,7 @@ class LLMProvider:
             tools: Optional tool definitions in OpenAI function-calling format.
             max_tokens: Override max_tokens for this call.
             temperature: Override temperature for this call.
+            model: Override model for this call (e.g. from ModelRouter).
 
         Returns:
             LLMResponse with content, tool_calls, usage, and cost.
@@ -197,7 +199,7 @@ class LLMProvider:
         client = await self._get_client()
 
         payload: dict[str, Any] = {
-            "model": self.config.model,
+            "model": model or self.config.model,
             "messages": messages,
             "max_tokens": max_tokens or self.config.max_tokens,
             "temperature": temperature if temperature is not None else self.config.temperature,

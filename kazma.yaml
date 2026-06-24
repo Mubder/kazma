@@ -72,6 +72,30 @@ safety:
       - shell_exec
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
+
+models:
+  default: "default"
+
+  providers:
+    deepseek:
+      api_key_env: DEEPSEEK_API_KEY
+      models:
+        - model: deepseek-v4-pro
+          profiles: [reasoning, coding, default]
+          max_tokens: 16384
+        - model: deepseek-chat
+          profiles: [fast]
+          max_tokens: 4096
+
+    openrouter:
+      api_key_env: OPENROUTER_API_KEY
+      models:
+        - model: anthropic/claude-sonnet-4
+          profiles: [reasoning, coding]
+          max_tokens: 8192
+        - model: meta-llama/llama-4-maverick
+          profiles: [fast]
+          max_tokens: 4096
 ui:
   host: 0.0.0.0
   port: 8000

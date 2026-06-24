@@ -1,13 +1,5 @@
-"""Kazma Models — Local provider discovery and model management."""
+"""Multi-model routing — selects the best model per task."""
 
-from kazma_core.models.discovery import (
-    ProviderInfo,
-    get_active_local_models,
-    get_model_base_url,
-)
+from kazma_core.models.router import ModelRouter, ModelSpec, TaskProfile
 
-__all__ = [
-    "ProviderInfo",
-    "get_active_local_models",
-    "get_model_base_url",
-]
+__all__ = ["ModelRouter", "ModelSpec", "TaskProfile"]

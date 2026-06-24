@@ -69,6 +69,7 @@ async def supervisor_node(
     cost_breaker: Any,  # CostCircuitBreaker
     authority: Any,  # ContextAuthority
     tracer: Any,  # KazmaTracer
+    model_router: Any | None = None,  # ModelRouter for multi-model routing
 ) -> dict[str, Any]:
     """Supervisor node — the brain of the ReAct loop.
 
@@ -113,11 +114,33 @@ async def supervisor_node(
         messages.insert(0, {"role": "system", "content": system_prompt})
 
     # ── LLM call ──────────────────────────────────────────────────
+    # Classify and route to optimal model if router is available
+    routed_model = None
+    if model_router is not None:
+        from kazma_core.models.router import ModelRouter
+
+        last_user_content = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                last_user_content = str(m.get("content", ""))
+                break
+        if last_user_content:
+            profile = ModelRouter.classify(last_user_content)
+            model_spec = model_router.route(profile)
+            routed_model = model_spec.model
+            logger.info(
+                "[Supervisor] Routed to %s (profile=%s, model=%s)",
+                profile.value,
+                model_spec.provider,
+                model_spec.model,
+            )
+
     start = time.monotonic()
     try:
         response = await llm.chat(
             messages=messages,
             tools=tool_definitions if tool_definitions else None,
+            model=routed_model,
         )
     except Exception as exc:
         logger.error("[Supervisor] LLM call failed: %s", exc)
@@ -384,6 +407,7 @@ def build_supervisor_graph(
     tracer: Any,
     checkpointer: AsyncSqliteSaver | None = None,
     hitl_config: dict[str, Any] | None = None,
+    model_router: Any | None = None,
 ) -> Any:
     """Build and compile the Supervisor StateGraph.
 
@@ -398,6 +422,8 @@ def build_supervisor_graph(
         checkpointer: Optional AsyncSqliteSaver for durable checkpointing.
         hitl_config: Optional HITL config from kazma.yaml safety.hitl.
             If provided, danger-tier tools trigger interrupt() before execution.
+        model_router: Optional ModelRouter for multi-model routing.
+            If provided, classifies messages and selects the optimal model.
 
     Returns:
         Compiled LangGraph app (invoke / ainvoke ready).
@@ -414,6 +440,7 @@ def build_supervisor_graph(
             cost_breaker=cost_breaker,
             authority=authority,
             tracer=tracer,
+            model_router=model_router,
         )
 
     async def _tool_worker(state: SupervisorState) -> dict[str, Any]:
