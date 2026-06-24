@@ -334,6 +334,30 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
         logger.info("[HITL] Approval endpoint mounted at /api/approve/{thread_id}")
 
+        # ── Sub-Agent Manager ─────────────────────────────────────
+        try:
+            from kazma_core.agent.sub_agent import SubAgentManager, set_sub_agent_manager
+
+            sub_agent_mgr = SubAgentManager(
+                graph_builder=lambda tools=None, hitl_config=None: build_supervisor_graph(
+                    llm=agent.llm,
+                    system_prompt=agent.system_prompt,
+                    tool_definitions=locals().get("sse_tools", sse_tools).get_tool_definitions()
+                    if "sse_tools" in dir()
+                    else [],
+                    tool_executor=locals().get("sse_tools", sse_tools),
+                    cost_breaker=agent.cost_breaker,
+                    authority=agent.authority,
+                    tracer=agent.tracer,
+                    hitl_config=hitl_config,
+                ),
+                max_concurrent=3,
+            )
+            set_sub_agent_manager(sub_agent_mgr)
+            logger.info("[SubAgent] Manager initialized (max_concurrent=3)")
+        except Exception as e:
+            logger.warning("[SubAgent] Manager not available: %s", e)
+
         _gateway = gateway
         _sse_tools_ref = locals().get("sse_tools")
         _sse_graph_ref = locals().get("sse_graph")

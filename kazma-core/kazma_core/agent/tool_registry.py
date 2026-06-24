@@ -557,6 +557,69 @@ class LocalToolRegistry:
 
             return await _send(target_id=target_id, text=text, backend=backend)
 
+        # ── Sub-agent spawning tools ─────────────────────────────
+        @self.register(
+            description=(
+                "Spawn a sub-agent to handle a focused task independently. "
+                "The sub-agent has its own context and tools. Use this for "
+                "research, code generation, file operations, or any task that "
+                "benefits from dedicated focus. Returns a summary when done."
+            ),
+            category="delegation",
+        )
+        async def spawn_agent(
+            goal: str,
+            context: str = "",
+            tools: str = "[]",
+        ) -> str:
+            import json as _json
+
+            from kazma_core.agent.sub_agent import get_sub_agent_manager
+
+            manager = get_sub_agent_manager()
+            if manager is None:
+                return "Error: Sub-agent manager not initialized."
+
+            try:
+                tool_list = _json.loads(tools) if isinstance(tools, str) else tools
+            except _json.JSONDecodeError:
+                tool_list = None
+
+            result = await manager.spawn(goal=goal, context=context, tools=tool_list)
+            return _json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+
+        @self.register(
+            description=(
+                "Spawn multiple sub-agents in parallel for independent tasks. "
+                "Use this when you have 2-3 unrelated tasks that can run concurrently. "
+                "Returns a list of results, one per task."
+            ),
+            category="delegation",
+        )
+        async def spawn_agents(tasks: str) -> str:
+            import json as _json
+
+            from kazma_core.agent.sub_agent import get_sub_agent_manager
+
+            manager = get_sub_agent_manager()
+            if manager is None:
+                return "Error: Sub-agent manager not initialized."
+
+            try:
+                task_list = _json.loads(tasks) if isinstance(tasks, str) else tasks
+            except _json.JSONDecodeError:
+                return "Error: tasks must be a JSON array."
+
+            if not isinstance(task_list, list):
+                return "Error: tasks must be a JSON array."
+
+            results = await manager.spawn_parallel(task_list)
+            return _json.dumps(
+                [r.to_dict() for r in results],
+                ensure_ascii=False,
+                indent=2,
+            )
+
         logger.info("Registered %d built-in tools", len(self._tools))
 
 
