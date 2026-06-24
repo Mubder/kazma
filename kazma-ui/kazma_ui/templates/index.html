@@ -406,12 +406,13 @@
 
                         <!-- ── Resume / New Session Banner ── -->
                         <template x-if="messages.length > 0">
-                            <div x-data="{ bannerDismissed: false }"
+                            <div x-data="{ bannerDismissed: false, highlight: false }"
+                                 x-init="if(isResumed) { setTimeout(function(){ highlight = true; setTimeout(function(){ highlight = false; }, 2000); }, 100); }"
                                  x-show="!bannerDismissed"
-                                 class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-300"
-                                 :class="isResumed
+                                 class="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-700"
+                                 :class="highlight ? 'bg-accent/25 border-2 border-accent/50 text-accent shadow-lg shadow-accent/20 scale-[1.02]' : (isResumed
                                      ? 'bg-accent/10 border border-accent/25 text-accent'
-                                     : 'bg-success/10 border border-success/25 text-success'">
+                                     : 'bg-success/10 border border-success/25 text-success')">
                                 <span x-text="isResumed ? '⟳' : '●'"></span>
                                 <span class="flex-1" x-text="isResumed
                                     ? 'Resumed — ' + resumeDisplayName + ' (' + _resumedMsgCount + ' prior messages)'
@@ -608,6 +609,8 @@
                                                 <span class="flex-shrink-0 text-xs" x-text="toolIcons[thought.name] || '⚙'"></span>
                                                 <!-- Name -->
                                                 <span class="font-mono font-medium text-text-primary truncate min-w-0" x-text="thought.name"></span>
+                                                <!-- Correlation ID -->
+                                                <span x-show="thought.correlation_id" class="text-[0.45rem] text-text-muted font-mono bg-border/30 px-1 rounded" x-text="'#' + (thought.correlation_id ? thought.correlation_id.slice(0,8) : '')"></span>
                                                 <!-- Duration -->
                                                 <span x-show="thought.duration_ms !== null && thought.duration_ms !== undefined"
                                                       class="text-text-muted flex-shrink-0 font-mono text-[0.5rem]">
@@ -1274,7 +1277,19 @@
                                 <span x-text="gatewayData.started ? 'Live' : 'Offline'"></span>
                             </span>
                         </template>
+                        <!-- Queue depth (from /health) -->
                         <span class="text-[0.6rem] text-text-muted font-mono" x-text="'Queue: ' + (gatewayData.queue_size || 0) + '/' + (gatewayData.queue_max || 5000)"></span>
+                        <span class="flex items-center gap-1.5 text-[0.6rem] text-text-muted" x-show="healthData !== null">
+                            <span class="text-success">◇</span>
+                            <span class="font-mono" x-text="'depth: ' + (healthData.queue_depth || 0)"></span>
+                        </span>
+                        <template x-if="!gatewayLoading">
+                            <span class="flex items-center gap-1 text-[0.55rem]"
+                                  :class="gatewayData.persistence ? 'text-success' : 'text-text-muted'">
+                                <span x-text="gatewayData.persistence ? '🗄️' : '○'"></span>
+                                <span x-text="gatewayData.persistence ? 'Persist' : 'No persist'"></span>
+                            </span>
+                        </template>
                         <button @click="fetchGatewayStatus()"
                                 class="px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-accent text-xs font-medium hover:bg-accent/20 transition-colors flex items-center gap-1.5"
                                 :disabled="gatewayRefreshing">
@@ -2224,6 +2239,8 @@ function appState() {
         sessionStartTime: null,
         gatewayLoading: true,
         gatewayError: null,
+        healthData: null,
+        healthTimer: null,
         thoughtPanelOpen: false,
         thoughtPanelPinned: false,
         _thoughtAutoCollapseTimer: null,
@@ -2269,6 +2286,13 @@ function appState() {
             self._connectTelemetrySSE();
             // Fetch available models from local providers
             self.fetchModels();
+            // Start health endpoint polling
+            self.healthTimer = setInterval(function() {
+                fetch('/health', { signal: AbortSignal.timeout(5000) })
+                    .then(function(r) { return r.json(); })
+                    .then(function(d) { self.healthData = d; })
+                    .catch(function() {});
+            }, 15000);
             // Auto-fetch whenever provider config changes
             self.$watch('$store.kazma.providerType', function() {
                 self.fetchModels();
@@ -2366,6 +2390,7 @@ function appState() {
                             result: '⏳ Executing…',
                             open: true,
                             duration_ms: data.duration_ms || null,
+                            correlation_id: data.correlation_id || null,
                         });
                         // Auto-expand thought panel during execution
                         self.thoughtPanelOpen = true;

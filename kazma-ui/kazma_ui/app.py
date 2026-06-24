@@ -318,6 +318,30 @@ def create_app(config_path: str | None = None) -> FastAPI:
         app.include_router(metrics_router)
         logger.info("[Metrics] Prometheus /metrics endpoint mounted")
 
+        # ── Health Check Endpoint ──────────────────────────────────
+        @app.get("/health")
+        async def health_check() -> dict[str, Any]:
+            """Health endpoint returning queue depth, adapter status, and uptime."""
+            adapters = [_a for _a in gateway.adapters] if hasattr(gateway, 'adapters') else []
+            queue = getattr(gateway, 'queue', None)
+            return {
+                "status": "ok",
+                "gateway_started": getattr(gateway, '_started', False),
+                "queue_depth": queue.qsize() if queue else 0,
+                "queue_maxsize": queue.maxsize if queue and hasattr(queue, 'maxsize') else 100,
+                "adapters_count": len(adapters),
+                "adapters_running": sum(1 for a in adapters if getattr(a, '_running', False)),
+                "adapters": [
+                    {
+                        "name": getattr(a, 'name', '?'),
+                        "platform": getattr(a, 'platform', getattr(a, 'name', '?')),
+                        "running": getattr(a, '_running', False),
+                    }
+                    for a in adapters
+                ],
+            }
+        logger.info("[Health] /health endpoint mounted")
+
         # ── HITL Approval Endpoint ────────────────────────────────
         from fastapi import Request as _Request
         from fastapi.responses import JSONResponse as _JSONResponse
