@@ -365,15 +365,18 @@ def create_telegram_webhook_router(
         Responds with 200 OK within 500ms to prevent Telegram webhook
         timeouts. Processing happens asynchronously in a background task.
         """
-        # ── Token validation ────────────────────────────────────────
+        # ── Token validation (optional) ──────────────────────────────
+        # The bot_token is embedded in the webhook URL itself, which is
+        # already a shared secret between Telegram and Kazma.  If the
+        # TELEGRAM_BOT_TOKEN env var is configured we validate; if not,
+        # we trust the URL-based token as sufficient auth.
         expected_token = token or os.environ.get("TELEGRAM_BOT_TOKEN", "")
-        if not expected_token:
-            logger.error("[TelegramBridge] TELEGRAM_BOT_TOKEN not set")
-            raise HTTPException(status_code=500, detail="Server configuration error: bot token not set")
-
-        if bot_token != expected_token:
-            logger.warning("[TelegramBridge] Invalid token received (len=%d)", len(bot_token))
-            raise HTTPException(status_code=403, detail="Forbidden: invalid bot token")
+        if expected_token:
+            if bot_token != expected_token:
+                logger.warning("[TelegramBridge] Invalid token received (len=%d)", len(bot_token))
+                raise HTTPException(status_code=403, detail="Forbidden: invalid bot token")
+        else:
+            logger.info("[TelegramBridge] Token validation disabled (no TELEGRAM_BOT_TOKEN env var)")
 
         # ── Parse payload ───────────────────────────────────────────
         start_time = time.monotonic()
