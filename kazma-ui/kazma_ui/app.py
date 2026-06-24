@@ -233,6 +233,52 @@ def create_app(config_path: str | None = None) -> FastAPI:
     except Exception as e:
         logger.warning("Telegram router failed to initialize: %s", e)
 
+    # ── Gateway (Omnichannel Message Bus) ───────────────────────────
+    try:
+        from kazma_gateway import get_gateway
+        from kazma_gateway.adapters.telegram import TelegramAdapter
+
+        gateway = get_gateway()
+
+        # Register Telegram polling adapter (no tunnels, no webhooks)
+        telegram_token = config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
+        if not telegram_token:
+            telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        if telegram_token:
+            tg_adapter = TelegramAdapter(token=telegram_token)
+            gateway.register(tg_adapter)
+            logger.info("[Gateway] Telegram adapter registered (polling mode)")
+
+        # Mount the gateway monitor router
+        from kazma_ui.gateway_monitor import create_gateway_router
+
+        gateway_router = create_gateway_router(gateway)
+        app.include_router(gateway_router)
+        logger.info("[Gateway] Monitor router mounted at /api/gateway/*")
+
+        # Start gateway on startup
+        original_startup = None
+        for e_h in app.router.on_startup:
+            original_startup = e_h
+            break
+
+        @app.on_event("startup")
+        async def _start_gateway() -> None:
+            try:
+                await gateway.start_all()
+                logger.info("[Gateway] All adapters started")
+            except Exception as e:
+                logger.warning("[Gateway] Failed to start adapters: %s", e)
+
+        # Stop gateway on shutdown
+        @app.on_event("shutdown")
+        async def _stop_gateway() -> None:
+            await gateway.stop_all()
+            logger.info("[Gateway] All adapters stopped")
+
+    except Exception as e:
+        logger.warning("Gateway failed to initialize: %s", e)
+
     # ── /api/telemetry — Mock telemetry data for Chart.js dashboard ──
     import random
     import time as time_module

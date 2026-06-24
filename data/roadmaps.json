@@ -1,0 +1,61 @@
+{
+  "version": "1.0.0",
+  "updated": "2026-06-24",
+  "phases": [
+    {
+      "id": "phase-1",
+      "name": "Core Gateway Infrastructure",
+      "description": "GatewayManager, asyncio Queue, and BaseAdapter setup — the backbone for all platform adapters.",
+      "icon": "gateway",
+      "status": "DONE",
+      "tasks": [
+        {"id": "1.1", "name": "GatewayManager with asyncio.Queue", "status": "DONE", "description": "Central message bus that routes inbound messages from adapters to the agent brain."},
+        {"id": "1.2", "name": "BaseAdapter abstract class", "status": "DONE", "description": "Interface every platform adapter must implement (send, _poll, start, stop)."},
+        {"id": "1.3", "name": "Universal Message Format (UMF)", "status": "DONE", "description": "Normalized Message dataclass with sender_id, content, platform, metadata."},
+        {"id": "1.4", "name": "Singleton GatewayManager (get_gateway)", "status": "DONE", "description": "Global gateway instance accessible from any module."},
+        {"id": "1.5", "name": "Gateway Monitor view in Web UI", "status": "IN_PROGRESS", "description": "Dashboard tab showing adapter status, queue log, and start/stop toggles."}
+      ]
+    },
+    {
+      "id": "phase-2",
+      "name": "Telegram Polling Adapter",
+      "description": "Stable, headless Telegram integration that works behind NAT with no tunnels, no webhooks, no public IP.",
+      "icon": "telegram",
+      "status": "IN_PROGRESS",
+      "tasks": [
+        {"id": "2.1", "name": "TelegramAdapter with getUpdates polling", "status": "DONE", "description": "Background task that long-polls Telegram's getUpdates API every 1s."},
+        {"id": "2.2", "name": "Universal Message normalization", "status": "DONE", "description": "Telegram update → Message(sender_id='telegram:chat_id', content='...')"},
+        {"id": "2.3", "name": "send() — outbound reply routing", "status": "DONE", "description": "send(target_id, content) → Telegram sendMessage API."},
+        {"id": "2.4", "name": "Token from env + config", "status": "DONE", "description": "Reads TELEGRAM_BOT_TOKEN from env or kazma.yaml."},
+        {"id": "2.5", "name": "Connectivity check on start (getMe)", "status": "DONE", "description": "Verifies the bot token is valid before starting the poll loop."},
+        {"id": "2.6", "name": "Error recovery & reconnection", "status": "TODO", "description": "Exponential backoff on connection loss, auto-restart polling."}
+      ]
+    },
+    {
+      "id": "phase-3",
+      "name": "Unified Agent Logic (Queue Consumer)",
+      "description": "The agent brain consumes from the gateway queue instead of routing webhooks directly.",
+      "icon": "brain",
+      "status": "TODO",
+      "tasks": [
+        {"id": "3.1", "name": "Gateway consumer background task", "status": "TODO", "description": "asyncio task that calls gateway.consume() and feeds messages to agent.run()."},
+        {"id": "3.2", "name": "send_message() tool uses gateway.send()", "status": "TODO", "description": "Agent's send_message tool routes replies via the gateway's platform-aware send()."},
+        {"id": "3.3", "name": "Session mapping via sender_id", "status": "TODO", "description": "Map sender_id to Kazma thread_id for conversation continuity."},
+        {"id": "3.4", "name": "Deprecate telegram_bridge.py webhooks", "status": "TODO", "description": "Remove old tunnel-based webhook code once polling is stable."}
+      ]
+    },
+    {
+      "id": "phase-4",
+      "name": "Expansion (Discord / WhatsApp)",
+      "description": "Adding new platform adapters using the BaseAdapter interface — each takes ~1 day.",
+      "icon": "expand",
+      "status": "TODO",
+      "tasks": [
+        {"id": "4.1", "name": "Discord adapter (gateway bot)", "status": "TODO", "description": "Discord.py-based adapter using intents for message events."},
+        {"id": "4.2", "name": "WhatsApp adapter (Cloud API)", "status": "TODO", "description": "WhatsApp Business API webhook consumer (requires public URL for webhook)."},
+        {"id": "4.3", "name": "Slack adapter (Socket Mode)", "status": "TODO", "description": "Slack Socket Mode — no public URL needed, like Telegram polling."},
+        {"id": "4.4", "name": "Adapter auto-discovery", "status": "TODO", "description": "Gateway scans config for enabled adapters and starts them automatically."}
+      ]
+    }
+  ]
+}

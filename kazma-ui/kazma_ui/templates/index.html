@@ -255,6 +255,14 @@
             </svg>
             <span>Settings</span>
         </div>
+        <!-- Gateway Monitor -->
+        <div class="nav-btn" :class="currentTab === 'gateway' ? 'active' : ''"
+             @click="currentTab = 'gateway'; fetchGatewayStatus()" title="Gateway Monitor">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <path d="M8.25 3v1.5M4.5 9h15M4.5 9l2.25 2.25M4.5 9l2.25-2.25M8.25 20.932V19.5m0-15l-2.25 2.25M8.25 3L6 5.25m0 0L8.25 8.25M8.25 8.25l-1.5 1.5m1.5-1.5L6 5.25m0 0L3.75 8.25m0 0L6 11.25m0-6l-2.25-2.25M12 3v2.25m6 5.25H9m9 0l-2.25 2.25M21 9l-2.25-2.25M21 9l-2.25 2.25M15 20.932V19.5m0-15l2.25 2.25M15 3l2.25 2.25m0 0L15 8.25m0 0l1.5 1.5M18 5.25L15.75 8.25M18 5.25l2.25 2.25m0 0L18 11.25"/>
+            </svg>
+            <span>Gateway</span>
+        </div>
         <!-- Spacer + status at bottom -->
         <div class="flex-1"></div>
         <div class="pb-2" :class="wsConnected ? 'text-success' : 'text-error'" title="Connection status">
@@ -976,6 +984,118 @@
             </div>
         </div>
 
+        <!-- ══════════════════════════════════════════════════════════
+             TAB: GATEWAY MONITOR
+             ══════════════════════════════════════════════════════════ -->
+        <div x-show="currentTab === 'gateway'"
+             x-transition:enter.duration.200ms.opacity
+             class="flex-1 overflow-y-auto px-6 py-6 bg-surface">
+            <div class="max-w-5xl mx-auto">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 class="text-lg font-semibold text-text-primary">Gateway Monitor</h2>
+                        <p class="text-sm text-text-muted mt-0.5">Omnichannel message bus — manage platform adapters, view queue traffic.</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[0.6rem] text-text-muted" x-text="'Queue: ' + (gatewayData.queue_size || 0) + '/' + (gatewayData.queue_max || 5000)"></span>
+                        <button @click="fetchGatewayStatus()" class="px-3 py-1.5 rounded-lg bg-accent/10 border border-accent/30 text-accent text-xs font-medium hover:bg-accent/20 transition-colors">⟳ Refresh</button>
+                    </div>
+                </div>
+
+                <!-- ── Active Adapters ── -->
+                <div class="mb-8">
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Active Adapters</h3>
+                    <div class="space-y-2">
+                        <template x-for="adapter in (gatewayData.adapters || [])" :key="adapter.name">
+                            <div class="bg-card border border-border rounded-xl p-4">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-9 h-9 rounded-lg flex items-center justify-center text-lg" :class="adapter.platform === 'telegram' ? 'bg-[#229ED9]/20' : 'bg-accent-dim/20'">
+                                            <span x-text="adapter.platform === 'telegram' ? '✈' : '🔌'"></span>
+                                        </div>
+                                        <div>
+                                            <div class="text-sm font-medium text-text-primary" x-text="adapter.name"></div>
+                                            <div class="flex items-center gap-2 mt-0.5">
+                                                <span class="text-[0.6rem] px-1.5 py-0.5 rounded font-mono"
+                                                      :class="adapter.status === 'running' ? 'bg-success/20 text-success' : adapter.status === 'error' ? 'bg-error/20 text-error' : 'bg-border text-text-muted'"
+                                                      x-text="adapter.status"></span>
+                                                <span class="text-[0.55rem] text-text-muted" x-text="adapter.platform"></span>
+                                                <span x-show="adapter.token_configured !== undefined" class="text-[0.55rem]" :class="adapter.token_configured ? 'text-success' : 'text-error'" x-text="adapter.token_configured ? '✓ Token set' : '✗ No token'"></span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-3">
+                                        <div class="text-right text-[0.6rem] text-text-muted">
+                                            <div x-text="adapter.message_count + ' msgs'"></div>
+                                            <div x-show="adapter.error_count > 0" class="text-error" x-text="adapter.error_count + ' errs'"></div>
+                                        </div>
+                                        <label class="relative inline-flex items-center cursor-pointer">
+                                            <input type="checkbox" class="sr-only peer" :checked="adapter.status === 'running'" @click="toggleAdapter(adapter.name, adapter.status === 'running' ? 'stop' : 'start')">
+                                            <div class="w-8 h-4 rounded-full peer peer-checked:bg-accent bg-border after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-4"></div>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div x-show="adapter.last_error" class="mt-2 text-[0.6rem] text-error">✗ <span x-text="adapter.last_error"></span></div>
+                            </div>
+                        </template>
+                        <div x-show="!(gatewayData.adapters && gatewayData.adapters.length)" class="text-center py-12 text-text-muted text-sm">
+                            <p>No adapters registered. Configure a platform connector in Settings.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Queue Log ── -->
+                <div class="mb-8">
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Queue Traffic</h3>
+                    <div class="bg-card border border-border rounded-xl overflow-hidden">
+                        <div class="max-h-80 overflow-y-auto font-mono text-[0.65rem] leading-relaxed p-3" style="background:#0d1117">
+                            <template x-if="gatewayData.queue_log && gatewayData.queue_log.length > 0">
+                                <div>
+                                    <template x-for="(entry, ei) in gatewayData.queue_log" :key="ei">
+                                        <div class="flex items-start gap-2 py-0.5 border-b border-border/30 last:border-0">
+                                            <span class="text-text-muted flex-shrink-0 w-8" x-text="entry.direction === 'inbound' ? '←' : '→'"></span>
+                                            <span class="text-text-muted flex-shrink-0 w-[60px]" x-text="entry.platform || '?'"></span>
+                                            <span class="flex-shrink-0 w-[100px] truncate" :class="entry.direction === 'inbound' ? 'text-accent' : 'text-success'" x-text="entry.sender_id || ''"></span>
+                                            <span class="text-text-secondary truncate flex-1" x-text="entry.content || ''"></span>
+                                            <span x-show="entry.status && entry.status !== 'ok'" class="text-warning flex-shrink-0 text-[0.55rem]" x-text="entry.status.slice(0,40)"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                            <div x-show="!(gatewayData.queue_log && gatewayData.queue_log.length)" class="text-text-muted text-center py-8">No messages yet.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Roadmap ── -->
+                <div>
+                    <h3 class="text-xs font-semibold uppercase tracking-wider text-text-muted mb-3">Project Roadmap</h3>
+                    <div class="space-y-3">
+                        <template x-for="phase in (roadmapData.phases || [])" :key="phase.id">
+                            <div class="bg-card border border-border rounded-xl p-4">
+                                <div class="flex items-center justify-between mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm font-medium text-text-primary" x-text="phase.name"></span>
+                                        <span class="text-[0.55rem] px-1.5 py-0.5 rounded font-mono" :class="phase.status === 'DONE' ? 'bg-success/20 text-success' : phase.status === 'IN_PROGRESS' ? 'bg-accent/20 text-accent' : 'bg-border text-text-muted'" x-text="phase.status"></span>
+                                    </div>
+                                </div>
+                                <p class="text-[0.65rem] text-text-muted mb-2" x-text="phase.description"></p>
+                                <div class="space-y-1">
+                                    <template x-for="task in (phase.tasks || [])" :key="task.id">
+                                        <div class="flex items-center gap-2 text-[0.6rem]">
+                                            <span x-text="task.status === 'DONE' ? '✅' : task.status === 'IN_PROGRESS' ? '🔄' : '⏳'" class="flex-shrink-0"></span>
+                                            <span class="text-text-secondary" x-text="task.name"></span>
+                                            <span class="text-text-muted ml-auto text-[0.5rem]" x-text="task.status"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
     </div>
 </div>
 
@@ -1352,6 +1472,8 @@ function appState() {
             { name: 'web-search', transport: 'sse', tools: 1, status: 'disconnected', enabled: false },
         ],
         _eventSource: null,
+        gatewayData: { adapters: [], queue_log: [], queue_size: 0, queue_max: 5000 },
+        roadmapData: { phases: [] },
 
         // WebSocket reference
         _ws: null,
@@ -1677,6 +1799,27 @@ function appState() {
         // ── Fetch available local models from backend ──
         fetchModels() {
             __kazmaFetchModels();
+        },
+
+        // ── Fetch gateway status for monitor ──
+        fetchGatewayStatus() {
+            var self = this;
+            fetch('/api/gateway/status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) { self.gatewayData = data; })
+                .catch(function() {});
+            fetch('/api/gateway/roadmap')
+                .then(function(r) { return r.json(); })
+                .then(function(data) { self.roadmapData = data; })
+                .catch(function() {});
+        },
+
+        // ── Toggle an adapter on/off ──
+        toggleAdapter(name, action) {
+            fetch('/api/gateway/adapter/' + name + '/' + action, { method: 'POST' })
+                .then(function(r) { return r.json(); })
+                .then(function() { this.fetchGatewayStatus(); }.bind(this))
+                .catch(function() {});
         },
 
         // ── Human-readable label for the active model ──
