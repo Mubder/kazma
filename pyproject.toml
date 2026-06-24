@@ -22,6 +22,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "textual>=8.0.0",
     "psutil>=5.9.0",
+    "aiogram>=3.0.0",
 ]
 
 [project.optional-dependencies]

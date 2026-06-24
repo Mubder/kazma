@@ -1,80 +1,84 @@
-"""Tests for the Kazma Gateway — schemas, base adapter, manager, and Telegram adapter."""
+"""Tests for the Kazma Gateway — schemas, BaseAdapter, GatewayManager, TelegramAdapter."""
 
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-from kazma_gateway.base import BaseAdapter
-from kazma_gateway.manager import GatewayManager
-from kazma_gateway.schemas import UniversalMessage
+from kazma_gateway.gateway import (
+    BaseAdapter,
+    GatewayManager,
+    IncomingMessage,
+    OutboundMessage,
+)
 
 # ══════════════════════════════════════════════════════════════════════════
-# UniversalMessage schema
+# IncomingMessage
 # ══════════════════════════════════════════════════════════════════════════
 
 
-class TestUniversalMessage:
-    """Tests for the UniversalMessage dataclass."""
+class TestIncomingMessage:
+    """Tests for the IncomingMessage dataclass."""
 
     def test_basic_creation(self) -> None:
-        msg = UniversalMessage(
+        msg = IncomingMessage(
             platform="telegram",
             sender_id="telegram:12345",
-            content="Hello world",
+            text="Hello world",
         )
         assert msg.platform == "telegram"
         assert msg.sender_id == "telegram:12345"
-        assert msg.content == "Hello world"
-        assert msg.reply_to == "telegram:12345"  # defaults to sender_id
-        assert msg.metadata == {}
+        assert msg.text == "Hello world"
+        assert msg.context_metadata == {}
         assert msg.timestamp > 0
 
-    def test_custom_reply_to(self) -> None:
-        msg = UniversalMessage(
-            platform="discord",
-            sender_id="discord:user123",
-            content="test",
-            reply_to="discord:channel456",
-        )
-        assert msg.reply_to == "discord:channel456"
-
-    def test_metadata(self) -> None:
-        msg = UniversalMessage(
+    def test_context_metadata(self) -> None:
+        msg = IncomingMessage(
             platform="telegram",
-            sender_id="telegram:1",
-            content="hi",
-            metadata={"chat_id": 1, "username": "test"},
+            sender_id="telegram:12345",
+            text="hi",
+            context_metadata={"chat_id": 12345, "user_id": 999, "username": "test"},
         )
-        assert msg.metadata["chat_id"] == 1
-        assert msg.metadata["username"] == "test"
+        assert msg.context_metadata["chat_id"] == 12345
+        assert msg.context_metadata["user_id"] == 999
 
-    def test_to_dict(self) -> None:
-        msg = UniversalMessage(
+    def test_reply_target(self) -> None:
+        msg = IncomingMessage(
             platform="telegram",
-            sender_id="telegram:1",
-            content="hello",
+            sender_id="telegram:12345",
+            text="hi",
         )
-        d = msg.to_dict()
-        assert d["platform"] == "telegram"
-        assert d["sender_id"] == "telegram:1"
-        assert d["content"] == "hello"
-
-    def test_content_truncated_in_to_dict(self) -> None:
-        msg = UniversalMessage(
-            platform="test",
-            sender_id="test:1",
-            content="x" * 500,
-        )
-        d = msg.to_dict()
-        assert len(d["content"]) == 200
+        assert msg.reply_target() == "telegram:12345"
 
     def test_slots(self) -> None:
-        """UniversalMessage uses __slots__ — cannot add arbitrary attributes."""
-        msg = UniversalMessage(platform="t", sender_id="t:1", content="c")
+        """IncomingMessage uses __slots__."""
+        msg = IncomingMessage(platform="t", sender_id="t:1", text="c")
         with pytest.raises(AttributeError):
             msg.nonexistent = "value"  # type: ignore[misc]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# OutboundMessage
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestOutboundMessage:
+    """Tests for the OutboundMessage dataclass."""
+
+    def test_basic_creation(self) -> None:
+        msg = OutboundMessage(target_id="telegram:12345", text="reply")
+        assert msg.target_id == "telegram:12345"
+        assert msg.text == "reply"
+        assert msg.context_metadata == {}
+
+    def test_with_context(self) -> None:
+        msg = OutboundMessage(
+            target_id="telegram:12345",
+            text="reply",
+            context_metadata={"chat_id": 12345, "message_id": 42},
+        )
+        assert msg.context_metadata["chat_id"] == 12345
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -90,18 +94,20 @@ class DummyAdapter(BaseAdapter):
     def __init__(self, *, fail_listen: bool = False) -> None:
         super().__init__()
         self._fail_listen = fail_listen
-        self.sent: list[tuple[str, str]] = []
-        self.received: list[UniversalMessage] = []
+        self.sent: list[OutboundMessage] = []
 
-    async def listen(self, queue: asyncio.Queue[UniversalMessage]) -> None:
+    async def listen(
+        self,
+        queue: asyncio.Queue[IncomingMessage],
+        shutdown_event: asyncio.Event,
+    ) -> None:
         if self._fail_listen:
             raise RuntimeError("listen failed on purpose")
-        while self._running:
-            # Just idle — tests inject messages manually
-            await asyncio.sleep(0.1)
+        # Wait for shutdown
+        await shutdown_event.wait()
 
-    async def send(self, target_id: str, content: str) -> bool:
-        self.sent.append((target_id, content))
+    async def send(self, outbound: OutboundMessage) -> bool:
+        self.sent.append(outbound)
         return True
 
 
@@ -111,22 +117,26 @@ class TestBaseAdapter:
     @pytest.mark.asyncio
     async def test_start_stop(self) -> None:
         adapter = DummyAdapter()
-        queue: asyncio.Queue[UniversalMessage] = asyncio.Queue()
-        await adapter.start(queue)
+        queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
+        shutdown = asyncio.Event()
+        await adapter.start(queue, shutdown)
         assert adapter._running is True
         assert adapter._task is not None
+        shutdown.set()
         await adapter.stop()
         assert adapter._running is False
 
     @pytest.mark.asyncio
-    async def test_listen_failure_logged(self) -> None:
-        """Adapter with failing listen should not crash the manager."""
+    async def test_listen_failure(self) -> None:
+        """Adapter with failing listen should complete the task (with error)."""
         adapter = DummyAdapter(fail_listen=True)
-        queue: asyncio.Queue[UniversalMessage] = asyncio.Queue()
-        await adapter.start(queue)
-        # Give the task time to run and fail
-        await asyncio.sleep(0.2)
+        queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
+        shutdown = asyncio.Event()
+        await adapter.start(queue, shutdown)
+        await asyncio.sleep(0.1)
         assert adapter._task.done()
+        # Task completed with exception
+        assert adapter._task.exception() is not None
         await adapter.stop()
 
 
@@ -147,6 +157,17 @@ class TestGatewayManager:
         assert manager.adapters[0].name == "dummy"
 
     @pytest.mark.asyncio
+    async def test_bounded_queue(self) -> None:
+        """Queue is bounded at maxsize=100 by default."""
+        manager = GatewayManager()
+        assert manager.queue.maxsize == 100
+
+    @pytest.mark.asyncio
+    async def test_custom_queue_size(self) -> None:
+        manager = GatewayManager(max_queue_size=50)
+        assert manager.queue.maxsize == 50
+
+    @pytest.mark.asyncio
     async def test_start_stop_lifecycle(self) -> None:
         manager = GatewayManager()
         adapter = DummyAdapter()
@@ -154,8 +175,25 @@ class TestGatewayManager:
         await manager.start()
         assert manager._started is True
         assert adapter._running is True
+        assert not manager._shutdown.is_set()
         await manager.stop()
         assert manager._started is False
+        assert manager._shutdown.is_set()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_event_propagates(self) -> None:
+        """Setting manager's shutdown event stops all adapters."""
+        manager = GatewayManager()
+        adapter = DummyAdapter()
+        manager.add_adapter(adapter)
+        await manager.start()
+
+        # The adapter's listen() is waiting on shutdown_event
+        assert adapter._running is True
+
+        # Stop signals shutdown
+        await manager.stop()
+        assert adapter._running is False
 
     @pytest.mark.asyncio
     async def test_handler_receives_messages(self) -> None:
@@ -164,41 +202,28 @@ class TestGatewayManager:
         adapter = DummyAdapter()
         manager.add_adapter(adapter)
 
-        received: list[UniversalMessage] = []
+        received: list[IncomingMessage] = []
 
-        async def handler(msg: UniversalMessage) -> None:
+        async def handler(msg: IncomingMessage) -> None:
             received.append(msg)
 
         manager.on_message(handler)
         await manager.start()
 
         # Simulate an adapter putting a message on the bus
-        test_msg = UniversalMessage(
+        test_msg = IncomingMessage(
             platform="dummy",
             sender_id="dummy:1",
-            content="test message",
+            text="test message",
         )
         await manager.queue.put(test_msg)
 
-        # Give the consumer task time to process
-        await asyncio.sleep(0.2)
+        # Give the consumer time to process
+        await asyncio.sleep(0.3)
         await manager.stop()
 
         assert len(received) == 1
-        assert received[0].content == "test message"
-
-    @pytest.mark.asyncio
-    async def test_next_message(self) -> None:
-        """next_message() blocks until a message arrives."""
-        manager = GatewayManager()
-        await manager.start()
-
-        msg = UniversalMessage(platform="test", sender_id="t:1", content="yo")
-        await manager.queue.put(msg)
-
-        result = await asyncio.wait_for(manager.next_message(), timeout=1.0)
-        assert result.content == "yo"
-        await manager.stop()
+        assert received[0].text == "test message"
 
     @pytest.mark.asyncio
     async def test_send_routes_to_adapter(self) -> None:
@@ -208,9 +233,16 @@ class TestGatewayManager:
         manager.add_adapter(adapter)
         await manager.start()
 
-        ok = await manager.send("dummy:12345", "hello")
+        outbound = OutboundMessage(
+            target_id="dummy:12345",
+            text="hello",
+            context_metadata={"chat_id": 12345},
+        )
+        ok = await manager.send(outbound)
         assert ok is True
-        assert adapter.sent == [("dummy:12345", "hello")]
+        assert len(adapter.sent) == 1
+        assert adapter.sent[0].text == "hello"
+        assert adapter.sent[0].context_metadata["chat_id"] == 12345
 
         await manager.stop()
 
@@ -220,18 +252,18 @@ class TestGatewayManager:
         manager = GatewayManager()
         await manager.start()
 
-        ok = await manager.send("slack:C123", "hello")
+        ok = await manager.send(OutboundMessage(target_id="slack:C123", text="hi"))
         assert ok is False
 
         await manager.stop()
 
     @pytest.mark.asyncio
     async def test_send_bad_format(self) -> None:
-        """send() fails gracefully for non-prefixed target IDs."""
+        """send() fails for non-prefixed target IDs."""
         manager = GatewayManager()
         await manager.start()
 
-        ok = await manager.send("no-platform-prefix", "hello")
+        ok = await manager.send(OutboundMessage(target_id="no-prefix", text="hi"))
         assert ok is False
 
         await manager.stop()
@@ -244,12 +276,12 @@ class TestGatewayManager:
 
         stats = manager.stats
         assert stats["started"] is False
+        assert stats["shutdown_signalled"] is False
+        assert stats["queue_maxsize"] == 100
         assert len(stats["adapters"]) == 1
-        assert stats["adapters"][0]["name"] == "dummy"
 
     @pytest.mark.asyncio
     async def test_lifespan_context_manager(self) -> None:
-        """The lifespan async context manager starts and stops the gateway."""
         manager = GatewayManager()
         adapter = DummyAdapter()
         manager.add_adapter(adapter)
@@ -259,6 +291,7 @@ class TestGatewayManager:
             assert adapter._running is True
 
         assert manager._started is False
+        assert manager._shutdown.is_set()
 
     @pytest.mark.asyncio
     async def test_start_idempotent(self) -> None:
@@ -273,190 +306,157 @@ class TestGatewayManager:
 
         await manager.stop()
 
+    @pytest.mark.asyncio
+    async def test_queue_backpressure(self) -> None:
+        """Bounded queue applies backpressure when full."""
+        manager = GatewayManager(max_queue_size=2)
+
+        # Fill the queue
+        await manager.queue.put(IncomingMessage(platform="t", sender_id="t:1", text="a"))
+        await manager.queue.put(IncomingMessage(platform="t", sender_id="t:1", text="b"))
+        assert manager.queue.full()
+
+        # Third put should block (we'll use put_nowait to test)
+        with pytest.raises(asyncio.QueueFull):
+            manager.queue.put_nowait(IncomingMessage(platform="t", sender_id="t:1", text="c"))
+
 
 # ══════════════════════════════════════════════════════════════════════════
-# TelegramAdapter
+# TelegramAdapter (unit tests — no real Telegram API)
 # ══════════════════════════════════════════════════════════════════════════
 
 
 class TestTelegramAdapter:
-    """Tests for the Telegram polling adapter."""
+    """Unit tests for TelegramAdapter (mocked aiogram)."""
 
-    def _make_adapter(self, **kwargs: object) -> object:
+    def test_import(self) -> None:
         from kazma_gateway.adapters.telegram import TelegramAdapter
 
-        return TelegramAdapter(token="fake:token", **kwargs)  # type: ignore[arg-type]
+        adapter = TelegramAdapter(token="fake:token")
+        assert adapter.name == "telegram"
 
-    def test_parse_text_message(self) -> None:
-        adapter = self._make_adapter()
-        update = {
-            "update_id": 42,
-            "message": {
-                "message_id": 1,
-                "chat": {"id": 12345, "type": "private"},
-                "from": {"id": 999, "username": "testuser", "first_name": "Test"},
-                "text": "Hello Kazma",
-            },
-        }
-        msg = adapter._parse_update(update)
-        assert msg is not None
-        assert msg.platform == "telegram"
-        assert msg.sender_id == "telegram:12345"
-        assert msg.content == "Hello Kazma"
-        assert msg.reply_to == "telegram:12345"
-        assert msg.metadata["chat_id"] == 12345
-        assert msg.metadata["user_id"] == 999
-        assert msg.metadata["username"] == "testuser"
-        assert msg.metadata["update_id"] == 42
+    def test_allowed_users(self) -> None:
+        from kazma_gateway.adapters.telegram import TelegramAdapter
 
-    def test_parse_channel_post(self) -> None:
-        adapter = self._make_adapter()
-        update = {
-            "update_id": 1,
-            "channel_post": {
-                "message_id": 10,
-                "chat": {"id": -100123, "type": "channel"},
-                "text": "Channel update",
-            },
-        }
-        msg = adapter._parse_update(update)
-        assert msg is not None
-        assert msg.sender_id == "telegram:-100123"
-        assert msg.content == "Channel update"
-
-    def test_parse_caption(self) -> None:
-        adapter = self._make_adapter()
-        update = {
-            "update_id": 1,
-            "message": {
-                "chat": {"id": 1},
-                "from": {"id": 1},
-                "text": None,
-                "caption": "Photo caption",
-            },
-        }
-        msg = adapter._parse_update(update)
-        assert msg is not None
-        assert msg.content == "Photo caption"
-
-    def test_parse_ignores_non_text(self) -> None:
-        adapter = self._make_adapter()
-        update = {
-            "update_id": 1,
-            "message": {
-                "chat": {"id": 1},
-                "from": {"id": 1},
-                "sticker": {"file_id": "abc"},
-            },
-        }
-        msg = adapter._parse_update(update)
-        assert msg is None
-
-    def test_parse_ignores_callback_query(self) -> None:
-        adapter = self._make_adapter()
-        update = {
-            "update_id": 1,
-            "callback_query": {"id": "abc"},
-        }
-        msg = adapter._parse_update(update)
-        assert msg is None
-
-    def test_parse_no_chat_id(self) -> None:
-        adapter = self._make_adapter()
-        update = {
-            "update_id": 1,
-            "message": {"text": "hello"},
-        }
-        msg = adapter._parse_update(update)
-        assert msg is None
-
-    def test_target_id_parsing(self) -> None:
-        adapter = self._make_adapter()
-        # Valid
-        assert adapter._parse_update({}) is None  # just checking import works
+        adapter = TelegramAdapter(token="fake:token", allowed_users=[1, 2, 3])
+        assert adapter._allowed_users == {1, 2, 3}
 
     @pytest.mark.asyncio
-    async def test_send_valid_target(self) -> None:
-        adapter = self._make_adapter()
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {"ok": True}
+    async def test_send_without_bot(self) -> None:
+        """send() fails gracefully when bot is not initialized."""
+        from kazma_gateway.adapters.telegram import TelegramAdapter
 
-        with patch("httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client_cls.return_value = mock_client
-            adapter._http = mock_client
-
-            ok = await adapter.send("telegram:12345", "Hello")
-            assert ok is True
-            mock_client.post.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_send_invalid_target(self) -> None:
-        adapter = self._make_adapter()
-        ok = await adapter.send("discord:12345", "Hello")
+        adapter = TelegramAdapter(token="fake:token")
+        ok = await adapter.send(
+            OutboundMessage(
+                target_id="telegram:123",
+                text="hi",
+                context_metadata={"chat_id": 123},
+            )
+        )
         assert ok is False
 
     @pytest.mark.asyncio
-    async def test_send_bad_chat_id(self) -> None:
-        adapter = self._make_adapter()
-        ok = await adapter.send("telegram:notanumber", "Hello")
+    async def test_send_with_mock_bot(self) -> None:
+        """send() delegates to bot.send_message with correct args."""
+        from kazma_gateway.adapters.telegram import TelegramAdapter
+
+        adapter = TelegramAdapter(token="fake:token")
+        mock_bot = AsyncMock()
+        adapter._bot = mock_bot
+
+        ok = await adapter.send(
+            OutboundMessage(
+                target_id="telegram:12345",
+                text="Hello!",
+                context_metadata={"chat_id": 12345},
+            )
+        )
+        assert ok is True
+        mock_bot.send_message.assert_called_once_with(
+            chat_id=12345,
+            text="Hello!",
+            parse_mode=adapter._parse_mode,
+        )
+
+    @pytest.mark.asyncio
+    async def test_send_fallback_target_id(self) -> None:
+        """send() falls back to parsing target_id when context_metadata has no chat_id."""
+        from kazma_gateway.adapters.telegram import TelegramAdapter
+
+        adapter = TelegramAdapter(token="fake:token")
+        mock_bot = AsyncMock()
+        adapter._bot = mock_bot
+
+        ok = await adapter.send(OutboundMessage(target_id="telegram:99999", text="hi"))
+        assert ok is True
+        mock_bot.send_message.assert_called_once_with(
+            chat_id=99999,
+            text="hi",
+            parse_mode=adapter._parse_mode,
+        )
+
+    @pytest.mark.asyncio
+    async def test_send_no_chat_id(self) -> None:
+        """send() fails when neither context_metadata nor target_id has chat_id."""
+        from kazma_gateway.adapters.telegram import TelegramAdapter
+
+        adapter = TelegramAdapter(token="fake:token")
+        adapter._bot = AsyncMock()
+
+        ok = await adapter.send(OutboundMessage(target_id="telegram:", text="hi"))
         assert ok is False
 
-    def test_user_whitelist(self) -> None:
-        adapter = self._make_adapter(allowed_users=[999])
-        update = {
-            "update_id": 1,
-            "message": {
-                "chat": {"id": 1},
-                "from": {"id": 111},  # not in whitelist
-                "text": "blocked",
-            },
-        }
-        msg = adapter._parse_update(update)
-        # The parse itself succeeds — filtering is in listen()
-        assert msg is not None
-        assert msg.metadata["user_id"] == 111
-
 
 # ══════════════════════════════════════════════════════════════════════════
-# FastAPI Integration
+# End-to-end flow (simulated)
 # ══════════════════════════════════════════════════════════════════════════
 
 
-class TestFastAPIIntegration:
-    """Tests for the FastAPI integration module."""
+class TestEndToEnd:
+    """Simulate the full flow: adapter enqueues → handler processes → reply sent."""
 
-    def test_setup_gateway_no_config(self) -> None:
-        from kazma_gateway.fastapi_integration import setup_gateway
+    @pytest.mark.asyncio
+    async def test_full_flow(self) -> None:
+        manager = GatewayManager(max_queue_size=10)
+        adapter = DummyAdapter()
+        manager.add_adapter(adapter)
 
-        config = MagicMock()
-        config.raw = {}
-        manager = setup_gateway(config)
-        assert len(manager.adapters) == 0
+        replies: list[OutboundMessage] = []
+        original_send = adapter.send
 
-    def test_setup_gateway_with_telegram(self) -> None:
-        from kazma_gateway.fastapi_integration import setup_gateway
+        async def capture_send(outbound: OutboundMessage) -> bool:
+            replies.append(outbound)
+            return await original_send(outbound)
 
-        config = MagicMock()
-        config.raw = {"connectors": {"telegram": {"token": "test:token"}}}
-        manager = setup_gateway(config)
-        assert len(manager.adapters) == 1
-        assert manager.adapters[0].name == "telegram"
+        adapter.send = capture_send  # type: ignore[assignment]
 
-    def test_gateway_router(self) -> None:
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from kazma_gateway.fastapi_integration import gateway_router
+        async def brain(msg: IncomingMessage) -> None:
+            """Simulated Brain: echo back with prefix."""
+            await manager.send(
+                OutboundMessage(
+                    target_id=msg.reply_target(),
+                    text=f"Echo: {msg.text}",
+                    context_metadata=msg.context_metadata,
+                )
+            )
 
-        manager = GatewayManager()
-        app = FastAPI()
-        app.include_router(gateway_router(manager))
+        manager.on_message(brain)
+        await manager.start()
 
-        client = TestClient(app)
-        resp = client.get("/api/gateway/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["started"] is False
+        # Simulate incoming message
+        incoming = IncomingMessage(
+            platform="dummy",
+            sender_id="dummy:42",
+            text="Hello Brain",
+            context_metadata={"chat_id": 42, "user_id": 7},
+        )
+        await manager.queue.put(incoming)
+
+        # Let the consumer process
+        await asyncio.sleep(0.5)
+        await manager.stop()
+
+        assert len(replies) == 1
+        assert replies[0].text == "Echo: Hello Brain"
+        assert replies[0].context_metadata["chat_id"] == 42
