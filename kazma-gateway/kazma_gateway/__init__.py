@@ -19,6 +19,7 @@ from kazma_gateway.gateway import (
     GatewayManager,
     IncomingMessage,
     OutboundMessage,
+    SessionStore,
 )
 
 from kazma_gateway.dispatcher import MessageDispatcher
@@ -29,4 +30,5 @@ __all__ = [
     "IncomingMessage",
     "MessageDispatcher",
     "OutboundMessage",
+    "SessionStore",
 ]

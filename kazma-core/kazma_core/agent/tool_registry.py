@@ -475,20 +475,38 @@ class LocalToolRegistry:
 
         @self.register(
             description=(
-                "Search the agent's memory store using full-text search. "
-                "Returns relevant past conversation snippets and facts."
+                "Search long-term memory for relevant past conversations, facts, or preferences. "
+                "Use this before answering questions that may require context from earlier sessions."
             ),
             category="memory",
         )
         async def memory_search(query: str, limit: int = 5) -> str:
-            # Placeholder — will be wired to kazma_memory at runtime
-            return json.dumps(
-                {
-                    "query": query,
-                    "results": [],
-                    "note": "Memory search not yet wired. Connect kazma_memory backend.",
-                }
-            )
+            from kazma_core.memory.vector_store import VectorMemory
+
+            mem = VectorMemory()
+            results = mem.search(query=query, n_results=limit)
+            if not results:
+                return "No relevant memories found."
+            return json.dumps(results, ensure_ascii=False, indent=2)
+
+        @self.register(
+            description=(
+                "Store a fact, preference, or conversation fragment in long-term memory. "
+                "Use this when the user shares personal info, preferences, or important context "
+                "that should be remembered across sessions."
+            ),
+            category="memory",
+        )
+        async def memory_store(text: str, metadata: str = "{}") -> str:
+            from kazma_core.memory.vector_store import VectorMemory
+
+            mem = VectorMemory()
+            try:
+                meta = json.loads(metadata) if isinstance(metadata, str) else metadata
+            except json.JSONDecodeError:
+                meta = {"raw": metadata}
+            doc_id = mem.add(text=text, metadata=meta)
+            return f"Stored memory (id={doc_id})"
 
         @self.register(
             description="Get the current date, time, and timezone in ISO-8601 format.",
@@ -520,6 +538,24 @@ class LocalToolRegistry:
             if stderr:
                 output += f"\n[stderr]\n{stderr.decode(errors='replace')}"
             return output[:10_000]  # cap output
+
+        # ── Generic send_message tool ─────────────────────────────
+        @self.register(
+            description=(
+                "Send a text message to the current conversation thread. "
+                "Use this to reply to the user. The platform and delivery "
+                "channel are handled automatically."
+            ),
+            category="communication",
+        )
+        async def send_message(
+            target_id: str,
+            text: str,
+            backend: str = "telegram",
+        ) -> str:
+            from kazma_core.tools.send_message import send_message as _send
+
+            return await _send(target_id=target_id, text=text, backend=backend)
 
         logger.info("Registered %d built-in tools", len(self._tools))
 

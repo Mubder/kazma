@@ -197,13 +197,22 @@ async def tool_worker_node(
     *,
     tool_executor: Any,
     tracer: Any,
+    hitl_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Tool Worker node — executes pending tool calls (parallel fan-out).
 
     All pending tool calls are dispatched concurrently via asyncio.gather.
     Results are collected and appended as tool-role messages.
+
+    HITL: If hitl_config is provided, danger-tier tools trigger an
+    interrupt() before execution, pausing the graph until the user
+    approves or denies via the /api/approve endpoint.
     """
     import asyncio
+
+    from langgraph.types import interrupt
+
+    from kazma_core.safety.hitl import requires_approval
 
     pending = state.get("tool_calls_pending", [])
     if not pending:
@@ -211,6 +220,19 @@ async def tool_worker_node(
         return {"next_node": NodeName.SUPERVISOR}
 
     logger.info("[ToolWorker] Executing %d tool calls", len(pending))
+
+    # ── HITL: separate safe and danger tools ──────────────────────
+    safe_tools: list[PendingToolCall] = []
+    danger_tools: list[PendingToolCall] = []
+
+    if hitl_config:
+        for tc in pending:
+            if requires_approval(tc["name"], hitl_config):
+                danger_tools.append(tc)
+            else:
+                safe_tools.append(tc)
+    else:
+        safe_tools = list(pending)
 
     async def _exec_one(tc: PendingToolCall) -> ToolResult:
         start = time.monotonic()
@@ -240,7 +262,40 @@ async def tool_worker_node(
             duration_ms=duration_ms,
         )
 
-    results = await asyncio.gather(*(_exec_one(tc) for tc in pending))
+    def _denied_result(tc: PendingToolCall) -> ToolResult:
+        """Create a ToolResult for a denied tool call."""
+        return ToolResult(
+            tool_call_id=tc["id"],
+            name=tc["name"],
+            content=f"Tool '{tc['name']}' denied by user. Operation not executed.",
+            is_error=True,
+            duration_ms=0,
+        )
+
+    # ── Execute safe tools in parallel ────────────────────────────
+    results: list[ToolResult] = []
+    if safe_tools:
+        results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
+
+    # ── HITL: interrupt for each danger tool ──────────────────────
+    for tc in danger_tools:
+        approval_input = {
+            "type": "hitl_approval",
+            "tool": tc["name"],
+            "args": tc["arguments"],
+            "message": f"Agent wants to run: {tc['name']}({tc['arguments']})",
+        }
+
+        # interrupt() pauses the graph — resumes when /api/approve calls
+        # graph.ainvoke(Command(resume=...), config)
+        approval = interrupt(approval_input)
+
+        if isinstance(approval, dict) and approval.get("approved", False):
+            logger.info("[ToolWorker] HITL approved: %s", tc["name"])
+            results.append(await _exec_one(tc))
+        else:
+            logger.info("[ToolWorker] HITL denied: %s", tc["name"])
+            results.append(_denied_result(tc))
 
     # Build tool-role messages for the conversation
     messages = list(state.get("messages", []))
@@ -328,6 +383,7 @@ def build_supervisor_graph(
     authority: Any,
     tracer: Any,
     checkpointer: AsyncSqliteSaver | None = None,
+    hitl_config: dict[str, Any] | None = None,
 ) -> Any:
     """Build and compile the Supervisor StateGraph.
 
@@ -340,6 +396,8 @@ def build_supervisor_graph(
         authority: ContextAuthority for 80% compaction.
         tracer: KazmaTracer for observability.
         checkpointer: Optional AsyncSqliteSaver for durable checkpointing.
+        hitl_config: Optional HITL config from kazma.yaml safety.hitl.
+            If provided, danger-tier tools trigger interrupt() before execution.
 
     Returns:
         Compiled LangGraph app (invoke / ainvoke ready).
@@ -359,7 +417,7 @@ def build_supervisor_graph(
         )
 
     async def _tool_worker(state: SupervisorState) -> dict[str, Any]:
-        return await tool_worker_node(state, tool_executor=tool_executor, tracer=tracer)
+        return await tool_worker_node(state, tool_executor=tool_executor, tracer=tracer, hitl_config=hitl_config)
 
     async def _respond(state: SupervisorState) -> dict[str, Any]:
         return await respond_node(state)

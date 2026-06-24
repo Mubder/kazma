@@ -1,11 +1,11 @@
-"""Telegram Tools — Agent tools for interacting with the Telegram Bot API.
+"""Telegram adapter utility — platform-specific message delivery for kazma-comms.
 
-Tools in this module allow Kazma agents to send messages back to
-Telegram users. These are registered as standard local tools that
-the LangGraph tool_worker node can execute.
+Provides direct Telegram Bot API messaging functions used by the
+TelegramAdapter and legacy agent tools. This is a platform-specific
+module — the Brain (agent loop) should never import from here.
 
 Usage:
-    from kazma_core.tools.telegram_tools import send_telegram_message
+    from kazma_comms.telegram_tools import send_telegram_message
 
     # Direct call
     result = await send_telegram_message(chat_id="123456", text="مرحباً")

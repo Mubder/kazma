@@ -1,17 +1,17 @@
 """Gateway Monitor — FastAPI router for the Gateway Monitor view.
 
-Endpoints:
-  - GET  /api/gateway/status  — snapshot of adapters, persistence, threads
-  - GET  /api/gateway/roadmap — project roadmap JSON
-
-Designed to work with the kazma-gateway GatewayManager API.
+Provides endpoints for:
+  - GET  /api/gateway/status         — full status (adapters, persistence, threads)
+  - POST /api/gateway/start          — start gateway
+  - POST /api/gateway/stop           — stop gateway
+  - GET  /api/gateway/roadmap        — project roadmap JSON
+  - DELETE /api/sessions/{thread_id} — delete a session and its checkpoint
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import time
 from pathlib import Path
 from typing import Any
 
@@ -21,81 +21,81 @@ logger = logging.getLogger(__name__)
 
 _ROADMAP_PATH = Path(__file__).resolve().parent.parent / "data" / "roadmaps.json"
 
-# ── Mock persistence/threads (swap for real LangGraph data when gw-012 ships) ──
 
-_MOCK_PERSISTENCE = {
-    "session_store": {"type": "sqlite", "size_kb": 124, "path": "~/.kazma/sessions.db"},
-    "checkpointer": {"type": "sqlite", "size_kb": 2100, "path": "~/.kazma/checkpoints.db"},
-    "active_threads": 0,
-}
+def create_gateway_router(
+    gateway: Any,
+    session_store: Any = None,
+    checkpointer: Any = None,
+) -> APIRouter:
+    """Create the gateway monitor router.
 
-_MOCK_THREADS: list[dict[str, Any]] = [
-    # {
-    #     "thread_id": "uuid-...",
-    #     "platform": "telegram",
-    #     "display_name": "user_A",
-    #     "status": "active",
-    #     "last_active_seconds": 120,
-    # },
-]
+    Args:
+        gateway:        GatewayManager instance.
+        session_store:  SQLiteSessionStore for session deletion.
+        checkpointer:   AsyncSqliteSaver for checkpoint deletion.
 
+    Returns:
+        APIRouter mounted at /api/gateway + /api/sessions.
+    """
 
-def _adapter_info(adapter: Any) -> dict[str, Any]:
-    """Extract a status snapshot from an adapter."""
-    running = getattr(adapter, "_running", False)
-    status = "running" if running else "stopped"
-    name = getattr(adapter, "name", "unknown")
-    platform = getattr(adapter, "platform", name)
-    return {
-        "name": name,
-        "platform": platform,
-        "status": status,
-        "message_count": getattr(adapter, "_message_count", 0),
-        "error_count": getattr(adapter, "_error_count", 0),
-        "last_error": getattr(adapter, "_last_error", None),
-    }
+    router = APIRouter(tags=["gateway"])
 
-
-def create_gateway_router(gateway: Any) -> APIRouter:
-    """Create the gateway monitor router."""
-
-    # ── Accumulated metrics ──
-    _prev_counts: dict[str, int] = {"inbound": 0, "outbound": 0, "errors": 0}
-
-    router = APIRouter(prefix="/api/gateway", tags=["gateway"])
-
-    @router.get("/status")
+    @router.get("/api/gateway/status")
     async def gateway_status() -> dict[str, Any]:
-        """Return full gateway status for the monitor UI."""
-        adapters = [_adapter_info(a) for a in gateway.adapters]
-        queue = getattr(gateway, "queue", None)
+        """Full status for the Gateway Monitor panel.
 
-        # Aggregate metrics from all adapters
-        inbound_total = sum(a.get("message_count", 0) for a in adapters)
-        errors_total = sum(a.get("error_count", 0) for a in adapters)
-        # Outbound approximates inbound minus errors (one reply per msg)
-        outbound_total = max(0, inbound_total - errors_total)
+        Returns:
+            {
+                "adapters": [{"platform", "status", "uptime_seconds"}],
+                "persistence": {"session_store": {...}, "checkpointer": {...}, "active_threads": N},
+                "threads": [{"thread_id", "platform", "display_name", "status", "last_active_seconds"}],
+            }
+        """
+        return await gateway.get_status()
 
-        return {
-            "started": getattr(gateway, "_started", False),
-            "queue_size": queue.qsize() if queue else 0,
-            "queue_max": queue.maxsize if queue and hasattr(queue, "maxsize") else 100,
-            "adapters": adapters,
-            "metrics": {
-                "inbound_total": inbound_total,
-                "outbound_total": outbound_total,
-                "errors_total": errors_total,
-            },
-            "persistence": _MOCK_PERSISTENCE,
-            "threads": _MOCK_THREADS,
-            "server_time": time.time(),
-        }
+    @router.post("/api/gateway/start")
+    async def start_gateway() -> dict[str, Any]:
+        """Start the gateway and all adapters."""
+        await gateway.start()
+        return {"status": "started", **gateway.stats}
 
-    @router.get("/roadmap")
+    @router.post("/api/gateway/stop")
+    async def stop_gateway() -> dict[str, Any]:
+        """Stop the gateway and all adapters."""
+        await gateway.stop()
+        return {"status": "stopped", **gateway.stats}
+
+    @router.get("/api/gateway/roadmap")
     async def get_roadmap() -> dict[str, Any]:
+        """Return the roadmap JSON."""
         try:
             return json.loads(_ROADMAP_PATH.read_text())
         except Exception as e:
             return {"error": str(e), "phases": []}
+
+    @router.delete("/api/sessions/{thread_id}", status_code=204)
+    async def delete_session(thread_id: str) -> None:
+        """Delete a session and its checkpoint data.
+
+        Args:
+            thread_id: The session thread ID to delete.
+        """
+        # Delete from session store
+        if session_store is not None:
+            await session_store.delete(thread_id)
+            logger.info("[Sessions] Deleted session %s", thread_id)
+
+        # Delete checkpoint if available
+        if checkpointer is not None:
+            try:
+                config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+                await checkpointer.adelete_thread(thread_id)
+                logger.info("[Sessions] Deleted checkpoint for %s", thread_id)
+            except AttributeError:
+                logger.warning(
+                    "[Sessions] Checkpointer does not support adelete_thread — checkpoint data may remain"
+                )
+            except Exception as e:
+                logger.warning("[Sessions] Failed to delete checkpoint for %s: %s", thread_id, e)
 
     return router

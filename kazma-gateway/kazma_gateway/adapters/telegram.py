@@ -34,6 +34,7 @@ from kazma_gateway.gateway import (
     BaseAdapter,
     IncomingMessage,
     OutboundMessage,
+    RateLimiter,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,7 @@ class TelegramAdapter(BaseAdapter):
         self._poll_timeout = poll_timeout
         self._offset: int = 0
         self._http: httpx.AsyncClient | None = None
+        self._rate_limiter = RateLimiter(max_per_second=30)
         # Queue ref stored for webhook ingress (set by start() in BaseAdapter)
         self._queue: asyncio.Queue[IncomingMessage] | None = None
 
@@ -117,7 +119,11 @@ class TelegramAdapter(BaseAdapter):
             queue:          The unified message bus.
             shutdown_event: Signals when to stop.
         """
-        self._http = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0))
+        self._http = httpx.AsyncClient(
+            base_url=_TELEGRAM_API.format(token=self._token),
+            timeout=httpx.Timeout(30.0, connect=5.0),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        )
 
         try:
             logger.info("[telegram] Starting getUpdates polling loop")
@@ -203,7 +209,7 @@ class TelegramAdapter(BaseAdapter):
             params["offset"] = self._offset
 
         resp = await self._http.get(
-            f"{self._api_base}/getUpdates",
+            f"/bot{self._token}/getUpdates",
             params=params,
         )
         resp.raise_for_status()
@@ -355,7 +361,11 @@ class TelegramAdapter(BaseAdapter):
             True if sent successfully.
         """
         if not self._http:
-            self._http = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0))
+            self._http = httpx.AsyncClient(
+                base_url=_TELEGRAM_API.format(token=self._token),
+                timeout=httpx.Timeout(30.0, connect=5.0),
+                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            )
 
         # Resolve chat_id
         chat_id = outbound.context_metadata.get("chat_id")
@@ -383,8 +393,9 @@ class TelegramAdapter(BaseAdapter):
 
         for attempt in range(_SEND_MAX_RETRIES):
             try:
+                await self._rate_limiter.acquire()
                 resp = await self._http.post(
-                    f"{self._api_base}/sendMessage",
+                    f"/bot{self._token}/sendMessage",
                     json=payload,
                 )
 

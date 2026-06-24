@@ -107,6 +107,107 @@ class OutboundMessage:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# RateLimiter — token-bucket rate limiting for outbound messages
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class RateLimiter:
+    """Token-bucket rate limiter for outbound messages.
+
+    Args:
+        max_per_second: Maximum messages per second (default 30 for Telegram).
+    """
+
+    def __init__(self, max_per_second: int = 30) -> None:
+        self._max = max_per_second
+        self._tokens = float(max_per_second)
+        self._last_refill = time.monotonic()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        """Wait until a token is available, then consume one."""
+        async with self._lock:
+            now = time.monotonic()
+            elapsed = now - self._last_refill
+            self._tokens = min(self._max, self._tokens + elapsed * self._max)
+            self._last_refill = now
+            if self._tokens < 1:
+                wait = (1 - self._tokens) / self._max
+                await asyncio.sleep(wait)
+                self._tokens = 0
+            else:
+                self._tokens -= 1
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# MessageMetrics — throughput and error tracking
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class MessageMetrics:
+    """Thread-safe message throughput and error counter."""
+
+    def __init__(self) -> None:
+        self.inbound_total: int = 0
+        self.outbound_total: int = 0
+        self.errors_total: int = 0
+        self._lock = asyncio.Lock()
+
+    async def record_inbound(self) -> None:
+        async with self._lock:
+            self.inbound_total += 1
+
+    async def record_outbound(self) -> None:
+        async with self._lock:
+            self.outbound_total += 1
+
+    async def record_error(self) -> None:
+        async with self._lock:
+            self.errors_total += 1
+
+    def snapshot(self) -> dict[str, int]:
+        """Return current metrics."""
+        return {
+            "inbound_total": self.inbound_total,
+            "outbound_total": self.outbound_total,
+            "errors_total": self.errors_total,
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# SessionStore — persistent side-cache for platform context
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class SessionStore(ABC):
+    """Abstract store for mapping thread_id → platform context_metadata.
+
+    Replaces the in-memory _session_map dict with a persistent backend.
+    Platform IDs (chat_id, user_id, etc.) live here — NEVER in graph state.
+
+    Subclasses MUST implement get(), put(), and delete().
+    """
+
+    @abstractmethod
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        """Retrieve stored context_metadata for a thread_id.
+
+        Returns empty dict if not found.
+        """
+        ...
+
+    @abstractmethod
+    async def put(self, thread_id: str, context: dict[str, Any]) -> None:
+        """Store context_metadata for a thread_id (upsert)."""
+        ...
+
+    @abstractmethod
+    async def delete(self, thread_id: str) -> None:
+        """Remove stored context for a thread_id. No-op if not found."""
+        ...
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # BaseAdapter — the contract every platform adapter must fulfill
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -135,6 +236,7 @@ class BaseAdapter(ABC):
     def __init__(self) -> None:
         self._task: asyncio.Task[None] | None = None
         self._running = False
+        self._start_time: float = 0.0
 
     async def start(
         self,
@@ -142,7 +244,10 @@ class BaseAdapter(ABC):
         shutdown_event: asyncio.Event,
     ) -> None:
         """Launch the adapter's listen loop as a background task."""
+        import time as _time
+
         self._running = True
+        self._start_time = _time.time()
         self._task = asyncio.create_task(
             self.listen(queue, shutdown_event),
             name=f"adapter-{self.name}",
@@ -162,6 +267,15 @@ class BaseAdapter(ABC):
                     pass
         self._running = False
         logger.info("[%s] Adapter stopped", self.name)
+
+    @property
+    def uptime(self) -> float:
+        """Seconds since the adapter was started. 0 if not started."""
+        if self._start_time and self._running:
+            import time as _time
+
+            return _time.time() - self._start_time
+        return 0.0
 
     @staticmethod
     async def jitter_sleep(shutdown_event: asyncio.Event) -> bool:
@@ -263,6 +377,26 @@ class GatewayManager:
         self._handler: MessageHandler | None = None
         self._consumer_task: asyncio.Task[None] | None = None
         self._started = False
+        # Metrics
+        self.metrics = MessageMetrics()
+        # Persistence references (set by app.py at startup)
+        self._session_store: Any = None
+        self._checkpointer: Any = None
+        self._session_store_path: str = ""
+        self._checkpointer_path: str = ""
+
+    def set_persistence(
+        self,
+        session_store: Any = None,
+        checkpointer: Any = None,
+        session_store_path: str = "",
+        checkpointer_path: str = "",
+    ) -> None:
+        """Register persistence backends for status reporting."""
+        self._session_store = session_store
+        self._checkpointer = checkpointer
+        self._session_store_path = session_store_path
+        self._checkpointer_path = checkpointer_path
 
     def add_adapter(self, adapter: BaseAdapter) -> None:
         """Register a platform adapter."""
@@ -370,9 +504,15 @@ class GatewayManager:
 
         for adapter in self.adapters:
             if adapter.name == platform:
-                return await adapter.send(outbound)
+                ok = await adapter.send(outbound)
+                if ok:
+                    await self.metrics.record_outbound()
+                else:
+                    await self.metrics.record_error()
+                return ok
 
         logger.error("No adapter for platform '%s'", platform)
+        await self.metrics.record_error()
         return False
 
     async def _consume(self) -> None:
@@ -384,6 +524,7 @@ class GatewayManager:
                     self.queue.get(),
                     timeout=1.0,
                 )
+                await self.metrics.record_inbound()
                 if self._handler:
                     try:
                         await self._handler(msg)
@@ -419,4 +560,68 @@ class GatewayManager:
             "queue_depth": self.queue.qsize(),
             "queue_maxsize": self.queue.maxsize,
             "handler_registered": self._handler is not None,
+        }
+
+    async def get_status(self) -> dict[str, Any]:
+        """Full status for the Gateway Monitor panel.
+
+        Returns:
+            {
+                "adapters": [{"platform", "status", "uptime_seconds"}],
+                "persistence": {"session_store": {...}, "checkpointer": {...}, "active_threads": N},
+                "threads": [{"thread_id", "platform", "display_name", "status", "last_active_seconds"}],
+            }
+        """
+        import time as _time
+
+        now = _time.time()
+
+        # Adapter status
+        adapter_status = []
+        for a in self.adapters:
+            adapter_status.append(
+                {
+                    "platform": a.name,
+                    "status": "connected" if a._running else "offline",
+                    "uptime_seconds": round(a.uptime, 1),
+                }
+            )
+
+        # Persistence info
+        persistence: dict[str, Any] = {
+            "session_store": {
+                "type": "sqlite",
+                "path": self._session_store_path or "(not configured)",
+            },
+            "checkpointer": {
+                "type": "sqlite",
+                "path": self._checkpointer_path or "(not configured)",
+            },
+            "active_threads": 0,
+        }
+
+        # Thread info from session store
+        threads: list[dict[str, Any]] = []
+        if self._session_store is not None and hasattr(self._session_store, "list_active"):
+            try:
+                active_sessions = await self._session_store.list_active()
+                persistence["active_threads"] = len(active_sessions)
+                for session in active_sessions:
+                    threads.append(
+                        {
+                            "thread_id": session.get("thread_id", ""),
+                            "platform": session.get("platform", "unknown"),
+                            "display_name": session.get("display_name", "unknown"),
+                            "status": "active",
+                            "last_active_seconds": round(now - session.get("updated_at", now), 1),
+                        }
+                    )
+            except Exception:
+                logger.debug("[Gateway] Could not list active sessions")
+
+        return {
+            "adapters": adapter_status,
+            "persistence": persistence,
+            "threads": threads,
+            "metrics": self.metrics.snapshot(),
         }

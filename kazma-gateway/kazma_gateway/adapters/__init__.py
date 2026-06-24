@@ -3,6 +3,7 @@
 Each adapter implements BaseAdapter for a specific messaging platform.
 """
 
+from kazma_gateway.adapters.discord import DiscordAdapter
 from kazma_gateway.adapters.telegram import TelegramAdapter
 
-__all__ = ["TelegramAdapter"]
+__all__ = ["DiscordAdapter", "TelegramAdapter"]

@@ -3,16 +3,16 @@
 Platform isolation contract:
     The Brain (LangGraph graph) NEVER sees platform-specific identifiers.
     chat_id, user_id, message_id, update_id, chat_type are stored in a
-    side-cache (_session_map) OUTSIDE the graph state and restored only
-    when constructing the OutboundMessage for the return path.
+    SessionStore OUTSIDE the graph state and restored only when
+    constructing the OutboundMessage for the return path.
 
     Graph state["_gateway"] contains ONLY:
         - thread_id:    stable session identifier
         - display_name: sender's display name (platform-agnostic)
         - platform:     "telegram" / "discord" (string, not an ID)
 
-    Everything else lives in _session_map[thread_id] and is popped
-    back onto the OutboundMessage.context_metadata when replying.
+    Everything else lives in the SessionStore and is fetched back
+    onto the OutboundMessage.context_metadata when replying.
 """
 
 from __future__ import annotations
@@ -23,15 +23,9 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from kazma_gateway.gateway import IncomingMessage, OutboundMessage
+from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
 
 logger = logging.getLogger(__name__)
-
-# ══════════════════════════════════════════════════════════════════════════
-# Side-cache — platform IDs live HERE, never in the graph state
-# ══════════════════════════════════════════════════════════════════════════
-
-_session_map: dict[str, dict[str, Any]] = {}
 
 # Platform-specific keys that must NEVER enter graph state
 _PLATFORM_KEYS = frozenset(
@@ -46,19 +40,41 @@ _PLATFORM_KEYS = frozenset(
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# In-memory fallback store (for when no persistent store is provided)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class _InMemoryStore(SessionStore):
+    """Trivial in-memory store — no persistence, for testing/fallback."""
+
+    def __init__(self) -> None:
+        self._data: dict[str, dict[str, Any]] = {}
+
+    async def get(self, thread_id: str) -> dict[str, Any]:
+        return dict(self._data.get(thread_id, {}))
+
+    async def put(self, thread_id: str, context: dict[str, Any]) -> None:
+        self._data[thread_id] = dict(context)
+
+    async def delete(self, thread_id: str) -> None:
+        self._data.pop(thread_id, None)
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # State builder — platform-agnostic
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def _build_initial_state(msg: IncomingMessage) -> dict[str, Any]:
+async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dict[str, Any]:
     """Build a platform-agnostic graph state from an IncomingMessage.
 
     Side-effects:
-        - Stores full context_metadata in _session_map[thread_id]
+        - Stores full context_metadata in SessionStore via store.put()
         - The graph state's _gateway block contains ZERO platform IDs
 
     Args:
-        msg: The incoming message from the gateway queue.
+        msg:   The incoming message from the gateway queue.
+        store: SessionStore for persisting platform context.
 
     Returns:
         LangGraph-compatible initial state dict.
@@ -68,8 +84,8 @@ def _build_initial_state(msg: IncomingMessage) -> dict[str, Any]:
     # Resolve or generate a stable thread_id
     thread_id = ctx.get("thread_id") or str(uuid.uuid4())
 
-    # Store full platform context in side-cache (NEVER enters the graph)
-    _session_map[thread_id] = dict(ctx)
+    # Store full platform context in SessionStore (NEVER enters the graph)
+    await store.put(thread_id, dict(ctx))
 
     # Build graph state with ONLY platform-agnostic fields
     try:
@@ -101,6 +117,7 @@ def create_graph_handler(
     manager: Any,  # GatewayManager (avoid circular import)
     system_prompt: str = "",
     cost_breaker: Any = None,
+    store: SessionStore | None = None,
 ) -> Callable[[IncomingMessage], Awaitable[None]]:
     """Create an async handler that processes messages through LangGraph.
 
@@ -109,10 +126,15 @@ def create_graph_handler(
         manager:        GatewayManager instance (for send() routing).
         system_prompt:  System prompt for the agent.
         cost_breaker:   Optional CostCircuitBreaker for budget control.
+        store:          SessionStore for platform context persistence.
+                        Falls back to in-memory store if not provided.
 
     Returns:
         Async handler function compatible with manager.on_message().
     """
+    # Use provided store or fall back to in-memory
+    _store = store or _InMemoryStore()
+
     # Per-sender session tracking (sender_id → thread_id)
     _sessions: dict[str, str] = {}
 
@@ -134,7 +156,9 @@ def create_graph_handler(
         # Cost breaker gate
         if cost_breaker and cost_breaker.should_halt():
             # Restore platform context for the reply
-            ctx = _session_map.get(thread_id, msg.context_metadata)
+            ctx = await _store.get(thread_id)
+            if not ctx:
+                ctx = msg.context_metadata
             await manager.send(
                 OutboundMessage(
                     target_id=_build_target_id(msg.platform, ctx),
@@ -148,7 +172,7 @@ def create_graph_handler(
             cost_breaker.record_user_interaction()
 
         # ── Build platform-agnostic state ──────────────────────────
-        state = _build_initial_state(msg)
+        state = await _build_initial_state(msg, _store)
 
         config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
 
@@ -175,8 +199,9 @@ def create_graph_handler(
                 msg.platform,
             )
 
-            # ── Restore platform IDs from side-cache ───────────────
-            ctx = _session_map.pop(thread_id, {})
+            # ── Restore platform IDs from SessionStore ─────────────
+            ctx = await _store.get(thread_id)
+            await _store.delete(thread_id)
 
             await manager.send(
                 OutboundMessage(
@@ -188,7 +213,10 @@ def create_graph_handler(
 
         except Exception:
             logger.exception("[agent-handler] Graph invocation failed for %s", sender)
-            ctx = _session_map.pop(thread_id, msg.context_metadata)
+            ctx = await _store.get(thread_id)
+            if not ctx:
+                ctx = msg.context_metadata
+            await _store.delete(thread_id)
             await manager.send(
                 OutboundMessage(
                     target_id=_build_target_id(msg.platform, ctx),
@@ -196,6 +224,22 @@ def create_graph_handler(
                     context_metadata=ctx,
                 )
             )
+
+    # ── Register telegram backend with core's send_message dispatcher ──
+    try:
+        from kazma_core.tools.send_message import register_message_backend
+
+        async def _telegram_backend_handler(target_id: str, text: str) -> str:
+            ctx = await _store.get(target_id)
+            if not ctx:
+                ctx = {"thread_id": target_id}
+            outbound = OutboundMessage(target_id=target_id, text=text, context_metadata=ctx)
+            await manager.send(outbound)
+            return f"sent:{target_id}"
+
+        register_message_backend("telegram", _telegram_backend_handler)
+    except ImportError:
+        logger.debug("[agent-handler] kazma_core not available — backend registration skipped")
 
     return handler
 

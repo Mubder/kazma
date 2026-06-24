@@ -635,7 +635,16 @@ class TestEndToEnd:
 class TestPlatformIsolation:
     """Verify that agent_handler strips platform IDs from graph state."""
 
-    def test_brain_state_has_no_platform_ids(self) -> None:
+    @pytest.fixture
+    async def store(self):
+        from kazma_gateway.stores.sqlite import SQLiteSessionStore
+
+        s = SQLiteSessionStore(":memory:")
+        yield s
+        await s.close()
+
+    @pytest.mark.asyncio
+    async def test_brain_state_has_no_platform_ids(self, store) -> None:
         """agent_handler must not leak chat_id/user_id/message_id/update_id/chat_type into state."""
         msg = IncomingMessage(
             platform="telegram",
@@ -650,7 +659,7 @@ class TestPlatformIsolation:
                 "chat_type": "private",
             },
         )
-        state = agent_handler._build_initial_state(msg)
+        state = await agent_handler._build_initial_state(msg, store)
 
         gateway_block = state.get("_gateway", {})
         assert "chat_id" not in gateway_block
@@ -662,8 +671,9 @@ class TestPlatformIsolation:
         assert gateway_block["display_name"] == "test_user"
         assert gateway_block["platform"] == "telegram"
 
-    def test_session_map_stores_full_context(self) -> None:
-        """_session_map must contain the full platform context after state build."""
+    @pytest.mark.asyncio
+    async def test_session_map_stores_full_context(self, store) -> None:
+        """Store must contain the full platform context after state build."""
         msg = IncomingMessage(
             platform="telegram",
             sender_id="telegram:100",
@@ -678,11 +688,11 @@ class TestPlatformIsolation:
                 "thread_id": "test-thread-123",
             },
         )
-        state = agent_handler._build_initial_state(msg)
+        state = await agent_handler._build_initial_state(msg, store)
         thread_id = state["_gateway"]["thread_id"]
 
-        # Side-cache must have the full context
-        cached = agent_handler._session_map.get(thread_id, {})
+        # Store must have the full context
+        cached = await store.get(thread_id)
         assert cached["chat_id"] == 100
         assert cached["user_id"] == 200
         assert cached["message_id"] == 300
@@ -691,10 +701,11 @@ class TestPlatformIsolation:
         assert cached["chat_type"] == "group"
 
         # Cleanup
-        agent_handler._session_map.pop(thread_id, None)
+        await store.delete(thread_id)
 
-    def test_session_map_popped_on_return_path(self) -> None:
-        """After _session_map.pop(), the entry is gone (single-use)."""
+    @pytest.mark.asyncio
+    async def test_session_map_popped_on_return_path(self, store) -> None:
+        """After store.delete(), get() returns empty."""
         msg = IncomingMessage(
             platform="telegram",
             sender_id="telegram:50",
@@ -704,20 +715,21 @@ class TestPlatformIsolation:
                 "thread_id": "pop-test-thread",
             },
         )
-        state = agent_handler._build_initial_state(msg)
+        state = await agent_handler._build_initial_state(msg, store)
         thread_id = state["_gateway"]["thread_id"]
 
-        assert thread_id in agent_handler._session_map
-
-        # Simulate the return path pop
-        ctx = agent_handler._session_map.pop(thread_id, {})
+        ctx = await store.get(thread_id)
         assert ctx["chat_id"] == 50
 
-        # Second pop returns empty default
-        ctx2 = agent_handler._session_map.pop(thread_id, {})
+        # Delete (simulates return path)
+        await store.delete(thread_id)
+
+        # Second get returns empty
+        ctx2 = await store.get(thread_id)
         assert ctx2 == {}
 
-    def test_gateway_block_only_agnostic_fields(self) -> None:
+    @pytest.mark.asyncio
+    async def test_gateway_block_only_agnostic_fields(self, store) -> None:
         """_gateway block must contain exactly: thread_id, display_name, platform."""
         msg = IncomingMessage(
             platform="telegram",
@@ -733,9 +745,113 @@ class TestPlatformIsolation:
                 "extra_field": "should not leak",
             },
         )
-        state = agent_handler._build_initial_state(msg)
+        state = await agent_handler._build_initial_state(msg, store)
         gw = state["_gateway"]
 
         allowed_keys = {"thread_id", "display_name", "platform"}
         leaked = set(gw.keys()) - allowed_keys
         assert leaked == set(), f"Unexpected keys in _gateway: {leaked}"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Gateway Status Endpoint
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestGatewayStatus:
+    """Tests for GET /api/gateway/status endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_status_has_required_keys(self) -> None:
+        """Status response must have adapters, persistence, threads."""
+        manager = GatewayManager()
+        status = await manager.get_status()
+
+        assert "adapters" in status
+        assert "persistence" in status
+        assert "threads" in status
+        assert isinstance(status["adapters"], list)
+        assert isinstance(status["persistence"], dict)
+        assert isinstance(status["threads"], list)
+
+    @pytest.mark.asyncio
+    async def test_status_empty_adapters(self) -> None:
+        """No adapters registered → empty array, not error."""
+        manager = GatewayManager()
+        status = await manager.get_status()
+
+        assert status["adapters"] == []
+        assert status["threads"] == []
+
+    @pytest.mark.asyncio
+    async def test_status_adapter_fields(self) -> None:
+        """Each adapter has platform, status, uptime_seconds."""
+        manager = GatewayManager()
+        adapter = DummyAdapter()
+        manager.add_adapter(adapter)
+        await manager.start()
+
+        status = await manager.get_status()
+        assert len(status["adapters"]) == 1
+        a = status["adapters"][0]
+        assert "platform" in a
+        assert "status" in a
+        assert "uptime_seconds" in a
+        assert a["platform"] == "dummy"
+        assert a["status"] == "connected"
+
+        await manager.stop()
+
+    @pytest.mark.asyncio
+    async def test_status_with_persistence(self) -> None:
+        """Status includes persistence info when store is registered."""
+        from kazma_gateway.stores.sqlite import SQLiteSessionStore
+
+        manager = GatewayManager()
+        store = SQLiteSessionStore(":memory:")
+        manager.set_persistence(
+            session_store=store,
+            session_store_path=":memory:",
+        )
+
+        # Add a session
+        await store.put("thread-1", {"chat_id": 100, "username": "alice"})
+
+        status = await manager.get_status()
+        assert status["persistence"]["session_store"]["type"] == "sqlite"
+        assert status["persistence"]["active_threads"] == 1
+        assert len(status["threads"]) == 1
+        assert status["threads"][0]["thread_id"] == "thread-1"
+
+        await store.close()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# send_message Tool Registration
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestSendMessageTool:
+    """Verify send_message is registered as an agent tool."""
+
+    def test_send_message_in_registry(self) -> None:
+        """send_message must appear in the built-in tool registry."""
+        from kazma_core.agent.tool_registry import LocalToolRegistry
+
+        registry = LocalToolRegistry(include_builtins=True)
+        tools = registry.get_tool_definitions()
+        tool_names = [t["function"]["name"] for t in tools]
+        assert "send_message" in tool_names
+
+    def test_send_message_schema(self) -> None:
+        """send_message tool must have target_id and text parameters."""
+        from kazma_core.agent.tool_registry import LocalToolRegistry
+
+        registry = LocalToolRegistry(include_builtins=True)
+        tools = registry.get_tool_definitions()
+        sm = next(t for t in tools if t["function"]["name"] == "send_message")
+        params = sm["function"]["parameters"]
+        assert "target_id" in params["properties"]
+        assert "text" in params["properties"]
+        assert params["properties"]["target_id"]["type"] == "string"
+        assert params["properties"]["text"]["type"] == "string"

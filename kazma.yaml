@@ -53,13 +53,25 @@ skills:
 connectors:
   telegram:
     enabled: true
-    token: 8857099640:***
+    # token via TELEGRAM_BOT_TOKEN env var
   discord:
     enabled: false
-    token: ''
-  slack:
-    enabled: false
-    token: ''
+    # token via DISCORD_BOT_TOKEN env var
+
+gateway:
+  rate_limits:
+    telegram: 30
+    discord: 5
+
+safety:
+  hitl:
+    enabled: true
+    require_approval_for:
+      - file_write
+      - file_delete
+      - shell_exec
+    approval_timeout_seconds: 60
+    auto_deny_on_timeout: true
 ui:
   host: 0.0.0.0
   port: 8000

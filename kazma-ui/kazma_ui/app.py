@@ -85,6 +85,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(agents_router)
 
     # ── SSE Chat Router (LangGraph astream_events → HTMX/Alpine) ──
+    _checkpointer = None
     try:
         from kazma_core.agent.graph_builder import build_supervisor_graph
         from kazma_core.agent.tool_registry import LocalToolRegistry
@@ -213,52 +214,187 @@ def create_app(config_path: str | None = None) -> FastAPI:
     logger.info("Models router mounted at /api/models, /api/ollama/*")
 
     # ── Gateway (Omnichannel Message Bus) ────────────────────────────
-    _gateway: Any = None
+    _gateway: Any = None  # module-level ref for shutdown handler
 
     try:
         from kazma_gateway import GatewayManager
         from kazma_gateway.adapters.telegram import TelegramAdapter
-        from kazma_gateway.consumer import make_agent_handler
+        from kazma_gateway.agent_handler import create_graph_handler
+        from kazma_gateway.stores import SQLiteSessionStore
 
-        gateway = GatewayManager()
-        _gateway = gateway
+        gateway = GatewayManager(max_queue_size=100)
 
         # Resolve Telegram token from config or environment
         telegram_token = config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
         if not telegram_token:
             telegram_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 
+        tg_adapter: TelegramAdapter | None = None
         if telegram_token:
             tg_adapter = TelegramAdapter(token=telegram_token)
             gateway.add_adapter(tg_adapter)
             logger.info("[Gateway] Telegram adapter registered (polling mode)")
+
+            # Mount webhook ingress for testing / optional push mode
+            webhook_router = tg_adapter.create_webhook_router()
+            app.include_router(webhook_router, prefix="/api/webhooks/telegram")
+            logger.info("[Gateway] Webhook ingress mounted at /api/webhooks/telegram")
         else:
             logger.info("[Gateway] No Telegram token — Telegram adapter skipped")
 
-        # Register the agent brain handler
-        gateway.on_message(make_agent_handler(agent))
-        logger.info("[Gateway] Agent handler registered")
+        # Discord adapter (optional, via env var)
+        discord_token = os.environ.get("DISCORD_BOT_TOKEN", "")
+        if discord_token:
+            from kazma_gateway.adapters.discord import DiscordAdapter
+
+            discord_adapter = DiscordAdapter(token=discord_token)
+            gateway.add_adapter(discord_adapter)
+            logger.info("[Gateway] Discord adapter registered")
+        else:
+            logger.info("[Gateway] No DISCORD_BOT_TOKEN — Discord adapter skipped")
+
+        # Register the Brain handler (IncomingMessage → LangGraph → reply)
+        session_store = SQLiteSessionStore("kazma-data/sessions.db")
+        gateway.set_persistence(
+            session_store=session_store,
+            session_store_path="kazma-data/sessions.db",
+        )
+        try:
+            # Use the SSE graph built above if available
+            sse_graph_ref = locals().get("sse_graph")
+            if sse_graph_ref:
+                brain_handler = create_graph_handler(
+                    graph=sse_graph_ref,
+                    manager=gateway,
+                    system_prompt=agent.system_prompt,
+                    cost_breaker=agent.cost_breaker,
+                    store=session_store,
+                )
+                gateway.on_message(brain_handler)
+                logger.info("[Gateway] Brain handler registered")
+            else:
+                logger.warning("[Gateway] No graph available — Brain handler not registered")
+        except Exception as e:
+            logger.warning("[Gateway] Brain handler failed to register: %s", e)
 
         # Mount the gateway monitor router
         from kazma_ui.gateway_monitor import create_gateway_router
 
-        monitor_router = create_gateway_router(gateway)
+        monitor_router = create_gateway_router(
+            gateway=gateway,
+            session_store=session_store,
+            checkpointer=None,  # set at startup when checkpointer is created
+        )
         app.include_router(monitor_router)
         logger.info("[Gateway] Monitor router mounted at /api/gateway/*")
 
+        # ── HITL Approval Endpoint ────────────────────────────────
+        from fastapi import Request as _Request
+        from fastapi.responses import JSONResponse as _JSONResponse
+
+        @app.post("/api/approve/{thread_id}")
+        async def approve_tool(thread_id: str, _request: _Request) -> _JSONResponse:
+            """Resume a paused graph after HITL approval/deny.
+
+            Body: {"action": "approve" | "deny", "reason": "optional"}
+            """
+            try:
+                body = await _request.json()
+            except Exception:
+                return _JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+            action = body.get("action", "deny")
+            approved = action == "approve"
+
+            # Get the graph reference
+            graph_ref = locals().get("_sse_graph_ref") or globals().get("_sse_graph_ref")
+            if graph_ref is None:
+                return _JSONResponse({"error": "Graph not available"}, status_code=503)
+
+            try:
+                from langgraph.types import Command
+
+                config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+                resume_value = {"approved": approved, "reason": body.get("reason", "")}
+
+                # Resume the graph — this continues from the interrupt()
+                result = await graph_ref.ainvoke(
+                    Command(resume=resume_value),
+                    config=config,
+                )
+
+                return _JSONResponse({
+                    "status": "approved" if approved else "denied",
+                    "thread_id": thread_id,
+                }, status_code=202)
+
+            except Exception as e:
+                logger.exception("[HITL] Failed to resume graph for thread=%s", thread_id)
+                return _JSONResponse({"error": str(e)}, status_code=500)
+
+        logger.info("[HITL] Approval endpoint mounted at /api/approve/{thread_id}")
+
+        _gateway = gateway
+        _sse_tools_ref = locals().get("sse_tools")
+        _sse_graph_ref = locals().get("sse_graph")
+
         @app.on_event("startup")
         async def _start_gateway() -> None:
-            nonlocal _gateway
+            """Start the gateway, initialize checkpointer, recompile graph."""
+            nonlocal _gateway, _sse_graph_ref
+
+            # Initialize checkpointer and recompile graph with it
+            try:
+                from kazma_gateway.stores.checkpoint import create_checkpointer
+
+                checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
+                logger.info("[Checkpoint] SQLite checkpointer initialized")
+
+                if _sse_graph_ref is not None and _sse_tools_ref is not None:
+                    from kazma_core.agent.graph_builder import build_supervisor_graph
+
+                    _sse_graph_ref = build_supervisor_graph(
+                        llm=agent.llm,
+                        system_prompt=agent.system_prompt,
+                        tool_definitions=_sse_tools_ref.get_tool_definitions(),
+                        tool_executor=_sse_tools_ref,
+                        cost_breaker=agent.cost_breaker,
+                        authority=agent.authority,
+                        tracer=agent.tracer,
+                        checkpointer=checkpointer,
+                    )
+                    logger.info("[Checkpoint] Graph recompiled with checkpointer")
+
+                    # Re-register brain handler with the checkpointed graph
+                    from kazma_gateway.agent_handler import create_graph_handler
+
+                    brain_handler = create_graph_handler(
+                        graph=_sse_graph_ref,
+                        manager=_gateway,
+                        system_prompt=agent.system_prompt,
+                        cost_breaker=agent.cost_breaker,
+                        store=session_store,
+                    )
+                    _gateway.on_message(brain_handler)
+                    logger.info("[Checkpoint] Brain handler re-registered with checkpointed graph")
+            except Exception as e:
+                logger.warning("[Checkpoint] Checkpointer not available: %s", e)
+
             if _gateway is None:
                 return
             try:
                 await _gateway.start()
-                logger.info("[Gateway] Started — adapters: [%s]", ", ".join(a.name for a in _gateway.adapters))
+                logger.info(
+                    "[Gateway] Started — adapters: [%s], queue maxsize=%d",
+                    ", ".join(a.name for a in _gateway.adapters),
+                    _gateway.queue.maxsize,
+                )
             except Exception as e:
                 logger.warning("[Gateway] Failed to start: %s", e)
 
         @app.on_event("shutdown")
         async def _stop_gateway() -> None:
+            """Stop the gateway and drain remaining messages."""
             nonlocal _gateway
             if _gateway is None:
                 return

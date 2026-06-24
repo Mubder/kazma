@@ -7,6 +7,6 @@ Each tool returns a string or dict — the registry normalizes results into
 {"content": ..., "is_error": ...} for the LangGraph tool_worker node.
 """
 
-from kazma_core.tools.telegram_tools import send_telegram_message
+from kazma_core.tools.send_message import register_message_backend, send_message
 
-__all__ = ["send_telegram_message"]
+__all__ = ["send_message", "register_message_backend"]
