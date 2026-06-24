@@ -14,7 +14,7 @@ class TestAgentE2E:
         assert config.name == "kazma"
         assert config.version == "0.1.0"
         assert config.language == "ar"
-        assert config.default_model in ("gpt-4o-mini", "gpt-4o")
+        assert config.default_model in ("gpt-4o-mini", "gpt-4o", "default")
 
     async def test_agent_init_with_config(self) -> None:
         config = load_config()

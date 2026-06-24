@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  kazma:
+    build: .
+    container_name: kazma
+    ports:
+      - "8000:8000"
+    volumes:
+      - kazma_data:/app/kazma-data
+      - kazma_vectors:/root/.kazma/vector_memory
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/gateway/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  kazma_data:
+    driver: local
+  kazma_vectors:
+    driver: local
