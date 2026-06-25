@@ -22,6 +22,7 @@ dependencies = [
     "textual>=8.0.0",
     "psutil>=5.9.0",
     "aiogram>=3.0.0",
+    "websockets>=12.0",
 ]
 
 [project.optional-dependencies]

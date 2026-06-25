@@ -274,18 +274,25 @@ class TestBuiltinTools:
 
     @pytest.mark.asyncio
     async def test_file_search(self):
+        # Search this repo's own source tree (resolved relative to this test
+        # file) instead of a hardcoded author-machine path, so the search
+        # actually matches files and the ≤limit assertion is meaningful.
+        import kazma_core
+
+        search_root = str(Path(kazma_core.__file__).parent)
         registry = LocalToolRegistry(include_builtins=True)
         result = await registry.execute(
             "file_search",
             {
                 "pattern": "def ",
-                "path": "/home/balfaris/kazma/kazma-core/kazma_core",
+                "path": search_root,
                 "glob": "*.py",
                 "limit": 5,
             },
         )
         assert result["is_error"] is False
         lines = result["content"].strip().split("\n")
+        assert lines and lines[0], "file_search returned nothing — search root is wrong"
         assert len(lines) <= 5
 
     @pytest.mark.asyncio
