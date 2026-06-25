@@ -275,7 +275,7 @@ class TestUnifiedToolExecutor:
         executor = UnifiedToolExecutor(local=local)
 
         defs = executor.get_tool_definitions()
-        assert len(defs) == 16  # built-in tools
+        assert len(defs) == 17  # built-in tools
 
     def test_merged_schemas(self):
         local = LocalToolRegistry(include_builtins=False)

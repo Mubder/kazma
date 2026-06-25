@@ -751,6 +751,21 @@ class LocalToolRegistry:
 
             return await _exec(code=code, timeout=timeout)
 
+        # ── Context window indicator ──────────────────────────────
+        @self.register(
+            description=(
+                "Show context window usage — token count, percentage, and summarization "
+                "threshold. Use '/context details' for per-role breakdown."
+            ),
+            category="diagnostics",
+        )
+        async def context_info(details: bool = False) -> str:
+            from kazma_core.tools.context_cmd import context_cmd as _ctx
+            from kazma_core.tools.export_session import get_session_messages
+
+            messages = get_session_messages()
+            return await _ctx(messages, detailed=details)
+
         logger.info("Registered %d built-in tools", len(self._tools))
 
 

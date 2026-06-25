@@ -382,6 +382,8 @@ class GatewayManager:
         self._started = False
         # Metrics
         self.metrics = MessageMetrics()
+        # Rate feedback (optional, set via set_rate_feedback)
+        self._rate_feedback: Any = None
         # Persistence references (set by app.py at startup)
         self._session_store: Any = None
         self._checkpointer: Any = None
@@ -405,6 +407,11 @@ class GatewayManager:
         """Register a platform adapter."""
         self.adapters.append(adapter)
         logger.info("Registered adapter: %s", adapter.name)
+
+    def set_rate_feedback(self, rate_feedback: Any) -> None:
+        """Register a RateFeedbackManager for inbound rate limiting."""
+        self._rate_feedback = rate_feedback
+        logger.info("Rate feedback manager registered")
 
     def on_message(self, handler: MessageHandler) -> None:
         """Register the Brain's message handler."""
@@ -528,6 +535,24 @@ class GatewayManager:
                     timeout=1.0,
                 )
                 await self.metrics.record_inbound()
+
+                # ── Rate feedback check ────────────────────────────
+                if self._rate_feedback is not None:
+                    if self._rate_feedback.is_limited(msg.sender_id):
+                        if self._rate_feedback.should_send_feedback(msg.sender_id):
+                            feedback_text = self._rate_feedback.get_feedback_message(msg.sender_id)
+                            self._rate_feedback.record_feedback(msg.sender_id)
+                            # Send feedback via the appropriate adapter
+                            try:
+                                feedback_msg = OutboundMessage(
+                                    target_id=msg.reply_target(),
+                                    text=feedback_text,
+                                )
+                                await self.send(feedback_msg)
+                            except Exception:
+                                logger.debug("[Gateway] Failed to send rate limit feedback")
+                        continue  # Skip dispatching to handler
+
                 if self._handler:
                     try:
                         await self._handler(msg)
