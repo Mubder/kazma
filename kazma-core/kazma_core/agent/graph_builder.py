@@ -257,6 +257,8 @@ async def tool_worker_node(
     else:
         safe_tools = list(pending)
 
+    TOOL_RESULT_MAX_CHARS = 4000
+
     async def _exec_one(tc: PendingToolCall) -> ToolResult:
         start = time.monotonic()
         result = await tool_executor.execute(tc["name"], tc.get("arguments") or {})
@@ -277,10 +279,19 @@ async def tool_worker_node(
             result.get("is_error", False),
         )
 
+        # ── Truncation middleware ──────────────────────────────────
+        content = result.get("content", "")
+        if len(content) > TOOL_RESULT_MAX_CHARS:
+            original_len = len(content)
+            content = content[:TOOL_RESULT_MAX_CHARS] + f"\n[truncated {original_len - TOOL_RESULT_MAX_CHARS} chars]"
+            logger.info(
+                "[ToolWorker] Truncated result from %s (%d → %d chars)", tc["name"], original_len, TOOL_RESULT_MAX_CHARS
+            )
+
         return ToolResult(
             tool_call_id=tc["id"],
             name=tc["name"],
-            content=result.get("content", ""),
+            content=content,
             is_error=result.get("is_error", False),
             duration_ms=duration_ms,
         )

@@ -7,6 +7,15 @@ Each tool returns a string or dict — the registry normalizes results into
 {"content": ..., "is_error": ...} for the LangGraph tool_worker node.
 """
 
+from kazma_core.tools.export_session import export_session
+from kazma_core.tools.read_url import read_url
 from kazma_core.tools.send_message import register_message_backend, send_message
+from kazma_core.tools.web_search import web_search
 
-__all__ = ["send_message", "register_message_backend"]
+__all__ = [
+    "send_message",
+    "register_message_backend",
+    "web_search",
+    "read_url",
+    "export_session",
+]
