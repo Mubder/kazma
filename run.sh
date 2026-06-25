@@ -44,9 +44,11 @@ $PY -m pytest tests/ -q -p no:cacheprovider -o addopts="" --tb=short \
     --cov-report=term-missing --cov-fail-under=$COV_MIN \
     2>&1 | tee "$ART/pytest_output.txt"
 SUMMARY="$(grep -E '[0-9]+ (passed|failed|error)' "$ART/pytest_output.txt" | tail -1)"
-PASSED="$(echo "$SUMMARY" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || true)"
-FAILED="$(echo "$SUMMARY" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || true)"
-ERRORS="$(echo "$SUMMARY" | grep -oE '[0-9]+ error' | grep -oE '[0-9]+' || true)"
+# NB: `grep -oE` prints nothing (not 0) on no match, so `|| echo 0` is correct
+# here — unlike `grep -c` below, which already prints 0 and needs `|| true`.
+PASSED="$(echo "$SUMMARY" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo 0)"
+FAILED="$(echo "$SUMMARY" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || echo 0)"
+ERRORS="$(echo "$SUMMARY" | grep -oE '[0-9]+ error' | grep -oE '[0-9]+' || echo 0)"
 COV_TOTAL="$(grep -E '^TOTAL' "$ART/pytest_output.txt" | grep -oE '[0-9]+%' | tail -1 || echo 'n/a')"
 # NOTE: `grep -c` already prints a single count line (0 on no match) but exits 1
 # when the count is 0 — so use `|| true`, NOT `|| echo 0` (which would append a
