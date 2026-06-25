@@ -7,6 +7,7 @@ Each tool returns a string or dict — the registry normalizes results into
 {"content": ..., "is_error": ...} for the LangGraph tool_worker node.
 """
 
+from kazma_core.tools.code_exec import python_exec
 from kazma_core.tools.export_session import export_session
 from kazma_core.tools.file_read import file_read
 from kazma_core.tools.file_write import file_write
@@ -22,4 +23,5 @@ __all__ = [
     "export_session",
     "file_read",
     "file_write",
+    "python_exec",
 ]

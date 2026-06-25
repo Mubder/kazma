@@ -737,6 +737,20 @@ class LocalToolRegistry:
             result = await scheduler.cancel(job_id)
             return _json.dumps(result, ensure_ascii=False, indent=2)
 
+        # ── Code execution tool ───────────────────────────────────
+        @self.register(
+            description=(
+                "Execute Python code in a sandboxed subprocess. Returns stdout + stderr. "
+                "Max 30s timeout, 512MB memory, isolated mode (no site-packages). "
+                "Use for calculations, data processing, prototyping."
+            ),
+            category="code",
+        )
+        async def python_exec(code: str, timeout: int = 30) -> str:
+            from kazma_core.tools.code_exec import python_exec as _exec
+
+            return await _exec(code=code, timeout=timeout)
+
         logger.info("Registered %d built-in tools", len(self._tools))
 
 

@@ -126,7 +126,7 @@ class TestLocalToolRegistry:
 
     def test_builtins_registered(self):
         registry = LocalToolRegistry(include_builtins=True)
-        assert registry.tool_count == 15
+        assert registry.tool_count == 16
         names = [t["name"] for t in registry.list_tools()]
         assert "file_read" in names
         assert "file_write" in names
@@ -136,6 +136,7 @@ class TestLocalToolRegistry:
         assert "memory_search" in names
         assert "current_datetime" in names
         assert "shell_exec" in names
+        assert "python_exec" in names
 
     def test_no_builtins(self):
         registry = LocalToolRegistry(include_builtins=False)

@@ -448,6 +448,65 @@ async def compact_node(
     }
 
 
+async def check_saturation_node(state: SupervisorState) -> dict[str, Any]:
+    """Check if conversation has exceeded the summarization threshold.
+
+    Routes to SUMMARIZE if over threshold, otherwise to SUPERVISOR.
+    """
+    from kazma_core.summarizer import TOKEN_THRESHOLD, estimate_tokens
+
+    messages = state.get("messages", [])
+    estimated = estimate_tokens(messages)
+
+    if estimated > TOKEN_THRESHOLD:
+        logger.info(
+            "[CheckSaturation] Estimated %d tokens > threshold %d — routing to summarize",
+            estimated,
+            TOKEN_THRESHOLD,
+        )
+        return {"next_node": NodeName.SUMMARIZE}
+
+    logger.debug("[CheckSaturation] Estimated %d tokens — under threshold, proceeding", estimated)
+    return {"next_node": NodeName.SUPERVISOR}
+
+
+async def summarize_node(
+    state: SupervisorState,
+    *,
+    llm: Any,
+) -> dict[str, Any]:
+    """Summarize the conversation and inject as a SystemMessage at position 0."""
+    from kazma_core.summarizer import format_summary, get_summary, summarize
+
+    messages = list(state.get("messages", []))
+    thread_id = state.get("thread_id", "")
+
+    # Check if we already have a summary for this thread
+    existing = get_summary(thread_id)
+    if existing:
+        # Use cached summary, but regenerate if conversation has grown significantly
+        summary_text = format_summary(existing)
+    else:
+        summary_text = await summarize(messages, llm, thread_id=thread_id)
+
+    # Inject summary as system message at position 0
+    summary_msg = {"role": "system", "content": summary_text}
+
+    # Remove any existing summary messages (to avoid duplicates)
+    filtered = [
+        m for m in messages if not (m.get("role") == "system" and "CONVERSATION SUMMARY" in str(m.get("content", "")))
+    ]
+
+    new_messages = [summary_msg] + filtered
+
+    logger.info("[Summarize] Injected summary (%d chars) at position 0", len(summary_text))
+
+    return {
+        "messages": new_messages,
+        "next_node": NodeName.SUPERVISOR,
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Graph builder
 # ══════════════════════════════════════════════════════════════════════════
@@ -509,6 +568,12 @@ def build_supervisor_graph(
     async def _compact(state: SupervisorState) -> dict[str, Any]:
         return await compact_node(state, authority=authority)
 
+    async def _check_saturation(state: SupervisorState) -> dict[str, Any]:
+        return await check_saturation_node(state)
+
+    async def _summarize(state: SupervisorState) -> dict[str, Any]:
+        return await summarize_node(state, llm=llm)
+
     # ── Routing function ────────────────────────────────────────────
     def _route(state: SupervisorState) -> str:
         """Route from Supervisor based on next_node field."""
@@ -535,15 +600,46 @@ def build_supervisor_graph(
         """Route from Compact — always back to Supervisor."""
         return NodeName.SUPERVISOR
 
+    def _route_from_saturation(state: SupervisorState) -> str:
+        """Route from Check Saturation — to summarize if over threshold, else supervisor."""
+        next_node = state.get("next_node", NodeName.SUPERVISOR)
+        if next_node == NodeName.SUMMARIZE:
+            return NodeName.SUMMARIZE
+        return NodeName.SUPERVISOR
+
+    def _route_from_summarize(state: SupervisorState) -> str:
+        """Route from Summarize — always to Supervisor."""
+        return NodeName.SUPERVISOR
+
     # ── Build the graph ─────────────────────────────────────────────
     graph = StateGraph(SupervisorState)
 
+    graph.add_node(NodeName.CHECK_SATURATION, _check_saturation)
     graph.add_node(NodeName.SUPERVISOR, _supervisor)
     graph.add_node(NodeName.TOOL_WORKER, _tool_worker)
     graph.add_node(NodeName.RESPOND, _respond)
     graph.add_node(NodeName.COMPACT, _compact)
+    graph.add_node(NodeName.SUMMARIZE, _summarize)
 
-    graph.set_entry_point(NodeName.SUPERVISOR)
+    # Entry: START → check_saturation
+    graph.set_entry_point(NodeName.CHECK_SATURATION)
+
+    # check_saturation → {summarize, supervisor}
+    graph.add_conditional_edges(
+        NodeName.CHECK_SATURATION,
+        _route_from_saturation,
+        {
+            NodeName.SUMMARIZE: NodeName.SUMMARIZE,
+            NodeName.SUPERVISOR: NodeName.SUPERVISOR,
+        },
+    )
+
+    # summarize → supervisor
+    graph.add_conditional_edges(
+        NodeName.SUMMARIZE,
+        _route_from_summarize,
+        {NodeName.SUPERVISOR: NodeName.SUPERVISOR},
+    )
 
     # Supervisor → {tool_worker, compact, respond}
     graph.add_conditional_edges(

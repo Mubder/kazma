@@ -29,6 +29,8 @@ class NodeName(StrEnum):
     TOOL_WORKER = "tool_worker"
     RESPOND = "respond"
     COMPACT = "compact"
+    CHECK_SATURATION = "check_saturation"
+    SUMMARIZE = "summarize"
 
 
 # ── Pending tool call (fan-out item) ───────────────────────────────────
