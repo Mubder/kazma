@@ -255,6 +255,18 @@ def create_app(config_path: str | None = None) -> FastAPI:
         else:
             logger.info("[Gateway] No DISCORD_BOT_TOKEN — Discord adapter skipped")
 
+        # Slack adapter (optional, via env vars)
+        slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+        slack_app_token = os.environ.get("SLACK_APP_TOKEN", "")
+        if slack_bot_token and slack_app_token:
+            from kazma_gateway.adapters.slack import SlackAdapter
+
+            slack_adapter = SlackAdapter(bot_token=slack_bot_token, app_token=slack_app_token)
+            gateway.add_adapter(slack_adapter)
+            logger.info("[Gateway] Slack adapter registered (Socket Mode)")
+        else:
+            logger.info("[Gateway] No SLACK_BOT_TOKEN/SLACK_APP_TOKEN — Slack adapter skipped")
+
         # Register the Brain handler (IncomingMessage → LangGraph → reply)
         session_store = SQLiteSessionStore("kazma-data/sessions.db")
         gateway.set_persistence(
@@ -342,6 +354,15 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 discord_adapter = DiscordAdapter(token=discord_token)
                 gateway.add_adapter(discord_adapter)
                 logger.info("[Gateway] Discord adapter re-registered via refresh")
+
+            # Slack adapter
+            slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
+            slack_app_token = os.environ.get("SLACK_APP_TOKEN", "")
+            if slack_bot_token and slack_app_token:
+                from kazma_gateway.adapters.slack import SlackAdapter
+                slack_adapter = SlackAdapter(bot_token=slack_bot_token, app_token=slack_app_token)
+                gateway.add_adapter(slack_adapter)
+                logger.info("[Gateway] Slack adapter re-registered via refresh")
 
             return {
                 "status": "ok",
