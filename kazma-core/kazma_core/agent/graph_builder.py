@@ -55,6 +55,47 @@ logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# Personality injection helper
+# ══════════════════════════════════════════════════════════════════════════
+
+_PERSONALITY_MARKER = "[KAZMA_PERSONALITY]"
+
+
+def _ensure_personality(
+    messages: list[dict[str, Any]],
+    base_system_prompt: str,
+    personality_prompt: str,
+) -> list[dict[str, Any]]:
+    """Inject personality system prompt, replacing any stale one.
+
+    Layout after injection:
+        [0] base system prompt  (Kazma identity)
+        [1] personality system prompt  (tagged with _PERSONALITY_MARKER)
+        [2+] conversation messages
+
+    On subsequent calls (personality switch or re-entry), the old
+    personality message is replaced in-place.
+    """
+    msgs = list(messages)
+
+    # Remove any old personality-tagged system message
+    msgs = [m for m in msgs if _PERSONALITY_MARKER not in m.get("content", "")]
+
+    # Ensure base system prompt at position 0
+    has_base = any(m.get("role") == "system" and _PERSONALITY_MARKER not in m.get("content", "") for m in msgs)
+    if not has_base:
+        msgs.insert(0, {"role": "system", "content": base_system_prompt})
+
+    # Inject personality right after the base system prompt.
+    # We tag it so we can find and replace it on the next switch.
+    tagged = f"{_PERSONALITY_MARKER}\n{personality_prompt}"
+    insert_at = 1 if msgs and msgs[0].get("role") == "system" else 0
+    msgs.insert(insert_at, {"role": "system", "content": tagged})
+
+    return msgs
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Node functions
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -70,6 +111,7 @@ async def supervisor_node(
     authority: Any,  # ContextAuthority
     tracer: Any,  # KazmaTracer
     model_router: Any | None = None,  # ModelRouter for multi-model routing
+    personality_prompt: str | None = None,  # Active personality system prompt
 ) -> dict[str, Any]:
     """Supervisor node — the brain of the ReAct loop.
 
@@ -109,8 +151,14 @@ async def supervisor_node(
             "next_node": NodeName.SUPERVISOR,  # re-enter supervisor
         }
 
-    # ── Ensure system prompt is present ────────────────────────────
-    if not any(m.get("role") == "system" for m in messages):
+    # ── Ensure system prompt and personality are present ───────────
+    # The personality prompt is injected at position 0, replacing any
+    # stale personality message from a previous personality setting.
+    # The base system_prompt goes at position 0 if no system message
+    # exists yet. Personality goes right after the base system prompt.
+    if personality_prompt:
+        messages = _ensure_personality(messages, system_prompt, personality_prompt)
+    elif not any(m.get("role") == "system" for m in messages):
         messages.insert(0, {"role": "system", "content": system_prompt})
 
     # ── LLM call ──────────────────────────────────────────────────
@@ -524,6 +572,7 @@ def build_supervisor_graph(
     checkpointer: AsyncSqliteSaver | None = None,
     hitl_config: dict[str, Any] | None = None,
     model_router: Any | None = None,
+    personality_prompt: str | None = None,
 ) -> Any:
     """Build and compile the Supervisor StateGraph.
 
@@ -546,6 +595,24 @@ def build_supervisor_graph(
     """
 
     # ── Wrap node functions with their dependencies (closures) ──────
+
+    def _resolve_personality_prompt() -> str | None:
+        """Resolve the active personality prompt dynamically.
+
+        Checks the runtime override first (set by /personality command),
+        then falls back to the personality_prompt passed at build time.
+        This is called on every supervisor iteration so runtime switches
+        take effect immediately without rebuilding the graph.
+        """
+        from kazma_core.personalities import get_runtime_personality, PERSONALITIES
+
+        runtime = get_runtime_personality()
+        if runtime is not None:
+            return PERSONALITIES[runtime]["system_prompt"]
+        if personality_prompt is not None:
+            return personality_prompt
+        return None
+
     async def _supervisor(state: SupervisorState) -> dict[str, Any]:
         return await supervisor_node(
             state,
@@ -557,6 +624,7 @@ def build_supervisor_graph(
             authority=authority,
             tracer=tracer,
             model_router=model_router,
+            personality_prompt=_resolve_personality_prompt(),
         )
 
     async def _tool_worker(state: SupervisorState) -> dict[str, Any]:
@@ -727,6 +795,17 @@ async def create_supervisor_app(
     llm_cfg = config.get("llm", {})
     system_prompt = config.get("system_prompt", "You are Kazma (كاظمه).")
 
+    # ── Load personality from config / env ─────────────────────────
+    personality_prompt: str | None = None
+    try:
+        from kazma_core.personalities import load_personality
+
+        profile = load_personality(config=config)
+        personality_prompt = profile.system_prompt
+        logger.info("Personality loaded: %s (%s)", profile.name, profile.emoji)
+    except Exception as exc:
+        logger.warning("Personality loading failed, continuing without: %s", exc)
+
     # Normalize LLM config URLs
     if "base_url" in llm_cfg:
         llm_cfg["base_url"] = normalize_provider_url(llm_cfg["base_url"])
@@ -800,6 +879,7 @@ async def create_supervisor_app(
         authority=authority,
         tracer=tracer,
         checkpointer=checkpointer,
+        personality_prompt=personality_prompt,
     )
 
     logger.info("Supervisor app created (model=%s, tools=%d)", model, len(tool_definitions))
