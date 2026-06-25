@@ -44,11 +44,14 @@ $PY -m pytest tests/ -q -p no:cacheprovider -o addopts="" --tb=short \
     --cov-report=term-missing --cov-fail-under=$COV_MIN \
     2>&1 | tee "$ART/pytest_output.txt"
 SUMMARY="$(grep -E '[0-9]+ (passed|failed|error)' "$ART/pytest_output.txt" | tail -1)"
-PASSED="$(echo "$SUMMARY" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo 0)"
-FAILED="$(echo "$SUMMARY" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || echo 0)"
-ERRORS="$(echo "$SUMMARY" | grep -oE '[0-9]+ error' | grep -oE '[0-9]+' || echo 0)"
+PASSED="$(echo "$SUMMARY" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || true)"
+FAILED="$(echo "$SUMMARY" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || true)"
+ERRORS="$(echo "$SUMMARY" | grep -oE '[0-9]+ error' | grep -oE '[0-9]+' || true)"
 COV_TOTAL="$(grep -E '^TOTAL' "$ART/pytest_output.txt" | grep -oE '[0-9]+%' | tail -1 || echo 'n/a')"
-COV_FAIL="$(grep -c 'Coverage failure' "$ART/pytest_output.txt" || echo 0)"
+# NOTE: `grep -c` already prints a single count line (0 on no match) but exits 1
+# when the count is 0 — so use `|| true`, NOT `|| echo 0` (which would append a
+# second line and break the string comparisons below).
+COV_FAIL="$(grep -c 'Coverage failure' "$ART/pytest_output.txt" || true)"
 
 # --- 4. Live agent E2E lifecycle (init -> tools/llm wired -> shutdown) ---
 echo "--- agent E2E lifecycle ---"
@@ -66,7 +69,7 @@ async def main():
 
 asyncio.run(main())
 PYEOF
-AGENT_OK=$(grep -c "E2E_AGENT_LIFECYCLE_OK" "$ART/agent_e2e.txt" || echo 0)
+AGENT_OK=$(grep -c "E2E_AGENT_LIFECYCLE_OK" "$ART/agent_e2e.txt" || true)
 
 # --- 4b. Server + real-graph end-to-end smoke ---
 #     Boot the real FastAPI app (ASGI) and hit /health, /, /api/gateway/status;
@@ -75,8 +78,8 @@ AGENT_OK=$(grep -c "E2E_AGENT_LIFECYCLE_OK" "$ART/agent_e2e.txt" || echo 0)
 #     a real on-disk AsyncSqliteSaver, and resume from the persisted checkpoint.
 echo "--- server + graph smoke ---"
 $PY scripts/repro_server_smoke.py 2>&1 | tee "$ART/server_graph_smoke.txt"
-SERVER_OK=$(grep -c "SERVER_SMOKE_OK" "$ART/server_graph_smoke.txt" || echo 0)
-GRAPH_OK=$(grep -c "GRAPH_FLOW_OK" "$ART/server_graph_smoke.txt" || echo 0)
+SERVER_OK=$(grep -c "SERVER_SMOKE_OK" "$ART/server_graph_smoke.txt" || true)
+GRAPH_OK=$(grep -c "GRAPH_FLOW_OK" "$ART/server_graph_smoke.txt" || true)
 
 # --- 5. Write EVAL.md ---
 if [ "$FAILED" = "0" ] && [ "$ERRORS" = "0" ] && [ "$AGENT_OK" -ge 1 ] && [ "$IMPORT_OK" = "1" ] \
