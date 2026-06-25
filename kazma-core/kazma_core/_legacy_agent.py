@@ -12,9 +12,7 @@ at 80% threshold, cost circuit breaking, and full tracing.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,9 +25,13 @@ from langgraph.graph import END, StateGraph
 from kazma_core.authority import ContextAuthority, create_authority
 from kazma_core.cost_breaker import create_cost_breaker
 from kazma_core.llm_provider import LLMConfig, LLMProvider
-from kazma_core.state import AgentState, initial_state
+from kazma_core.state import AgentState
 from kazma_core.tool_registry import ToolRegistry
 from kazma_core.tracing import create_tracer
+
+# NOTE: kazma_core.agent.graph_builder / .state are imported lazily inside
+# run()/_ensure_graph() to avoid a circular import — the kazma_core.agent
+# package __init__ re-exports names from this module.
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +108,15 @@ class KazmaAgent:
     def __init__(self, config: AgentConfig | None = None) -> None:
         self.config = config or load_config()
         self._running = False
+
+        # Supervisor graph + checkpointer, built lazily on first run() so the
+        # agent's entry point actually executes the LangGraph supervisor graph
+        # (with durable AsyncSqliteSaver checkpointing) rather than a separate
+        # hand-rolled loop. See run() / _ensure_graph().
+        self._graph: Any = None
+        self._checkpointer: AsyncSqliteSaver | None = None
+        self._checkpoint_conn: aiosqlite.Connection | None = None
+        self._thread_id: str = ""
 
         # LLM Provider
         llm_cfg_dict = self.config.raw.get("llm", {})
@@ -232,151 +243,96 @@ class KazmaAgent:
                 logger.info("MCP server '%s': %d tools", server_cfg.get("name"), count)
         return total
 
-    async def run(self, user_input: str, state: AgentState | None = None) -> str:
-        """Process user input through the full ReAct loop.
+    async def _ensure_graph(self) -> Any:
+        """Build (once) the LangGraph supervisor graph this agent runs on.
 
-        1. Build messages with system prompt + history + user input
-        2. Enforce 80% compaction if needed
-        3. Run think → act → observe loop
-        4. Return final response text
+        The graph is wired from the agent's own already-constructed components
+        (LLM, tool registry, cost breaker, context authority, tracer) and a
+        durable AsyncSqliteSaver checkpointer, so run() executes the real
+        supervisor StateGraph instead of a separate hand-rolled loop.
+        """
+        if self._graph is not None:
+            return self._graph
+
+        from kazma_core.agent.graph_builder import build_supervisor_graph
+
+        # Durable checkpointer (SIGKILL-safe). One connection per agent,
+        # closed in shutdown().
+        db_path = self.config.raw.get("storage", {}).get("checkpoint_path", CHECKPOINT_DB)
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._checkpoint_conn = await aiosqlite.connect(db_path)
+        await self._checkpoint_conn.execute("PRAGMA journal_mode=WAL")
+        await self._checkpoint_conn.execute("PRAGMA synchronous=NORMAL")
+        self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
+        await self._checkpointer.setup()
+
+        hitl_config = self.config.raw.get("safety", {}).get("hitl") or None
+
+        self._graph = build_supervisor_graph(
+            llm=self.llm,
+            system_prompt=self.system_prompt,
+            tool_definitions=self.tools.get_tool_definitions(),
+            tool_executor=self.tools,
+            cost_breaker=self.cost_breaker,
+            authority=self.authority,
+            tracer=self.tracer,
+            checkpointer=self._checkpointer,
+            hitl_config=hitl_config,
+        )
+        logger.info("KazmaAgent run path bound to supervisor graph (checkpoint=%s)", db_path)
+        return self._graph
+
+    async def run(self, user_input: str, state: AgentState | None = None) -> str:
+        """Process user input by invoking the LangGraph supervisor graph.
+
+        The agent compiles (once) the supervisor StateGraph with a durable
+        AsyncSqliteSaver checkpointer and ``ainvoke()``s it with the user input.
+        The graph runs the real SUPERVISOR -> TOOL_WORKER -> SUPERVISOR ->
+        RESPOND ReAct loop with checkpointing; this method extracts and returns
+        the final assistant text (preserving the historical ``str`` contract).
         """
         logger.info("Received input: %s", user_input[:100])
         self.cost_breaker.record_user_interaction()
 
-        # Check cost breaker
+        # Cost breaker gate (kept here so a halted session short-circuits before
+        # building/invoking the graph).
         if self.cost_breaker.should_halt():
             return "⚠️ ميزانية الجلسة انتهت. أعد التشغيل أو اتصل بالمسؤول. (Budget exceeded)"
 
-        if state is None:
-            state = initial_state()
+        graph = await self._ensure_graph()
 
-        # Build messages: system + history + user
-        messages = list(state.get("messages", []))
-        has_system = any(m.get("role") == "system" for m in messages)
-        if not has_system:
-            messages.insert(0, {"role": "system", "content": self.system_prompt})
-        messages.append({"role": "user", "content": user_input})
-        state["messages"] = messages
+        # Carry any prior conversation in `state` into the graph's messages, then
+        # append the new user turn. The graph inserts the system prompt itself.
+        prior = list(state.get("messages", [])) if state else []
+        messages = prior + [{"role": "user", "content": user_input}]
 
-        # Enforce 80% context compaction
-        state = await self.authority.check_and_enforce(state)
+        # Stable thread id per agent instance → checkpoints accumulate across
+        # turns of a session under one thread.
+        if not self._thread_id:
+            import uuid
 
-        # Get tool definitions for the LLM
-        tool_defs = self.tools.get_tool_definitions()
+            self._thread_id = str(uuid.uuid4())
 
-        # ReAct loop
-        iteration = 0
-        while iteration < MAX_ITERATIONS:
-            iteration += 1
+        from kazma_core.agent.state import initial_supervisor_state
 
-            # ── THINK: Call the LLM ──
-            start = time.monotonic()
-            try:
-                llm_response = await self.llm.chat(
-                    messages=state["messages"],
-                    tools=tool_defs if tool_defs else None,
-                )
-            except Exception as e:
-                logger.error("LLM call failed on iteration %d: %s", iteration, e)
-                error_msg = f"عذراً، حدث خطأ في الاتصال: {e}"
-                state["messages"] = state.get("messages", []) + [{"role": "assistant", "content": error_msg}]
-                return error_msg
+        graph_state = initial_supervisor_state(thread_id=self._thread_id)
+        graph_state["messages"] = messages
+        config = {"configurable": {"thread_id": self._thread_id}}
 
-            duration_ms = (time.monotonic() - start) * 1000
+        try:
+            result = await graph.ainvoke(graph_state, config)
+        except Exception as e:
+            logger.error("Graph invocation failed: %s", e)
+            return f"عذراً، حدث خطأ في الاتصال: {e}"
 
-            # Record cost
-            self.cost_breaker.record_cost(llm_response.cost_usd)
+        # Extract the final assistant message text.
+        final_messages = result.get("messages", [])
+        for msg in reversed(final_messages):
+            if isinstance(msg, dict) and msg.get("role") == "assistant" and msg.get("content"):
+                return str(msg["content"])
 
-            # Trace the LLM call
-            self.tracer.trace_llm_call(
-                model=llm_response.model,
-                prompt=str(state["messages"][-1].get("content", ""))[:500],
-                response=llm_response.content[:500],
-                tokens=llm_response.usage.get("total_tokens", 0),
-                cost=llm_response.cost_usd,
-                duration_ms=duration_ms,
-            )
-
-            logger.info(
-                "Think #%d: model=%s tokens=%d cost=$%.4f duration=%.0fms tool_calls=%d",
-                iteration,
-                llm_response.model,
-                llm_response.usage.get("total_tokens", 0),
-                llm_response.cost_usd,
-                duration_ms,
-                len(llm_response.tool_calls),
-            )
-
-            # ── If no tool calls, we're done ──
-            if not llm_response.tool_calls:
-                state["messages"] = state.get("messages", []) + [{"role": "assistant", "content": llm_response.content}]
-                logger.info("Agent responded (no tool calls) after %d iterations", iteration)
-                return llm_response.content
-
-            # ── ACT: Execute tool calls ──
-            # Add the assistant message with tool_calls
-            assistant_msg: dict[str, Any] = {
-                "role": "assistant",
-                "content": llm_response.content or None,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments),
-                        },
-                    }
-                    for tc in llm_response.tool_calls
-                ],
-            }
-            state["messages"] = state.get("messages", []) + [assistant_msg]
-
-            # Execute each tool call
-            for tc in llm_response.tool_calls:
-                tool_start = time.monotonic()
-                result = await self.tools.execute(tc.name, tc.arguments)
-                tool_duration = (time.monotonic() - tool_start) * 1000
-
-                # Trace tool execution
-                self.tracer.trace_tool_execution(
-                    tool_name=tc.name,
-                    input_data=tc.arguments,
-                    output_data=result,
-                    duration_ms=tool_duration,
-                    success=not result.get("is_error", False),
-                )
-
-                # Add tool result to messages
-                tool_msg: dict[str, Any] = {
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": result.get("content", ""),
-                }
-                state["messages"] = state.get("messages", []) + [tool_msg]
-
-                # Track in tool_results for state
-                tool_results = dict(state.get("tool_results", {}))
-                tool_results[tc.id] = result
-                state["tool_results"] = tool_results
-
-                logger.info(
-                    "Tool '%s' executed in %.0fms (error=%s)",
-                    tc.name,
-                    tool_duration,
-                    result.get("is_error", False),
-                )
-
-            # ── OBSERVE: Continue the loop (LLM will see tool results) ──
-            # Check cost breaker again
-            if self.cost_breaker.should_halt():
-                return "⚠️ تم إيقاف الوكيل بسبب تجاوز الميزانية. (Agent halted: budget exceeded)"
-
-            # Loop continues — the LLM will see the tool results and decide
-
-        # Exceeded max iterations
-        logger.warning("Agent hit max iterations (%d)", MAX_ITERATIONS)
-        return "⚠️ وصلت الحد الأقصى من التكرارات. يرجى تبسيط الطلب. (Max iterations reached)"
+        logger.warning("Graph produced no assistant response")
+        return ""
 
     async def shutdown(self) -> None:
         """Clean shutdown of the agent."""
@@ -384,6 +340,14 @@ class KazmaAgent:
         await self.tools.disconnect_all()
         await self.llm.close()
         self.tracer.shutdown()
+        if self._checkpoint_conn is not None:
+            try:
+                await self._checkpoint_conn.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Error closing checkpointer connection: %s", e)
+            self._checkpoint_conn = None
+            self._checkpointer = None
+            self._graph = None
         logger.info("Kazma agent shut down.")
 
 

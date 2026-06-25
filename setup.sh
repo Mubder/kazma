@@ -235,7 +235,6 @@ check_import() {
     fi
 }
 
-check_import "sqlite_vec"       "sqlite-vec"
 check_import "aiosqlite"        "aiosqlite"
 check_import "langgraph"        "LangGraph"
 check_import "langgraph.checkpoint.sqlite.aio" "LangGraph SQLite checkpointer"
@@ -247,7 +246,6 @@ if [[ "$INTRO_ERRORS" -gt 0 ]]; then
     echo ""
     log_fail "$INTRO_ERRORS core import(s) failed"
     log_info "Fix: uv sync --reinstall"
-    log_info "If sqlite-vec fails: ensure SQLite 3.35+ (sqlite3 --version)"
     exit 1
 fi
 

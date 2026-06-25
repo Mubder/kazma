@@ -120,16 +120,19 @@ Pytest summary line: \`$SUMMARY\`
 ## What "end to end" exercises
 
 - Install via \`uv\` with all runtime extras (dev, cli, tui, rag).
-- Full pytest suite (~1381 tests): agent graph, gateway/adapters, RAG pipeline
+- Full pytest suite (~1384 tests): agent graph, gateway/adapters, RAG pipeline
   (ChromaDB store -> retrieve), HITL safety gate, cron (incl. a job that fires),
-  hub/skills, sandbox, plus the new real-graph round-trip and cron/adapter
-  integration tests.
+  hub/skills, sandbox, plus the real-graph round-trip, cron/adapter, and
+  agent-uses-graph integration tests.
 - **Real FastAPI server** booted via ASGI (TestClient): \`/health\`, \`/\`, and
   \`/api/gateway/status\` all return 200 with the documented body.
 - **Real LangGraph supervisor graph** driven end to end with a stub LLM:
   SUPERVISOR -> TOOL_WORKER (executes a real \`shell_exec\` tool) -> SUPERVISOR
   -> RESPOND, backed by an on-disk \`AsyncSqliteSaver\`; the persisted checkpoint
   is then reopened and the full conversation (user/assistant/tool) resumed.
+- **The production agent runs ON that graph:** \`KazmaAgent.run()\` compiles the
+  supervisor graph and \`ainvoke()\`s it with a durable checkpointer — the
+  README's "Built on LangGraph" claim is now true of the actual entry point.
 - Live agent lifecycle: \`load_config()\` -> \`KazmaAgent\` -> \`shutdown()\`.
 
 ## What the repro proves beyond "the suite is green"
@@ -160,6 +163,18 @@ Built up across two rounds on top of the baseline:
   in \`test_supervisor.py\` is replaced with a repo-relative path so the
   \`file_search\` test actually matches files; and the dead, shadowed
   \`kazma_core/agent.py\` module (the \`agent/\` package shadows it) is removed.
+
+**Round 3 — production agent runs on the graph (this child):**
+- **\`KazmaAgent.run()\` now delegates to the supervisor graph** (Option A from
+  review). The entry point builds \`build_supervisor_graph(...)\` wired from the
+  agent's own LLM / tool registry / cost breaker / authority / tracer plus a
+  durable \`AsyncSqliteSaver\`, \`ainvoke()\`s it, and returns the final assistant
+  text. The hand-rolled ReAct loop is gone from the run path. New
+  \`tests/integration/test_agent_uses_graph.py\` proves run() invokes the real
+  graph, executes tools via TOOL_WORKER, and persists a checkpoint under the
+  agent's thread.
+- **\`setup.sh\` no longer import-checks \`sqlite_vec\`** — nothing in the shipped
+  Python code imports it (matching the earlier \`run.sh\` correction).
 
 ## Reproduction notes
 
