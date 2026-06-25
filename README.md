@@ -2,9 +2,10 @@
 
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
-![Tests](https://img.shields.io/badge/tests-1353_passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1390_passing-brightgreen)
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-blue)
+![Portability](https://img.shields.io/badge/portability-linux_|_macOS_|_docker_|_WSL-brightgreen)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
 
@@ -55,10 +56,12 @@ kazma-core/              Agent graph, ReAct supervisor, sub-agents, model router
 ├── kazma-memory/         SQLite FTS5 + Arabic tokenizer
 ├── kazma-skills/         YAML skill manifests + MCP server registry
 ├── kazma-providers/      LiteLLM router (multi-provider failover)
-├── tests/                1,353 tests (pytest + asyncio)
+├── tests/                1,390 tests (pytest + asyncio)
 ├── docker-compose.yml    Single-command deployment
 └── archive/              Deprecated (kazma-comms, kazma-connectors)
 ```
+
+**Portability:** Kazma runs on any Linux, macOS, Docker, or WSL machine with zero modifications. No hardcoded home paths, no OS-specific hooks, no architecture assumptions. [Read the policy →](docs/portability.md)
 
 ---
 
