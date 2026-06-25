@@ -8,6 +8,8 @@ Each tool returns a string or dict — the registry normalizes results into
 """
 
 from kazma_core.tools.export_session import export_session
+from kazma_core.tools.file_read import file_read
+from kazma_core.tools.file_write import file_write
 from kazma_core.tools.read_url import read_url
 from kazma_core.tools.send_message import register_message_backend, send_message
 from kazma_core.tools.web_search import web_search
@@ -18,4 +20,6 @@ __all__ = [
     "web_search",
     "read_url",
     "export_session",
+    "file_read",
+    "file_write",
 ]

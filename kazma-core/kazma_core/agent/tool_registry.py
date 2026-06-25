@@ -315,32 +315,82 @@ class LocalToolRegistry:
                 "is_error": True,
             }
 
-        start = time.monotonic()
+        # ── Retryable exception types (network/timeout only) ──────
+        retryable_exc: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, asyncio.TimeoutError)
         try:
-            if tool.is_async:
-                result = await tool.func(**arguments)
-            else:
-                # Run sync functions in a thread pool
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(None, lambda: tool.func(**arguments))
+            import httpx
 
-            duration_ms = (time.monotonic() - start) * 1000
-            logger.info("Tool '%s' executed in %.0fms", tool_name, duration_ms)
+            retryable_exc = retryable_exc + (
+                httpx.TimeoutException,
+                httpx.ConnectError,
+                httpx.RemoteProtocolError,
+            )
+        except ImportError:
+            pass
 
-            # Normalize result to string
-            if isinstance(result, str):
-                content = result
-            elif isinstance(result, dict | list):
-                content = json.dumps(result, ensure_ascii=False, indent=2)
-            else:
-                content = str(result)
+        # Load retry config
+        try:
+            from kazma_core.retry import load_retry_config
 
-            return {"content": content, "is_error": False}
+            cfg = load_retry_config()
+            max_attempts = cfg["max_attempts"]
+            min_wait = cfg["min_wait"]
+            max_wait = cfg["max_wait"]
+        except Exception:
+            max_attempts = 1  # No retry if config unavailable
+            min_wait = 2
+            max_wait = 10
 
-        except Exception as exc:
-            duration_ms = (time.monotonic() - start) * 1000
-            logger.error("Tool '%s' failed after %.0fms: %s", tool_name, duration_ms, exc)
-            return {"content": f"Error: {exc}", "is_error": True}
+        start = time.monotonic()
+        last_exc: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                if tool.is_async:
+                    result = await tool.func(**arguments)
+                else:
+                    # Run sync functions in a thread pool
+                    loop = asyncio.get_running_loop()
+                    result = await loop.run_in_executor(None, lambda: tool.func(**arguments))
+
+                duration_ms = (time.monotonic() - start) * 1000
+                logger.info("Tool '%s' executed in %.0fms", tool_name, duration_ms)
+
+                # Normalize result to string
+                if isinstance(result, str):
+                    content = result
+                elif isinstance(result, dict | list):
+                    content = json.dumps(result, ensure_ascii=False, indent=2)
+                else:
+                    content = str(result)
+
+                return {"content": content, "is_error": False}
+
+            except retryable_exc as exc:
+                last_exc = exc
+                if attempt < max_attempts:
+                    wait_time = min(min_wait * (2 ** (attempt - 1)), max_wait)
+                    logger.warning(
+                        "Tool '%s' attempt %d/%d failed: %s (retrying in %ds)",
+                        tool_name,
+                        attempt,
+                        max_attempts,
+                        exc,
+                        wait_time,
+                    )
+                    await asyncio.sleep(wait_time)
+                # If last attempt, fall through to error return below
+
+            except Exception as exc:
+                # Non-retryable error — return immediately
+                duration_ms = (time.monotonic() - start) * 1000
+                logger.error("Tool '%s' failed after %.0fms: %s", tool_name, duration_ms, exc)
+                return {"content": f"Error: {exc}", "is_error": True}
+
+        # All retry attempts exhausted
+        duration_ms = (time.monotonic() - start) * 1000
+        logger.error("Tool '%s' failed after %d attempts (%.0fms): %s", tool_name, max_attempts, duration_ms, last_exc)
+        return {"content": f"Error: {last_exc}", "is_error": True}
 
     # ── Introspection ───────────────────────────────────────────────
 

@@ -137,14 +137,60 @@ async def supervisor_node(
 
     start = time.monotonic()
     try:
-        response = await llm.chat(
-            messages=messages,
-            tools=tool_definitions if tool_definitions else None,
-            model=routed_model,
-        )
+        from kazma_core.retry import friendly_llm_error, load_retry_config
+
+        cfg = load_retry_config()
+        retryable_exc: tuple[type[Exception], ...] = (ConnectionError, TimeoutError)
+        try:
+            import httpx
+
+            retryable_exc = retryable_exc + (
+                httpx.TimeoutException,
+                httpx.ConnectError,
+                httpx.RemoteProtocolError,
+            )
+        except ImportError:
+            pass
+
+        _llm_attempts = 0
+
+        async def _call_llm_with_retry() -> Any:
+            nonlocal _llm_attempts
+            last_exc: Exception | None = None
+            for attempt in range(1, cfg["max_attempts"] + 1):
+                try:
+                    return await llm.chat(
+                        messages=messages,
+                        tools=tool_definitions if tool_definitions else None,
+                        model=routed_model,
+                    )
+                except retryable_exc as exc:
+                    last_exc = exc
+                    _llm_attempts = attempt
+                    if attempt < cfg["max_attempts"]:
+                        wait_time = min(cfg["min_wait"] * (2 ** (attempt - 1)), cfg["max_wait"])
+                        logger.warning(
+                            "[Supervisor] LLM call attempt %d/%d failed: %s (retrying in %ds)",
+                            attempt,
+                            cfg["max_attempts"],
+                            exc,
+                            wait_time,
+                        )
+                        import asyncio
+
+                        await asyncio.sleep(wait_time)
+                    else:
+                        raise
+                except Exception:
+                    raise  # Non-retryable — re-raise immediately
+            raise last_exc  # type: ignore[misc]
+
+        response = await _call_llm_with_retry()
     except Exception as exc:
-        logger.error("[Supervisor] LLM call failed: %s", exc)
-        error_content = f"عذراً، حدث خطأ في الاتصال: {exc}"
+        logger.error("[Supervisor] LLM call failed after retries: %s", exc)
+        from kazma_core.retry import friendly_llm_error
+
+        error_content = friendly_llm_error(exc)
         return {
             "next_node": NodeName.RESPOND,
             "messages": messages + [{"role": "assistant", "content": error_content}],
