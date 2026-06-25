@@ -278,6 +278,18 @@ class DiscordAdapter(BaseAdapter):
             },
         )
 
+    # ── Typing indicator (fire-and-forget) ──────────────────────────
+
+    async def _trigger_typing(self, channel_id: str) -> None:
+        """Fire a 'typing…' indicator on a Discord channel (fire-and-forget)."""
+        cid = channel_id.split(":", 1)[1] if ":" in channel_id else channel_id
+        try:
+            if not self._http:
+                return
+            await self._http.post(f"/channels/{cid}/typing")
+        except Exception:
+            pass  # fire-and-forget
+
     async def send(self, outbound: OutboundMessage) -> bool:
         """Send a message to a Discord channel via REST API.
 
@@ -290,6 +302,8 @@ class DiscordAdapter(BaseAdapter):
         Returns:
             True if sent successfully.
         """
+        # Fire typing indicator before sending
+        asyncio.create_task(self._trigger_typing(outbound.target_id))
         if not self._http:
             self._http = httpx.AsyncClient(
                 base_url=_DISCORD_API,

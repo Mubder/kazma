@@ -350,6 +350,18 @@ class TelegramAdapter(BaseAdapter):
 
         return router
 
+    # ── Typing indicator (fire-and-forget) ──────────────────────────
+
+    async def _trigger_typing(self, target_id: str) -> None:
+        """Send a 'typing…' chat action to the user (fire-and-forget)."""
+        chat_id = target_id.split(":", 1)[1] if ":" in target_id else target_id
+        try:
+            url = f"{_TELEGRAM_API.format(token=self._token)}/sendChatAction"
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                await c.post(url, json={"chat_id": chat_id, "action": "typing"})
+        except Exception:
+            pass  # fire-and-forget — never block
+
     async def send(self, outbound: OutboundMessage) -> bool:
         """Send a message back to Telegram with 429 retry.
 
@@ -364,6 +376,9 @@ class TelegramAdapter(BaseAdapter):
         Returns:
             True if sent successfully.
         """
+        # Fire typing indicator before sending
+        asyncio.create_task(self._trigger_typing(outbound.target_id))
+
         if not self._http:
             self._http = httpx.AsyncClient(
                 base_url=_TELEGRAM_API.format(token=self._token),
