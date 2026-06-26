@@ -45,6 +45,16 @@ _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 _SEND_MAX_RETRIES = 3
 _SEND_BASE_DELAY = 1.0  # base delay for exponential backoff on 429
 
+# Emoji reaction map for setMessageReaction API
+_EMOJI_MAP: dict[str, list[dict[str, str]]] = {
+    "👀": [{"type": "emoji", "emoji": "👀"}],
+    "✅": [{"type": "emoji", "emoji": "✅"}],
+    "🎯": [{"type": "emoji", "emoji": "🎯"}],
+    "❌": [{"type": "emoji", "emoji": "❌"}],
+    "⏳": [{"type": "emoji", "emoji": "⏳"}],
+    "": [],  # clear reaction
+}
+
 
 class TelegramAdapter(BaseAdapter):
     """Telegram Bot API adapter using manual getUpdates polling.
@@ -155,6 +165,15 @@ class TelegramAdapter(BaseAdapter):
                     if shutdown_event.is_set():
                         break
 
+                    # Handle inline keyboard callbacks
+                    if "callback_query" in update:
+                        asyncio.create_task(
+                            self._handle_callback_query(
+                                update["callback_query"],
+                            )
+                        )
+                        continue
+
                     msg = self._parse_update(update)
                     if msg is None:
                         continue
@@ -177,6 +196,15 @@ class TelegramAdapter(BaseAdapter):
                             msg.context_metadata.get("chat_id", 0),
                             msg.text,
                         )
+                        # Fire 👀 reaction on the user's message
+                        if msg.context_metadata.get("message_id"):
+                            asyncio.create_task(
+                                self._set_reaction(
+                                    msg.context_metadata["chat_id"],
+                                    msg.context_metadata["message_id"],
+                                    "👀",
+                                )
+                            )
                     except asyncio.QueueFull:
                         logger.warning(
                             "[telegram] Queue full — dropping message from chat=%d",
@@ -362,6 +390,192 @@ class TelegramAdapter(BaseAdapter):
         except Exception:
             pass  # fire-and-forget — never block
 
+    # ── Emoji reactions ────────────────────────────────────────────
+
+    async def _set_reaction(
+        self,
+        chat_id: int | str,
+        message_id: int,
+        emoji: str,
+    ) -> None:
+        """Set an emoji reaction on a Telegram message (fire-and-forget).
+
+        Uses the setMessageReaction Bot API endpoint. Errors are logged
+        at debug level but never propagate — reactions are cosmetic.
+
+        Args:
+            chat_id:    Telegram chat ID.
+            message_id: Message ID to react to.
+            emoji:      One of 👀, ✅, 🎯, ❌, ⏳, or "" to clear.
+        """
+        reaction = _EMOJI_MAP.get(emoji, [{"type": "emoji", "emoji": emoji}])
+        try:
+            url = f"{_TELEGRAM_API.format(token=self._token)}/setMessageReaction"
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                resp = await c.post(
+                    url,
+                    json={
+                        "chat_id": chat_id,
+                        "message_id": message_id,
+                        "reaction": reaction,
+                        "is_big": False,
+                    },
+                )
+                if resp.status_code != 200:
+                    logger.debug(
+                        "[telegram] setMessageReaction %s failed (%d): %s",
+                        emoji,
+                        resp.status_code,
+                        resp.text[:200],
+                    )
+        except Exception:
+            logger.debug("[telegram] setMessageReaction error (fire-and-forget)")
+
+    # ── Callback query handling ────────────────────────────────────
+
+    async def _answer_callback_query(
+        self,
+        callback_query_id: str,
+        text: str = "",
+    ) -> None:
+        """Answer a Telegram callback query (fire-and-forget).
+
+        Dismisses the loading indicator on the client side.
+
+        Args:
+            callback_query_id: The callback query ID from the update.
+            text:              Optional notification text to show.
+        """
+        try:
+            url = f"{_TELEGRAM_API.format(token=self._token)}/answerCallbackQuery"
+            async with httpx.AsyncClient(timeout=5.0) as c:
+                payload: dict[str, Any] = {"callback_query_id": callback_query_id}
+                if text:
+                    payload["text"] = text
+                await c.post(url, json=payload)
+        except Exception:
+            logger.debug("[telegram] answerCallbackQuery error (fire-and-forget)")
+
+    async def _handle_callback_query(self, callback_query: dict[str, Any]) -> None:
+        """Handle an inline keyboard callback query.
+
+        Parses callback_data, answers the query, and enqueues a synthetic
+        IncomingMessage so the agent can process the user's button press.
+
+        Supported callback_data formats:
+            - hitl:approve:<request_id>
+            - hitl:deny:<request_id>
+            - personality:<name>
+
+        Args:
+            callback_query: Raw Telegram CallbackQuery object.
+        """
+        cb_id = callback_query.get("id", "")
+        data = callback_query.get("data", "")
+        message = callback_query.get("message", {})
+        from_user = callback_query.get("from", {})
+
+        # Dismiss loading indicator
+        asyncio.create_task(self._answer_callback_query(cb_id))
+
+        # Parse callback_data into a synthetic command text
+        text = ""
+        if data.startswith("hitl:"):
+            parts = data.split(":", 2)
+            if len(parts) == 3:
+                action, request_id = parts[1], parts[2]
+                text = f"/hitl {action} {request_id}"
+        elif data.startswith("personality:"):
+            name = data.split(":", 1)[1]
+            text = f"/personality {name}"
+
+        if not text:
+            logger.debug("[telegram] Unknown callback_data: %s", data)
+            return
+
+        # Build synthetic IncomingMessage
+        chat_id = message.get("chat", {}).get("id", 0)
+        user_id = from_user.get("id", 0)
+        username = (
+            from_user.get("username", "")
+            or from_user.get("first_name", "")
+            or f"tg_{user_id}"
+        )
+
+        msg = IncomingMessage(
+            platform="telegram",
+            sender_id=f"telegram:{user_id}" if user_id else f"telegram:{chat_id}",
+            text=text,
+            context_metadata={
+                "chat_id": chat_id,
+                "user_id": user_id,
+                "username": username,
+                "message_id": message.get("message_id", 0),
+                "chat_type": message.get("chat", {}).get("type", "private"),
+                "callback_query_id": cb_id,
+            },
+        )
+
+        if self._queue is not None:
+            try:
+                self._queue.put_nowait(msg)
+                logger.info(
+                    "[telegram] Callback enqueued from %s: %.80s",
+                    username,
+                    text,
+                )
+            except asyncio.QueueFull:
+                logger.warning(
+                    "[telegram] Queue full — dropping callback from chat=%d",
+                    chat_id,
+                )
+
+    # ── Inline keyboard builders ──────────────────────────────────
+
+    @staticmethod
+    def build_approval_keyboard(request_id: str) -> dict[str, Any]:
+        """Build an inline keyboard for HITL approval prompts.
+
+        Args:
+            request_id: Unique identifier for the approval request.
+
+        Returns:
+            Telegram InlineKeyboardMarkup dict.
+        """
+        return {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "✅ Approve",
+                        "callback_data": f"hitl:approve:{request_id}",
+                    },
+                    {
+                        "text": "❌ Deny",
+                        "callback_data": f"hitl:deny:{request_id}",
+                    },
+                ]
+            ]
+        }
+
+    @staticmethod
+    def build_personality_keyboard(
+        personalities: list[str],
+    ) -> dict[str, Any]:
+        """Build an inline keyboard for personality selection (top 3).
+
+        Args:
+            personalities: List of personality names.
+
+        Returns:
+            Telegram InlineKeyboardMarkup dict with up to 3 buttons.
+        """
+        return {
+            "inline_keyboard": [
+                [{"text": name, "callback_data": f"personality:{name}"}]
+                for name in personalities[:3]
+            ]
+        }
+
     async def send(self, outbound: OutboundMessage) -> bool:
         """Send a message back to Telegram with 429 retry.
 
@@ -403,12 +617,17 @@ class TelegramAdapter(BaseAdapter):
                 return False
 
         # Send with 429 retry (exponential backoff)
-        payload = {
+        payload: dict[str, Any] = {
             "chat_id": chat_id,
             "text": outbound.text[:4096],
         }
         if self._parse_mode:
             payload["parse_mode"] = self._parse_mode
+
+        # Include inline keyboard if present
+        reply_markup = outbound.context_metadata.get("reply_markup")
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
 
         for attempt in range(_SEND_MAX_RETRIES):
             try:
@@ -446,9 +665,22 @@ class TelegramAdapter(BaseAdapter):
 
                 if result.get("ok"):
                     logger.debug("[telegram] Sent to %d: %.80s", chat_id, outbound.text)
+                    # React with ✅ (or 🎯 if a tool was used)
+                    original_msg_id = outbound.context_metadata.get("message_id")
+                    if original_msg_id:
+                        emoji = "🎯" if outbound.context_metadata.get("tool_used") else "✅"
+                        asyncio.create_task(
+                            self._set_reaction(chat_id, original_msg_id, emoji)
+                        )
                     return True
                 else:
                     logger.error("[telegram] sendMessage not ok: %s", result)
+                    # React with ❌ on failure
+                    original_msg_id = outbound.context_metadata.get("message_id")
+                    if original_msg_id:
+                        asyncio.create_task(
+                            self._set_reaction(chat_id, original_msg_id, "❌")
+                        )
                     return False
 
             except httpx.HTTPStatusError as exc:
@@ -458,9 +690,21 @@ class TelegramAdapter(BaseAdapter):
                     chat_id,
                     exc,
                 )
+                # React with ❌ on error
+                original_msg_id = outbound.context_metadata.get("message_id")
+                if original_msg_id:
+                    asyncio.create_task(
+                        self._set_reaction(chat_id, original_msg_id, "❌")
+                    )
                 return False
             except Exception:
                 logger.exception("[telegram] Failed to send to %d", chat_id)
+                # React with ❌ on error
+                original_msg_id = outbound.context_metadata.get("message_id")
+                if original_msg_id:
+                    asyncio.create_task(
+                        self._set_reaction(chat_id, original_msg_id, "❌")
+                    )
                 return False
 
         logger.error(
@@ -468,4 +712,10 @@ class TelegramAdapter(BaseAdapter):
             _SEND_MAX_RETRIES,
             chat_id,
         )
+        # React with ❌ on exhausted retries
+        original_msg_id = outbound.context_metadata.get("message_id")
+        if original_msg_id:
+            asyncio.create_task(
+                self._set_reaction(chat_id, original_msg_id, "❌")
+            )
         return False
