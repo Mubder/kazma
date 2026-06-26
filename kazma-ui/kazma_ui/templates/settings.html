@@ -4,53 +4,161 @@
 {% block page_title %}Settings{% endblock %}
 
 {% block content %}
-<div x-data="settingsApp()" x-init="init()">
-    <div class="tabs">
-        <button class="tab" :class="{ active: tab === 'model' }" @click="tab = 'model'">Model</button>
-        <button class="tab" :class="{ active: tab === 'agent' }" @click="tab = 'agent'">Agent</button>
-        <button class="tab" :class="{ active: tab === 'connectors' }" @click="tab = 'connectors'">Connectors</button>
-        <button class="tab" :class="{ active: tab === 'import' }" @click="tab = 'import'">Import/Export</button>
+<div x-data="settingsApp()" x-init="init()" x-cloak>
+
+    <!-- ═══ Settings Navigation (12 tabs) ═══ -->
+    <nav class="settings-nav">
+        <button class="settings-tab" :class="{ active: tab === 'providers' }" @click="onTabChange('providers')">Services</button>
+        <button class="settings-tab" :class="{ active: tab === 'models' }" @click="onTabChange('models')">Models</button>
+        <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">Agent</button>
+        <button class="settings-tab" :class="{ active: tab === 'connectors' }" @click="onTabChange('connectors')">Connectors</button>
+        <button class="settings-tab" :class="{ active: tab === 'mcp' }" @click="onTabChange('mcp')">MCP</button>
+        <button class="settings-tab" :class="{ active: tab === 'skills' }" @click="onTabChange('skills')">Skills</button>
+        <button class="settings-tab" :class="{ active: tab === 'appearance' }" @click="onTabChange('appearance')">Appearance</button>
+        <button class="settings-tab" :class="{ active: tab === 'shortcuts' }" @click="onTabChange('shortcuts')">Shortcuts</button>
+        <button class="settings-tab" :class="{ active: tab === 'account' }" @click="onTabChange('account')">Account</button>
+        <button class="settings-tab" :class="{ active: tab === 'tools' }" @click="onTabChange('tools')">Tools</button>
+        <button class="settings-tab" :class="{ active: tab === 'system' }" @click="onTabChange('system')">System</button>
+        <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">Import/Export</button>
+    </nav>
+
+    <!-- Loading indicator -->
+    <div x-show="loading" style="padding:40px;text-align:center;color:var(--text-muted)">Loading settings...</div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 1: SERVICES / PROVIDERS
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'providers'" x-transition>
+        <div class="settings-group">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+                <h3>LLM Providers</h3>
+                <button class="btn btn-primary btn-sm" @click="openAddProvider()">+ Add Provider</button>
+            </div>
+
+            <!-- Provider List -->
+            <template x-for="p in providers" :key="p.name">
+                <div class="provider-card" style="display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:8px">
+                    <div style="flex:1">
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <strong x-text="p.display_name || p.name" style="font-size:0.95rem"></strong>
+                            <span class="badge" :class="p.enabled ? 'badge-stdio' : 'badge-sse'" x-text="p.enabled ? 'Enabled' : 'Disabled'"></span>
+                            <span class="badge" :class="{
+                                'badge-stdio': p.health === 'healthy',
+                                'badge-standard': p.health === 'degraded',
+                                'badge-premium': p.health === 'down'
+                            }" x-text="p.health || 'unknown'" x-show="p.health"></span>
+                        </div>
+                        <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" x-text="p.base_url"></div>
+                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="p.models && p.models.length">
+                            Models: <span x-text="(p.models || []).join(', ')"></span>
+                        </div>
+                    </div>
+                    <div style="display:flex;gap:6px;align-items:center">
+                        <label class="toggle" :title="p.enabled ? 'Disable' : 'Enable'">
+                            <input type="checkbox" :checked="p.enabled" @change="toggleProvider(p.name, $event.target.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <button class="btn btn-secondary btn-sm" @click="testProvider(p.name)" :disabled="testingProvider === p.name" x-text="testingProvider === p.name ? '...' : 'Test'"></button>
+                        <button class="btn btn-danger btn-sm" @click="deleteProvider(p.name)">×</button>
+                    </div>
+                </div>
+            </template>
+
+            <div x-show="providers.length === 0 && !loading" class="empty-state">
+                No providers configured. Click "Add Provider" to get started.
+            </div>
+
+            <!-- Provider Test Result -->
+            <div x-show="providerTestResult" class="validation-result" style="margin-top:12px">
+                <template x-if="providerTestResult?.success">
+                    <span class="text-success">✓ Connected! Latency: <span x-text="providerTestResult?.latency_ms"></span>ms</span>
+                </template>
+                <template x-if="providerTestResult && !providerTestResult.success">
+                    <span class="text-error">✗ <span x-text="providerTestResult?.error"></span></span>
+                </template>
+            </div>
+        </div>
+
+        <!-- Add Provider Modal -->
+        <div x-show="showProviderModal" class="modal-overlay" @click.self="showProviderModal = false">
+            <div class="modal">
+                <h2>Add Provider</h2>
+                <div class="form-group">
+                    <label>Preset</label>
+                    <select class="form-select" @change="applyProviderPreset($event.target.value)">
+                        <option value="">— Custom —</option>
+                        <template x-for="p in providerPresets" :key="p.key">
+                            <option :value="p.key" x-text="p.name"></option>
+                        </template>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Name (ID)</label>
+                        <input type="text" class="form-input" x-model="newProvider.name" placeholder="openai">
+                    </div>
+                    <div class="form-group">
+                        <label>Display Name</label>
+                        <input type="text" class="form-input" x-model="newProvider.display_name" placeholder="OpenAI">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Base URL</label>
+                    <input type="text" class="form-input" x-model="newProvider.base_url" placeholder="https://api.openai.com/v1">
+                </div>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" class="form-input" x-model="newProvider.api_key" placeholder="sk-...">
+                </div>
+                <div class="form-group">
+                    <label>Models (comma-separated, or leave empty to auto-discover)</label>
+                    <input type="text" class="form-input" x-model="newProvider.models" placeholder="gpt-4o, gpt-4o-mini">
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" @click="showProviderModal = false">Cancel</button>
+                    <button class="btn btn-primary" @click="saveProvider()" :disabled="saving" x-text="saving ? 'Saving...' : 'Add Provider'"></button>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <!-- Model Tab -->
-    <div x-show="tab === 'model'">
-        <div class="card">
-            <div class="card-title">LLM Provider</div>
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 2: MODELS
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'models'" x-transition>
+        <!-- Current Model Configuration -->
+        <div class="settings-group">
+            <h3>Active Model</h3>
             <div class="form-group">
-                <label class="form-label">Provider</label>
-                <select x-model="provider" @change="onProviderChange()" class="form-select">
+                <label>Provider</label>
+                <select class="form-select" x-model="modelProvider" @change="onProviderChange()">
                     <option value="">Custom</option>
-                    <option value="openai">OpenAI</option>
-                    <option value="anthropic">Anthropic</option>
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="google">Google Gemini</option>
-                    <option value="xai">xAI / Grok</option>
-                    <option value="openrouter">OpenRouter</option>
-                    <option value="ollama">Ollama (Local)</option>
-                    <option value="lm-studio">LM Studio (Local)</option>
+                    <template x-for="p in providerPresets" :key="p.key">
+                        <option :value="p.key" x-text="p.name"></option>
+                    </template>
                 </select>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">Base URL</label>
-                    <input type="text" x-model="model.base_url" class="form-input" placeholder="https://api.openai.com/v1">
+                    <label>Base URL</label>
+                    <input type="text" class="form-input" x-model="currentModel.base_url" placeholder="https://api.openai.com/v1">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">API Key</label>
-                    <div class="input-with-icon">
-                        <input :type="showKey ? 'text' : 'password'" x-model="model.api_key" class="form-input" placeholder="sk-...">
-                        <button @click="showKey = !showKey" x-text="showKey ? 'Hide' : 'Show'"></button>
+                    <label>API Key</label>
+                    <div class="input-with-toggle">
+                        <input :type="showKey ? 'text' : 'password'" class="form-input" x-model="currentModel.api_key" placeholder="sk-...">
+                        <button class="btn btn-icon" @click="showKey = !showKey" x-text="showKey ? '🙈' : '👁'"></button>
                     </div>
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">Model</label>
+                    <label>Model Name</label>
                     <div style="display:flex;gap:4px">
-                        <input type="text" x-model="model.model" class="form-input" placeholder="gpt-4o-mini" style="flex:1">
+                        <input type="text" class="form-input" x-model="currentModel.model" placeholder="gpt-4o-mini" style="flex:1">
                         <button class="btn btn-secondary btn-sm" @click="fetchModels()" x-text="fetchingModels ? '...' : 'Fetch'"></button>
                     </div>
-                    <select x-show="availableModels.length > 0" x-model="model.model" class="form-select" style="margin-top:4px">
+                    <select x-show="availableModels.length > 0" class="form-select" x-model="currentModel.model" style="margin-top:4px">
                         <option value="">— select model —</option>
                         <template x-for="m in availableModels">
                             <option :value="m" x-text="m"></option>
@@ -58,244 +166,742 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Max Tokens</label>
-                    <input type="number" x-model.number="model.max_tokens" class="form-input" min="256" max="128000">
+                    <label>Max Tokens</label>
+                    <input type="number" class="form-input" x-model.number="currentModel.max_tokens" min="256" max="128000">
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">Temperature: <span x-text="model.temperature"></span></label>
-                    <input type="range" x-model.number="model.temperature" min="0" max="2" step="0.1" style="width:100%">
+                    <label>Temperature: <span x-text="currentModel.temperature"></span></label>
+                    <input type="range" class="form-range" x-model.number="currentModel.temperature" min="0" max="2" step="0.1">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Timeout (seconds)</label>
-                    <input type="number" x-model.number="model.timeout" class="form-input" min="5" max="300">
+                    <label>Timeout (seconds)</label>
+                    <input type="number" class="form-input" x-model.number="currentModel.timeout" min="5" max="300">
                 </div>
             </div>
-            <div style="display:flex; gap:8px; align-items:center;">
-                <button class="btn btn-primary" @click="saveModel()">Save</button>
-                <button class="btn btn-secondary" @click="testModel()">
+            <div style="display:flex;gap:8px;align-items:center">
+                <button class="btn btn-primary" @click="saveModel()" :disabled="saving" x-text="saving ? 'Saving...' : 'Save'"></button>
+                <button class="btn btn-secondary" @click="testModel()" :disabled="testing">
                     <span x-show="!testing">Test Connection</span>
                     <span x-show="testing">Testing...</span>
                 </button>
                 <span x-show="testResult" :class="testResult?.success ? 'text-success' : 'text-error'" x-text="testResult?.success ? '✓ Connected! ' + testResult?.model : '✗ ' + testResult?.error"></span>
             </div>
         </div>
+
+        <!-- Model Defaults per Task -->
+        <div class="settings-group">
+            <h3>Default Models per Task</h3>
+            <template x-for="taskType in ['chat', 'code', 'summarize', 'translate']" :key="taskType">
+                <div class="form-row" style="align-items:end;margin-bottom:8px">
+                    <div class="form-group" style="margin-bottom:0">
+                        <label x-text="taskType.charAt(0).toUpperCase() + taskType.slice(1)"></label>
+                        <input type="text" class="form-input" x-model="modelDefaults[taskType]" :placeholder="'e.g. gpt-4o-mini'">
+                    </div>
+                    <button class="btn btn-secondary btn-sm" @click="saveModelDefault(taskType)" style="height:36px">Set</button>
+                </div>
+            </template>
+        </div>
+
+        <!-- Model Comparison -->
+        <div class="settings-group">
+            <h3>Model Comparison</h3>
+            <div class="form-group">
+                <label>Test Prompt</label>
+                <textarea class="form-textarea" x-model="comparePrompt" rows="2" placeholder="Enter a prompt to test across models..."></textarea>
+            </div>
+            <div class="form-group">
+                <label>Models to compare (comma-separated)</label>
+                <input type="text" class="form-input" x-model="compareModels" placeholder="gpt-4o-mini, claude-3-haiku, deepseek-chat">
+            </div>
+            <button class="btn btn-primary" @click="runModelComparison()" :disabled="comparing" x-text="comparing ? 'Running...' : 'Run Comparison'"></button>
+            <div x-show="compareResults.length > 0" style="margin-top:16px">
+                <template x-for="(r, i) in compareResults" :key="i">
+                    <div style="padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px">
+                        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+                            <strong x-text="r.model" style="color:var(--accent-light)"></strong>
+                            <span style="font-size:0.8rem;color:var(--text-muted)" x-text="r.latency_ms ? r.latency_ms + 'ms' : ''"></span>
+                        </div>
+                        <div x-text="r.response || r.error || 'No response'" style="font-size:0.85rem;color:var(--text-secondary);white-space:pre-wrap"></div>
+                    </div>
+                </template>
+            </div>
+        </div>
     </div>
 
-    <!-- Agent Tab -->
-    <div x-show="tab === 'agent'">
-        <div class="card">
-            <div class="card-title">Agent Configuration</div>
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 3: AGENT
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'agent'" x-transition>
+        <!-- Basic Config -->
+        <div class="settings-group">
+            <h3>Agent Configuration</h3>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">Agent Name</label>
-                    <input type="text" x-model="agent.name" class="form-input">
+                    <label>Agent Name</label>
+                    <input type="text" class="form-input" x-model="agent.name">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Language</label>
-                    <select x-model="agent.language" class="form-select">
+                    <label>Language</label>
+                    <select class="form-select" x-model="agent.language">
                         <option value="ar">Arabic</option>
                         <option value="en">English</option>
                     </select>
                 </div>
             </div>
             <div class="form-group">
-                <label class="form-label">System Prompt</label>
-                <textarea x-model="agent.system_prompt" class="form-input" rows="4" style="resize:vertical;"></textarea>
+                <label>System Prompt</label>
+                <textarea class="form-textarea" x-model="agent.system_prompt" rows="6" placeholder="You are a helpful AI assistant..."></textarea>
             </div>
-            <button class="btn btn-primary" @click="saveAgent()">Save</button>
+            <button class="btn btn-primary" @click="saveAgent()" :disabled="saving" x-text="saving ? 'Saving...' : 'Save Agent'"></button>
         </div>
-    </div>
 
-    <!-- Connectors Tab -->
-    <div x-show="tab === 'connectors'">
-        <div class="card">
-            <div class="card-title">Telegram</div>
+        <!-- Personality Templates -->
+        <div class="settings-group">
+            <h3>Personality Templates</h3>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">
+                <template x-for="p in personalities" :key="p.name">
+                    <div @click="setPersonality(p.name)" style="padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:all 0.15s" :style="agent.personality === p.name ? 'border-color:var(--accent);background:rgba(94,106,210,0.08)' : ''">
+                        <div style="font-size:1.5rem;margin-bottom:4px" x-text="p.emoji"></div>
+                        <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px" x-text="p.name"></div>
+                        <div style="font-size:0.8rem;color:var(--text-tertiary)" x-text="p.description"></div>
+                    </div>
+                </template>
+            </div>
+        </div>
+
+        <!-- Safety Settings -->
+        <div class="settings-group">
+            <h3>Safety (HITL)</h3>
             <div class="form-group">
-                <label class="form-label">Bot Token</label>
-                <div class="input-with-icon">
-                    <input :type="showTelegramToken ? 'text' : 'password'" x-model="connectors.telegram_token" class="form-input" placeholder="123456789:ABC...">
-                    <button @click="showTelegramToken = !showTelegramToken" x-text="showTelegramToken ? 'Hide' : 'Show'"></button>
+                <label style="display:flex;align-items:center;gap:8px">
+                    <span>Enable Human-in-the-Loop</span>
+                    <label class="toggle">
+                        <input type="checkbox" x-model="safety.hitl_enabled">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </label>
+            </div>
+            <div class="form-group" x-show="safety.hitl_enabled">
+                <label>Tools Requiring Approval (comma-separated)</label>
+                <input type="text" class="form-input" :value="(safety.require_approval_for || []).join(', ')" @input="safety.require_approval_for = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)" placeholder="file_write, file_delete, shell_exec">
+            </div>
+            <div class="form-row" x-show="safety.hitl_enabled">
+                <div class="form-group">
+                    <label>Approval Timeout (seconds)</label>
+                    <input type="number" class="form-input" x-model.number="safety.approval_timeout" min="10" max="600">
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px">
+                        <span>Auto-deny on Timeout</span>
+                        <label class="toggle">
+                            <input type="checkbox" x-model="safety.auto_deny_on_timeout">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </label>
                 </div>
             </div>
-            <div class="form-group">
-                <label class="form-label">Allowed User IDs (comma-separated — restricts bot access to these Telegram users)</label>
-                <input type="text" x-model="connectors.telegram_allowed_users" class="form-input" placeholder="1804015016">
-            </div>
+            <button class="btn btn-primary" @click="saveSafety()">Save Safety Settings</button>
         </div>
 
-        <div class="card">
-            <div class="card-title">Discord</div>
-            <div class="form-group">
-                <label class="form-label">Bot Token</label>
-                <input type="password" x-model="connectors.discord_token" class="form-input" placeholder="MTIzNDU2...">
-            </div>
-        </div>
-
-        <div class="card">
-            <div class="card-title">Slack</div>
+        <!-- Context Window -->
+        <div class="settings-group">
+            <h3>Context Window</h3>
             <div class="form-row">
                 <div class="form-group">
-                    <label class="form-label">Bot Token (xoxb-...)</label>
-                    <input type="password" x-model="connectors.slack_token" class="form-input" placeholder="xoxb-...">
+                    <label>Max Context Tokens</label>
+                    <input type="number" class="form-input" x-model.number="context.max_context_tokens" min="1024" max="1000000">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">App Token (xapp-...)</label>
-                    <input type="password" x-model="connectors.slack_app_token" class="form-input" placeholder="xapp-...">
+                    <label>Strategy</label>
+                    <select class="form-select" x-model="context.context_strategy">
+                        <option value="sliding_window">Sliding Window</option>
+                        <option value="summarize">Summarize Old Messages</option>
+                        <option value="truncate">Truncate Oldest</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Summarization Threshold: <span x-text="context.summarization_threshold"></span></label>
+                <input type="range" class="form-range" x-model.number="context.summarization_threshold" min="0.5" max="0.95" step="0.05">
+            </div>
+            <button class="btn btn-primary" @click="saveContext()">Save Context Settings</button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 4: CONNECTORS
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'connectors'" x-transition>
+        <!-- Telegram -->
+        <div class="settings-group">
+            <h3>💬 Telegram</h3>
+            <div class="form-group">
+                <label>Bot Token</label>
+                <div class="input-with-toggle">
+                    <input :type="showTelegramToken ? 'text' : 'password'" class="form-input" x-model="connectors.telegram.token" placeholder="123456789:ABC...">
+                    <button class="btn btn-icon" @click="showTelegramToken = !showTelegramToken" x-text="showTelegramToken ? '🙈' : '👁'"></button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Allowed User IDs (comma-separated)</label>
+                <input type="text" class="form-input" x-model="connectors.telegram.allowed_users" placeholder="1804015016">
+            </div>
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-primary" @click="saveConnector('telegram')">Save</button>
+                <button class="btn btn-secondary" @click="testConnector('telegram')" :disabled="testingConnector === 'telegram'" x-text="testingConnector === 'telegram' ? 'Testing...' : 'Test'"></button>
+            </div>
+        </div>
+
+        <!-- Discord -->
+        <div class="settings-group">
+            <h3>🎮 Discord</h3>
+            <div class="form-group">
+                <label>Bot Token</label>
+                <input type="password" class="form-input" x-model="connectors.discord.token" placeholder="MTIzNDU2...">
+            </div>
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-primary" @click="saveConnector('discord')">Save</button>
+                <button class="btn btn-secondary" @click="testConnector('discord')" :disabled="testingConnector === 'discord'" x-text="testingConnector === 'discord' ? 'Testing...' : 'Test'"></button>
+            </div>
+        </div>
+
+        <!-- Slack -->
+        <div class="settings-group">
+            <h3>📱 Slack</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Bot Token (xoxb-...)</label>
+                    <input type="password" class="form-input" x-model="connectors.slack.token" placeholder="xoxb-...">
+                </div>
+                <div class="form-group">
+                    <label>App Token (xapp-...)</label>
+                    <input type="password" class="form-input" x-model="connectors.slack.app_token" placeholder="xapp-...">
+                </div>
+            </div>
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-primary" @click="saveConnector('slack')">Save</button>
+                <button class="btn btn-secondary" @click="testConnector('slack')" :disabled="testingConnector === 'slack'" x-text="testingConnector === 'slack' ? 'Testing...' : 'Test'"></button>
+            </div>
+        </div>
+
+        <!-- Email -->
+        <div class="settings-group">
+            <h3>📧 Email</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>SMTP Host</label>
+                    <input type="text" class="form-input" x-model="connectors.email.smtp_host" placeholder="smtp.gmail.com">
+                </div>
+                <div class="form-group">
+                    <label>SMTP Port</label>
+                    <input type="number" class="form-input" x-model="connectors.email.smtp_port" placeholder="587">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" class="form-input" x-model="connectors.email.username" placeholder="user@example.com">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" class="form-input" x-model="connectors.email.password" placeholder="App password">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>IMAP Host</label>
+                <input type="text" class="form-input" x-model="connectors.email.imap_host" placeholder="imap.gmail.com">
+            </div>
+            <div style="display:flex;gap:8px">
+                <button class="btn btn-primary" @click="saveConnector('email')">Save</button>
+                <button class="btn btn-secondary" @click="testConnector('email')" :disabled="testingConnector === 'email'" x-text="testingConnector === 'email' ? 'Testing...' : 'Test'"></button>
+            </div>
+        </div>
+
+        <!-- Webhooks -->
+        <div class="settings-group">
+            <h3>🔗 Webhooks</h3>
+            <div class="form-group">
+                <label>Incoming Webhook URL</label>
+                <input type="text" class="form-input" x-model="connectors.webhook.incoming_url" placeholder="https://your-domain.com/api/webhooks/incoming">
+            </div>
+            <div class="form-group">
+                <label>Outgoing Webhook URL</label>
+                <input type="text" class="form-input" x-model="connectors.webhook.outgoing_url" placeholder="https://hooks.example.com/...">
+            </div>
+            <div class="form-group">
+                <label>Webhook Secret</label>
+                <input type="password" class="form-input" x-model="connectors.webhook.secret" placeholder="Shared secret for verification">
+            </div>
+            <button class="btn btn-primary" @click="saveConnector('webhook')">Save</button>
+        </div>
+
+        <p class="text-muted" style="margin-top:8px">Gateway restart required after saving connector changes.</p>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 5: MCP
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'mcp'" x-transition>
+        <div class="settings-group">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+                <h3>MCP Servers</h3>
+                <button class="btn btn-primary btn-sm" @click="openAddMcpServer()">+ Add Server</button>
+            </div>
+
+            <template x-for="s in mcpServers" :key="s.name">
+                <div style="padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                        <span class="status-dot" :class="s.connected ? 'status-ok' : 'status-stopped'"></span>
+                        <strong x-text="s.name"></strong>
+                        <span class="badge" :class="s.transport === 'stdio' ? 'badge-stdio' : 'badge-sse'" x-text="s.transport"></span>
+                        <span style="font-size:0.8rem;color:var(--text-muted)" x-text="(s.tool_count || 0) + ' tools'"></span>
+                    </div>
+                    <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px" x-text="s.transport === 'stdio' ? (s.command || []).join(' ') : s.url"></div>
+                    <div style="display:flex;gap:6px">
+                        <label class="toggle">
+                            <input type="checkbox" :checked="s.enabled !== false" @change="toggleMcpServer(s.name, $event.target.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <button class="btn btn-secondary btn-sm" @click="testMcpServer(s.name)" :disabled="testingMcp === s.name" x-text="testingMcp === s.name ? '...' : 'Test'"></button>
+                        <button class="btn btn-danger btn-sm" @click="deleteMcpServer(s.name)">×</button>
+                    </div>
+                    <!-- Tool list (expandable) -->
+                    <div x-show="s.tools && s.tools.length > 0" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)">
+                        <template x-for="tool in (s.tools || [])" :key="tool.name">
+                            <div style="display:flex;gap:8px;padding:3px 0;font-size:0.8rem">
+                                <span class="tool-name" x-text="tool.name"></span>
+                                <span style="color:var(--text-muted)" x-text="tool.description || ''"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <div x-show="mcpServers.length === 0 && !loading" class="empty-state">
+                No MCP servers configured. Add one to extend Kazma's tool capabilities.
+            </div>
+        </div>
+
+        <!-- Add MCP Server Modal -->
+        <div x-show="showMcpModal" class="modal-overlay" @click.self="showMcpModal = false">
+            <div class="modal">
+                <h2>Add MCP Server</h2>
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" class="form-input" x-model="newMcpServer.name" placeholder="my-server">
+                </div>
+                <div class="form-group">
+                    <label>Transport</label>
+                    <select class="form-select" x-model="newMcpServer.transport">
+                        <option value="stdio">stdio (local process)</option>
+                        <option value="sse">SSE (HTTP)</option>
+                    </select>
+                </div>
+                <div class="form-group" x-show="newMcpServer.transport === 'stdio'">
+                    <label>Command (space-separated)</label>
+                    <input type="text" class="form-input" x-model="newMcpServer.command" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
+                </div>
+                <div class="form-group" x-show="newMcpServer.transport === 'sse'">
+                    <label>URL</label>
+                    <input type="text" class="form-input" x-model="newMcpServer.url" placeholder="http://localhost:8080/sse">
+                </div>
+                <div class="form-group">
+                    <label>Environment Variables (JSON)</label>
+                    <input type="text" class="form-input" x-model="newMcpServer.env" placeholder='{"KEY": "value"}'>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" @click="showMcpModal = false">Cancel</button>
+                    <button class="btn btn-primary" @click="saveMcpServer()" :disabled="saving" x-text="saving ? 'Adding...' : 'Add Server'"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 6: SKILLS
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'skills'" x-transition>
+        <div class="settings-group">
+            <h3>Installed Skills</h3>
+            <div class="search-bar">
+                <input type="text" class="form-input" x-model="skillFilter" placeholder="Search skills...">
+            </div>
+
+            <div class="skills-grid">
+                <template x-for="skill in filteredSkills" :key="skill.name">
+                    <div class="skill-card">
+                        <div class="skill-header">
+                            <h3 x-text="skill.name"></h3>
+                            <label class="toggle">
+                                <input type="checkbox" :checked="skill.enabled !== false" @change="toggleSkill(skill.name, $event.target.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="skill-desc" x-text="skill.description || 'No description'"></div>
+                        <div class="skill-meta">
+                            <span x-show="skill.version">v<span x-text="skill.version"></span></span>
+                            <span x-show="skill.category" x-text="skill.category"></span>
+                            <span x-show="skill.author" x-text="'by ' + skill.author"></span>
+                        </div>
+                        <div class="skill-actions">
+                            <button class="btn btn-danger btn-sm" @click="uninstallSkill(skill.name)">Uninstall</button>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <div x-show="skills.length === 0 && !loading" class="empty-state">
+                No skills installed. Browse the skill marketplace to add capabilities.
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 7: APPEARANCE
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'appearance'" x-transition>
+        <div class="settings-group">
+            <h3>Theme</h3>
+            <div style="display:flex;gap:12px;margin-bottom:16px">
+                <button class="btn" :class="appearance.theme === 'dark' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'dark'; previewTheme('dark')">🌙 Dark</button>
+                <button class="btn" :class="appearance.theme === 'light' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'light'; previewTheme('light')">☀️ Light</button>
+                <button class="btn" :class="appearance.theme === 'auto' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'auto'">🔄 Auto</button>
+            </div>
+        </div>
+
+        <div class="settings-group">
+            <h3>Accent Color</h3>
+            <div style="display:flex;gap:12px;align-items:center">
+                <input type="color" x-model="appearance.accent_color" style="width:48px;height:36px;border:none;cursor:pointer;background:none">
+                <input type="text" class="form-input" x-model="appearance.accent_color" style="width:120px" placeholder="#5e6ad2">
+                <div style="display:flex;gap:6px">
+                    <template x-for="color in ['#5e6ad2', '#6C5CE7', '#0969da', '#10b981', '#f85149', '#d29922', '#e34ba9', '#8b5cf6']" :key="color">
+                        <div @click="appearance.accent_color = color" style="width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid transparent" :style="appearance.accent_color === color ? 'border-color:var(--text-primary)' : ''" :key="color">
+                            <div style="width:100%;height:100%;border-radius:50%" :style="'background:' + color"></div>
+                        </div>
+                    </template>
                 </div>
             </div>
         </div>
 
-        <button class="btn btn-primary" @click="saveConnectors()">Save Connectors</button>
-        <span class="text-muted" style="margin-left:10px">Gateway restart required after saving.</span>
+        <div class="settings-group">
+            <h3>Font Size</h3>
+            <div class="form-group">
+                <label>Base Font Size: <span x-text="appearance.font_size"></span>px</label>
+                <input type="range" class="form-range" x-model.number="appearance.font_size" min="12" max="18" step="1">
+            </div>
+        </div>
+
+        <div class="settings-group">
+            <h3>Layout</h3>
+            <div class="form-group">
+                <label>Sidebar Position</label>
+                <select class="form-select" x-model="appearance.sidebar_position" style="width:200px">
+                    <option value="left">Left</option>
+                    <option value="right">Right</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="settings-group">
+            <h3>Custom CSS</h3>
+            <div class="form-group">
+                <label>Inject custom CSS (advanced)</label>
+                <textarea class="form-textarea" x-model="appearance.custom_css" rows="4" style="font-family:var(--font-mono)" placeholder="/* Custom overrides */"></textarea>
+            </div>
+        </div>
+
+        <button class="btn btn-primary" @click="saveAppearance()" :disabled="saving" x-text="saving ? 'Saving...' : 'Save Appearance'"></button>
     </div>
 
-    <!-- Import/Export Tab -->
-    <div x-show="tab === 'import'">
-        <div class="card">
-            <div class="card-title">Export Settings</div>
-            <p class="text-muted" style="margin-bottom:10px">Download current configuration as YAML.</p>
-            <a href="/api/settings/export" class="btn btn-secondary">Download YAML</a>
-        </div>
-        <div class="card">
-            <div class="card-title">Import Settings</div>
-            <p class="text-muted" style="margin-bottom:10px">Upload a kazma.yaml file to restore configuration.</p>
-            <input type="file" accept=".yaml,.yml" @change="importYaml($event)" style="display:none" id="import-file">
-            <button class="btn btn-secondary" @click="document.getElementById('import-file').click()">Upload YAML</button>
-        </div>
-        <div class="card">
-            <div class="card-title">Reset</div>
-            <p class="text-muted" style="margin-bottom:10px">Clear all saved settings and revert to defaults.</p>
-            <button class="btn btn-danger" @click="resetSettings()">Reset All Settings</button>
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 8: SHORTCUTS
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'shortcuts'" x-transition>
+        <div class="settings-group">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+                <h3>Keyboard Shortcuts</h3>
+                <button class="btn btn-secondary btn-sm" @click="resetShortcuts()">Reset to Defaults</button>
+            </div>
+
+            <!-- Conflict warnings -->
+            <div x-show="shortcutConflicts.length > 0" style="padding:12px;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:var(--radius);margin-bottom:16px">
+                <div style="color:var(--warning);font-weight:600;margin-bottom:4px">⚠️ Conflicts Detected</div>
+                <template x-for="c in shortcutConflicts" :key="c.action1 + c.action2">
+                    <div style="font-size:0.85rem;color:var(--text-secondary)" x-text="`"${c.action1}" and "${c.action2}" both use ${c.keys}`"></div>
+                </template>
+            </div>
+
+            <template x-for="(keys, action) in shortcuts" :key="action">
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
+                    <span style="flex:1;font-size:0.9rem" x-text="action.replace(/_/g, ' ')"></span>
+                    <input type="text" class="form-input" :value="keys" @change="saveShortcut(action, $event.target.value)" style="width:180px;text-align:center;font-family:var(--font-mono)" placeholder="Ctrl+K">
+                </div>
+            </template>
         </div>
     </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 9: ACCOUNT
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'account'" x-transition>
+        <!-- Password -->
+        <div class="settings-group">
+            <h3>Change Password</h3>
+            <div class="form-group">
+                <label>Current Password</label>
+                <input type="password" class="form-input" x-model="passwordForm.old_password">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>New Password</label>
+                    <input type="password" class="form-input" x-model="passwordForm.new_password" placeholder="Min 8 characters">
+                </div>
+                <div class="form-group">
+                    <label>Confirm Password</label>
+                    <input type="password" class="form-input" x-model="passwordForm.confirm_password">
+                </div>
+            </div>
+            <button class="btn btn-primary" @click="changePassword()">Change Password</button>
+        </div>
+
+        <!-- API Tokens -->
+        <div class="settings-group">
+            <h3>API Tokens</h3>
+            <div style="display:flex;gap:8px;margin-bottom:12px">
+                <input type="text" class="form-input" x-model="tokenName" placeholder="Token name" style="flex:1">
+                <button class="btn btn-primary" @click="createToken()">Create Token</button>
+            </div>
+            <template x-for="t in apiTokens" :key="t.id">
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
+                    <span style="flex:1;font-size:0.9rem" x-text="t.name"></span>
+                    <span style="font-size:0.8rem;color:var(--text-muted);font-family:var(--font-mono)" x-text="(t.token_prefix || '***') + '...'"></span>
+                    <span style="font-size:0.8rem;color:var(--text-muted)" x-text="t.created_at || ''"></span>
+                    <button class="btn btn-danger btn-sm" @click="revokeToken(t.id)">Revoke</button>
+                </div>
+            </template>
+            <div x-show="apiTokens.length === 0" class="empty-state" style="padding:16px">No API tokens</div>
+        </div>
+
+        <!-- Sessions -->
+        <div class="settings-group">
+            <h3>Active Sessions</h3>
+            <template x-for="s in sessions" :key="s.id">
+                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
+                    <span style="flex:1;font-size:0.9rem" x-text="s.platform || 'Web'"></span>
+                    <span style="font-size:0.8rem;color:var(--text-muted)" x-text="s.last_active || ''"></span>
+                    <span class="badge badge-stdio" x-show="s.current">Current</span>
+                </div>
+            </template>
+            <div x-show="sessions.length === 0" class="empty-state" style="padding:16px">No active sessions</div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 10: TOOLS
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'tools'" x-transition>
+        <div class="settings-group">
+            <h3>Tool Registry</h3>
+            <div class="search-bar">
+                <input type="text" class="form-input" x-model="toolSearch" placeholder="Search tools by name, description, or category...">
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:6px">
+                <template x-for="tool in filteredTools" :key="tool.name">
+                    <div style="padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:border-color 0.15s" :style="selectedTool === tool.name ? 'border-color:var(--accent)' : ''" @click="selectedTool = selectedTool === tool.name ? null : tool.name">
+                        <div style="display:flex;align-items:center;gap:8px">
+                            <label class="toggle" @click.stop>
+                                <input type="checkbox" :checked="tool.enabled !== false" @change="toggleTool(tool.name, $event.target.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span class="tool-name" x-text="tool.name"></span>
+                            <span class="badge badge-basic" x-text="tool.category || 'general'" style="font-size:0.7rem"></span>
+                            <span style="flex:1"></span>
+                            <span style="font-size:0.8rem;color:var(--text-muted)" x-text="tool.description || ''" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+                        </div>
+                        <!-- Expanded tool details -->
+                        <div x-show="selectedTool === tool.name" x-transition style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle)">
+                            <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px" x-text="tool.description || ''"></div>
+                            <div x-show="tool.parameters" style="margin-bottom:8px">
+                                <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">Parameters:</div>
+                                <pre style="font-size:0.75rem;color:var(--text-secondary);background:var(--bg-primary);padding:8px;border-radius:var(--radius);overflow-x:auto" x-text="JSON.stringify(tool.parameters || {}, null, 2)"></pre>
+                            </div>
+                            <div style="display:flex;gap:8px;align-items:end">
+                                <div class="form-group" style="flex:1;margin-bottom:0">
+                                    <label>Test Arguments (JSON)</label>
+                                    <input type="text" class="form-input" x-model="toolTestArgs" placeholder='{}' style="font-family:var(--font-mono)">
+                                </div>
+                                <button class="btn btn-secondary btn-sm" @click.stop="testTool(tool.name)" style="height:36px">Test</button>
+                            </div>
+                            <div x-show="toolTestResult" style="margin-top:8px;padding:8px;background:var(--bg-primary);border-radius:var(--radius);font-size:0.8rem">
+                                <pre x-text="JSON.stringify(toolTestResult, null, 2)" style="white-space:pre-wrap"></pre>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+
+            <div x-show="tools.length === 0 && !loading" class="empty-state">
+                No tools registered. Tools are added via MCP servers or local tool definitions.
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 11: SYSTEM
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'system'" x-transition>
+        <!-- Diagnostics -->
+        <div class="settings-group">
+            <h3>System Diagnostics</h3>
+            <div class="metrics-row">
+                <div class="metric-card">
+                    <div class="metric-value" x-text="diagnostics.uptime || '—'"></div>
+                    <div class="metric-label">Uptime</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" x-text="diagnostics.cpu_percent !== undefined ? diagnostics.cpu_percent + '%' : '—'"></div>
+                    <div class="metric-label">CPU</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" x-text="diagnostics.memory_mb ? diagnostics.memory_mb + ' MB' : '—'"></div>
+                    <div class="metric-label">Memory</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" x-text="diagnostics.disk_free_gb ? diagnostics.disk_free_gb + ' GB' : '—'"></div>
+                    <div class="metric-label">Disk Free</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value" x-text="diagnostics.python_version || '—'"></div>
+                    <div class="metric-label">Python</div>
+                </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" @click="loadDiagnostics()">Refresh</button>
+        </div>
+
+        <!-- Logs -->
+        <div class="settings-group">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+                <h3>System Logs</h3>
+                <div style="display:flex;gap:8px">
+                    <select class="form-select" x-model.number="logLines" style="width:100px" @change="loadLogs()">
+                        <option value="50">50 lines</option>
+                        <option value="100">100 lines</option>
+                        <option value="200">200 lines</option>
+                        <option value="500">500 lines</option>
+                    </select>
+                    <button class="btn btn-secondary btn-sm" @click="loadLogs()">Refresh</button>
+                </div>
+            </div>
+            <div style="background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius);padding:12px;max-height:400px;overflow-y:auto;font-family:var(--font-mono);font-size:0.8rem;line-height:1.6">
+                <template x-for="(line, i) in logs" :key="i">
+                    <div x-text="line" :style="line.includes('ERROR') || line.includes('error') ? 'color:var(--danger)' : line.includes('WARNING') ? 'color:var(--warning)' : 'color:var(--text-secondary)'"></div>
+                </template>
+                <div x-show="logs.length === 0" style="color:var(--text-muted)">No logs available</div>
+            </div>
+        </div>
+
+        <!-- Backup/Restore -->
+        <div class="settings-group">
+            <h3>Backup & Maintenance</h3>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <button class="btn btn-secondary" @click="createBackup()">📦 Download Backup</button>
+                <button class="btn btn-secondary" @click="checkUpdates()">🔄 Check for Updates</button>
+                <button class="btn btn-danger" @click="systemReset()">⚠️ System Reset</button>
+            </div>
+            <div x-show="updateInfo" style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
+                <template x-if="updateInfo?.update_available">
+                    <div>
+                        <span class="text-warning">Update available:</span>
+                        <span x-text="updateInfo?.latest_version"></span>
+                        <span style="color:var(--text-muted)" x-text="'(current: ' + updateInfo?.current_version + ')'"></span>
+                    </div>
+                </template>
+                <template x-if="updateInfo && !updateInfo?.update_available && !updateInfo?.error">
+                    <span class="text-success">✓ Running the latest version</span>
+                </template>
+                <template x-if="updateInfo?.error">
+                    <span class="text-error" x-text="updateInfo.error"></span>
+                </template>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 12: IMPORT/EXPORT
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'import'" x-transition>
+        <!-- Export -->
+        <div class="settings-group">
+            <h3>Export Configuration</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">Download your complete Kazma configuration.</p>
+            <div style="display:flex;gap:8px;align-items:center">
+                <select class="form-select" x-model="exportFormat" style="width:120px">
+                    <option value="yaml">YAML</option>
+                    <option value="json">JSON</option>
+                </select>
+                <button class="btn btn-primary" @click="exportConfig()">Download Config</button>
+            </div>
+        </div>
+
+        <!-- Import -->
+        <div class="settings-group">
+            <h3>Import Configuration</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">Upload or paste a configuration file to import settings.</p>
+            <div class="form-group">
+                <label>Format</label>
+                <select class="form-select" x-model="importFormat" style="width:120px">
+                    <option value="yaml">YAML</option>
+                    <option value="json">JSON</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Configuration Data</label>
+                <textarea class="form-textarea" x-model="importData" rows="8" style="font-family:var(--font-mono)" placeholder="Paste YAML or JSON configuration here..."></textarea>
+            </div>
+            <div style="display:flex;gap:12px;margin-bottom:12px">
+                <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem">
+                    <input type="file" accept=".yaml,.yml,.json" @change="handleFileUpload($event)" style="display:none" id="import-file-input">
+                    <button class="btn btn-secondary btn-sm" @click="document.getElementById('import-file-input').click()">📁 Upload File</button>
+                </label>
+            </div>
+            <div class="form-group">
+                <label style="display:flex;align-items:center;gap:8px">
+                    <span>Selective Import</span>
+                    <label class="toggle">
+                        <input type="checkbox" x-model="importSelective">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </label>
+            </div>
+            <div x-show="importSelective" class="form-group">
+                <label>Select sections to import</label>
+                <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+                    <template x-for="section in availableSections" :key="section">
+                        <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;padding:4px 8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer" :style="importSections.includes(section) ? 'border-color:var(--accent);background:rgba(94,106,210,0.08)' : ''">
+                            <input type="checkbox" :value="section" x-model="importSections" style="display:none">
+                            <span x-text="section"></span>
+                        </label>
+                    </template>
+                </div>
+            </div>
+            <button class="btn btn-primary" @click="importConfig()" :disabled="saving" x-text="saving ? 'Importing...' : 'Import Configuration'"></button>
+        </div>
+
+        <!-- Reset -->
+        <div class="settings-group">
+            <h3>Reset to Defaults</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">Clear all saved settings and revert to factory defaults. This cannot be undone.</p>
+            <button class="btn btn-danger" @click="resetToDefaults()">Reset All Settings</button>
+        </div>
+    </div>
+
 </div>
 
-<script>
-function settingsApp() {
-    return {
-        tab: 'model',
-        showKey: false,
-        showTelegramToken: false,
-        testing: false,
-        fetchingModels: false,
-        testResult: null,
-        provider: '',
-        availableModels: [],
-        model: { base_url: '', api_key: '', model: '', max_tokens: 4096, temperature: 0.7, timeout: 60 },
-        agent: { name: 'kazma', language: 'ar', system_prompt: '' },
-        connectors: { telegram_token: '', telegram_allowed_users: '', discord_token: '', slack_token: '', slack_app_token: '' },
-
-        async init() {
-            try {
-                var resp = await fetch('/api/settings');
-                var data = await resp.json();
-                if (data.model) Object.assign(this.model, data.model);
-                if (data.agent) Object.assign(this.agent, data.agent);
-                if (data.connectors) Object.assign(this.connectors, data.connectors);
-            } catch (e) {}
-        },
-
-        async saveModel() {
-            var updates = Object.entries(this.model).map(function([k, v]) {
-                return { key: 'llm.' + k, value: v, category: 'model' };
-            });
-            await this._save(updates);
-        },
-
-        async saveAgent() {
-            var updates = Object.entries(this.agent).map(function([k, v]) {
-                return { key: 'agent.' + k, value: v, category: 'agent' };
-            });
-            await this._save(updates);
-        },
-
-        async saveConnectors() {
-            var updates = [
-                { key: 'connectors.telegram.token', value: this.connectors.telegram_token, category: 'connectors' },
-                { key: 'connectors.telegram.allowed_users', value: this.connectors.telegram_allowed_users, category: 'connectors' },
-                { key: 'connectors.discord.token', value: this.connectors.discord_token, category: 'connectors' },
-                { key: 'connectors.slack.token', value: this.connectors.slack_token, category: 'connectors' },
-                { key: 'connectors.slack.app_token', value: this.connectors.slack_app_token, category: 'connectors' },
-            ];
-            await this._save(updates);
-            showToast('Connectors saved. Restart gateway to apply.', 'success');
-        },
-
-        async _save(updates) {
-            try {
-                var resp = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
-                if (resp.ok) showToast('Settings saved', 'success');
-            } catch (e) { showToast('Failed to save', 'error'); }
-        },
-
-        async testModel() {
-            this.testing = true; this.testResult = null;
-            if (!this.model.model) { this.testResult = { success: false, error: 'Enter a model name first, or click Fetch to list available models' }; this.testing = false; return; }
-            try {
-                var resp = await fetch('/api/settings/test-model', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.model) });
-                this.testResult = await resp.json();
-                if (!this.testResult.success && this.testResult.error && this.testResult.error.includes('400')) {
-                    this.testResult.error = 'Model not found. Click Fetch to see available models for this provider, or check your API key.';
-                }
-            } catch (e) { this.testResult = { success: false, error: e.message }; }
-            this.testing = false;
-        },
-
-        onProviderChange() {
-            var presets = {
-                'openai': 'https://api.openai.com/v1',
-                'anthropic': 'https://api.anthropic.com/v1',
-                'deepseek': 'https://api.deepseek.com/v1',
-                'google': 'https://generativelanguage.googleapis.com/v1beta',
-                'xai': 'https://api.x.ai/v1',
-                'openrouter': 'https://openrouter.ai/api/v1',
-                'ollama': 'http://127.0.0.1:11434/v1',
-                'lm-studio': 'http://localhost:1234/v1',
-            };
-            if (this.provider && presets[this.provider]) {
-                this.model.base_url = presets[this.provider];
-            }
-            this.availableModels = [];
-        },
-
-        async fetchModels() {
-            if (!this.model.base_url) { showToast('Enter a base URL first', 'error'); return; }
-            this.fetchingModels = true;
-            try {
-                var url = '/api/models?base_url=' + encodeURIComponent(this.model.base_url);
-                if (this.model.api_key) { url += '&api_key=' + encodeURIComponent(this.model.api_key); }
-                if (this.provider) { url += '&provider=' + this.provider; }
-                var resp = await fetch(url);
-                var data = await resp.json();
-                if (data.models && data.models.length > 0) {
-                    this.availableModels = data.models;
-                    showToast(data.models.length + ' models found', 'success');
-                } else {
-                    showToast('No models returned. Check your API key and base URL.', 'error');
-                }
-            } catch (e) { showToast('Failed to fetch models: ' + e.message, 'error'); }
-            this.fetchingModels = false;
-        },
-
-        async importYaml(event) {
-            var file = event.target.files[0]; if (!file) return;
-            try {
-                var resp = await fetch('/api/settings/import', { method: 'POST', body: await file.text() });
-                if (resp.ok) { showToast('Settings imported', 'success'); this.init(); }
-            } catch (e) { showToast('Import failed', 'error'); }
-        },
-
-        async resetSettings() {
-            if (!confirm('Reset all settings to defaults?')) return;
-            try {
-                await fetch('/api/settings/reset', { method: 'POST' });
-                showToast('Settings reset', 'success');
-                this.init();
-            } catch (e) { showToast('Reset failed', 'error'); }
-        }
-    };
-}
-</script>
+<style>
+[x-cloak] { display: none !important; }
+</style>
 {% endblock %}

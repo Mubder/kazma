@@ -526,6 +526,24 @@ button { cursor: pointer; font-family: inherit; }
   border-bottom: 1px solid var(--border-subtle);
 }
 
+/* Settings navigation (12-tab system) */
+.settings-nav {
+  display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin;
+  border-bottom: 1px solid var(--border-subtle); padding-bottom: 0;
+  -webkit-overflow-scrolling: touch; margin-bottom: var(--sp-5);
+}
+.settings-tab {
+  padding: 8px 14px; background: none; border: none;
+  border-bottom: 2px solid transparent; white-space: nowrap;
+  color: var(--text-tertiary); cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 0.85rem; transition: all 0.15s;
+}
+.settings-tab:hover { color: var(--text-primary); }
+.settings-tab.active { color: var(--accent-light); border-bottom-color: var(--accent); }
+.provider-card { transition: border-color 0.15s; }
+.provider-card:hover { border-color: rgba(255, 255, 255, 0.12) !important; }
+
 /* ── 7. Buttons ─────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;

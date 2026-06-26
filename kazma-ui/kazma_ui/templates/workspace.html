@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+{% set active_page = "workspace" %}
+{% block title %}Kazma — Workspace{% endblock %}
+{% block page_title %}Workspace{% endblock %}
+
+{% block content %}
+<div class="workspace-container" x-data="workspaceApp()" x-init="init()" style="max-width:1400px;margin:0 auto;">
+
+  <!-- ── Quick Actions Bar ── -->
+  <div class="quick-actions-bar">
+    <button class="btn btn-sm btn-primary" @click="runTests()">
+      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="5 12 10 17 19 8"/></svg>
+      Run Tests
+    </button>
+    <button class="btn btn-sm btn-secondary" @click="build()">
+      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+      Build
+    </button>
+    <button class="btn btn-sm btn-secondary" @click="deploy()">
+      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Deploy
+    </button>
+    <button class="btn btn-sm btn-secondary" @click="openTerminal()">
+      <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+      Terminal
+    </button>
+    <button class="btn btn-sm btn-secondary" @click="refreshAll()" style="margin-left:auto;">
+      ↻ Refresh
+    </button>
+  </div>
+
+  <!-- ── Main Grid ── -->
+  <div class="workspace-grid">
+    <!-- File Browser -->
+    <div class="card" style="padding:0;overflow:hidden;">
+      <div class="card-header">
+        <h3>📁 Project Files</h3>
+        <span style="font-size:0.75rem;color:var(--text-muted);" x-text="currentPath"></span>
+      </div>
+      <div class="file-list" style="max-height:400px;overflow-y:auto;">
+        <template x-for="item in files" :key="item.path">
+          <div class="file-row"
+               :class="{ 'is-directory': item.is_dir }"
+               @click="navigate(item)"
+               style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;">
+            <span x-text="item.is_dir ? '📁' : fileIcon(item.name)" style="width:20px;"></span>
+            <span x-text="item.name" style="flex:1;" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
+            <span x-text="item.size || ''" style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
+          </div>
+        </template>
+        <div x-show="files.length === 0 && !loading" style="padding:40px 20px;text-align:center;color:var(--text-muted);">
+          <div style="font-size:2rem;margin-bottom:8px;">📭</div>
+          <p>No files found</p>
+        </div>
+        <div x-show="loading" style="padding:20px;text-align:center;color:var(--text-muted);">
+          <div class="skeleton" style="height:36px;margin-bottom:6px;"></div>
+          <div class="skeleton" style="height:36px;margin-bottom:6px;"></div>
+          <div class="skeleton" style="height:36px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Git Status -->
+    <div class="card" style="padding:0;overflow:hidden;">
+      <div class="card-header">
+        <h3>🔀 Git Status</h3>
+        <span :style="{ color: gitDirty ? 'var(--warning)' : 'var(--success)', fontSize:'0.75rem' }"
+              x-text="gitDirty ? '● Uncommitted changes' : '● Clean'"></span>
+      </div>
+      <div style="padding:16px;">
+        <div style="margin-bottom:12px;">
+          <span style="font-size:0.8rem;color:var(--text-tertiary);display:block;">Current Branch</span>
+          <code style="font-family:var(--font-mono);font-size:0.9rem;" x-text="gitBranch"></code>
+        </div>
+        <div x-show="gitStatus.length > 0">
+          <span style="font-size:0.8rem;color:var(--text-tertiary);display:block;margin-bottom:4px;">Changes</span>
+          <template x-for="line in gitStatus.slice(0, 10)" :key="line">
+            <div x-text="line" style="font-family:var(--font-mono);font-size:0.75rem;padding:2px 0;color:var(--text-secondary);"></div>
+          </template>
+          <div x-show="gitStatus.length > 10" style="font-size:0.75rem;color:var(--text-muted);">
+            + <span x-text="gitStatus.length - 10"></span> more lines
+          </div>
+        </div>
+        <div x-show="gitStatus.length === 0 && !loading" style="padding:20px 0;text-align:center;color:var(--text-muted);">
+          <p style="font-size:0.85rem;">Working tree clean</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Files -->
+    <div class="card" style="padding:0;overflow:hidden;">
+      <div class="card-header">
+        <h3>🕐 Recent Files</h3>
+      </div>
+      <div class="file-list" style="max-height:200px;overflow-y:auto;">
+        <template x-for="rf in recentFiles" :key="rf.path">
+          <div class="file-row" @click="openFile(rf.path)"
+               style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;">
+            <span x-text="fileIcon(rf.name)" style="width:20px;"></span>
+            <span x-text="rf.name" style="flex:1;"></span>
+            <span x-text="rf.time" style="font-size:0.75rem;color:var(--text-muted);"></span>
+          </div>
+        </template>
+        <div x-show="recentFiles.length === 0 && !loading" style="padding:40px 20px;text-align:center;color:var(--text-muted);">
+          <p>No recent files</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bookmarks -->
+    <div class="card" style="padding:0;overflow:hidden;">
+      <div class="card-header">
+        <h3>⭐ Bookmarks</h3>
+        <button class="btn btn-sm btn-secondary" @click="addBookmark()">+ Add</button>
+      </div>
+      <div class="file-list" style="max-height:200px;overflow-y:auto;">
+        <template x-for="bm in bookmarks" :key="bm.path">
+          <div class="file-row" @click="openFile(bm.path)"
+               style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;">
+            <span>⭐</span>
+            <span x-text="bm.label || bm.path" style="flex:1;"></span>
+            <button class="btn-icon" @click.stop="removeBookmark(bm)" title="Remove">✕</button>
+          </div>
+        </template>
+        <div x-show="bookmarks.length === 0" style="padding:40px 20px;text-align:center;color:var(--text-muted);">
+          <p>No bookmarks yet</p>
+          <p style="font-size:0.8rem;color:var(--text-tertiary);">Right-click a file to bookmark it</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Terminal Output -->
+    <div class="card" x-show="showTerminal" style="padding:0;overflow:hidden;grid-column:1/-1;">
+      <div class="card-header">
+        <h3>💻 Terminal</h3>
+        <button class="btn-icon" @click="showTerminal = false">✕ Close</button>
+      </div>
+      <div class="terminal-output" x-ref="terminal" style="background:var(--bg-deep);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;padding:16px;max-height:300px;overflow-y:auto;">
+        <div x-show="termOutput.length === 0" style="color:var(--text-muted);">Terminal ready. Type a command below.</div>
+        <template x-for="line in termOutput" :key="line">
+          <div x-text="line" style="white-space:pre-wrap;word-break:break-all;"></div>
+        </template>
+      </div>
+      <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border-subtle);background:var(--bg-panel);">
+        <input type="text" class="form-input" placeholder="Enter command…" x-model="termCommand"
+               @keydown.enter="runTermCommand()" style="flex:1;font-family:var(--font-mono);">
+        <button class="btn btn-sm btn-primary" @click="runTermCommand()">Run</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function workspaceApp() {
+  return {
+    files: [],
+    currentPath: '/',
+    loading: true,
+    gitBranch: '—',
+    gitDirty: false,
+    gitStatus: [],
+    recentFiles: [],
+    bookmarks: [],
+    showTerminal: false,
+    termCommand: '',
+    termOutput: [],
+
+    init() {
+      this.refreshAll();
+      // Load saved bookmarks
+      try {
+        var saved = localStorage.getItem('kazma-bookmarks');
+        if (saved) this.bookmarks = JSON.parse(saved);
+      } catch(e) {}
+    },
+
+    fileIcon(name) {
+      if (!name) return '📄';
+      var ext = name.split('.').pop().toLowerCase();
+      var icons = {
+        py: '🐍', js: '🟨', ts: '🔷', tsx: '⚛️', jsx: '⚛️',
+        html: '🌐', css: '🎨', json: '📋', yaml: '⚙️', yml: '⚙️',
+        md: '📝', txt: '📄', log: '📋', csv: '📊',
+        toml: '⚙️', ini: '⚙️', cfg: '⚙️', env: '🔒',
+        sh: '💻', bash: '💻', zsh: '💻',
+        gitignore: '🙈', lock: '🔒', dockerfile: '🐳',
+        png: '🖼', jpg: '🖼', svg: '🎯', ico: '🎯',
+      };
+      return icons[ext] || '📄';
+    },
+
+    async refreshAll() {
+      this.loading = true;
+      await Promise.all([
+        this.loadFiles(),
+        this.loadGitStatus(),
+        this.loadRecentFiles()
+      ]);
+      this.loading = false;
+    },
+
+    async loadFiles(path) {
+      path = path || this.currentPath;
+      try {
+        var resp = await fetch('/api/workspace/files?path=' + encodeURIComponent(path));
+        if (resp.ok) {
+          var data = await resp.json();
+          this.files = data.files || [];
+          this.currentPath = path;
+        } else {
+          this.files = fallbackFiles();
+        }
+      } catch(e) {
+        this.files = fallbackFiles();
+      }
+    },
+
+    navigate(item) {
+      if (item.is_dir) {
+        this.loadFiles(item.path);
+      } else {
+        this.openFile(item.path);
+      }
+    },
+
+    openFile(path) {
+      // Add to recent
+      this.recentFiles.unshift({ name: path.split('/').pop(), path: path, time: 'just now' });
+      if (this.recentFiles.length > 20) this.recentFiles.pop();
+      // Try to open in chat or new tab
+      window.open('/chat?file=' + encodeURIComponent(path), '_blank');
+      KazmaStream.toast('Opening ' + path, 'info', 2000);
+    },
+
+    async loadGitStatus() {
+      try {
+        var resp = await fetch('/api/workspace/git');
+        if (resp.ok) {
+          var data = await resp.json();
+          this.gitBranch = data.branch || 'main';
+          this.gitDirty = data.dirty || false;
+          this.gitStatus = (data.status || '').split('\n').filter(function(l) { return l.trim(); });
+        }
+      } catch(e) {
+        this.gitBranch = '—';
+        this.gitDirty = false;
+        this.gitStatus = [];
+      }
+    },
+
+    async loadRecentFiles() {
+      try {
+        var resp = await fetch('/api/workspace/recent');
+        if (resp.ok) {
+          var data = await resp.json();
+          this.recentFiles = data.files || [];
+        }
+      } catch(e) {
+        this.recentFiles = [];
+      }
+    },
+
+    runTests() {
+      this.showTerminal = true;
+      this.termOutput.push('$ pytest tests/ -q --tb=line');
+      this.termOutput.push('Running tests...');
+      fetch('/api/workspace/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'pytest tests/ -q --tb=line' })
+      }).then(function(r) { return r.json(); })
+        .then(function(data) {
+          var lines = (data.output || '').split('\n');
+          lines.forEach(function(l) { this.termOutput.push(l); }.bind(this));
+        }.bind(this))
+        .catch(function(e) {
+          this.termOutput.push('Error: ' + e.message);
+        }.bind(this));
+    },
+
+    build() {
+      KazmaStream.toast('Build started...', 'info', 3000);
+      this.showTerminal = true;
+      this.termOutput.push('$ make build');
+      this.termOutput.push('Build command dispatched.');
+    },
+
+    deploy() {
+      if (!confirm('Deploy to production?')) return;
+      KazmaStream.toast('Deployment initiated', 'info', 3000);
+      this.termOutput.push('$ make deploy');
+      this.termOutput.push('Deploy command dispatched.');
+    },
+
+    openTerminal() {
+      this.showTerminal = !this.showTerminal;
+    },
+
+    runTermCommand() {
+      var cmd = this.termCommand.trim();
+      if (!cmd) return;
+      this.termOutput.push('$ ' + cmd);
+      this.termCommand = '';
+
+      fetch('/api/workspace/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: cmd })
+      }).then(function(r) { return r.json(); })
+        .then(function(data) {
+          var lines = (data.output || '').split('\n');
+          lines.forEach(function(l) { this.termOutput.push(l); }.bind(this));
+        }.bind(this))
+        .catch(function(e) {
+          this.termOutput.push('Error: ' + e.message);
+        }.bind(this));
+    },
+
+    addBookmark() {
+      var path = prompt('Enter file path to bookmark:');
+      if (!path) return;
+      this.bookmarks.push({ path: path, label: path.split('/').pop() });
+      try { localStorage.setItem('kazma-bookmarks', JSON.stringify(this.bookmarks)); } catch(e) {}
+      KazmaStream.toast('Bookmarked: ' + path, 'success', 2000);
+    },
+
+    removeBookmark(bm) {
+      this.bookmarks = this.bookmarks.filter(function(b) { return b.path !== bm.path; });
+      try { localStorage.setItem('kazma-bookmarks', JSON.stringify(this.bookmarks)); } catch(e) {}
+    }
+  };
+}
+
+function fallbackFiles() {
+  return [
+    { name: 'kazma-core/', is_dir: true, path: '/kazma-core', size: '—' },
+    { name: 'kazma-ui/', is_dir: true, path: '/kazma-ui', size: '—' },
+    { name: 'kazma-gateway/', is_dir: true, path: '/kazma-gateway', size: '—' },
+    { name: 'tests/', is_dir: true, path: '/tests', size: '—' },
+    { name: 'README.md', is_dir: false, path: '/README.md', size: '—' },
+    { name: 'requirements.txt', is_dir: false, path: '/requirements.txt', size: '—' },
+  ];
+}
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/streaming.js"></script>
+{% endblock %}

@@ -17,7 +17,6 @@ class ChatMessage(BaseModel):
     timestamp: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-
 class ChatRequest(BaseModel):
     """Incoming chat message from the WebSocket."""
 
@@ -39,7 +38,7 @@ class ChatEvent(BaseModel):
     tokens: int = 0
 
 
-# ── Settings ──────────────────────────────────────────────────────────
+# ── Settings (legacy) ─────────────────────────────────────────────────
 
 
 class SettingsUpdate(BaseModel):
@@ -98,6 +97,12 @@ class MCPServerAddRequest(BaseModel):
     working_dir: str | None = None
 
 
+class MCPServerToggleRequest(BaseModel):
+    """Toggle an MCP server enabled/disabled."""
+
+    enabled: bool
+
+
 # ── Dashboard ─────────────────────────────────────────────────────────
 
 
@@ -115,3 +120,163 @@ class DashboardMetrics(BaseModel):
     active_sessions: int = 0
     mcp_servers_running: int = 0
     mcp_tools_available: int = 0
+
+
+# ── Provider Models ───────────────────────────────────────────────────
+
+
+class ProviderAddRequest(BaseModel):
+    """Request to add a new LLM provider."""
+
+    name: str
+    display_name: str = ""
+    base_url: str
+    api_key: str = ""
+    models: list[str] = Field(default_factory=list)
+    enabled: bool = True
+
+
+class ProviderToggleRequest(BaseModel):
+    """Toggle a provider enabled/disabled."""
+
+    enabled: bool
+
+
+# ── Agent Models ──────────────────────────────────────────────────────
+
+
+class AgentConfigUpdate(BaseModel):
+    """Update agent configuration."""
+
+    name: str | None = None
+    language: str | None = None
+    system_prompt: str | None = None
+    personality: str | None = None
+
+
+class SafetySettingsUpdate(BaseModel):
+    """Update HITL safety settings."""
+
+    hitl_enabled: bool = True
+    require_approval_for: list[str] = Field(default_factory=list)
+    approval_timeout: int = 60
+    auto_deny_on_timeout: bool = True
+
+
+class ContextSettingsUpdate(BaseModel):
+    """Update context window settings."""
+
+    max_context_tokens: int = 128000
+    context_strategy: str = "sliding_window"
+    summarization_threshold: float = 0.8
+
+
+# ── Connector Models ──────────────────────────────────────────────────
+
+
+class ConnectorConfigUpdate(BaseModel):
+    """Update a connector's configuration."""
+
+    platform: str
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+class ConnectorTestRequest(BaseModel):
+    """Test a connector connection."""
+
+    platform: str
+
+
+# ── Skill Models ──────────────────────────────────────────────────────
+
+
+class SkillConfigUpdate(BaseModel):
+    """Update skill-specific settings."""
+
+    settings: dict[str, Any] = Field(default_factory=dict)
+
+
+# ── Appearance Models ─────────────────────────────────────────────────
+
+
+class AppearanceUpdate(BaseModel):
+    """Update appearance settings."""
+
+    theme: str | None = None
+    accent_color: str | None = None
+    font_size: int | None = None
+    sidebar_position: str | None = None
+    custom_css: str | None = None
+
+
+# ── Shortcut Models ───────────────────────────────────────────────────
+
+
+class ShortcutUpdate(BaseModel):
+    """Update a keyboard shortcut."""
+
+    action: str
+    keys: str
+
+
+# ── Account Models ────────────────────────────────────────────────────
+
+
+class PasswordChange(BaseModel):
+    """Change account password."""
+
+    old_password: str
+    new_password: str
+
+
+class APITokenCreate(BaseModel):
+    """Create a new API token."""
+
+    name: str
+    expires_days: int = 90
+
+
+# ── Tool Models ───────────────────────────────────────────────────────
+
+
+class ToolToggleRequest(BaseModel):
+    """Toggle a tool enabled/disabled."""
+
+    enabled: bool
+
+
+class ToolTestRequest(BaseModel):
+    """Test a tool with arguments."""
+
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+# ── Import/Export Models ──────────────────────────────────────────────
+
+
+class ImportConfigRequest(BaseModel):
+    """Import configuration from YAML/JSON."""
+
+    data: str
+    format: str = "yaml"
+    selective: bool = False
+    sections: list[str] = Field(default_factory=list)
+
+
+# ── Model Comparison ──────────────────────────────────────────────────
+
+
+class ModelCompareRequest(BaseModel):
+    """Compare multiple models with the same prompt."""
+
+    prompt: str
+    models: list[str]
+    temperature: float = 0.7
+    max_tokens: int = 256
+
+
+class ModelDefaultUpdate(BaseModel):
+    """Set default model for a task type."""
+
+    task_type: str  # 'chat', 'code', 'summarize', 'translate'
+    model_name: str

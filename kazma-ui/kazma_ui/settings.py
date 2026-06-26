@@ -1,7 +1,8 @@
 """Settings management routes for the Kazma WebUI.
 
-Provides a full settings UI with live configuration updates,
-model testing, and YAML import/export.
+Provides a comprehensive 12-tab settings UI with real API endpoints
+for providers, models, agent config, connectors, MCP, skills,
+appearance, shortcuts, account, tools, system, and import/export.
 """
 
 from __future__ import annotations
@@ -9,11 +10,28 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 
-from kazma_ui.models import MCPServerTestRequest, ModelTestRequest, SettingsUpdate
+from kazma_ui.models import (
+    AgentConfigUpdate,
+    AppearanceUpdate,
+    ConnectorConfigUpdate,
+    ConnectorTestRequest,
+    ImportConfigRequest,
+    MCPServerAddRequest,
+    MCPServerTestRequest,
+    MCPServerToggleRequest,
+    ModelCompareRequest,
+    ModelDefaultUpdate,
+    ModelTestRequest,
+    PasswordChange,
+    ProviderAddRequest,
+    ProviderToggleRequest,
+    SettingsUpdate,
+    ShortcutUpdate,
+)
 
 if TYPE_CHECKING:
     from kazma_core.agent import KazmaAgent
@@ -27,10 +45,21 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
 
     router = APIRouter(tags=["settings"])
 
+    # Lazily initialize SettingsManager
+    _sm = None
+
+    def _get_sm():
+        nonlocal _sm
+        if _sm is None:
+            from kazma_core.settings_manager import SettingsManager
+            _sm = SettingsManager(config_store)
+        return _sm
+
+    # ── Settings Page ────────────────────────────────────────────────
+
     @router.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request) -> HTMLResponse:
         """Render the settings page."""
-        # Gather current settings from config store
         model_settings = {
             "base_url": config_store.get("llm.base_url", agent.llm_config.base_url),
             "api_key": config_store.get("llm.api_key", agent.llm_config.api_key),
@@ -43,10 +72,6 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
             "name": config_store.get("agent.name", agent.config.name),
             "language": config_store.get("agent.language", agent.config.language),
             "system_prompt": config_store.get("agent.system_prompt", agent.system_prompt),
-        }
-        cost_settings = {
-            "max_cost": config_store.get("cost.max_cost", 0.50),
-            "silence_window": config_store.get("cost.silence_window", 300),
         }
         connector_settings = {
             "telegram_token": config_store.get("connectors.telegram.token", ""),
@@ -62,14 +87,13 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
             {
                 "model": model_settings,
                 "agent": agent_settings,
-                "cost": cost_settings,
                 "connectors": connector_settings,
                 "config": agent.config,
                 "active_page": "settings",
             },
         )
 
-    # ── Settings CRUD ─────────────────────────────────────────────────
+    # ── Settings CRUD ────────────────────────────────────────────────
 
     @router.get("/api/settings")
     async def api_get_all_settings() -> dict[str, dict[str, Any]]:
@@ -77,22 +101,21 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         return config_store.get_all()
 
     @router.get("/api/settings/export")
-    async def api_export_yaml() -> Response:
-        """Export settings as YAML file download."""
+    async def api_export_yaml(format: str = Query("yaml")) -> Response:
+        """Export settings as YAML or JSON file download."""
+        sm = _get_sm()
         try:
-            yaml_content = config_store.export_yaml()
+            content = sm.export_config(format)
+            media = "application/json" if format == "json" else "text/yaml"
+            ext = "json" if format == "json" else "yaml"
             return Response(
-                content=yaml_content,
-                media_type="text/yaml; charset=utf-8",
-                headers={"Content-Disposition": "attachment; filename=kazma.yaml"},
+                content=content,
+                media_type=f"{media}; charset=utf-8",
+                headers={"Content-Disposition": f"attachment; filename=kazma-config.{ext}"},
             )
         except Exception as e:
-            logger.error(f"Failed to export YAML: {e}")
-            return Response(
-                content=f"Error: {str(e)}",
-                media_type="text/plain",
-                status_code=500,
-            )
+            logger.error("Failed to export: %s", e)
+            return Response(content=f"Error: {e}", media_type="text/plain", status_code=500)
 
     @router.get("/api/settings/{category}")
     async def api_get_category(category: str) -> dict[str, Any]:
@@ -118,7 +141,41 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         config_store.delete(key)
         return {"status": "ok"}
 
-    # ── Model testing ─────────────────────────────────────────────────
+    # ── Providers ────────────────────────────────────────────────────
+
+    @router.get("/api/settings/providers")
+    async def api_get_providers() -> list[dict[str, Any]]:
+        """List all configured providers."""
+        return _get_sm().get_all_providers()
+
+    @router.post("/api/settings/providers")
+    async def api_add_provider(req: ProviderAddRequest) -> dict[str, Any]:
+        """Add a new provider."""
+        return _get_sm().add_provider(req.model_dump())
+
+    @router.delete("/api/settings/providers/{name}")
+    async def api_delete_provider(name: str) -> dict[str, str]:
+        """Delete a provider."""
+        _get_sm().delete_provider(name)
+        return {"status": "ok"}
+
+    @router.put("/api/settings/providers/{name}/toggle")
+    async def api_toggle_provider(name: str, req: ProviderToggleRequest) -> dict[str, str]:
+        """Toggle provider enabled/disabled."""
+        _get_sm().toggle_provider(name, req.enabled)
+        return {"status": "ok"}
+
+    @router.post("/api/settings/providers/{name}/test")
+    async def api_test_provider(name: str) -> dict[str, Any]:
+        """Test a provider connection."""
+        return await _get_sm().test_provider(name)
+
+    @router.get("/api/settings/providers/{name}/health")
+    async def api_provider_health(name: str) -> dict[str, Any]:
+        """Get provider health status."""
+        return _get_sm().get_provider_health(name)
+
+    # ── Model Testing ────────────────────────────────────────────────
 
     @router.post("/api/settings/test-model")
     async def api_test_model(req: ModelTestRequest) -> dict[str, Any]:
@@ -152,40 +209,250 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    # ── MCP testing ───────────────────────────────────────────────────
+    # ── Models ───────────────────────────────────────────────────────
 
-    @router.post("/api/settings/test-mcp")
-    async def api_test_mcp(req: MCPServerTestRequest) -> dict[str, Any]:
+    @router.get("/api/settings/models/registry")
+    async def api_model_registry() -> list[dict[str, Any]]:
+        """Get model registry."""
+        return _get_sm().get_model_registry()
+
+    @router.get("/api/settings/models/defaults")
+    async def api_model_defaults() -> dict[str, str]:
+        """Get default models per task type."""
+        return _get_sm().get_model_defaults()
+
+    @router.put("/api/settings/models/defaults")
+    async def api_set_model_default(req: ModelDefaultUpdate) -> dict[str, str]:
+        """Set default model for a task type."""
+        _get_sm().set_default_model(req.task_type, req.model_name)
+        return {"status": "ok"}
+
+    @router.get("/api/settings/models/usage")
+    async def api_model_usage() -> dict[str, Any]:
+        """Get token usage stats per model."""
+        return _get_sm().get_model_usage()
+
+    @router.post("/api/settings/models/compare")
+    async def api_model_compare(req: ModelCompareRequest) -> list[dict[str, Any]]:
+        """Compare models with the same prompt."""
+        return await _get_sm().compare_models(req.prompt, req.models, req.temperature, req.max_tokens)
+
+    # ── Agent ────────────────────────────────────────────────────────
+
+    @router.put("/api/settings/agent")
+    async def api_update_agent(req: AgentConfigUpdate) -> dict[str, str]:
+        """Update agent configuration."""
+        sm = _get_sm()
+        data = {k: v for k, v in req.model_dump().items() if v is not None}
+        sm.save_agent_config(data)
+        return {"status": "ok"}
+
+    @router.get("/api/settings/agent/personalities")
+    async def api_get_personalities() -> list[dict[str, Any]]:
+        """List available personality templates."""
+        return _get_sm().get_personalities()
+
+    @router.put("/api/settings/agent/safety")
+    async def api_save_safety(req: dict[str, Any]) -> dict[str, str]:
+        """Save safety/HITL settings."""
+        _get_sm().save_safety_settings(req)
+        return {"status": "ok"}
+
+    @router.put("/api/settings/agent/context")
+    async def api_save_context(req: dict[str, Any]) -> dict[str, str]:
+        """Save context window settings."""
+        _get_sm().save_context_settings(req)
+        return {"status": "ok"}
+
+    # ── Connectors ───────────────────────────────────────────────────
+
+    @router.get("/api/settings/connectors")
+    async def api_get_connectors() -> dict[str, Any]:
+        """Get all connector configurations."""
+        return _get_sm().get_connectors()
+
+    @router.put("/api/settings/connectors")
+    async def api_save_connector(req: ConnectorConfigUpdate) -> dict[str, str]:
+        """Save a connector's configuration."""
+        _get_sm().save_connector(req.platform, req.settings)
+        return {"status": "ok"}
+
+    @router.post("/api/settings/connectors/test")
+    async def api_test_connector(req: ConnectorTestRequest) -> dict[str, Any]:
+        """Test a connector connection."""
+        return await _get_sm().test_connector(req.platform)
+
+    # ── MCP ──────────────────────────────────────────────────────────
+
+    @router.get("/api/settings/mcp")
+    async def api_get_mcp() -> list[dict[str, Any]]:
+        """List all MCP servers."""
+        return _get_sm().get_mcp_servers()
+
+    @router.post("/api/settings/mcp")
+    async def api_add_mcp(req: MCPServerAddRequest) -> dict[str, Any]:
+        """Add an MCP server."""
+        return _get_sm().add_mcp_server(req.model_dump())
+
+    @router.delete("/api/settings/mcp/{name}")
+    async def api_delete_mcp(name: str) -> dict[str, str]:
+        """Delete an MCP server."""
+        _get_sm().delete_mcp_server(name)
+        return {"status": "ok"}
+
+    @router.put("/api/settings/mcp/{name}/toggle")
+    async def api_toggle_mcp(name: str, req: MCPServerToggleRequest) -> dict[str, str]:
+        """Toggle MCP server enabled/disabled."""
+        _get_sm().toggle_mcp_server(name, req.enabled)
+        return {"status": "ok"}
+
+    @router.post("/api/settings/mcp/{name}/test")
+    async def api_test_mcp(name: str) -> dict[str, Any]:
         """Test an MCP server connection."""
-        from kazma_core.mcp_client import MCPClient, MCPServerConfig
+        return await _get_sm().test_mcp_server(name)
 
-        try:
-            config = MCPServerConfig(
-                name=req.name,
-                transport=req.transport,
-                command=req.command,
-                url=req.url,
-                env=req.env,
-            )
-            client = MCPClient()
-            await client.connect(config)
-            tools = await client.list_tools()
-            await client.disconnect()
-            return {
-                "success": True,
-                "tool_count": len(tools),
-                "tools": [t.get("name", "") for t in tools[:10]],
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+    # ── Skills ───────────────────────────────────────────────────────
 
-    # ── YAML import/export ────────────────────────────────────────────
+    @router.get("/api/settings/skills")
+    async def api_get_skills() -> list[dict[str, Any]]:
+        """List installed skills."""
+        return _get_sm().get_installed_skills()
+
+    @router.put("/api/settings/skills/{skill_id}/toggle")
+    async def api_toggle_skill(skill_id: str, req: dict[str, Any]) -> dict[str, str]:
+        """Toggle skill enabled/disabled."""
+        _get_sm().toggle_skill(skill_id, req.get("enabled", True))
+        return {"status": "ok"}
+
+    @router.delete("/api/settings/skills/{skill_id}")
+    async def api_uninstall_skill(skill_id: str) -> dict[str, str]:
+        """Uninstall a skill."""
+        _get_sm().uninstall_skill(skill_id)
+        return {"status": "ok"}
+
+    # ── Appearance ───────────────────────────────────────────────────
+
+    @router.get("/api/settings/appearance")
+    async def api_get_appearance() -> dict[str, Any]:
+        """Get appearance settings."""
+        return _get_sm().get_appearance()
+
+    @router.put("/api/settings/appearance")
+    async def api_save_appearance(req: AppearanceUpdate) -> dict[str, str]:
+        """Save appearance settings."""
+        data = {k: v for k, v in req.model_dump().items() if v is not None}
+        _get_sm().save_appearance(data)
+        return {"status": "ok"}
+
+    # ── Shortcuts ────────────────────────────────────────────────────
+
+    @router.get("/api/settings/shortcuts")
+    async def api_get_shortcuts() -> dict[str, str]:
+        """Get all keyboard shortcuts."""
+        return _get_sm().get_shortcuts()
+
+    @router.put("/api/settings/shortcuts")
+    async def api_save_shortcut(req: ShortcutUpdate) -> dict[str, str]:
+        """Update a single shortcut."""
+        _get_sm().save_shortcut(req.action, req.keys)
+        return {"status": "ok"}
+
+    @router.post("/api/settings/shortcuts/reset")
+    async def api_reset_shortcuts() -> dict[str, str]:
+        """Reset shortcuts to defaults."""
+        _get_sm().reset_shortcuts()
+        return {"status": "ok"}
+
+    # ── Account ──────────────────────────────────────────────────────
+
+    @router.put("/api/settings/account/password")
+    async def api_change_password(req: PasswordChange, request: Request) -> Response:
+        """Change account password."""
+        from fastapi.responses import JSONResponse
+        result = _get_sm().change_password(req.old_password, req.new_password)
+        if result.get("error"):
+            return JSONResponse(result, status_code=400)
+        return JSONResponse(result)
+
+    @router.get("/api/settings/account/tokens")
+    async def api_get_tokens() -> list[dict[str, Any]]:
+        """List API tokens."""
+        return _get_sm().get_api_tokens()
+
+    @router.post("/api/settings/account/tokens")
+    async def api_create_token(req: dict[str, Any]) -> dict[str, Any]:
+        """Create an API token."""
+        return _get_sm().create_api_token(req.get("name", "unnamed"))
+
+    @router.delete("/api/settings/account/tokens/{token_id}")
+    async def api_revoke_token(token_id: str) -> dict[str, str]:
+        """Revoke an API token."""
+        _get_sm().revoke_api_token(token_id)
+        return {"status": "ok"}
+
+    @router.get("/api/settings/account/sessions")
+    async def api_get_sessions() -> list[dict[str, Any]]:
+        """List active sessions."""
+        return _get_sm().get_sessions()
+
+    # ── Tools ────────────────────────────────────────────────────────
+
+    @router.get("/api/settings/tools")
+    async def api_get_tools() -> list[dict[str, Any]]:
+        """List all registered tools."""
+        return _get_sm().get_tool_registry()
+
+    @router.put("/api/settings/tools/{tool_name}/toggle")
+    async def api_toggle_tool(tool_name: str, req: dict[str, Any]) -> dict[str, str]:
+        """Toggle a tool enabled/disabled."""
+        _get_sm().toggle_tool(tool_name, req.get("enabled", True))
+        return {"status": "ok"}
+
+    @router.post("/api/settings/tools/{tool_name}/test")
+    async def api_test_tool(tool_name: str, req: dict[str, Any]) -> dict[str, Any]:
+        """Test a tool with arguments."""
+        return await _get_sm().test_tool(tool_name, req.get("arguments", {}))
+
+    # ── System ───────────────────────────────────────────────────────
+
+    @router.get("/api/settings/system/logs")
+    async def api_get_logs(lines: int = Query(100)) -> dict[str, Any]:
+        """Get system logs."""
+        return _get_sm().get_logs(lines)
+
+    @router.get("/api/settings/system/backup")
+    async def api_backup() -> Response:
+        """Download a full config backup."""
+        content = _get_sm().create_backup()
+        return Response(
+            content=content,
+            media_type="text/yaml; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=kazma-backup.yaml"},
+        )
+
+    @router.post("/api/settings/system/restore")
+    async def api_restore(request: Request) -> dict[str, str]:
+        """Restore from backup."""
+        body = await request.body()
+        count = _get_sm().restore_backup(body.decode("utf-8"))
+        return {"status": "ok", "restored": str(count)}
+
+    @router.get("/api/settings/system/diagnostics")
+    async def api_diagnostics() -> dict[str, Any]:
+        """Get system diagnostics."""
+        return _get_sm().get_diagnostics()
+
+    @router.get("/api/settings/system/updates")
+    async def api_check_updates() -> dict[str, Any]:
+        """Check for updates."""
+        return _get_sm().check_updates()
+
+    # ── Import/Export ────────────────────────────────────────────────
 
     @router.post("/api/settings/import")
-    async def api_import_yaml(request: Request) -> dict[str, str]:
-        """Import settings from YAML."""
-        body = await request.body()
-        count = config_store.import_yaml(body.decode("utf-8"))
+    async def api_import_config(req: ImportConfigRequest) -> dict[str, str]:
+        """Import configuration."""
+        count = _get_sm().import_config(req.data, req.format, req.selective, req.sections)
         return {"status": "ok", "imported": str(count)}
 
     @router.post("/api/settings/reset")
