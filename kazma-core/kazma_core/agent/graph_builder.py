@@ -50,6 +50,7 @@ from kazma_core.agent.state import (
     ToolResult,
 )
 from kazma_core.llm_provider import LLMConfig, LLMProvider
+from kazma_core.time_travel import SnapshotRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -573,6 +574,7 @@ def build_supervisor_graph(
     hitl_config: dict[str, Any] | None = None,
     model_router: Any | None = None,
     personality_prompt: str | None = None,
+    snapshot_recorder: SnapshotRecorder | None = None,
 ) -> Any:
     """Build and compile the Supervisor StateGraph.
 
@@ -614,7 +616,7 @@ def build_supervisor_graph(
         return None
 
     async def _supervisor(state: SupervisorState) -> dict[str, Any]:
-        return await supervisor_node(
+        result = await supervisor_node(
             state,
             llm=llm,
             system_prompt=system_prompt,
@@ -626,6 +628,15 @@ def build_supervisor_graph(
             model_router=model_router,
             personality_prompt=_resolve_personality_prompt(),
         )
+        # ── Time Travel: capture snapshot after supervisor iteration ──
+        if snapshot_recorder is not None and snapshot_recorder.enabled:
+            # Merge current state with result to get the full picture
+            merged = {**state, **result}
+            record = snapshot_recorder.capture(merged)
+            if record is not None:
+                result["snapshot_id"] = record.id
+                result["snapshot_iteration"] = merged.get("iteration", 0)
+        return result
 
     async def _tool_worker(state: SupervisorState) -> dict[str, Any]:
         return await tool_worker_node(state, tool_executor=tool_executor, tracer=tracer, hitl_config=hitl_config)
@@ -780,6 +791,7 @@ async def create_supervisor_app(
 
     from kazma_core.authority import create_authority
     from kazma_core.cost_breaker import create_cost_breaker
+    from kazma_core.time_travel import create_recorder
     from kazma_core.tracing import KazmaTracer
     from kazma_core.url_utils import normalize_model_name, normalize_provider_url
 
@@ -869,6 +881,9 @@ async def create_supervisor_app(
     checkpointer = AsyncSqliteSaver(conn)
     await checkpointer.setup()
 
+    # Time Travel recorder
+    snapshot_recorder = create_recorder(config=config)
+
     # Build graph
     graph = build_supervisor_graph(
         llm=llm,
@@ -880,6 +895,7 @@ async def create_supervisor_app(
         tracer=tracer,
         checkpointer=checkpointer,
         personality_prompt=personality_prompt,
+        snapshot_recorder=snapshot_recorder,
     )
 
     logger.info("Supervisor app created (model=%s, tools=%d)", model, len(tool_definitions))

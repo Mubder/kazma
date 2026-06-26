@@ -69,6 +69,9 @@ gateway:
     slack: 1
   suggestions:
     enabled: true
+  voice:
+    enabled: false
+    provider: openai  # openai | local | groq
 
 safety:
   hitl:
@@ -92,3 +95,8 @@ logging:
     enabled: false
     public_key: ''
     secret_key: ''
+
+time_travel:
+  enabled: true
+  max_snapshots: 50
+  db_path: kazma-data/snapshots.db
