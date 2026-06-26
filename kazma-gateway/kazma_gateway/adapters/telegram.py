@@ -11,12 +11,20 @@ feed into the same asyncio.Queue — the Brain sees no difference.
 All incoming messages are normalized to IncomingMessage with context_metadata
 carrying raw Telegram IDs so the Brain never imports Telegram-specific code.
 
+Voice messages are transcribed via a configurable STT provider (openai, local,
+groq) and injected into the agent pipeline as text. If STT is not configured,
+the user receives a fallback message.
+
 Configuration (kazma.yaml):
     connectors:
       telegram:
         token: "123456:ABC-DEF..."
         allowed_users: []       # optional whitelist of Telegram user IDs
         parse_mode: "Markdown"  # default parse_mode for replies
+    gateway:
+      voice:
+        enabled: false          # enable voice transcription
+        provider: openai        # openai | local | groq
 """
 
 from __future__ import annotations
@@ -73,6 +81,9 @@ class TelegramAdapter(BaseAdapter):
         allowed_users:  Optional whitelist of user IDs (empty = allow all).
         parse_mode:     Default parse_mode for outbound messages.
         poll_timeout:   Long-poll timeout in seconds for getUpdates (default 5).
+        voice_enabled:  Whether to transcribe voice messages (default False).
+        voice_provider: STT provider name ("openai", "local", "groq").
+        stt_api_key:    API key for the STT provider (default from env).
 
     context_metadata keys (carried in every IncomingMessage):
         chat_id:    int — Telegram chat ID (group, private, channel)
@@ -90,6 +101,9 @@ class TelegramAdapter(BaseAdapter):
         allowed_users: list[int] | None = None,
         parse_mode: str = "Markdown",
         poll_timeout: int = 5,
+        voice_enabled: bool = False,
+        voice_provider: str = "openai",
+        stt_api_key: str | None = None,
     ) -> None:
         super().__init__()
         self._token = token
@@ -102,6 +116,10 @@ class TelegramAdapter(BaseAdapter):
         self._rate_limiter = RateLimiter(max_per_second=30)
         # Queue ref stored for webhook ingress (set by start() in BaseAdapter)
         self._queue: asyncio.Queue[IncomingMessage] | None = None
+        # Voice transcription config
+        self._voice_enabled = voice_enabled
+        self._voice_provider = voice_provider
+        self._stt_api_key = stt_api_key
 
     async def start(
         self,
@@ -174,9 +192,43 @@ class TelegramAdapter(BaseAdapter):
                         )
                         continue
 
+                    # Handle voice messages (async download + transcribe)
                     msg = self._parse_update(update)
                     if msg is None:
-                        continue
+                        message = (
+                            update.get("message")
+                            or update.get("channel_post")
+                            or update.get("edited_message")
+                        )
+                        if message and self.detect_voice_message(message):
+                            voice_result = await self._handle_voice_message(message)
+                            if voice_result is None:
+                                continue
+                            from_user = message.get("from", {})
+                            user_id = from_user.get("id", 0)
+                            chat_id = message.get("chat", {}).get("id", 0)
+                            username = (
+                                from_user.get("username", "")
+                                or from_user.get("first_name", "")
+                                or f"tg_{user_id}"
+                            )
+                            sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
+                            msg = IncomingMessage(
+                                platform="telegram",
+                                sender_id=sender_id,
+                                text=voice_result,
+                                context_metadata={
+                                    "chat_id": chat_id,
+                                    "user_id": user_id,
+                                    "username": username,
+                                    "message_id": message.get("message_id", 0),
+                                    "chat_type": message.get("chat", {}).get("type", "private"),
+                                    "update_id": update.get("update_id", 0),
+                                    "voice_transcribed": True,
+                                },
+                            )
+                        else:
+                            continue
 
                     # User whitelist
                     if self._allowed_users:
@@ -377,6 +429,137 @@ class TelegramAdapter(BaseAdapter):
             }
 
         return router
+
+    # --- Voice message transcription ---------------------------------
+
+    @staticmethod
+    def detect_voice_message(message: dict[str, Any]) -> bool:
+        """Check if a Telegram message contains a voice or audio file."""
+        return "voice" in message or "audio" in message
+
+    async def download_voice_file(self, file_id: str) -> bytes | None:
+        """Download a voice/audio file from Telegram using getFile."""
+        assert self._http is not None, "HTTP client not initialized -- adapter not started"
+        try:
+            resp = await self._http.get(
+                f"/bot{self._token}/getFile",
+                params={"file_id": file_id},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("ok"):
+                logger.error("[telegram] getFile returned ok=false: %s", data)
+                return None
+            file_path = data["result"].get("file_path")
+            if not file_path:
+                logger.error("[telegram] No file_path in getFile response")
+                return None
+            file_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
+            dl_resp = await self._http.get(file_url)
+            dl_resp.raise_for_status()
+            logger.info("[telegram] Downloaded voice file: %s (%d bytes)", file_path, len(dl_resp.content))
+            return dl_resp.content
+        except httpx.HTTPStatusError as exc:
+            logger.error("[telegram] HTTP %d downloading voice file: %s", exc.response.status_code, exc)
+            return None
+        except Exception:
+            logger.exception("[telegram] Failed to download voice file")
+            return None
+
+    async def transcribe_voice(self, audio_bytes: bytes) -> str | None:
+        """Transcribe audio bytes using the configured STT provider."""
+        if self._voice_provider == "openai":
+            return await self._transcribe_openai(audio_bytes)
+        elif self._voice_provider == "groq":
+            return await self._transcribe_groq(audio_bytes)
+        elif self._voice_provider == "local":
+            logger.warning("[telegram] Local STT provider not yet implemented")
+            return None
+        else:
+            logger.error("[telegram] Unknown STT provider: %s", self._voice_provider)
+            return None
+
+    async def _transcribe_openai(self, audio_bytes: bytes) -> str | None:
+        """Transcribe via OpenAI Whisper API."""
+        import os
+        api_key = self._stt_api_key or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            logger.error("[telegram] No OpenAI API key for STT")
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    "https://api.openai.com/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files={"file": ("voice.ogg", audio_bytes, "audio/ogg")},
+                    data={"model": "whisper-1"},
+                )
+                resp.raise_for_status()
+                result = resp.json()
+                text = result.get("text", "").strip()
+                if text:
+                    logger.info("[telegram] OpenAI STT transcription: %.100s", text)
+                return text or None
+        except Exception:
+            logger.exception("[telegram] OpenAI STT transcription failed")
+            return None
+
+    async def _transcribe_groq(self, audio_bytes: bytes) -> str | None:
+        """Transcribe via Groq Whisper API."""
+        import os
+        api_key = self._stt_api_key or os.environ.get("GROQ_API_KEY")
+        if not api_key:
+            logger.error("[telegram] No Groq API key for STT")
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                resp = await client.post(
+                    "https://api.groq.com/openai/v1/audio/transcriptions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files={"file": ("voice.ogg", audio_bytes, "audio/ogg")},
+                    data={"model": "whisper-large-v3"},
+                )
+                resp.raise_for_status()
+                result = resp.json()
+                text = result.get("text", "").strip()
+                if text:
+                    logger.info("[telegram] Groq STT transcription: %.100s", text)
+                return text or None
+        except Exception:
+            logger.exception("[telegram] Groq STT transcription failed")
+            return None
+
+    async def _handle_voice_message(self, message: dict[str, Any]) -> str | None:
+        """Full voice pipeline: detect -> download -> transcribe -> return text."""
+        voice_obj = message.get("voice") or message.get("audio")
+        if not voice_obj:
+            return None
+        if not self._voice_enabled:
+            return None
+        file_id = voice_obj.get("file_id")
+        if not file_id:
+            logger.warning("[telegram] Voice message has no file_id")
+            return None
+        audio_bytes = await self.download_voice_file(file_id)
+        if not audio_bytes:
+            return None
+        transcription = await self.transcribe_voice(audio_bytes)
+        if not transcription:
+            chat_id = message.get("chat", {}).get("id")
+            if chat_id:
+                try:
+                    assert self._http is not None
+                    await self._http.post(
+                        f"/bot{self._token}/sendMessage",
+                        json={
+                            "chat_id": chat_id,
+                            "text": "Voice received but transcription is unavailable. Please configure an STT provider (openai/groq) or type your message.",
+                        },
+                    )
+                except Exception:
+                    logger.debug("[telegram] Failed to send voice fallback message")
+            return None
+        return transcription
 
     # ── Typing indicator (fire-and-forget) ──────────────────────────
 
