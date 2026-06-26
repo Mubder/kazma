@@ -210,7 +210,9 @@ function settingsApp() {
             this.fetchingModels = true;
             try {
                 const data = await ModelsManager.discover(this.modelProvider, this.currentModel.base_url, this.currentModel.api_key);
-                if (data.models && data.models.length) {
+                if (data.error) {
+                    showToast(data.error, 'error');
+                } else if (data.models && data.models.length) {
                     this.availableModels = data.models;
                     showToast(data.models.length + ' models found', 'success');
                 } else {
