@@ -33,12 +33,10 @@
             <div class="mcp-card-actions">
                 {% if server.status == 'stopped' %}
                 <button class="btn btn-sm btn-primary"
-                        hx-post="/api/mcp/servers/{{ server.name }}/start"
-                        hx-on::after-request="showToast('Server started', 'success')">Start</button>
+                        @click="startServer('{{ server.name }}')">Start</button>
                 {% else %}
                 <button class="btn btn-sm btn-secondary"
-                        hx-post="/api/mcp/servers/{{ server.name }}/stop"
-                        hx-on::after-request="showToast('Server stopped', 'info')">Stop</button>
+                        @click="stopServer('{{ server.name }}')">Stop</button>
                 {% endif %}
                 <button class="btn btn-sm btn-secondary"
                         @click="testServer('{{ server.name }}')">Test</button>

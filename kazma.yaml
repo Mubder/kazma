@@ -2,7 +2,7 @@ agent:
   name: kazma
   version: 0.1.0
   language: ar
-  rtl: true
+  rtl: false
 models:
   default: gpt-4o-mini
   router: litellm
@@ -90,7 +90,7 @@ safety:
 ui:
   host: 0.0.0.0
   port: 8000
-  rtl: true
+  rtl: false
   title: Kazma Dashboard
 logging:
   level: INFO

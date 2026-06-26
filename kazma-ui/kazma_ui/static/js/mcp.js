@@ -44,6 +44,40 @@ function mcpApp() {
             }
         },
 
+        async startServer(name) {
+            try {
+                var resp = await fetch('/api/mcp/servers/' + encodeURIComponent(name) + '/start', {
+                    method: 'POST'
+                });
+                var result = await resp.json();
+                if (result.status === 'ok') {
+                    showToast('Server started with ' + result.tool_count + ' tools', 'success');
+                    location.reload();
+                } else {
+                    showToast('Failed: ' + (result.error || ''), 'error');
+                }
+            } catch (e) {
+                showToast('Failed to start server', 'error');
+            }
+        },
+
+        async stopServer(name) {
+            try {
+                var resp = await fetch('/api/mcp/servers/' + encodeURIComponent(name) + '/stop', {
+                    method: 'POST'
+                });
+                var result = await resp.json();
+                if (result.status === 'ok') {
+                    showToast('Server stopped', 'info');
+                    location.reload();
+                } else {
+                    showToast('Failed: ' + (result.error || ''), 'error');
+                }
+            } catch (e) {
+                showToast('Failed to stop server', 'error');
+            }
+        },
+
         async testServer(name) {
             showToast('Testing connection...', 'info');
             try {

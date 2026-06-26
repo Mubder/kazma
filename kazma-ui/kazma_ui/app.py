@@ -61,8 +61,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
     # Global template context for language/direction
-    templates.env.globals["lang"] = agent.config.language if hasattr(agent.config, "language") else "ar"
-    templates.env.globals["dir"] = "rtl" if getattr(agent.config, "rtl", True) else "ltr"
+    templates.env.globals["lang"] = agent.config.language if hasattr(agent.config, "language") else "en"
+    templates.env.globals["dir"] = "rtl" if getattr(agent.config, "rtl", False) else "ltr"
 
     # Create routers
     from kazma_ui.agents import create_agents_router
@@ -187,14 +187,13 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # ── Root — Unified Master Workspace ──
     @app.get("/", response_class=HTMLResponse)
     async def root(request: Request) -> HTMLResponse:
-        """Serve the unified orchestration workspace."""
+        """Serve the dashboard as default page."""
         return templates.TemplateResponse(
             request,
-            "index.html",
+            "dashboard.html",
             {
                 "config": agent.config,
-                "sessions": list_sessions(),
-                "active_page": "workspace",
+                "active_page": "dashboard",
             },
         )
 
