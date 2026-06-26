@@ -21,7 +21,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-import networkx as nx
+try:
+    import networkx as nx
+except ImportError as e:
+    raise ImportError(
+        "networkx is required for the knowledge-graph engine. "
+        "Install with: pip install networkx"
+    ) from e
 
 logger = logging.getLogger(__name__)
 

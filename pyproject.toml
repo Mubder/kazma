@@ -27,6 +27,7 @@ dependencies = [
     "trafilatura>=1.12",
     "markdown>=3.6",
     "tenacity>=8.0.0",
+    "networkx>=3.1",
 ]
 
 [project.optional-dependencies]
