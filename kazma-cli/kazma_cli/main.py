@@ -47,6 +47,9 @@ def main() -> None:
     elif cmd == "completion":
         _run_completion(sys.argv[2:])
 
+    elif cmd == "project":
+        _run_project(sys.argv[2:])
+
     elif cmd in ("--help", "-h", "help"):
         print("Kazma CLI v0.1.0")
         print("Commands:")
@@ -56,6 +59,7 @@ def main() -> None:
         print("  hub        Kazma Hub commands (search, install, list, etc.)")
         print("  docs       Documentation commands (build, serve)")
         print("  completion Shell tab completion (bash, zsh, install)")
+        print("  project    Project-level config (.kazma/) — init, show, validate")
         print("")
         print("Options:")
         print("  serve [port]  Start server on specified port (default: 8000)")
@@ -232,6 +236,48 @@ def _run_completion(args: list[str]) -> None:
 
     print(f"Unknown completion command: {subcmd}")
     print("Available: bash, zsh, install")
+
+
+def _run_project(args: list[str]) -> None:
+    """Handle 'kazma project' subcommands.
+
+    Usage:
+        kazma project init       — create .kazma/ with default templates
+        kazma project show       — display current project configuration
+        kazma project validate   — check config validity
+    """
+    from kazma_cli.project import init_project, show_project, validate_project
+
+    if not args:
+        print("Usage: kazma project <init|show|validate>")
+        return
+
+    subcmd = args[0]
+
+    if subcmd == "init":
+        path = args[1] if len(args) > 1 else "."
+        kazma_dir = init_project(path)
+        print(f"Initialized .kazma/ project directory at {kazma_dir}")
+        print("Created: rules.yaml, context.md, personality.yaml, tools.yaml, history/")
+
+    elif subcmd == "show":
+        path = args[1] if len(args) > 1 else "."
+        print(show_project(path))
+
+    elif subcmd == "validate":
+        path = args[1] if len(args) > 1 else "."
+        is_valid, issues = validate_project(path)
+        if is_valid:
+            print("Project config is valid.")
+        else:
+            print("Project config has issues:")
+            for issue in issues:
+                print(f"  - {issue}")
+            sys.exit(1)
+
+    else:
+        print(f"Unknown project command: {subcmd}")
+        print("Available: init, show, validate")
 
 
 def _detect_shell() -> str:
