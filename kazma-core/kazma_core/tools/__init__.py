@@ -13,10 +13,10 @@ from kazma_core.tools.export_session import export_session
 from kazma_core.tools.file_read import file_read
 from kazma_core.tools.file_write import file_write
 from kazma_core.tools.image_gen import generate_image
-from kazma_core.tools.vision_analyze import analyze_image
 from kazma_core.tools.personality_cmd import handle_personality_command, is_personality_command
 from kazma_core.tools.read_url import read_url
 from kazma_core.tools.send_message import register_message_backend, send_message
+from kazma_core.tools.vision_analyze import analyze_image
 from kazma_core.tools.web_search import web_search
 
 __all__ = [

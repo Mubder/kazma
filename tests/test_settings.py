@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import json
 import sys
-import os
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -291,7 +290,6 @@ class TestSettingsManager:
     def test_toggle_tool(self, sm):
         """Toggling a tool persists."""
         sm.toggle_tool("test_tool", False)
-        from kazma_core.config_store import ConfigStore
         val = sm._cs.get("tools.test_tool.enabled", True)
         assert val is False
 

@@ -12,22 +12,17 @@ Covers:
 from __future__ import annotations
 
 import json
-import os
-import textwrap
 from io import StringIO
 from pathlib import Path
 
 import pytest
-
 from kazma_gateway.mcp_server import (
-    MCPServer,
     TOOLS,
-    TOOL_MAP,
+    MCPServer,
     make_error,
     make_response,
     parse_request,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════
 # JSON-RPC protocol

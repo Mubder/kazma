@@ -75,7 +75,7 @@ class SwarmConfig:
             logger.warning("Config file not found: %s", path)
             return None
 
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
 
         swarm_data = data.get("swarm")

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -256,7 +256,7 @@ def create_swarm_router(templates: Any) -> APIRouter:
                 "bot_token": payload.get("bot_token"),
                 "busy": False,
                 "last_task": None,
-                "added_at": datetime.now(timezone.utc).isoformat(),
+                "added_at": datetime.now(UTC).isoformat(),
                 "last_heartbeat": None,
             }
             _workers[name] = worker

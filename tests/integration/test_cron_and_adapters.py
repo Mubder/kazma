@@ -25,7 +25,6 @@ from kazma_core.cron.scheduler import (
     SQLiteCronStore,
 )
 
-
 # ── #3: cron job fires end to end ────────────────────────────────────────
 
 

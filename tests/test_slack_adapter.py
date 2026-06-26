@@ -10,7 +10,6 @@ Covers:
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from kazma_gateway.adapters.slack import SlackAdapter
 
 
@@ -354,7 +353,7 @@ class TestSlackAdapter:
 
     def test_package_export(self):
         """Test SlackAdapter is exported from adapters __init__."""
-        from kazma_gateway.adapters import SlackAdapter as SA2
+        from kazma_gateway.adapters import SlackAdapter as SA2  # noqa: N814
         assert SA2 is SlackAdapter
 
     def test_message_text_truncation(self):

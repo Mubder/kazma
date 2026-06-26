@@ -5,19 +5,15 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-
 from kazma_gateway.dispatcher import (
     MessageDispatcher,
     MessageTracker,
     _friendly_error,
 )
 from kazma_gateway.slash_commands import (
-    CMD_EDIT,
-    CMD_UNDO,
     is_slash_command,
     resolve_slash_command,
 )
-
 
 # ── Mock GatewayManager ────────────────────────────────────────────────
 

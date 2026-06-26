@@ -5,18 +5,14 @@ Covers config loading, worker lifecycle, dispatch, broadcast, and validation.
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
-
 from kazma_core.swarm.config import OrchestratorConfig, SwarmConfig, WorkerConfig
 from kazma_core.swarm.manager import SwarmManager
-from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
-
+from kazma_core.swarm.worker import InProcessWorker, TelegramWorker
 
 # ---------------------------------------------------------------------------
 # Fixtures

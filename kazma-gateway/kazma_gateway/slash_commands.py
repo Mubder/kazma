@@ -58,7 +58,7 @@ def _load_config() -> dict[str, Any]:
     mtime = path.stat().st_mtime
     if _CONFIG_CACHE is not None and mtime == _CONFIG_CACHE_MTIME:
         return _CONFIG_CACHE
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         _CONFIG_CACHE = yaml.safe_load(f) or {}
     _CONFIG_CACHE_MTIME = mtime
     return _CONFIG_CACHE

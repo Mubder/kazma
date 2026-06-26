@@ -6,10 +6,7 @@ import copy
 import json
 from unittest.mock import patch
 
-import pytest
-
 from kazma_gateway.slash_commands import resolve_slash_command
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

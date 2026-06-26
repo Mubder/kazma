@@ -278,7 +278,6 @@ class KnowledgeGraphAdapter:
         if entity_id not in self._graph:
             return []
 
-        import networkx as nx
 
         visited: set[str] = {entity_id}
         frontier: set[str] = {entity_id}

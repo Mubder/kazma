@@ -66,7 +66,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     # Create routers
     from kazma_ui.agents import create_agents_router
-    from kazma_ui.chat import chat_websocket_handler, create_chat_router, list_sessions
+    from kazma_ui.chat import chat_websocket_handler, create_chat_router
     from kazma_ui.mcp_ui import create_mcp_router
     from kazma_ui.settings import create_settings_router
     from kazma_ui.skills_ui import create_skills_router

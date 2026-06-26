@@ -19,22 +19,17 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from kazma_core.tools.vision_analyze import (
     DEFAULT_QUESTION,
     MAX_DOWNLOAD_BYTES,
-    MAX_IMAGE_BYTES,
     RESIZE_MAX_DIMENSION,
-    SUPPORTED_FORMATS,
     _build_data_uri,
-    _build_vision_messages,
     _detect_format,
     _download_image,
     _load_local_image,
     _resize_image,
     analyze_image,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════
 # Helpers
@@ -351,7 +346,7 @@ class TestLargeImageResize:
     async def test_analyze_auto_resizes_large_file(self, tmp_path):
         """analyze_image auto-resizes when file exceeds MAX_IMAGE_BYTES."""
         try:
-            from PIL import Image
+            from PIL import Image  # noqa: F401
         except ImportError:
             pytest.skip("Pillow not installed")
 

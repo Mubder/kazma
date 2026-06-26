@@ -7,13 +7,10 @@ BUG 3: KG engine graph property type hint (docstring-only fix, no runtime test n
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from kazma_core.llm_provider import LLMResponse, ToolCall
-
 
 # -----------------------------------------------------------------------
 # BUG 1: ReAct iteration counter must increment on tool-call path
@@ -75,7 +72,6 @@ class TestIterationCounterIncrement:
     async def test_iteration_starts_from_zero(self):
         """First tool-call iteration should return 1, not 0."""
         from kazma_core.agent.graph_builder import supervisor_node
-        from kazma_core.agent.state import NodeName
 
         response = LLMResponse(
             content="",
@@ -154,8 +150,9 @@ class TestEdgeAttributeConsistency:
 
     def test_adapter_export_uses_relation_key(self):
         """export_subgraph must use 'relation' key, not 'relation_type'."""
-        from kazma_core.memory.kg_adapter import KnowledgeGraphAdapter
         import json
+
+        from kazma_core.memory.kg_adapter import KnowledgeGraphAdapter
 
         kg = KnowledgeGraphAdapter(backend="networkx")
         kg.add_entity("x", "doc")

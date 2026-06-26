@@ -12,17 +12,14 @@ Covers:
 from __future__ import annotations
 
 import urllib.parse
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from kazma_core.tools.image_gen import (
     MAX_HEIGHT,
     MAX_PROMPT_CHARS,
     MAX_WIDTH,
     MIN_DIMENSION,
-    POLLINATIONS_URL,
     _slugify,
     _validate_dimensions,
     generate_image,

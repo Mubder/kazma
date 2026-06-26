@@ -12,22 +12,16 @@ Covers:
 from __future__ import annotations
 
 import asyncio
-import importlib
-import sys
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-
 from kazma_gateway.swarm_notify import (
+    _RATE_LIMIT_MSGS,
     SwarmNotifier,
     SwarmTaskTracker,
-    TrackedTask,
-    _RATE_LIMIT_MSGS,
-    _RATE_LIMIT_WINDOW,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────
 

@@ -7,16 +7,12 @@ BUG 2: Cron double-fire — verify in-flight guard prevents duplicate execution.
 from __future__ import annotations
 
 import asyncio
-import tempfile
 import time
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
-
-from kazma_memory import SearchBackend, SQLiteMemoryBackend
-
+from kazma_memory import SQLiteMemoryBackend
 
 # ═══════════════════════════════════════════════════════════════════════════
 # BUG 1: Memory ranking — regression tests for reverse=True sort order
@@ -139,7 +135,7 @@ class TestMemoryRankingSortOrder:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-from kazma_core.cron.scheduler import CronScheduler, JobStatus, ScheduledJob
+from kazma_core.cron.scheduler import CronScheduler, ScheduledJob
 
 
 class TestCronInFlightGuard:

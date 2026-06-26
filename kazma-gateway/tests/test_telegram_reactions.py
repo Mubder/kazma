@@ -1,7 +1,7 @@
 """Tests for emoji reactions and quick reply buttons in Telegram adapter."""
 from __future__ import annotations
 
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

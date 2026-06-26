@@ -21,7 +21,6 @@ from kazma_ui.models import (
     ConnectorTestRequest,
     ImportConfigRequest,
     MCPServerAddRequest,
-    MCPServerTestRequest,
     MCPServerToggleRequest,
     ModelCompareRequest,
     ModelDefaultUpdate,

@@ -11,8 +11,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # Direct module import — bypass broken __init__.py chain
 # ---------------------------------------------------------------------------

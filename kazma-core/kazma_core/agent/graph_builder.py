@@ -606,7 +606,7 @@ def build_supervisor_graph(
         This is called on every supervisor iteration so runtime switches
         take effect immediately without rebuilding the graph.
         """
-        from kazma_core.personalities import get_runtime_personality, PERSONALITIES
+        from kazma_core.personalities import PERSONALITIES, get_runtime_personality
 
         runtime = get_runtime_personality()
         if runtime is not None:

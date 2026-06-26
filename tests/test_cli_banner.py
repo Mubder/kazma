@@ -6,8 +6,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from kazma_cli.banner import (
     _load_config,
     check_config,

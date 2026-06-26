@@ -523,7 +523,7 @@ class TestAppJS:
         for size in ["modal-sm", "modal-md", "modal-lg", "modal-xl"]:
             assert size in modal_html, f"Missing size class: {size}"
 
-    def test_has_localStorage_persistence(self, js):
+    def test_has_localstorage_persistence(self, js):  # noqa: N802
         assert "localStorage" in js
 
 

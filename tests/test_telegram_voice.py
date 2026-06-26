@@ -9,14 +9,11 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from kazma_gateway.adapters.telegram import TelegramAdapter, MAX_VOICE_BYTES
+from kazma_gateway.adapters.telegram import MAX_VOICE_BYTES, TelegramAdapter
 from kazma_gateway.gateway import IncomingMessage
-
 
 # ══════════════════════════════════════════════════════════════════════════
 # Helpers

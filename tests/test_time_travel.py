@@ -11,12 +11,10 @@ Covers:
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import pytest
-
 from kazma_core.agent.state import initial_supervisor_state
 from kazma_core.time_travel import (
     DEFAULT_MAX_SNAPSHOTS,
@@ -26,7 +24,6 @@ from kazma_core.time_travel import (
     SnapshotStore,
     create_recorder,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 

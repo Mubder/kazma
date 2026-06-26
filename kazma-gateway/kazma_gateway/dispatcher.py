@@ -23,15 +23,18 @@ Markdown rendering is applied per platform:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 import uuid
 from typing import TYPE_CHECKING, Any
 
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage
-from kazma_gateway.slash_commands import is_slash_command, resolve_slash_command
-from kazma_gateway.slash_commands import CMD_UNDO, CMD_EDIT  # noqa: F401 — re-exported
+from kazma_gateway.slash_commands import (  # noqa: F401 — re-exported
+    CMD_EDIT,
+    CMD_UNDO,
+    is_slash_command,
+    resolve_slash_command,
+)
 
 if TYPE_CHECKING:
     from kazma_gateway.gateway import GatewayManager
@@ -271,7 +274,7 @@ class MessageDispatcher:
 
         try:
             result = await self._gateway.send(out)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("[Dispatcher] Send timed out for %s", original_sender_id)
             return "🤔 The model is taking longer than expected. Retrying..."
         except ConnectionError:

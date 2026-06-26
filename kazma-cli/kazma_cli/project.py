@@ -153,7 +153,7 @@ def show_project(path: str | Path = ".") -> str:
             preview = value[:200] + "..." if len(value) > 200 else value
             lines.append(f"  {preview}")
         elif value is None:
-            lines.append(f"  (parse error)")
+            lines.append("  (parse error)")
 
     return "\n".join(lines)
 

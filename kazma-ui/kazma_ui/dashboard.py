@@ -16,9 +16,9 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 if TYPE_CHECKING:
+    from kazma_core.checkpoint import CheckpointManager
     from kazma_core.cost_breaker import CostCircuitBreaker
     from kazma_core.tracing import KazmaTracer
-    from kazma_core.checkpoint import CheckpointManager
 
 logger = logging.getLogger(__name__)
 

@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
-from kazma_gateway.gateway import IncomingMessage, OutboundMessage
+from kazma_gateway.gateway import OutboundMessage
 from kazma_gateway.slash_commands import is_slash_command, resolve_slash_command
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -175,7 +171,6 @@ class TestMarkdownRendering:
         from kazma_gateway.dispatcher import MessageDispatcher
 
         d = MessageDispatcher(mgr)
-        import asyncio
 
         asyncio.run(d.reply("unknown:123", "Hello **world**"))
 
@@ -206,7 +201,6 @@ class TestTypingIndicator:
             context_metadata={"chat_id": 123456},
         )
 
-        import asyncio
 
         asyncio.run(adapter.send(outbound))
 
@@ -229,7 +223,6 @@ class TestTypingIndicator:
             context_metadata={"channel_id": "987654"},
         )
 
-        import asyncio
 
         asyncio.run(adapter.send(outbound))
         assert True

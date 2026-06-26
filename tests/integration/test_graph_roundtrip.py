@@ -17,7 +17,6 @@ with a stub LLM (no network), backed by a real AsyncSqliteSaver, and assert:
 from __future__ import annotations
 
 import aiosqlite
-import pytest
 from kazma_core.agent.graph_builder import build_supervisor_graph
 from kazma_core.agent.state import initial_supervisor_state
 from kazma_core.agent.tool_registry import LocalToolRegistry

@@ -14,11 +14,9 @@ from typing import Optional, Union
 
 import pytest
 import pytest_asyncio
-
 from kazma_core.audit_logger import AuditLogger
 from kazma_core.authorization_flow import AuthorizationFlow
-from kazma_core.rbac import RBACEngine, _DEFAULT_PERMISSIONS
-
+from kazma_core.rbac import RBACEngine
 
 # ── BUG 1: Optional/Union type schema tests ─────────────────────────
 
@@ -30,21 +28,21 @@ class TestOptionalSchemaBug:
         """Optional[str] should produce {'type': 'string'}, not {'type': 'string'} fallback."""
         from kazma_core.agent.tool_registry import _python_type_to_json_schema
 
-        schema = _python_type_to_json_schema(Optional[str])
+        schema = _python_type_to_json_schema(Optional[str])  # noqa: UP045
         assert schema == {"type": "string"}
 
     def test_optional_int_returns_integer_schema(self):
         """Optional[int] should produce {'type': 'integer'}."""
         from kazma_core.agent.tool_registry import _python_type_to_json_schema
 
-        schema = _python_type_to_json_schema(Optional[int])
+        schema = _python_type_to_json_schema(Optional[int])  # noqa: UP045
         assert schema == {"type": "integer"}
 
     def test_union_with_none_returns_inner_type(self):
         """Union[str, None] should produce {'type': 'string'} (same as Optional[str])."""
         from kazma_core.agent.tool_registry import _python_type_to_json_schema
 
-        schema = _python_type_to_json_schema(Union[str, None])
+        schema = _python_type_to_json_schema(Union[str, None])  # noqa: UP007
         assert schema == {"type": "string"}
 
     def test_pipe_syntax_optional(self):
@@ -157,7 +155,7 @@ class TestAgentRunnerRename:
 
     def test_agent_package_still_reexports(self):
         """kazma_core.agent should still re-export the names for backward compat."""
-        from kazma_core.agent import KazmaAgent, AgentConfig, run_agent
+        from kazma_core.agent import AgentConfig, KazmaAgent
         assert KazmaAgent is not None
         assert AgentConfig is not None
 

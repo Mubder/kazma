@@ -223,7 +223,7 @@ class TestPersonalityUserExtensible:
 
     def test_register_custom_personality(self):
         """Users can add custom personalities at runtime."""
-        from kazma_core.personalities import _register, PERSONALITIES
+        from kazma_core.personalities import PERSONALITIES, _register
 
         custom = _register({
             "name": "pirate",

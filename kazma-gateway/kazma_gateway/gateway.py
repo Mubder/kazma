@@ -516,7 +516,7 @@ class GatewayManager:
             if adapter.name == platform:
                 try:
                     ok = await adapter.send(outbound)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning(
                         "[Gateway] Send timed out for %s (platform=%s)",
                         outbound.target_id,

@@ -7,10 +7,8 @@ and a quick reference hint for slash commands.
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Version detection
@@ -70,7 +68,7 @@ def _check_venv(project_root: Path) -> bool:
 def _count_slash_commands() -> int:
     """Count slash commands from the gateway module, if available."""
     try:
-        from kazma_gateway.slash_commands import resolve_slash_command
+        # resolve_slash_command checked via importlib below
 
         # Commands are registered in resolve_slash_command's dispatch table
         # We count them by checking against known commands

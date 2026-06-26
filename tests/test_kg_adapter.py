@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from kazma_core.memory.kg_adapter import KnowledgeGraphAdapter
 
 
