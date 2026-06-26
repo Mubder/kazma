@@ -315,6 +315,13 @@ def create_app(config_path: str | None = None) -> FastAPI:
             logger.warning("[Gateway] Brain handler failed to register: %s", e)
 
         # Mount the gateway monitor router
+        # ── Swarm Panel ─────────────────────────────────────────────
+        from kazma_ui.swarm_panel import create_swarm_router
+
+        swarm_router = create_swarm_router(templates)
+        app.include_router(swarm_router)
+        logger.info("[Swarm] Swarm Panel mounted at /api/swarm/*, /swarm")
+
         from kazma_ui.gateway_monitor import create_gateway_router
 
         monitor_router = create_gateway_router(

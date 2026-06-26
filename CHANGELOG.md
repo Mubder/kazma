@@ -40,8 +40,9 @@ Features are listed with their implementation PR/commit where available.
 | ✅ | Vision Analysis | Analyze images via LLM vision capabilities | `1be0db9` |
 | ✅ | Knowledge Graph | NetworkX MultiDiGraph backend for structured memory | `6c69708` |
 | ✅ | KG Memory Adapter | Knowledge Graph-backed memory integration layer | `d832f9b` |
-| ✅ | MCP Server | IDE integration via MCP protocol (VS Code extensions) | `679530b` |
-| ✅ | Kazma Hub | Skill marketplace — search, install, publish, certify | `bdd2846` |
+|| ✅ | MCP Server | IDE integration via MCP protocol (VS Code extensions) | `679530b` |
+|| ✅ | Swarm Orchestration | Multi-worker Web UI panel — worker table, dispatch, lifecycle controls | `gw-067` |
+|| ✅ | Kazma Hub | Skill marketplace — search, install, publish, certify | `bdd2846` |
 
 ### Security
 

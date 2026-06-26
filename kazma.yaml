@@ -104,3 +104,32 @@ time_travel:
   enabled: true
   max_snapshots: 50
   db_path: kazma-data/snapshots.db
+
+swarm:
+  enabled: true
+  group_chat_id: -5553328924
+  orchestrator:
+    name: Kazma Orchestrator
+    profile: default
+  workers:
+    - name: core
+      type: telegram_bot
+      model: mimo-v2.5-pro
+      provider: xiaomi
+      profile: core
+      bot_token_env: KAZMA_CORE_BOT_TOKEN
+      role: backend_core
+    - name: bridge
+      type: telegram_bot
+      model: mimo-v2.5-pro
+      provider: xiaomi
+      profile: bridge
+      bot_token_env: KAZMA_BRIDGE_BOT_TOKEN
+      role: backend_systems
+    - name: ux
+      type: telegram_bot
+      model: deepseek-v4-pro
+      provider: deepseek
+      profile: ux
+      bot_token_env: KAZMA_UX_BOT_TOKEN
+      role: frontend_ux

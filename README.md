@@ -2,7 +2,7 @@
 
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
-![Tests](https://img.shields.io/badge/tests-1,781_passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-1,819_passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
@@ -23,7 +23,8 @@ Kazma is an open-source framework for building reliable, culturally-aware AI age
 | **Durable Execution** | LangGraph + SQLite checkpointing — agents resume mid-task after SIGKILL |
 | **RAG Memory** | VectorMemory (ChromaDB + sentence-transformers) — store/retrieve facts with provenance |
 | **Human-in-the-Loop** | Approval gate for dangerous tools + shared-secret authenticated endpoint |
-| **Sub-Agent Spawning** | Delegate tasks to child graphs with isolated contexts |
+| **Sub-Agent Spawning** | Delegate tasks to child graphs: in-process (SubAgentManager) or distributed (Swarm Panel) |
+| **Swarm Orchestration** | Multi-worker panel — health monitoring, dispatch, lifecycle control |
 | **Cron Autonomy** | Scheduled agent actions with SQLite-backed persistence |
 | **Cultural Moat** | Native Arabic support (MSA/Gulf dialects) with "Majlis Mode" protocol |
 | **Docker Deployable** | Single `docker compose up` — 2 volumes, graceful shutdown |
@@ -92,7 +93,8 @@ docker compose up -d
 |:---:|:---|:---|
 | ✅ | ReAct Supervisor | LangGraph-based agent with tool-calling loop and SQLite checkpointing |
 | ✅ | Durable Checkpoints | Agents resume mid-task after crash — SQLite-backed graph state |
-| ✅ | Sub-Agent Spawning | Delegate tasks to child graphs with isolated contexts |
+| ✅ | Sub-Agent Spawning | Delegate tasks to child graphs (in-process) or swarm workers (distributed) |
+| ✅ | Swarm Orchestration | Multi-worker panel with health monitoring, dispatch, and lifecycle control |
 | ✅ | Cron Autonomy | Scheduled agent actions with SQLite persistence |
 | ✅ | Auto-Summarization | Context compaction when token window exceeds 4K threshold |
 | ✅ | Model Router | Multi-provider routing (DeepSeek, OpenRouter) with intelligent selection |
@@ -163,6 +165,84 @@ docker compose up -d
 | ✅ | Kazma Hub | Skill marketplace — search, install, publish, certify |
 | ✅ | Docusaurus Docs | Full documentation site with security guides |
 | ✅ | Portability | Runs on Linux, macOS, Docker, WSL — no OS-specific hooks |
+
+---
+
+## 🐝 Swarm Orchestration
+
+Kazma supports two sub-agent delegation modes:
+
+| Mode | Mechanism | Use Case |
+|:---|:---|:---|
+| **In-Process** | `SubAgentManager` — child LangGraph graphs in the same Python process | Quick parallel subtasks, isolated context |
+| **Distributed Swarm** | Swarm Panel — register workers, dispatch tasks, monitor health via Web UI | Multi-machine deployments, Telegram bot workers |
+
+### Swarm Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│                  🐝 Swarm Panel (/swarm)              │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
+│  │  Workers  │  │  Dispatch │  │  Start/Stop All   │   │
+│  │  Table    │  │  Form     │  │  Controls         │   │
+│  └──────────┘  └──────────┘  └──────────────────┘   │
+├──────────────────────────────────────────────────────┤
+│                  REST API (/api/swarm/*)              │
+│  GET /status  POST /dispatch  POST /workers          │
+│  DELETE /workers/{name}  POST /start  POST /stop     │
+├──────────────────────────────────────────────────────┤
+│              Backend (kazma_core.swarm)               │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐              │
+│  │Worker-1 │  │Worker-2 │  │Worker-N │  ...          │
+│  │(online) │  │(busy)   │  │(offline)│              │
+│  └─────────┘  └─────────┘  └─────────┘              │
+└──────────────────────────────────────────────────────┘
+```
+
+### Swarm Config (`kazma.yaml`)
+
+```yaml
+swarm:
+  enabled: true
+  max_concurrent: 3
+  workers:
+    - name: "builder"
+      model: "deepseek-chat"
+      provider: "deepseek"
+      type: "in-process"
+      role: "leaf"
+    - name: "reviewer"
+      model: "claude-sonnet-4"
+      provider: "anthropic"
+      type: "telegram"
+      bot_token: "${TELEGRAM_BOT_TOKEN_2}"
+      role: "leaf"
+    - name: "researcher"
+      model: "gpt-4o-mini"
+      provider: "openai"
+      type: "in-process"
+      role: "orchestrator"
+
+  dispatch:
+    default_strategy: "round-robin"
+    retry_on_failure: true
+    max_retries: 2
+```
+
+### Web UI Panel
+
+Access at `/swarm` when the server is running:
+
+```bash
+uv run kazma-web
+# Then open http://localhost:8000/swarm
+```
+
+The panel shows:
+- **Worker table**: name, model, provider, type, health status (🟢 online / 🟡 busy / 🔴 offline)
+- **Add Worker form**: register in-process or Telegram bot workers
+- **Dispatch form**: select workers, enter task, send
+- **Start/Stop All**: lifecycle control for the entire swarm
 
 ---
 
@@ -296,7 +376,7 @@ For overrides, copy to `kazma.local.yaml` (git-ignored). Env vars take precedenc
 
 ## 🧪 Tests
 
-1797 collected, **1,781 passing** (7 failures + 9 errors due to missing optional deps: chromadb, duckduckgo_search, trafilatura).
+1837 collected, **1,819 passing** (8 failures + 10 errors due to missing optional deps: chromadb, duckduckgo_search, trafilatura).
 
 ```bash
 # Full suite
