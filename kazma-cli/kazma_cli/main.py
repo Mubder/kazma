@@ -4,16 +4,29 @@ from __future__ import annotations
 
 import sys
 
+from kazma_cli.banner import check_config, show_banner, show_help_brief, show_status
+
 
 def main() -> None:
     """CLI entry point — supports wizard, hub, and docs commands."""
-    if len(sys.argv) < 2:
-        print("Kazma CLI v0.1.0")
-        print("Commands: status, serve, wizard, hub, docs")
-        print("Usage: kazma <command>")
+    # Parse --no-banner early (consume it if present)
+    show_banner_flag = True
+    args = sys.argv[1:]
+    filtered: list[str] = []
+    for a in args:
+        if a == "--no-banner":
+            show_banner_flag = False
+        else:
+            filtered.append(a)
+
+    # No subcommand → startup experience
+    if not filtered:
+        _print_startup(show_banner_flag)
         return
 
-    cmd = sys.argv[1]
+    cmd = filtered[0]
+    # Rebuild argv so subcommand handlers see a clean list
+    sys.argv = [sys.argv[0]] + filtered
 
     if cmd == "status":
         print("Kazma status: OK")
@@ -151,6 +164,25 @@ def _docs_serve(port: int = 3000) -> None:
         ["npm", "run", "start", "--", "--port", str(port)],
         cwd=str(docs_dir),
     )
+
+
+def _print_startup(show_banner_flag: bool = True) -> None:
+    """Print the full startup experience: banner, status, config checks, help hint."""
+    # 1. Banner
+    print(show_banner(suppress=not show_banner_flag))
+
+    # 2. Config checks
+    warnings = check_config()
+    if warnings:
+        for w in warnings:
+            print(w)
+        print()
+
+    # 3. Status overview
+    print(show_status())
+
+    # 4. Quick help hint
+    print(show_help_brief())
 
 
 if __name__ == "__main__":
