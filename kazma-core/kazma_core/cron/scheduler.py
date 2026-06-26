@@ -288,6 +288,7 @@ class CronScheduler:
         self._poll_interval = poll_interval
         self._running = False
         self._task: asyncio.Task[None] | None = None
+        self._in_flight: set[str] = set()
 
     async def start(self) -> None:
         """Start the scheduler polling loop."""
@@ -364,7 +365,10 @@ class CronScheduler:
                 now = datetime.now(UTC)
 
                 for job in jobs:
+                    if job.job_id in self._in_flight:
+                        continue
                     if job.next_run and self._is_due(job.next_run, now):
+                        self._in_flight.add(job.job_id)
                         asyncio.create_task(
                             self._execute(job),
                             name=f"cron-exec-{job.job_id}",
@@ -444,6 +448,8 @@ class CronScheduler:
             logger.exception("[CronScheduler] %s failed", job.job_id)
             await self._store.update_status(job.job_id, JobStatus.FAILED)
             await self._store.update_result(job.job_id, f"Error: {str(exc)[:500]}")
+        finally:
+            self._in_flight.discard(job.job_id)
 
     async def _deliver(self, job: ScheduledJob, text: str) -> None:
         """Send result to the user via the original platform."""
