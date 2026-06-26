@@ -3,7 +3,7 @@
 Connects to Slack via bot token using Slack's Web API (httpx).
 Receives messages via polling the conversations.list + conversations.history
 pattern (no Socket Mode dependency). Delivers outbound messages via
-chat.postMessage REST API.
+chat.postMessage REST API with 429 rate-limit retry.
 
 No webhooks, no tunnels, no Socket Mode required.
 Platform-specific IDs (channel_id, user_id, team_id) live in
@@ -35,22 +35,42 @@ logger = logging.getLogger(__name__)
 _SLACK_API = "https://slack.com/api"
 _POLL_INTERVAL = 2.0
 _MAX_TIMEOUT = 15.0
+_MAX_RETRIES = 3
+
+# Slack message subtypes that should be filtered out at the adapter level
+_SKIP_SUBTYPES = frozenset({"message_changed", "message_deleted", "channel_join", "channel_leave"})
 
 
 class SlackAdapter(BaseAdapter):
     """Polling-based Slack adapter using Web API.
 
     Args:
-        token: Slack bot token (xoxb-...). If None, reads SLACK_BOT_TOKEN
-               from the environment.
+        bot_token: Slack bot token (xoxb-...). If None, reads SLACK_BOT_TOKEN
+                   from the environment.
+        app_token: Slack app-level token (xapp-...) for Socket Mode.
+                   Optional — not used by the polling adapter.
+        allowed_teams: Optional iterable of team IDs to whitelist.
+        allowed_channels: Optional iterable of channel IDs to whitelist.
     """
 
-    def __init__(self, token: str | None = None) -> None:
+    def __init__(
+        self,
+        bot_token: str | None = None,
+        app_token: str | None = None,
+        allowed_teams: list[str] | None = None,
+        allowed_channels: list[str] | None = None,
+    ) -> None:
         import os
 
-        super().__init__(name="slack", platform="slack")
-        self._token = token or os.environ.get("SLACK_BOT_TOKEN", "")
-        if not self._token:
+        super().__init__()
+        self.name = "slack"
+
+        self._bot_token = bot_token or os.environ.get("SLACK_BOT_TOKEN", "")
+        self._app_token = app_token or os.environ.get("SLACK_APP_TOKEN", "")
+        self._allowed_teams: set[str] = set(allowed_teams or [])
+        self._allowed_channels: set[str] = set(allowed_channels or [])
+
+        if not self._bot_token:
             logger.warning("[Slack] No bot token — adapter will stay STOPPED")
 
         self._http: httpx.AsyncClient | None = None
@@ -61,9 +81,67 @@ class SlackAdapter(BaseAdapter):
 
     def _headers(self) -> dict[str, str]:
         return {
-            "Authorization": f"Bearer {self._token}",
+            "Authorization": f"Bearer {self._bot_token}",
             "Content-Type": "application/json",
         }
+
+    # ── Event Parsing (public for testing) ──────────────────────────
+
+    def _parse_event(self, event: dict[str, Any] | None) -> IncomingMessage | None:
+        """Parse a raw Slack event dict into an IncomingMessage.
+
+        Returns None for events that should be skipped (bot messages,
+        edits, empty text, non-message types, missing fields).
+        """
+        if event is None:
+            return None
+
+        event_type = event.get("type", "")
+
+        # Only handle message and app_mention events
+        if event_type not in ("message", "app_mention"):
+            return None
+
+        # Skip bot messages
+        if "bot_id" in event:
+            return None
+
+        # Skip edit / delete etc.
+        subtype = event.get("subtype", "")
+        if subtype and subtype != "bot_message":
+            return None
+
+        # Require channel
+        channel_id = event.get("channel")
+        if not channel_id:
+            return None
+
+        # Require user
+        user_id = event.get("user", "")
+        if not user_id:
+            return None
+
+        text = event.get("text", "")
+        if not text:
+            return None
+
+        ts = event.get("ts", "")
+        team_id = event.get("team", "")
+        username = event.get("username") or f"slack_{user_id}"
+
+        return IncomingMessage(
+            platform="slack",
+            sender_id=f"slack:{user_id}",
+            text=text,
+            context_metadata={
+                "channel_id": channel_id,
+                "user_id": user_id,
+                "team_id": team_id,
+                "thread_ts": event.get("thread_ts"),
+                "message_ts": ts,
+                "username": username,
+            },
+        )
 
     # ── Typing indicator (fire-and-forget) ──────────────────────────
 
@@ -86,6 +164,8 @@ class SlackAdapter(BaseAdapter):
     async def send(self, outbound: OutboundMessage) -> bool:
         """Send a message to a Slack channel via chat.postMessage.
 
+        Handles 429 rate-limit responses with up to 3 retries.
+
         Args:
             outbound: The OutboundMessage to deliver.
 
@@ -95,7 +175,8 @@ class SlackAdapter(BaseAdapter):
         # Fire typing indicator (fire-and-forget)
         asyncio.create_task(self._trigger_typing(outbound.target_id))
 
-        channel_id = outbound.context_metadata.get("channel_id")
+        # Resolve channel_id
+        channel_id: str | None = outbound.context_metadata.get("channel_id")
         if not channel_id and ":" in outbound.target_id:
             channel_id = outbound.target_id.split(":", 1)[1]
 
@@ -112,41 +193,76 @@ class SlackAdapter(BaseAdapter):
         if thread_ts:
             payload["thread_ts"] = thread_ts
 
-        try:
-            if not self._http:
-                self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
-            resp = await self._http.post(
-                f"{_SLACK_API}/chat.postMessage",
-                json=payload,
-                headers=self._headers(),
-            )
-            data = resp.json()
-            if data.get("ok"):
-                logger.info("[Slack] Sent to channel=%s (ts=%s)", channel_id, data.get("ts", "?"))
-                return True
-            else:
-                logger.error("[Slack] Send failed: %s", data.get("error", "unknown"))
+        for attempt in range(1, _MAX_RETRIES + 1):
+            try:
+                if not self._http:
+                    self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+
+                resp = await self._http.post(
+                    f"{_SLACK_API}/chat.postMessage",
+                    json=payload,
+                    headers=self._headers(),
+                )
+
+                if resp.status_code == 429:
+                    retry_after = resp.headers.get("Retry-After", "1")
+                    try:
+                        delay = float(retry_after)
+                    except ValueError:
+                        delay = 1.0
+                    logger.warning(
+                        "[Slack] Rate-limited (attempt %d/%d), retrying in %.1fs",
+                        attempt, _MAX_RETRIES, delay,
+                    )
+                    if attempt < _MAX_RETRIES:
+                        await asyncio.sleep(delay)
+                        continue
+                    return False
+
+                data = resp.json()
+                if data.get("ok"):
+                    logger.info("[Slack] Sent to channel=%s (ts=%s)", channel_id, data.get("ts", "?"))
+                    return True
+                else:
+                    logger.error("[Slack] Send failed: %s", data.get("error", "unknown"))
+                    return False
+
+            except httpx.HTTPStatusError:
+                logger.exception("[Slack] HTTP error sending to channel=%s", channel_id)
                 return False
-        except Exception as exc:
-            logger.exception("[Slack] Send exception: %s", exc)
-            return False
+            except Exception as exc:
+                logger.exception("[Slack] Send exception: %s", exc)
+                return False
 
-    # ── Polling loop ────────────────────────────────────────────────
+        return False
 
-    async def _poll(self) -> None:
-        """Poll Slack for new messages across known channels."""
-        if not self._token:
+    # ── Listen (abstract method) ────────────────────────────────────
+
+    async def listen(
+        self,
+        queue: asyncio.Queue[IncomingMessage],
+        shutdown_event: asyncio.Event,
+    ) -> None:
+        """Poll Slack for new messages and enqueue them.
+
+        Implements the BaseAdapter abstract method.
+        """
+        if not self._bot_token:
             return
 
         self._http = httpx.AsyncClient(timeout=httpx.Timeout(_MAX_TIMEOUT + 5, connect=10.0))
+        self._queue = queue
+        self._shutdown = shutdown_event
 
         # Fetch channel list on first poll
         await self._refresh_channels()
 
-        while not self._stop_event.is_set():
+        while not shutdown_event.is_set():
             try:
                 await self._poll_channels()
-                await asyncio.sleep(_POLL_INTERVAL)
+                should_exit = await self.jitter_sleep(shutdown_event)
+                if should_exit:
+                    break
             except asyncio.CancelledError:
                 break
             except Exception as exc:
@@ -154,6 +270,8 @@ class SlackAdapter(BaseAdapter):
                 await asyncio.sleep(5)
 
         await self._http.aclose()
+
+    # ── Polling internals ───────────────────────────────────────────
 
     async def _refresh_channels(self) -> None:
         """Fetch list of channels the bot has access to."""
@@ -213,7 +331,7 @@ class SlackAdapter(BaseAdapter):
                 logger.debug("[Slack] Channel %s poll error: %s", channel.get("id", "?"), exc)
 
     async def _handle_message(self, channel_id: str, msg: dict[str, Any]) -> None:
-        """Normalize a Slack message into an IncomingMessage."""
+        """Normalize a Slack message into an IncomingMessage and enqueue it."""
         text = msg.get("text", "").strip()
         if not text:
             return
@@ -233,14 +351,16 @@ class SlackAdapter(BaseAdapter):
                 "username": username,
             },
         )
-        await self._emit(incoming)
+        await self._queue.put(incoming)
         logger.debug("[Slack] ← from %s: %.80s", user_id, text)
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
     async def start(self, queue: asyncio.Queue[IncomingMessage], shutdown_event: asyncio.Event) -> None:
         """Override start with token check."""
-        if not self._token:
+        if not self._bot_token:
             logger.error("[Slack] Cannot start — no bot token")
             return
+        self._queue = queue
+        self._shutdown = shutdown_event
         await super().start(queue, shutdown_event)
