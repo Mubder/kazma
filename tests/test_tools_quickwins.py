@@ -3,9 +3,34 @@
 from __future__ import annotations
 
 import json
+import sys
+from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+# ── helpers to inject mock modules for missing optional deps ──────────────
+def _make_mock_ddgs(ddgs_instance):
+    """Create a fake duckduckgo_search module with DDGS returning *ddgs_instance*."""
+    mod = ModuleType("duckduckgo_search")
+    mod.DDGS = MagicMock(return_value=ddgs_instance)
+    return mod
+
+
+def _make_mock_trafilatura(extract_return):
+    """Create a fake trafilatura module whose extract() returns *extract_return*."""
+    mod = ModuleType("trafilatura")
+    mod.extract = MagicMock(return_value=extract_return)
+    return mod
+
+
+# ── helper for trafilatura raising an exception ───────────────────────────
+def _make_mock_trafilatura_raises(exc):
+    """Create a fake trafilatura module whose extract() raises *exc*."""
+    mod = ModuleType("trafilatura")
+    mod.extract = MagicMock(side_effect=exc)
+    return mod
 
 # ══════════════════════════════════════════════════════════════════════════
 # web_search tests
@@ -28,7 +53,8 @@ class TestWebSearch:
         mock_ddgs.__exit__ = MagicMock(return_value=False)
         mock_ddgs.text = MagicMock(return_value=mock_results)
 
-        with patch("duckduckgo_search.DDGS", return_value=mock_ddgs):
+        fake_mod = _make_mock_ddgs(mock_ddgs)
+        with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("test query", max_results=2)
@@ -46,7 +72,8 @@ class TestWebSearch:
         mock_ddgs.__exit__ = MagicMock(return_value=False)
         mock_ddgs.text = MagicMock(return_value=[])
 
-        with patch("duckduckgo_search.DDGS", return_value=mock_ddgs):
+        fake_mod = _make_mock_ddgs(mock_ddgs)
+        with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("nonexistent query xyz")
@@ -76,9 +103,10 @@ class TestReadUrl:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
+        fake_trafilatura = _make_mock_trafilatura("Hello World")
         with (
             patch("httpx.AsyncClient", return_value=mock_client),
-            patch("trafilatura.extract", return_value="Hello World"),
+            patch.dict(sys.modules, {"trafilatura": fake_trafilatura}),
         ):
             from kazma_core.tools.read_url import read_url
 
@@ -184,7 +212,8 @@ class TestFriendlyErrors:
         mock_ddgs.__exit__ = MagicMock(return_value=False)
         mock_ddgs.text = MagicMock(side_effect=ConnectionError("Network unreachable"))
 
-        with patch("duckduckgo_search.DDGS", return_value=mock_ddgs):
+        fake_mod = _make_mock_ddgs(mock_ddgs)
+        with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("test")
@@ -342,9 +371,10 @@ class TestReadUrlEdgeCases:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
+        fake_trafilatura = _make_mock_trafilatura(None)
         with (
             patch("httpx.AsyncClient", return_value=mock_client),
-            patch("trafilatura.extract", return_value=None),
+            patch.dict(sys.modules, {"trafilatura": fake_trafilatura}),
         ):
             from kazma_core.tools.read_url import read_url
 
@@ -365,7 +395,8 @@ class TestWebSearchEdgeCases:
         mock_ddgs.__exit__ = MagicMock(return_value=False)
         mock_ddgs.text = MagicMock(side_effect=TimeoutError("timed out"))
 
-        with patch("duckduckgo_search.DDGS", return_value=mock_ddgs):
+        fake_mod = _make_mock_ddgs(mock_ddgs)
+        with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("test")
