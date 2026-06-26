@@ -62,22 +62,15 @@ for i in range(5):
         assert len(result) < 5000
 
     @pytest.mark.asyncio
-    async def test_python_exec_isolated(self) -> None:
+    async def test_python_exec_isolated(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Isolated mode (-I) ignores caller-controlled import paths."""
         with tempfile.TemporaryDirectory() as tmpdir:
             module_path = os.path.join(tmpdir, "shadowmod.py")
             with open(module_path, "w", encoding="utf-8") as module_file:
                 module_file.write("VALUE = 1\n")
 
-            original_pythonpath = os.environ.get("PYTHONPATH")
-            os.environ["PYTHONPATH"] = tmpdir
-            try:
-                result = await python_exec("import shadowmod")
-            finally:
-                if original_pythonpath is None:
-                    del os.environ["PYTHONPATH"]
-                else:
-                    os.environ["PYTHONPATH"] = original_pythonpath
+            monkeypatch.setenv("PYTHONPATH", tmpdir)
+            result = await python_exec("import shadowmod")
 
         assert "[Exit code:" in result
         assert "ModuleNotFoundError" in result
