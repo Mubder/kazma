@@ -1,76 +1,76 @@
 {% extends "base.html" %}
+{% set active_page = "settings" %}
 {% block title %}Kazma — Settings{% endblock %}
 {% block page_title %}Settings{% endblock %}
 
 {% block content %}
-<div class="settings-container" x-data="settingsApp()">
-    <div class="settings-nav">
-        <button class="settings-tab" :class="{ active: tab === 'model' }" @click="tab = 'model'">Model</button>
-        <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="tab = 'agent'">Agent</button>
-        <button class="settings-tab" :class="{ active: tab === 'cost' }" @click="tab = 'cost'">Cost</button>
-        <button class="settings-tab" :class="{ active: tab === 'connectors' }" @click="tab = 'connectors'">Connectors</button>
-        <button class="settings-tab" :class="{ active: tab === 'import' }" @click="tab = 'import'">Import/Export</button>
+<div x-data="settingsApp()" x-init="init()">
+    <div class="tabs">
+        <button class="tab" :class="{ active: tab === 'model' }" @click="tab = 'model'">Model</button>
+        <button class="tab" :class="{ active: tab === 'agent' }" @click="tab = 'agent'">Agent</button>
+        <button class="tab" :class="{ active: tab === 'connectors' }" @click="tab = 'connectors'">Connectors</button>
+        <button class="tab" :class="{ active: tab === 'import' }" @click="tab = 'import'">Import/Export</button>
     </div>
 
-    <!-- Model Settings -->
-    <div class="settings-panel" x-show="tab === 'model'">
-        <div class="settings-group">
-            <h3>LLM Provider</h3>
+    <!-- Model Tab -->
+    <div x-show="tab === 'model'">
+        <div class="card">
+            <div class="card-title">LLM Provider</div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Base URL</label>
+                    <label class="form-label">Base URL</label>
                     <input type="text" x-model="model.base_url" class="form-input" placeholder="https://api.openai.com/v1">
                 </div>
                 <div class="form-group">
-                    <label>API Key</label>
-                    <div class="input-with-toggle">
+                    <label class="form-label">API Key</label>
+                    <div class="input-with-icon">
                         <input :type="showKey ? 'text' : 'password'" x-model="model.api_key" class="form-input" placeholder="sk-...">
-                        <button class="btn-icon" @click="showKey = !showKey" x-text="showKey ? 'Hide' : 'Show'"></button>
+                        <button @click="showKey = !showKey" x-text="showKey ? 'Hide' : 'Show'"></button>
                     </div>
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Model</label>
+                    <label class="form-label">Model</label>
                     <input type="text" x-model="model.model" class="form-input" placeholder="gpt-4o-mini">
                 </div>
                 <div class="form-group">
-                    <label>Max Tokens</label>
+                    <label class="form-label">Max Tokens</label>
                     <input type="number" x-model.number="model.max_tokens" class="form-input" min="256" max="128000">
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Temperature: <span x-text="model.temperature"></span></label>
-                    <input type="range" x-model.number="model.temperature" class="form-range" min="0" max="2" step="0.1">
+                    <label class="form-label">Temperature: <span x-text="model.temperature"></span></label>
+                    <input type="range" x-model.number="model.temperature" min="0" max="2" step="0.1" style="width:100%">
                 </div>
                 <div class="form-group">
-                    <label>Timeout (seconds)</label>
+                    <label class="form-label">Timeout (seconds)</label>
                     <input type="number" x-model.number="model.timeout" class="form-input" min="5" max="300">
                 </div>
             </div>
-            <div class="form-actions">
+            <div style="display:flex; gap:8px; align-items:center;">
                 <button class="btn btn-primary" @click="saveModel()">Save</button>
                 <button class="btn btn-secondary" @click="testModel()">
                     <span x-show="!testing">Test Connection</span>
                     <span x-show="testing">Testing...</span>
                 </button>
-                <span x-show="testResult" :class="testResult?.success ? 'text-success' : 'text-error'" x-text="testResult?.success ? 'Connected! ' + testResult.model : testResult?.error"></span>
+                <span x-show="testResult" :class="testResult?.success ? 'text-success' : 'text-error'" x-text="testResult?.success ? '✓ Connected! ' + testResult?.model : '✗ ' + testResult?.error"></span>
             </div>
         </div>
     </div>
 
-    <!-- Agent Settings -->
-    <div class="settings-panel" x-show="tab === 'agent'">
-        <div class="settings-group">
-            <h3>Agent Configuration</h3>
+    <!-- Agent Tab -->
+    <div x-show="tab === 'agent'">
+        <div class="card">
+            <div class="card-title">Agent Configuration</div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Agent Name</label>
+                    <label class="form-label">Agent Name</label>
                     <input type="text" x-model="agent.name" class="form-input">
                 </div>
                 <div class="form-group">
-                    <label>Language</label>
+                    <label class="form-label">Language</label>
                     <select x-model="agent.language" class="form-select">
                         <option value="ar">Arabic</option>
                         <option value="en">English</option>
@@ -78,103 +78,158 @@
                 </div>
             </div>
             <div class="form-group">
-                <label>System Prompt</label>
-                <textarea x-model="agent.system_prompt" class="form-textarea" rows="8"></textarea>
+                <label class="form-label">System Prompt</label>
+                <textarea x-model="agent.system_prompt" class="form-input" rows="4" style="resize:vertical;"></textarea>
             </div>
-            <div class="form-actions">
-                <button class="btn btn-primary" @click="saveAgent()">Save</button>
-            </div>
+            <button class="btn btn-primary" @click="saveAgent()">Save</button>
         </div>
     </div>
 
-    <!-- Cost Settings -->
-    <div class="settings-panel" x-show="tab === 'cost'">
-        <div class="settings-group">
-            <h3>Cost Limits</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Max Cost per Session (USD)</label>
-                    <input type="number" x-model.number="cost.max_cost" class="form-input" min="0.01" step="0.01">
-                </div>
-                <div class="form-group">
-                    <label>Silence Window (seconds)</label>
-                    <input type="number" x-model.number="cost.silence_window" class="form-input" min="30">
+    <!-- Connectors Tab -->
+    <div x-show="tab === 'connectors'">
+        <div class="card">
+            <div class="card-title">Telegram</div>
+            <div class="form-group">
+                <label class="form-label">Bot Token</label>
+                <div class="input-with-icon">
+                    <input :type="showTelegramToken ? 'text' : 'password'" x-model="connectors.telegram_token" class="form-input" placeholder="123456789:ABC...">
+                    <button @click="showTelegramToken = !showTelegramToken" x-text="showTelegramToken ? 'Hide' : 'Show'"></button>
                 </div>
             </div>
-            <div class="form-actions">
-                <button class="btn btn-primary" @click="saveCost()">Save</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Connectors Settings -->
-    <div class="settings-panel" x-show="tab === 'connectors'">
-        <div class="settings-group">
-            <h3>🔵 Telegram</h3>
-            <div class="form-row">
-                <div class="form-group full-width">
-                    <label>Bot Token</label>
-                    <div class="input-with-toggle">
-                        <input :type="showTelegramToken ? 'text' : 'password'" x-model="connectors.telegram_token" class="form-input" placeholder="123456789:ABC...">
-                        <button class="btn-icon" @click="showTelegramToken = !showTelegramToken" x-text="showTelegramToken ? 'Hide' : 'Show'"></button>
-                    </div>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group full-width">
-                    <label>Allowed User IDs (comma-separated — restricts bot access)</label>
-                    <input type="text" x-model="connectors.telegram_allowed_users" class="form-input" placeholder="1804015016,123456789">
-                </div>
-            </div>
-            <button class="btn btn-primary" @click="saveConnectors()">Save Connectors</button>
-        </div>
-
-        <div class="settings-group">
-            <h3>🟣 Discord</h3>
-            <div class="form-row">
-                <div class="form-group full-width">
-                    <label>Bot Token</label>
-                    <input type="password" x-model="connectors.discord_token" class="form-input" placeholder="MTIzNDU2...">
-                </div>
+            <div class="form-group">
+                <label class="form-label">Allowed User IDs (comma-separated — restricts bot access to these Telegram users)</label>
+                <input type="text" x-model="connectors.telegram_allowed_users" class="form-input" placeholder="1804015016">
             </div>
         </div>
 
-        <div class="settings-group">
-            <h3>🟢 Slack</h3>
+        <div class="card">
+            <div class="card-title">Discord</div>
+            <div class="form-group">
+                <label class="form-label">Bot Token</label>
+                <input type="password" x-model="connectors.discord_token" class="form-input" placeholder="MTIzNDU2...">
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-title">Slack</div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Bot Token (xoxb-...)</label>
+                    <label class="form-label">Bot Token (xoxb-...)</label>
                     <input type="password" x-model="connectors.slack_token" class="form-input" placeholder="xoxb-...">
                 </div>
                 <div class="form-group">
-                    <label>App Token (xapp-...)</label>
+                    <label class="form-label">App Token (xapp-...)</label>
                     <input type="password" x-model="connectors.slack_app_token" class="form-input" placeholder="xapp-...">
                 </div>
             </div>
         </div>
+
+        <button class="btn btn-primary" @click="saveConnectors()">Save Connectors</button>
+        <span class="text-muted" style="margin-left:10px">Gateway restart required after saving.</span>
     </div>
 
-    <!-- Import/Export -->
-    <div class="settings-panel" x-show="tab === 'import'">
-        <div class="settings-group">
-            <h3>Export Settings</h3>
-            <p class="text-muted">Download current settings as kazma.yaml</p>
+    <!-- Import/Export Tab -->
+    <div x-show="tab === 'import'">
+        <div class="card">
+            <div class="card-title">Export Settings</div>
+            <p class="text-muted" style="margin-bottom:10px">Download current configuration as YAML.</p>
             <a href="/api/settings/export" class="btn btn-secondary">Download YAML</a>
         </div>
-        <div class="settings-group">
-            <h3>Import Settings</h3>
-            <p class="text-muted">Upload a kazma.yaml to import settings</p>
-            <input type="file" accept=".yaml,.yml" @change="importYaml($event)" class="form-input">
+        <div class="card">
+            <div class="card-title">Import Settings</div>
+            <p class="text-muted" style="margin-bottom:10px">Upload a kazma.yaml file to restore configuration.</p>
+            <input type="file" accept=".yaml,.yml" @change="importYaml($event)" style="display:none" id="import-file">
+            <button class="btn btn-secondary" @click="document.getElementById('import-file').click()">Upload YAML</button>
         </div>
-        <div class="settings-group">
-            <h3>Reset All</h3>
-            <p class="text-muted">Delete all runtime settings and revert to YAML defaults</p>
+        <div class="card">
+            <div class="card-title">Reset</div>
+            <p class="text-muted" style="margin-bottom:10px">Clear all saved settings and revert to defaults.</p>
             <button class="btn btn-danger" @click="resetSettings()">Reset All Settings</button>
         </div>
     </div>
 </div>
-{% endblock %}
 
-{% block scripts %}
-<script src="/static/js/settings.js"></script>
+<script>
+function settingsApp() {
+    return {
+        tab: 'model',
+        showKey: false,
+        showTelegramToken: false,
+        testing: false,
+        testResult: null,
+        model: { base_url: '', api_key: '', model: '', max_tokens: 4096, temperature: 0.7, timeout: 60 },
+        agent: { name: 'kazma', language: 'ar', system_prompt: '' },
+        connectors: { telegram_token: '', telegram_allowed_users: '', discord_token: '', slack_token: '', slack_app_token: '' },
+
+        async init() {
+            try {
+                var resp = await fetch('/api/settings');
+                var data = await resp.json();
+                if (data.model) Object.assign(this.model, data.model);
+                if (data.agent) Object.assign(this.agent, data.agent);
+                if (data.connectors) Object.assign(this.connectors, data.connectors);
+            } catch (e) {}
+        },
+
+        async saveModel() {
+            var updates = Object.entries(this.model).map(function([k, v]) {
+                return { key: 'llm.' + k, value: v, category: 'model' };
+            });
+            await this._save(updates);
+        },
+
+        async saveAgent() {
+            var updates = Object.entries(this.agent).map(function([k, v]) {
+                return { key: 'agent.' + k, value: v, category: 'agent' };
+            });
+            await this._save(updates);
+        },
+
+        async saveConnectors() {
+            var updates = [
+                { key: 'connectors.telegram.token', value: this.connectors.telegram_token, category: 'connectors' },
+                { key: 'connectors.telegram.allowed_users', value: this.connectors.telegram_allowed_users, category: 'connectors' },
+                { key: 'connectors.discord.token', value: this.connectors.discord_token, category: 'connectors' },
+                { key: 'connectors.slack.token', value: this.connectors.slack_token, category: 'connectors' },
+                { key: 'connectors.slack.app_token', value: this.connectors.slack_app_token, category: 'connectors' },
+            ];
+            await this._save(updates);
+            showToast('Connectors saved. Restart gateway to apply.', 'success');
+        },
+
+        async _save(updates) {
+            try {
+                var resp = await fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+                if (resp.ok) showToast('Settings saved', 'success');
+            } catch (e) { showToast('Failed to save', 'error'); }
+        },
+
+        async testModel() {
+            this.testing = true; this.testResult = null;
+            try {
+                var resp = await fetch('/api/settings/test-model', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.model) });
+                this.testResult = await resp.json();
+            } catch (e) { this.testResult = { success: false, error: e.message }; }
+            this.testing = false;
+        },
+
+        async importYaml(event) {
+            var file = event.target.files[0]; if (!file) return;
+            try {
+                var resp = await fetch('/api/settings/import', { method: 'POST', body: await file.text() });
+                if (resp.ok) { showToast('Settings imported', 'success'); this.init(); }
+            } catch (e) { showToast('Import failed', 'error'); }
+        },
+
+        async resetSettings() {
+            if (!confirm('Reset all settings to defaults?')) return;
+            try {
+                await fetch('/api/settings/reset', { method: 'POST' });
+                showToast('Settings reset', 'success');
+                this.init();
+            } catch (e) { showToast('Reset failed', 'error'); }
+        }
+    };
+}
+</script>
 {% endblock %}

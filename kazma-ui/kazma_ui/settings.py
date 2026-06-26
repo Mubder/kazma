@@ -65,6 +65,7 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
                 "cost": cost_settings,
                 "connectors": connector_settings,
                 "config": agent.config,
+                "active_page": "settings",
             },
         )
 

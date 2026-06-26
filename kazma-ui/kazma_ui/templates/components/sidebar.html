@@ -1,0 +1,55 @@
+<aside class="sidebar">
+    <div class="sidebar-header">
+        <span class="logo">⚡ Kazma</span>
+    </div>
+
+    <nav class="sidebar-nav">
+        <a href="/" class="nav-link {{ 'active' if active_page == 'workspace' else '' }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+                <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+            </svg>
+            Workspace
+        </a>
+        <a href="/chat" class="nav-link {{ 'active' if active_page == 'chat' else '' }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+            </svg>
+            Chat
+        </a>
+        <a href="/settings" class="nav-link {{ 'active' if active_page == 'settings' else '' }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+            </svg>
+            Settings
+        </a>
+        <a href="/skills" class="nav-link {{ 'active' if active_page == 'skills' else '' }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
+            </svg>
+            Skills
+        </a>
+        <a href="/mcp" class="nav-link {{ 'active' if active_page == 'mcp' else '' }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/>
+                <line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+            </svg>
+            MCP
+        </a>
+        <a href="/swarm" class="nav-link {{ 'active' if active_page == 'swarm' else '' }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>
+                <circle cx="12" cy="18" r="2"/>
+                <line x1="6" y1="6" x2="12" y2="18"/><line x1="18" y1="6" x2="12" y2="18"/>
+            </svg>
+            Swarm
+        </a>
+    </nav>
+
+    <div class="sidebar-footer">
+        <div class="model-badge">
+            <span class="status-dot"></span>
+            <span>{{ config.default_model if config and config.default_model else 'gpt-4o-mini' }}</span>
+        </div>
+    </div>
+</aside>

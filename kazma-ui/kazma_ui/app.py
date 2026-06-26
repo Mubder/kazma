@@ -194,6 +194,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             {
                 "config": agent.config,
                 "sessions": list_sessions(),
+                "active_page": "workspace",
             },
         )
 

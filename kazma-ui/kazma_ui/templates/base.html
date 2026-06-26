@@ -1,163 +1,369 @@
 <!DOCTYPE html>
-<html lang="{{ lang|default('ar') }}" dir="{{ dir|default('rtl') }}">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Kazma{% endblock %}</title>
-    <link rel="stylesheet" href="/static/css/kazma.css">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            corePlugins: { preflight: false },
-            theme: { extend: {} }
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%236C5CE7'/><text x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' fill='white' font-size='18' font-family='sans-serif'>K</text></svg>">
+    <style>
+        :root {
+            --bg: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent: #6C5CE7;
+            --accent-hover: #7C6CF7;
+            --green: #3fb950;
+            --red: #f85149;
+            --yellow: #d29922;
+            --radius: 8px;
+            --sidebar-width: 220px;
         }
-    </script>
-    <script src="/static/js/htmx.min.js"></script>
-    <script src="/static/js/htmx-ws.min.js"></script>
-    <script defer src="/static/js/alpine.min.js"></script>
-    {% block head %}{% endblock %}
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            min-height: 100vh;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            top: 0; left: 0; bottom: 0;
+            z-index: 100;
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--accent);
+            letter-spacing: -0.5px;
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .sidebar-nav a {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 13px;
+            transition: all 0.15s;
+        }
+
+        .sidebar-nav a:hover { background: var(--bg-tertiary); color: var(--text); }
+        .sidebar-nav a.active { background: var(--accent); color: white; }
+
+        .sidebar-nav svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+        .sidebar-footer {
+            padding: 12px;
+            border-top: 1px solid var(--border);
+        }
+
+        .model-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .status-dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: var(--green);
+        }
+
+        /* ── Main Content ── */
+        .main {
+            margin-left: var(--sidebar-width);
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        .topbar {
+            height: 52px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .topbar-title {
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .content {
+            padding: 24px;
+            flex: 1;
+        }
+
+        /* ── Cards ── */
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .card-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--text);
+        }
+
+        /* ── Forms ── */
+        .form-group {
+            margin-bottom: 14px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+
+        .form-input, .form-select {
+            width: 100%;
+            padding: 8px 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 13px;
+            font-family: inherit;
+            transition: border-color 0.15s;
+        }
+
+        .form-input:focus, .form-select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+
+        .form-row-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 14px;
+        }
+
+        /* ── Buttons ── */
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: inherit;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover { background: var(--accent-hover); }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--text);
+        }
+
+        .btn-secondary:hover { background: var(--bg-tertiary); }
+
+        .btn-danger {
+            background: transparent;
+            border-color: var(--red);
+            color: var(--red);
+        }
+
+        .btn-danger:hover { background: var(--red); color: white; }
+
+        .btn-sm { padding: 4px 10px; font-size: 12px; }
+
+        /* ── Tabs ── */
+        .tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 10px 18px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.15s;
+            background: none;
+            border-top: none;
+            border-left: none;
+            border-right: none;
+            font-family: inherit;
+        }
+
+        .tab:hover { color: var(--text); }
+        .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+        /* ── Toast ── */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+        }
+
+        .toast-success { background: #1a3a2a; color: var(--green); border: 1px solid var(--green); }
+        .toast-error { background: #3a1a1a; color: var(--red); border: 1px solid var(--red); }
+
+        @keyframes slideIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* ── Status indicators ── */
+        .text-success { color: var(--green); }
+        .text-error { color: var(--red); }
+        .text-muted { color: var(--text-muted); font-size: 12px; }
+
+        .input-with-icon {
+            position: relative;
+        }
+
+        .input-with-icon button {
+            position: absolute;
+            right: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 4px 8px;
+        }
+
+        /* ── Provider card ── */
+        .provider-card {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+
+        .provider-card .provider-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+        }
+
+        .provider-card .provider-actions {
+            display: flex;
+            gap: 6px;
+        }
+    </style>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>
 <body>
-    <div class="app-layout">
-        {% include "components/nav.html" %}
-        <main class="main-content">
-            <header class="page-header">
-                <h1>{% block page_title %}{% endblock %}</h1>
-                <div class="header-actions" style="display:flex;align-items:center;gap:8px;">
-                    {% block header_actions %}{% endblock %}
-                    <!-- Notification Bell -->
-                    <div x-data="notificationBell()" @click="togglePanel()" style="position:relative;cursor:pointer;padding:6px;border-radius:var(--radius);" @mouseenter="hover=true" @mouseleave="hover=false" :style="hover ? 'background:var(--bg-hover)' : ''">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-tertiary)">
-                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-                        </svg>
-                        <span x-show="unread > 0" style="position:absolute;top:-2px;right:-2px;background:var(--danger);color:#fff;font-size:0.65rem;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-weight:600;" x-text="unread > 99 ? '99+' : unread"></span>
-                        <!-- Dropdown -->
-                        <div x-show="open" @click.stop style="position:absolute;top:100%;left:0;margin-top:8px;width:320px;max-height:400px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-card);box-shadow:0 4px 24px rgba(0,0,0,0.3);z-index:100;padding:8px;">
-                            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 8px 12px;border-bottom:1px solid var(--border-subtle);margin-bottom:4px;">
-                                <span style="font-size:0.85rem;font-weight:500;color:var(--text-primary);">Notifications</span>
-                                <button @click="markAllRead()" style="font-size:0.75rem;color:var(--accent);background:none;border:none;cursor:pointer;">Mark all read</button>
-                            </div>
-                            <template x-for="(n, i) in notifications.slice(0, 50)" :key="i">
-                                <div @click="markRead(i)" style="padding:10px 8px;border-bottom:1px solid var(--border-subtle);cursor:pointer;border-radius:var(--radius-sm);font-size:0.85rem;transition:background 0.15s;"
-                                     @mouseenter="$el.style.background='var(--bg-hover)'" @mouseleave="$el.style.background=''"
-                                     :style="n.read ? '' : 'border-right:3px solid var(--accent)'">
-                                    <div style="display:flex;justify-content:space-between;align-items:center;">
-                                        <span style="font-weight:500;color:var(--text-primary);" x-text="n.title"></span>
-                                        <span style="font-size:0.7rem;color:var(--text-muted);" x-text="n.time"></span>
-                                    </div>
-                                    <div style="font-size:0.8rem;color:var(--text-tertiary);margin-top:2px;" x-text="n.message"></div>
-                                </div>
-                            </template>
-                            <div x-show="notifications.length === 0" style="text-align:center;padding:20px;color:var(--text-tertiary);font-size:0.85rem;">
-                                No notifications yet
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </header>
-            <div class="page-body">
-                {% block content %}{% endblock %}
+    {% include "components/sidebar.html" %}
+
+    <div class="main">
+        <div class="topbar">
+            <span class="topbar-title">{% block page_title %}Kazma{% endblock %}</span>
+            <div class="topbar-right">
+                <span class="status-dot"></span>
+                <span>{{ config.default_model if config and config.default_model else 'gpt-4o-mini' }}</span>
             </div>
-        </main>
+        </div>
+
+        <div class="content">
+            {% block content %}{% endblock %}
+        </div>
     </div>
 
-    <div id="toast-container" class="toast-container"></div>
+    <div id="toast-container"></div>
 
     <script>
-        // ── Toast System ──
-        function showToast(message, type) {
-            type = type || 'info';
-            var container = document.getElementById('toast-container');
+        function showToast(msg, type) {
+            var el = document.getElementById('toast-container');
             var toast = document.createElement('div');
-            toast.className = 'toast toast-' + type;
-            toast.textContent = message;
-            container.appendChild(toast);
-            setTimeout(function() { toast.classList.add('toast-show'); }, 10);
-            setTimeout(function() {
-                toast.classList.remove('toast-show');
-                setTimeout(function() { toast.remove(); }, 300);
-            }, 3000);
-        }
-
-        // ── Notification Bell (Alpine component) ──
-        function notificationBell() {
-            return {
-                open: false,
-                unread: 0,
-                notifications: [],
-                hover: false,
-                init() {
-                    // Load from session storage
-                    try {
-                        var saved = sessionStorage.getItem('kazma-notifications');
-                        if (saved) {
-                            this.notifications = JSON.parse(saved);
-                            this.unread = this.notifications.filter(function(n) { return !n.read; }).length;
-                        }
-                    } catch(e) {}
-
-                    // Connect to dashboard WS for real-time notifications
-                    var wsUrl = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws/dashboard';
-                    var ws = new WebSocket(wsUrl);
-                    var self = this;
-                    ws.onmessage = function(event) {
-                        try {
-                            var msg = JSON.parse(event.data);
-                            if (msg.type === 'trace') {
-                                self.addNotification({
-                                    title: msg.data.trace_type === 'llm' ? 'LLM: ' + msg.data.label :
-                                           msg.data.trace_type === 'tool' ? 'Tool: ' + msg.data.label :
-                                           'State: ' + msg.data.label,
-                                    message: msg.data.status === 'error' ? 'Failed (' + msg.data.duration_ms + 'ms)' :
-                                             msg.data.duration_ms + 'ms, ' + msg.data.tokens + ' tokens',
-                                    time: msg.data.timestamp,
-                                    read: false,
-                                });
-                                // Also show toast for errors
-                                if (msg.data.status === 'error') {
-                                    showToast(msg.data.label + ' failed', 'error');
-                                }
-                            }
-                        } catch(e) {}
-                    };
-                    ws.onclose = function() {
-                        setTimeout(function() {
-                            new WebSocket(wsUrl);
-                        }, 5000);
-                    };
-                },
-                addNotification(n) {
-                    this.notifications.unshift(n);
-                    this.unread = this.notifications.filter(function(n) { return !n.read; }).length;
-                    this._save();
-                    // Keep max 100
-                    if (this.notifications.length > 100) {
-                        this.notifications = this.notifications.slice(0, 100);
-                    }
-                },
-                togglePanel() {
-                    this.open = !this.open;
-                },
-                markRead(i) {
-                    if (this.notifications[i]) {
-                        this.notifications[i].read = true;
-                        this.unread = this.notifications.filter(function(n) { return !n.read; }).length;
-                        this._save();
-                    }
-                },
-                markAllRead() {
-                    for (var i = 0; i < this.notifications.length; i++) {
-                        this.notifications[i].read = true;
-                    }
-                    this.unread = 0;
-                    this._save();
-                },
-                _save() {
-                    try { sessionStorage.setItem('kazma-notifications', JSON.stringify(this.notifications)); } catch(e) {}
-                }
-            };
+            toast.className = 'toast toast-' + (type || 'success');
+            toast.textContent = msg;
+            el.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 3000);
         }
     </script>
-    {% block scripts %}{% endblock %}
 </body>
 </html>
