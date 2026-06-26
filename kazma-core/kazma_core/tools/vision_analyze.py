@@ -137,17 +137,29 @@ async def _download_image(url: str) -> tuple[bytes, str]:
             timeout=REQUEST_TIMEOUT,
             headers={"User-Agent": "KazmaBot/1.0 (vision analyzer)"},
         ) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
+            async with client.stream("GET", url) as resp:
+                resp.raise_for_status()
 
-            content_length = int(resp.headers.get("content-length", 0))
-            if content_length > MAX_DOWNLOAD_BYTES:
-                raise ValueError(
-                    f"Image too large ({content_length / 1_048_576:.1f} MB). "
-                    f"Max {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB."
-                )
+                # Check Content-Length header first (may be absent)
+                content_length = int(resp.headers.get("content-length", 0))
+                if content_length > MAX_DOWNLOAD_BYTES:
+                    raise ValueError(
+                        f"Image too large ({content_length / 1_048_576:.1f} MB). "
+                        f"Max {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB."
+                    )
 
-            image_bytes = resp.content
+                # Stream-based size check — protects against missing Content-Length
+                chunks: list[bytes] = []
+                total_bytes = 0
+                async for chunk in resp.aiter_bytes(chunk_size=65536):
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_DOWNLOAD_BYTES:
+                        raise ValueError(
+                            f"Image download exceeds {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB limit "
+                            f"(downloaded {total_bytes / 1_048_576:.1f} MB so far)."
+                        )
+                    chunks.append(chunk)
+                image_bytes = b"".join(chunks)
 
             # Detect MIME from Content-Type header, fallback to PNG
             content_type = resp.headers.get("content-type", "image/png")

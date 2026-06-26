@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kazma_gateway.adapters.telegram import TelegramAdapter
+from kazma_gateway.adapters.telegram import TelegramAdapter, MAX_VOICE_BYTES
 from kazma_gateway.gateway import IncomingMessage
 
 
@@ -147,6 +147,7 @@ class TestDownloadVoiceFile:
         download_resp.status_code = 200
         download_resp.raise_for_status = MagicMock()
         download_resp.content = b"\x4f\x67\x67\x53"  # fake OGG bytes
+        download_resp.headers = {"content-length": str(len(b"\x4f\x67\x67\x53"))}
 
         adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
 
@@ -316,6 +317,7 @@ class TestVoicePipeline:
         download_resp.status_code = 200
         download_resp.raise_for_status = MagicMock()
         download_resp.content = b"fake ogg bytes"
+        download_resp.headers = {"content-length": str(len(b"fake ogg bytes"))}
 
         adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
 
@@ -361,6 +363,7 @@ class TestVoicePipeline:
         download_resp.status_code = 200
         download_resp.raise_for_status = MagicMock()
         download_resp.content = b"fake ogg bytes"
+        download_resp.headers = {"content-length": str(len(b"fake ogg bytes"))}
 
         # sendMessage response (for fallback message)
         send_resp = MagicMock()
@@ -406,6 +409,7 @@ class TestVoicePipeline:
         download_resp.status_code = 200
         download_resp.raise_for_status = MagicMock()
         download_resp.content = b"fake ogg bytes"
+        download_resp.headers = {"content-length": str(len(b"fake ogg bytes"))}
 
         adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
 
@@ -459,3 +463,92 @@ class TestVoicePipeline:
             assert incoming.sender_id == "telegram:999"
             assert incoming.context_metadata["voice_transcribed"] is True
             assert incoming.context_metadata["chat_id"] == 12345
+
+# ══════════════════════════════════════════════════════════════════════════
+# 5. Voice file size cap (gw-064 BUG 1)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestVoiceSizeCap:
+    """Tests for MAX_VOICE_BYTES enforcement in download_voice_file."""
+
+    @pytest.mark.asyncio
+    async def test_download_voice_file_content_length_too_large(self) -> None:
+        """Returns None when Content-Length exceeds MAX_VOICE_BYTES."""
+        adapter = TelegramAdapter(token="fake:token")
+        adapter._http = AsyncMock()
+
+        get_file_resp = MagicMock()
+        get_file_resp.status_code = 200
+        get_file_resp.raise_for_status = MagicMock()
+        get_file_resp.json.return_value = {
+            "ok": True,
+            "result": {"file_path": "voice/huge.ogg"},
+        }
+
+        download_resp = MagicMock()
+        download_resp.status_code = 200
+        download_resp.raise_for_status = MagicMock()
+        download_resp.content = b"x" * 100  # small actual content
+        download_resp.headers = {"content-length": str(MAX_VOICE_BYTES + 1)}
+
+        adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
+
+        result = await adapter.download_voice_file("huge_file_id")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_download_voice_file_actual_content_too_large(self) -> None:
+        """Returns None when downloaded bytes exceed limit (no Content-Length header)."""
+        adapter = TelegramAdapter(token="fake:token")
+        adapter._http = AsyncMock()
+
+        get_file_resp = MagicMock()
+        get_file_resp.status_code = 200
+        get_file_resp.raise_for_status = MagicMock()
+        get_file_resp.json.return_value = {
+            "ok": True,
+            "result": {"file_path": "voice/stealth.ogg"},
+        }
+
+        download_resp = MagicMock()
+        download_resp.status_code = 200
+        download_resp.raise_for_status = MagicMock()
+        download_resp.content = b"x" * 100
+        download_resp.headers = {}  # no Content-Length header
+
+        adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
+
+        # Patch MAX_VOICE_BYTES to be tiny so 100 bytes triggers the cap
+        with patch("kazma_gateway.adapters.telegram.MAX_VOICE_BYTES", 50):
+            result = await adapter.download_voice_file("stealth_file_id")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_download_voice_file_at_limit_succeeds(self) -> None:
+        """Returns content when file is exactly at (not over) the limit."""
+        adapter = TelegramAdapter(token="fake:token")
+        adapter._http = AsyncMock()
+
+        get_file_resp = MagicMock()
+        get_file_resp.status_code = 200
+        get_file_resp.raise_for_status = MagicMock()
+        get_file_resp.json.return_value = {
+            "ok": True,
+            "result": {"file_path": "voice/exact.ogg"},
+        }
+
+        content = b"OggS" * 4  # 16 bytes
+        download_resp = MagicMock()
+        download_resp.status_code = 200
+        download_resp.raise_for_status = MagicMock()
+        download_resp.content = content
+        download_resp.headers = {"content-length": str(len(content))}
+
+        adapter._http.get = AsyncMock(side_effect=[get_file_resp, download_resp])
+
+        with patch("kazma_gateway.adapters.telegram.MAX_VOICE_BYTES", 16):
+            result = await adapter.download_voice_file("exact_file_id")
+
+        assert result == content

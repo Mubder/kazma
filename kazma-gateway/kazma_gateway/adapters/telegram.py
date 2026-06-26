@@ -49,6 +49,9 @@ logger = logging.getLogger(__name__)
 
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
+# Voice download size cap
+MAX_VOICE_BYTES = 10 * 1024 * 1024  # 10 MB
+
 # Rate-limit constants
 _SEND_MAX_RETRIES = 3
 _SEND_BASE_DELAY = 1.0  # base delay for exponential backoff on 429
@@ -457,6 +460,27 @@ class TelegramAdapter(BaseAdapter):
             file_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
             dl_resp = await self._http.get(file_url)
             dl_resp.raise_for_status()
+
+            # Check Content-Length header first (gw-064)
+            content_length = int(dl_resp.headers.get("content-length", 0))
+            if content_length > MAX_VOICE_BYTES:
+                logger.warning(
+                    "[telegram] Voice file too large (Content-Length): %d bytes exceeds limit %d",
+                    content_length,
+                    MAX_VOICE_BYTES,
+                )
+                return None
+
+            # Stream-based fallback: check actual downloaded bytes
+            # (protects against servers that omit Content-Length)
+            if len(dl_resp.content) > MAX_VOICE_BYTES:
+                logger.warning(
+                    "[telegram] Voice file too large (downloaded): %d bytes exceeds limit %d",
+                    len(dl_resp.content),
+                    MAX_VOICE_BYTES,
+                )
+                return None
+
             logger.info("[telegram] Downloaded voice file: %s (%d bytes)", file_path, len(dl_resp.content))
             return dl_resp.content
         except httpx.HTTPStatusError as exc:
