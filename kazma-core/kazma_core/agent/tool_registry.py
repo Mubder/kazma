@@ -768,6 +768,47 @@ class LocalToolRegistry:
             messages = get_session_messages()
             return await _ctx(messages, detailed=details)
 
+        # ── Register tools from kazma_core/tools/ ──────────────────────
+        try:
+            from kazma_core.tools.web_search import web_search
+            self.register_function("web_search", web_search,
+                description="Search the web using DuckDuckGo. Returns markdown results with titles, URLs, and snippets.",
+                category="search")
+        except ImportError:
+            logger.debug("web_search not available (missing duckduckgo-search)")
+
+        try:
+            from kazma_core.tools.read_url import read_url
+            self.register_function("read_url", read_url,
+                description="Fetch and extract readable content from a URL. Returns text content.",
+                category="search")
+        except ImportError:
+            logger.debug("read_url not available (missing trafilatura)")
+
+        try:
+            from kazma_core.tools.image_gen import generate_image
+            self.register_function("generate_image", generate_image,
+                description="Generate an image from a text prompt using pollinations.ai. Returns the saved file path.",
+                category="media")
+        except ImportError:
+            logger.debug("generate_image not available")
+
+        try:
+            from kazma_core.tools.vision_analyze import analyze_image
+            self.register_function("analyze_image", analyze_image,
+                description="Analyze an image using LLM vision. Provide a local path or URL and an optional question.",
+                category="media")
+        except ImportError:
+            logger.debug("analyze_image not available")
+
+        try:
+            from kazma_core.tools.export_session import export_session
+            self.register_function("export_session", export_session,
+                description="Export the current conversation session to a file (JSON or Markdown format).",
+                category="utility")
+        except ImportError:
+            logger.debug("export_session not available")
+
         logger.info("Registered %d built-in tools", len(self._tools))
 
 

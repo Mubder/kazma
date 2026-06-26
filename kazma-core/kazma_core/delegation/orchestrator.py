@@ -169,23 +169,52 @@ class DelegationOrchestrator:
         return result
 
     def _decompose_task(self, task: str, max_agents: int) -> list[SubTask]:
-        """Decompose a task into sub-tasks.
+        """Decompose a task into sub-tasks using heuristic splitting.
 
-        Uses a simple heuristic: split by logical boundaries.
-        In production, this would use an LLM for intelligent decomposition.
+        Splits on sentence boundaries (periods, semicolons, newlines) when
+        the task contains multiple independent clauses. Falls back to single
+        task if no clear boundaries found.
         """
-        # Simple decomposition: treat the task as a single unit
-        # Real implementation would use LLM-based analysis
-        sub_tasks = [
-            SubTask(
+        import re
+
+        # Split on sentence boundaries that suggest independent steps
+        parts = re.split(r'[;\n]|(?<=\.)\s+', task.strip())
+        parts = [p.strip() for p in parts if p.strip()]
+
+        # If no meaningful split or only 1 part, treat as single task
+        if len(parts) <= 1:
+            return [
+                SubTask(
+                    task_id="sub-0",
+                    description=task,
+                    required_capabilities=["general"],
+                    max_budget=0.10,
+                    timeout_seconds=300,
+                )
+            ]
+
+        # Cap at max_agents
+        parts = parts[:max_agents]
+
+        sub_tasks = []
+        for i, part in enumerate(parts):
+            # Infer capabilities from keywords
+            caps = ["general"]
+            if any(w in part.lower() for w in ["code", "implement", "write", "function", "class"]):
+                caps.append("coding")
+            if any(w in part.lower() for w in ["test", "verify", "check", "validate"]):
+                caps.append("testing")
+            if any(w in part.lower() for w in ["search", "find", "look", "research"]):
+                caps.append("research")
+
+            sub_tasks.append(SubTask(
                 task_id=f"sub-{i}",
-                description=task,
-                required_capabilities=["general"],
-                max_budget=0.10,
+                description=part,
+                required_capabilities=caps,
+                max_budget=round(0.10 / len(parts), 2),
                 timeout_seconds=300,
-            )
-            for i in range(min(1, max_agents))  # Start with single sub-task
-        ]
+            ))
+
         return sub_tasks
 
     async def _discover_and_assign(
