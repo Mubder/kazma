@@ -117,10 +117,8 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
             logger.error("Failed to export: %s", e)
             return Response(content=f"Error: {e}", media_type="text/plain", status_code=500)
 
-    @router.get("/api/settings/{category}")
-    async def api_get_category(category: str) -> dict[str, Any]:
-        """Get all settings for a category."""
-        return config_store.get_category(category)
+    # NOTE: catch-all /api/settings/{category} moved to end of file to avoid
+    # intercepting specific routes like /api/settings/shortcuts, /api/settings/providers, etc.
 
     @router.put("/api/settings")
     async def api_update_settings(updates: list[SettingsUpdate]) -> dict[str, str]:
@@ -349,7 +347,10 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
     @router.get("/api/settings/shortcuts")
     async def api_get_shortcuts() -> dict[str, str]:
         """Get all keyboard shortcuts."""
-        return _get_sm().get_shortcuts()
+        sm = _get_sm()
+        shortcuts = sm.get_shortcuts()
+        logger.info("[Settings] Shortcuts: %s", shortcuts)
+        return shortcuts
 
     @router.put("/api/settings/shortcuts")
     async def api_save_shortcut(req: ShortcutUpdate) -> dict[str, str]:

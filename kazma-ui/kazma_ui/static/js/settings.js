@@ -382,7 +382,7 @@ function settingsApp() {
 
         async loadMcpServers() {
             try {
-                this.mcpServers = await this._fetch('/api/settings/mcp') || [];
+                this.mcpServers = await this._fetch('/api/mcp/servers') || [];
             } catch (e) {
                 this.mcpServers = [];
             }
@@ -451,7 +451,7 @@ function settingsApp() {
 
         async loadSkills() {
             try {
-                this.skills = await this._fetch('/api/settings/skills') || [];
+                this.skills = await this._fetch('/api/skills') || [];
             } catch (e) {
                 this.skills = [];
             }
@@ -509,6 +509,11 @@ function settingsApp() {
 
         previewTheme(theme) {
             document.documentElement.setAttribute('data-theme', theme);
+        },
+
+        applyFontSize(size) {
+            document.documentElement.style.fontSize = size + 'px';
+            this.appearance.font_size = size;
         },
 
         /* ══════════════════════════════════════════════════════════════════

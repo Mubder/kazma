@@ -590,7 +590,7 @@
             <h3>Font Size</h3>
             <div class="form-group">
                 <label>Base Font Size: <span x-text="appearance.font_size"></span>px</label>
-                <input type="range" class="form-range" x-model.number="appearance.font_size" min="12" max="18" step="1">
+                <input type="range" class="form-range" x-model.number="appearance.font_size" min="12" max="18" step="1" @input="applyFontSize(appearance.font_size)">
             </div>
         </div>
 
