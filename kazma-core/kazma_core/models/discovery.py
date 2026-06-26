@@ -260,7 +260,23 @@ async def _discover_openai_compatible(base_url: str, api_key: str | None, provid
                     resp = await client.get(url, headers=headers)
             resp.raise_for_status()
             data = resp.json()
+
+            # Check for API-level errors (some providers return 200 with error body)
+            if "error" in data:
+                error_msg = data["error"]
+                if isinstance(error_msg, dict):
+                    error_msg = error_msg.get("message", str(error_msg))
+                return ProviderInfo(
+                    name=provider, label=provider.title(), base_url=base_url,
+                    error=f"API error: {error_msg}",
+                )
+
             models = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+            if not models:
+                return ProviderInfo(
+                    name=provider, label=provider.title(), base_url=base_url,
+                    error="No models returned. Check your API key.",
+                )
             return ProviderInfo(
                 name=provider,
                 label=provider.title(),
