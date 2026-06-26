@@ -44,6 +44,9 @@ def main() -> None:
     elif cmd == "docs":
         _run_docs(sys.argv[2:])
 
+    elif cmd == "completion":
+        _run_completion(sys.argv[2:])
+
     elif cmd in ("--help", "-h", "help"):
         print("Kazma CLI v0.1.0")
         print("Commands:")
@@ -52,6 +55,7 @@ def main() -> None:
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")
         print("  docs       Documentation commands (build, serve)")
+        print("  completion Shell tab completion (bash, zsh, install)")
         print("")
         print("Options:")
         print("  serve [port]  Start server on specified port (default: 8000)")
@@ -183,6 +187,61 @@ def _print_startup(show_banner_flag: bool = True) -> None:
 
     # 4. Quick help hint
     print(show_help_brief())
+
+
+def _run_completion(args: list[str]) -> None:
+    """Handle 'kazma completion' subcommands.
+
+    Usage:
+        kazma completion bash            — print bash completion script
+        kazma completion zsh             — print zsh completion script
+        kazma completion install [bash|zsh]  — auto-install
+        kazma completion --list-models   — print available model names
+    """
+    from kazma_cli.completions import generate_completions, install_completion, list_available_models
+
+    if not args:
+        print("Usage: kazma completion <bash|zsh|install>")
+        print("")
+        print("  bash      Print bash completion script")
+        print("  zsh       Print zsh completion script")
+        print("  install   Auto-detect shell and install completion")
+        print("  install bash  Install bash completion")
+        print("  install zsh   Install zsh completion")
+        return
+
+    subcmd = args[0]
+
+    if subcmd == "--list-models":
+        for model in list_available_models():
+            print(model)
+        return
+
+    if subcmd == "bash":
+        print(generate_completions("bash"))
+        return
+
+    if subcmd == "zsh":
+        print(generate_completions("zsh"))
+        return
+
+    if subcmd == "install":
+        shell = args[1] if len(args) > 1 else _detect_shell()
+        print(install_completion(shell))
+        return
+
+    print(f"Unknown completion command: {subcmd}")
+    print("Available: bash, zsh, install")
+
+
+def _detect_shell() -> str:
+    """Detect the current shell from $SHELL, defaulting to bash."""
+    import os
+
+    shell_path = os.environ.get("SHELL", "")
+    if "zsh" in shell_path:
+        return "zsh"
+    return "bash"
 
 
 if __name__ == "__main__":
