@@ -1,0 +1,56 @@
+{# ─── Kazma Modal Component ───
+   Reusable modal with Alpine.js integration.
+   Usage: Set $store.modal to configure, or use x-data locally.
+   ───────────────────────────────────────────── #}
+
+{# Global modal (controlled via Alpine store) #}
+<template x-if="$store.modal.open" x-transition>
+    <div class="modal-overlay"
+         @click.self="$store.modal.close()"
+         @keydown.escape.window="$store.modal.close()">
+        <div class="modal"
+             :class="{
+                 'modal-sm': $store.modal.size === 'sm',
+                 'modal-md': $store.modal.size === 'md',
+                 'modal-lg': $store.modal.size === 'lg',
+                 'modal-xl': $store.modal.size === 'xl'
+             }"
+             role="dialog"
+             aria-modal="true"
+             :aria-label="$store.modal.title">
+
+            {# Header #}
+            <div class="modal-header">
+                <h2 x-text="$store.modal.title"></h2>
+                <button class="modal-close" @click="$store.modal.close()" aria-label="Close modal">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 6L6 18M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            {# Body #}
+            <div class="modal-body" x-html="$store.modal.body"></div>
+
+            {# Footer #}
+            <div class="modal-footer" x-show="$store.modal.actions && $store.modal.actions.length > 0">
+                <template x-for="action in $store.modal.actions" :key="action.label">
+                    <button class="btn"
+                            :class="action.variant || 'btn-secondary'"
+                            @click="action.handler ? action.handler() : null; action.close !== false && $store.modal.close()"
+                            x-text="action.label">
+                    </button>
+                </template>
+            </div>
+        </div>
+    </div>
+</template>
+
+{# ─── Local Modal Template (for page-specific modals) ───
+   Usage example in a page:
+   <div x-show="showModal" class="modal-overlay" @click.self="showModal = false">
+       {% call modal_content('sm') %}
+           ...body...
+       {% endcall %}
+   </div>
+   ───────────────────────────────────────────── #}
