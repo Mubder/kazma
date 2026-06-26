@@ -123,12 +123,42 @@ def _load_local_image(path: Path) -> tuple[bytes, str]:
     return raw, mime
 
 
+
+def _is_safe_url(url: str) -> bool:
+    """Check if URL is safe to fetch (no SSRF to private/internal hosts)."""
+    import ipaddress
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = parsed.hostname
+        if not host:
+            return False
+        if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+            return False
+        try:
+            ip = ipaddress.ip_address(host)
+            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
+                return False
+        except ValueError:
+            if host.endswith(".local") or host.endswith(".internal"):
+                return False
+        if "169.254.169.254" in host or "metadata.google" in host:
+            return False
+        return True
+    except Exception:
+        return False
+
+
 async def _download_image(url: str) -> tuple[bytes, str]:
     """Download an image from *url* and return ``(image_bytes, mime_type)``.
 
     Raises:
         ValueError: if the download fails or the content type is unsupported.
     """
+    if not _is_safe_url(url):
+        raise ValueError(f"Blocked potentially unsafe URL: {url}")
     import httpx
 
     try:

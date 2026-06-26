@@ -335,12 +335,14 @@ class TestLargeImageResize:
 
     def test_small_image_not_resized(self):
         """Images already under the limit pass through unchanged (same content)."""
+        try:
+            from PIL import Image as PILImage
+        except ImportError:
+            pytest.skip("Pillow not installed")
         png = _make_png_bytes(8, 8)
         # _resize_image still normalises the format, so sizes may differ slightly
         # but dimensions should remain 8x8
         resized = _resize_image(png, max_dim=RESIZE_MAX_DIMENSION)
-
-        from PIL import Image as PILImage
 
         result_img = PILImage.open(io.BytesIO(resized))
         assert result_img.size == (8, 8)

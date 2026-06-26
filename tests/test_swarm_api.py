@@ -16,7 +16,7 @@ def _build_client():
     from fastapi.templating import Jinja2Templates
 
     app = FastAPI()
-    templates = Jinja2Templates(directory="/tmp")  # dummy — not used in tests
+    templates = Jinja2Templates(directory="kazma-ui/kazma_ui/templates")
 
     from kazma_ui.swarm_panel import create_swarm_router
 

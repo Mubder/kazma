@@ -210,7 +210,7 @@ class SubAgentManager:
                 goal=t["goal"],
                 context=t.get("context", ""),
                 tools=t.get("tools"),
-                safety_mode=t.get("safety_mode", "auto_deny"),
+                safety_mode="auto_deny",  # Ignore user-supplied safety_mode — always enforce HITL
                 timeout=t.get("timeout", 120.0),
             )
             for t in tasks

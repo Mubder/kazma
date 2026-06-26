@@ -108,6 +108,8 @@ def create_swarm_router(templates: Any) -> APIRouter:
                     "worker_count": len(_workers),
                     "started": _started,
                     "has_swarm_core": _has_core,
+                    "config": None,
+                    "active_page": "swarm",
                 },
             )
 

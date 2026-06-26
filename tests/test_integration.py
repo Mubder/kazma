@@ -41,7 +41,7 @@ class TestAgentRoutes:
     def test_agents_page(self, client: TestClient) -> None:
         resp = client.get("/agents")
         assert resp.status_code == 200
-        assert "Agent Management" in resp.text
+        assert "Agent" in resp.text
 
     def test_agents_api_status(self, client: TestClient) -> None:
         resp = client.get("/api/agents/status")

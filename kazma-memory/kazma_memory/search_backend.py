@@ -259,10 +259,12 @@ class SQLiteMemoryBackend:
                 unique_results[result_id] = result
 
         # Sort by combined relevance score
+        # BM25 scores are negative-better (more negative = more relevant),
+        # so negate them so all scores are positive-better for consistent sorting.
         sorted_results = sorted(
             unique_results.values(),
             key=lambda x: (
-                x.get("bm25_score", 0) * 0.7 + x.get("relevance", 1.0) * 0.3
+                -x.get("bm25_score", 0) * 0.7 + x.get("relevance", 1.0) * 0.3
                 if "bm25_score" in x
                 else x.get("relevance", 1.0)
             ),

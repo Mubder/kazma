@@ -625,7 +625,9 @@ class SettingsManager:
 
     def save_shortcut(self, action: str, keys: str) -> None:
         """Update a single shortcut."""
-        self._cs.set(f"shortcuts.{action}", keys, category="shortcuts")
+        current = self.get_shortcuts()
+        current[action] = keys
+        self._cs.set("shortcuts", current, category="shortcuts")
 
     def reset_shortcuts(self) -> None:
         """Reset shortcuts to defaults."""
