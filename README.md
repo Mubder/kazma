@@ -2,7 +2,7 @@
 
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
-![Tests](https://img.shields.io/badge/tests-1,819_passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-2,129_passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
@@ -21,7 +21,7 @@ Kazma is an open-source framework for building reliable, culturally-aware AI age
 |:---|:---|
 | **Headless Gateway** | Telegram + Discord + Slack adapters with rate limiting, session isolation, and platform-agnostic backend registry |
 | **Durable Execution** | LangGraph + SQLite checkpointing — agents resume mid-task after SIGKILL |
-| **RAG Memory** | VectorMemory (ChromaDB + sentence-transformers) — store/retrieve facts with provenance |
+| **RAG Memory** | VectorMemory (ChromaDB + sentence-transformers) + FTS5 full-text search — store/retrieve facts with provenance |
 | **Human-in-the-Loop** | Approval gate for dangerous tools + shared-secret authenticated endpoint |
 | **Sub-Agent Spawning** | Delegate tasks to child graphs: in-process (SubAgentManager) or distributed (Swarm Panel) |
 | **Swarm Orchestration** | Multi-worker panel — health monitoring, dispatch, lifecycle control |
@@ -101,6 +101,7 @@ docker compose up -d
 | ✅ | Retry & Backoff | Exponential backoff with configurable attempts, min/max wait |
 | ✅ | Time Travel | Snapshot-based replay engine — rewind to any iteration |
 | ✅ | Knowledge Graph | NetworkX MultiDiGraph backend with KG memory adapter |
+| ✅ | FTS5 Memory | SQLite full-text search with BM25 ranking — keyword search alongside vector search |
 
 ### 🔧 Tools
 
@@ -111,6 +112,7 @@ docker compose up -d
 | ✅ | Code Execution | Sandboxed Python subprocess (`-I` isolated, 30s timeout, 512MB limit) |
 | ✅ | Image Generation | pollinations.ai-backed image gen, saved to `kazma-data/images/` |
 | ✅ | Vision Analysis | Analyze images via LLM vision capabilities |
+| ✅ | Voice Transcription | Telegram voice message transcription via STT |
 | ✅ | File I/O | Read, write, list, and search files through the agent (with HITL gates) |
 | ✅ | Export Session | Save conversation history to file |
 | ✅ | MCP Bridge | UnifiedToolExecutor — local + MCP tool routing |
@@ -138,7 +140,7 @@ docker compose up -d
 | ✅ | Discord Adapter | Native Markdown, rate-limited |
 | ✅ | Slack Adapter | Socket Mode with 429 retry and event parsing |
 | ✅ | Cross-Platform Gateway | Platform-agnostic backend registry, reply metadata envelope |
-| ✅ | Web UI | FastAPI + Jinja2 dashboard with SSE chat, metrics, Arabic RTL |
+| ✅ | Web UI | FastAPI + Jinja2 dashboard with 12-tab settings, SSE chat, provider management, Arabic RTL |
 | ✅ | Terminal UI | Textual TUI with Arabic/RTL support |
 
 ### 🔒 Safety & Security
@@ -376,7 +378,7 @@ For overrides, copy to `kazma.local.yaml` (git-ignored). Env vars take precedenc
 
 ## 🧪 Tests
 
-1837 collected, **1,819 passing** (8 failures + 10 errors due to missing optional deps: chromadb, duckduckgo_search, trafilatura).
+1837 collected, **2,129 passing** (4 failures + 10 skipped due to missing optional deps: chromadb, duckduckgo_search, trafilatura).
 
 ```bash
 # Full suite

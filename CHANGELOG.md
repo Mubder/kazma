@@ -5,6 +5,57 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## Sprint 7 — Web UI Rebuild & Memory (June 2026)
+
+### Web UI
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Web UI Rebuild | Complete rebuild from scratch — 12 settings tabs, Alpine.js, single base template | `4a2a705` |
+| ✅ | Settings Persistence | SQLite config_store for all settings (model, agent, connectors, appearance) | `e93a1b5` |
+| ✅ | Provider Integration | 9 built-in providers (OpenAI, Anthropic, DeepSeek, Google, xAI, OpenRouter, Ollama, LM Studio, Custom) | `4cf2a4a` |
+| ✅ | Model Discovery | Real model fetching from providers with API key authentication | `8530c99` |
+| ✅ | Connectors Tab | Telegram, Discord, Slack token management with allowed users | `e93a1b5` |
+| ✅ | Appearance Tab | Theme, accent color, font size slider | `4a2a705` |
+| ✅ | Shortcuts Tab | Keyboard shortcuts with conflict detection | `4a2a705` |
+| ✅ | Tools Tab | Tool registry browser with enable/disable | `4a2a705` |
+| ✅ | MCP Tab | MCP server management with start/stop/test | `4a2a705` |
+| ✅ | Skills Tab | Skill browser with install/uninstall | `4a2a705` |
+
+### Memory
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | FTS5 Memory | SQLite full-text search with BM25 ranking — keyword search alongside vector search | `b34c47a` |
+| ✅ | Arabic Search | Arabic text support in FTS5 with porter unicode61 tokenizer | `b34c47a` |
+
+### Swarm
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Swarm Manager | Unified in-process + distributed worker orchestration | `gw-065` |
+| ✅ | Swarm Notifier | Telegram group notification system for worker progress | `gw-066` |
+| ✅ | Swarm Panel | Web UI for worker management, dispatch, lifecycle | `gw-067` |
+| ✅ | Role Presets | Worker role presets (orchestrator, observer, backend, frontend, researcher, reviewer) | `b34c47a` |
+| ✅ | API Key Field | Per-worker API key support for custom providers | `7554374` |
+
+### Bug Fixes
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | RBAC DB Fix | check_permission now queries division_permissions table | `a80b806` |
+| ✅ | Role Expiry | authorization_flow now revokes roles on expiry | `a80b806` |
+| ✅ | Cron Double-Fire | _in_flight guard prevents duplicate job execution | `f57eeae` |
+| ✅ | Optional Schema | Optional[T] tool params now correctly typed | `a80b806` |
+| ✅ | KG Parallel Edges | MultiDiGraph support for multiple relations between nodes | `ff4c0e1` |
+| ✅ | ReAct Counter | Iteration counter now increments on tool path | `91cb17a` |
+| ✅ | Voice Size Cap | 10MB limit on voice file downloads | `c7d6d53` |
+| ✅ | Vision Stream | Stream-based Content-Length bypass protection | `c7d6d53` |
+| ✅ | Shortcuts Route | Catch-all route no longer intercepts specific endpoints | `b38a483` |
+| ✅ | Dashboard Default | Root page now serves dashboard instead of workspace | `784dd16` |
+
+---
+
 ## Sprint 4+ — UX, Security & Ecosystem
 
 ### Agent UX
