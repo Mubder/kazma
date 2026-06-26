@@ -113,16 +113,36 @@
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Model</label>
-              <select id="add-model" class="form-select">
-                <option value="deepseek-chat">deepseek-chat</option>
+              <label class="form-label">Role Preset</label>
+              <select id="add-role" class="form-select" onchange="KazmaSwarm.applyRole(this.value)">
+                <option value="">Custom</option>
+                <option value="orchestrator">Orchestrator (Supervisor)</option>
+                <option value="observer">Observer (Watcher)</option>
+                <option value="backend">Backend (Code/Tools)</option>
+                <option value="frontend">Frontend (UI/UX)</option>
+                <option value="researcher">Researcher (Analysis)</option>
+                <option value="reviewer">Reviewer (Code Review)</option>
               </select>
             </div>
             <div class="form-group">
               <label class="form-label">Provider</label>
               <select id="add-provider" class="form-select">
-                <option value="deepseek">deepseek</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="google">Google</option>
+                <option value="custom">Custom</option>
               </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Model</label>
+              <input type="text" id="add-model" class="form-input" placeholder="e.g., deepseek-chat, gpt-4o" value="deepseek-chat">
+            </div>
+            <div class="form-group">
+              <label class="form-label">API Endpoint <span style="font-size:0.7rem;color:var(--text-muted);">(optional)</span></label>
+              <input type="text" id="add-endpoint" class="form-input" placeholder="https://api.example.com/v1">
             </div>
           </div>
           <div class="form-row">
@@ -149,8 +169,13 @@
         <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:16px;">📤 Dispatch Task</h3>
         <form id="dispatch-form" onsubmit="return false;">
           <div class="form-group">
-            <label class="form-label">Worker(s) * <span style="font-size:0.7rem;color:var(--text-muted);">— comma-separated</span></label>
-            <input type="text" id="dispatch-workers" class="form-input" placeholder="worker-1, worker-2" required>
+            <label class="form-label">Worker(s) *</label>
+            <select id="dispatch-workers" class="form-select" multiple style="height:100px;">
+              {% for w in workers %}
+              <option value="{{ w.name }}">{{ w.name }} ({{ w.get('model', '?') }})</option>
+              {% endfor %}
+            </select>
+            <span style="font-size:0.7rem;color:var(--text-muted);">Hold Ctrl to select multiple workers</span>
           </div>
           <div class="form-group">
             <label class="form-label">Task *</label>

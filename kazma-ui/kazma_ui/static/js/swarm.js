@@ -365,6 +365,48 @@
     init();
   }
 
+  // Role presets
+  var rolePresets = {
+    orchestrator: {
+      model: 'deepseek-chat',
+      provider: 'deepseek',
+      description: 'Supervisor that coordinates other workers'
+    },
+    observer: {
+      model: 'deepseek-chat',
+      provider: 'deepseek',
+      description: 'Monitors and reports on agent activity'
+    },
+    backend: {
+      model: 'deepseek-chat',
+      provider: 'deepseek',
+      description: 'Code execution, tools, and backend tasks'
+    },
+    frontend: {
+      model: 'deepseek-chat',
+      provider: 'deepseek',
+      description: 'UI/UX, adapters, and gateway work'
+    },
+    researcher: {
+      model: 'deepseek-chat',
+      provider: 'deepseek',
+      description: 'Research, analysis, and documentation'
+    },
+    reviewer: {
+      model: 'deepseek-chat',
+      provider: 'deepseek',
+      description: 'Code review and quality assurance'
+    }
+  };
+
+  function applyRole(role) {
+    var preset = rolePresets[role];
+    if (!preset) return;
+    document.getElementById('add-model').value = preset.model;
+    document.getElementById('add-provider').value = preset.provider;
+    showToast('Applied ' + role + ' preset', true);
+  }
+
   // Expose for onclick handlers
   window.KazmaSwarm = {
     refresh: refreshStatus,
@@ -375,5 +417,6 @@
     stop: function() { swarmAction('stop'); },
     viewLogs: viewLogs,
     closeLogs: closeLogs,
+    applyRole: applyRole,
   };
 })();
