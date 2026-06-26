@@ -194,6 +194,16 @@ def create_app(config_path: str | None = None) -> FastAPI:
             {
                 "config": agent.config,
                 "active_page": "dashboard",
+                "cost_current": 0.0,
+                "cost_max": 0.50,
+                "cost_headroom": 0.50,
+                "cost_color": "var(--success)",
+                "breaker_status": "closed",
+                "breaker_color": "var(--success)",
+                "silence_info": "",
+                "tracing_backend": "console",
+                "traces": [],
+                "metrics": {},
             },
         )
 
