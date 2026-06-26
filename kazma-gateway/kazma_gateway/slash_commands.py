@@ -5,15 +5,17 @@ ever reaches the agent.  This keeps responses instant (<50ms) and
 saves tokens.
 
 Registered commands:
-  /help     — list available commands
-  /reset    — clear conversation history
-  /status   — return gateway health overview
-  /model    — show active model
-  /memory   — toggle or report memory stats
-  /cost     — show token spend for this session
-  /undo     — remove the last agent response from chat
-  /edit     — edit the last agent response with corrected text
-  /replay   — time travel: list snapshots, replay, or compare iterations
+  /help         — list available commands grouped by category
+  /reset        — clear conversation history
+  /status       — return gateway health overview
+  /model        — show active model
+  /memory       — report memory stats
+  /cost         — show token spend for this session
+  /undo         — remove the last agent response from chat
+  /edit         — edit the last agent response with corrected text
+  /replay       — time travel: list snapshots, replay, or compare
+  /personality  — show, list, or switch agent personality (core tool)
+  /context      — context window token usage report (core tool)
 """
 
 from __future__ import annotations
@@ -97,18 +99,25 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
 def _cmd_help() -> str:
     return (
         "*Available commands:*\n\n"
-        "• `/help` — Show this list\n"
+        "🔄 *Session*\n"
         "• `/reset` — Clear conversation history\n"
-        "• `/status` — Gateway health overview\n"
-        "• `/model` — Show active model\n"
-        "• `/memory` — Report memory usage\n"
-        "• `/cost` — Token spend this session\n"
         "• `/undo` — Remove last agent response\n"
-        "• `/edit <text>` — Correct last agent response\n\n"
+        "• `/edit <text>` — Correct last agent response\n"
         "• `/replay list` — Show available snapshots\n"
         "• `/replay <iteration>` — Replay from iteration\n"
         "• `/replay compare <a> <b>` — Compare two runs\n"
         "• `/replay clear` — Clear snapshots for this thread\n\n"
+        "🔧 *Tools*\n"
+        "• `/personality` — Show current personality\n"
+        "• `/personality list` — List all available personalities\n"
+        "• `/personality <name>` — Switch personality\n"
+        "• `/context` — Show context window usage\n\n"
+        "ℹ️ *Info*\n"
+        "• `/help` — Show this list\n"
+        "• `/status` — Gateway health overview\n"
+        "• `/model` — Show active model\n"
+        "• `/memory` — Report memory usage\n"
+        "• `/cost` — Token spend this session\n\n"
         "For anything else, just ask the agent directly!"
     )
 

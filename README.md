@@ -65,6 +65,36 @@ kazma-core/              Agent graph, ReAct supervisor, sub-agents, model router
 
 ---
 
+## ✨ Features
+
+| Category | Feature | Description |
+|:---|:---|:---|
+| 🧠 **Agent** | ReAct Supervisor | LangGraph-based agent with tool-calling loop and SQLite checkpointing |
+| | Sub-Agent Spawning | Delegate tasks to child graphs with isolated contexts |
+| | Cron Autonomy | Scheduled agent actions with SQLite persistence |
+| | Auto-Summarization | Context compaction when token window fills up (4K threshold) |
+| 🔧 **Tools** | Web Search | DuckDuckGo-powered search returning markdown results |
+| | URL Reader | Fetch + extract readable content via trafilatura (8K char cap) |
+| | Code Execution | Sandboxed Python subprocess (`-I` isolated, 30s timeout, 512MB limit) |
+| | Image Generation | pollinations.ai-backed image gen, saved to `kazma-data/images/` |
+| | File I/O | Read/write files through the agent (with HITL gates) |
+| 🎭 **Personalities** | 8 Built-in Profiles | `default`, `friendly_expert`, `concise`, `gulf_engineer`, `creative_partner`, `sysadmin`, `teacher`, `code_reviewer` |
+| | Runtime Switching | `/personality` — instant, zero-token change at any time |
+| 💬 **UX** | Slash Commands | 11 instant commands: `/help`, `/reset`, `/status`, `/model`, `/memory`, `/cost`, `/undo`, `/edit`, `/replay`, `/personality`, `/context` |
+| | Quick Reply Buttons | Telegram inline keyboards for HITL approvals + personality selection |
+| | Proactive Suggestions | Post-task next-step hints + automatic tool-intent detection |
+| | Rate Feedback | Friendly cooldown messages when user hits rate limits |
+| | Context Indicator | Token usage report with role breakdown via `/context` |
+| 🌍 **Platform** | Telegram Adapter | Full Telegram bot support with MarkdownV2 + typing indicators |
+| | Discord Adapter | Native Markdown, rate-limited |
+| | Cross-Platform Gateway | Platform-agnostic backend registry, reply metadata envelope |
+| 🔒 **Safety** | HITL Approval Gates | Tiered tool approval: safe/warning/danger, inline keyboard approve/deny |
+| | Cost Circuit Breaker | Budget-aware — halts agent when limit reached |
+
+Slash commands are resolved in <50ms without any LLM call. See the [slash commands reference](docs/slash-commands.md) for full details.
+
+---
+
 ## 📦 Quick Start
 
 ### Prerequisites
