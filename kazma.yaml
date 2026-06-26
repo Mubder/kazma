@@ -25,6 +25,10 @@ mcp:
     - -y
     - '@modelcontextprotocol/server-filesystem'
     - /tmp
+  ide_server:
+    enabled: true
+    root: .
+    max_file_size: 1048576
 system_prompt: 'You are Kazma (كاظمه), an autonomous AI agent framework.
 
   You understand Arabic dialects including Kuwaiti/Gulf Arabic.
