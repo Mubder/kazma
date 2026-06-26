@@ -51,6 +51,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC
 from pathlib import Path
+import types as _types
+import typing as _typing
 from typing import Any, get_type_hints
 
 logger = logging.getLogger(__name__)
@@ -114,8 +116,8 @@ def _python_type_to_json_schema(tp: Any) -> dict[str, Any]:
     if origin is dict:
         return {"type": "object"}
 
-    # Optional[X] = Union[X, None]
-    if origin is type:
+    # Optional[X] = Union[X, None] or X | None (Python 3.10+)
+    if origin is _typing.Union or isinstance(tp, _types.UnionType):
         args = getattr(tp, "__args__", ())
         non_none = [a for a in args if a is not type(None)]
         if len(non_none) == 1:

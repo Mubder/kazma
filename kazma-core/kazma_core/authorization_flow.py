@@ -346,6 +346,10 @@ class AuthorizationFlow:
                     continue
                 if now > expires:
                     req.status = "expired"
+                    # Revoke the viewer role that was granted on approval
+                    await self.rbac.revoke_role(
+                        req.user_id, req.target_division, "viewer",
+                    )
                     expired.append(req.id)
-                    logger.info("Request %s expired", req.id[:8])
+                    logger.info("Request %s expired (role revoked)", req.id[:8])
         return expired

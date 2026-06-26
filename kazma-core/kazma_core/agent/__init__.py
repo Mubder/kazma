@@ -12,11 +12,11 @@ from kazma_core.agent.graph_builder import build_supervisor_graph, create_superv
 from kazma_core.agent.state import NodeName, SupervisorState, initial_supervisor_state
 from kazma_core.agent.tool_registry import LocalToolRegistry, tool
 
-# ── Backward-compatible re-exports from the legacy agent module ─────
-# The old kazma_core/agent.py was moved to kazma_core/_legacy_agent.py
+# ── Backward-compatible re-exports from the agent runner module ─────
+# The old kazma_core/agent.py was moved to kazma_core/agent_runner.py
 # to avoid circular imports when this package was created.
 try:
-    from kazma_core._legacy_agent import (  # noqa: F401
+    from kazma_core.agent_runner import (  # noqa: F401
         CHECKPOINT_DB,
         MAX_ITERATIONS,
         AgentConfig,

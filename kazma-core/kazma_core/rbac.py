@@ -276,6 +276,27 @@ class RBACEngine:
 
     # ─── Permission Checks ────────────────────────────────────────────
 
+    async def _get_permissions_for_role(
+        self, division: str, role: str,
+    ) -> dict[str, list[str]]:
+        """Get permissions for a role in a division from the DB.
+
+        Falls back to the hardcoded ``_DEFAULT_PERMISSIONS`` matrix only
+        when the ``division_permissions`` table has no rows for this
+        division/role combination (e.g. first run before seeding).
+        """
+        db = await self._get_db()
+        cursor = await db.execute(
+            "SELECT resource_pattern, actions FROM division_permissions "
+            "WHERE division = ? AND role = ?",
+            (division, role),
+        )
+        rows = await cursor.fetchall()
+        if rows:
+            return {row["resource_pattern"]: json.loads(row["actions"]) for row in rows}
+        # Fallback only when DB table is truly empty for this combo
+        return _DEFAULT_PERMISSIONS.get(division, {}).get(role, {})
+
     async def check_permission(
         self,
         user_id: str,
@@ -332,8 +353,8 @@ class RBACEngine:
                 highest_role = role
                 break
 
-        # 3. Check permission matrix
-        permissions = _DEFAULT_PERMISSIONS.get(division, {}).get(highest_role, {})
+        # 3. Check permission matrix (from DB, with hardcoded fallback)
+        permissions = await self._get_permissions_for_role(division, highest_role)
 
         # Check exact resource match first, then wildcard
         allowed_actions: list[str] = []
