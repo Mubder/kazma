@@ -1,4 +1,4 @@
-# Kazma 🇰🇼 كاظمة
+# Kazma - كاظمة
 
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
