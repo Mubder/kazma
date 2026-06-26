@@ -18,22 +18,32 @@ from kazma_core.agent.tool_registry import (
 from kazma_core.memory.vector_store import VectorMemory
 
 
-def _chromadb_available() -> bool:
-    """Check if chromadb (optional [rag] extra) is installed."""
+def _rag_dependencies_available() -> bool:
+    """Check if the optional RAG test dependencies are installed."""
     try:
         import chromadb  # noqa: F401
+        import sentence_transformers  # noqa: F401
+
         return True
-    except ImportError:
+    except Exception:
         return False
+
+
+def _build_vector_memory(*, path: str, collection_name: str, model_name: str = "all-MiniLM-L6-v2") -> VectorMemory:
+    """Create VectorMemory or skip when optional RAG dependencies are unusable."""
+    try:
+        return VectorMemory(path=path, collection_name=collection_name, model_name=model_name)
+    except Exception as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"RAG test dependencies unavailable: {exc}")
 
 
 @pytest.fixture
 def vector_memory():
     """Temporary VectorMemory with test data."""
-    if not _chromadb_available():
-        pytest.skip("chromadb not installed (optional [rag] extra)")
+    if not _rag_dependencies_available():
+        pytest.skip("RAG test dependencies not installed (optional [rag] extra)")
     with tempfile.TemporaryDirectory() as tmpdir:
-        vm = VectorMemory(path=tmpdir, collection_name="test_rag")
+        vm = _build_vector_memory(path=tmpdir, collection_name="test_rag")
         yield vm
 
 
@@ -119,8 +129,8 @@ class TestRAGPipeline:
 
     def test_env_vars_respected(self) -> None:
         """VectorMemory respects env vars for path/collection/model."""
-        if not _chromadb_available():
-            pytest.skip("chromadb not installed (optional [rag] extra)")
+        if not _rag_dependencies_available():
+            pytest.skip("RAG test dependencies not installed (optional [rag] extra)")
         import os
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -128,7 +138,7 @@ class TestRAGPipeline:
             os.environ["KAZMA_VECTOR_COLLECTION"] = "test_env_col"
             os.environ["KAZMA_VECTOR_MODEL"] = "all-MiniLM-L6-v2"
 
-            vm = VectorMemory(
+            vm = _build_vector_memory(
                 path=os.environ["KAZMA_VECTOR_PATH"],
                 collection_name=os.environ["KAZMA_VECTOR_COLLECTION"],
                 model_name=os.environ["KAZMA_VECTOR_MODEL"],

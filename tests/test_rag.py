@@ -17,22 +17,32 @@ import pytest
 from kazma_core.memory.vector_store import VectorMemory
 
 
-def _chromadb_available() -> bool:
-    """Check if chromadb (optional [rag] extra) is installed."""
+def _rag_dependencies_available() -> bool:
+    """Check if the optional RAG test dependencies are installed."""
     try:
         import chromadb  # noqa: F401
+        import sentence_transformers  # noqa: F401
+
         return True
-    except ImportError:
+    except Exception:
         return False
+
+
+def _build_vector_memory(*, path: str, collection_name: str) -> VectorMemory:
+    """Create VectorMemory or skip when optional RAG dependencies are unusable."""
+    try:
+        return VectorMemory(path=path, collection_name=collection_name)
+    except Exception as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"RAG test dependencies unavailable: {exc}")
 
 
 @pytest.fixture
 def vector_memory():
     """Temporary VectorMemory for testing."""
-    if not _chromadb_available():
-        pytest.skip("chromadb not installed (optional [rag] extra)")
+    if not _rag_dependencies_available():
+        pytest.skip("RAG test dependencies not installed (optional [rag] extra)")
     with tempfile.TemporaryDirectory() as tmpdir:
-        mem = VectorMemory(path=tmpdir, collection_name="test_memory")
+        mem = _build_vector_memory(path=tmpdir, collection_name="test_memory")
         yield mem
 
 

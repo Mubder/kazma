@@ -62,13 +62,18 @@ for i in range(5):
         assert len(result) < 5000
 
     @pytest.mark.asyncio
-    async def test_python_exec_isolated(self) -> None:
-        """Isolated mode (-I) blocks site-packages."""
-        # numpy is not in isolated mode's path
-        result = await python_exec("import numpy")
+    async def test_python_exec_isolated(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Isolated mode (-I) ignores caller-controlled import paths."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            module_path = os.path.join(tmpdir, "shadowmod.py")
+            with open(module_path, "w", encoding="utf-8") as module_file:
+                module_file.write("VALUE = 1\n")
+
+            monkeypatch.setenv("PYTHONPATH", tmpdir)
+            result = await python_exec("import shadowmod")
+
         assert "[Exit code:" in result
-        # Should fail with ModuleNotFoundError or ImportError
-        assert "Error" in result or "error" in result.lower()
+        assert "ModuleNotFoundError" in result
 
     @pytest.mark.asyncio
     async def test_python_exec_cleanup(self) -> None:
