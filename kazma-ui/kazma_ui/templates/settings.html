@@ -8,6 +8,7 @@
         <button class="settings-tab" :class="{ active: tab === 'model' }" @click="tab = 'model'">Model</button>
         <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="tab = 'agent'">Agent</button>
         <button class="settings-tab" :class="{ active: tab === 'cost' }" @click="tab = 'cost'">Cost</button>
+        <button class="settings-tab" :class="{ active: tab === 'connectors' }" @click="tab = 'connectors'">Connectors</button>
         <button class="settings-tab" :class="{ active: tab === 'import' }" @click="tab = 'import'">Import/Export</button>
     </div>
 
@@ -102,6 +103,53 @@
             </div>
             <div class="form-actions">
                 <button class="btn btn-primary" @click="saveCost()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Connectors Settings -->
+    <div class="settings-panel" x-show="tab === 'connectors'">
+        <div class="settings-group">
+            <h3>🔵 Telegram</h3>
+            <div class="form-row">
+                <div class="form-group full-width">
+                    <label>Bot Token</label>
+                    <div class="input-with-toggle">
+                        <input :type="showTelegramToken ? 'text' : 'password'" x-model="connectors.telegram_token" class="form-input" placeholder="123456789:ABC...">
+                        <button class="btn-icon" @click="showTelegramToken = !showTelegramToken" x-text="showTelegramToken ? 'Hide' : 'Show'"></button>
+                    </div>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group full-width">
+                    <label>Allowed User IDs (comma-separated — restricts bot access)</label>
+                    <input type="text" x-model="connectors.telegram_allowed_users" class="form-input" placeholder="1804015016,123456789">
+                </div>
+            </div>
+            <button class="btn btn-primary" @click="saveConnectors()">Save Connectors</button>
+        </div>
+
+        <div class="settings-group">
+            <h3>🟣 Discord</h3>
+            <div class="form-row">
+                <div class="form-group full-width">
+                    <label>Bot Token</label>
+                    <input type="password" x-model="connectors.discord_token" class="form-input" placeholder="MTIzNDU2...">
+                </div>
+            </div>
+        </div>
+
+        <div class="settings-group">
+            <h3>🟢 Slack</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Bot Token (xoxb-...)</label>
+                    <input type="password" x-model="connectors.slack_token" class="form-input" placeholder="xoxb-...">
+                </div>
+                <div class="form-group">
+                    <label>App Token (xapp-...)</label>
+                    <input type="password" x-model="connectors.slack_app_token" class="form-input" placeholder="xapp-...">
+                </div>
             </div>
         </div>
     </div>

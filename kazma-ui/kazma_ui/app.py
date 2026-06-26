@@ -234,6 +234,15 @@ def create_app(config_path: str | None = None) -> FastAPI:
         tg_adapter: TelegramAdapter | None = None
         if telegram_token:
             tg_adapter = TelegramAdapter(token=telegram_token)
+            # Set allowed users from config store
+            allowed = config_store.get("connectors.telegram.allowed_users", "")
+            if allowed:
+                try:
+                    allowed_ids = [int(uid.strip()) for uid in allowed.split(",") if uid.strip()]
+                    tg_adapter._allowed_users = set(allowed_ids)
+                    logger.info("[Gateway] Telegram allowed users: %d IDs", len(allowed_ids))
+                except ValueError:
+                    logger.warning("[Gateway] Invalid allowed_users format: %s", allowed)
             gateway.add_adapter(tg_adapter)
             logger.info("[Gateway] Telegram adapter registered (polling mode)")
 
@@ -244,8 +253,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
         else:
             logger.info("[Gateway] No Telegram token — Telegram adapter skipped")
 
-        # Discord adapter (optional, via env var)
-        discord_token = os.environ.get("DISCORD_BOT_TOKEN", "")
+        # Discord adapter (from config store → env)
+        discord_token = config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
         if discord_token:
             from kazma_gateway.adapters.discord import DiscordAdapter
 
@@ -256,8 +265,9 @@ def create_app(config_path: str | None = None) -> FastAPI:
             logger.info("[Gateway] No DISCORD_BOT_TOKEN — Discord adapter skipped")
 
         # Slack adapter (optional, via env vars)
-        slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
-        slack_app_token = os.environ.get("SLACK_APP_TOKEN", "")
+        # Slack adapter (from config store → env)
+        slack_bot_token = config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
+        slack_app_token = config_store.get("connectors.slack.app_token", "") or os.environ.get("SLACK_APP_TOKEN", "")
         if slack_bot_token and slack_app_token:
             from kazma_gateway.adapters.slack import SlackAdapter
 

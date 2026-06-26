@@ -48,6 +48,13 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
             "max_cost": config_store.get("cost.max_cost", 0.50),
             "silence_window": config_store.get("cost.silence_window", 300),
         }
+        connector_settings = {
+            "telegram_token": config_store.get("connectors.telegram.token", ""),
+            "telegram_allowed_users": config_store.get("connectors.telegram.allowed_users", ""),
+            "discord_token": config_store.get("connectors.discord.token", ""),
+            "slack_token": config_store.get("connectors.slack.token", ""),
+            "slack_app_token": config_store.get("connectors.slack.app_token", ""),
+        }
 
         return templates.TemplateResponse(
             request,
@@ -56,6 +63,7 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
                 "model": model_settings,
                 "agent": agent_settings,
                 "cost": cost_settings,
+                "connectors": connector_settings,
                 "config": agent.config,
             },
         )

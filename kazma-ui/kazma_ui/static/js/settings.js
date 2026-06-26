@@ -4,6 +4,7 @@ function settingsApp() {
     return {
         tab: 'model',
         showKey: false,
+        showTelegramToken: false,
         testing: false,
         testResult: null,
         model: {
@@ -23,6 +24,13 @@ function settingsApp() {
             max_cost: 0.50,
             silence_window: 300
         },
+        connectors: {
+            telegram_token: '',
+            telegram_allowed_users: '',
+            discord_token: '',
+            slack_token: '',
+            slack_app_token: ''
+        },
 
         init() {
             // Load settings from server
@@ -36,6 +44,7 @@ function settingsApp() {
                 if (data.model) Object.assign(this.model, data.model);
                 if (data.agent) Object.assign(this.agent, data.agent);
                 if (data.cost) Object.assign(this.cost, data.cost);
+                if (data.connectors) Object.assign(this.connectors, data.connectors);
             } catch (e) {
                 console.error('Failed to load settings:', e);
             }
@@ -60,6 +69,18 @@ function settingsApp() {
                 return { key: 'cost.' + k, value: v, category: 'cost' };
             });
             await this.save(updates);
+        },
+
+        async saveConnectors() {
+            var updates = [
+                { key: 'connectors.telegram.token', value: this.connectors.telegram_token, category: 'connectors' },
+                { key: 'connectors.telegram.allowed_users', value: this.connectors.telegram_allowed_users, category: 'connectors' },
+                { key: 'connectors.discord.token', value: this.connectors.discord_token, category: 'connectors' },
+                { key: 'connectors.slack.token', value: this.connectors.slack_token, category: 'connectors' },
+                { key: 'connectors.slack.app_token', value: this.connectors.slack_app_token, category: 'connectors' },
+            ];
+            await this.save(updates);
+            showToast('Connectors saved. Restart gateway to apply.', 'success');
         },
 
         async save(updates) {
