@@ -251,6 +251,33 @@ class TestMemoryIntegration:
         assert "f2" in neighbor_ids
 
 
+class TestParallelEdgePreservation:
+    """Parallel edges between the same node pair must not overwrite each other."""
+
+    def test_parallel_relations_preserved(self, kg):
+        """A→works_at→B and A→founded→B must coexist (BUG gw-068 #1)."""
+        kg.add_entity("alice", "person")
+        kg.add_entity("acme", "company")
+        kg.add_relation("alice", "acme", "works_at")
+        kg.add_relation("alice", "acme", "founded")
+
+        rels = kg.query_relations(source="alice", target="acme")
+        rel_types = {r["relation"] for r in rels}
+        assert rel_types == {"works_at", "founded"}
+        assert kg.relation_count == 2
+
+    def test_parallel_relations_in_export(self, kg):
+        """export_subgraph must include all parallel edges."""
+        kg.add_entity("a", "node")
+        kg.add_entity("b", "node")
+        kg.add_relation("a", "b", "r1")
+        kg.add_relation("a", "b", "r2")
+
+        raw = kg.export_subgraph(["a", "b"])
+        data = json.loads(raw)
+        assert len(data["edges"]) == 2
+
+
 class TestBackendValidation:
     """Test backend parameter validation."""
 

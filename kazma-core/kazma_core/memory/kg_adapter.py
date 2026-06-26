@@ -67,7 +67,7 @@ class KnowledgeGraphAdapter:
         else:
             import networkx as nx
             self._engine = None
-            self._graph = nx.DiGraph()
+            self._graph = nx.MultiDiGraph()
 
         # Optional SQLite persistence
         self._db: sqlite3.Connection | None = None

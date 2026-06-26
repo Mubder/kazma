@@ -196,24 +196,33 @@ class KazmaKG:
         source: str,
         target: str,
         weight_delta: float,
+        relation: str | None = None,
     ) -> float:
         """Adjust the weight of an edge by *weight_delta* (reinforcement).
 
         Returns the new weight.
-        Updates *all* parallel edges between source and target.
+        If *relation* is given, only updates edges matching that relation;
+        otherwise updates *all* parallel edges between source and target.
 
-        Raises ``KeyError`` if the edge does not exist.
+        Raises ``KeyError`` if the edge does not exist (or no matching relation).
         """
         with self._lock:
             if not self._graph.has_edge(source, target):
                 raise KeyError(f"Edge ({source!r} -> {target!r}) not found")
             # MultiDiGraph: self._graph[u][v] is {key: data, ...}
             edge_data = self._graph[source][target]
-            first_key = next(iter(edge_data))
-            current = edge_data[first_key].get("weight", 1.0)
+            if relation is not None:
+                targets = {k: d for k, d in edge_data.items() if d.get("relation") == relation}
+                if not targets:
+                    raise KeyError(
+                        f"Edge ({source!r} -> {target!r}, relation={relation!r}) not found"
+                    )
+            else:
+                targets = edge_data
+            first_key = next(iter(targets))
+            current = targets[first_key].get("weight", 1.0)
             new_weight = current + weight_delta
-            # Update all parallel edges between source and target
-            for key in edge_data:
+            for key in targets:
                 self._graph[source][target][key]["weight"] = new_weight
             return new_weight
 
@@ -232,16 +241,20 @@ class KazmaKG:
             if relation is None:
                 if not self._graph.has_edge(source, target):
                     raise KeyError(f"Edge ({source!r} -> {target!r}) not found")
-                self._graph.remove_edge(source, target)
+                # Collect all keys to remove (remove_edge without key only
+                # removes one edge in MultiDiGraph)
+                keys = list(self._graph[source][target].keys())
+                for key in keys:
+                    self._graph.remove_edge(source, target, key)
             else:
                 removed = False
                 # Collect edges to avoid modifying during iteration
                 to_remove = []
-                for u, v, data in self._graph.edges(data=True):
+                for u, v, key, data in self._graph.edges(data=True, keys=True):
                     if u == source and v == target and data.get("relation") == relation:
-                        to_remove.append((u, v))
-                for u, v in to_remove:
-                    self._graph.remove_edge(u, v)
+                        to_remove.append((u, v, key))
+                for u, v, key in to_remove:
+                    self._graph.remove_edge(u, v, key)
                     removed = True
                 if not removed:
                     raise KeyError(

@@ -196,6 +196,57 @@ class TestDeleteEdge:
             kg.delete_edge("a", "z")
 
 
+class TestDeleteEdgeParallel:
+    """Targeted delete must only remove the matching edge, not all parallels (BUG gw-068 #2)."""
+
+    def test_delete_by_relation_preserves_other_parallels(self, kg):
+        kg.add_node("a", "node")
+        kg.add_node("b", "node")
+        kg.add_edge("a", "b", "works_at")
+        kg.add_edge("a", "b", "founded")
+
+        kg.delete_edge("a", "b", relation="works_at")
+        assert kg.edge_count == 1
+        remaining = kg.get_edges(source="a", target="b")
+        assert remaining[0]["relation"] == "founded"
+
+    def test_delete_all_without_relation(self, kg):
+        """delete_edge(u, v) without relation removes all parallel edges."""
+        kg.add_node("a", "node")
+        kg.add_node("b", "node")
+        kg.add_edge("a", "b", "r1")
+        kg.add_edge("a", "b", "r2")
+
+        kg.delete_edge("a", "b")
+        assert kg.edge_count == 0
+
+
+class TestEdgeWeightUpdateParallel:
+    """Targeted weight update must only affect the matching relation (BUG gw-068 #3)."""
+
+    def test_update_specific_relation_weight(self, kg):
+        kg.add_node("a", "node")
+        kg.add_node("b", "node")
+        kg.add_edge("a", "b", "knows", weight=1.0)
+        kg.add_edge("a", "b", "likes", weight=2.0)
+
+        new_w = kg.update_edge_weight("a", "b", 0.5, relation="knows")
+        assert new_w == pytest.approx(1.5)
+
+        knows = kg.get_edges(source="a", target="b", relation="knows")
+        likes = kg.get_edges(source="a", target="b", relation="likes")
+        assert knows[0]["weight"] == pytest.approx(1.5)
+        assert likes[0]["weight"] == pytest.approx(2.0)  # untouched
+
+    def test_update_missing_relation_raises(self, kg):
+        kg.add_node("a", "node")
+        kg.add_node("b", "node")
+        kg.add_edge("a", "b", "knows", weight=1.0)
+
+        with pytest.raises(KeyError, match="relation"):
+            kg.update_edge_weight("a", "b", 0.5, relation="nonexistent")
+
+
 # ------------------------------------------------------------------
 # Traversal tests
 # ------------------------------------------------------------------
