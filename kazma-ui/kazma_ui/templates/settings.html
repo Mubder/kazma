@@ -16,6 +16,20 @@
     <div x-show="tab === 'model'">
         <div class="card">
             <div class="card-title">LLM Provider</div>
+            <div class="form-group">
+                <label class="form-label">Provider</label>
+                <select x-model="provider" @change="onProviderChange()" class="form-select">
+                    <option value="">Custom</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="google">Google Gemini</option>
+                    <option value="xai">xAI / Grok</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="ollama">Ollama (Local)</option>
+                    <option value="lm-studio">LM Studio (Local)</option>
+                </select>
+            </div>
             <div class="form-row">
                 <div class="form-group">
                     <label class="form-label">Base URL</label>
@@ -32,7 +46,16 @@
             <div class="form-row">
                 <div class="form-group">
                     <label class="form-label">Model</label>
-                    <input type="text" x-model="model.model" class="form-input" placeholder="gpt-4o-mini">
+                    <div style="display:flex;gap:4px">
+                        <input type="text" x-model="model.model" class="form-input" placeholder="gpt-4o-mini" style="flex:1">
+                        <button class="btn btn-secondary btn-sm" @click="fetchModels()" x-text="fetchingModels ? '...' : 'Fetch'"></button>
+                    </div>
+                    <select x-show="availableModels.length > 0" x-model="model.model" class="form-select" style="margin-top:4px">
+                        <option value="">— select model —</option>
+                        <template x-for="m in availableModels">
+                            <option :value="m" x-text="m"></option>
+                        </template>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Max Tokens</label>
@@ -156,7 +179,10 @@ function settingsApp() {
         showKey: false,
         showTelegramToken: false,
         testing: false,
+        fetchingModels: false,
         testResult: null,
+        provider: '',
+        availableModels: [],
         model: { base_url: '', api_key: '', model: '', max_tokens: 4096, temperature: 0.7, timeout: 60 },
         agent: { name: 'kazma', language: 'ar', system_prompt: '' },
         connectors: { telegram_token: '', telegram_allowed_users: '', discord_token: '', slack_token: '', slack_app_token: '' },
@@ -206,11 +232,51 @@ function settingsApp() {
 
         async testModel() {
             this.testing = true; this.testResult = null;
+            if (!this.model.model) { this.testResult = { success: false, error: 'Enter a model name first, or click Fetch to list available models' }; this.testing = false; return; }
             try {
                 var resp = await fetch('/api/settings/test-model', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this.model) });
                 this.testResult = await resp.json();
+                if (!this.testResult.success && this.testResult.error && this.testResult.error.includes('400')) {
+                    this.testResult.error = 'Model not found. Click Fetch to see available models for this provider, or check your API key.';
+                }
             } catch (e) { this.testResult = { success: false, error: e.message }; }
             this.testing = false;
+        },
+
+        onProviderChange() {
+            var presets = {
+                'openai': 'https://api.openai.com/v1',
+                'anthropic': 'https://api.anthropic.com/v1',
+                'deepseek': 'https://api.deepseek.com/v1',
+                'google': 'https://generativelanguage.googleapis.com/v1beta',
+                'xai': 'https://api.x.ai/v1',
+                'openrouter': 'https://openrouter.ai/api/v1',
+                'ollama': 'http://127.0.0.1:11434/v1',
+                'lm-studio': 'http://localhost:1234/v1',
+            };
+            if (this.provider && presets[this.provider]) {
+                this.model.base_url = presets[this.provider];
+            }
+            this.availableModels = [];
+        },
+
+        async fetchModels() {
+            if (!this.model.base_url) { showToast('Enter a base URL first', 'error'); return; }
+            this.fetchingModels = true;
+            try {
+                var url = '/api/models?base_url=' + encodeURIComponent(this.model.base_url);
+                if (this.model.api_key) { url += '&api_key=' + encodeURIComponent(this.model.api_key); }
+                if (this.provider) { url += '&provider=' + this.provider; }
+                var resp = await fetch(url);
+                var data = await resp.json();
+                if (data.models && data.models.length > 0) {
+                    this.availableModels = data.models;
+                    showToast(data.models.length + ' models found', 'success');
+                } else {
+                    showToast('No models returned. Check your API key and base URL.', 'error');
+                }
+            } catch (e) { showToast('Failed to fetch models: ' + e.message, 'error'); }
+            this.fetchingModels = false;
         },
 
         async importYaml(event) {
