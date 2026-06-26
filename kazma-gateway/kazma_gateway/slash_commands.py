@@ -16,14 +16,60 @@ Registered commands:
   /replay       — time travel: list snapshots, replay, or compare
   /personality  — show, list, or switch agent personality (core tool)
   /context      — context window token usage report (core tool)
+  /config       — interactive config wizard (show, model, personality, memory, tools, export)
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
+import yaml
+
 logger = logging.getLogger(__name__)
+
+# ── Config path / cache ──────────────────────────────────────────────
+
+_CONFIG_PATH: Path | None = None
+_CONFIG_CACHE: dict[str, Any] | None = None
+_CONFIG_CACHE_MTIME: float = 0.0
+
+
+def _get_config_path() -> Path:
+    global _CONFIG_PATH
+    if _CONFIG_PATH is not None:
+        return _CONFIG_PATH
+    # Walk up from this file to find kazma.yaml in repo root
+    p = Path(__file__).resolve().parent
+    while p != p.parent:
+        candidate = p / "kazma.yaml"
+        if candidate.exists():
+            _CONFIG_PATH = candidate
+            return candidate
+        p = p.parent
+    raise FileNotFoundError("kazma.yaml not found")
+
+
+def _load_config() -> dict[str, Any]:
+    global _CONFIG_CACHE, _CONFIG_CACHE_MTIME
+    path = _get_config_path()
+    mtime = path.stat().st_mtime
+    if _CONFIG_CACHE is not None and mtime == _CONFIG_CACHE_MTIME:
+        return _CONFIG_CACHE
+    with open(path, "r", encoding="utf-8") as f:
+        _CONFIG_CACHE = yaml.safe_load(f) or {}
+    _CONFIG_CACHE_MTIME = mtime
+    return _CONFIG_CACHE
+
+
+def _save_config(config: dict[str, Any]) -> None:
+    global _CONFIG_CACHE_MTIME
+    path = _get_config_path()
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    _CONFIG_CACHE_MTIME = path.stat().st_mtime
 
 # Re-exported for dispatcher.py
 CMD_UNDO = "/undo"
@@ -92,6 +138,8 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
         return _cmd_edit(text, ctx)
     if cmd == "/replay":
         return _cmd_replay(text, ctx)
+    if cmd == "/config":
+        return _cmd_config(text, ctx)
 
     return None  # not a recognised command → passed to LLM
 
@@ -112,6 +160,14 @@ def _cmd_help() -> str:
         "• `/personality list` — List all available personalities\n"
         "• `/personality <name>` — Switch personality\n"
         "• `/context` — Show context window usage\n\n"
+        "⚙️ *Config*\n"
+        "• `/config show` — Display current configuration\n"
+        "• `/config model <name>` — Switch model\n"
+        "• `/config personality <name>` — Switch personality\n"
+        "• `/config memory on|off` — Toggle memory\n"
+        "• `/config tools list` — Show configured tools\n"
+        "• `/config tools toggle <name>` — Enable/disable a tool\n"
+        "• `/config export` — Export config as JSON\n\n"
         "ℹ️ *Info*\n"
         "• `/help` — Show this list\n"
         "• `/status` — Gateway health overview\n"
@@ -350,3 +406,228 @@ def _replay_clear(engine_cls, thread_id: str) -> str:
         return f"⚠️ Could not clear snapshots: {exc}"
 
     return f"🗑️ Cleared {count} snapshot(s) for this thread."
+
+
+# ── Config Wizard ──────────────────────────────────────────────────────
+
+
+def _cmd_config(text: str, ctx: dict[str, Any]) -> str:
+    """Handle /config sub-commands.
+
+    Sub-commands:
+        /config show                        — display current config table
+        /config model <name>                — switch model
+        /config personality <name>          — switch personality (delegates)
+        /config memory on|off               — toggle memory
+        /config tools list                  — show enabled tools
+        /config tools toggle <name>         — enable/disable a tool
+        /config export                      — export config as JSON
+    """
+    parts = text.strip().split()
+    sub = parts[1].lower() if len(parts) > 1 else "show"
+
+    if sub in ("show", ""):
+        return _config_show(ctx)
+    if sub == "model":
+        return _config_model(parts, ctx)
+    if sub == "personality":
+        return _config_personality(parts)
+    if sub == "memory":
+        return _config_memory(parts)
+    if sub == "tools":
+        return _config_tools(parts, ctx)
+    if sub == "export":
+        return _config_export()
+    return _config_usage()
+
+
+def _config_show(ctx: dict[str, Any]) -> str:
+    """Format current config as a table."""
+    config = _load_config()
+    model = _resolve_current_model(config, ctx)
+    personality = _resolve_personality(config)
+    memory_enabled = config.get("memory", {}).get("enabled", True)
+    tools = _list_tool_names(config)
+
+    lines = [
+        "⚙️ *Current Configuration*",
+        "",
+        "```",
+        f"{'Setting':<20} {'Value':<30}",
+        f"{'───────':<20} {'─────':<30}",
+        f"{'Model':<20} {model:<30}",
+        f"{'Personality':<20} {personality:<30}",
+        f"{'Memory':<20} {'enabled' if memory_enabled else 'disabled':<30}",
+        f"{'Tools':<20} {', '.join(tools) if tools else '(none)':<30}",
+        "```",
+    ]
+    return "\n".join(lines)
+
+
+def _config_model(parts: list, ctx: dict[str, Any]) -> str:
+    """Switch the active model."""
+    if len(parts) < 3:
+        current = _resolve_current_model(_load_config(), ctx)
+        return f"🧠 Current model: **{current}**\n\nUsage: `/config model <name>`"
+
+    model_name = parts[2].lower()
+    # Persist to kazma.yaml
+    try:
+        config = _load_config()
+        config.setdefault("models", {})["default"] = model_name
+        config.setdefault("llm", {})["model"] = model_name
+        _save_config(config)
+        return f"✅ Switched to **{model_name}**.  Restart or reload for the change to take full effect."
+    except Exception as exc:
+        logger.warning("[slash] /config model save failed: %s", exc)
+        return f"✅ Switched to **{model_name}** _(config write skipped: {exc})_"
+
+
+def _config_personality(parts: list) -> str:
+    """Delegate personality switching to kazma-core."""
+    # Reconstruct the equivalent /personality command
+    if len(parts) < 3:
+        sub_text = "/personality"
+    else:
+        sub_text = f"/personality {parts[2]}"
+    try:
+        from kazma_core.tools.personality_cmd import handle_personality_command
+        return handle_personality_command(sub_text)
+    except ImportError:
+        logger.info("[slash] kazma_core.tools.personality_cmd not available")
+        return "🎭 Personality switching is handled by the agent. Try `/personality` directly."
+
+
+def _config_memory(parts: list) -> str:
+    """Toggle memory on/off."""
+    if len(parts) < 3 or parts[2].lower() not in ("on", "off"):
+        config = _load_config()
+        state = "enabled" if config.get("memory", {}).get("enabled", True) else "disabled"
+        return f"💾 Memory is currently **{state}**.\n\nUsage: `/config memory on` or `/config memory off`"
+
+    toggle = parts[2].lower()
+    try:
+        config = _load_config()
+        config.setdefault("memory", {})["enabled"] = (toggle == "on")
+        _save_config(config)
+        return f"💾 Memory **{toggle.upper()}**.  Restart for the change to take full effect."
+    except Exception as exc:
+        logger.warning("[slash] /config memory save failed: %s", exc)
+        return f"💾 Memory **{toggle.upper()}** _(config write skipped: {exc})_"
+
+
+def _config_tools(parts: list, ctx: dict[str, Any]) -> str:
+    """Handle /config tools sub-commands."""
+    if len(parts) < 3:
+        return _config_usage()
+
+    action = parts[2].lower()
+    config = _load_config()
+
+    if action == "list":
+        tools = _list_tool_names(config)
+        if not tools:
+            return "🔧 No tools configured.\n\nAdd tools to `mcp.servers` in kazma.yaml."
+        lines = ["🔧 *Configured Tools:*", ""]
+        for t in tools:
+            line = f"• `{t}`"
+            if _tool_is_disabled(config, t):
+                line += " _(disabled)_"
+            lines.append(line)
+        return "\n".join(lines)
+
+    if action == "toggle" and len(parts) >= 4:
+        tool_name = parts[3].lower()
+        tools = _list_tool_names(config)
+        if tool_name not in [t.lower() for t in tools]:
+            available = ", ".join(tools) if tools else "(none)"
+            return f"❌ Unknown tool: `{tool_name}`\n\nAvailable: {available}"
+        try:
+            was_enabled = not _tool_is_disabled(config, tool_name)
+            _toggle_tool(config, tool_name, not was_enabled)
+            _save_config(config)
+            new_state = "enabled" if not was_enabled else "disabled"
+            return f"🔧 Tool `{tool_name}` **{new_state}**."
+        except Exception as exc:
+            logger.warning("[slash] /config tools toggle save failed: %s", exc)
+            return f"🔧 Tool `{tool_name}` toggled _(config write skipped: {exc})_"
+
+    return "Usage: `/config tools list` or `/config tools toggle <name>`"
+
+
+def _config_export() -> str:
+    """Export current config as JSON."""
+    try:
+        config = _load_config()
+        # Redact sensitive keys
+        safe = dict(config)
+        if "llm" in safe and "api_key" in safe["llm"]:
+            safe["llm"]["api_key"] = "***REDACTED***"
+        for conn in safe.get("connectors", {}).values():
+            if isinstance(conn, dict) and "token" in conn:
+                conn["token"] = "***REDACTED***"
+        return f"```json\n{json.dumps(safe, indent=2, ensure_ascii=False)}\n```"
+    except Exception as exc:
+        logger.warning("[slash] /config export failed: %s", exc)
+        return f"⚠️ Could not export config: {exc}"
+
+
+def _config_usage() -> str:
+    return (
+        "⚙️ *Config Wizard — available sub-commands:*\n\n"
+        "• `/config show` — Display current configuration\n"
+        "• `/config model <name>` — Switch model\n"
+        "• `/config personality <name>` — Switch personality\n"
+        "• `/config memory on|off` — Toggle memory\n"
+        "• `/config tools list` — Show configured tools\n"
+        "• `/config tools toggle <name>` — Enable/disable a tool\n"
+        "• `/config export` — Export config as JSON"
+    )
+
+
+# ── Config helpers ────────────────────────────────────────────────────
+
+
+def _resolve_current_model(config: dict[str, Any], ctx: dict[str, Any]) -> str:
+    """Resolve the current model from ctx or config."""
+    return ctx.get("model") or config.get("llm", {}).get("model") or config.get("models", {}).get("default", "unknown")
+
+
+def _resolve_personality(config: dict[str, Any]) -> str:
+    """Resolve the current personality name."""
+    try:
+        from kazma_core.personalities import get_current_personality
+        return get_current_personality(config=config).name
+    except ImportError:
+        return config.get("agent", {}).get("personality", "default")
+
+
+def _list_tool_names(config: dict[str, Any]) -> list[str]:
+    """List tool/server names from MCP config."""
+    servers = config.get("mcp", {}).get("servers", [])
+    if not servers:
+        return []
+    names: list[str] = []
+    for s in servers:
+        if isinstance(s, dict):
+            name = s.get("name", "unnamed")
+            names.append(name)
+    return names
+
+
+def _tool_is_disabled(config: dict[str, Any], tool_name: str) -> bool:
+    """Check if a tool is explicitly disabled."""
+    disabled: list[str] = config.get("mcp", {}).get("disabled_servers", [])
+    return tool_name.lower() in [d.lower() for d in disabled]
+
+
+def _toggle_tool(config: dict[str, Any], tool_name: str, enable: bool) -> None:
+    """Toggle a tool in the disabled_servers list."""
+    disabled: list[str] = config.setdefault("mcp", {}).setdefault("disabled_servers", [])
+    if enable:
+        # Remove from disabled list
+        config["mcp"]["disabled_servers"] = [d for d in disabled if d.lower() != tool_name.lower()]
+    else:
+        # Add to disabled list if not present
+        if tool_name.lower() not in [d.lower() for d in disabled]:
+            disabled.append(tool_name)
