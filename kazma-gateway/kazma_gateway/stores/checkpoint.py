@@ -17,12 +17,13 @@ from pathlib import Path
 from typing import Any
 
 import aiosqlite
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 logger = logging.getLogger(__name__)
 
 
-class CheckpointManager:
+class CheckpointManager(BaseCheckpointSaver):
     """Thread-safe wrapper around AsyncSqliteSaver.
 
     Prevents race conditions during concurrent writes to the same
