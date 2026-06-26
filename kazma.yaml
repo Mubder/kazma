@@ -67,6 +67,8 @@ gateway:
     telegram: 30
     discord: 5
     slack: 1
+  suggestions:
+    enabled: true
 
 safety:
   hitl:

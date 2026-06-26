@@ -514,7 +514,24 @@ class GatewayManager:
 
         for adapter in self.adapters:
             if adapter.name == platform:
-                ok = await adapter.send(outbound)
+                try:
+                    ok = await adapter.send(outbound)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Gateway] Send timed out for %s (platform=%s)",
+                        outbound.target_id,
+                        platform,
+                    )
+                    await self.metrics.record_error()
+                    return False
+                except ConnectionError:
+                    logger.warning(
+                        "[Gateway] Connection issue for %s (platform=%s) — will retry",
+                        outbound.target_id,
+                        platform,
+                    )
+                    await self.metrics.record_error()
+                    return False
                 if ok:
                     await self.metrics.record_outbound()
                 else:
