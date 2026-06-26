@@ -67,6 +67,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             {
                 "servers": servers,
                 "config": agent.config,
+                "active_page": "mcp",
             },
         )
 

@@ -87,6 +87,7 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                 "installed_skills": installed,
                 "hub_results": [],
                 "config": agent.config,
+                "active_page": "skills",
             },
         )
 

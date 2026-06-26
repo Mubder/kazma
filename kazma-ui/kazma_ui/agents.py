@@ -28,6 +28,7 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
     async def agents_page(request: Request) -> HTMLResponse:
         """Render agent management page."""
         agent_info = _get_agent_info(agent)
+        agent_info["active_page"] = "agents"
         return templates.TemplateResponse(
             request,
             "agents.html",

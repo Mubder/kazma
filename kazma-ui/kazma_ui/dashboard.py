@@ -141,6 +141,7 @@ async def dashboard(request: Request) -> HTMLResponse:
             "tracing_backend": tracing_backend,
             "traces": _get_trace_data(),
             "metrics": _get_metrics(),
+            "active_page": "dashboard",
         },
     )
 

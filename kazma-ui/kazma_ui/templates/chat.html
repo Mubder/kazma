@@ -1,61 +1,36 @@
 {% extends "base.html" %}
+{% set active_page = "chat" %}
 {% block title %}Kazma — Chat{% endblock %}
 {% block page_title %}Chat{% endblock %}
 
 {% block content %}
-<div class="chat-container" hx-ws="connect:/ws/chat">
-    <div class="chat-sidebar">
-        <button class="btn btn-primary btn-full" onclick="newSession()">New Chat</button>
-        <div class="session-list" id="session-list">
-            {% for s in sessions %}
-            <div class="session-item" data-id="{{ s.session_id }}" onclick="loadSession('{{ s.session_id }}')">
-                <span class="session-title">Chat {{ loop.index }}</span>
-                <span class="session-meta">{{ s.messages|length }} messages</span>
-            </div>
-            {% endfor %}
-        </div>
+<div id="chat-container" x-data="chatApp()" x-init="init()" style="max-width:800px;margin:0 auto;">
+    <div id="chat-messages" style="min-height:400px;margin-bottom:16px;">
+        <div class="text-muted">Send a message to start chatting with the agent.</div>
     </div>
-
-    <div class="chat-main">
-        <div class="chat-messages" id="messages">
-            <div class="chat-welcome">
-                <div class="welcome-icon">&#x1F30A;</div>
-                <h2>Kazma</h2>
-                <p>How can I help you today?</p>
-            </div>
-        </div>
-
-        <div class="chat-input-area">
-            <div class="input-wrapper">
-                <textarea
-                    id="chat-input"
-                    class="chat-input"
-                    placeholder="Write your message..."
-                    rows="1"
-                    onkeydown="handleInputKeydown(event)"
-                    oninput="autoResize(this)"
-                ></textarea>
-                <button class="send-btn" onclick="sendMessage()" id="send-btn">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-                    </svg>
-                </button>
-            </div>
-            <div class="input-footer">
-                <span class="model-badge" id="model-badge">{{ config.default_model if config else 'gpt-4o-mini' }}</span>
-                <span class="cost-badge" id="session-cost">$0.00</span>
-                <span class="token-badge" id="session-tokens">0 tokens</span>
-            </div>
-        </div>
+    <div style="display:flex;gap:8px">
+        <input type="text" x-model="message" @keydown.enter="send()" class="form-input" placeholder="Type your message..." style="flex:1">
+        <button class="btn btn-primary" @click="send()">Send</button>
     </div>
 </div>
 
-<div class="thinking-indicator" id="thinking-indicator" style="display:none">
-    <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-    <span class="thinking-text">Thinking...</span>
-</div>
-{% endblock %}
-
-{% block scripts %}
-<script src="/static/js/chat.js"></script>
+<script>
+function chatApp() {
+    return {
+        message: '',
+        messages: [],
+        init() {},
+        send() {
+            if (!this.message.trim()) return;
+            var container = document.getElementById('chat-messages');
+            var msg = document.createElement('div');
+            msg.innerHTML = '<strong>You:</strong> ' + this.message;
+            msg.style.marginBottom = '8px';
+            container.appendChild(msg);
+            container.innerHTML += '<div class="text-muted" style="margin-bottom:8px"><em>Sending to agent...</em></div>';
+            this.message = '';
+        }
+    };
+}
+</script>
 {% endblock %}
