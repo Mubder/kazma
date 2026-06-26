@@ -1,0 +1,17 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "redhat.vscode-yaml",
+    "eamodio.gitlens",
+    "charliermarsh.ruff",
+    "ms-python.debugpy",
+    "tamasfe.even-better-toml",
+    "gruntfuggly.todo-tree",
+    "mechatroner.rainbow-csv",
+    "yzhang.markdown-all-in-one"
+  ],
+  "unwantedRecommendations": [
+    "ms-vscode.vscode-typescript-next"
+  ]
+}
