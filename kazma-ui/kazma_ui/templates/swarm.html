@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% set active_page = "swarm" %}
+{% block title %}Kazma — Swarm{% endblock %}
+{% block page_title %}Swarm Management{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-title">Multi-Agent Swarm</div>
+    <p class="text-muted" style="margin-bottom:12px">
+        Manage your multi-worker AI swarm. Add workers with different models and dispatch tasks to them.
+    </p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <a href="/swarm" class="btn btn-primary">Refresh Status</a>
+        <button class="btn btn-secondary" onclick="fetch('/api/swarm/status').then(r=>r.json()).then(d=>alert(JSON.stringify(d,null,2)))">API Status</button>
+    </div>
+    <div class="text-muted" style="margin-top:12px; font-size:12px;">
+        Swarm API endpoints: GET /api/swarm/status, POST /api/swarm/dispatch, POST /api/swarm/workers, DELETE /api/swarm/workers/&lt;name&gt;
+    </div>
+</div>
+{% endblock %}

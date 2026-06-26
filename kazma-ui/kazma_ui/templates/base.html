@@ -333,6 +333,30 @@
             display: flex;
             gap: 6px;
         }
+
+        /* ── MCP ── */
+        .mcp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+        .mcp-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+        .mcp-card h3 { font-size: 15px; margin-bottom: 8px; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+        .badge-stdio { background: #1a3a5c; color: #58a6ff; }
+        .badge-http { background: #1a3a2a; color: var(--green); }
+        .tool-count { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+        .mcp-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+        .status-running { background: var(--green); }
+        .status-stopped { background: var(--red); }
+        .status-unknown { background: var(--yellow); }
+
+        /* ── Skills ── */
+        .skills-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+        .skill-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+        .skill-card h3 { font-size: 14px; margin-bottom: 4px; }
+
+        /* ── Metrics ── */
+        .metrics-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
+        .metric-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; text-align: center; }
+        .metric-value { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+        .metric-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
     </style>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 </head>

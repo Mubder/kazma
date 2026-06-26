@@ -1,15 +1,115 @@
 {% extends "base.html" %}
-{% set active_page = "skills" %}
 {% block title %}Kazma — Skills{% endblock %}
-{% block page_title %}Skills{% endblock %}
+{% block page_title %}Skills Management{% endblock %}
 
 {% block content %}
-<div class="card">
-    <div class="card-title">Skills & Plugins</div>
-    <p class="text-muted" style="margin-bottom:12px">Skills define automated routines and tool integrations. Browse and install skills from the hub.</p>
-    <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="showToast('Coming soon', 'success')">Browse Hub</button>
-        <button class="btn btn-secondary" onclick="showToast('Coming soon', 'success')">Install from URL</button>
+<div class="skills-container" x-data="skillsApp()">
+    <div class="skills-tabs">
+        <button class="tab-btn" :class="{ active: tab === 'installed' }" @click="tab = 'installed'">
+            Installed ({{ installed_skills|length }})
+        </button>
+        <button class="tab-btn" :class="{ active: tab === 'hub' }" @click="tab = 'hub'">
+            Hub Browse
+        </button>
+        <button class="tab-btn" :class="{ active: tab === 'validate' }" @click="tab = 'validate'">
+            Validate
+        </button>
+    </div>
+
+    <!-- Installed Skills -->
+    <div x-show="tab === 'installed'">
+        <div class="skills-grid">
+            {% for skill in installed_skills %}
+            <div class="skill-card">
+                <div class="skill-header">
+                    <h3>{{ skill.name }}</h3>
+                    <span class="badge badge-{{ skill.certification_level }}">{{ skill.certification_level }}</span>
+                </div>
+                <p class="skill-desc">{{ skill.description }}</p>
+                <div class="skill-meta">
+                    <span>v{{ skill.version }}</span>
+                    <span class="security-score">{{ skill.security_score }}/100</span>
+                    <span class="text-muted">{{ skill.author }}</span>
+                </div>
+                <div class="skill-actions">
+                    <label class="toggle">
+                        <input type="checkbox" {% if skill.enabled %}checked{% endif %}
+                               @change="toggleSkill('{{ skill.id }}', $event.target.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                    <button class="btn btn-sm btn-danger" @click="uninstallSkill('{{ skill.id }}')">Uninstall</button>
+                </div>
+            </div>
+            {% endfor %}
+            {% if not installed_skills %}
+            <div class="empty-state">
+                <p>No skills installed yet. Browse the Hub to find skills.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Hub Browse -->
+    <div x-show="tab === 'hub'">
+        <div class="search-bar">
+            <input type="text" x-model="hubQuery" @input.debounce.300ms="searchHub()" placeholder="Search skills..." class="form-input">
+        </div>
+        <div class="skills-grid">
+            <template x-for="skill in hubResults" :key="skill.id">
+                <div class="skill-card">
+                    <div class="skill-header">
+                        <h3 x-text="skill.name"></h3>
+                    </div>
+                    <p class="skill-desc" x-text="skill.description"></p>
+                    <div class="skill-meta">
+                        <span x-text="'v' + skill.version"></span>
+                        <span class="text-muted" x-text="skill.author"></span>
+                    </div>
+                    <div class="skill-actions">
+                        <button class="btn btn-primary btn-sm" @click="installSkill(skill.id)">Install</button>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Validate -->
+    <div x-show="tab === 'validate'">
+        <div class="settings-group">
+            <h3>Validate Local Skill</h3>
+            <div class="form-row">
+                <div class="form-group" style="flex:1">
+                    <label>Skill Directory Path</label>
+                    <input type="text" x-model="validatePath" class="form-input" placeholder="/path/to/skill">
+                </div>
+                <div class="form-group">
+                    <label>&nbsp;</label>
+                    <button class="btn btn-primary" @click="validateSkill()">Validate</button>
+                </div>
+            </div>
+            <div x-show="validateResult" class="validation-result">
+                <div :class="validateResult?.passed ? 'text-success' : 'text-error'" x-text="validateResult?.passed ? 'PASSED' : 'FAILED'"></div>
+                <div x-text="'Score: ' + (validateResult?.score || 0) + '/100'"></div>
+                <template x-if="validateResult?.errors?.length">
+                    <ul class="error-list">
+                        <template x-for="err in validateResult.errors" :key="err">
+                            <li class="text-error" x-text="err"></li>
+                        </template>
+                    </ul>
+                </template>
+                <template x-if="validateResult?.warnings?.length">
+                    <ul class="warning-list">
+                        <template x-for="warn in validateResult.warnings" :key="warn">
+                            <li class="text-warning" x-text="warn"></li>
+                        </template>
+                    </ul>
+                </template>
+            </div>
+        </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/skills.js"></script>
 {% endblock %}
