@@ -205,14 +205,18 @@ async def discover_custom_models(base_url: str) -> ProviderInfo:
 async def discover_models(
     provider: str,
     base_url: str | None = None,
+    api_key: str | None = None,
 ) -> ProviderInfo:
     """Discover models from a specific provider.
 
     Routes to the correct discovery function based on provider name.
+    Built-in providers (openai, anthropic, deepseek, google, xai, openrouter)
+    call /v1/models on their base_url with the api_key in auth headers.
 
     Args:
-        provider: One of "ollama", "lm-studio", "custom".
-        base_url: Optional override URL (used by lm-studio and custom).
+        provider: Provider key (openai, deepseek, ollama, custom, etc.)
+        base_url: Optional override URL.
+        api_key:  Optional API key for authenticated providers.
 
     Returns:
         ProviderInfo with discovered models.
@@ -225,15 +229,51 @@ async def discover_models(
     if provider in ("lm-studio", "lm_studio", "lmstudio"):
         return await discover_lm_studio_models(base_url)
 
-    if provider == "custom":
-        if not base_url:
+    # All known providers + custom: fetch /v1/models with auth
+    if base_url:
+        return await _discover_openai_compatible(base_url, api_key, provider)
+
+    return ProviderInfo(
+        name=provider,
+        label=provider.title(),
+        base_url="",
+        error=f"No base_url for provider '{provider}'",
+    )
+
+
+async def _discover_openai_compatible(base_url: str, api_key: str | None, provider: str) -> ProviderInfo:
+    """Discover models from any OpenAI-compatible /v1/models endpoint."""
+    import httpx
+
+    url = f"{base_url.rstrip('/')}/models"
+    headers: dict[str, str] = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=headers)
+            if resp.status_code in (200, 401):
+                # 401 with valid key often means the endpoint requires /v1 prefix already
+                if resp.status_code == 401 and "/v1/v1" in url:
+                    url = url.replace("/v1/v1", "/v1")
+                    resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+            models = [m.get("id", "") for m in data.get("data", []) if m.get("id")]
             return ProviderInfo(
-                name="custom",
-                label="Custom",
-                base_url="",
-                error="base_url is required for custom provider",
+                name=provider,
+                label=provider.title(),
+                base_url=base_url,
+                models=models,
+                online=True,
             )
-        return await discover_custom_models(base_url)
+    except httpx.ConnectError:
+        return ProviderInfo(name=provider, label=provider.title(), base_url=base_url, error="Connection refused")
+    except httpx.HTTPStatusError as e:
+        return ProviderInfo(name=provider, label=provider.title(), base_url=base_url, error=f"HTTP {e.response.status_code}")
+    except Exception as e:
+        return ProviderInfo(name=provider, label=provider.title(), base_url=base_url, error=str(e))
 
     # Unknown provider — try all concurrently
     logger.warning("Unknown provider '%s', probing all", provider)

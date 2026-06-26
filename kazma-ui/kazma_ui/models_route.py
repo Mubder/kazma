@@ -37,23 +37,27 @@ def create_models_router() -> APIRouter:
     @r.get("/api/models")
     @r.get("/v1/models")
     async def get_models(
-        provider: str = Query("all", description="Provider: ollama, lm-studio, custom, all"),
-        base_url: str | None = Query(None, description="Custom base URL for lm-studio or custom"),
+        provider: str = Query("all", description="Provider key: openai, anthropic, deepseek, google, xai, openrouter, ollama, lm-studio, custom, all"),
+        base_url: str | None = Query(None, description="Override base URL"),
+        api_key: str | None = Query(None, description="API key for authenticated model discovery"),
     ) -> dict[str, Any]:
         """Unified model discovery endpoint.
 
-        Routes to the correct provider based on the `provider` query param:
-          - provider=ollama:    Queries Ollama daemon (port 11434)
-          - provider=lm-studio: Queries LM Studio (default port 1234)
-          - provider=custom:    Queries custom base_url (required)
-          - provider=all:       Probes all providers concurrently
+        Routes to the correct provider based on the `provider` query param.
+        Built-in providers (openai, anthropic, deepseek, google, xai, openrouter)
+        auto-resolve their default base_url from PROVIDER_PRESETS.
 
         Returns:
-            {"models": ["ollama/llama3.2", ...], "provider": "ollama", "online": true}
+            {"models": ["gpt-4o-mini", ...], "provider": "openai", "online": true}
         """
         from kazma_core.models.discovery import discover_models
+        from kazma_core.providers import PROVIDER_PRESETS
 
-        result = await discover_models(provider, base_url=base_url)
+        # Use preset base_url if a known provider and none provided
+        if provider in PROVIDER_PRESETS and not base_url:
+            base_url = PROVIDER_PRESETS[provider]["base_url"]
+
+        result = await discover_models(provider, base_url=base_url, api_key=api_key)
 
         return {
             "models": result.models,

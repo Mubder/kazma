@@ -416,12 +416,18 @@ def create_sse_chat_router(
             safe["api_key"] = "***"
         return safe
 
+    @r.get("/api/providers")
+    async def list_providers_endpoint() -> list[dict[str, str]]:
+        """Return the list of known provider presets."""
+        from kazma_core.providers import list_providers
+        return list_providers()
+
     @r.post("/api/provider/switch")
     async def switch_provider(request: Request) -> dict[str, Any]:
         """Switch the active provider profile at runtime.
 
         Request body:
-            {"provider": "ollama", "model": "llama3.2"}
+            {"provider": "openai", "model": "gpt-4o-mini", "api_key": "sk-..."}
             {"provider": "lm-studio", "base_url": "http://localhost:1234/v1", "model": "local-model"}
             {"provider": "custom", "base_url": "http://my-server:8080/v1", "model": "gpt-4o", "api_key": "sk-..."}
 
@@ -440,8 +446,11 @@ def create_sse_chat_router(
         raw_model = body.get("model", "")
         raw_key = body.get("api_key", "")
 
-        # Normalize URL based on provider
-        if prov in ("ollama",):
+        # Use preset base_url if a known built-in provider
+        from kazma_core.providers import PROVIDER_PRESETS
+        if prov in PROVIDER_PRESETS and not raw_url:
+            url = PROVIDER_PRESETS[prov]["base_url"]
+        elif prov in ("ollama",):
             url = "http://127.0.0.1:11434/v1"
         elif prov in ("lm-studio", "lm_studio", "lmstudio"):
             url = normalize_provider_url(raw_url or "http://localhost:1234/v1")
