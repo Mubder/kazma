@@ -112,6 +112,13 @@ class SupervisorState(TypedDict, total=False):
     last_checkpoint_id: str
     """Most recent checkpoint UUID (avoids LangGraph reserved name)."""
 
+    # ── Time Travel ─────────────────────────────────────────────────
+    snapshot_id: str
+    """UUID of the most recent Time Travel snapshot captured for this state."""
+
+    snapshot_iteration: int
+    """Iteration number at which the last Time Travel snapshot was captured."""
+
     created_at: str
     """ISO-8601 UTC timestamp of state creation."""
 
@@ -145,5 +152,7 @@ def initial_supervisor_state(
         last_cost_usd=0.0,
         thread_id=thread_id or str(uuid.uuid4()),
         last_checkpoint_id=str(uuid.uuid4()),
+        snapshot_id="",
+        snapshot_iteration=-1,
         created_at=now,
     )
