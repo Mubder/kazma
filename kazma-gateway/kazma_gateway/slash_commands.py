@@ -13,6 +13,7 @@ Registered commands:
   /cost     — show token spend for this session
   /undo     — remove the last agent response from chat
   /edit     — edit the last agent response with corrected text
+  /replay   — time travel: list snapshots, replay, or compare iterations
 """
 
 from __future__ import annotations
@@ -25,6 +26,29 @@ logger = logging.getLogger(__name__)
 # Re-exported for dispatcher.py
 CMD_UNDO = "/undo"
 CMD_EDIT = "/edit"
+
+# Lazy-loaded ReplayEngine — may not be available yet
+_ReplayEngine = None
+_replay_import_attempted = False
+
+
+def _get_replay_engine():
+    """Try to import ReplayEngine from kazma_core.time_travel.
+
+    Returns the class if available, None otherwise.  Caches the result
+    so the import is attempted only once per process.
+    """
+    global _ReplayEngine, _replay_import_attempted
+    if _replay_import_attempted:
+        return _ReplayEngine
+    _replay_import_attempted = True
+    try:
+        from kazma_core.time_travel import ReplayEngine  # type: ignore[import-untyped]
+        _ReplayEngine = ReplayEngine
+    except ImportError:
+        logger.info("[slash] kazma_core.time_travel not available — /replay will show fallback")
+        _ReplayEngine = None
+    return _ReplayEngine
 
 
 def is_slash_command(text: str) -> bool:
@@ -64,6 +88,8 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
         return _cmd_undo(ctx)
     if cmd == CMD_EDIT:
         return _cmd_edit(text, ctx)
+    if cmd == "/replay":
+        return _cmd_replay(text, ctx)
 
     return None  # not a recognised command → passed to LLM
 
@@ -79,6 +105,10 @@ def _cmd_help() -> str:
         "• `/cost` — Token spend this session\n"
         "• `/undo` — Remove last agent response\n"
         "• `/edit <text>` — Correct last agent response\n\n"
+        "• `/replay list` — Show available snapshots\n"
+        "• `/replay <iteration>` — Replay from iteration\n"
+        "• `/replay compare <a> <b>` — Compare two runs\n"
+        "• `/replay clear` — Clear snapshots for this thread\n\n"
         "For anything else, just ask the agent directly!"
     )
 
@@ -197,3 +227,117 @@ def _cmd_edit(text: str, ctx: dict[str, Any]) -> str:
         chat_id,
     )
     return f"✏️ Last response edited to:\n\n{new_text}"
+
+
+# ── Replay / Time Travel ────────────────────────────────────────────
+
+
+def _cmd_replay(text: str, ctx: dict[str, Any]) -> str:
+    """Handle /replay commands for time-travel debugging.
+
+    Sub-commands:
+        /replay list               — show available snapshots
+        /replay <iteration>        — replay from that iteration
+        /replay compare <a> <b>    — compare two replay runs
+        /replay clear              — clear snapshots for current thread
+
+    Gracefully falls back if kazma_core.time_travel is not yet available.
+    """
+    engine_cls = _get_replay_engine()
+    if engine_cls is None:
+        return "⏳ Time travel not yet available."
+
+    parts = text.strip().split()
+    # parts[0] is "/replay"
+    sub = parts[1] if len(parts) > 1 else ""
+
+    thread_id = ctx.get("thread_id", "default")
+
+    if sub == "list" or sub == "":
+        return _replay_list(engine_cls, thread_id)
+    if sub == "compare":
+        return _replay_compare(engine_cls, parts, thread_id)
+    if sub == "clear":
+        return _replay_clear(engine_cls, thread_id)
+    # Otherwise treat as an iteration number
+    return _replay_iteration(engine_cls, sub, thread_id)
+
+
+def _replay_list(engine_cls, thread_id: str) -> str:
+    """List available snapshots for a thread."""
+    try:
+        engine = engine_cls(thread_id=thread_id)
+        snapshots = engine.list_snapshots()
+    except Exception as exc:
+        logger.warning("[slash] /replay list failed: %s", exc)
+        return f"⚠️ Could not list snapshots: {exc}"
+
+    if not snapshots:
+        return "📭 No snapshots available for this thread."
+
+    lines = ["🕰️ *Available snapshots:*\n"]
+    for snap in snapshots:
+        it = snap.get("iteration", "?")
+        ts = snap.get("timestamp", "?")
+        desc = snap.get("description", "")
+        entry = f"• Iteration `{it}` — {ts}"
+        if desc:
+            entry += f" — {desc}"
+        lines.append(entry)
+    return "\n".join(lines)
+
+
+def _replay_iteration(engine_cls, iteration_str: str, thread_id: str) -> str:
+    """Replay from a specific iteration."""
+    try:
+        iteration = int(iteration_str)
+    except (ValueError, TypeError):
+        return f"⚠️ Invalid iteration: `{iteration_str}`. Use a number (e.g. `/replay 3`)."
+
+    try:
+        engine = engine_cls(thread_id=thread_id)
+        result = engine.replay(iteration)
+    except Exception as exc:
+        logger.warning("[slash] /replay iteration %s failed: %s", iteration, exc)
+        return f"⚠️ Could not replay iteration `{iteration}`: {exc}"
+
+    if result is None:
+        return f"📭 No snapshot found for iteration `{iteration}`."
+
+    return f"🕰️ *Replay from iteration {iteration}:*\n\n{result}"
+
+
+def _replay_compare(engine_cls, parts: list, thread_id: str) -> str:
+    """Compare two replay runs."""
+    if len(parts) < 4:
+        return "⚠️ Usage: `/replay compare <a> <b>` — provide two iteration numbers."
+
+    try:
+        iter_a = int(parts[2])
+        iter_b = int(parts[3])
+    except (ValueError, TypeError):
+        return "⚠️ Both iterations must be numbers (e.g. `/replay compare 1 3`)."
+
+    try:
+        engine = engine_cls(thread_id=thread_id)
+        result = engine.compare(iter_a, iter_b)
+    except Exception as exc:
+        logger.warning("[slash] /replay compare %s vs %s failed: %s", iter_a, iter_b, exc)
+        return f"⚠️ Could not compare iterations `{iter_a}` and `{iter_b}`: {exc}"
+
+    if result is None:
+        return f"📭 Could not compare iterations `{iter_a}` and `{iter_b}` — snapshots may be missing."
+
+    return f"🕰️ *Comparison: iteration {iter_a} vs {iter_b}:*\n\n{result}"
+
+
+def _replay_clear(engine_cls, thread_id: str) -> str:
+    """Clear all snapshots for a thread."""
+    try:
+        engine = engine_cls(thread_id=thread_id)
+        count = engine.clear_snapshots()
+    except Exception as exc:
+        logger.warning("[slash] /replay clear failed: %s", exc)
+        return f"⚠️ Could not clear snapshots: {exc}"
+
+    return f"🗑️ Cleared {count} snapshot(s) for this thread."
