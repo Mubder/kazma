@@ -128,7 +128,7 @@ class KnowledgeGraphAdapter:
             self._graph.add_edge(
                 row[0],
                 row[1],
-                relation_type=row[2],
+                relation=row[2],
                 properties=props,
                 created_at=row[4],
             )
@@ -197,7 +197,7 @@ class KnowledgeGraphAdapter:
             source,
             target,
             relation_id=rel_id,
-            relation_type=relation_type,
+            relation=relation_type,
             properties=props,
             created_at=ts,
         )
@@ -251,12 +251,12 @@ class KnowledgeGraphAdapter:
                 continue
             if target and v != target:
                 continue
-            if relation_type and data.get("relation_type") != relation_type:
+            if relation_type and data.get("relation") != relation_type:
                 continue
             results.append({
                 "source": u,
                 "target": v,
-                "relation_type": data.get("relation_type"),
+                "relation": data.get("relation"),
                 "properties": data.get("properties", {}),
                 "created_at": data.get("created_at"),
             })
@@ -345,7 +345,7 @@ class KnowledgeGraphAdapter:
             if u != entity_id and v != entity_id:
                 continue
             rel_text = (
-                f"  {u} --[{data.get('relation_type')}]--> {v}"
+                f"  {u} --[{data.get('relation')}]--> {v}"
             )
             if data.get("properties"):
                 rel_text += f"  props={json.dumps(data['properties'])}"
@@ -404,7 +404,7 @@ class KnowledgeGraphAdapter:
                 edges.append({
                     "source": u,
                     "target": v,
-                    "relation_type": data.get("relation_type"),
+                    "relation": data.get("relation"),
                     "properties": data.get("properties", {}),
                     "created_at": data.get("created_at"),
                 })

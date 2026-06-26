@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 class KazmaKG:
-    """Core knowledge graph engine backed by ``networkx.DiGraph``.
+    """Core knowledge graph engine backed by ``networkx.MultiDiGraph``.
 
     Args:
         persist_path: Optional file path for JSON persistence.
@@ -512,8 +512,8 @@ class KazmaKG:
         return self._graph.has_edge(source, target)
 
     @property
-    def graph(self) -> nx.DiGraph:
-        """Direct access to the underlying ``networkx.DiGraph``.
+    def graph(self) -> nx.MultiDiGraph:
+        """Direct access to the underlying ``networkx.MultiDiGraph``.
 
         Prefer using the typed methods above for thread safety.
         """

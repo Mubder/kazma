@@ -64,7 +64,7 @@ class TestAddRelation:
         kg.add_relation("x", "y", "references", {"since": "2026-01"})
         rels = kg.query_relations(source="x", target="y")
         assert len(rels) == 1
-        assert rels[0]["relation_type"] == "references"
+        assert rels[0]["relation"] == "references"
         assert rels[0]["properties"]["since"] == "2026-01"
 
 
@@ -233,7 +233,7 @@ class TestMemoryIntegration:
 
         # Relations: fact --about--> topic, fact --mentioned_by--> user
         rels = kg.query_relations(source="fact-1")
-        rel_types = {r["relation_type"] for r in rels}
+        rel_types = {r["relation"] for r in rels}
         assert "about" in rel_types
         assert "mentioned_by" in rel_types
 

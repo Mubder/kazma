@@ -303,7 +303,7 @@ async def supervisor_node(
         "tool_calls_pending": pending,
         "tool_calls_done": [],  # reset for this iteration
         "next_node": NodeName.TOOL_WORKER,
-        "iteration": iteration,
+        "iteration": iteration + 1,
         "last_model": response.model,
         "last_tokens": response.usage.get("total_tokens", 0),
         "last_cost_usd": response.cost_usd,
