@@ -1,6 +1,6 @@
 """Integration test for RAG pipeline (gw-033).
 
-Proves the full pipeline: store → retrieve → agent responds.
+Proves the full pipeline: store -> retrieve -> agent responds.
 """
 
 from __future__ import annotations
@@ -18,9 +18,20 @@ from kazma_core.agent.tool_registry import (
 from kazma_core.memory.vector_store import VectorMemory
 
 
+def _chromadb_available() -> bool:
+    """Check if chromadb (optional [rag] extra) is installed."""
+    try:
+        import chromadb  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 @pytest.fixture
 def vector_memory():
     """Temporary VectorMemory with test data."""
+    if not _chromadb_available():
+        pytest.skip("chromadb not installed (optional [rag] extra)")
     with tempfile.TemporaryDirectory() as tmpdir:
         vm = VectorMemory(path=tmpdir, collection_name="test_rag")
         yield vm
@@ -30,7 +41,7 @@ class TestRAGPipeline:
     """End-to-end RAG pipeline tests."""
 
     def test_store_and_retrieve(self, vector_memory: VectorMemory) -> None:
-        """Store a fact → search retrieves it."""
+        """Store a fact -> search retrieves it."""
         vector_memory.add(
             "The secret launch code is ZEPHYR-42",
             {"topic": "launch_codes"},
@@ -40,7 +51,7 @@ class TestRAGPipeline:
         assert "ZEPHYR-42" in results[0]["text"]
 
     def test_singleton_wiring(self, vector_memory: VectorMemory) -> None:
-        """set_vector_memory → get_vector_memory returns same instance."""
+        """set_vector_memory -> get_vector_memory returns same instance."""
         set_vector_memory(vector_memory)
         assert get_vector_memory() is vector_memory
         set_vector_memory(None)
@@ -108,6 +119,8 @@ class TestRAGPipeline:
 
     def test_env_vars_respected(self) -> None:
         """VectorMemory respects env vars for path/collection/model."""
+        if not _chromadb_available():
+            pytest.skip("chromadb not installed (optional [rag] extra)")
         import os
 
         with tempfile.TemporaryDirectory() as tmpdir:

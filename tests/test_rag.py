@@ -17,9 +17,20 @@ import pytest
 from kazma_core.memory.vector_store import VectorMemory
 
 
+def _chromadb_available() -> bool:
+    """Check if chromadb (optional [rag] extra) is installed."""
+    try:
+        import chromadb  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 @pytest.fixture
 def vector_memory():
     """Temporary VectorMemory for testing."""
+    if not _chromadb_available():
+        pytest.skip("chromadb not installed (optional [rag] extra)")
     with tempfile.TemporaryDirectory() as tmpdir:
         mem = VectorMemory(path=tmpdir, collection_name="test_memory")
         yield mem
