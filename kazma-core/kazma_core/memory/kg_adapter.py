@@ -50,6 +50,7 @@ class KnowledgeGraphAdapter:
         self,
         backend: str = "networkx",
         persist_path: str | None = None,
+        engine: Any | None = None,
     ) -> None:
         if backend not in ("networkx", "neo4j"):
             raise ValueError(f"Unknown backend: {backend!r}")
@@ -59,9 +60,14 @@ class KnowledgeGraphAdapter:
         self._backend = backend
         self._persist_path = persist_path
 
-        import networkx as nx
-
-        self._graph = nx.DiGraph()
+        # Wire to a KazmaKG engine if provided, else create internal graph
+        if engine is not None:
+            self._engine = engine
+            self._graph = engine.graph
+        else:
+            import networkx as nx
+            self._engine = None
+            self._graph = nx.DiGraph()
 
         # Optional SQLite persistence
         self._db: sqlite3.Connection | None = None
@@ -91,9 +97,10 @@ class KnowledgeGraphAdapter:
             self._load_from_db()
 
         logger.info(
-            "[KG] Initialized (backend=%s, persist=%s)",
+            "[KG] Initialized (backend=%s, persist=%s, engine=%s)",
             backend,
             persist_path or "memory-only",
+            type(self._engine).__name__ if self._engine else "none",
         )
 
     # ------------------------------------------------------------------
