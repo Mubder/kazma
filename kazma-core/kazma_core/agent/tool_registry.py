@@ -763,9 +763,12 @@ class LocalToolRegistry:
         )
         async def context_info(details: bool = False) -> str:
             from kazma_core.tools.context_cmd import context_cmd as _ctx
-            from kazma_core.tools.export_session import get_session_messages
+            from kazma_core.tools.export_session import get_current_session_messages
 
-            messages = get_session_messages()
+            # Messages come from the per-invocation ContextVar set by the
+            # graph's tool-worker node.  This keeps concurrent sessions
+            # isolated (no shared module-global list).
+            messages = get_current_session_messages()
             return await _ctx(messages, detailed=details)
 
         # ── Register tools from kazma_core/tools/ ──────────────────────

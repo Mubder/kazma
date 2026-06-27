@@ -339,117 +339,136 @@ async def tool_worker_node(
 
     logger.info("[ToolWorker] Executing %d tool calls", len(pending))
 
-    # ── HITL: separate safe and danger tools ──────────────────────
-    safe_tools: list[PendingToolCall] = []
-    danger_tools: list[PendingToolCall] = []
+    # ── Bind session messages to the current async context ─────────
+    # Tools such as export_session and context_info need access to the
+    # current conversation messages, but the LLM does not pass them as
+    # arguments.  We publish the state's messages into a ContextVar so
+    # each concurrent graph invocation sees its own messages (no shared
+    # module-global list).  The token restores the prior value on exit.
+    from kazma_core.tools.export_session import (
+        reset_current_session_messages,
+        set_current_session_messages,
+    )
 
-    if hitl_config:
-        for tc in pending:
-            if requires_approval(tc["name"], hitl_config):
-                danger_tools.append(tc)
-            else:
-                safe_tools.append(tc)
-    else:
-        safe_tools = list(pending)
+    session_messages = list(state.get("messages", []))
+    _messages_token = set_current_session_messages(session_messages)
 
-    TOOL_RESULT_MAX_CHARS = 4000
+    try:
+        # ── HITL: separate safe and danger tools ──────────────────────
+        safe_tools: list[PendingToolCall] = []
+        danger_tools: list[PendingToolCall] = []
 
-    async def _exec_one(tc: PendingToolCall) -> ToolResult:
-        start = time.monotonic()
-        result = await tool_executor.execute(tc["name"], tc.get("arguments") or {})
-        duration_ms = (time.monotonic() - start) * 1000
+        if hitl_config:
+            for tc in pending:
+                if requires_approval(tc["name"], hitl_config):
+                    danger_tools.append(tc)
+                else:
+                    safe_tools.append(tc)
+        else:
+            safe_tools = list(pending)
 
-        tracer.trace_tool_execution(
-            tool_name=tc["name"],
-            input_data=tc["arguments"],
-            output_data=result,
-            duration_ms=duration_ms,
-            success=not result.get("is_error", False),
-        )
+        TOOL_RESULT_MAX_CHARS = 4000
 
-        logger.info(
-            "[ToolWorker] %s → %.0fms (error=%s)",
-            tc["name"],
-            duration_ms,
-            result.get("is_error", False),
-        )
+        async def _exec_one(tc: PendingToolCall) -> ToolResult:
+            start = time.monotonic()
+            result = await tool_executor.execute(tc["name"], tc.get("arguments") or {})
+            duration_ms = (time.monotonic() - start) * 1000
 
-        # ── Truncation middleware ──────────────────────────────────
-        content = result.get("content", "")
-        if len(content) > TOOL_RESULT_MAX_CHARS:
-            original_len = len(content)
-            content = content[:TOOL_RESULT_MAX_CHARS] + f"\n[truncated {original_len - TOOL_RESULT_MAX_CHARS} chars]"
-            logger.info(
-                "[ToolWorker] Truncated result from %s (%d → %d chars)", tc["name"], original_len, TOOL_RESULT_MAX_CHARS
+            tracer.trace_tool_execution(
+                tool_name=tc["name"],
+                input_data=tc["arguments"],
+                output_data=result,
+                duration_ms=duration_ms,
+                success=not result.get("is_error", False),
             )
 
-        return ToolResult(
-            tool_call_id=tc["id"],
-            name=tc["name"],
-            content=content,
-            is_error=result.get("is_error", False),
-            duration_ms=duration_ms,
-        )
+            logger.info(
+                "[ToolWorker] %s → %.0fms (error=%s)",
+                tc["name"],
+                duration_ms,
+                result.get("is_error", False),
+            )
 
-    def _denied_result(tc: PendingToolCall) -> ToolResult:
-        """Create a ToolResult for a denied tool call."""
-        return ToolResult(
-            tool_call_id=tc["id"],
-            name=tc["name"],
-            content=f"Tool '{tc['name']}' denied by user. Operation not executed.",
-            is_error=True,
-            duration_ms=0,
-        )
+            # ── Truncation middleware ──────────────────────────────────
+            content = result.get("content", "")
+            if len(content) > TOOL_RESULT_MAX_CHARS:
+                original_len = len(content)
+                content = content[:TOOL_RESULT_MAX_CHARS] + f"\n[truncated {original_len - TOOL_RESULT_MAX_CHARS} chars]"
+                logger.info(
+                    "[ToolWorker] Truncated result from %s (%d → %d chars)", tc["name"], original_len, TOOL_RESULT_MAX_CHARS
+                )
 
-    # ── Execute safe tools in parallel ────────────────────────────
-    results: list[ToolResult] = []
-    if safe_tools:
-        results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
+            return ToolResult(
+                tool_call_id=tc["id"],
+                name=tc["name"],
+                content=content,
+                is_error=result.get("is_error", False),
+                duration_ms=duration_ms,
+            )
 
-    # ── HITL: interrupt for each danger tool ──────────────────────
-    for tc in danger_tools:
-        approval_input = {
-            "type": "hitl_approval",
-            "tool": tc["name"],
-            "args": tc["arguments"],
-            "message": f"Agent wants to run: {tc['name']}({tc['arguments']})",
-        }
+        def _denied_result(tc: PendingToolCall) -> ToolResult:
+            """Create a ToolResult for a denied tool call."""
+            return ToolResult(
+                tool_call_id=tc["id"],
+                name=tc["name"],
+                content=f"Tool '{tc['name']}' denied by user. Operation not executed.",
+                is_error=True,
+                duration_ms=0,
+            )
 
-        # interrupt() pauses the graph — resumes when /api/approve calls
-        # graph.ainvoke(Command(resume=...), config)
-        approval = interrupt(approval_input)
+        # ── Execute safe tools in parallel ────────────────────────────
+        results: list[ToolResult] = []
+        if safe_tools:
+            results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
 
-        if isinstance(approval, dict) and approval.get("approved", False):
-            logger.info("[ToolWorker] HITL approved: %s", tc["name"])
-            results.append(await _exec_one(tc))
-        else:
-            logger.info("[ToolWorker] HITL denied: %s", tc["name"])
-            results.append(_denied_result(tc))
-
-    # Build tool-role messages for the conversation
-    messages = list(state.get("messages", []))
-    tool_messages: list[dict[str, Any]] = []
-    for tr in results:
-        tool_messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": tr["tool_call_id"],
-                "content": tr["content"],
+        # ── HITL: interrupt for each danger tool ──────────────────────
+        for tc in danger_tools:
+            approval_input = {
+                "type": "hitl_approval",
+                "tool": tc["name"],
+                "args": tc["arguments"],
+                "message": f"Agent wants to run: {tc['name']}({tc['arguments']})",
             }
-        )
 
-    # Merge into cumulative tool_results
-    cumulative = dict(state.get("tool_results", {}))
-    for tr in results:
-        cumulative[tr["tool_call_id"]] = tr
+            # interrupt() pauses the graph — resumes when /api/approve calls
+            # graph.ainvoke(Command(resume=...), config)
+            approval = interrupt(approval_input)
 
-    return {
-        "messages": messages + tool_messages,
-        "tool_calls_pending": [],  # all consumed
-        "tool_calls_done": list(results),
-        "tool_results": cumulative,
-        "next_node": NodeName.SUPERVISOR,  # loop back
-    }
+            if isinstance(approval, dict) and approval.get("approved", False):
+                logger.info("[ToolWorker] HITL approved: %s", tc["name"])
+                results.append(await _exec_one(tc))
+            else:
+                logger.info("[ToolWorker] HITL denied: %s", tc["name"])
+                results.append(_denied_result(tc))
+
+        # Build tool-role messages for the conversation
+        messages = list(state.get("messages", []))
+        tool_messages: list[dict[str, Any]] = []
+        for tr in results:
+            tool_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tr["tool_call_id"],
+                    "content": tr["content"],
+                }
+            )
+
+        # Merge into cumulative tool_results
+        cumulative = dict(state.get("tool_results", {}))
+        for tr in results:
+            cumulative[tr["tool_call_id"]] = tr
+
+        return {
+            "messages": messages + tool_messages,
+            "tool_calls_pending": [],  # all consumed
+            "tool_calls_done": list(results),
+            "tool_results": cumulative,
+            "next_node": NodeName.SUPERVISOR,  # loop back
+        }
+    finally:
+        # Always restore the prior ContextVar value, even if a tool
+        # raised or the graph was interrupted by HITL.
+        reset_current_session_messages(_messages_token)
 
 
 async def respond_node(state: SupervisorState) -> dict[str, Any]:

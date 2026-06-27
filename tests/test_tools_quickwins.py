@@ -231,20 +231,24 @@ class TestFriendlyErrors:
 
 
 class TestExportSession:
-    """Tests for the export_session tool."""
+    """Tests for the export_session tool.
+
+    The export_session function must accept messages as an explicit
+    parameter (not via a module-global list) so that concurrent sessions
+    do not corrupt each other's export data (VAL-CRIT-005).
+    """
 
     @pytest.mark.asyncio
     async def test_export_session_json(self) -> None:
         """export_session with format='json' returns valid JSON with messages."""
-        from kazma_core.tools.export_session import export_session, set_session_messages
+        from kazma_core.tools.export_session import export_session
 
         test_messages = [
             {"role": "user", "content": "Hello"},
             {"role": "assistant", "content": "Hi there!"},
         ]
-        set_session_messages(test_messages)
 
-        result = await export_session(format="json")
+        result = await export_session(format="json", messages=test_messages)
         data = json.loads(result)
 
         assert "exported_at" in data
@@ -255,15 +259,14 @@ class TestExportSession:
     @pytest.mark.asyncio
     async def test_export_session_markdown(self) -> None:
         """export_session with format='markdown' returns formatted markdown."""
-        from kazma_core.tools.export_session import export_session, set_session_messages
+        from kazma_core.tools.export_session import export_session
 
         test_messages = [
             {"role": "user", "content": "What is AI?"},
             {"role": "assistant", "content": "AI is artificial intelligence."},
         ]
-        set_session_messages(test_messages)
 
-        result = await export_session(format="markdown")
+        result = await export_session(format="markdown", messages=test_messages)
 
         assert "# Session Export" in result
         assert "User" in result
@@ -274,27 +277,25 @@ class TestExportSession:
     @pytest.mark.asyncio
     async def test_export_session_unknown_format(self) -> None:
         """export_session with unknown format returns an error."""
-        from kazma_core.tools.export_session import export_session, set_session_messages
+        from kazma_core.tools.export_session import export_session
 
-        set_session_messages([{"role": "user", "content": "test"}])
-        result = await export_session(format="csv")
+        result = await export_session(format="csv", messages=[{"role": "user", "content": "test"}])
         assert "Error" in result
         assert "csv" in result
 
     @pytest.mark.asyncio
     async def test_export_session_empty(self) -> None:
         """export_session with no messages returns an error."""
-        from kazma_core.tools.export_session import export_session, set_session_messages
+        from kazma_core.tools.export_session import export_session
 
-        set_session_messages([])
-        result = await export_session(format="json")
+        result = await export_session(format="json", messages=[])
         assert "Error" in result
         assert "No session" in result
 
     @pytest.mark.asyncio
     async def test_export_session_markdown_with_tool_calls(self) -> None:
         """export_session markdown includes tool calls and skips system messages."""
-        from kazma_core.tools.export_session import export_session, set_session_messages
+        from kazma_core.tools.export_session import export_session
 
         test_messages = [
             {"role": "system", "content": "You are helpful."},
@@ -306,13 +307,66 @@ class TestExportSession:
             },
             {"role": "tool", "content": "Result here", "name": "web_search"},
         ]
-        set_session_messages(test_messages)
-        result = await export_session(format="markdown")
+        result = await export_session(format="markdown", messages=test_messages)
 
         # System should be skipped
         assert "System" not in result.split("---")[1] if "---" in result else True
         # Tool call should appear
         assert "web_search" in result
+
+    @pytest.mark.asyncio
+    async def test_export_session_no_module_global(self) -> None:
+        """VAL-CRIT-005: export_session.py must not expose a module-global
+        _session_messages list or set_session_messages/get_session_messages
+        accessors that share state across concurrent sessions."""
+        import kazma_core.tools.export_session as es_module
+
+        # No module-level mutable list
+        assert not hasattr(es_module, "_session_messages")
+        # No global accessor functions that mutate shared state
+        assert not hasattr(es_module, "set_session_messages")
+        assert not hasattr(es_module, "get_session_messages")
+
+    @pytest.mark.asyncio
+    async def test_export_session_concurrent_isolation(self) -> None:
+        """VAL-CRIT-005: Two concurrent export_session calls with different
+        message lists must each export only their own messages.
+
+        This is the core regression test for the shared-global bug: before
+        the fix, both tasks would read the same module-global list and the
+        second set_session_messages() call would clobber the first.
+        """
+        import asyncio
+
+        from kazma_core.tools.export_session import export_session
+
+        messages_a = [
+            {"role": "user", "content": "session-A-message"},
+            {"role": "assistant", "content": "reply-A"},
+        ]
+        messages_b = [
+            {"role": "user", "content": "session-B-message"},
+            {"role": "assistant", "content": "reply-B"},
+        ]
+
+        # Interleave the two exports to maximize the chance of catching
+        # shared-state corruption. Each task exports its own message list.
+        results = await asyncio.gather(
+            export_session(format="json", messages=messages_a),
+            export_session(format="json", messages=messages_b),
+        )
+
+        data_a = json.loads(results[0])
+        data_b = json.loads(results[1])
+
+        # Each export must contain ONLY its own messages.
+        assert data_a["message_count"] == 2
+        assert data_b["message_count"] == 2
+        assert data_a["messages"][0]["content"] == "session-A-message"
+        assert data_b["messages"][0]["content"] == "session-B-message"
+        # Cross-contamination check
+        assert "session-B-message" not in json.dumps(data_a)
+        assert "session-A-message" not in json.dumps(data_b)
 
 
 class TestReadUrlEdgeCases:
