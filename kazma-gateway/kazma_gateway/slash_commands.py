@@ -24,20 +24,29 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
+if TYPE_CHECKING:
+    from kazma_core.config_store import ConfigStore
+
 logger = logging.getLogger(__name__)
 
-# ── Config path / cache ──────────────────────────────────────────────
+# ── Config path / store ──────────────────────────────────────────────
+#
+# kazma.yaml is treated as a READ-ONLY bootstrap.  All runtime config
+# mutations (slash commands, settings page, connector token updates) are
+# routed through ``ConfigStore.set()`` which serializes every write with a
+# ``threading.Lock`` and persists to the SQLite override DB.  This fixes
+# the write-race that previously allowed concurrent slash commands to
+# truncate or partially overwrite kazma.yaml (VAL-CRIT-006 / VAL-CRIT-007).
 
 _CONFIG_PATH: Path | None = None
-_CONFIG_CACHE: dict[str, Any] | None = None
-_CONFIG_CACHE_MTIME: float = 0.0
 
 
 def _get_config_path() -> Path:
+    """Locate the read-only ``kazma.yaml`` bootstrap file (cached)."""
     global _CONFIG_PATH
     if _CONFIG_PATH is not None:
         return _CONFIG_PATH
@@ -52,24 +61,84 @@ def _get_config_path() -> Path:
     raise FileNotFoundError("kazma.yaml not found")
 
 
-def _load_config() -> dict[str, Any]:
-    global _CONFIG_CACHE, _CONFIG_CACHE_MTIME
+def _get_config_store() -> ConfigStore:
+    """Return the shared ``ConfigStore`` (locked SQLite settings store).
+
+    Lazily imported to avoid a hard gateway -> core import at module load.
+    Tests may monkeypatch this attribute (``slash_commands._get_config_store``)
+    to inject an isolated store.
+    """
+    from kazma_core.config_store import ConfigStore
+
+    return ConfigStore()
+
+
+def _read_bootstrap_yaml() -> dict[str, Any]:
+    """Read the read-only ``kazma.yaml`` bootstrap directly (no caching)."""
     path = _get_config_path()
-    mtime = path.stat().st_mtime
-    if _CONFIG_CACHE is not None and mtime == _CONFIG_CACHE_MTIME:
-        return _CONFIG_CACHE
     with open(path, encoding="utf-8") as f:
-        _CONFIG_CACHE = yaml.safe_load(f) or {}
-    _CONFIG_CACHE_MTIME = mtime
-    return _CONFIG_CACHE
+        return yaml.safe_load(f) or {}
+
+
+def _apply_overrides(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
+    """Deeply merge ``overrides`` (dotted-key -> value) into a copy of ``base``."""
+    result: dict[str, Any] = {k: v for k, v in base.items()}
+    for dotted_key, value in overrides.items():
+        parts = dotted_key.split(".")
+        target = result
+        for part in parts[:-1]:
+            existing = target.get(part)
+            if not isinstance(existing, dict):
+                existing = {}
+                target[part] = existing
+            target = existing
+        target[parts[-1]] = value
+    return result
+
+
+def _load_config() -> dict[str, Any]:
+    """Return the effective config: bootstrap YAML overridden by ConfigStore DB values.
+
+    kazma.yaml is treated as read-only.  Runtime mutations made via
+    ``_save_config`` (which delegates to ``ConfigStore.set``) are merged on
+    top of the bootstrap so subsequent reads reflect the latest changes.
+    """
+    base = _read_bootstrap_yaml()
+    try:
+        store = _get_config_store()
+    except Exception as exc:  # pragma: no cover - defensive: fall back to YAML
+        logger.warning("[slash] ConfigStore unavailable, using YAML only: %s", exc)
+        return base
+
+    grouped = store.get_all()
+    overrides: dict[str, Any] = {}
+    for settings in grouped.values():
+        overrides.update(settings)
+    return _apply_overrides(base, overrides)
 
 
 def _save_config(config: dict[str, Any]) -> None:
-    global _CONFIG_CACHE_MTIME
-    path = _get_config_path()
-    with open(path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(config, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    _CONFIG_CACHE_MTIME = path.stat().st_mtime
+    """Persist ``config`` through the locked ``ConfigStore``.
+
+    Walks the (possibly nested) dict and writes each leaf scalar to the
+    SQLite override DB via ``ConfigStore.set(key, value, category=...)``
+    which serializes writes with a ``threading.Lock``.  kazma.yaml is never
+    opened for writing at runtime.
+    """
+
+    store = _get_config_store()
+    _flatten_and_set(store, config)
+
+
+def _flatten_and_set(store: ConfigStore, data: dict[str, Any], prefix: str = "") -> None:
+    """Walk ``data`` and write each leaf scalar to ``store.set(dotted_key, value)``."""
+    for key, value in data.items():
+        full_key = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, dict):
+            _flatten_and_set(store, value, full_key)
+        else:
+            category = prefix.split(".")[0] if prefix else "general"
+            store.set(full_key, value, category=category)
 
 # Re-exported for dispatcher.py
 CMD_UNDO = "/undo"
