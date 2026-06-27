@@ -25,8 +25,8 @@ from langgraph.graph import END, StateGraph
 from kazma_core.authority import ContextAuthority, create_authority
 from kazma_core.cost_breaker import create_cost_breaker
 from kazma_core.llm_provider import LLMConfig, LLMProvider
+from kazma_core.mcp.manager import UnifiedToolExecutor
 from kazma_core.state import AgentState
-from kazma_core.tool_registry import ToolRegistry
 from kazma_core.tracing import create_tracer
 
 # NOTE: kazma_core.agent.graph_builder / .state are imported lazily inside
@@ -124,8 +124,14 @@ class KazmaAgent:
         self.llm_config = LLMConfig.from_dict(llm_cfg_dict)
         self.llm = LLMProvider(self.llm_config)
 
-        # Tool Registry
-        self.tools = ToolRegistry()
+        # Tool Registry — unified executor over local built-in tools + MCP.
+        # ``UnifiedToolExecutor`` is the single canonical tool abstraction:
+        # it dispatches ``execute(name, args)`` to the in-process
+        # LocalToolRegistry first, then to the AsyncMCPManager. The legacy
+        # MCP-only ToolRegistry (kazma_core.tool_registry) has been removed.
+        from kazma_core.agent.tool_registry import LocalToolRegistry
+
+        self.tools = UnifiedToolExecutor(local=LocalToolRegistry(include_builtins=True))
 
         # Cost Circuit Breaker
         self.cost_breaker = create_cost_breaker()

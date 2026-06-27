@@ -32,15 +32,12 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         result = []
         for s in servers:
             name = s.get("name", "unknown")
-            # Check if server is connected
-            is_connected = name in agent.tools._clients if hasattr(agent.tools, "_clients") else False
+            # Use the unified executor's public API instead of reaching
+            # into private _clients/_tools attributes.
+            is_connected = agent.tools.is_server_connected(name)
             tools = []
-            if is_connected and hasattr(agent.tools, "_tools"):
-                tools = [
-                    {"name": t.name, "description": t.description}
-                    for t in agent.tools._tools.values()
-                    if t.server_name == name
-                ]
+            if is_connected:
+                tools = agent.tools.get_mcp_tools_for_server(name)
 
             result.append(
                 {
@@ -110,11 +107,10 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         servers = agent.config.raw.get("mcp", {}).get("servers", [])
         agent.config.raw["mcp"]["servers"] = [s for s in servers if s.get("name") != name]
 
-        # Disconnect if running
-        if hasattr(agent.tools, "_clients") and name in agent.tools._clients:
+        # Disconnect if running — use the unified executor's public API.
+        if agent.tools.is_server_connected(name):
             try:
-                client = agent.tools._clients.pop(name)
-                await client.disconnect()
+                await agent.tools.disconnect_server(name)
             except Exception:
                 pass
 
@@ -142,10 +138,9 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
     @router.post("/api/mcp/servers/{name}/stop")
     async def api_stop_server(name: str) -> dict[str, str]:
         """Stop/disconnect an MCP server."""
-        if hasattr(agent.tools, "_clients") and name in agent.tools._clients:
+        if agent.tools.is_server_connected(name):
             try:
-                client = agent.tools._clients.pop(name)
-                await client.disconnect()
+                await agent.tools.disconnect_server(name)
             except Exception as e:
                 return {"status": "error", "error": str(e)}
         return {"status": "ok"}
@@ -189,10 +184,6 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
     @router.get("/api/mcp/servers/{name}/tools")
     async def api_server_tools(name: str) -> list[dict[str, str]]:
         """Get tools from a connected MCP server."""
-        if not hasattr(agent.tools, "_tools"):
-            return []
-        return [
-            {"name": t.name, "description": t.description} for t in agent.tools._tools.values() if t.server_name == name
-        ]
+        return agent.tools.get_mcp_tools_for_server(name)
 
     return router

@@ -565,8 +565,32 @@ class UnifiedToolExecutor:
         local: Any = None,
         mcp: AsyncMCPManager | None = None,
     ) -> None:
+        if mcp is None:
+            # Always carry an MCP manager so callers can connect servers
+            # after construction (e.g. KazmaAgent.connect_mcp_servers).
+            mcp = AsyncMCPManager()
         self._local = local
         self._mcp = mcp
+
+    # ── MCP server lifecycle (delegates to AsyncMCPManager) ─────────
+
+    async def connect_server(self, server_config: dict[str, Any]) -> int:
+        """Connect a single MCP server and register its tools.
+
+        Thin compatibility shim over ``AsyncMCPManager.connect_from_config``
+        so callers that previously used the old MCP-only ``ToolRegistry``
+        (e.g. ``KazmaAgent.connect_mcp_servers``, the MCP settings UI)
+        keep working through the unified executor.
+        """
+        if self._mcp is None:
+            return 0
+        return await self._mcp.connect_from_config([server_config])
+
+    def list_servers(self) -> list[dict[str, Any]]:
+        """Return status info for all managed MCP servers."""
+        if self._mcp is None:
+            return []
+        return self._mcp.list_servers()
 
     # ── Unified schema list ─────────────────────────────────────────
 
@@ -662,6 +686,106 @@ class UnifiedToolExecutor:
         has_local = self._local is not None and self._local.tool_count > 0
         has_mcp = self._mcp is not None and any(s["connected"] for s in self._mcp.list_servers())
         return has_local or has_mcp
+
+    @property
+    def tool_count(self) -> int:
+        """Total number of tools across both backends."""
+        count = 0
+        if self._local is not None:
+            count += self._local.tool_count
+        if self._mcp is not None:
+            count += len(self._mcp.get_tool_server_map())
+        return count
+
+    def list_tools(self) -> list[dict[str, str]]:
+        """Return a merged summary of every tool (local + MCP).
+
+        Each entry has ``name``, ``description``, ``category`` and ``server``
+        keys so callers (e.g. the MCP settings UI) can render the full tool
+        inventory through this single public method.
+        """
+        tools: list[dict[str, str]] = []
+        if self._local is not None:
+            for t in self._local.list_tools():
+                entry = dict(t)
+                entry.setdefault("category", "local")
+                entry["server"] = "local"
+                tools.append(entry)
+        if self._mcp is not None:
+            for tool_name, server_name in self._mcp.get_tool_server_map().items():
+                description = ""
+                for handle in self._mcp._servers.values():
+                    if handle.name != server_name:
+                        continue
+                    for tool in handle.tools:
+                        if tool.get("name") == tool_name:
+                            description = tool.get("description", "")
+                            break
+                    break
+                tools.append(
+                    {
+                        "name": tool_name,
+                        "description": description[:120],
+                        "category": "mcp",
+                        "server": server_name,
+                    }
+                )
+        return tools
+
+    def get_mcp_tools_for_server(self, server_name: str) -> list[dict[str, str]]:
+        """Return ``[{name, description}]`` for the tools of a specific MCP server.
+
+        Replaces the previous direct ``agent.tools._tools.values()`` access
+        from the UI layer.
+        """
+        tools: list[dict[str, str]] = []
+        if self._mcp is None:
+            return tools
+        for handle in self._mcp._servers.values():
+            if handle.name != server_name:
+                continue
+            for tool in handle.tools:
+                tools.append(
+                    {
+                        "name": tool.get("name", ""),
+                        "description": tool.get("description", ""),
+                    }
+                )
+        return tools
+
+    def is_server_connected(self, name: str) -> bool:
+        """Return True if an MCP server with ``name`` is currently connected."""
+        if self._mcp is None:
+            return False
+        return any(s["name"] == name and s["connected"] for s in self._mcp.list_servers())
+
+    async def disconnect_server(self, name: str) -> bool:
+        """Disconnect a single MCP server by name.
+
+        Returns True if a server was disconnected.
+        """
+        if self._mcp is None:
+            return False
+        handle = self._mcp._servers.pop(name, None)
+        if handle is None:
+            return False
+        try:
+            if handle.process is not None:
+                handle.process.terminate()
+                try:
+                    import asyncio as _asyncio
+
+                    await _asyncio.wait_for(handle.process.wait(), timeout=5.0)
+                except TimeoutError:
+                    handle.process.kill()
+                    await handle.process.wait()
+            if handle.http is not None:
+                await handle.http.aclose()
+            handle.connected = False
+            return True
+        except Exception as exc:
+            logger.warning("[Unified] Error disconnecting server '%s': %s", name, exc)
+            return False
 
     async def disconnect_all(self) -> None:
         """Shutdown all backends."""

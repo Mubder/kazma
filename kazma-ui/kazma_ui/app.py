@@ -88,19 +88,12 @@ def create_app(config_path: str | None = None) -> FastAPI:
     _checkpointer = None
     try:
         from kazma_core.agent.graph_builder import build_supervisor_graph
-        from kazma_core.agent.tool_registry import LocalToolRegistry
 
-        # Build the Supervisor graph for SSE streaming
-        sse_tools = LocalToolRegistry(include_builtins=True)
-        # Also register MCP tools if any were connected
-        for tool_def in agent.tools.get_tool_definitions():
-            fname = tool_def.get("function", {})
-            sse_tools.register_function(
-                name=fname.get("name", ""),
-                func=lambda **kw: {"content": "MCP tool (use WebSocket)", "is_error": False},
-                description=fname.get("description", ""),
-                category="mcp",
-            )
+        # Use the agent's UnifiedToolExecutor directly so the SSE path
+        # executes real tools (both local built-ins and MCP). The previous
+        # implementation rebuilt a parallel LocalToolRegistry and registered
+        # MCP tools as no-op lambdas, silently swallowing every MCP call.
+        sse_tools = agent.tools
 
         sse_graph = build_supervisor_graph(
             llm=agent.llm,
