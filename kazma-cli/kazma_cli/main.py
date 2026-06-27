@@ -58,7 +58,7 @@ def main() -> None:
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")
         print("  docs       Documentation commands (build, serve)")
-        print("  completion Shell tab completion (bash, zsh, install)")
+        print("  completion Shell tab completion (bash, zsh, powershell, install)")
         print("  project    Project-level config (.kazma/) — init, show, validate")
         print("")
         print("Options:")
@@ -199,19 +199,23 @@ def _run_completion(args: list[str]) -> None:
     Usage:
         kazma completion bash            — print bash completion script
         kazma completion zsh             — print zsh completion script
-        kazma completion install [bash|zsh]  — auto-install
+        kazma completion powershell      — print PowerShell completion script
+        kazma completion install [bash|zsh|powershell]  — auto-install
         kazma completion --list-models   — print available model names
     """
     from kazma_cli.completions import generate_completions, install_completion, list_available_models
 
     if not args:
-        print("Usage: kazma completion <bash|zsh|install>")
+        print("Usage: kazma completion <bash|zsh|powershell|install>")
         print("")
-        print("  bash      Print bash completion script")
-        print("  zsh       Print zsh completion script")
-        print("  install   Auto-detect shell and install completion")
-        print("  install bash  Install bash completion")
-        print("  install zsh   Install zsh completion")
+        print("  bash         Print bash completion script")
+        print("  zsh          Print zsh completion script")
+        print("  powershell   Print PowerShell completion script")
+        print("  install      Auto-detect shell and install completion")
+        print("  install bash         Install bash completion")
+        print("  install zsh          Install zsh completion")
+        print("  install powershell   Install PowerShell completion")
+        print("  --list-models        Print available model names")
         return
 
     subcmd = args[0]
@@ -229,13 +233,17 @@ def _run_completion(args: list[str]) -> None:
         print(generate_completions("zsh"))
         return
 
+    if subcmd in ("powershell", "pwsh", "ps"):
+        print(generate_completions("powershell"))
+        return
+
     if subcmd == "install":
         shell = args[1] if len(args) > 1 else _detect_shell()
         print(install_completion(shell))
         return
 
     print(f"Unknown completion command: {subcmd}")
-    print("Available: bash, zsh, install")
+    print("Available: bash, zsh, powershell, install")
 
 
 def _run_project(args: list[str]) -> None:
@@ -281,8 +289,16 @@ def _run_project(args: list[str]) -> None:
 
 
 def _detect_shell() -> str:
-    """Detect the current shell from $SHELL, defaulting to bash."""
+    """Detect the current shell, defaulting to bash on POSIX / powershell on Windows."""
     import os
+    import sys
+
+    # On Windows, default to PowerShell
+    if sys.platform == "win32":
+        ps_module = os.environ.get("PSModulePath", "")
+        if ps_module:
+            return "powershell"
+        return "powershell"
 
     shell_path = os.environ.get("SHELL", "")
     if "zsh" in shell_path:

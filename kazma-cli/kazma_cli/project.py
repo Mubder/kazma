@@ -18,7 +18,7 @@ import yaml
 DEFAULT_RULES = """# Project-specific agent rules
 # These rules are applied to every agent session in this project.
 language: python
-test_command: .venv/bin/pytest tests/ -q
+test_command: python -m pytest tests/ -q
 git_branch: main
 """
 

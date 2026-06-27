@@ -8,6 +8,7 @@ gracefully degrade.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,24 @@ from typing import Any
 import yaml
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_chat_id(yaml_value: int) -> int:
+    """Resolve the swarm group chat ID.
+
+    The ``SWARM_CHAT_ID`` environment variable takes precedence so the chat ID
+    is never hardcoded in a checked-in config file. If the env var is absent,
+    the YAML value (default ``0``) is used.
+    """
+    env_value = os.environ.get("SWARM_CHAT_ID")
+    if env_value:
+        try:
+            return int(env_value)
+        except ValueError:
+            logger.warning(
+                "SWARM_CHAT_ID env var '%s' is not a valid integer — ignoring.", env_value
+            )
+    return yaml_value
 
 
 @dataclass(frozen=True)
@@ -110,7 +129,7 @@ class SwarmConfig:
 
         return cls(
             enabled=data.get("enabled", False),
-            group_chat_id=data.get("group_chat_id", 0),
+            group_chat_id=_resolve_chat_id(int(data.get("group_chat_id", 0))),
             orchestrator=orchestrator,
             workers=workers,
         )

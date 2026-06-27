@@ -107,7 +107,9 @@ time_travel:
 
 swarm:
   enabled: true
-  group_chat_id: -5553328924
+  # group_chat_id is read from the SWARM_CHAT_ID environment variable.
+  # Set it before starting the swarm, e.g.:  export SWARM_CHAT_ID=<your-chat-id>
+  group_chat_id: 0
   orchestrator:
     name: Kazma Orchestrator
     profile: default

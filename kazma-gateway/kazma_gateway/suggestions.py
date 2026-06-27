@@ -14,7 +14,7 @@ Usage:
 
     suggester = PostTaskSuggester(enabled=True)
     hints = suggester.suggest(actions=["file_write", "git_commit"])
-    # ["💡 Run tests to verify: .venv/bin/pytest tests/"]
+    # ["💡 Run tests to verify: python -m pytest tests/"]
 
     tool_hints = detect_tool_intent("search for best python frameworks")
     # ["💡 You can use the web_search tool to find that."]
@@ -34,7 +34,7 @@ MAX_SUGGESTIONS = 2
 
 # Action → suggestion mapping (ordered by priority, highest first).
 _ACTION_SUGGESTIONS: list[tuple[str, str]] = [
-    ("file_write", "💡 Run tests to verify: .venv/bin/pytest tests/"),
+    ("file_write", "💡 Run tests to verify: python -m pytest tests/"),
     (
         "git_commit",
         "💡 Consider pushing: git push origin main",

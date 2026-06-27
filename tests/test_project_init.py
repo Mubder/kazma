@@ -54,7 +54,7 @@ class TestProjectInit:
             rules_path = Path(tmp) / ".kazma" / "rules.yaml"
             data = yaml.safe_load(rules_path.read_text())
             assert data["language"] == "python"
-            assert data["test_command"] == ".venv/bin/pytest tests/ -q"
+            assert data["test_command"] == "python -m pytest tests/ -q"
             assert data["git_branch"] == "main"
 
 

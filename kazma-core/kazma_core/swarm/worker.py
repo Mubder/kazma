@@ -154,11 +154,20 @@ class TelegramWorker(SwarmWorker):
     a one-shot prompt.  The bot token is read from the environment variable
     named by ``bot_token_env``.
 
+    .. note::
+
+        **External dependency:** This worker requires the ``hermes`` CLI to be
+        installed and available on ``PATH``.  ``hermes`` is a separate Telegram
+        bot runner (not bundled with Kazma).  If it is not installed, dispatch
+        will return an ``error`` result.  Install it separately or use
+        :class:`InProcessWorker` instead.
+
     Args:
         name:          Worker identifier.
         profile:       Hermes profile name (e.g. ``core``).
         bot_token_env: Env var holding the Telegram bot token.
-        group_chat_id: Telegram group chat ID to target.
+        group_chat_id: Telegram group chat ID to target (read from
+                       ``SWARM_CHAT_ID`` env var by the config loader).
         role:          Semantic role.
     """
 
