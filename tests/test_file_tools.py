@@ -123,7 +123,7 @@ class TestFileWrite:
         result = await file_write("/root/kazma_test_no_permission.txt", "test")
 
         # Should get permission error (unless running as root)
-        if os.getuid() == 0:
+        if hasattr(os, "getuid") and os.getuid() == 0:
             pytest.skip("Running as root — permission test not meaningful")
         assert "Error" in result
         assert "Permission" in result

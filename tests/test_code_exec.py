@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
 import os
+import sys
 import tempfile
 
 import pytest
+from kazma_core.tools import code_exec
 from kazma_core.tools.code_exec import python_exec
 
 
@@ -105,3 +108,67 @@ for i in range(5):
         """Output format includes exit code."""
         result = await python_exec("import sys; sys.exit(42)")
         assert "[Exit code: 42]" in result
+
+
+class TestCodeExecWindowsPortability:
+    """Tests ensuring code_exec.py works on Windows (and all platforms)."""
+
+    def test_code_exec_imports_without_resource_error(self) -> None:
+        """Module imports cleanly on Windows (no ModuleNotFoundError for 'resource')."""
+        # If we got here, the import at top of file already succeeded.
+        assert hasattr(code_exec, "python_exec")
+
+    def test_no_hardcoded_python3_in_source(self) -> None:
+        """Source must not contain a hardcoded 'python3' subprocess binary."""
+        source = inspect.getsource(code_exec)
+        # Allow references in comments/docstrings but not as a subprocess binary.
+        # The subprocess binary must be sys.executable, never literal "python3".
+        assert '"python3"' not in source, "Hardcoded \"python3\" found in code_exec.py source"
+
+    def test_subprocess_uses_sys_executable(self) -> None:
+        """python_exec must invoke sys.executable, not 'python3'."""
+        source = inspect.getsource(code_exec.python_exec)
+        assert "sys.executable" in source, "python_exec does not use sys.executable"
+        assert "python3" not in source, "python_exec still references 'python3'"
+
+    def test_preexec_fn_conditional_on_platform(self) -> None:
+        """preexec_fn must only be set on Unix, not unconditionally."""
+        source = inspect.getsource(code_exec)
+        # preexec_fn should not be passed unconditionally; it should be behind a
+        # platform check or a conditional variable.
+        assert "preexec_fn=_set_limits" not in source, (
+            "preexec_fn=_set_limits is hardcoded unconditionally"
+        )
+
+    def test_no_posix_only_path_fallback(self) -> None:
+        """PATH fallback must not be the POSIX-only /usr/bin:/bin."""
+        source = inspect.getsource(code_exec)
+        assert "/usr/bin:/bin" not in source, (
+            "POSIX-only /usr/bin:/bin PATH fallback remains in code_exec.py"
+        )
+
+    @pytest.mark.asyncio
+    async def test_python_exec_uses_sys_executable_at_runtime(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """At runtime, subprocess must be invoked with sys.executable as first arg."""
+        captured_args: list[tuple] = []
+
+        class _FakeProc:
+            returncode = 0
+
+            async def communicate(self) -> tuple[bytes, bytes]:
+                return (b"ok", b"")
+
+            def kill(self) -> None:
+                pass
+
+            async def wait(self) -> int:
+                return 0
+
+        async def _fake_create_subprocess_exec(*args, **kwargs):
+            captured_args.append(args)
+            return _FakeProc()
+
+        monkeypatch.setattr(code_exec.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
+        await python_exec("print('test')")
+        assert len(captured_args) == 1
+        assert captured_args[0][0] == sys.executable

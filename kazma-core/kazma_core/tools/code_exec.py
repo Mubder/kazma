@@ -12,28 +12,44 @@ from __future__ import annotations
 
 import asyncio
 import os
-import resource
 import shutil
+import sys
 import tempfile
 from pathlib import Path
+from typing import Any
+
+# The 'resource' module is POSIX-only and does not exist on Windows.
+try:
+    import resource as _resource_module
+except ImportError:
+    _resource_module = None  # type: ignore[assignment]
 
 MAX_OUTPUT_CHARS = 4000
 DEFAULT_TIMEOUT = 30  # seconds
 MEMORY_LIMIT_MB = 512
 
+# preexec_fn is only supported on POSIX platforms (Unix/Linux/macOS).
+_IS_UNIX = sys.platform != "win32" and _resource_module is not None
+
 
 def _set_limits() -> None:
-    """Set resource limits in the child process (pre-exec)."""
+    """Set resource limits in the child process (pre-exec).
+
+    Only called on POSIX platforms where the ``resource`` module is available.
+    """
+    if _resource_module is None:
+        return
+
     # Memory limit: 512MB
     mem_bytes = MEMORY_LIMIT_MB * 1024 * 1024
     try:
-        resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
+        _resource_module.setrlimit(_resource_module.RLIMIT_AS, (mem_bytes, mem_bytes))  # type: ignore[attr-defined]
     except (ValueError, OSError):
         pass  # Some systems don't support this
 
     # CPU time limit (backup)
     try:
-        resource.setrlimit(resource.RLIMIT_CPU, (DEFAULT_TIMEOUT + 5, DEFAULT_TIMEOUT + 5))
+        _resource_module.setrlimit(_resource_module.RLIMIT_CPU, (DEFAULT_TIMEOUT + 5, DEFAULT_TIMEOUT + 5))  # type: ignore[attr-defined]
     except (ValueError, OSError):
         pass
 
@@ -58,20 +74,26 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     try:
         code_file.write_text(code, encoding="utf-8")
 
-        # Spawn subprocess with isolated mode (-I) and resource limits
-        proc = await asyncio.create_subprocess_exec(
-            "python3",
-            "-I",  # isolated mode: no user site-packages, no PYTHON*
-            str(code_file),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=tmp_dir,
-            env={
-                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        # Build subprocess keyword arguments (preexec_fn is POSIX-only)
+        subprocess_kwargs: dict[str, Any] = {
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.PIPE,
+            "cwd": tmp_dir,
+            "env": {
+                "PATH": os.environ.get("PATH", ""),
                 "HOME": tmp_dir,
                 "LANG": os.environ.get("LANG", "C.UTF-8"),
             },
-            preexec_fn=_set_limits,
+        }
+        if _IS_UNIX:
+            subprocess_kwargs["preexec_fn"] = _set_limits
+
+        # Spawn subprocess with isolated mode (-I) and resource limits
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-I",  # isolated mode: no user site-packages, no PYTHON*
+            str(code_file),
+            **subprocess_kwargs,
         )
 
         try:
