@@ -24,6 +24,29 @@
     </div>
   </div>
 
+  <!-- ── HITL Pending Approvals Panel ── -->
+  <div id="hitl-approvals-panel" class="card hitl-panel" style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle);">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <h2 style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
+          Pending Approvals
+        </h2>
+        <span class="hitl-approval-count badge badge-premium" style="display:none;font-size:0.7rem;min-width:20px;text-align:center;">0</span>
+      </div>
+      <span style="font-size:0.75rem;color:var(--text-muted);">Human-in-the-Loop tool execution review</span>
+    </div>
+    <div class="hitl-approval-list" style="padding:16px 20px;">
+      <!-- Approval cards injected by hitl_approval.js -->
+    </div>
+    <div class="hitl-approval-empty" style="display:block;text-align:center;padding:24px 20px;color:var(--text-muted);">
+      <div style="font-size:1.5rem;margin-bottom:6px;">✅</div>
+      <p style="margin:0;">No pending approvals</p>
+      <p style="font-size:0.75rem;color:var(--text-tertiary);margin-top:4px;">
+        Tools requiring human approval will appear here
+      </p>
+    </div>
+  </div>
+
   <!-- ── Metrics Row ── -->
   <div class="metrics-grid">
     <div class="metric-card">
@@ -180,6 +203,8 @@
 {% block scripts %}
 <script src="/static/js/streaming.js"></script>
 <script src="/static/js/dashboard.js"></script>
+<script>window.__KAZMA_SECRET__ = "{{ kazma_secret|default('') }}";</script>
+<script src="/static/js/hitl_approval.js"></script>
 <script>
 (function() {
   // Session management (preserve existing functionality)

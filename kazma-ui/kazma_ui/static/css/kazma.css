@@ -1981,3 +1981,80 @@ canvas { display: block; border-radius: 4px; }
 @media (max-width: 480px) {
   .metrics-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* ── HITL Approval Panel ───────────────────────────────────────── */
+.hitl-panel.has-pending {
+  border-color: rgba(139, 92, 246, 0.3);
+}
+.hitl-approval-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  transition: border-color 0.15s;
+}
+.hitl-approval-card:last-child { margin-bottom: 0; }
+.hitl-approval-card:hover { border-color: rgba(255, 255, 255, 0.12); }
+.hitl-approval-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.hitl-tool-name {
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+.hitl-thread-id {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hitl-approval-message {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.hitl-approval-args {
+  background: var(--bg-deep);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  overflow-x: auto;
+}
+.hitl-approval-args pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-tertiary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.hitl-approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-success {
+  background: var(--success-subtle);
+  color: var(--success);
+  border: 1px solid transparent;
+}
+.btn-success:hover:not(:disabled) {
+  background: var(--success);
+  color: #fff;
+}
+.hitl-approval-status {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.hitl-status-ok { color: var(--success); }
+.hitl-status-denied { color: var(--text-tertiary); }
+.hitl-status-error { color: var(--danger); }
+

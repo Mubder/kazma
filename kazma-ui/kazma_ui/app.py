@@ -63,6 +63,9 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # Global template context for language/direction
     templates.env.globals["lang"] = agent.config.language if hasattr(agent.config, "language") else "en"
     templates.env.globals["dir"] = "rtl" if getattr(agent.config, "rtl", False) else "ltr"
+    # Expose KAZMA_SECRET to templates so the HITL approval frontend can
+    # send it as the X-Kazma-Secret header on /api/approve requests.
+    templates.env.globals["kazma_secret"] = os.environ.get("KAZMA_SECRET", "")
 
     # Create routers
     from kazma_ui.agents import create_agents_router
@@ -422,14 +425,27 @@ def create_app(config_path: str | None = None) -> FastAPI:
         logger.info("[Health] /health endpoint mounted")
 
         # ── HITL Approval Endpoint ────────────────────────────────
-        from fastapi import Request as _Request
         from fastapi.responses import JSONResponse as _JSONResponse
 
         # HITL auth — shared secret validation
         _KAZMA_SECRET = os.environ.get("KAZMA_SECRET", "")
 
+        # Mutable holder for the latest graph/checkpointer references.
+        # The graph is recompiled with a checkpointer during startup, so
+        # we resolve the latest reference at request time instead of
+        # capturing the pre-startup closure variable.
+        _hitl_state: dict[str, Any] = {}
+
+        def _resolve_hitl_graph() -> Any:
+            """Return the latest compiled graph reference (post-startup)."""
+            return _hitl_state.get("graph") or _sse_graph_ref
+
+        def _resolve_hitl_checkpointer() -> Any:
+            """Return the latest checkpointer (post-startup)."""
+            return _hitl_state.get("checkpointer")
+
         @app.post("/api/approve/{thread_id}")
-        async def approve_tool(thread_id: str, _request: _Request) -> _JSONResponse:
+        async def approve_tool(thread_id: str, request: Request) -> _JSONResponse:
             """Resume a paused graph after HITL approval/deny.
 
             Body: {"action": "approve" | "deny", "reason": "optional"}
@@ -439,20 +455,20 @@ def create_app(config_path: str | None = None) -> FastAPI:
             if _KAZMA_SECRET:
                 import secrets as _secrets
 
-                provided = _request.headers.get("X-Kazma-Secret", "")
+                provided = request.headers.get("X-Kazma-Secret", "")
                 if not _secrets.compare_digest(provided, _KAZMA_SECRET):
                     return _JSONResponse({"error": "Unauthorized"}, status_code=401)
 
             try:
-                body = await _request.json()
+                body = await request.json()
             except Exception:
                 return _JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
             action = body.get("action", "deny")
             approved = action == "approve"
 
-            # Get the graph reference
-            graph_ref = locals().get("_sse_graph_ref") or globals().get("_sse_graph_ref")
+            # Get the graph reference (latest, post-startup)
+            graph_ref = _resolve_hitl_graph()
             if graph_ref is None:
                 return _JSONResponse({"error": "Graph not available"}, status_code=503)
 
@@ -478,6 +494,35 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 return _JSONResponse({"error": str(e)}, status_code=500)
 
         logger.info("[HITL] Approval endpoint mounted at /api/approve/{thread_id}")
+
+        # ── Pending Approvals Listing (GET /api/pending-approvals) ──
+        # _hitl_state, _resolve_hitl_graph, _resolve_hitl_checkpointer
+        # are defined above alongside the approve endpoint.
+
+        @app.get("/api/pending-approvals")
+        async def list_pending_approvals() -> _JSONResponse:
+            """List all threads currently waiting for HITL tool approval.
+
+            Returns:
+                {"pending": [{"thread_id","tool_name","arguments","message"}], "count": N}
+            """
+            from kazma_ui.hitl_approval import _get_pending_approvals
+
+            graph = _resolve_hitl_graph()
+            checkpointer = _resolve_hitl_checkpointer()
+            if graph is None or checkpointer is None:
+                return _JSONResponse(
+                    {"pending": [], "count": 0, "error": "Graph/checkpointer not yet initialized"},
+                    status_code=503,
+                )
+            try:
+                pending = await _get_pending_approvals(graph, checkpointer)
+                return _JSONResponse({"pending": pending, "count": len(pending)})
+            except Exception as exc:
+                logger.exception("[HITL] Failed to list pending approvals")
+                return _JSONResponse({"pending": [], "count": 0, "error": str(exc)}, status_code=500)
+
+        logger.info("[HITL] Pending approvals endpoint mounted at /api/pending-approvals")
 
         # ── Sub-Agent Manager ─────────────────────────────────────
         try:
@@ -551,6 +596,12 @@ def create_app(config_path: str | None = None) -> FastAPI:
                         checkpointer=checkpointer,
                     )
                     logger.info("[Checkpoint] Graph recompiled with checkpointer")
+
+                    # Update HITL references so /api/pending-approvals can
+                    # enumerate interrupted threads from the checkpoint DB.
+                    _hitl_state["graph"] = _sse_graph_ref
+                    _hitl_state["checkpointer"] = checkpointer
+                    logger.info("[HITL] Pending approvals endpoint linked to checkpointed graph")
 
                     # Re-register brain handler with the checkpointed graph
                     from kazma_gateway.agent_handler import create_graph_handler
