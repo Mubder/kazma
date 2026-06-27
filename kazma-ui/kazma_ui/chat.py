@@ -169,7 +169,7 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 if agent.cost_breaker.should_halt():
                     await websocket.send_json(
                         {
-                            "type": "done",
+                            "type": "error",
                             "content": "⚠️ ميزانية الجلسة انتهت. (Budget exceeded)",
                         }
                     )

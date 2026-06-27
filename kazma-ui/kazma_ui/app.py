@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse
@@ -88,6 +88,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(agents_router)
 
     # ── SSE Chat Router (LangGraph astream_events → HTMX/Alpine) ──
+    _init_errors: list[dict[str, str]] = []
     _checkpointer = None
     try:
         from kazma_core.agent.graph_builder import build_supervisor_graph
@@ -123,6 +124,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         logger.info("SSE chat router mounted at /api/chat/stream")
     except Exception as e:
         logger.warning("SSE chat router failed to initialize: %s", e)
+        _init_errors.append({"subsystem": "sse_chat", "error": str(e)})
 
     # ── Telemetry SSE Route (real hardware metrics) ───────────────
     try:
@@ -136,6 +138,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         logger.info("Telemetry SSE router mounted at /api/telemetry/stream")
     except Exception as e:
         logger.warning("Telemetry router failed to initialize: %s", e)
+        _init_errors.append({"subsystem": "telemetry", "error": str(e)})
 
     # Dashboard (legacy)
     from kazma_ui.dashboard import router as dashboard_router
@@ -421,6 +424,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                     }
                     for a in adapters
                 ],
+                "init_errors": _init_errors,
             }
         logger.info("[Health] /health endpoint mounted")
 
@@ -658,6 +662,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     except Exception as e:
         logger.warning("Gateway failed to initialize: %s", e)
+        _init_errors.append({"subsystem": "gateway", "error": str(e)})
 
     # ── /api/telemetry — Mock telemetry data for Chart.js dashboard ──
     import random
@@ -692,43 +697,24 @@ def create_app(config_path: str | None = None) -> FastAPI:
             "timestamp": now,
         }
 
-    # ── /api/telemetry/stream — SSE stream for live Chart.js metrics ──
-    @app.get("/api/telemetry/stream")
-    async def telemetry_stream(request: Request):
-        """Server-Sent Events endpoint pushing hardware metrics every 1.5s.
+    # NOTE: The duplicate mock /api/telemetry/stream route that was defined
+    # here has been removed.  The real telemetry SSE route is provided by
+    # telemetry_route.create_telemetry_router() (mounted above) and serves
+    # genuine HardwareMonitor metrics at 1 Hz.
 
-        Yields JSON payloads: {"cpu": 23, "ram_used_gb": 4.2, "gpu": 45, "vram_used_gb": 3.1}
+    # ── /api/status — Subsystem init error reporting ──────────────
+    @app.get("/api/status")
+    async def get_status() -> dict[str, Any]:
+        """Return subsystem initialization status.
+
+        Any subsystem (SSE chat, telemetry, gateway) that failed to
+        initialize is listed in ``init_errors`` so the UI can surface
+        a warning banner to the operator.
         """
-        import asyncio
-        import json as json_mod
-
-        from kazma_core.shutdown import is_shutting_down
-
-        async def event_generator():
-            tokens_base = 1200
-            vram_base = 3072
-            while not is_shutting_down():
-                try:
-                    # Simulate drifting metrics
-                    tokens_base = max(200, tokens_base + random.randint(-80, 120))
-                    vram_base = max(512, min(20480, vram_base + random.randint(-64, 64)))
-                    cpu = random.randint(10, 85)
-                    ram = round(random.uniform(1.5, 12.0), 1)
-                    gpu = random.randint(5, 95)
-                    vram = round(vram_base / 1024, 1)  # MB -> GB
-
-                    payload = {
-                        "cpu": cpu,
-                        "ram_used_gb": ram,
-                        "gpu": gpu,
-                        "vram_used_gb": vram,
-                    }
-                    yield f"data: {json_mod.dumps(payload)}\n\n"
-                    await asyncio.sleep(1.5)
-                except asyncio.CancelledError:
-                    break
-
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
+        return {
+            "status": "degraded" if _init_errors else "ok",
+            "init_errors": _init_errors,
+        }
 
     # ── Lifecycle events
     @app.on_event("startup")

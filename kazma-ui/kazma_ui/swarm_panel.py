@@ -189,11 +189,18 @@ def create_swarm_router(templates: Any) -> APIRouter:
 
         dispatched = []
         missing = []
+        now_ts = datetime.now(UTC).isoformat()
         with _lock:
             for name in worker_names:
                 if name in _workers:
                     _workers[name]["busy"] = True
                     _workers[name]["last_task"] = task
+                    _workers[name]["last_heartbeat"] = now_ts
+                    if "logs" not in _workers[name]:
+                        _workers[name]["logs"] = []
+                    _workers[name]["logs"].append(
+                        f"[{now_ts}] Task dispatched: {task[:80]}"
+                    )
                     dispatched.append(name)
                 else:
                     missing.append(name)
@@ -258,6 +265,7 @@ def create_swarm_router(templates: Any) -> APIRouter:
                 "last_task": None,
                 "added_at": datetime.now(UTC).isoformat(),
                 "last_heartbeat": None,
+                "logs": [],
             }
             _workers[name] = worker
 
@@ -278,6 +286,41 @@ def create_swarm_router(templates: Any) -> APIRouter:
 
         logger.info("[Swarm] Worker removed: %s", name)
         return JSONResponse({"status": "ok", "message": f"Worker '{name}' removed"})
+
+    # ── API: Worker Logs ─────────────────────────────────────────────
+    @router.get("/api/swarm/workers/{name}/logs")
+    async def swarm_worker_logs(name: str) -> JSONResponse:
+        """Return log lines for a specific worker.
+
+        Reads from the in-memory log buffer maintained per worker.
+        When kazma_core.swarm is installed, workers write status/task
+        lines that are captured here for display in the UI.
+        """
+        with _lock:
+            worker = _workers.get(name)
+
+        if worker is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+
+        logs = list(worker.get("logs", []))
+
+        # If no explicit logs exist, synthesize a summary from worker metadata
+        if not logs:
+            logs = [
+                f"[{worker.get('added_at', 'unknown')}] Worker '{name}' registered "
+                f"(model={worker.get('model', '?')}, provider={worker.get('provider', '?')})",
+            ]
+            if worker.get("last_task"):
+                logs.append(f"[{worker.get('last_heartbeat', 'unknown')}] "
+                            f"Last task: {worker['last_task']}")
+            status = _worker_status(worker)
+            logs.append(f"[{datetime.now(UTC).isoformat()}] "
+                        f"Current status: {status}")
+
+        return JSONResponse({"logs": logs, "count": len(logs)})
 
     # ── API: Start / Stop All ────────────────────────────────────────
     @router.post("/api/swarm/start")

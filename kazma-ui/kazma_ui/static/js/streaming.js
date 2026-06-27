@@ -240,7 +240,9 @@ var KazmaStream = (function() {
   function toast(msg, type, duration) {
     type = type || 'info';
     duration = duration || 3500;
-    var container = document.getElementById('toast-container');
+    var container = document.getElementById('toast-container') ||
+      document.querySelector('.toast-container');
+    if (!container) return;
     var el = document.createElement('div');
     el.className = 'toast toast-' + type;
     el.innerHTML = msg;
