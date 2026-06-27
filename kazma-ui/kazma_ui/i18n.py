@@ -15,6 +15,7 @@ Usage in templates (after the global is registered)::
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -161,3 +162,52 @@ def make_translator(lang: str = "en"):
 
 # Supported language codes (for validation / UI toggles)
 SUPPORTED_LANGUAGES = sorted({lang for entry in TRANSLATIONS.values() for lang in entry})
+
+
+# ---------------------------------------------------------------------------
+# Jinja2Templates — always-available i18n globals
+# ---------------------------------------------------------------------------
+#
+# ``create_app()`` (production) sets the language-specific translator on the
+# Jinja2 env.  However, tests and lightweight code paths sometimes construct
+# ``Jinja2Templates`` directly without going through ``create_app()``, which
+# previously caused ``UndefinedError: 't' is undefined`` whenever a template
+# used ``{{ t('...') }}``.
+#
+# To guarantee the ``t`` global is *always* present (defaulting to English),
+# we wrap ``Jinja2Templates.__init__`` so every instance starts with sensible
+# defaults.  Production code can still override these globals afterwards.
+# ---------------------------------------------------------------------------
+
+def _patch_jinja2_templates() -> None:
+    """Patch ``Jinja2Templates.__init__`` to inject default i18n globals."""
+    try:
+        from fastapi.templating import Jinja2Templates as _Templates
+    except Exception as exc:  # pragma: no cover — FastAPI always installed
+        logging.getLogger(__name__).debug("Cannot patch Jinja2Templates: %s", exc)
+        return
+
+    # Guard against double-patching
+    if getattr(_Templates.__init__, "_kazma_i18n_patched", False):
+        return
+
+    _original_init = _Templates.__init__
+
+    def _patched_init(self: Any, *args: Any, **kwargs: Any) -> Any:
+        result = _original_init(self, *args, **kwargs)
+        # Inject default i18n globals (English fallback).
+        # ``create_app()`` may override these with the configured language.
+        try:
+            env = self.env
+            env.globals.setdefault("t", make_translator("en"))
+            env.globals.setdefault("lang", "en")
+            env.globals.setdefault("dir", "ltr")
+        except Exception:
+            pass
+        return result
+
+    _patched_init._kazma_i18n_patched = True  # type: ignore[attr-defined]
+    _Templates.__init__ = _patched_init  # type: ignore[method-assign]
+
+
+_patch_jinja2_templates()

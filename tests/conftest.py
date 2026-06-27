@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+# Import i18n early so the Jinja2Templates patch (which injects the default
+# ``t`` global) is applied before any test creates a Jinja2Templates instance.
+import kazma_ui.i18n  # noqa: F401
+
 import pytest
 from kazma_core.agent import AgentConfig, KazmaAgent
 
