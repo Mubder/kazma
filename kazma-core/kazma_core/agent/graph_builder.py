@@ -5,27 +5,21 @@ Graph topology
 
     ┌────────────┐
     │  SUPERVISOR │  ← entry point
-    └──┬───┬───┬─┘
-       │   │   │
-       │   │   └──────────────────────────────┐
-       │   │                                  │
-       ▼   ▼                                  ▼
+    └──┬───────┬─┘
+       │       │
+       │       └──────────────────────────────┐
+       │                                      │
+       ▼                                      ▼
     ┌────────────┐                     ┌────────────┐
-    │    COMPACT  │                     │   RESPOND  │ → END
+    │ TOOL_WORKER │                     │   RESPOND  │ → END
     └─────┬──────┘                     └────────────┘
-          │                                   ▲
-          └────────────► SUPERVISOR ──────────┘
-                              │
-                      ┌───────▼───────┐
-                      │  TOOL_WORKER  │
-                      └───────┬───────┘
-                              │
-                        SUPERVISOR
+          │
+    SUPERVISOR
 
 The Supervisor is the decision-maker.  On each iteration it:
   1. Calls the LLM with the current messages + tool schemas.
   2. If the LLM returns tool_calls → routes to TOOL_WORKER.
-  3. If context is ≥ 80% full → routes to COMPACT.
+  3. If context is ≥ 80% full → compacts inline and re-enters SUPERVISOR.
   4. If the LLM returns a final text response → routes to RESPOND.
   5. If max_iterations is hit → forced RESPOND.
 
@@ -495,27 +489,6 @@ async def respond_node(state: SupervisorState) -> dict[str, Any]:
     }
 
 
-async def compact_node(
-    state: SupervisorState,
-    *,
-    authority: Any,
-) -> dict[str, Any]:
-    """Compact node — triggers context compaction and loops back.
-
-    This is a dedicated node (rather than inline in supervisor) so the
-    compaction event gets its own checkpoint and trace.
-    """
-    logger.info("[Compact] Triggering context compaction")
-
-    compacted = await authority.check_and_enforce({**state, "messages": state.get("messages", [])})
-
-    return {
-        "messages": compacted.get("messages", []),
-        "needs_compaction": False,
-        "next_node": NodeName.SUPERVISOR,
-    }
-
-
 async def check_saturation_node(state: SupervisorState) -> dict[str, Any]:
     """Check if conversation has exceeded the summarization threshold.
 
@@ -663,9 +636,6 @@ def build_supervisor_graph(
     async def _respond(state: SupervisorState) -> dict[str, Any]:
         return await respond_node(state)
 
-    async def _compact(state: SupervisorState) -> dict[str, Any]:
-        return await compact_node(state, authority=authority)
-
     async def _check_saturation(state: SupervisorState) -> dict[str, Any]:
         return await check_saturation_node(state)
 
@@ -686,16 +656,10 @@ def build_supervisor_graph(
 
         if next_node == NodeName.TOOL_WORKER:
             return NodeName.TOOL_WORKER
-        if next_node == NodeName.COMPACT:
-            return NodeName.COMPACT
         return NodeName.RESPOND
 
     def _route_from_worker(state: SupervisorState) -> str:
         """Route from Tool Worker — always back to Supervisor."""
-        return NodeName.SUPERVISOR
-
-    def _route_from_compact(state: SupervisorState) -> str:
-        """Route from Compact — always back to Supervisor."""
         return NodeName.SUPERVISOR
 
     def _route_from_saturation(state: SupervisorState) -> str:
@@ -716,7 +680,6 @@ def build_supervisor_graph(
     graph.add_node(NodeName.SUPERVISOR, _supervisor)
     graph.add_node(NodeName.TOOL_WORKER, _tool_worker)
     graph.add_node(NodeName.RESPOND, _respond)
-    graph.add_node(NodeName.COMPACT, _compact)
     graph.add_node(NodeName.SUMMARIZE, _summarize)
 
     # Entry: START → check_saturation
@@ -739,13 +702,12 @@ def build_supervisor_graph(
         {NodeName.SUPERVISOR: NodeName.SUPERVISOR},
     )
 
-    # Supervisor → {tool_worker, compact, respond}
+    # Supervisor → {tool_worker, respond}
     graph.add_conditional_edges(
         NodeName.SUPERVISOR,
         _route,
         {
             NodeName.TOOL_WORKER: NodeName.TOOL_WORKER,
-            NodeName.COMPACT: NodeName.COMPACT,
             NodeName.RESPOND: NodeName.RESPOND,
         },
     )
@@ -754,13 +716,6 @@ def build_supervisor_graph(
     graph.add_conditional_edges(
         NodeName.TOOL_WORKER,
         _route_from_worker,
-        {NodeName.SUPERVISOR: NodeName.SUPERVISOR},
-    )
-
-    # Compact → Supervisor (loop back)
-    graph.add_conditional_edges(
-        NodeName.COMPACT,
-        _route_from_compact,
         {NodeName.SUPERVISOR: NodeName.SUPERVISOR},
     )
 

@@ -28,7 +28,6 @@ class NodeName(StrEnum):
     SUPERVISOR = "supervisor"
     TOOL_WORKER = "tool_worker"
     RESPOND = "respond"
-    COMPACT = "compact"
     CHECK_SATURATION = "check_saturation"
     SUMMARIZE = "summarize"
 

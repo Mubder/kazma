@@ -20,7 +20,6 @@ from typing import Any
 import aiosqlite
 import yaml
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph import END, StateGraph
 
 from kazma_core.authority import ContextAuthority, create_authority
 from kazma_core.cost_breaker import create_cost_breaker
@@ -410,73 +409,6 @@ async def main() -> None:
     finally:
         await agent.shutdown()
         print("\n🇰🇼 مع السلامة!")
-
-
-# ---------------------------------------------------------------------------
-# Backward-compatible aliases for tests that import these names
-# ---------------------------------------------------------------------------
-
-
-# Keep build_graph available for tests that import it directly
-def build_graph(checkpointer: AsyncSqliteSaver | None = None) -> Any:
-    """Build a basic LangGraph state machine (backward-compatible stub).
-
-    The real ReAct loop now runs inside KazmaAgent.run(). This function
-    is kept for backward compatibility with existing tests.
-    """
-
-    async def _think(state: AgentState) -> dict[str, Any]:
-        return {"messages": state.get("messages", []) + [{"role": "assistant", "content": "[thinking]"}]}
-
-    async def _act(state: AgentState) -> dict[str, Any]:
-        tool_results = dict(state.get("tool_results", {}))
-        tool_results[f"action_{len(tool_results)}"] = {"status": "completed", "result": "placeholder"}
-        return {
-            "messages": state.get("messages", []) + [{"role": "assistant", "content": "[acted]"}],
-            "tool_results": tool_results,
-        }
-
-    async def _observe(state: AgentState) -> dict[str, Any]:
-        tool_results = state.get("tool_results", {})
-        done = len(tool_results) >= 3
-        return {
-            "messages": state.get("messages", [])
-            + [{"role": "assistant", "content": "[done]" if done else "[continue]"}],
-            "_should_continue": not done,
-        }
-
-    def _route(state: AgentState) -> str:
-        return "end" if not state.get("_should_continue", True) else "continue"
-
-    graph = StateGraph(AgentState)
-    graph.add_node("think", _think)
-    graph.add_node("act", _act)
-    graph.add_node("observe", _observe)
-    graph.set_entry_point("think")
-    graph.add_edge("think", "act")
-    graph.add_edge("act", "observe")
-    graph.add_conditional_edges("observe", _route, {"continue": "think", "end": END})
-
-    if checkpointer is not None:
-        return graph.compile(checkpointer=checkpointer)
-    return graph.compile()
-
-
-async def create_app(db_path: str = CHECKPOINT_DB) -> Any:
-    """Create a compiled LangGraph app with SQLite checkpointer (backward-compatible)."""
-    from pathlib import Path as _Path
-
-    _Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = await aiosqlite.connect(db_path)
-    try:
-        await conn.execute("PRAGMA journal_mode=WAL")
-        await conn.execute("PRAGMA synchronous=NORMAL")
-        saver = AsyncSqliteSaver(conn)
-        await saver.setup()
-        return build_graph(checkpointer=saver), saver
-    except Exception:
-        await conn.close()
-        raise
 
 
 if __name__ == "__main__":

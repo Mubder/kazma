@@ -4,7 +4,7 @@ Exposes the compiled Supervisor graph, enhanced state schema,
 and the lightweight local + MCP tool registry.
 
 Also re-exports backward-compatible names from the legacy agent module
-(AgentConfig, KazmaAgent, load_config, build_graph, run_agent, main).
+(AgentConfig, KazmaAgent, load_config, run_agent, main).
 """
 
 # ── New Supervisor components ───────────────────────────────────────
@@ -21,8 +21,6 @@ try:
         MAX_ITERATIONS,
         AgentConfig,
         KazmaAgent,
-        build_graph,
-        create_app,
         load_config,
         main,
         run_agent,
@@ -44,7 +42,6 @@ __all__ = [
     "AgentConfig",
     "KazmaAgent",
     "load_config",
-    "build_graph",
     "run_agent",
     "main",
 ]

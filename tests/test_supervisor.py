@@ -58,7 +58,7 @@ class TestSupervisorState:
         assert NodeName.SUPERVISOR == "supervisor"
         assert NodeName.TOOL_WORKER == "tool_worker"
         assert NodeName.RESPOND == "respond"
-        assert NodeName.COMPACT == "compact"
+        assert NodeName.SUMMARIZE == "summarize"
 
     def test_partial_state_update(self):
         """LangGraph merges partial dicts — verify partial updates work."""
@@ -375,7 +375,6 @@ class TestGraphBuilder:
         assert NodeName.SUPERVISOR in nodes
         assert NodeName.TOOL_WORKER in nodes
         assert NodeName.RESPOND in nodes
-        assert NodeName.COMPACT in nodes
 
     def test_graph_with_checkpointer(self):
         import asyncio
