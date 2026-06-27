@@ -10,7 +10,6 @@ from kazma_core.authorization_flow import (
     AuthorizationRequest,
     DenialResult,
 )
-from kazma_core.checkpoint import CheckpointManager
 from kazma_core.cost_breaker import CostCircuitBreaker, create_cost_breaker
 from kazma_core.cultural_context import CulturalContext, CulturalEvent
 from kazma_core.dialect_detector import DialectDetector, DialectResult
@@ -19,7 +18,6 @@ from kazma_core.llm_provider import LLMConfig, LLMError, LLMProvider, LLMRespons
 from kazma_core.majlis import ConversationPhase, MajlisProtocol, MajlisResponse
 from kazma_core.pacing import ConversationPacing, Intent, TransitionDecision
 from kazma_core.rbac import DIVISIONS, PermissionResult, RBACEngine
-from kazma_core.recovery import recover_on_startup
 from kazma_core.router import AgentRequest, AgentResponse, DialectRouter
 from kazma_core.state import AgentState, initial_state
 from kazma_core.tokenizer import DualEngineTokenizer, TokenResult
@@ -33,7 +31,6 @@ __all__ = [
     "AuditLogger",
     "AuthorizationFlow",
     "AuthorizationRequest",
-    "CheckpointManager",
     "CostCircuitBreaker",
     "CulturalContext",
     "CulturalEvent",
@@ -68,5 +65,4 @@ __all__ = [
     "create_cost_breaker",
     "create_tracer",
     "initial_state",
-    "recover_on_startup",
 ]

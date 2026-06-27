@@ -15,38 +15,11 @@ import pytest
 import yaml
 
 # ── Bug 1: checkpoint.py prune() only fetches keep_last+1 ──────────────────
-
-
-class TestBug01_PruneFetchesAllCheckpoints:
-    """prune() must fetch ALL checkpoints, not just keep_last+1."""
-
-    @pytest.mark.asyncio
-    async def test_prune_deletes_all_old_checkpoints(self, tmp_path):
-        """With 200 checkpoints and keep_last=100, exactly 100 should be deleted."""
-        from kazma_core.checkpoint import CheckpointManager
-
-        db_path = str(tmp_path / "test.db")
-        manager = CheckpointManager(db_path=db_path)
-        await manager._ensure_saver()
-
-        # Create 200 checkpoints
-        from kazma_core.state import initial_state
-
-        for i in range(200):
-            state = initial_state()
-            state["messages"] = [{"role": "user", "content": f"msg {i}"}]
-            state["created_at"] = f"2026-01-{(i % 28) + 1:02d}T00:00:00Z"
-            await manager.save(state)
-
-        # Prune: keep 100
-        removed = await manager.prune(keep_last=100)
-
-        # Should have removed 100, not just 1
-        assert removed == 100, f"Expected 100 removed, got {removed}"
-
-        remaining = await manager.list_checkpoints(limit=999_999)
-        assert len(remaining) == 100
-        await manager.close()
+# NOTE: Bug01 tested kazma_core.checkpoint.CheckpointManager.prune(), which was
+# the dead second CheckpointManager (VAL-DEDUP-002). The production checkpointer
+# is kazma_gateway.stores.checkpoint.CheckpointManager (a thin AsyncSqliteSaver
+# wrapper). prune() moved with the dead class; the gateway checkpointer does
+# not expose it. Test removed.
 
 
 # ── Bug 2: recovery.py uses wrong field name ───────────────────────────────
@@ -62,29 +35,6 @@ class TestBug02_RecoveryFieldName:
         state = initial_state()
         assert "last_cp_id" in state
         assert "checkpoint_id" not in state
-
-    @pytest.mark.asyncio
-    async def test_recovery_logs_correct_field(self, tmp_path, caplog):
-        """recovery.py should log last_cp_id, not None."""
-        import logging
-
-        from kazma_core.checkpoint import CheckpointManager
-        from kazma_core.state import initial_state
-
-        db_path = str(tmp_path / "test.db")
-        manager = CheckpointManager(db_path=db_path)
-        state = initial_state()
-        state["messages"] = [{"role": "user", "content": "test"}]
-        cp_id = await manager.save(state)
-        await manager.close()
-
-        with caplog.at_level(logging.INFO):
-            from kazma_core.recovery import recover_on_startup
-
-            recovered = await recover_on_startup(db_path=db_path)
-
-        # Should log the actual checkpoint ID, not None
-        assert cp_id in caplog.text or recovered.get("last_cp_id") == cp_id
 
 
 # ── Bug 3: tone_adapter.py \b broken for Arabic ───────────────────────────
@@ -256,38 +206,10 @@ class TestBug09_MSAScoreNotZero:
 
 
 # ── Bug 10: O(N) load in checkpoint.py ─────────────────────────────────────
-
-
-class TestBug10_CheckpointLoadUsesSQL:
-    """load() should use direct SQL lookup, not scan all checkpoints."""
-
-    @pytest.mark.asyncio
-    async def test_load_finds_checkpoint_directly(self, tmp_path):
-        from kazma_core.checkpoint import CheckpointManager
-        from kazma_core.state import initial_state
-
-        db_path = str(tmp_path / "test.db")
-        manager = CheckpointManager(db_path=db_path)
-
-        state = initial_state()
-        state["messages"] = [{"role": "user", "content": "test"}]
-        cp_id = await manager.save(state)
-
-        loaded = await manager.load(cp_id)
-        assert loaded["messages"][0]["content"] == "test"
-        await manager.close()
-
-    @pytest.mark.asyncio
-    async def test_load_nonexistent_raises(self, tmp_path):
-        from kazma_core.checkpoint import CheckpointManager
-
-        db_path = str(tmp_path / "test.db")
-        manager = CheckpointManager(db_path=db_path)
-        await manager._ensure_saver()
-
-        with pytest.raises(FileNotFoundError):
-            await manager.load("nonexistent-id")
-        await manager.close()
+# NOTE: Bug10 tested kazma_core.checkpoint.CheckpointManager.load(), which was
+# the dead second CheckpointManager (VAL-DEDUP-002). The production checkpointer
+# (kazma_gateway.stores.checkpoint.CheckpointManager) is a thin AsyncSqliteSaver
+# wrapper and does not expose a load() method. Test removed.
 
 
 # ── Bug 11: mcp_client.py ID concurrency ───────────────────────────────────
