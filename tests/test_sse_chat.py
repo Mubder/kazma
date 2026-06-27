@@ -161,6 +161,38 @@ class TestChatStreamEndpoint:
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
 
+    def test_session_messages_endpoint_registered(self):
+        """The SSE router must expose GET /api/chat/sessions/{id}/messages."""
+        app, _ = self._make_app()
+        client = TestClient(app)
+
+        resp = client.get("/api/chat/sessions/nonexistent/messages")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_session_messages_returns_messages(self):
+        """After creating a session via /api/chat/stream, the messages endpoint
+        must return the stored user + assistant messages."""
+        app, _ = self._make_app()
+        client = TestClient(app)
+
+        # Send a message to create a session (the mock graph yields no events,
+        # but the session is still created with the user message stored).
+        client.post("/api/chat/stream", json={"message": "hello world"})
+
+        # List sessions to get the session_id
+        sessions = client.get("/api/chat/sessions").json()
+        assert len(sessions) == 1
+        session_id = sessions[0]["session_id"]
+
+        # Fetch messages for that session
+        resp = client.get(f"/api/chat/sessions/{session_id}/messages")
+        assert resp.status_code == 200
+        messages = resp.json()
+        assert len(messages) >= 1
+        assert messages[0]["role"] == "user"
+        assert messages[0]["content"] == "hello world"
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Stream content (mock graph)

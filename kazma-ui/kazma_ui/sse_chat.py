@@ -231,10 +231,30 @@ def create_sse_chat_router(
     Returns:
         APIRouter with POST /api/chat/stream registered.
     """
+    from kazma_ui.chat import ChatSession
+    from kazma_ui.chat import _sessions as _ws_sessions
+
     r = APIRouter(tags=["chat-sse"])
 
     # In-memory session → thread_id mapping (persists across requests)
     _sessions: dict[str, dict[str, Any]] = {}
+
+    def _sync_to_shared_store(session_id: str, session: dict[str, Any]) -> None:
+        """Mirror an SSE session into the shared WebSocket session store.
+
+        The chat.py router's GET endpoints (/api/chat/sessions and
+        /api/chat/sessions/{id}/messages) are registered before the SSE
+        router and therefore take precedence in route matching. By syncing
+        SSE-created sessions into the shared store, the session list and
+        message-history endpoints serve data from both transports.
+        """
+        ws = _ws_sessions.get(session_id)
+        if ws is None:
+            ws = ChatSession(session_id=session_id)
+            _ws_sessions[session_id] = ws
+        ws.messages = list(session.get("messages", []))
+        ws.total_cost = session.get("total_cost", 0.0)
+        ws.total_tokens = session.get("total_tokens", 0)
 
     @r.post("/api/chat/stream")
     async def chat_stream(request: Request) -> StreamingResponse:
@@ -294,6 +314,7 @@ def create_sse_chat_router(
 
         # ── Build conversation messages ────────────────────────────
         session["messages"].append({"role": "user", "content": user_message})
+        _sync_to_shared_store(session_id, session)
 
         messages: list[dict[str, Any]] = []
         has_system = any(m.get("role") == "system" for m in session["messages"])
@@ -358,6 +379,7 @@ def create_sse_chat_router(
                             "content": content_acc,
                         }
                     )
+                    _sync_to_shared_store(session_id, session)
 
             except asyncio.CancelledError:
                 logger.warning("SSE generator cancelled for session=%s", session_id)
@@ -394,7 +416,28 @@ def create_sse_chat_router(
     async def delete_session(session_id: str) -> dict[str, str]:
         """Delete an SSE chat session."""
         _sessions.pop(session_id, None)
+        _ws_sessions.pop(session_id, None)
         return {"status": "ok"}
+
+    @r.get("/api/chat/sessions/{session_id}/messages")
+    async def get_session_messages(session_id: str) -> list[dict[str, Any]]:
+        """Return the message history for an SSE chat session.
+
+        Each message dict has ``role`` ("user" | "assistant") and ``content``.
+        Returns an empty list if the session does not exist (e.g. it was
+        created on a different transport or has already been deleted).
+        """
+        session = _sessions.get(session_id)
+        if not session:
+            return []
+        # Return only role/content pairs so we don't leak internal keys
+        return [
+            {
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", ""),
+            }
+            for msg in session.get("messages", [])
+        ]
 
     # ── Provider profile management ───────────────────────────────
 

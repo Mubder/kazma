@@ -398,7 +398,7 @@
 
   function loadSession(sessionId) {
     chatSessionId = sessionId;
-    // Clear messages
+    // Clear messages and show loading state
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
         '<div class="welcome-icon">\u{1F30A}</div>' +
@@ -406,8 +406,44 @@
         '<p>Loading messages\u2026</p>' +
       '</div>';
     renderSessionList();
-    // Messages loaded through API
     updateSessionStats(0, 0);
+
+    // Fetch the session messages from the API and render them
+    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages')
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(messages) {
+        // Clear the loading placeholder
+        messagesEl.innerHTML = '';
+
+        if (!messages || messages.length === 0) {
+          messagesEl.innerHTML =
+            '<div class="chat-welcome">' +
+              '<div class="welcome-icon">\u{1F30A}</div>' +
+              '<h2>Session ' + escapeHtml(sessionId.slice(0, 8)) + '</h2>' +
+              '<p>No messages in this session yet.</p>' +
+            '</div>';
+          return;
+        }
+
+        // Render each stored message
+        messages.forEach(function(msg) {
+          var role = msg.role === 'assistant' ? 'assistant' : 'user';
+          appendMessage(role, msg.content || '');
+        });
+        scrollToBottom();
+      })
+      .catch(function(err) {
+        messagesEl.innerHTML =
+          '<div class="chat-welcome">' +
+            '<div class="welcome-icon">\u{1F30A}</div>' +
+            '<h2>Session ' + escapeHtml(sessionId.slice(0, 8)) + '</h2>' +
+            '<p>Failed to load messages: ' + escapeHtml(err.message) + '</p>' +
+          '</div>';
+        KS.toast('Failed to load session messages', 'error', 3000);
+      });
   }
 
   function newSession() {
