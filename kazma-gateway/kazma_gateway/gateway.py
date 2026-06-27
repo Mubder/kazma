@@ -188,7 +188,10 @@ class SessionStore(ABC):
     Replaces the in-memory _session_map dict with a persistent backend.
     Platform IDs (chat_id, user_id, etc.) live here — NEVER in graph state.
 
-    Subclasses MUST implement get(), put(), and delete().
+    Subclasses MUST implement get(), put(), and delete(). Implementations
+    SHOULD override evict_older_than() to provide TTL-based eviction so that
+    session entries survive an agent reply (enabling crash-recovery routing)
+    instead of being deleted immediately.
     """
 
     @abstractmethod
@@ -208,6 +211,24 @@ class SessionStore(ABC):
     async def delete(self, thread_id: str) -> None:
         """Remove stored context for a thread_id. No-op if not found."""
         ...
+
+    async def evict_older_than(self, seconds: float) -> int:
+        """Evict session entries older than ``seconds`` since their last update.
+
+        Returns the number of entries evicted. The base implementation is a
+        no-op returning 0; backends with a timestamp (e.g. SQLiteSessionStore)
+        override this to enable TTL/LRU eviction. This replaces the old
+        behavior of deleting the session entry after every agent reply, which
+        broke crash-recovery routing.
+
+        Args:
+            seconds: TTL in seconds. Entries whose ``updated_at`` is older
+                     than ``now - seconds`` are removed.
+
+        Returns:
+            Number of entries evicted.
+        """
+        return 0
 
 
 # ══════════════════════════════════════════════════════════════════════════

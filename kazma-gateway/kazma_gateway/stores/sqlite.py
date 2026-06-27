@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 _GET_BY_THREAD = "SELECT context FROM sessions WHERE thread_id = ?"
 _UPSERT = "INSERT OR REPLACE INTO sessions (thread_id, context, updated_at) VALUES (?, ?, strftime('%s', 'now'))"
 _DELETE = "DELETE FROM sessions WHERE thread_id = ?"
+_EVICT_OLDER_THAN = "DELETE FROM sessions WHERE updated_at < ?"
 
 
 class SQLiteSessionStore(SessionStore):
@@ -95,6 +97,26 @@ class SQLiteSessionStore(SessionStore):
         db = await self._ensure_db()
         await db.execute(_DELETE, (thread_id,))
         await db.commit()
+
+    async def evict_older_than(self, seconds: float) -> int:
+        """Evict session entries whose ``updated_at`` is older than ``seconds``.
+
+        Implements TTL-based eviction so that session entries persist across
+        agent replies (for crash-recovery routing) while still bounding the
+        store size over time.
+
+        Args:
+            seconds: TTL in seconds. Entries not updated within this window
+                     are removed.
+
+        Returns:
+            Number of entries evicted.
+        """
+        db = await self._ensure_db()
+        cutoff = int(time.time()) - int(seconds)
+        cursor = await db.execute(_EVICT_OLDER_THAN, (cutoff,))
+        await db.commit()
+        return cursor.rowcount or 0
 
     async def list_active(self) -> list[dict[str, Any]]:
         """List all stored sessions with their metadata.

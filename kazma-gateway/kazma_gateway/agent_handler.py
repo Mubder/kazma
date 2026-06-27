@@ -17,6 +17,7 @@ Platform isolation contract:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -79,19 +80,35 @@ def _resolve_thread(msg: IncomingMessage) -> str:
 
 
 class _InMemoryStore(SessionStore):
-    """Trivial in-memory store — no persistence, for testing/fallback."""
+    """Trivial in-memory store — no persistence, for testing/fallback.
+
+    Tracks a monotonic timestamp per entry so that TTL-based eviction
+    (``evict_older_than``) works the same way as the SQLite backend.
+    """
 
     def __init__(self) -> None:
         self._data: dict[str, dict[str, Any]] = {}
+        self._timestamps: dict[str, float] = {}
 
     async def get(self, thread_id: str) -> dict[str, Any]:
         return dict(self._data.get(thread_id, {}))
 
     async def put(self, thread_id: str, context: dict[str, Any]) -> None:
         self._data[thread_id] = dict(context)
+        self._timestamps[thread_id] = time.monotonic()
 
     async def delete(self, thread_id: str) -> None:
         self._data.pop(thread_id, None)
+        self._timestamps.pop(thread_id, None)
+
+    async def evict_older_than(self, seconds: float) -> int:
+        """Remove entries whose last ``put`` is older than ``seconds`` ago."""
+        cutoff = time.monotonic() - seconds
+        stale = [tid for tid, ts in self._timestamps.items() if ts < cutoff]
+        for tid in stale:
+            self._data.pop(tid, None)
+            self._timestamps.pop(tid, None)
+        return len(stale)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -169,18 +186,41 @@ def create_graph_handler(
     # Use provided store or fall back to in-memory
     _store = store or _InMemoryStore()
 
-    # Per-sender session tracking (sender_id → thread_id)
+    # Per-sender session tracking (sender_id → thread_id).
+    # Guarded by _sessions_lock because concurrent handler invocations for
+    # different senders read/write this shared dict.
     _sessions: dict[str, str] = {}
+    _sessions_lock = asyncio.Lock()
+
+    # Per-thread_id serialization lock. Two concurrent messages for the same
+    # thread_id must not interleave graph.ainvoke() / checkpoint writes, or
+    # the LangGraph state and SQLite checkpoint will corrupt. Each distinct
+    # thread_id gets its own asyncio.Lock so unrelated threads stay parallel.
+    _thread_locks: dict[str, asyncio.Lock] = {}
+    _thread_locks_lock = asyncio.Lock()
+
+    # Session TTL: entries survive agent replies (for crash-recovery routing)
+    # and are evicted lazily by this many seconds of inactivity.
+    _session_ttl_seconds = 300  # 5 minutes
+
+    async def _get_thread_lock(thread_id: str) -> asyncio.Lock:
+        """Return (creating if needed) the serialization lock for a thread_id."""
+        async with _thread_locks_lock:
+            lock = _thread_locks.get(thread_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                _thread_locks[thread_id] = lock
+            return lock
 
     async def handler(msg: IncomingMessage) -> None:
         """Process a single IncomingMessage through the agent graph."""
         sender = msg.sender_id
 
-        # Resolve thread_id using standardized resolver
-        if sender not in _sessions:
-            _sessions[sender] = _resolve_thread(msg)
-
-        thread_id = _sessions[sender]
+        # Resolve thread_id using standardized resolver (synchronized)
+        async with _sessions_lock:
+            if sender not in _sessions:
+                _sessions[sender] = _resolve_thread(msg)
+            thread_id = _sessions[sender]
 
         # Inject the resolved thread_id into context_metadata
         # so _build_initial_state can pick it up
@@ -209,54 +249,73 @@ def create_graph_handler(
 
         config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
 
-        # ── Invoke graph ───────────────────────────────────────────
-        start = time.monotonic()
+        # ── Serialize per thread_id ────────────────────────────────
+        # Two concurrent messages for the same thread_id must NOT interleave
+        # graph.ainvoke() calls, or LangGraph checkpoints and messages will
+        # corrupt. Different thread_ids use different locks and stay parallel.
+        thread_lock = await _get_thread_lock(thread_id)
+
+        async with thread_lock:
+            # ── Invoke graph ───────────────────────────────────────
+            start = time.monotonic()
+            try:
+                result_state = await graph.ainvoke(state, config)
+                duration_ms = (time.monotonic() - start) * 1000
+
+                messages = result_state.get("messages", [])
+                assistant_text = ""
+                for m in reversed(messages):
+                    if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content"):
+                        assistant_text = m["content"]
+                        break
+
+                if not assistant_text:
+                    assistant_text = "(No response generated)"
+
+                logger.info(
+                    "[agent-handler] Graph completed in %.0fms (thread=%s, platform=%s)",
+                    duration_ms,
+                    thread_id,
+                    msg.platform,
+                )
+
+                # ── Restore platform IDs from SessionStore ─────────
+                # The entry is intentionally NOT deleted here. It must persist
+                # so crash-recovery routing can rehydrate the platform context
+                # (chat_id, user_id) on the next inbound message. Stale
+                # entries are evicted lazily by TTL below.
+                ctx = await _store.get(thread_id)
+
+                await manager.send(
+                    OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=assistant_text,
+                        context_metadata=ctx,
+                    )
+                )
+
+            except Exception:
+                logger.exception("[agent-handler] Graph invocation failed for %s", sender)
+                ctx = await _store.get(thread_id)
+                if not ctx:
+                    ctx = msg.context_metadata
+                # Keep the session entry for recovery routing; only evict via TTL.
+                await manager.send(
+                    OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text="⚠️ حدث خطأ أثناء معالجة رسالتك. (Processing error)",
+                        context_metadata=ctx,
+                    )
+                )
+
+        # ── Lazy TTL eviction ──────────────────────────────────────
+        # Opportunistically prune sessions that have been inactive longer than
+        # the TTL. This bounds the store size over time without deleting live
+        # entries that crash recovery still needs.
         try:
-            result_state = await graph.ainvoke(state, config)
-            duration_ms = (time.monotonic() - start) * 1000
-
-            messages = result_state.get("messages", [])
-            assistant_text = ""
-            for m in reversed(messages):
-                if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content"):
-                    assistant_text = m["content"]
-                    break
-
-            if not assistant_text:
-                assistant_text = "(No response generated)"
-
-            logger.info(
-                "[agent-handler] Graph completed in %.0fms (thread=%s, platform=%s)",
-                duration_ms,
-                thread_id,
-                msg.platform,
-            )
-
-            # ── Restore platform IDs from SessionStore ─────────────
-            ctx = await _store.get(thread_id)
-            await _store.delete(thread_id)
-
-            await manager.send(
-                OutboundMessage(
-                    target_id=_build_target_id(msg.platform, ctx),
-                    text=assistant_text,
-                    context_metadata=ctx,
-                )
-            )
-
+            await _store.evict_older_than(_session_ttl_seconds)
         except Exception:
-            logger.exception("[agent-handler] Graph invocation failed for %s", sender)
-            ctx = await _store.get(thread_id)
-            if not ctx:
-                ctx = msg.context_metadata
-            await _store.delete(thread_id)
-            await manager.send(
-                OutboundMessage(
-                    target_id=_build_target_id(msg.platform, ctx),
-                    text="⚠️ حدث خطأ أثناء معالجة رسالتك. (Processing error)",
-                    context_metadata=ctx,
-                )
-            )
+            logger.debug("[agent-handler] TTL eviction skipped (store may not support it)")
 
     # ── Register telegram backend with core's send_message dispatcher ──
     try:
