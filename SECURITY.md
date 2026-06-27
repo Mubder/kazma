@@ -21,7 +21,7 @@ security vulnerability, please report it responsibly through the channels below.
 
 | Channel  | Contact                           | Use Case                        |
 | -------- | --------------------------------- | ------------------------------- |
-| Email    | security@kazma.dev                | All vulnerabilities             |
+| Email    | admin@kazma.ai                | All vulnerabilities             |
 | Signal   | +1-XXX-XXX-XXXX                  | Critical / actively exploited   |
 
 - **PGP Key**: A PGP key for encrypting email reports is available at
@@ -168,7 +168,7 @@ The following hardening measures are applied to all Kazma deployments:
 
 For questions about this security policy, contact the Kazma security team:
 
-- **Email**: security@kazma.dev
+- **Email**: admin@kazma.ai
 - **GitHub**: [github.com/kazma-dev/kazma](https://github.com/kazma-dev/kazma)
   (for non-sensitive inquiries only)
 
