@@ -13,9 +13,24 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from kazma_ui.sse_chat import _sse_frame, create_sse_chat_router
+
+
+@pytest.fixture(autouse=True)
+def _reset_shared_session_store():
+    """Reset the shared SessionManager singleton before each test.
+
+    Both WebSocket (chat.py) and SSE (sse_chat.py) transports now use a
+    single process-wide SessionManager (VAL-UX-007).  Without this reset,
+    sessions created by one test would leak into another.
+    """
+    from kazma_ui.session_manager import reset_session_manager
+
+    reset_session_manager()
+
 
 # ═══════════════════════════════════════════════════════════════════
 # SSE frame formatting

@@ -9,13 +9,14 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+
+from kazma_ui.session_manager import ChatSession, SessionManager, get_session_manager
 
 if TYPE_CHECKING:
     from kazma_core.agent import KazmaAgent
@@ -25,39 +26,30 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["chat"])
 
 # ── Session management ────────────────────────────────────────────────
+#
+# Both the WebSocket handler (this module) and the SSE handler
+# (sse_chat.py) use the shared SessionManager singleton so a session
+# created on one transport is immediately visible to the other.
+# See VAL-UX-007 for the contract this satisfies.
 
 
-@dataclass
-class ChatSession:
-    """A chat session with message history."""
+def _sessions() -> SessionManager:
+    """Return the current shared SessionManager singleton.
 
-    session_id: str
-    messages: list[dict[str, Any]] = field(default_factory=list)
-    created_at: str = ""
-    total_cost: float = 0.0
-    total_tokens: int = 0
-
-    def __post_init__(self) -> None:
-        if not self.created_at:
-            self.created_at = datetime.now(UTC).isoformat()
-
-
-_sessions: dict[str, ChatSession] = {}
+    Resolved at call time (not import time) so test resets via
+    ``reset_session_manager()`` are immediately reflected.
+    """
+    return get_session_manager()
 
 
 def get_or_create_session(session_id: str | None = None) -> ChatSession:
     """Get an existing session or create a new one."""
-    if session_id and session_id in _sessions:
-        return _sessions[session_id]
-    sid = session_id or str(uuid.uuid4())
-    session = ChatSession(session_id=sid)
-    _sessions[sid] = session
-    return session
+    return _sessions().get_or_create(session_id)
 
 
 def list_sessions() -> list[ChatSession]:
     """List all active sessions."""
-    return list(_sessions.values())
+    return _sessions().list_all()
 
 
 # ── Routes ────────────────────────────────────────────────────────────
@@ -96,7 +88,7 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
     @r.get("/api/chat/sessions/{session_id}/messages")
     async def api_session_messages(session_id: str) -> list[dict[str, Any]]:
         """Get messages for a session."""
-        session = _sessions.get(session_id)
+        session = _sessions().get(session_id)
         if not session:
             return []
         return session.messages
@@ -104,7 +96,7 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
     @r.delete("/api/chat/sessions/{session_id}")
     async def api_delete_session(session_id: str) -> dict[str, str]:
         """Delete a chat session."""
-        _sessions.pop(session_id, None)
+        _sessions().delete(session_id)
         return {"status": "ok"}
 
     return r

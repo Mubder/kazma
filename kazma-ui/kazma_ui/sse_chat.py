@@ -231,30 +231,33 @@ def create_sse_chat_router(
     Returns:
         APIRouter with POST /api/chat/stream registered.
     """
-    from kazma_ui.chat import ChatSession
-    from kazma_ui.chat import _sessions as _ws_sessions
+    from kazma_ui.session_manager import get_session_manager
+
+    # Shared, process-wide session store (same instance used by chat.py).
+    # A session created via the SSE transport is therefore visible to the
+    # WebSocket session-list / message-history endpoints and vice versa.
+    # See VAL-UX-007 for the contract this satisfies.
+    _store = get_session_manager()
 
     r = APIRouter(tags=["chat-sse"])
 
-    # In-memory session → thread_id mapping (persists across requests)
-    _sessions: dict[str, dict[str, Any]] = {}
+    # SSE-only mapping: session_id -> thread_id used for LangGraph
+    # checkpointing.  This is orthogonal to the shared message-history
+    # store and therefore lives here rather than in SessionManager.
+    _thread_ids: dict[str, str] = {}
 
-    def _sync_to_shared_store(session_id: str, session: dict[str, Any]) -> None:
-        """Mirror an SSE session into the shared WebSocket session store.
+    def _resolve_session(session_id: str) -> tuple[Any, str]:
+        """Return (ChatSession, thread_id) for ``session_id``.
 
-        The chat.py router's GET endpoints (/api/chat/sessions and
-        /api/chat/sessions/{id}/messages) are registered before the SSE
-        router and therefore take precedence in route matching. By syncing
-        SSE-created sessions into the shared store, the session list and
-        message-history endpoints serve data from both transports.
+        Creates the ChatSession in the shared store on first use so the
+        WebSocket transport can see it immediately.
         """
-        ws = _ws_sessions.get(session_id)
-        if ws is None:
-            ws = ChatSession(session_id=session_id)
-            _ws_sessions[session_id] = ws
-        ws.messages = list(session.get("messages", []))
-        ws.total_cost = session.get("total_cost", 0.0)
-        ws.total_tokens = session.get("total_tokens", 0)
+        session = _store.get_or_create(session_id)
+        thread_id = _thread_ids.get(session_id)
+        if thread_id is None:
+            thread_id = str(uuid.uuid4())
+            _thread_ids[session_id] = thread_id
+        return session, thread_id
 
     @r.post("/api/chat/stream")
     async def chat_stream(request: Request) -> StreamingResponse:
@@ -290,16 +293,8 @@ def create_sse_chat_router(
 
         session_id = body.get("session_id") or str(uuid.uuid4())
 
-        # ── Resolve thread_id for this session ─────────────────────
-        if session_id not in _sessions:
-            _sessions[session_id] = {
-                "thread_id": str(uuid.uuid4()),
-                "messages": [],
-                "total_cost": 0.0,
-                "total_tokens": 0,
-            }
-        session = _sessions[session_id]
-        thread_id = session["thread_id"]
+        # ── Resolve session and thread_id (shared store) ───────────
+        session, thread_id = _resolve_session(session_id)
 
         # ── Cost breaker gate ──────────────────────────────────────
         if cost_breaker and cost_breaker.should_halt():
@@ -313,14 +308,15 @@ def create_sse_chat_router(
             cost_breaker.record_user_interaction()
 
         # ── Build conversation messages ────────────────────────────
-        session["messages"].append({"role": "user", "content": user_message})
-        _sync_to_shared_store(session_id, session)
+        session.messages.append({"role": "user", "content": user_message})
 
         messages: list[dict[str, Any]] = []
-        has_system = any(m.get("role") == "system" for m in session["messages"])
+        has_system = any(m.get("role") == "system" for m in session.messages)
         if not has_system and system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-        messages.extend(session["messages"])
+        messages.extend(
+            {k: v for k, v in m.items() if k in ("role", "content")} for m in session.messages
+        )
 
         # ── Build SupervisorState for the graph ────────────────────
         from kazma_core.agent.state import initial_supervisor_state
@@ -373,13 +369,12 @@ def create_sse_chat_router(
 
                 # Store assistant response in session history
                 if content_acc:
-                    session["messages"].append(
+                    session.messages.append(
                         {
                             "role": "assistant",
                             "content": content_acc,
                         }
                     )
-                    _sync_to_shared_store(session_id, session)
 
             except asyncio.CancelledError:
                 logger.warning("SSE generator cancelled for session=%s", session_id)
@@ -401,33 +396,28 @@ def create_sse_chat_router(
 
     @r.get("/api/chat/sessions")
     async def list_sessions() -> list[dict[str, Any]]:
-        """List all active SSE chat sessions."""
+        """List all active chat sessions (shared store)."""
         return [
-            {
-                "session_id": sid,
-                "message_count": len(s["messages"]),
-                "total_cost": s["total_cost"],
-                "total_tokens": s["total_tokens"],
-            }
-            for sid, s in _sessions.items()
+            s.to_summary()
+            for s in _store.list_all()
         ]
 
     @r.delete("/api/chat/sessions/{session_id}")
     async def delete_session(session_id: str) -> dict[str, str]:
-        """Delete an SSE chat session."""
-        _sessions.pop(session_id, None)
-        _ws_sessions.pop(session_id, None)
+        """Delete a chat session (shared store)."""
+        _store.delete(session_id)
+        _thread_ids.pop(session_id, None)
         return {"status": "ok"}
 
     @r.get("/api/chat/sessions/{session_id}/messages")
     async def get_session_messages(session_id: str) -> list[dict[str, Any]]:
-        """Return the message history for an SSE chat session.
+        """Return the message history for a chat session (shared store).
 
         Each message dict has ``role`` ("user" | "assistant") and ``content``.
         Returns an empty list if the session does not exist (e.g. it was
         created on a different transport or has already been deleted).
         """
-        session = _sessions.get(session_id)
+        session = _store.get(session_id)
         if not session:
             return []
         # Return only role/content pairs so we don't leak internal keys
@@ -436,7 +426,7 @@ def create_sse_chat_router(
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", ""),
             }
-            for msg in session.get("messages", [])
+            for msg in session.messages
         ]
 
     # ── Provider profile management ───────────────────────────────
