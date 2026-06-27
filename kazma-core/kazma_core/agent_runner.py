@@ -117,6 +117,10 @@ class KazmaAgent:
         self._checkpoint_conn: aiosqlite.Connection | None = None
         self._thread_id: str = ""
 
+        # Streaming graph for SSE path (built lazily, cached).
+        # Separate from _graph which includes a checkpointer for run().
+        self._streaming_graph: Any = None
+
         # LLM Provider
         llm_cfg_dict = self.config.raw.get("llm", {})
         llm_cfg_dict.setdefault("model", self.config.default_model)
@@ -233,6 +237,256 @@ class KazmaAgent:
                 logger.info("MCP server '%s': %d tools", server_cfg.get("name"), count)
         return total
 
+    # ------------------------------------------------------------------
+    # Service-layer facade (VAL-ARCH-001 / VAL-ARCH-002)
+    #
+    # The following public methods form a stable API that UI routers and
+    # other consumers should use instead of reaching into private
+    # attributes (``_running``, ``_servers``, ``_conn``, ``config.raw``,
+    # ``llm_config``, etc.).  Every method here delegates to existing
+    # internal logic — no behaviour change, only an access-pattern change.
+    # ------------------------------------------------------------------
+
+    # ── Running state ───────────────────────────────────────────────
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the agent loop is currently active."""
+        return self._running
+
+    def set_running(self, running: bool) -> None:
+        """Set the agent's running state (start/stop control)."""
+        self._running = running
+
+    # ── Tools ───────────────────────────────────────────────────────
+
+    def get_tools_info(self) -> dict[str, Any]:
+        """Return tool registry summary for UI consumption.
+
+        Returns a dict with ``count``, ``list`` (up to 20 tool summaries),
+        and ``servers`` (number of connected MCP servers).
+        """
+        tool_defs = self.tools.get_tool_definitions()
+        return {
+            "count": len(tool_defs),
+            "list": [
+                {
+                    "name": t.get("name", t.get("function", {}).get("name", "?")),
+                    "description": t.get(
+                        "description", t.get("function", {}).get("description", "")
+                    )[:80],
+                }
+                for t in tool_defs[:20]
+            ],
+            "servers": len(self.tools.list_servers()),
+        }
+
+    # ── MCP server config management ───────────────────────────────
+
+    def get_mcp_servers_config(self) -> list[dict[str, Any]]:
+        """Return the MCP server configurations from the agent config.
+
+        This is the public replacement for ``agent.config.raw["mcp"]["servers"]``.
+        """
+        return list(self.config.raw.get("mcp", {}).get("servers", []))
+
+    def get_mcp_servers(self) -> list[dict[str, Any]]:
+        """Return enriched MCP server info (config + connection status + tools).
+
+        This is the public replacement for iterating ``agent.config.raw``
+        and calling ``agent.tools.is_server_connected()`` in UI code.
+        """
+        servers = self.config.raw.get("mcp", {}).get("servers", [])
+        result: list[dict[str, Any]] = []
+        for s in servers:
+            name = s.get("name", "unknown")
+            is_connected = self.tools.is_server_connected(name)
+            tools = []
+            if is_connected:
+                tools = self.tools.get_mcp_tools_for_server(name)
+            result.append(
+                {
+                    "name": name,
+                    "transport": s.get("transport", "stdio"),
+                    "command": s.get("command", []),
+                    "url": s.get("url", ""),
+                    "env": s.get("env", {}),
+                    "working_dir": s.get("working_dir"),
+                    "status": "running" if is_connected else "stopped",
+                    "tool_count": len(tools),
+                    "tools": tools,
+                }
+            )
+        return result
+
+    def get_config_section(self, section: str) -> dict[str, Any]:
+        """Return a top-level section from the agent config.
+
+        This is the public replacement for ``agent.config.raw.get(section, {})``.
+        Returns an empty dict if the section does not exist.
+        """
+        result = self.config.raw.get(section, {})
+        return dict(result) if isinstance(result, dict) else {}
+
+    def add_mcp_server(
+        self,
+        name: str,
+        transport: str = "stdio",
+        command: list[str] | None = None,
+        url: str = "",
+        env: dict[str, str] | None = None,
+        working_dir: str | None = None,
+    ) -> dict[str, str]:
+        """Add an MCP server to the in-memory configuration.
+
+        Returns ``{"status": "ok"}`` on success or
+        ``{"status": "error", "error": "..."}`` if a duplicate name exists.
+        """
+        new_server: dict[str, Any] = {"name": name, "transport": transport}
+        if transport == "stdio":
+            new_server["command"] = command or []
+            if working_dir:
+                new_server["working_dir"] = working_dir
+        else:
+            new_server["url"] = url
+        if env:
+            new_server["env"] = env
+
+        mcp_section = self.config.raw.setdefault("mcp", {})
+        servers_list = mcp_section.setdefault("servers", [])
+
+        for s in servers_list:
+            if s.get("name") == name:
+                return {"status": "error", "error": f"Server '{name}' already exists"}
+
+        servers_list.append(new_server)
+        return {"status": "ok"}
+
+    def remove_mcp_server(self, name: str) -> dict[str, str]:
+        """Remove an MCP server from the in-memory configuration.
+
+        Returns ``{"status": "ok"}``. Does NOT raise if the server was absent.
+        """
+        mcp_section = self.config.raw.get("mcp", {})
+        servers = mcp_section.get("servers", [])
+        mcp_section["servers"] = [s for s in servers if s.get("name") != name]
+        return {"status": "ok"}
+
+    # ── LLM config ─────────────────────────────────────────────────
+
+    def get_llm_config(self) -> dict[str, Any]:
+        """Return the LLM configuration as a plain dict.
+
+        This is the public replacement for direct ``agent.llm_config.*``
+        access in UI code.
+        """
+        return {
+            "base_url": self.llm_config.base_url,
+            "api_key": self.llm_config.api_key,
+            "model": self.llm_config.model,
+            "max_tokens": self.llm_config.max_tokens,
+            "temperature": self.llm_config.temperature,
+            "timeout": self.llm_config.timeout,
+            "input_cost_per_1m": self.llm_config.input_cost_per_1m,
+            "output_cost_per_1m": self.llm_config.output_cost_per_1m,
+        }
+
+    async def get_llm_client(self) -> Any:
+        """Return the LLM provider's HTTP client for streaming.
+
+        This is the public replacement for ``agent.llm._get_client()``
+        access in UI code.
+        """
+        return await self.llm.get_client()
+
+    # ── Checkpoint summary ─────────────────────────────────────────
+
+    async def get_checkpoint_summary(self) -> dict[str, Any]:
+        """Return a summary of checkpointed sessions.
+
+        If the checkpoint graph has not been initialized yet, returns
+        an empty summary (``{"sessions": [], "count": 0}``).
+        """
+        if self._checkpoint_conn is None:
+            return {"sessions": [], "count": 0}
+
+        try:
+            cursor = await self._checkpoint_conn.execute(
+                "SELECT DISTINCT thread_id FROM checkpoints LIMIT 100"
+            )
+            rows = await cursor.fetchall()
+            thread_ids = [row[0] for row in rows]
+            sessions = [{"thread_id": tid} for tid in thread_ids]
+            return {"sessions": sessions, "count": len(sessions)}
+        except Exception as e:
+            logger.debug("Failed to read checkpoint summary: %s", e)
+            return {"sessions": [], "count": 0}
+
+    async def delete_checkpoint_thread(self, thread_id: str) -> bool:
+        """Delete all checkpoints for a specific thread.
+
+        Returns True if deletion succeeded, False otherwise.
+        """
+        if self._checkpoint_conn is None:
+            return False
+        try:
+            await self._checkpoint_conn.execute(
+                "DELETE FROM checkpoints WHERE thread_id = ?",
+                (thread_id,),
+            )
+            await self._checkpoint_conn.commit()
+            return True
+        except Exception as e:
+            logger.debug("Failed to delete checkpoint thread %s: %s", thread_id, e)
+            return False
+
+    async def clear_all_checkpoints(self) -> int:
+        """Delete ALL checkpointed sessions.
+
+        Returns the number of deleted rows, or -1 on error.
+        """
+        if self._checkpoint_conn is None:
+            return -1
+        try:
+            cursor = await self._checkpoint_conn.execute(
+                "SELECT COUNT(*) FROM checkpoints"
+            )
+            row = await cursor.fetchone()
+            count: int = row[0] if row else 0
+            await self._checkpoint_conn.execute("DELETE FROM checkpoints")
+            await self._checkpoint_conn.commit()
+            return count
+        except Exception as e:
+            logger.debug("Failed to clear checkpoints: %s", e)
+            return -1
+
+    # ── Streaming graph (VAL-ARCH-002) ─────────────────────────────
+
+    def get_streaming_graph(self) -> Any:
+        """Return a compiled supervisor graph suitable for SSE streaming.
+
+        This builds (and caches) a graph from the agent's own components
+        without a checkpointer, so the SSE path can use ``astream_events``
+        without reaching into private graph-builder internals.
+
+        The graph supports ``ainvoke()`` and ``astream_events()``.
+        """
+        if self._streaming_graph is not None:
+            return self._streaming_graph
+
+        from kazma_core.agent.graph_builder import build_supervisor_graph
+
+        self._streaming_graph = build_supervisor_graph(
+            llm=self.llm,
+            system_prompt=self.system_prompt,
+            tool_definitions=self.tools.get_tool_definitions(),
+            tool_executor=self.tools,
+            cost_breaker=self.cost_breaker,
+            authority=self.authority,
+            tracer=self.tracer,
+        )
+        return self._streaming_graph
+
     async def _ensure_graph(self) -> Any:
         """Build (once) the LangGraph supervisor graph this agent runs on.
 
@@ -338,6 +592,7 @@ class KazmaAgent:
             self._checkpoint_conn = None
             self._checkpointer = None
             self._graph = None
+            self._streaming_graph = None
         logger.info("Kazma agent shut down.")
 
 

@@ -109,6 +109,10 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
     """Handle WebSocket chat connections with streaming responses."""
     from kazma_core.streaming import stream_chat
 
+    # Use the agent's facade method to get LLM config as a plain dict,
+    # avoiding direct access to agent.llm_config.* attributes.
+    llm_cfg = agent.get_llm_config()
+
     await websocket.accept()
     session_id = str(uuid.uuid4())
     session = get_or_create_session(session_id)
@@ -134,7 +138,7 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                     continue
 
                 # Resolve model override from client, fall back to config default
-                active_model = data.get("model", "") or agent.llm_config.model
+                active_model = data.get("model", "") or llm_cfg["model"]
                 # Resolve base_url — client can send it, otherwise stay on default
                 active_base_url: str | None = data.get("base_url") or None
 
@@ -175,10 +179,10 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
 
                 # Determine the endpoint: use client-provided base_url, or resolve
                 # from model prefix, or stay on config default
-                chat_base_url = agent.llm_config.base_url
+                chat_base_url = llm_cfg["base_url"]
                 if active_base_url:
                     chat_base_url = active_base_url
-                elif active_model != agent.llm_config.model and "/" in active_model:
+                elif active_model != llm_cfg["model"] and "/" in active_model:
                     from kazma_core.models.discovery import get_model_base_url
 
                     resolved = await get_model_base_url(active_model)
@@ -187,7 +191,7 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
 
                 # ── FORCE SANITIZATION ──
                 # Ensure base_url ends with /v1 and prepend scheme if bare
-                if chat_base_url and chat_base_url != agent.llm_config.base_url:
+                if chat_base_url and chat_base_url != llm_cfg["base_url"]:
                     chat_base_url = chat_base_url.rstrip("/")
                     if not chat_base_url.startswith("http"):
                         chat_base_url = "http://" + chat_base_url
@@ -196,30 +200,30 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
 
                 # If using a custom endpoint, force openai/ model prefix and dummy key
                 chat_model = active_model
-                chat_api_key = agent.llm_config.api_key
-                if chat_base_url and chat_base_url != agent.llm_config.base_url:
+                chat_api_key = llm_cfg["api_key"]
+                if chat_base_url and chat_base_url != llm_cfg["base_url"]:
                     if not chat_model.startswith("openai/"):
                         chat_model = f"openai/{chat_model}"
                     chat_api_key = "sk-local-dev"  # Prevent cloud fallback
 
                 # Fallback to LM Studio if base_url is empty but model is local
-                if not chat_base_url or chat_base_url == agent.llm_config.base_url:
+                if not chat_base_url or chat_base_url == llm_cfg["base_url"]:
                     if active_model and not active_model.startswith("openai/"):
                         chat_base_url = "http://127.0.0.1:1234/v1"
                         chat_model = f"openai/{active_model}"
                         chat_api_key = "sk-local-dev"
 
                 async for event in stream_chat(
-                    client=await agent.llm._get_client(),
+                    client=await agent.get_llm_client(),
                     model=chat_model,
                     base_url=chat_base_url,
                     api_key=chat_api_key,
                     messages=messages,
                     tools=tool_defs if tool_defs else None,
-                    max_tokens=agent.llm_config.max_tokens,
-                    temperature=agent.llm_config.temperature,
-                    input_cost_per_1m=agent.llm_config.input_cost_per_1m,
-                    output_cost_per_1m=agent.llm_config.output_cost_per_1m,
+                    max_tokens=llm_cfg["max_tokens"],
+                    temperature=llm_cfg["temperature"],
+                    input_cost_per_1m=llm_cfg["input_cost_per_1m"],
+                    output_cost_per_1m=llm_cfg["output_cost_per_1m"],
                 ):
                     if event.type == "token":
                         assistant_content += event.content
@@ -308,15 +312,15 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                         from kazma_core.streaming import stream_chat as _stream
 
                         async for followup in _stream(
-                            client=await agent.llm._get_client(),
+                            client=await agent.get_llm_client(),
                             model=chat_model,
                             base_url=chat_base_url,
                             api_key=chat_api_key,
                             messages=messages,
-                            max_tokens=agent.llm_config.max_tokens,
-                            temperature=agent.llm_config.temperature,
-                            input_cost_per_1m=agent.llm_config.input_cost_per_1m,
-                            output_cost_per_1m=agent.llm_config.output_cost_per_1m,
+                            max_tokens=llm_cfg["max_tokens"],
+                            temperature=llm_cfg["temperature"],
+                            input_cost_per_1m=llm_cfg["input_cost_per_1m"],
+                            output_cost_per_1m=llm_cfg["output_cost_per_1m"],
                         ):
                             if followup.type == "token":
                                 assistant_content += followup.content

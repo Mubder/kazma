@@ -91,23 +91,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
     _init_errors: list[dict[str, str]] = []
     _checkpointer = None
     try:
-        from kazma_core.agent.graph_builder import build_supervisor_graph
-
-        # Use the agent's UnifiedToolExecutor directly so the SSE path
-        # executes real tools (both local built-ins and MCP). The previous
-        # implementation rebuilt a parallel LocalToolRegistry and registered
-        # MCP tools as no-op lambdas, silently swallowing every MCP call.
-        sse_tools = agent.tools
-
-        sse_graph = build_supervisor_graph(
-            llm=agent.llm,
-            system_prompt=agent.system_prompt,
-            tool_definitions=sse_tools.get_tool_definitions(),
-            tool_executor=sse_tools,
-            cost_breaker=agent.cost_breaker,
-            authority=agent.authority,
-            tracer=agent.tracer,
-        )
+        # Use the agent's facade method to get the streaming graph, so app.py
+        # does not reach into private graph-builder internals. This builds
+        # (and caches) a supervisor graph configured for SSE streaming.
+        sse_graph = agent.get_streaming_graph()
 
         from kazma_ui.sse_chat import create_sse_chat_router
 
@@ -248,7 +235,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             if allowed:
                 try:
                     allowed_ids = [int(uid.strip()) for uid in allowed.split(",") if uid.strip()]
-                    tg_adapter._allowed_users = set(allowed_ids)
+                    tg_adapter.set_allowed_users(allowed_ids)
                     logger.info("[Gateway] Telegram allowed users: %d IDs", len(allowed_ids))
                 except ValueError:
                     logger.warning("[Gateway] Invalid allowed_users format: %s", allowed)
@@ -533,18 +520,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             from kazma_core.agent.sub_agent import SubAgentManager, set_sub_agent_manager
 
             sub_agent_mgr = SubAgentManager(
-                graph_builder=lambda tools=None, hitl_config=None: build_supervisor_graph(
-                    llm=agent.llm,
-                    system_prompt=agent.system_prompt,
-                    tool_definitions=locals().get("sse_tools", sse_tools).get_tool_definitions()
-                    if "sse_tools" in dir()
-                    else [],
-                    tool_executor=locals().get("sse_tools", sse_tools),
-                    cost_breaker=agent.cost_breaker,
-                    authority=agent.authority,
-                    tracer=agent.tracer,
-                    hitl_config=hitl_config,
-                ),
+                graph_builder=lambda tools=None, hitl_config=None: agent.get_streaming_graph(),
                 max_concurrent=3,
             )
             set_sub_agent_manager(sub_agent_mgr)
@@ -571,7 +547,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
             _cron_store_ref = None
 
         _gateway = gateway
-        _sse_tools_ref = locals().get("sse_tools")
         _sse_graph_ref = locals().get("sse_graph")
 
         @app.on_event("startup")
@@ -586,14 +561,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
                 logger.info("[Checkpoint] SQLite checkpointer initialized")
 
-                if _sse_graph_ref is not None and _sse_tools_ref is not None:
+                if _sse_graph_ref is not None:
                     from kazma_core.agent.graph_builder import build_supervisor_graph
 
                     _sse_graph_ref = build_supervisor_graph(
                         llm=agent.llm,
                         system_prompt=agent.system_prompt,
-                        tool_definitions=_sse_tools_ref.get_tool_definitions(),
-                        tool_executor=_sse_tools_ref,
+                        tool_definitions=agent.tools.get_tool_definitions(),
+                        tool_executor=agent.tools,
                         cost_breaker=agent.cost_breaker,
                         authority=agent.authority,
                         tracer=agent.tracer,
@@ -693,7 +668,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         return {
             "tokens": _telemetry_state["tokens_base"],
             "vram_mb": _telemetry_state["vram_base"],
-            "model": agent.llm_config.model if hasattr(agent, "llm_config") else "local",
+            "model": agent.get_llm_config().get("model", "local") if hasattr(agent, "get_llm_config") else "local",
             "timestamp": now,
         }
 

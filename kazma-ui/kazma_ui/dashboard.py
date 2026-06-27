@@ -261,9 +261,9 @@ async def delete_session(thread_id: str) -> JSONResponse:
         return JSONResponse({"deleted": False, "error": "CheckpointManager not initialized"}, status_code=500)
     
     try:
-        # Use prune() with a filter or implement delete_thread() in CheckpointManager
-        # For now, we'll delete all checkpoints for this thread
-        conn = _checkpoint_manager._conn
+        # Use the CheckpointManager's public conn property instead of
+        # the private _conn attribute.
+        conn = _checkpoint_manager.conn if hasattr(_checkpoint_manager, "conn") else None
         if not conn:
             return JSONResponse({"deleted": False, "error": "Database not initialized"}, status_code=500)
         
@@ -299,7 +299,9 @@ async def clear_all_sessions() -> JSONResponse:
         return JSONResponse({"deleted": False, "error": "CheckpointManager not initialized"}, status_code=500)
     
     try:
-        conn = _checkpoint_manager._conn
+        # Use the CheckpointManager's public conn property instead of
+        # the private _conn attribute.
+        conn = _checkpoint_manager.conn if hasattr(_checkpoint_manager, "conn") else None
         if not conn:
             return JSONResponse({"deleted": False, "error": "Database not initialized"}, status_code=500)
         

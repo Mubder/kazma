@@ -65,7 +65,7 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
         lines.append(f"kazma_active_threads {active_threads}")
 
         # ── Connected adapters ────────────────────────────────────
-        connected = sum(1 for a in gateway.adapters if a._running)
+        connected = sum(1 for a in gateway.adapters if a.is_running)
 
         lines.append("# HELP kazma_adapters_connected Adapters currently connected")
         lines.append("# TYPE kazma_adapters_connected gauge")

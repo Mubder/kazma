@@ -124,6 +124,14 @@ class TelegramAdapter(BaseAdapter):
         self._voice_provider = voice_provider
         self._stt_api_key = stt_api_key
 
+    def set_allowed_users(self, user_ids: list[int] | set[int]) -> None:
+        """Set the whitelist of allowed Telegram user IDs (public setter).
+
+        This replaces direct assignment to the private ``_allowed_users``
+        attribute from UI or configuration code.
+        """
+        self._allowed_users = set(user_ids)
+
     async def start(
         self,
         queue: asyncio.Queue[IncomingMessage],

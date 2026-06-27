@@ -134,14 +134,14 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
         """Start or stop the agent."""
         if action == "start":
             try:
-                agent._running = True
+                agent.set_running(True)
                 logger.info("Agent started")
                 return JSONResponse({"status": "ok", "running": True})
             except Exception as e:
                 return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
         elif action == "stop":
             try:
-                agent._running = False
+                agent.set_running(False)
                 logger.info("Agent stopped")
                 return JSONResponse({"status": "ok", "running": False})
             except Exception as e:
@@ -186,27 +186,25 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
     stats = store.stats()
 
     config = getattr(agent, "config", None)
-    llm_cfg = getattr(agent, "llm_config", None)
-    tools = getattr(agent, "tools", None)
 
-    # Tool count
-    tool_count = 0
-    tool_list = []
-    if tools:
-        try:
-            tool_list = tools.list_tools()
-            tool_count = len(tool_list)
-        except Exception:
-            pass
+    # Tool info via facade method (avoids private _servers access)
+    tools_info = agent.get_tools_info() if hasattr(agent, "get_tools_info") else {
+        "count": 0,
+        "list": [],
+        "servers": 0,
+    }
 
-    # MCP servers count
-    mcp_servers = 0
-    if tools:
-        mcp_servers = len(getattr(tools, "_servers", {}))
+    # LLM config via facade method (avoids llm_config.* access)
+    llm_info = agent.get_llm_config() if hasattr(agent, "get_llm_config") else {
+        "model": "unknown",
+        "base_url": "",
+        "max_tokens": 4096,
+        "temperature": 0.7,
+    }
 
     # Derive agent state from running flag + recent traces
     recent_traces = store.recent(10)
-    running = getattr(agent, "_running", False)
+    running = agent.is_running if hasattr(agent, "is_running") else False
     agent_state = _derive_agent_state(running, recent_traces)
 
     # Session count from trace stats (proxied by total traces)
@@ -226,21 +224,15 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
             "system_prompt": (getattr(config, "system_prompt", "") or "")[:200] if config else "",
         },
         "llm": {
-            "model": getattr(llm_cfg, "model", "unknown") if llm_cfg else "unknown",
-            "base_url": getattr(llm_cfg, "base_url", "") if llm_cfg else "",
-            "max_tokens": getattr(llm_cfg, "max_tokens", 4096) if llm_cfg else 4096,
-            "temperature": getattr(llm_cfg, "temperature", 0.7) if llm_cfg else 0.7,
+            "model": llm_info.get("model", "unknown"),
+            "base_url": llm_info.get("base_url", ""),
+            "max_tokens": llm_info.get("max_tokens", 4096),
+            "temperature": llm_info.get("temperature", 0.7),
         },
         "tools": {
-            "count": tool_count,
-            "servers": mcp_servers,
-            "list": [
-                {
-                    "name": t.get("name", t.get("function", {}).get("name", "?")),
-                    "description": t.get("description", t.get("function", {}).get("description", ""))[:80],
-                }
-                for t in tool_list[:20]
-            ],
+            "count": tools_info["count"],
+            "servers": tools_info["servers"],
+            "list": tools_info["list"],
         },
         "metrics": {
             "total_cost": f"${stats['total_cost']:.4f}",

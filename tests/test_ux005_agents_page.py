@@ -53,14 +53,50 @@ def _make_mock_agent(running: bool = False) -> Any:
                 {"name": "code_exec", "description": "Execute Python code"},
             ]
 
+        def get_tool_definitions(self) -> list[dict[str, Any]]:
+            return self.list_tools()
+
+        def list_servers(self) -> list[dict[str, Any]]:
+            return []
+
         _servers: dict[str, Any] = {}
 
-    return SimpleNamespace(
-        _running=running,
-        config=config,
-        llm_config=llm_config,
-        tools=MockTools(),
-    )
+    mock_state: dict[str, Any] = {"running": running}
+
+    class _Agent:
+        """Mock agent with public facade methods."""
+
+        def __init__(self) -> None:
+            self.config = config
+            self.llm_config = llm_config
+            self.tools = MockTools()
+
+        @property
+        def is_running(self) -> bool:
+            return mock_state["running"]
+
+        def set_running(self, val: bool) -> None:
+            mock_state["running"] = val
+
+        def get_tools_info(self) -> dict[str, Any]:
+            return {
+                "count": len(self.tools.list_tools()),
+                "list": [
+                    {"name": t["name"], "description": t["description"]}
+                    for t in self.tools.list_tools()[:20]
+                ],
+                "servers": len(self.tools.list_servers()),
+            }
+
+        def get_llm_config(self) -> dict[str, Any]:
+            return {
+                "model": self.llm_config.model,
+                "base_url": self.llm_config.base_url,
+                "max_tokens": self.llm_config.max_tokens,
+                "temperature": self.llm_config.temperature,
+            }
+
+    return _Agent()
 
 
 @pytest.fixture
@@ -251,23 +287,23 @@ class TestAgentsEndpoints:
 
     def test_agent_start_control(self, client, mock_agent: Any):
         """POST /api/agents/start starts the agent."""
-        assert mock_agent._running is False
+        assert mock_agent.is_running is False
         resp = client.post("/api/agents/start")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
         assert data["running"] is True
-        assert mock_agent._running is True
+        assert mock_agent.is_running is True
 
     def test_agent_stop_control(self, client, mock_agent: Any):
         """POST /api/agents/stop stops the agent."""
-        mock_agent._running = True
+        mock_agent.set_running(True)
         resp = client.post("/api/agents/stop")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
         assert data["running"] is False
-        assert mock_agent._running is False
+        assert mock_agent.is_running is False
 
     def test_agent_invalid_action(self, client):
         """POST /api/agents/{invalid} returns 400."""

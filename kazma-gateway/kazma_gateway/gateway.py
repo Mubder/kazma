@@ -301,6 +301,11 @@ class BaseAdapter(ABC):
             return _time.time() - self._start_time
         return 0.0
 
+    @property
+    def is_running(self) -> bool:
+        """Whether the adapter is currently running (public accessor)."""
+        return self._running
+
     @staticmethod
     async def jitter_sleep(shutdown_event: asyncio.Event) -> bool:
         """Randomized 1-3 second delay between poll cycles.

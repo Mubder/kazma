@@ -59,13 +59,15 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
     @router.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request) -> HTMLResponse:
         """Render the settings page."""
+        # Use the agent's facade method to avoid direct llm_config access.
+        llm_cfg = agent.get_llm_config()
         model_settings = {
-            "base_url": config_store.get("llm.base_url", agent.llm_config.base_url),
-            "api_key": config_store.get("llm.api_key", agent.llm_config.api_key),
-            "model": config_store.get("llm.model", agent.llm_config.model),
-            "max_tokens": config_store.get("llm.max_tokens", agent.llm_config.max_tokens),
-            "temperature": config_store.get("llm.temperature", agent.llm_config.temperature),
-            "timeout": config_store.get("llm.timeout", agent.llm_config.timeout),
+            "base_url": config_store.get("llm.base_url", llm_cfg["base_url"]),
+            "api_key": config_store.get("llm.api_key", llm_cfg["api_key"]),
+            "model": config_store.get("llm.model", llm_cfg["model"]),
+            "max_tokens": config_store.get("llm.max_tokens", llm_cfg["max_tokens"]),
+            "temperature": config_store.get("llm.temperature", llm_cfg["temperature"]),
+            "timeout": config_store.get("llm.timeout", llm_cfg["timeout"]),
         }
         agent_settings = {
             "name": config_store.get("agent.name", agent.config.name),

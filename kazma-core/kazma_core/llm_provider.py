@@ -176,6 +176,14 @@ class LLMProvider:
             )
         return self._http
 
+    async def get_client(self) -> httpx.AsyncClient:
+        """Public accessor for the HTTP client (lazy-init).
+
+        This is the public alias for ``_get_client()`` so UI code does
+        not need to access a private method.
+        """
+        return await self._get_client()
+
     async def chat(
         self,
         messages: list[dict[str, Any]],

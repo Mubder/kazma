@@ -27,32 +27,8 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
     router = APIRouter(tags=["mcp"])
 
     def _get_configured_servers() -> list[dict[str, Any]]:
-        """Get MCP servers from the agent config."""
-        servers = agent.config.raw.get("mcp", {}).get("servers", [])
-        result = []
-        for s in servers:
-            name = s.get("name", "unknown")
-            # Use the unified executor's public API instead of reaching
-            # into private _clients/_tools attributes.
-            is_connected = agent.tools.is_server_connected(name)
-            tools = []
-            if is_connected:
-                tools = agent.tools.get_mcp_tools_for_server(name)
-
-            result.append(
-                {
-                    "name": name,
-                    "transport": s.get("transport", "stdio"),
-                    "command": s.get("command", []),
-                    "url": s.get("url", ""),
-                    "env": s.get("env", {}),
-                    "working_dir": s.get("working_dir"),
-                    "status": "running" if is_connected else "stopped",
-                    "tool_count": len(tools),
-                    "tools": tools,
-                }
-            )
-        return result
+        """Get MCP servers from the agent via the facade method."""
+        return agent.get_mcp_servers()
 
     @router.get("/mcp", response_class=HTMLResponse)
     async def mcp_page(request: Request) -> HTMLResponse:
@@ -76,36 +52,20 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
     @router.post("/api/mcp/servers")
     async def api_add_server(req: MCPServerAddRequest) -> dict[str, str]:
         """Add a new MCP server to the configuration."""
-        new_server = {
-            "name": req.name,
-            "transport": req.transport,
-        }
-        if req.transport == "stdio":
-            new_server["command"] = req.command
-            if req.working_dir:
-                new_server["working_dir"] = req.working_dir
-        else:
-            new_server["url"] = req.url
-        if req.env:
-            new_server["env"] = req.env
-
-        # Add to config raw
-        mcp_section = agent.config.raw.setdefault("mcp", {})
-        servers_list = mcp_section.setdefault("servers", [])
-
-        # Check for duplicate name
-        for s in servers_list:
-            if s.get("name") == req.name:
-                return {"status": "error", "error": f"Server '{req.name}' already exists"}
-
-        servers_list.append(new_server)
-        return {"status": "ok"}
+        result = agent.add_mcp_server(
+            name=req.name,
+            transport=req.transport,
+            command=req.command,
+            url=req.url,
+            env=req.env,
+            working_dir=req.working_dir,
+        )
+        return result
 
     @router.delete("/api/mcp/servers/{name}")
     async def api_remove_server(name: str) -> dict[str, str]:
         """Remove an MCP server from configuration."""
-        servers = agent.config.raw.get("mcp", {}).get("servers", [])
-        agent.config.raw["mcp"]["servers"] = [s for s in servers if s.get("name") != name]
+        agent.remove_mcp_server(name)
 
         # Disconnect if running — use the unified executor's public API.
         if agent.tools.is_server_connected(name):
@@ -119,7 +79,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
     @router.post("/api/mcp/servers/{name}/start")
     async def api_start_server(name: str) -> dict[str, Any]:
         """Start/connect an MCP server."""
-        servers = agent.config.raw.get("mcp", {}).get("servers", [])
+        servers = agent.get_mcp_servers_config()
         server_cfg = None
         for s in servers:
             if s.get("name") == name:
@@ -150,7 +110,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         """Test an MCP server connection without permanently connecting."""
         from kazma_core.mcp_client import MCPClient, MCPServerConfig
 
-        servers = agent.config.raw.get("mcp", {}).get("servers", [])
+        servers = agent.get_mcp_servers_config()
         server_cfg = None
         for s in servers:
             if s.get("name") == name:
