@@ -3,7 +3,7 @@
    Accent: #6C5CE7 | Grid: 4px | Font: Inter + JetBrains Mono
    ═══════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Cairo:wght@300;400;500;600;700&display=swap');
 
 /* ── 1. CSS Variables ───────────────────────────────────────────── */
 :root {
@@ -71,7 +71,8 @@
   --header-height: 56px;
 
   /* Typography */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-sans: 'Inter', 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-arabic: 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
   --font-features: 'cv01', 'ss03';
 
@@ -105,6 +106,15 @@ code, pre { font-family: var(--font-mono); font-size: 0.875em; }
 img { max-width: 100%; display: block; }
 button { cursor: pointer; font-family: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* RTL: use Arabic-capable font as primary when dir=rtl */
+[dir="rtl"] body,
+[dir="rtl"] input,
+[dir="rtl"] textarea,
+[dir="rtl"] button,
+[dir="rtl"] select {
+  font-family: var(--font-arabic);
+}
 
 /* ── 3. Layout ──────────────────────────────────────────────────── */
 .app-layout {
@@ -1529,30 +1539,216 @@ tbody tr:last-child td {
 [dir="rtl"] .main-content.sidebar-collapsed {
   margin-right: var(--sidebar-collapsed);
 }
+
+/* ── RTL: Navigation ── */
+[dir="rtl"] .nav-link {
+  padding-left: var(--sp-4);
+  padding-right: var(--sp-3);
+}
 [dir="rtl"] .nav-link.active::before {
   left: auto;
   right: 0;
   border-radius: 2px 0 0 2px;
 }
-[dir="rtl"] .tool-call-box {
-  border-left: none;
-  border-right: 3px solid var(--warning);
+[dir="rtl"] .nav-kbd {
+  margin-left: 0;
+  margin-right: auto;
 }
+[dir="rtl"] .sidebar-toggle {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+/* ── RTL: Header ── */
+[dir="rtl"] .page-header .header-left,
+[dir="rtl"] .page-header .header-right {
+  flex-direction: row-reverse;
+}
+[dir="rtl"] .breadcrumbs .breadcrumb-sep {
+  /* keep separator visual order correct in RTL */
+  unicode-bidi: plaintext;
+}
+[dir="rtl"] .header-btn .sidebar-collapsed-hide,
+[dir="rtl"] .header-right {
+  flex-direction: row-reverse;
+}
+
+/* ── RTL: Chat messages ── */
+[dir="rtl"] .chat-sidebar {
+  border-right: none;
+  border-left: 1px solid var(--border-subtle);
+  order: 2; /* move session list to the right in RTL */
+}
+[dir="rtl"] .chat-main {
+  order: 1;
+}
+[dir="rtl"] .message {
+  flex-direction: row-reverse;
+}
+[dir="rtl"] .message-user {
+  flex-direction: row-reverse;
+}
+[dir="rtl"] .message-assistant {
+  flex-direction: row-reverse;
+}
+[dir="rtl"] .message-user .message-text {
+  border-radius: var(--radius);
+  border-top-right-radius: 0;
+  border-top-left-radius: var(--radius);
+  text-align: right;
+}
+[dir="rtl"] .message-assistant .message-text {
+  text-align: right;
+}
+[dir="rtl"] .message-meta {
+  text-align: right;
+}
+[dir="rtl"] .tool-call-box,
 [dir="rtl"] .tool-result-box {
   border-left: none;
-  border-right: 3px solid var(--success);
+  border-right: 3px solid var(--warning);
+  text-align: right;
 }
+[dir="rtl"] .tool-result-box {
+  border-right-color: var(--success);
+}
+[dir="rtl"] .thinking-indicator {
+  flex-direction: row-reverse;
+}
+[dir="rtl"] .input-wrapper {
+  flex-direction: row-reverse;
+}
+[dir="rtl"] .chat-input-area .input-footer {
+  flex-direction: row-reverse;
+}
+[dir="rtl"] .session-search-wrapper .form-input {
+  padding-right: var(--sp-3);
+  padding-left: var(--sp-10);
+}
+
+/* ── RTL: Chat sessions list ── */
+[dir="rtl"] .session-item {
+  text-align: right;
+}
+
+/* ── RTL: Tables ── */
+[dir="rtl"] thead th,
+[dir="rtl"] tbody td {
+  text-align: right;
+}
+[dir="rtl"] tbody td:first-child,
+[dir="rtl"] thead th:first-child {
+  padding-right: var(--sp-3);
+  padding-left: var(--sp-4);
+}
+
+/* ── RTL: Charts ── */
+[dir="rtl"] .chart-card,
+[dir="rtl"] .charts-row {
+  direction: ltr; /* chart canvases render correctly LTR internally */
+}
+[dir="rtl"] .chart-title {
+  text-align: right;
+}
+[dir="rtl"] .metric-card {
+  text-align: right;
+}
+[dir="rtl"] .metric-sub {
+  text-align: right;
+}
+
+/* ── RTL: Modals ── */
+[dir="rtl"] .modal-header {
+  flex-direction: row-reverse;
+}
+[dir="rtl"] .modal-header h2 {
+  text-align: right;
+}
+[dir="rtl"] .modal-close {
+  margin-left: 0;
+  margin-right: auto;
+}
+[dir="rtl"] .modal-footer {
+  flex-direction: row-reverse;
+}
+
+/* ── RTL: Settings forms ── */
+[dir="rtl"] .settings-group,
+[dir="rtl"] .settings-nav,
+[dir="rtl"] .settings-tab {
+  text-align: right;
+}
+[dir="rtl"] .form-row {
+  flex-direction: row-reverse;
+}
+[dir="rtl"] .form-group label {
+  text-align: right;
+}
+[dir="rtl"] .form-input,
+[dir="rtl"] .form-select,
+[dir="rtl"] .form-textarea {
+  text-align: right;
+}
+[dir="rtl"] .form-hint {
+  text-align: right;
+}
+
+/* ── RTL: Swarm panel ── */
+[dir="rtl"] .swarm-container {
+  text-align: right;
+}
+[dir="rtl"] .swarm-container .metrics-grid {
+  direction: rtl;
+}
+
+/* ── RTL: Cards ── */
+[dir="rtl"] .card {
+  text-align: right;
+}
+[dir="rtl"] .card-header {
+  flex-direction: row-reverse;
+}
+
+/* ── RTL: Toggles & badges ── */
 [dir="rtl"] .toggle-slider::before { left: auto; right: 2px; }
 [dir="rtl"] .toggle input:checked + .toggle-slider::before {
   transform: translateX(-16px);
 }
+[dir="rtl"] .badge {
+  margin-left: 0;
+  margin-right: var(--sp-1);
+}
+
+/* ── RTL: Toasts ── */
 [dir="rtl"] .toast-container { right: auto; left: var(--sp-5); }
 [dir="rtl"] .toast { animation-name: slide-in-right; }
+
+/* ── RTL: Search bar ── */
 [dir="rtl"] .search-bar .form-input {
   padding-left: var(--sp-3);
   padding-right: var(--sp-10);
   background-position: right 12px center;
 }
+
+/* ── RTL: Code blocks (keep code LTR) ── */
+[dir="rtl"] pre,
+[dir="rtl"] code,
+[dir="rtl"] .message-text pre,
+[dir="rtl"] .message-text code {
+  direction: ltr;
+  text-align: left;
+}
+
+/* ── RTL: Pagination ── */
+[dir="rtl"] .pagination {
+  flex-direction: row-reverse;
+}
+
+/* ── RTL: Agents page ── */
+[dir="rtl"] .agents-container {
+  text-align: right;
+}
+
 
 /* ── 25. Responsive ─────────────────────────────────────────────── */
 @media (max-width: 1024px) {

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "agents" %}
-{% block title %}Kazma — Agents{% endblock %}
-{% block page_title %}Agents{% endblock %}
+{% block title %}Kazma — {{ t('agents.title') }}{% endblock %}
+{% block page_title %}{{ t('agents.title') }}{% endblock %}
 
 {% block content %}
 <div x-data="agentsPage()" x-init="init()" class="agents-container" style="max-width:1400px;margin:0 auto;">

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "swarm" %}
-{% block title %}Kazma — Swarm{% endblock %}
-{% block page_title %}Swarm Management{% endblock %}
+{% block title %}Kazma — {{ t('swarm.title') }}{% endblock %}
+{% block page_title %}{{ t('swarm.title') }}{% endblock %}
 
 {% block content %}
 <div class="swarm-container" style="max-width:1400px;margin:0 auto;">
@@ -18,14 +18,14 @@
   <div class="metrics-grid" style="margin-bottom:1.5rem;">
     <div class="metric-card">
       <div class="metric-icon">🐝</div>
-      <div class="metric-label">Workers</div>
+      <div class="metric-label">{{ t('swarm.workers') }}</div>
       <div class="metric-value" id="metric-worker-count" style="color:var(--text-primary);">{{ worker_count }}</div>
-      <div class="metric-sub"><span id="metric-busy">0</span> busy</div>
+      <div class="metric-sub"><span id="metric-busy">0</span> {{ t('swarm.busy') }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon">⚡</div>
-      <div class="metric-label">Status</div>
-      <div class="metric-value" id="metric-swarm-status" style="color:var(--text-muted);">{{ 'Running' if started else 'Stopped' }}</div>
+      <div class="metric-label">{{ t('swarm.status') }}</div>
+      <div class="metric-value" id="metric-swarm-status" style="color:var(--text-muted);">{{ t('swarm.running') if started else t('swarm.stopped') }}</div>
       <div class="metric-sub">swarm {{ 'active' if started else 'idle' }}</div>
     </div>
   </div>

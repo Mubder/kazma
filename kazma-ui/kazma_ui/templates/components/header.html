@@ -8,7 +8,7 @@
         <h1 class="header-title">{% block page_title %}{{ active_page|default('Kazma')|title }}{% endblock %}</h1>
         {% block breadcrumbs %}
         <nav class="breadcrumbs" aria-label="Breadcrumb">
-            <a href="/" class="breadcrumb-link">Home</a>
+            <a href="/" class="breadcrumb-link">{{ t('header.home') }}</a>
             {% if active_page and active_page != 'workspace' %}
             <span class="breadcrumb-sep">/</span>
             <span class="breadcrumb-current">{{ active_page|title }}</span>
@@ -19,11 +19,11 @@
 
     <div class="header-right">
         {# New Chat button #}
-        <button class="header-btn" @click="window.location.href='/chat'" title="New Chat (Ctrl+N)">
+        <button class="header-btn" @click="window.location.href='/chat'" title="{{ t('header.new_chat') }} (Ctrl+N)">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                 <path d="M12 4v16m8-8H4"/>
             </svg>
-            <span class="sidebar-collapsed-hide">New Chat</span>
+            <span class="sidebar-collapsed-hide">{{ t('header.new_chat') }}</span>
         </button>
 
         {# Search button #}
@@ -66,21 +66,21 @@
             <div class="user-menu-dropdown" x-show="open" x-transition @keydown.escape.window="open = false">
                 <button class="dropdown-item" @click="window.location.href='/settings'">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2"/></svg>
-                    Settings
+                    {{ t('header.settings') }}
                 </button>
                 <button class="dropdown-item" @click="window.location.href='/dashboard'">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
-                    Dashboard
+                    {{ t('header.dashboard') }}
                 </button>
                 <div class="dropdown-divider"></div>
                 <button class="dropdown-item" @click="window.open('/health', '_blank')">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-                    Health Status
+                    {{ t('header.health_status') }}
                 </button>
                 <div class="dropdown-divider"></div>
                 <button class="dropdown-item danger">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
-                    Logout
+                    {{ t('header.logout') }}
                 </button>
             </div>
         </div>

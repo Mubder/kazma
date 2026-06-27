@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "chat" %}
-{% block title %}Kazma — Chat{% endblock %}
-{% block page_title %}Chat{% endblock %}
+{% block title %}Kazma — {{ t('chat.title') }}{% endblock %}
+{% block page_title %}{{ t('chat.title') }}{% endblock %}
 
 {% block head_extra %}
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -12,19 +12,19 @@
   <!-- ── Session Sidebar ── -->
   <aside class="chat-sidebar">
     <div class="chat-sidebar-header">
-      <h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">Sessions</h3>
-      <button id="new-session-btn" class="btn btn-sm btn-primary" title="New session (Ctrl+N)">+ New</button>
+      <h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">{{ t('chat.sessions') }}</h3>
+      <button id="new-session-btn" class="btn btn-sm btn-primary" title="{{ t('chat.new_session') }} (Ctrl+N)">{{ t('chat.new_session') }}</button>
     </div>
     <div class="session-search-wrapper">
-      <input type="text" id="session-search" class="form-input" placeholder="Search sessions…" style="font-size:0.8rem;padding:6px 10px;">
+      <input type="text" id="session-search" class="form-input" placeholder="{{ t('chat.search_sessions') }}" style="font-size:0.8rem;padding:6px 10px;">
     </div>
     <div id="session-list" class="session-list">
-      <div class="session-empty">Loading sessions…</div>
+      <div class="session-empty">{{ t('chat.loading_sessions') }}</div>
     </div>
     <div class="chat-sidebar-footer">
       <span style="font-size:0.7rem;color:var(--text-muted);">
-        <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+K</kbd> Search
-        <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+N</kbd> New
+        <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+K</kbd> {{ t('chat.search') }}
+        <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+N</kbd> {{ t('chat.new') }}
       </span>
     </div>
   </aside>
@@ -34,12 +34,12 @@
     <div id="chat-messages" class="chat-messages">
       <div class="chat-welcome">
         <div class="welcome-icon">🌊</div>
-        <h2>Kazma</h2>
-        <p>How can I help you today?</p>
+        <h2>{{ t('chat.welcome_title') }}</h2>
+        <p>{{ t('chat.welcome_subtitle') }}</p>
         <div class="welcome-hints">
-          <button class="hint-chip" onclick="document.getElementById('chat-input').value='Explain how Kazma swarms work';KazmaChat.sendMessage()">🐝 Explain swarms</button>
-          <button class="hint-chip" onclick="document.getElementById('chat-input').value='Write a Python script to analyze logs';KazmaChat.sendMessage()">🐍 Analyze logs</button>
-          <button class="hint-chip" onclick="document.getElementById('chat-input').value='What can you help me with?';KazmaChat.sendMessage()">❓ What can you do?</button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='Explain how Kazma swarms work';KazmaChat.sendMessage()">🐝 {{ t('nav.swarm') }}</button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='Write a Python script to analyze logs';KazmaChat.sendMessage()">🐍 Python</button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='What can you help me with?';KazmaChat.sendMessage()">❓ {{ t('chat.welcome_subtitle') }}</button>
         </div>
       </div>
     </div>
@@ -47,13 +47,13 @@
     <!-- Typing Indicator -->
     <div id="thinking-indicator" class="thinking-indicator" style="display:none;">
       <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      <span class="thinking-text">Kazma is thinking…</span>
+      <span class="thinking-text">{{ t('chat.thinking') }}</span>
     </div>
 
     <!-- Chat Input Area -->
     <div class="chat-input-area">
       <div class="input-wrapper">
-        <button id="attach-btn" class="btn-icon" title="Attach file" style="padding:4px;">
+        <button id="attach-btn" class="btn-icon" title="{{ t('chat.attach_file') }}" style="padding:4px;">
           <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
             <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
           </svg>
@@ -63,9 +63,9 @@
           id="chat-input"
           class="chat-input"
           rows="1"
-          placeholder="Type your message… (Enter to send, Shift+Enter for newline)"
+          placeholder="{{ t('chat.placeholder') }}"
         ></textarea>
-        <button id="send-btn" class="send-btn" title="Send (Enter)">
+        <button id="send-btn" class="send-btn" title="{{ t('chat.send') }} (Enter)">
           <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
             <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
           </svg>
@@ -73,10 +73,10 @@
       </div>
       <div class="input-footer">
         <span id="session-cost" class="cost-badge">$0.0000</span>
-        <span id="session-tokens" class="token-badge">0 tokens</span>
+        <span id="session-tokens" class="token-badge">0 {{ t('chat.tokens') }}</span>
         <span style="margin-left:auto;font-size:0.7rem;color:var(--text-muted);">
-          <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Enter</kbd> send ·
-          <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Shift+Enter</kbd> newline
+          <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Enter</kbd> {{ t('chat.send_shortcut') }} ·
+          <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Shift+Enter</kbd> {{ t('chat.newline_shortcut') }}
         </span>
       </div>
     </div>

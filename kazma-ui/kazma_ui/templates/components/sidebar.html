@@ -33,7 +33,7 @@
     {# Navigation #}
     <nav class="nav-links">
         {# Primary Section #}
-        <span class="nav-section-title">Primary</span>
+        <span class="nav-section-title">{{ t('nav.primary') }}</span>
 
         <a href="/" class="nav-link {{ 'active' if active_page == 'workspace' else '' }}">
             <span class="nav-icon">
@@ -42,7 +42,7 @@
                     <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
                 </svg>
             </span>
-            <span class="nav-label">Workspace</span>
+            <span class="nav-label">{{ t('nav.workspace') }}</span>
             <span class="nav-kbd">⌘1</span>
         </a>
 
@@ -52,7 +52,7 @@
                     <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
                 </svg>
             </span>
-            <span class="nav-label">Chat</span>
+            <span class="nav-label">{{ t('nav.chat') }}</span>
             <span class="nav-kbd">⌘2</span>
         </a>
 
@@ -62,12 +62,12 @@
                     <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/>
                 </svg>
             </span>
-            <span class="nav-label">Dashboard</span>
+            <span class="nav-label">{{ t('nav.dashboard') }}</span>
             <span class="nav-kbd">⌘3</span>
         </a>
 
         {# Tools Section #}
-        <span class="nav-section-title" style="margin-top: var(--sp-3)">Tools</span>
+        <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.tools') }}</span>
 
         <a href="/skills" class="nav-link {{ 'active' if active_page == 'skills' else '' }}">
             <span class="nav-icon">
@@ -75,7 +75,7 @@
                     <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
                 </svg>
             </span>
-            <span class="nav-label">Skills</span>
+            <span class="nav-label">{{ t('nav.skills') }}</span>
             <span class="nav-kbd">⌘4</span>
         </a>
 
@@ -87,12 +87,12 @@
                     <line x1="6" y1="18" x2="6.01" y2="18" stroke-width="2" stroke-linecap="round"/>
                 </svg>
             </span>
-            <span class="nav-label">MCP Servers</span>
+            <span class="nav-label">{{ t('nav.mcp') }}</span>
             <span class="nav-kbd">⌘5</span>
         </a>
 
         {# System Section #}
-        <span class="nav-section-title" style="margin-top: var(--sp-3)">System</span>
+        <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.system') }}</span>
 
         <a href="/swarm" class="nav-link {{ 'active' if active_page == 'swarm' else '' }}">
             <span class="nav-icon">
@@ -104,7 +104,7 @@
                     <line x1="8" y1="6" x2="16" y2="6"/>
                 </svg>
             </span>
-            <span class="nav-label">Swarm</span>
+            <span class="nav-label">{{ t('nav.swarm') }}</span>
             <span class="nav-kbd">⌘6</span>
         </a>
 
@@ -116,7 +116,7 @@
                     <path d="M2 12l10 5 10-5"/>
                 </svg>
             </span>
-            <span class="nav-label">Agents</span>
+            <span class="nav-label">{{ t('nav.agents') }}</span>
         </a>
 
         <a href="/settings" class="nav-link {{ 'active' if active_page == 'settings' else '' }}">
@@ -126,7 +126,7 @@
                     <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
                 </svg>
             </span>
-            <span class="nav-label">Settings</span>
+            <span class="nav-label">{{ t('nav.settings') }}</span>
             <span class="nav-kbd">⌘,</span>
         </a>
     </nav>

@@ -61,8 +61,15 @@ def create_app(config_path: str | None = None) -> FastAPI:
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
     # Global template context for language/direction
-    templates.env.globals["lang"] = agent.config.language if hasattr(agent.config, "language") else "en"
-    templates.env.globals["dir"] = "rtl" if getattr(agent.config, "rtl", False) else "ltr"
+    _lang = agent.config.language if hasattr(agent.config, "language") else "en"
+    _dir = "rtl" if getattr(agent.config, "rtl", False) else "ltr"
+    templates.env.globals["lang"] = _lang
+    templates.env.globals["dir"] = _dir
+    # i18n: expose ``t()`` to all Jinja2 templates so ``{{ t('nav.chat') }}``
+    # renders the string in the configured language.
+    from kazma_ui.i18n import make_translator
+
+    templates.env.globals["t"] = make_translator(_lang)
     # Expose KAZMA_SECRET to templates so the HITL approval frontend can
     # send it as the X-Kazma-Secret header on /api/approve requests.
     templates.env.globals["kazma_secret"] = os.environ.get("KAZMA_SECRET", "")

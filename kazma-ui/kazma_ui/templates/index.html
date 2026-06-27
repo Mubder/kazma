@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% set active_page = "workspace" %}
-{% block title %}Kazma — Workspace{% endblock %}
-{% block page_title %}Workspace{% endblock %}
+{% block title %}Kazma — {{ t('nav.workspace') }}{% endblock %}
+{% block page_title %}{{ t('nav.workspace') }}{% endblock %}
 
 {% block content %}
 <div class="card">
-    <div class="card-title">Kazma Orchestration Workspace</div>
-    <p class="text-muted" style="margin-bottom:12px">Welcome to Kazma. Use the sidebar to navigate between Chat, Settings, Skills, MCP, and Swarm.</p>
+    <div class="card-title">Kazma</div>
+    <p class="text-muted" style="margin-bottom:12px">{{ t('chat.welcome_subtitle') }}</p>
     <div style="display:flex;gap:8px">
-        <a href="/chat" class="btn btn-primary">Start Chat</a>
-        <a href="/settings" class="btn btn-secondary">Configure Settings</a>
-        <a href="/swarm" class="btn btn-secondary">Manage Swarm</a>
+        <a href="/chat" class="btn btn-primary">{{ t('nav.chat') }}</a>
+        <a href="/settings" class="btn btn-secondary">{{ t('nav.settings') }}</a>
+        <a href="/swarm" class="btn btn-secondary">{{ t('nav.swarm') }}</a>
     </div>
 </div>
 {% endblock %}
