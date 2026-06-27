@@ -24,7 +24,7 @@ mcp:
     - npx
     - -y
     - '@modelcontextprotocol/server-filesystem'
-    - /tmp
+    - kazma-data/workspace
   ide_server:
     enabled: true
     root: .

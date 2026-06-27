@@ -772,7 +772,7 @@ class SettingsManager:
         """Read recent log entries."""
         log_paths = [
             Path("kazma-data/kazma.log"),
-            Path("/var/log/kazma.log"),
+            Path.cwd() / "kazma.log",
             Path.home() / ".kazma" / "kazma.log",
         ]
         for log_path in log_paths:

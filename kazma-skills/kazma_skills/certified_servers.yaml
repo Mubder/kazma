@@ -10,7 +10,7 @@ servers:
   filesystem:
     name: "MCP Filesystem Server"
     description: "Read, write, and manage local files"
-    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "kazma-data/workspace"]
     transport: stdio
     certified: true
     arabic_support: partial
@@ -20,7 +20,7 @@ servers:
   filesystem_write:
     name: "MCP Filesystem Server (read/write)"
     description: "Full filesystem access including write operations"
-    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "kazma-data/workspace"]
     transport: stdio
     certified: true
     arabic_support: partial
@@ -40,7 +40,7 @@ servers:
   sqlite:
     name: "SQLite MCP Server"
     description: "Query and manage SQLite databases"
-    command: ["npx", "-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/tmp/kazma.db"]
+    command: ["npx", "-y", "@modelcontextprotocol/server-sqlite", "--db-path", "kazma-data/kazma.db"]
     transport: stdio
     certified: true
     arabic_support: none
@@ -50,7 +50,7 @@ servers:
   sqlite_wal:
     name: "SQLite WAL MCP Server"
     description: "SQLite with WAL mode for concurrent read access"
-    command: ["npx", "-y", "@modelcontextprotocol/server-sqlite", "--db-path", "/tmp/kazma.db", "--wal-mode"]
+    command: ["npx", "-y", "@modelcontextprotocol/server-sqlite", "--db-path", "kazma-data/kazma.db", "--wal-mode"]
     transport: stdio
     certified: true
     arabic_support: none

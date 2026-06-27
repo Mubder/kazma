@@ -27,7 +27,7 @@ Config format (from kazma.yaml ``mcp.servers``):
     servers:
       - name: "filesystem"
         transport: "stdio"
-        command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+        command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "kazma-data/workspace"]
       - name: "web-search"
         transport: "sse"
         url: "http://localhost:8080/sse"

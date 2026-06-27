@@ -17,7 +17,7 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = str(Path(__file__).resolve().parent.parent.parent / "kazma-data" / "audit.db")
+_DEFAULT_DB = str(Path.cwd() / "kazma-data" / "audit.db")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit_entries (
