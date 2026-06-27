@@ -22,11 +22,11 @@ import yaml
 # not expose it. Test removed.
 
 
-# ── Bug 2: recovery.py uses wrong field name ───────────────────────────────
+# ── Bug 2: state uses wrong checkpoint field name ──────────────────────────
 
 
 class TestBug02_RecoveryFieldName:
-    """recovery.py must use 'last_cp_id', not 'checkpoint_id'."""
+    """AgentState must use 'last_cp_id', not 'checkpoint_id'."""
 
     def test_state_has_last_cp_id_not_checkpoint_id(self):
         """AgentState uses 'last_cp_id', not 'checkpoint_id'."""

@@ -1,8 +1,7 @@
 """Slash command router — resolves common commands without LLM calls.
 
-Commands are matched by prefix in the dispatcher before the message
-ever reaches the agent.  This keeps responses instant (<50ms) and
-saves tokens.
+Commands are matched by prefix before the message ever reaches the
+agent.  This keeps responses instant (<50ms) and saves tokens.
 
 Registered commands:
   /help         — list available commands grouped by category
@@ -11,8 +10,6 @@ Registered commands:
   /model        — show active model
   /memory       — report memory stats
   /cost         — show token spend for this session
-  /undo         — remove the last agent response from chat
-  /edit         — edit the last agent response with corrected text
   /replay       — time travel: list snapshots, replay, or compare
   /personality  — show, list, or switch agent personality (core tool)
   /context      — context window token usage report (core tool)
@@ -140,10 +137,6 @@ def _flatten_and_set(store: ConfigStore, data: dict[str, Any], prefix: str = "")
             category = prefix.split(".")[0] if prefix else "general"
             store.set(full_key, value, category=category)
 
-# Re-exported for dispatcher.py
-CMD_UNDO = "/undo"
-CMD_EDIT = "/edit"
-
 # Lazy-loaded ReplayEngine — may not be available yet
 _ReplayEngine = None
 _replay_import_attempted = False
@@ -179,9 +172,6 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
     Args:
         text: The raw message text (e.g. "/help", "/reset").
         context: Optional dict with session data (token_count, model, etc.).
-                 For /undo and /edit, must contain:
-                   - _dispatcher: MessageDispatcher instance
-                   - _chat_id:    chat-scoped key (str)
 
     Returns:
         Response string if the command is recognised, None otherwise.
@@ -201,10 +191,6 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
         return _cmd_memory(ctx)
     if cmd == "/cost":
         return _cmd_cost(ctx)
-    if cmd == CMD_UNDO:
-        return _cmd_undo(ctx)
-    if cmd == CMD_EDIT:
-        return _cmd_edit(text, ctx)
     if cmd == "/replay":
         return _cmd_replay(text, ctx)
     if cmd == "/config":
@@ -218,8 +204,6 @@ def _cmd_help() -> str:
         "*Available commands:*\n\n"
         "🔄 *Session*\n"
         "• `/reset` — Clear conversation history\n"
-        "• `/undo` — Remove last agent response\n"
-        "• `/edit <text>` — Correct last agent response\n"
         "• `/replay list` — Show available snapshots\n"
         "• `/replay <iteration>` — Replay from iteration\n"
         "• `/replay compare <a> <b>` — Compare two runs\n"
@@ -277,90 +261,6 @@ def _cmd_cost(ctx: dict[str, Any]) -> str:
     tokens = ctx.get("total_tokens", 0)
     cost = ctx.get("total_cost", 0.0)
     return f"💰 Session cost: `${cost:.4f}` ({tokens} tokens)"
-
-
-# ── Undo / Edit ───────────────────────────────────────────────────────
-
-
-def _cmd_undo(ctx: dict[str, Any]) -> str:
-    """Remove the last agent response from the chat.
-
-    Pops the last exchange from the dispatcher's message tracker.
-    The caller (dispatcher) is responsible for issuing the platform-level
-    deleteMessage call if the adapter supports it.
-
-    Args:
-        ctx: Must contain ``_dispatcher`` (MessageDispatcher) and
-             ``_chat_id`` (str).
-
-    Returns:
-        Confirmation or error message.
-    """
-    dispatcher = ctx.get("_dispatcher")
-    chat_id = ctx.get("_chat_id", "")
-
-    if dispatcher is None:
-        logger.warning("[slash] /undo called without _dispatcher in context")
-        return "⚠️ Undo not available right now."
-
-    pair = dispatcher.undo_last(chat_id)
-    if pair is None:
-        return "📭 Nothing to undo — no recent responses."
-
-    user_msg_id, bot_tracking_id = pair
-    logger.info(
-        "[slash] /undo popped exchange: user_msg=%s bot_track=%s (chat=%s)",
-        user_msg_id,
-        bot_tracking_id,
-        chat_id,
-    )
-    return "🔄 Last response removed."
-
-
-def _cmd_edit(text: str, ctx: dict[str, Any]) -> str:
-    """Edit the last agent response.
-
-    Usage: /edit <corrected text>
-
-    Pops the last bot response and replaces it with the new text.
-    The caller (dispatcher) is responsible for issuing the platform-level
-    editMessageText call if the adapter supports it.
-
-    Args:
-        text:    The full command text (e.g. "/edit fixed response here").
-        ctx:     Must contain ``_dispatcher`` (MessageDispatcher) and
-                 ``_chat_id`` (str).
-
-    Returns:
-        Confirmation with the new text, or error message.
-    """
-    dispatcher = ctx.get("_dispatcher")
-    chat_id = ctx.get("_chat_id", "")
-
-    if dispatcher is None:
-        logger.warning("[slash] /edit called without _dispatcher in context")
-        return "⚠️ Edit not available right now."
-
-    # Extract the new text after "/edit "
-    parts = text.split(maxsplit=1)
-    if len(parts) < 2 or not parts[1].strip():
-        return "✏️ Usage: `/edit <corrected text>` — provide the new text."
-
-    new_text = parts[1].strip()
-
-    pair = dispatcher.undo_last(chat_id)
-    if pair is None:
-        return "📭 Nothing to edit — no recent responses."
-
-    user_msg_id, bot_tracking_id = pair
-    logger.info(
-        "[slash] /edit popped exchange: user_msg=%s bot_track=%s → new_text=%.80s (chat=%s)",
-        user_msg_id,
-        bot_tracking_id,
-        new_text,
-        chat_id,
-    )
-    return f"✏️ Last response edited to:\n\n{new_text}"
 
 
 # ── Replay / Time Travel ────────────────────────────────────────────

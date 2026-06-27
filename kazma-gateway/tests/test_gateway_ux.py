@@ -1,9 +1,9 @@
-"""Tests for gateway UX features: slash commands, markdown rendering, typing indicators."""
+"""Tests for gateway UX features: slash commands, typing indicators."""
 
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from kazma_gateway.gateway import OutboundMessage
 from kazma_gateway.slash_commands import is_slash_command, resolve_slash_command
@@ -95,90 +95,6 @@ class TestSlashCommands:
         result = resolve_slash_command("/HELP")
         assert result is not None
         assert "/help" in result.lower() or "/reset" in result
-
-
-# ══════════════════════════════════════════════════════════════════════
-# Markdown rendering tests (via dispatcher)
-# ══════════════════════════════════════════════════════════════════════
-
-
-class TestMarkdownRendering:
-    def test_telegram_parse_mode_set(self):
-        """Telegram dispatcher uses MarkdownV2 parse_mode."""
-        from kazma_gateway.dispatcher import _platform_parse_mode
-
-        mode = _platform_parse_mode("telegram")
-        assert mode == "MarkdownV2"
-
-    def test_discord_parse_mode_none(self):
-        """Discord uses native Markdown (no parse_mode needed)."""
-        from kazma_gateway.dispatcher import _platform_parse_mode
-
-        mode = _platform_parse_mode("discord")
-        assert mode is None
-
-    def test_slack_parse_mode_none(self):
-        """Slack uses mrkdwn=true (no parse_mode needed)."""
-        from kazma_gateway.dispatcher import _platform_parse_mode
-
-        mode = _platform_parse_mode("slack")
-        assert mode is None
-
-    def test_fallback_html(self):
-        """Unknown platforms use HTML conversion."""
-        from kazma_gateway.dispatcher import _platform_parse_mode
-
-        mode = _platform_parse_mode("unknown")
-        assert mode == "HTML"
-
-    def test_markdown_to_html_bold(self):
-        """Bold markdown is converted to <b> tags."""
-        from kazma_gateway.dispatcher import _markdown_to_html
-
-        result = _markdown_to_html("Hello **world**")
-        assert "<b>world</b>" in result
-
-    def test_markdown_to_html_code(self):
-        """Inline code is converted to <code> tags."""
-        from kazma_gateway.dispatcher import _markdown_to_html
-
-        result = _markdown_to_html("Run `pip install`")
-        assert "<code>pip install</code>" in result
-
-    def test_markdown_to_html_link(self):
-        """Links are converted to <a> tags."""
-        from kazma_gateway.dispatcher import _markdown_to_html
-
-        result = _markdown_to_html("[click here](https://example.com)")
-        assert 'href="https://example.com"' in result
-        assert "click here" in result
-
-    def test_markdown_to_html_codeblock(self):
-        """Code blocks are converted to <pre><code>."""
-        from kazma_gateway.dispatcher import _markdown_to_html
-
-        result = _markdown_to_html("```python\nprint('hi')\n```")
-        assert "<pre><code>" in result
-        assert "print('hi')" in result
-
-    def test_dispatcher_reply_applies_markdown(self):
-        """Dispatcher.reply() applies HTML conversion for unknown platforms."""
-        from kazma_gateway.gateway import GatewayManager
-
-        mgr = MagicMock(spec=GatewayManager)
-        mgr.send = AsyncMock(return_value=True)
-
-        from kazma_gateway.dispatcher import MessageDispatcher
-
-        d = MessageDispatcher(mgr)
-
-        asyncio.run(d.reply("unknown:123", "Hello **world**"))
-
-        # Verify OutboundMessage was sent with HTML parse_mode
-        call_args = mgr.send.call_args
-        outbound = call_args[0][0]
-        assert outbound.text == "Hello <b>world</b>"
-        assert outbound.context_metadata.get("parse_mode") == "HTML"
 
 
 # ══════════════════════════════════════════════════════════════════════

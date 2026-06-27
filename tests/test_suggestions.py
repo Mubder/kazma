@@ -1,8 +1,7 @@
 """Tests for proactive suggestions and automatic tool intent detection.
 
-Note: Imports directly via importlib to avoid the pre-existing broken
-import chain in kazma_gateway.__init__ (dispatcher.py imports CMD_UNDO
-from slash_commands which doesn't define it).  Core owns that fix.
+Imports directly via importlib to isolate the suggestions module for
+unit testing without pulling in the full gateway package init chain.
 """
 
 from __future__ import annotations
