@@ -13,6 +13,7 @@ Features are listed with their implementation PR/commit where available.
 |:---:|:---|:---|:---|
 | ✅ | Fan-out Orchestration | Added concurrent `fan_out` execution with bounded concurrency, partial-failure handling, and single-worker passthrough | `swarm-fanout-pattern` |
 | ✅ | Result Aggregation | Added `first_valid`, `merge_all`, `vote`, `synthesize`, and `collect` fan-out aggregation strategies | `swarm-fanout-pattern` |
+| ✅ | Consult Orchestration | Added `consult` pattern in `kazma_core/swarm/consultation.py` — role-aware independent worker opinions, attributed synthesis, partial/all-fail/single-worker handling, persisted `individual_opinions` + `synthesized_output`, and `GET /api/swarm/tasks?type=consult` history | `swarm-consult-pattern` |
 
 ---
 

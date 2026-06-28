@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any, cast
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,8 @@ def _coerce_task_type(payload: dict[str, Any], worker_names: list[str]) -> Any:
         return TaskType.FAN_OUT
     if normalized == "pipeline":
         return TaskType.PIPELINE
+    if normalized == "consult":
+        return TaskType.CONSULT
     if normalized == "broadcast":
         return TaskType.BROADCAST
     if normalized == "dispatch":
@@ -297,6 +299,14 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 },
                 status_code=400,
             )
+        if task_type == getattr(TaskType, "CONSULT", None) and not worker_names:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "message": "Consult requires at least one worker.",
+                },
+                status_code=400,
+            )
         if not worker_names:
             return JSONResponse(
                 {"status": "error", "message": "No workers specified"},
@@ -343,6 +353,7 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
             not in {
                 getattr(TaskType, "PIPELINE", None),
                 getattr(TaskType, "FAN_OUT", None),
+                getattr(TaskType, "CONSULT", None),
             }
         )
         if uses_external_dispatch:
@@ -391,6 +402,11 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 "task_id": None if task_result is None else task_result.task_id,
                 "result_status": None if task_result is None else task_result.status,
                 "aggregated_output": None if task_result is None else task_result.aggregated_output,
+                "individual_opinions": (
+                    []
+                    if task_result is None
+                    else [item.to_dict() for item in task_result.individual_opinions]
+                ),
                 "synthesized_output": (
                     None if task_result is None else task_result.synthesized_output
                 ),
@@ -398,6 +414,18 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 "metadata": None if task_result is None else task_result.metadata,
             }
         )
+
+    @router.get("/api/swarm/tasks")
+    async def swarm_tasks(
+        task_type: str | None = Query(default=None, alias="type"),
+    ) -> JSONResponse:
+        """Return completed swarm tasks, optionally filtered by task type."""
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse({"tasks": [], "count": 0})
+
+        tasks = [task.to_dict() for task in engine.list_tasks(task_type)]
+        return JSONResponse({"tasks": tasks, "count": len(tasks)})
 
     @router.post("/api/swarm/workers", status_code=201)
     async def swarm_add_worker(payload: dict[str, Any]) -> JSONResponse:

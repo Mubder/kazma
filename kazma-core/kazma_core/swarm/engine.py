@@ -11,6 +11,10 @@ from typing import Any
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
+from kazma_core.swarm.consultation import (
+    ConsultationConfigurationError,
+    execute_consult,
+)
 from kazma_core.swarm.patterns import (
     FanOutConfigurationError,
     PipelineConfigurationError,
@@ -59,6 +63,7 @@ class SwarmEngine:
     ) -> None:
         self.config = config or SwarmConfig(enabled=True, workers=[])
         self._workers: dict[str, SwarmWorker] = {}
+        self._task_history: dict[str, SwarmTask] = {}
         self._result_aggregator = result_aggregator or ResultAggregator()
         self._build_workers()
 
@@ -115,6 +120,28 @@ class SwarmEngine:
     def get_worker(self, name: str) -> SwarmWorker | None:
         """Return a worker by name."""
         return self._workers.get(name)
+
+    def get_task(self, task_id: str) -> SwarmTask | None:
+        """Return a completed task snapshot by identifier."""
+        return self._task_history.get(task_id)
+
+    def list_tasks(self, task_type: TaskType | str | None = None) -> list[SwarmTask]:
+        """Return completed task snapshots, optionally filtered by task type."""
+        normalized_type = (
+            task_type.value
+            if isinstance(task_type, TaskType)
+            else str(task_type).strip().lower()
+            if task_type
+            else None
+        )
+        tasks = list(self._task_history.values())
+        if normalized_type:
+            tasks = [task for task in tasks if task.type.value == normalized_type]
+        return sorted(
+            tasks,
+            key=lambda item: item.completed_at or item.started_at or item.created_at,
+            reverse=True,
+        )
 
     @property
     def worker_names(self) -> list[str]:
@@ -214,6 +241,36 @@ class SwarmEngine:
             return self._finalize_task(
                 task,
                 worker_results=pattern_result.worker_results,
+                status=pattern_result.status,
+                aggregated_output=pattern_result.aggregated_output,
+                synthesized_output=pattern_result.synthesized_output,
+                error=pattern_result.error,
+                duration_seconds=perf_counter() - started,
+                metadata=pattern_result.metadata,
+            )
+
+        if task.type == TaskType.CONSULT:
+            try:
+                pattern_result = await execute_consult(
+                    task,
+                    resolve_worker=self.get_worker,
+                    dispatch_worker_by_name=self._dispatch_worker_by_name,
+                    aggregator=self._result_aggregator,
+                    max_concurrent=self._resolve_max_concurrent(task),
+                )
+            except ConsultationConfigurationError as exc:
+                return self._finalize_task(
+                    task,
+                    worker_results=[],
+                    status="failed",
+                    error=str(exc),
+                    duration_seconds=perf_counter() - started,
+                )
+
+            return self._finalize_task(
+                task,
+                worker_results=pattern_result.worker_results,
+                individual_opinions=pattern_result.individual_opinions,
                 status=pattern_result.status,
                 aggregated_output=pattern_result.aggregated_output,
                 synthesized_output=pattern_result.synthesized_output,
@@ -389,6 +446,7 @@ class SwarmEngine:
         worker_results: list[WorkerResult],
         status: str,
         duration_seconds: float,
+        individual_opinions: list[WorkerResult] | None = None,
         aggregated_output: str | None = None,
         synthesized_output: str | None = None,
         error: str | None = None,
@@ -407,6 +465,7 @@ class SwarmEngine:
             task_id=task.id,
             status=status,
             worker_results=worker_results,
+            individual_opinions=list(individual_opinions or []),
             aggregated_output=aggregated_output,
             synthesized_output=synthesized_output,
             error=error,
@@ -416,6 +475,7 @@ class SwarmEngine:
             metadata=dict(metadata or {}),
         )
         task.result = result
+        self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
         return result
 
     @staticmethod

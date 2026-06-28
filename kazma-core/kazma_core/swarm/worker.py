@@ -31,6 +31,18 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _compose_context_payload(context: str | SwarmDispatchContext) -> str:
+    """Render dispatch context text, including consult system guidance."""
+    plain_context = context_text(context).strip()
+    if not isinstance(context, SwarmDispatchContext) or not context.system_prompt:
+        return plain_context
+
+    sections = [f"System prompt:\n{context.system_prompt.strip()}"]
+    if plain_context:
+        sections.append(f"Additional context:\n{plain_context}")
+    return "\n\n".join(sections)
+
+
 # ---------------------------------------------------------------------------
 # Base
 # ---------------------------------------------------------------------------
@@ -177,7 +189,10 @@ class InProcessWorker(SwarmWorker):
         logger.info("[InProcessWorker:%s] dispatching %s", self.name, task_id)
         try:
             manager = self._get_manager()
-            result = await manager.spawn(goal=task, context=context_text(context))
+            result = await manager.spawn(
+                goal=task,
+                context=_compose_context_payload(context),
+            )
             return {
                 "worker": self.name,
                 "task_id": task_id,
@@ -283,7 +298,7 @@ class TelegramWorker(SwarmWorker):
         logger.info("[TelegramWorker:%s] dispatching %s", self.name, task_id)
 
         prompt = task
-        context_value = context_text(context)
+        context_value = _compose_context_payload(context)
         if context_value:
             prompt = f"{task}\n\nContext:\n{context_value}"
 

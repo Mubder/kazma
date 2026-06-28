@@ -21,7 +21,8 @@ _SYNTHESIS_SYSTEM_PROMPT = """You consolidate multiple worker responses into one
 
 Preserve the important technical points from each response, resolve obvious
 conflicts, and write a concise unified answer. If a worker failed, ignore that
-failed response.
+failed response. When you reference a point from a worker, explicitly name that
+worker in the synthesis.
 """
 
 
@@ -109,7 +110,7 @@ class ResultAggregator:
             )
 
         if strategy == "synthesize":
-            synthesized_output = await self._synthesize(task, successful_results)
+            synthesized_output = await self.synthesize(task, successful_results)
             metadata["synthesized"] = True
             return AggregationResult(
                 aggregated_output=synthesized_output,
@@ -119,10 +120,29 @@ class ResultAggregator:
 
         raise ValueError(f"Unknown aggregation strategy: '{task.aggregation}'")
 
+    async def synthesize(
+        self,
+        task: SwarmTask,
+        successful_results: list[WorkerResult],
+        *,
+        system_prompt: str | None = None,
+        final_instruction: str | None = None,
+    ) -> str:
+        """Generate a synthesized answer from successful worker results."""
+        return await self._synthesize(
+            task,
+            successful_results,
+            system_prompt=system_prompt,
+            final_instruction=final_instruction,
+        )
+
     async def _synthesize(
         self,
         task: SwarmTask,
         successful_results: list[WorkerResult],
+        *,
+        system_prompt: str | None = None,
+        final_instruction: str | None = None,
     ) -> str:
         """Generate a consolidated answer from successful worker results."""
         if self._synthesizer is not None:
@@ -140,7 +160,9 @@ class ResultAggregator:
                 f"{result.worker}:\n{result.output}" for result in successful_results
             )
         )
-        prompt_sections.append("Produce a single consolidated answer.")
+        prompt_sections.append(
+            final_instruction or "Produce a single consolidated answer."
+        )
         prompt = "\n\n".join(prompt_sections)
 
         provider = None
@@ -152,7 +174,7 @@ class ResultAggregator:
                 messages=[
                     {
                         "role": "system",
-                        "content": _SYNTHESIS_SYSTEM_PROMPT,
+                        "content": system_prompt or _SYNTHESIS_SYSTEM_PROMPT,
                     },
                     {"role": "user", "content": prompt},
                 ]

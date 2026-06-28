@@ -66,6 +66,7 @@ class SwarmDispatchContext(str):
     metadata: dict[str, Any]
     task_id: str | None
     task_type: str | None
+    system_prompt: str | None
 
     def __new__(
         cls,
@@ -75,12 +76,14 @@ class SwarmDispatchContext(str):
         metadata: Mapping[str, Any] | None = None,
         task_id: str | None = None,
         task_type: str | None = None,
+        system_prompt: str | None = None,
     ) -> SwarmDispatchContext:
         context = str.__new__(cls, text)
         context.blackboard = blackboard
         context.metadata = dict(metadata or {})
         context.task_id = task_id
         context.task_type = task_type
+        context.system_prompt = system_prompt
         return context
 
     @property

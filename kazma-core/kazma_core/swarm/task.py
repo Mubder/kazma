@@ -189,6 +189,7 @@ class TaskResult(_JsonSerializable):
     task_id: str
     status: str
     worker_results: list[WorkerResult] = field(default_factory=list)
+    individual_opinions: list[WorkerResult] = field(default_factory=list)
     aggregated_output: str | None = None
     synthesized_output: str | None = None
     error: str | None = None
@@ -199,6 +200,9 @@ class TaskResult(_JsonSerializable):
 
     def __post_init__(self) -> None:
         self.worker_results = [WorkerResult.from_dict(result) for result in self.worker_results]
+        self.individual_opinions = [
+            WorkerResult.from_dict(result) for result in self.individual_opinions
+        ]
         self.metadata = dict(self.metadata)
 
     @classmethod
@@ -210,6 +214,10 @@ class TaskResult(_JsonSerializable):
             task_id=data.get("task_id", ""),
             status=data.get("status", ""),
             worker_results=[WorkerResult.from_dict(result) for result in data.get("worker_results", [])],
+            individual_opinions=[
+                WorkerResult.from_dict(result)
+                for result in data.get("individual_opinions", [])
+            ],
             aggregated_output=data.get("aggregated_output"),
             synthesized_output=data.get("synthesized_output"),
             error=data.get("error"),

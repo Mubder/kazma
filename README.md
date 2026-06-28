@@ -221,11 +221,27 @@ The swarm engine supports these worker orchestration patterns:
 - `broadcast` for all registered workers
 - `pipeline` for sequential handoff between workers
 - `fan_out` for concurrent execution of the same prompt across selected workers
+- `consult` for collecting independent role-aware worker opinions and synthesizing a consolidated answer
 
 Fan-out supports `first_valid`, `merge_all`, `vote`, `synthesize`, and
 `collect` aggregation strategies. Parallel dispatches are bounded by
 `swarm.max_concurrent` (default `5`), and requests can override the limit with
 `max_concurrent` when needed.
+
+#### Consult mode
+
+`consult` sends the prompt to each selected worker independently with a
+role-aware system prompt derived from that worker's `WorkerCapabilities`
+(role, expertise, model specialty). Workers never see each other's opinions.
+After collecting the opinions, the engine runs an orchestrator synthesis step
+that produces a `synthesized_output` referencing every successful worker by
+name. Results include both `individual_opinions` and `synthesized_output`.
+
+Consult handles partial failure by synthesizing from available opinions
+(status `partial`), all-failure by returning no synthesis (status `failed`),
+and the single-worker edge case with a passthrough synthesis. Completed
+consult tasks are persisted to the in-memory task history and are queryable
+via `GET /api/swarm/tasks?type=consult`.
 
 ### Swarm Architecture
 
