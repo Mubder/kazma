@@ -68,6 +68,17 @@ def create_app(config_path: str | None = None) -> FastAPI:
         description="Autonomous AI Agent Framework — Arabic RTL Dashboard",
     )
 
+    # ── Auth Middleware: gate sensitive API endpoints behind KAZMA_SECRET ──
+    # When KAZMA_SECRET env var is set, all /api/settings, /api/swarm,
+    # /api/mcp, /api/skills, /api/models, /api/ollama endpoints require the
+    # X-Kazma-Secret header (timing-safe comparison).  Read-only endpoints
+    # and page routes remain open.  When the secret is unset everything is
+    # open (backward compatible).
+    from kazma_ui.auth import create_auth_middleware
+
+    app.middleware("http")(create_auth_middleware())
+    logger.info("[Auth] KAZMA_SECRET middleware registered")
+
     # Mount static files
     _STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
