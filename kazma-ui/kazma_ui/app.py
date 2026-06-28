@@ -79,6 +79,30 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.middleware("http")(create_auth_middleware())
     logger.info("[Auth] KAZMA_SECRET middleware registered")
 
+    # ── CORS Middleware ──────────────────────────────────────────────────
+    # Restrictive by default (localhost variants only). Override via the
+    # KAZMA_CORS_ORIGINS env var (comma-separated list of origins).
+    from fastapi.middleware.cors import CORSMiddleware
+
+    _default_cors_origins = [
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+    _cors_env = os.environ.get("KAZMA_CORS_ORIGINS", "").strip()
+    if _cors_env:
+        _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+    else:
+        _cors_origins = _default_cors_origins
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        allow_headers=["*"],
+    )
+    logger.info("[CORS] allow_origins=%s", _cors_origins)
+
     # Mount static files
     _STATIC_DIR.mkdir(parents=True, exist_ok=True)
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")

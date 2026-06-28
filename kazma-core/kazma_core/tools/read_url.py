@@ -54,6 +54,19 @@ async def read_url(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
+    # ── SSRF protection: reject private/internal/metadata endpoints ──
+    # Resolve the hostname and block if any resolved IP is private,
+    # loopback, link-local (incl. cloud metadata 169.254.169.254), or
+    # reserved. This runs before any network fetch so we never connect.
+    try:
+        from kazma_core.security.ssrf import SSRFError, validate_url
+
+        validate_url(url)
+    except SSRFError as exc:
+        return f"Error: {exc}"
+    except ValueError as exc:
+        return f"Error: Invalid URL — {exc}"
+
     try:
         import httpx
     except ImportError:

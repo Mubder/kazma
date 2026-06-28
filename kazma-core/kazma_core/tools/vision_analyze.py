@@ -125,30 +125,20 @@ def _load_local_image(path: Path) -> tuple[bytes, str]:
 
 
 def _is_safe_url(url: str) -> bool:
-    """Check if URL is safe to fetch (no SSRF to private/internal hosts)."""
-    import ipaddress
-    from urllib.parse import urlparse
+    """Check if URL is safe to fetch (no SSRF to private/internal hosts).
+
+    Resolves the hostname and blocks if **any** resolved IP is private,
+    loopback, link-local (incl. cloud metadata 169.254.169.254), or
+    reserved. Also rejects ``localhost``, ``0.0.0.0``, ``::1``, and
+    ``.local``/``.internal`` hostnames.
+    """
     try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False
-        host = parsed.hostname
-        if not host:
-            return False
-        if host in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-            return False
-        try:
-            ip = ipaddress.ip_address(host)
-            if ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local:
-                return False
-        except ValueError:
-            if host.endswith(".local") or host.endswith(".internal"):
-                return False
-        if "169.254.169.254" in host or "metadata.google" in host:
-            return False
-        return True
+        from kazma_core.security.ssrf import validate_url
+
+        validate_url(url)
     except Exception:
         return False
+    return True
 
 
 async def _download_image(url: str) -> tuple[bytes, str]:
