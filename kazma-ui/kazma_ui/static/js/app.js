@@ -212,6 +212,32 @@ function kazmaApp() {
 // ── 6. Sidebar Component ───────────────────────────────────────────
 function sidebarComponent() {
     return {
+        // Active model name, fetched from /api/provider/active on init.
+        // Falls back to the server-rendered (config.default_model) value
+        // or 'gpt-4o-mini' when the fetch fails or returns an empty model.
+        activeModel: '',
+
+        init() {
+            this.fetchActiveModel();
+        },
+
+        async fetchActiveModel() {
+            try {
+                const res = await fetch('/api/provider/active', {
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin',
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data && data.model) {
+                    this.activeModel = data.model;
+                }
+            } catch (err) {
+                // Network or parse error — keep the fallback display
+                console.warn('[sidebar] Could not fetch active model:', err);
+            }
+        },
+
         toggleSidebar() {
             // Delegates to root app via Alpine
             const appEl = document.querySelector('[x-data*="kazmaApp"]');
