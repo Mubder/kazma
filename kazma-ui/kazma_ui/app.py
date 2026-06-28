@@ -310,6 +310,51 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(workspace_router)
     logger.info("Workspace API router mounted at /api/workspace/*")
 
+    # ── Sub-Agent Manager ─────────────────────────────────────
+    try:
+        from kazma_core.agent.sub_agent import SubAgentManager, set_sub_agent_manager
+
+        sub_agent_mgr = SubAgentManager(
+            graph_builder=lambda tools=None, hitl_config=None: agent.get_streaming_graph(),
+            max_concurrent=3,
+        )
+        set_sub_agent_manager(sub_agent_mgr)
+        logger.info("[SubAgent] Manager initialized (max_concurrent=3)")
+    except Exception as e:
+        logger.warning("[SubAgent] Manager not available: %s", e)
+
+    # ── Swarm Panel ─────────────────────────────────────────────
+    from kazma_ui.swarm_panel import create_swarm_router
+
+    _swarm_mgr = None
+    try:
+        from kazma_core.swarm import (
+            SwarmConfig,
+            SwarmManager,
+            set_swarm_engine,
+        )
+
+        swarm_cfg_path = config_path or "kazma.yaml"
+        swarm_cfg = SwarmConfig.from_yaml(swarm_cfg_path)
+        if swarm_cfg is not None and swarm_cfg.enabled:
+            _swarm_mgr = SwarmManager(swarm_cfg)
+            logger.info(
+                "[Swarm] SwarmManager initialized from %s — %d worker(s)",
+                swarm_cfg_path,
+                len(_swarm_mgr.worker_names),
+            )
+        else:
+            _swarm_mgr = SwarmManager(SwarmConfig(enabled=True, workers=[]))
+            logger.info("[Swarm] SwarmManager initialized (empty — UI-driven mode)")
+        set_swarm_engine(_swarm_mgr.engine)
+    except Exception as e:
+        logger.warning("[Swarm] SwarmManager not available: %s", e)
+        _swarm_mgr = None
+
+    swarm_router = create_swarm_router(templates, swarm_manager=_swarm_mgr)
+    app.include_router(swarm_router)
+    logger.info("[Swarm] Swarm Panel mounted at /api/swarm/*, /swarm")
+
     # ── Gateway (Omnichannel Message Bus) ────────────────────────────
     _gateway: Any = None  # module-level ref for shutdown handler
 
@@ -429,40 +474,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 logger.warning("[Gateway] No graph available — Brain handler not registered")
         except Exception as e:
             logger.warning("[Gateway] Brain handler failed to register: %s", e)
-
-        # Mount the gateway monitor router
-        # ── Swarm Panel ─────────────────────────────────────────────
-        from kazma_ui.swarm_panel import create_swarm_router
-
-        # Build SwarmManager from config so the dispatch endpoint delegates
-        # to real workers (InProcessWorker / TelegramWorker) instead of just
-        # setting a busy flag. When no swarm config section exists, the
-        # manager is None and the panel operates in local-only mode.
-        _swarm_mgr = None
-        try:
-            from kazma_core.swarm import SwarmConfig, SwarmManager
-
-            # Look for a config file (kazma.yaml) to load the swarm section.
-            swarm_cfg_path = config_path or "kazma.yaml"
-            swarm_cfg = SwarmConfig.from_yaml(swarm_cfg_path)
-            if swarm_cfg is not None and swarm_cfg.enabled:
-                _swarm_mgr = SwarmManager(swarm_cfg)
-                logger.info(
-                    "[Swarm] SwarmManager initialized from %s — %d worker(s)",
-                    swarm_cfg_path, len(_swarm_mgr.worker_names),
-                )
-            else:
-                # Still create an empty manager so UI-added workers can be
-                # dispatched via InProcessWorker (SubAgentManager).
-                _swarm_mgr = SwarmManager(SwarmConfig(enabled=True, workers=[]))
-                logger.info("[Swarm] SwarmManager initialized (empty — UI-driven mode)")
-        except Exception as e:
-            logger.warning("[Swarm] SwarmManager not available: %s", e)
-            _swarm_mgr = None
-
-        swarm_router = create_swarm_router(templates, swarm_manager=_swarm_mgr)
-        app.include_router(swarm_router)
-        logger.info("[Swarm] Swarm Panel mounted at /api/swarm/*, /swarm")
 
         from kazma_ui.gateway_monitor import create_gateway_router
 
@@ -658,19 +669,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 return _JSONResponse({"pending": [], "count": 0, "error": str(exc)}, status_code=500)
 
         logger.info("[HITL] Pending approvals endpoint mounted at /api/pending-approvals")
-
-        # ── Sub-Agent Manager ─────────────────────────────────────
-        try:
-            from kazma_core.agent.sub_agent import SubAgentManager, set_sub_agent_manager
-
-            sub_agent_mgr = SubAgentManager(
-                graph_builder=lambda tools=None, hitl_config=None: agent.get_streaming_graph(),
-                max_concurrent=3,
-            )
-            set_sub_agent_manager(sub_agent_mgr)
-            logger.info("[SubAgent] Manager initialized (max_concurrent=3)")
-        except Exception as e:
-            logger.warning("[SubAgent] Manager not available: %s", e)
 
         # ── Cron Scheduler ────────────────────────────────────────
         try:

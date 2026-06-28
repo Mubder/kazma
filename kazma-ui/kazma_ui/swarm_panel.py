@@ -1,59 +1,38 @@
-"""Swarm Panel — Web UI for managing multi-worker AI agent swarms.
-
-Provides:
-  GET    /api/swarm/status       — list all workers + health
-  POST   /api/swarm/dispatch     — dispatch task to worker(s)
-  POST   /api/swarm/workers      — add a new worker
-  DELETE /api/swarm/workers/{name} — remove a worker
-  POST   /api/swarm/start        — start all workers
-  POST   /api/swarm/stop         — stop all workers
-  GET    /swarm                  — Web UI panel (HTML)
-
-If kazma_core.swarm is not installed, the API returns setup instructions
-and the UI shows an onboarding banner.
-"""
+"""Swarm Panel, backed by the shared SwarmEngine registry."""
 
 from __future__ import annotations
 
 import logging
-import threading
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 logger = logging.getLogger(__name__)
 
-# Optional imports from kazma_core.swarm — degrade gracefully if absent.
 try:
-    from kazma_core.swarm.config import SwarmConfig, WorkerConfig
-    from kazma_core.swarm.manager import SwarmManager
-    from kazma_core.swarm.worker import InProcessWorker
-except ImportError:  # pragma: no cover — exercised only when core is absent
-    SwarmConfig = None  # type: ignore[assignment]
-    WorkerConfig = None  # type: ignore[assignment]
-    SwarmManager = None  # type: ignore[assignment]
-    InProcessWorker = None  # type: ignore[assignment]
+    from kazma_core.swarm import (
+        SwarmConfig,
+        SwarmEngine,
+        SwarmManager,
+        SwarmTask,
+        TaskType,
+        WorkerConfig,
+        get_swarm_engine,
+        set_swarm_engine,
+    )
+except ImportError:  # pragma: no cover
+    SwarmConfig = None  # type: ignore[assignment,misc]
+    SwarmEngine = None  # type: ignore[assignment,misc]
+    SwarmManager = None  # type: ignore[assignment,misc]
+    SwarmTask = None  # type: ignore[assignment,misc]
+    TaskType = None  # type: ignore[assignment,misc]
+    WorkerConfig = None  # type: ignore[assignment,misc]
+    get_swarm_engine = None  # type: ignore[assignment,misc]
+    set_swarm_engine = None  # type: ignore[assignment,misc]
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
-
-# ---------------------------------------------------------------------------
-# In-memory worker registry (local backend; replaced by kazma_core.swarm
-# when the package is installed)
-# ---------------------------------------------------------------------------
-_workers: dict[str, dict[str, Any]] = {}
-_lock = threading.Lock()
-_started = False
-
-
-def _reset_swarm_state() -> None:
-    """Reset all in-memory swarm state (for testing)."""
-    global _workers, _started
-    with _lock:
-        _workers.clear()
-        _started = False
 
 _SUPPORTED_MODELS = [
     "deepseek-chat",
@@ -75,225 +54,225 @@ _SUPPORTED_PROVIDERS = [
 
 
 def _has_swarm_core() -> bool:
-    """Check if kazma_core.swarm package is available."""
-    try:
-        import kazma_core.swarm  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
-def _register_ui_worker_with_manager(swarm_manager: Any, worker: dict[str, Any]) -> None:
-    """Register a UI-added worker with the SwarmManager.
-
-    For in-process workers we build a ``WorkerConfig`` so SwarmManager can
-    construct an :class:`InProcessWorker`. If the worker is already
-    registered (e.g. loaded from YAML config), this is a no-op.
-    """
-    if WorkerConfig is None or swarm_manager is None:
-        return
-
-    name = worker.get("name", "")
-    if not name:
-        return
-
-    # Skip if already registered in the manager (e.g. from YAML config).
-    if swarm_manager.get_worker(name) is not None:
-        return
-
-    worker_type_raw = worker.get("type", "in-process")
-    # Map UI type names to config type names.
-    type_map = {"in-process": "in_process", "telegram": "telegram_bot"}
-    cfg_type = type_map.get(worker_type_raw, "in_process")
-
-    wc = WorkerConfig(
-        name=name,
-        type=cfg_type,
-        model=worker.get("model", ""),
-        provider=worker.get("provider", ""),
-        role=worker.get("role", ""),
+    """Return whether kazma_core.swarm is importable."""
+    return all(
+        item is not None
+        for item in (
+            SwarmConfig,
+            SwarmEngine,
+            SwarmTask,
+            TaskType,
+            WorkerConfig,
+            get_swarm_engine,
+            set_swarm_engine,
+        )
     )
-    swarm_manager.add_worker(wc)
 
 
-def _worker_status(worker: dict) -> str:
-    """Derive display status: online / offline / busy."""
-    if not _started:
+def _create_empty_engine() -> Any:
+    """Create an empty shared engine when swarm core is available."""
+    if not _has_swarm_core():
+        return None
+    return SwarmEngine(SwarmConfig(enabled=True, workers=[]))
+
+
+def _resolve_engine(swarm_manager: Any = None) -> Any:
+    """Resolve the engine used by the router at request time."""
+    if not _has_swarm_core():
+        return None
+
+    engine: Any | None
+    if isinstance(swarm_manager, SwarmEngine):
+        engine = swarm_manager
+    else:
+        engine = getattr(swarm_manager, "engine", None)
+        if not isinstance(engine, SwarmEngine):
+            engine = None
+        if engine is None:
+            engine = get_swarm_engine()
+
+    if engine is None:
+        engine = _create_empty_engine()
+    set_swarm_engine(engine)
+    return engine
+
+
+def _reset_swarm_state() -> None:
+    """Reset the shared engine for tests."""
+    if not _has_swarm_core():
+        return
+    set_swarm_engine(_create_empty_engine())
+
+
+def _swarm_started(engine: Any) -> bool:
+    """Return whether any worker is running."""
+    if engine is None:
+        return False
+    return any(worker._running for worker in engine._workers.values())
+
+
+def _worker_status(worker: Any) -> str:
+    """Return the UI-facing worker state."""
+    if not worker._running:
         return "offline"
-    if worker.get("busy"):
+    if worker.busy:
         return "busy"
     return "online"
 
 
-def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
-    """Create the Swarm Panel API router.
+def _serialize_worker(worker: Any) -> dict[str, Any]:
+    """Convert a worker object into a response-friendly dict."""
+    return {
+        "name": worker.name,
+        "model": worker.model or "?",
+        "provider": worker.provider or "?",
+        "type": worker.worker_type,
+        "role": worker.role,
+        "status": _worker_status(worker),
+        "bot_token": "***" if getattr(worker, "bot_token", None) else None,
+        "added_at": worker.added_at,
+        "last_task": worker.last_task,
+        "last_heartbeat": worker.last_heartbeat,
+        "logs": list(worker.logs),
+    }
 
-    Args:
-        templates: Jinja2Templates instance for HTML rendering.
-        swarm_manager: Optional :class:`SwarmManager` instance. When provided,
-            the dispatch endpoint delegates task execution to it (real execution
-            via ``InProcessWorker`` / ``TelegramWorker``). When ``None``, the
-            panel operates in local-only mode (metadata tracking without real
-            execution).
 
-    Returns:
-        APIRouter mounted at /api/swarm + /swarm page.
-    """
-    router = APIRouter(tags=["swarm"])
+def _worker_views(engine: Any) -> list[dict[str, Any]]:
+    """Return serialized worker views for templates and APIs."""
+    if engine is None:
+        return []
+    return [_serialize_worker(worker) for worker in engine._workers.values()]
 
-    _has_core = _has_swarm_core()
-    _swarm_manager = swarm_manager
 
-    # ── Web UI Page ──────────────────────────────────────────────────
-    @router.get("/swarm", response_class=HTMLResponse)
-    async def swarm_page(request: Request) -> HTMLResponse:
-        """Render the Swarm management page."""
-        template_path = _TEMPLATE_DIR / "swarm.html"
-        if template_path.exists():
-            return templates.TemplateResponse(
-                request,
-                "swarm.html",
-                {
-                    "workers": list(_workers.values()),
-                    "worker_count": len(_workers),
-                    "started": _started,
-                    "has_swarm_core": _has_core,
-                    "config": None,
-                    "active_page": "swarm",
-                },
+def _build_worker_config(payload: dict[str, Any]) -> Any:
+    """Create a WorkerConfig from a UI payload."""
+    if WorkerConfig is None:
+        return None
+    worker_type = {"in-process": "in_process", "telegram": "telegram_bot"}.get(
+        payload.get("type", "in-process"),
+        "in_process",
+    )
+    return WorkerConfig(
+        name=(payload.get("name") or "").strip(),
+        type=worker_type,
+        model=payload.get("model", "deepseek-chat"),
+        provider=payload.get("provider", "deepseek"),
+        role=payload.get("role", ""),
+    )
+
+
+def _sync_external_manager_add(
+    swarm_manager: Any,
+    worker_config: Any,
+    engine: Any,
+) -> None:
+    """Keep mock or external managers informed about UI-added workers."""
+    manager_engine = getattr(swarm_manager, "engine", None)
+    if not isinstance(manager_engine, SwarmEngine):
+        manager_engine = None
+    if swarm_manager is None or manager_engine is engine:
+        return
+    add_worker = getattr(swarm_manager, "add_worker", None)
+    if callable(add_worker):
+        add_worker(worker_config)
+
+
+def _sync_external_manager_remove(
+    swarm_manager: Any,
+    name: str,
+    engine: Any,
+) -> None:
+    """Keep mock or external managers informed about UI removals."""
+    manager_engine = getattr(swarm_manager, "engine", None)
+    if not isinstance(manager_engine, SwarmEngine):
+        manager_engine = None
+    if swarm_manager is None or manager_engine is engine:
+        return
+    remove_worker = getattr(swarm_manager, "remove_worker", None)
+    if callable(remove_worker):
+        try:
+            remove_worker(name)
+        except Exception as exc:
+            logger.warning(
+                "[Swarm] Failed to remove worker '%s' from delegated manager: %s",
+                name,
+                exc,
             )
 
-        # Fallback: inline HTML if template doesn't exist yet
-        return HTMLResponse(_fallback_html(request, _has_core))
 
-    # ── API: Worker Status ───────────────────────────────────────────
+def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
+    """Create the Swarm Panel router backed by the shared engine."""
+    router = APIRouter(tags=["swarm"])
+
+    def _current_engine() -> Any:
+        return _resolve_engine(swarm_manager)
+
+    @router.get("/swarm", response_class=HTMLResponse)
+    async def swarm_page(request: Request) -> HTMLResponse:
+        """Render the Swarm panel."""
+        engine = _current_engine()
+        workers = _worker_views(engine)
+        started = _swarm_started(engine)
+        template_path = _TEMPLATE_DIR / "swarm.html"
+        if template_path.exists():
+            return cast(
+                HTMLResponse,
+                templates.TemplateResponse(
+                    request,
+                    "swarm.html",
+                    {
+                        "workers": workers,
+                        "worker_count": len(workers),
+                        "started": started,
+                        "has_swarm_core": _has_swarm_core(),
+                        "config": None,
+                        "active_page": "swarm",
+                    },
+                ),
+            )
+
+        return HTMLResponse(_fallback_html(_has_swarm_core(), workers))
+
     @router.get("/api/swarm/status")
     async def swarm_status() -> dict[str, Any]:
-        """List all workers with health status.
-
-        Returns:
-            {
-                "workers": [{name, model, provider, type, status, ...}],
-                "count": N,
-                "started": bool,
-                "has_swarm_core": bool,
-                "setup_instructions": str | null,
-            }
-        """
-        with _lock:
-            worker_list = [
-                {
-                    "name": name,
-                    "model": w.get("model", "?"),
-                    "provider": w.get("provider", "?"),
-                    "type": w.get("type", "?"),
-                    "status": _worker_status(w),
-                    "bot_token": "***" if w.get("bot_token") else None,
-                    "added_at": w.get("added_at"),
-                    "last_heartbeat": w.get("last_heartbeat"),
-                }
-                for name, w in _workers.items()
-            ]
-
+        """Return current worker status."""
+        engine = _current_engine()
+        workers = _worker_views(engine)
         result: dict[str, Any] = {
-            "workers": worker_list,
-            "count": len(worker_list),
-            "started": _started,
-            "has_swarm_core": _has_core,
+            "workers": workers,
+            "count": len(workers),
+            "started": _swarm_started(engine),
+            "has_swarm_core": _has_swarm_core(),
             "setup_instructions": None,
         }
-
-        if not _has_core:
+        if not _has_swarm_core():
             result["setup_instructions"] = (
                 "kazma_core.swarm is not installed. "
                 "Install with: pip install kazma-core[swarm] "
                 "or add kazma_core.swarm to your project."
             )
-
         return result
 
-    # ── API: Dispatch Task ───────────────────────────────────────────
     @router.post("/api/swarm/dispatch")
     async def swarm_dispatch(payload: dict[str, Any]) -> JSONResponse:
-        """Dispatch a task to one or more workers.
-
-        Request body:
-            {
-                "workers": ["worker1", "worker2"],
-                "task": "Build feature gw-067",
-                "context": "optional extra context"
-            }
-        """
+        """Dispatch a task to one or more workers."""
         worker_names = payload.get("workers", [])
         task = payload.get("task", "")
         context = payload.get("context", "")
 
         if not worker_names:
             return JSONResponse(
-                {"status": "error", "message": "No workers specified"}, status_code=400
+                {"status": "error", "message": "No workers specified"},
+                status_code=400,
             )
         if not task:
             return JSONResponse(
-                {"status": "error", "message": "No task specified"}, status_code=400
+                {"status": "error", "message": "No task specified"},
+                status_code=400,
             )
 
-        dispatched = []
-        missing = []
-        results: list[dict[str, Any]] = []
-        now_ts = datetime.now(UTC).isoformat()
-
-        # Identify which workers exist in the local registry.
-        with _lock:
-            for name in worker_names:
-                if name in _workers:
-                    _workers[name]["busy"] = True
-                    _workers[name]["last_task"] = task
-                    _workers[name]["last_heartbeat"] = now_ts
-                    if "logs" not in _workers[name]:
-                        _workers[name]["logs"] = []
-                    _workers[name]["logs"].append(
-                        f"[{now_ts}] Task dispatched: {task[:80]}"
-                    )
-                    dispatched.append(name)
-                else:
-                    missing.append(name)
-
-        # Execute tasks via SwarmManager when available.
-        if _swarm_manager is not None and _has_core:
-            for name in dispatched:
-                try:
-                    result = await _swarm_manager.dispatch(name, task, context)
-                    results.append(result)
-                except Exception as exc:
-                    logger.exception("[Swarm] dispatch failed for worker '%s'", name)
-                    results.append({
-                        "worker": name,
-                        "task_id": "",
-                        "status": "error",
-                        "output": "",
-                        "error": str(exc)[:500],
-                    })
-
-            # Clear busy flags now that execution is complete.
-            with _lock:
-                for name in dispatched:
-                    if name in _workers:
-                        _workers[name]["busy"] = False
-                        _workers[name]["last_heartbeat"] = datetime.now(UTC).isoformat()
-
-            return JSONResponse(
-                {
-                    "status": "ok",
-                    "message": f"Task dispatched to {len(dispatched)} worker(s)",
-                    "dispatched": dispatched,
-                    "missing": missing,
-                    "task": task,
-                    "results": results,
-                }
-            )
-
-        # No SwarmManager wired — local-only mode (metadata tracking).
-        if not _has_core:
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
             return JSONResponse(
                 {
                     "status": "warning",
@@ -301,11 +280,54 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                         "kazma_core.swarm is not installed — task recorded locally "
                         "but no workers will execute it. Install: pip install kazma-core[swarm]"
                     ),
-                    "dispatched": dispatched,
-                    "missing": missing,
-                    "results": results,
+                    "dispatched": [],
+                    "missing": list(worker_names),
+                    "results": [],
                 }
             )
+
+        dispatched = [name for name in worker_names if engine.get_worker(name) is not None]
+        missing = [name for name in worker_names if name not in dispatched]
+        results: list[dict[str, Any]] = []
+
+        manager_engine = getattr(swarm_manager, "engine", None)
+        if not isinstance(manager_engine, SwarmEngine):
+            manager_engine = None
+        uses_external_dispatch = swarm_manager is not None and manager_engine is None
+        if uses_external_dispatch:
+            for name in dispatched:
+                worker = engine.get_worker(name)
+                if worker is not None:
+                    worker.mark_dispatched(task)
+                try:
+                    result = await swarm_manager.dispatch(name, task, context)
+                except Exception as exc:
+                    logger.exception("[Swarm] delegated dispatch failed for worker '%s'", name)
+                    result = {
+                        "worker": name,
+                        "task_id": "",
+                        "status": "error",
+                        "output": "",
+                        "error": str(exc)[:500],
+                    }
+                if worker is not None:
+                    worker.mark_completed(result.get("status", "error"))
+                results.append(result)
+        elif len(dispatched) == 1:
+            task_result = await engine.dispatch(
+                SwarmTask(prompt=task, context=context, workers=dispatched)
+            )
+            results = [item.to_dict() for item in task_result.worker_results]
+        elif dispatched:
+            task_result = await engine.broadcast(
+                SwarmTask(
+                    prompt=task,
+                    context=context,
+                    workers=dispatched,
+                    type=TaskType.BROADCAST,
+                )
+            )
+            results = [item.to_dict() for item in task_result.worker_results]
 
         return JSONResponse(
             {
@@ -318,203 +340,133 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
             }
         )
 
-    # ── API: Add Worker ──────────────────────────────────────────────
     @router.post("/api/swarm/workers", status_code=201)
     async def swarm_add_worker(payload: dict[str, Any]) -> JSONResponse:
-        """Add a new worker to the swarm.
-
-        Request body:
-            {
-                "name": "worker-1",
-                "model": "deepseek-chat",
-                "provider": "deepseek",
-                "bot_token": "optional-telegram-token",
-                "type": "in-process"  // or "telegram"
-            }
-        """
+        """Add a worker to the shared engine registry."""
         name = (payload.get("name") or "").strip()
         if not name:
             return JSONResponse(
-                {"status": "error", "message": "Worker name is required"}, status_code=400
+                {"status": "error", "message": "Worker name is required"},
+                status_code=400,
             )
 
-        with _lock:
-            if name in _workers:
-                return JSONResponse(
-                    {"status": "error", "message": f"Worker '{name}' already exists"},
-                    status_code=409,
-                )
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "message": "Swarm core is not available",
+                },
+                status_code=503,
+            )
 
-            worker = {
-                "name": name,
-                "model": payload.get("model", "deepseek-chat"),
-                "provider": payload.get("provider", "deepseek"),
-                "type": payload.get("type", "in-process"),
-                "bot_token": payload.get("bot_token"),
-                "busy": False,
-                "last_task": None,
-                "added_at": datetime.now(UTC).isoformat(),
-                "last_heartbeat": None,
-                "logs": [],
-            }
-            _workers[name] = worker
+        if engine.get_worker(name) is not None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' already exists"},
+                status_code=409,
+            )
 
-        # Register with the SwarmManager if available so dispatch can route
-        # to this worker. For UI-added in-process workers, we create an
-        # InProcessWorker (or a WorkerConfig) dynamically.
-        if _swarm_manager is not None:
-            try:
-                _register_ui_worker_with_manager(_swarm_manager, worker)
-            except Exception as exc:
-                logger.warning(
-                    "[Swarm] Failed to register worker '%s' with SwarmManager: %s",
-                    name, exc,
-                )
+        worker_config = _build_worker_config(payload)
+        worker = engine.add_worker(worker_config)
+        setattr(worker, "bot_token", payload.get("bot_token"))
+        setattr(worker, "endpoint", payload.get("endpoint"))
+        setattr(worker, "api_key", payload.get("api_key"))
+        _sync_external_manager_add(swarm_manager, worker_config, engine)
 
-        logger.info("[Swarm] Worker added: %s (%s/%s)", name, worker["model"], worker["provider"])
-        return JSONResponse({"status": "ok", "worker": worker}, status_code=201)
+        logger.info("[Swarm] Worker added: %s (%s/%s)", name, worker.model, worker.provider)
+        return JSONResponse({"status": "ok", "worker": _serialize_worker(worker)}, status_code=201)
 
-    # ── API: Remove Worker ───────────────────────────────────────────
     @router.delete("/api/swarm/workers/{name}")
     async def swarm_remove_worker(name: str) -> JSONResponse:
-        """Remove a worker from the swarm by name."""
-        with _lock:
-            if name not in _workers:
-                return JSONResponse(
-                    {"status": "error", "message": f"Worker '{name}' not found"},
-                    status_code=404,
-                )
-            del _workers[name]
+        """Remove a worker from the shared engine registry."""
+        engine = _current_engine()
+        if engine is None or engine.get_worker(name) is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
 
-        # Also unregister from the SwarmManager if present.
-        if _swarm_manager is not None:
-            try:
-                if _swarm_manager.get_worker(name) is not None:
-                    _swarm_manager.remove_worker(name)
-            except Exception as exc:
-                logger.warning(
-                    "[Swarm] Failed to remove worker '%s' from SwarmManager: %s",
-                    name, exc,
-                )
-
+        engine.remove_worker(name)
+        _sync_external_manager_remove(swarm_manager, name, engine)
         logger.info("[Swarm] Worker removed: %s", name)
         return JSONResponse({"status": "ok", "message": f"Worker '{name}' removed"})
 
-    # ── API: Worker Logs ─────────────────────────────────────────────
     @router.get("/api/swarm/workers/{name}/logs")
     async def swarm_worker_logs(name: str) -> JSONResponse:
-        """Return log lines for a specific worker.
-
-        Reads from the in-memory log buffer maintained per worker.
-        When kazma_core.swarm is installed, workers write status/task
-        lines that are captured here for display in the UI.
-        """
-        with _lock:
-            worker = _workers.get(name)
-
+        """Return log lines for a worker."""
+        engine = _current_engine()
+        worker = None if engine is None else engine.get_worker(name)
         if worker is None:
             return JSONResponse(
                 {"status": "error", "message": f"Worker '{name}' not found"},
                 status_code=404,
             )
 
-        logs = list(worker.get("logs", []))
-
-        # If no explicit logs exist, synthesize a summary from worker metadata
+        logs = list(worker.logs)
         if not logs:
             logs = [
-                f"[{worker.get('added_at', 'unknown')}] Worker '{name}' registered "
-                f"(model={worker.get('model', '?')}, provider={worker.get('provider', '?')})",
+                f"[{worker.added_at}] Worker '{name}' registered "
+                f"(model={worker.model or '?'}, provider={worker.provider or '?'})",
             ]
-            if worker.get("last_task"):
-                logs.append(f"[{worker.get('last_heartbeat', 'unknown')}] "
-                            f"Last task: {worker['last_task']}")
-            status = _worker_status(worker)
-            logs.append(f"[{datetime.now(UTC).isoformat()}] "
-                        f"Current status: {status}")
+            if worker.last_task:
+                logs.append(
+                    f"[{worker.last_heartbeat or worker.added_at}] Last task: {worker.last_task}"
+                )
+            logs.append(f"Current status: {_worker_status(worker)}")
 
         return JSONResponse({"logs": logs, "count": len(logs)})
 
-    # ── API: Start / Stop All ────────────────────────────────────────
     @router.post("/api/swarm/start")
     async def swarm_start() -> JSONResponse:
-        """Start all workers in the swarm."""
-        global _started
-
-        if _started:
-            return JSONResponse({"status": "ok", "message": "Swarm already started"})
-
-        if not _workers:
+        """Start all workers."""
+        engine = _current_engine()
+        workers = [] if engine is None else list(engine._workers.values())
+        if not workers:
             return JSONResponse(
                 {"status": "error", "message": "No workers registered — add workers first"},
                 status_code=400,
             )
+        if _swarm_started(engine):
+            return JSONResponse({"status": "ok", "message": "Swarm already started"})
 
-        if not _has_core:
-            return JSONResponse(
-                {
-                    "status": "warning",
-                    "message": (
-                        "kazma_core.swarm is not installed — workers registered but "
-                        "cannot be started. Install: pip install kazma-core[swarm]"
-                    ),
-                    "worker_count": len(_workers),
-                }
-            )
-
-        _started = True
-        with _lock:
-            for w in _workers.values():
-                w["status"] = "online"
-
-        logger.info("[Swarm] Started — %d workers", len(_workers))
+        await engine.start_all()
+        logger.info("[Swarm] Started, %d workers online", len(workers))
         return JSONResponse(
             {
                 "status": "ok",
-                "message": f"Swarm started — {len(_workers)} worker(s) online",
-                "worker_count": len(_workers),
+                "message": f"Swarm started — {len(workers)} worker(s) online",
+                "worker_count": len(workers),
             }
         )
 
     @router.post("/api/swarm/stop")
     async def swarm_stop() -> JSONResponse:
-        """Stop all workers in the swarm."""
-        global _started
-
-        if not _started:
+        """Stop all workers."""
+        engine = _current_engine()
+        workers = [] if engine is None else list(engine._workers.values())
+        if not _swarm_started(engine):
             return JSONResponse({"status": "ok", "message": "Swarm already stopped"})
 
-        _started = False
-        with _lock:
-            for w in _workers.values():
-                w["busy"] = False
-
-        logger.info("[Swarm] Stopped — %d workers", len(_workers))
+        await engine.stop_all()
+        logger.info("[Swarm] Stopped, %d workers offline", len(workers))
         return JSONResponse(
             {
                 "status": "ok",
-                "message": f"Swarm stopped — {len(_workers)} worker(s) offline",
-                "worker_count": len(_workers),
+                "message": f"Swarm stopped — {len(workers)} worker(s) offline",
+                "worker_count": len(workers),
             }
         )
 
-    # ── Models / Providers lookup ────────────────────────────────────
     @router.get("/api/swarm/models")
     async def swarm_models() -> dict[str, Any]:
-        """Return supported models and providers for dropdowns."""
-        return {
-            "models": _SUPPORTED_MODELS,
-            "providers": _SUPPORTED_PROVIDERS,
-        }
+        """Return supported models and providers."""
+        return {"models": _SUPPORTED_MODELS, "providers": _SUPPORTED_PROVIDERS}
 
     return router
 
 
-# ── Fallback inline HTML (served when swarm.html template is missing) ──
-
-
-def _fallback_html(request: Request, has_core: bool) -> str:
-    """Inline HTML fallback for /swarm page."""
+def _fallback_html(has_core: bool, workers: list[dict[str, Any]]) -> str:
+    """Inline HTML fallback for /swarm when the template is unavailable."""
     setup_banner = ""
     if not has_core:
         setup_banner = """
@@ -526,18 +478,18 @@ def _fallback_html(request: Request, has_core: bool) -> str:
         </div>"""
 
     worker_rows = ""
-    for name, w in sorted(_workers.items()):
-        status = _worker_status(w)
+    for worker in sorted(workers, key=lambda item: item["name"]):
         color = {"online": "#28a745", "offline": "#dc3545", "busy": "#ffc107"}.get(
-            status, "#6c757d"
+            worker["status"],
+            "#6c757d",
         )
         worker_rows += f"""
         <tr>
-          <td>{name}</td>
-          <td>{w.get('model', '?')}</td>
-          <td>{w.get('provider', '?')}</td>
-          <td>{w.get('type', 'in-process')}</td>
-          <td><span style="color:{color};font-weight:bold;">● {status}</span></td>
+          <td>{worker['name']}</td>
+          <td>{worker.get('model', '?')}</td>
+          <td>{worker.get('provider', '?')}</td>
+          <td>{worker.get('type', 'in-process')}</td>
+          <td><span style="color:{color};font-weight:bold;">● {worker['status']}</span></td>
         </tr>"""
 
     return f"""<!DOCTYPE html>
@@ -564,14 +516,9 @@ def _fallback_html(request: Request, has_core: bool) -> str:
               cursor: pointer; margin-right: 8px; margin-top: 8px; }}
     .btn-primary {{ background: #238636; color: #fff; }}
     .btn-danger {{ background: #da3633; color: #fff; }}
-    .btn-warning {{ background: #d29922; color: #000; }}
     table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
     th {{ text-align: left; padding: 8px 12px; border-bottom: 1px solid #30363d; color: #8b949e; }}
     td {{ padding: 8px 12px; border-bottom: 1px solid #21262d; }}
-    .dot {{ display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }}
-    .dot-green {{ background: #28a745; }}
-    .dot-red {{ background: #dc3545; }}
-    .dot-yellow {{ background: #ffc107; }}
     .row {{ display: flex; gap: 20px; flex-wrap: wrap; }}
     .col {{ flex: 1; min-width: 300px; }}
     .toast {{ position: fixed; top: 20px; right: 20px; padding: 12px 20px;
@@ -613,11 +560,11 @@ def _fallback_html(request: Request, has_core: bool) -> str:
         <input id="add-name" placeholder="worker-1">
         <label>Model</label>
         <select id="add-model">
-          {''.join(f'<option value="{m}">{m}</option>' for m in _SUPPORTED_MODELS)}
+          {''.join(f'<option value="{model}">{model}</option>' for model in _SUPPORTED_MODELS)}
         </select>
         <label>Provider</label>
         <select id="add-provider">
-          {''.join(f'<option value="{p}">{p}</option>' for p in _SUPPORTED_PROVIDERS)}
+          {''.join(f'<option value="{provider}">{provider}</option>' for provider in _SUPPORTED_PROVIDERS)}
         </select>
         <label>Bot Token (optional)</label>
         <input id="add-token" placeholder="telegram-bot-token" type="password">
@@ -660,7 +607,7 @@ def _fallback_html(request: Request, has_core: bool) -> str:
         const d = await r.json();
         showToast(d.message || d.status, r.ok);
         setTimeout(() => location.reload(), 500);
-      }} catch(e) {{ showToast('Network error: ' + e, false); }}
+      }} catch (e) {{ showToast('Network error: ' + e, false); }}
     }}
 
     async function addWorker() {{
@@ -673,13 +620,14 @@ def _fallback_html(request: Request, has_core: bool) -> str:
       }};
       try {{
         const r = await fetch('/api/swarm/workers', {{
-          method: 'POST', headers: {{'Content-Type': 'application/json'}},
-          body: JSON.stringify(payload)
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify(payload),
         }});
         const d = await r.json();
         showToast(d.message || 'Worker added', r.ok);
         if (r.ok) setTimeout(() => location.reload(), 500);
-      }} catch(e) {{ showToast('Network error: ' + e, false); }}
+      }} catch (e) {{ showToast('Network error: ' + e, false); }}
     }}
 
     async function removeWorker() {{
@@ -690,7 +638,7 @@ def _fallback_html(request: Request, has_core: bool) -> str:
         const d = await r.json();
         showToast(d.message || 'Worker removed', r.ok);
         if (r.ok) setTimeout(() => location.reload(), 500);
-      }} catch(e) {{ showToast('Network error: ' + e, false); }}
+      }} catch (e) {{ showToast('Network error: ' + e, false); }}
     }}
 
     async function dispatchTask() {{
@@ -703,12 +651,13 @@ def _fallback_html(request: Request, has_core: bool) -> str:
       }};
       try {{
         const r = await fetch('/api/swarm/dispatch', {{
-          method: 'POST', headers: {{'Content-Type': 'application/json'}},
-          body: JSON.stringify(payload)
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify(payload),
         }});
         const d = await r.json();
         showToast(d.message || d.status, r.ok);
-      }} catch(e) {{ showToast('Network error: ' + e, false); }}
+      }} catch (e) {{ showToast('Network error: ' + e, false); }}
     }}
   </script>
 </body>

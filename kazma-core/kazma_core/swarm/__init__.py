@@ -15,6 +15,7 @@ Usage::
 """
 
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
+from kazma_core.swarm.engine import SwarmEngine, get_swarm_engine, set_swarm_engine
 from kazma_core.swarm.manager import SwarmManager
 from kazma_core.swarm.task import (
     HandoffRecord,
@@ -30,6 +31,7 @@ from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
 __all__ = [
     "SwarmConfig",
     "SwarmManager",
+    "SwarmEngine",
     "SwarmWorker",
     "WorkerConfig",
     "WorkerCapabilities",
@@ -41,4 +43,6 @@ __all__ = [
     "HandoffRecord",
     "InProcessWorker",
     "TelegramWorker",
+    "get_swarm_engine",
+    "set_swarm_engine",
 ]

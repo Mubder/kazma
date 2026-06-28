@@ -17,9 +17,17 @@ import shlex
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
+from kazma_core.swarm.task import WorkerCapabilities
+
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_iso() -> str:
+    """Return the current UTC time in ISO-8601 format."""
+    return datetime.now(UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -34,6 +42,12 @@ class SwarmWorker(ABC):
     role: str = ""
     model: str = ""
     provider: str = ""
+    capabilities: WorkerCapabilities = field(default_factory=WorkerCapabilities)
+    added_at: str = field(default_factory=_utc_now_iso, init=False)
+    busy: bool = field(default=False, init=False)
+    last_task: str | None = field(default=None, init=False)
+    last_heartbeat: str | None = field(default=None, init=False)
+    logs: list[str] = field(default_factory=list, init=False)
     _running: bool = field(default=False, init=False, repr=False)
 
     @abstractmethod
@@ -72,6 +86,24 @@ class SwarmWorker(ABC):
             "running": self._running,
         }
 
+    @property
+    def worker_type(self) -> str:
+        """Return the UI-facing worker type label."""
+        return "worker"
+
+    def mark_dispatched(self, task: str) -> None:
+        """Record dispatch metadata for status and logs."""
+        self.busy = True
+        self.last_task = task
+        self.last_heartbeat = _utc_now_iso()
+        self.logs.append(f"[{self.last_heartbeat}] Task dispatched: {task[:80]}")
+
+    def mark_completed(self, status: str) -> None:
+        """Record completion metadata for status and logs."""
+        self.busy = False
+        self.last_heartbeat = _utc_now_iso()
+        self.logs.append(f"[{self.last_heartbeat}] Task completed with status={status}")
+
 
 # ---------------------------------------------------------------------------
 # In-process (sub_agent)
@@ -93,9 +125,16 @@ class InProcessWorker(SwarmWorker):
         role: str = "",
         model: str = "",
         provider: str = "",
+        capabilities: WorkerCapabilities | None = None,
         manager: Any = None,
     ) -> None:
-        super().__init__(name=name, role=role, model=model, provider=provider)
+        super().__init__(
+            name=name,
+            role=role,
+            model=model,
+            provider=provider,
+            capabilities=capabilities or WorkerCapabilities(role=role),
+        )
         self._manager = manager
 
     def _get_manager(self) -> Any:
@@ -118,6 +157,11 @@ class InProcessWorker(SwarmWorker):
     async def stop(self) -> None:
         self._running = False
         logger.info("[InProcessWorker:%s] stopped", self.name)
+
+    @property
+    def worker_type(self) -> str:
+        """Return the UI-facing worker type label."""
+        return "in-process"
 
     async def dispatch(self, task: str, context: str = "") -> dict[str, Any]:
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
@@ -180,8 +224,15 @@ class TelegramWorker(SwarmWorker):
         role: str = "",
         model: str = "",
         provider: str = "",
+        capabilities: WorkerCapabilities | None = None,
     ) -> None:
-        super().__init__(name=name, role=role, model=model, provider=provider)
+        super().__init__(
+            name=name,
+            role=role,
+            model=model,
+            provider=provider,
+            capabilities=capabilities or WorkerCapabilities(role=role),
+        )
         self.profile = profile
         self.bot_token_env = bot_token_env
         self.group_chat_id = group_chat_id
@@ -260,3 +311,8 @@ class TelegramWorker(SwarmWorker):
                 "output": "",
                 "error": str(exc)[:500],
             }
+
+    @property
+    def worker_type(self) -> str:
+        """Return the UI-facing worker type label."""
+        return "telegram"

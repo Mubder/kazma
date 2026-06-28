@@ -13,7 +13,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
+
+from kazma_core.swarm.task import WorkerCapabilities
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,7 @@ class WorkerConfig:
     profile: str = ""
     bot_token_env: str = ""  # env var name holding the Telegram bot token
     role: str = ""  # e.g. "backend_core", "frontend_ux"
+    capabilities: WorkerCapabilities = field(default_factory=WorkerCapabilities)
 
     def validate(self) -> list[str]:
         """Return a list of validation errors (empty = valid)."""
@@ -115,6 +118,9 @@ class SwarmConfig:
 
         workers: list[WorkerConfig] = []
         for w in data.get("workers", []):
+            capabilities = WorkerCapabilities.from_dict(
+                w.get("capabilities", {"role": w.get("role", "")})
+            )
             workers.append(
                 WorkerConfig(
                     name=w["name"],
@@ -124,6 +130,7 @@ class SwarmConfig:
                     profile=w.get("profile", ""),
                     bot_token_env=w.get("bot_token_env", ""),
                     role=w.get("role", ""),
+                    capabilities=capabilities,
                 )
             )
 
