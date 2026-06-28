@@ -10,6 +10,7 @@ from typing import Any
 
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
+from kazma_core.swarm.patterns import PipelineConfigurationError, execute_pipeline
 from kazma_core.swarm.task import (
     SwarmTask,
     TaskResult,
@@ -147,6 +148,31 @@ class SwarmEngine:
         started = perf_counter()
         task.started_at = task.started_at or _utc_now_iso()
         task.status = TaskStatus.RUNNING
+
+        if task.type == TaskType.PIPELINE:
+            try:
+                pattern_result = await execute_pipeline(
+                    task,
+                    dispatch_worker_by_name=self._dispatch_worker_by_name,
+                )
+            except PipelineConfigurationError as exc:
+                return self._finalize_task(
+                    task,
+                    worker_results=[],
+                    status="failed",
+                    error=str(exc),
+                    duration_seconds=perf_counter() - started,
+                )
+
+            return self._finalize_task(
+                task,
+                worker_results=pattern_result.worker_results,
+                status=pattern_result.status,
+                aggregated_output=pattern_result.aggregated_output,
+                error=pattern_result.error,
+                duration_seconds=perf_counter() - started,
+                metadata=pattern_result.metadata,
+            )
 
         if not task.workers:
             return self._finalize_task(
@@ -364,4 +390,8 @@ class SwarmEngine:
     ) -> dict[str, Any]:
         if blackboard is None:
             return {}
-        return {"blackboard": await blackboard.snapshot()}
+        snapshot = await blackboard.snapshot()
+        return {
+            "blackboard": snapshot,
+            "blackboard_snapshot": snapshot,
+        }

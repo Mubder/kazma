@@ -120,6 +120,31 @@ def _worker_status(worker: Any) -> str:
     return "online"
 
 
+def _coerce_task_type(payload: dict[str, Any], worker_names: list[str]) -> Any:
+    """Resolve the requested swarm task type from the API payload."""
+    if TaskType is None:
+        return None
+
+    raw_value = str(payload.get("pattern") or payload.get("type") or "").strip().lower()
+    normalized = raw_value.replace("-", "_")
+
+    if normalized == "pipeline":
+        return TaskType.PIPELINE
+    if normalized == "broadcast":
+        return TaskType.BROADCAST
+    if normalized == "dispatch":
+        return TaskType.DISPATCH
+    return TaskType.DISPATCH if len(worker_names) == 1 else TaskType.BROADCAST
+
+
+def _coerce_timeout(payload: dict[str, Any]) -> float:
+    """Return a numeric task timeout from the API payload."""
+    try:
+        return float(payload.get("timeout", 300.0))
+    except (TypeError, ValueError):
+        return 300.0
+
+
 def _serialize_worker(worker: Any) -> dict[str, Any]:
     """Convert a worker object into a response-friendly dict."""
     return {
@@ -259,7 +284,17 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
         worker_names = payload.get("workers", [])
         task = payload.get("task", "")
         context = payload.get("context", "")
+        task_type = _coerce_task_type(payload, worker_names)
+        timeout = _coerce_timeout(payload)
 
+        if task_type == getattr(TaskType, "PIPELINE", None) and not worker_names:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "message": "Pipeline requires at least one worker.",
+                },
+                status_code=400,
+            )
         if not worker_names:
             return JSONResponse(
                 {"status": "error", "message": "No workers specified"},
@@ -289,11 +324,16 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
         dispatched = [name for name in worker_names if engine.get_worker(name) is not None]
         missing = [name for name in worker_names if name not in dispatched]
         results: list[dict[str, Any]] = []
+        task_result: Any | None = None
 
         manager_engine = getattr(swarm_manager, "engine", None)
         if not isinstance(manager_engine, SwarmEngine):
             manager_engine = None
-        uses_external_dispatch = swarm_manager is not None and manager_engine is None
+        uses_external_dispatch = (
+            swarm_manager is not None
+            and manager_engine is None
+            and task_type != getattr(TaskType, "PIPELINE", None)
+        )
         if uses_external_dispatch:
             for name in dispatched:
                 worker = engine.get_worker(name)
@@ -313,20 +353,18 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 if worker is not None:
                     worker.mark_completed(result.get("status", "error"))
                 results.append(result)
-        elif len(dispatched) == 1:
-            task_result = await engine.dispatch(
-                SwarmTask(prompt=task, context=context, workers=dispatched)
-            )
-            results = [item.to_dict() for item in task_result.worker_results]
         elif dispatched:
-            task_result = await engine.broadcast(
-                SwarmTask(
-                    prompt=task,
-                    context=context,
-                    workers=dispatched,
-                    type=TaskType.BROADCAST,
-                )
+            swarm_task = SwarmTask(
+                prompt=task,
+                context=context,
+                workers=dispatched,
+                type=task_type,
+                timeout=timeout,
             )
+            if task_type == TaskType.BROADCAST:
+                task_result = await engine.broadcast(swarm_task)
+            else:
+                task_result = await engine.dispatch(swarm_task)
             results = [item.to_dict() for item in task_result.worker_results]
 
         return JSONResponse(
@@ -337,6 +375,11 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 "missing": missing,
                 "task": task,
                 "results": results,
+                "task_id": None if task_result is None else task_result.task_id,
+                "result_status": None if task_result is None else task_result.status,
+                "aggregated_output": None if task_result is None else task_result.aggregated_output,
+                "error": None if task_result is None else task_result.error,
+                "metadata": None if task_result is None else task_result.metadata,
             }
         )
 
