@@ -252,6 +252,13 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(models_router)
     logger.info("Models router mounted at /api/models, /api/ollama/*")
 
+    # ── Workspace File Browser API ───────────────────────────────
+    from kazma_ui.workspace_api import create_workspace_router
+
+    workspace_router = create_workspace_router()
+    app.include_router(workspace_router)
+    logger.info("Workspace API router mounted at /api/workspace/*")
+
     # ── Gateway (Omnichannel Message Bus) ────────────────────────────
     _gateway: Any = None  # module-level ref for shutdown handler
 
@@ -376,7 +383,33 @@ def create_app(config_path: str | None = None) -> FastAPI:
         # ── Swarm Panel ─────────────────────────────────────────────
         from kazma_ui.swarm_panel import create_swarm_router
 
-        swarm_router = create_swarm_router(templates)
+        # Build SwarmManager from config so the dispatch endpoint delegates
+        # to real workers (InProcessWorker / TelegramWorker) instead of just
+        # setting a busy flag. When no swarm config section exists, the
+        # manager is None and the panel operates in local-only mode.
+        _swarm_mgr = None
+        try:
+            from kazma_core.swarm import SwarmConfig, SwarmManager
+
+            # Look for a config file (kazma.yaml) to load the swarm section.
+            swarm_cfg_path = config_path or "kazma.yaml"
+            swarm_cfg = SwarmConfig.from_yaml(swarm_cfg_path)
+            if swarm_cfg is not None and swarm_cfg.enabled:
+                _swarm_mgr = SwarmManager(swarm_cfg)
+                logger.info(
+                    "[Swarm] SwarmManager initialized from %s — %d worker(s)",
+                    swarm_cfg_path, len(_swarm_mgr.worker_names),
+                )
+            else:
+                # Still create an empty manager so UI-added workers can be
+                # dispatched via InProcessWorker (SubAgentManager).
+                _swarm_mgr = SwarmManager(SwarmConfig(enabled=True, workers=[]))
+                logger.info("[Swarm] SwarmManager initialized (empty — UI-driven mode)")
+        except Exception as e:
+            logger.warning("[Swarm] SwarmManager not available: %s", e)
+            _swarm_mgr = None
+
+        swarm_router = create_swarm_router(templates, swarm_manager=_swarm_mgr)
         app.include_router(swarm_router)
         logger.info("[Swarm] Swarm Panel mounted at /api/swarm/*, /swarm")
 

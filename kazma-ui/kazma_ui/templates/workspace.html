@@ -38,6 +38,12 @@
         <span style="font-size:0.75rem;color:var(--text-muted);" x-text="currentPath"></span>
       </div>
       <div class="file-list" style="max-height:400px;overflow-y:auto;">
+        <div x-show="currentPath && currentPath !== '/'" @click="goUp()"
+             style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;color:var(--text-secondary);">
+          <span style="width:20px;">⬆️</span>
+          <span style="flex:1;">..</span>
+          <span style="font-size:0.75rem;color:var(--text-muted);">Up one level</span>
+        </div>
         <template x-for="item in files" :key="item.path">
           <div class="file-row"
                :class="{ 'is-directory': item.is_dir }"
@@ -155,6 +161,7 @@ function workspaceApp() {
   return {
     files: [],
     currentPath: '/',
+    parentPath: '',
     loading: true,
     gitBranch: '—',
     gitDirty: false,
@@ -200,18 +207,25 @@ function workspaceApp() {
     },
 
     async loadFiles(path) {
-      path = path || this.currentPath;
+      path = path || '';
       try {
         var resp = await fetch('/api/workspace/files?path=' + encodeURIComponent(path));
         if (resp.ok) {
           var data = await resp.json();
           this.files = data.files || [];
-          this.currentPath = path;
+          this.currentPath = path || '/';
+          this.parentPath = data.parent || '';
         } else {
           this.files = fallbackFiles();
         }
       } catch(e) {
         this.files = fallbackFiles();
+      }
+    },
+
+    goUp() {
+      if (this.parentPath !== undefined) {
+        this.loadFiles(this.parentPath);
       }
     },
 
