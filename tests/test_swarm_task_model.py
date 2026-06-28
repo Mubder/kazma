@@ -121,12 +121,24 @@ def test_task_result_round_trips_through_json() -> None:
         total_cost=0.12,
         total_tokens=42,
         duration_seconds=1.5,
+        metadata={"blackboard": {"workers": ["alpha"]}},
     )
 
     restored = TaskResult.from_json(result.to_json())
 
     assert restored == result
     assert restored.worker_results[0].handoffs == []
+    assert restored.metadata == {"blackboard": {"workers": ["alpha"]}}
+
+
+def test_task_result_metadata_defaults_to_independent_empty_dicts() -> None:
+    """TaskResult metadata defaults to a fresh empty dict per instance."""
+    first = TaskResult(task_id="task-1", status="success")
+    second = TaskResult(task_id="task-2", status="success")
+
+    assert first.metadata == {}
+    assert second.metadata == {}
+    assert first.metadata is not second.metadata
 
 
 def test_worker_result_handoffs_default_to_independent_empty_lists() -> None:

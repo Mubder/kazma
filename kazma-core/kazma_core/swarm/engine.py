@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
 
+from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
 from kazma_core.swarm.task import (
     SwarmTask,
@@ -185,6 +186,8 @@ class SwarmEngine:
         started = perf_counter()
         task.started_at = task.started_at or _utc_now_iso()
         task.status = TaskStatus.RUNNING
+        blackboard = BlackboardStore()
+        dispatch_context = self._build_dispatch_context(task, blackboard=blackboard)
 
         target_names = list(task.workers) if task.workers else list(self._workers.keys())
         if not target_names:
@@ -194,10 +197,14 @@ class SwarmEngine:
                 status="success",
                 aggregated_output=None,
                 duration_seconds=perf_counter() - started,
+                metadata=await self._build_result_metadata(blackboard),
             )
 
         worker_results = await asyncio.gather(
-            *(self._dispatch_worker_by_name(name, task.prompt, task.context) for name in target_names)
+            *(
+                self._dispatch_worker_by_name(name, task.prompt, dispatch_context)
+                for name in target_names
+            )
         )
         result_status = self._overall_status(worker_results)
         aggregated_output = self._aggregate_outputs(worker_results)
@@ -217,6 +224,7 @@ class SwarmEngine:
             aggregated_output=aggregated_output,
             error=error,
             duration_seconds=perf_counter() - started,
+            metadata=await self._build_result_metadata(blackboard),
         )
 
     async def start_all(self) -> None:
@@ -237,7 +245,7 @@ class SwarmEngine:
         self,
         worker_name: str,
         prompt: str,
-        context: str,
+        context: str | SwarmDispatchContext,
     ) -> WorkerResult:
         worker = self.get_worker(worker_name)
         if worker is None:
@@ -254,7 +262,7 @@ class SwarmEngine:
         self,
         worker: SwarmWorker,
         prompt: str,
-        context: str,
+        context: str | SwarmDispatchContext,
     ) -> WorkerResult:
         started = perf_counter()
         worker.mark_dispatched(prompt)
@@ -309,6 +317,7 @@ class SwarmEngine:
         duration_seconds: float,
         aggregated_output: str | None = None,
         error: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> TaskResult:
         task.status = (
             TaskStatus.TIMEOUT
@@ -328,6 +337,31 @@ class SwarmEngine:
             total_cost=sum(item.cost for item in worker_results),
             total_tokens=sum(item.tokens_used for item in worker_results),
             duration_seconds=duration_seconds,
+            metadata=dict(metadata or {}),
         )
         task.result = result
         return result
+
+    @staticmethod
+    def _build_dispatch_context(
+        task: SwarmTask,
+        *,
+        blackboard: BlackboardStore | None = None,
+    ) -> str | SwarmDispatchContext:
+        if blackboard is None:
+            return task.context
+        return SwarmDispatchContext(
+            task.context,
+            blackboard=blackboard,
+            metadata=task.metadata,
+            task_id=task.id,
+            task_type=task.type.value,
+        )
+
+    @staticmethod
+    async def _build_result_metadata(
+        blackboard: BlackboardStore | None = None,
+    ) -> dict[str, Any]:
+        if blackboard is None:
+            return {}
+        return {"blackboard": await blackboard.snapshot()}

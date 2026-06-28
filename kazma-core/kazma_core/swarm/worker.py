@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from kazma_core.swarm.blackboard import SwarmDispatchContext, context_text
 from kazma_core.swarm.task import WorkerCapabilities
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,11 @@ class SwarmWorker(ABC):
     _running: bool = field(default=False, init=False, repr=False)
 
     @abstractmethod
-    async def dispatch(self, task: str, context: str = "") -> dict[str, Any]:
+    async def dispatch(
+        self,
+        task: str,
+        context: str | SwarmDispatchContext = "",
+    ) -> dict[str, Any]:
         """Send a task to this worker and return a result dict.
 
         Returns::
@@ -163,12 +168,16 @@ class InProcessWorker(SwarmWorker):
         """Return the UI-facing worker type label."""
         return "in-process"
 
-    async def dispatch(self, task: str, context: str = "") -> dict[str, Any]:
+    async def dispatch(
+        self,
+        task: str,
+        context: str | SwarmDispatchContext = "",
+    ) -> dict[str, Any]:
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
         logger.info("[InProcessWorker:%s] dispatching %s", self.name, task_id)
         try:
             manager = self._get_manager()
-            result = await manager.spawn(goal=task, context=context)
+            result = await manager.spawn(goal=task, context=context_text(context))
             return {
                 "worker": self.name,
                 "task_id": task_id,
@@ -261,7 +270,11 @@ class TelegramWorker(SwarmWorker):
         self._process = None
         self._running = False
 
-    async def dispatch(self, task: str, context: str = "") -> dict[str, Any]:
+    async def dispatch(
+        self,
+        task: str,
+        context: str | SwarmDispatchContext = "",
+    ) -> dict[str, Any]:
         """Send *task* to the Hermes profile via ``hermes -p <profile>`` CLI.
 
         This is a one-shot invocation — hermes processes the prompt and exits.
@@ -270,8 +283,9 @@ class TelegramWorker(SwarmWorker):
         logger.info("[TelegramWorker:%s] dispatching %s", self.name, task_id)
 
         prompt = task
-        if context:
-            prompt = f"{task}\n\nContext:\n{context}"
+        context_value = context_text(context)
+        if context_value:
+            prompt = f"{task}\n\nContext:\n{context_value}"
 
         cmd = f"hermes -p {shlex.quote(self.profile)} {shlex.quote(prompt)}"
 

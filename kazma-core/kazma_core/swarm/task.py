@@ -195,9 +195,11 @@ class TaskResult(_JsonSerializable):
     total_cost: float = 0.0
     total_tokens: int = 0
     duration_seconds: float = 0.0
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.worker_results = [WorkerResult.from_dict(result) for result in self.worker_results]
+        self.metadata = dict(self.metadata)
 
     @classmethod
     def from_dict(cls, data: TaskResult | dict[str, Any]) -> TaskResult:
@@ -214,6 +216,7 @@ class TaskResult(_JsonSerializable):
             total_cost=float(data.get("total_cost", 0.0)),
             total_tokens=int(data.get("total_tokens", 0)),
             duration_seconds=float(data.get("duration_seconds", 0.0)),
+            metadata=dict(data.get("metadata", {})),
         )
 
     @classmethod

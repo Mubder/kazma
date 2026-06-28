@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
+from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.config import OrchestratorConfig, SwarmConfig, WorkerConfig
 from kazma_core.swarm.manager import SwarmManager
 from kazma_core.swarm.worker import InProcessWorker, TelegramWorker
@@ -206,6 +207,31 @@ class TestDispatchInProcess:
         await worker.start()
 
         result = await worker.dispatch("Fix bug", context="In auth module")
+
+        call_kwargs = mock_manager.spawn.call_args
+        assert call_kwargs.kwargs["goal"] == "Fix bug"
+        assert call_kwargs.kwargs["context"] == "In auth module"
+        assert result["status"] == "success"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_in_process_accepts_blackboard_context(self):
+        mock_manager = MagicMock()
+        mock_result = MagicMock()
+        mock_result.status = "success"
+        mock_result.summary = "Done"
+        mock_result.error = None
+        mock_manager.spawn = AsyncMock(return_value=mock_result)
+
+        worker = InProcessWorker(name="brain", role="reasoning", manager=mock_manager)
+        await worker.start()
+
+        result = await worker.dispatch(
+            "Fix bug",
+            context=SwarmDispatchContext(
+                "In auth module",
+                blackboard=BlackboardStore(),
+            ),
+        )
 
         call_kwargs = mock_manager.spawn.call_args
         assert call_kwargs.kwargs["goal"] == "Fix bug"

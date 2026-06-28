@@ -156,6 +156,107 @@ async def test_engine_broadcast_with_zero_workers_returns_empty_success(empty_co
     assert result.aggregated_output is None
 
 
+@pytest.mark.asyncio
+async def test_engine_broadcast_shares_blackboard_and_captures_snapshot(empty_config):
+    from kazma_core.swarm.engine import SwarmEngine
+
+    engine = SwarmEngine(empty_config)
+    engine.add_worker(WorkerConfig(name="alpha", type="in_process"))
+    engine.add_worker(WorkerConfig(name="beta", type="in_process"))
+
+    seen_blackboards: list[int] = []
+
+    async def alpha_dispatch(task: str, context: str = "") -> dict[str, str | None]:
+        assert hasattr(context, "blackboard")
+        seen_blackboards.append(id(context.blackboard))
+        await context.blackboard.update(
+            "workers",
+            lambda current: [*(current or []), "alpha"],
+        )
+        return {
+            "worker": "alpha",
+            "task_id": "task-alpha",
+            "status": "success",
+            "output": f"alpha:{context}",
+            "error": None,
+        }
+
+    async def beta_dispatch(task: str, context: str = "") -> dict[str, str | None]:
+        assert hasattr(context, "blackboard")
+        seen_blackboards.append(id(context.blackboard))
+        await context.blackboard.update(
+            "workers",
+            lambda current: [*(current or []), "beta"],
+        )
+        return {
+            "worker": "beta",
+            "task_id": "task-beta",
+            "status": "success",
+            "output": f"beta:{context}",
+            "error": None,
+        }
+
+    engine.get_worker("alpha").dispatch = alpha_dispatch  # type: ignore[assignment,union-attr]
+    engine.get_worker("beta").dispatch = beta_dispatch  # type: ignore[assignment,union-attr]
+
+    result = await engine.broadcast(
+        SwarmTask(
+            prompt="Broadcast task",
+            context="ctx",
+            workers=["alpha", "beta"],
+            type=TaskType.BROADCAST,
+        )
+    )
+
+    assert len(set(seen_blackboards)) == 1
+    assert set(result.metadata["blackboard"]["workers"]) == {"alpha", "beta"}
+    assert [item.output for item in result.worker_results] == ["alpha:ctx", "beta:ctx"]
+
+
+@pytest.mark.asyncio
+async def test_engine_broadcast_creates_fresh_blackboard_per_task_group(empty_config):
+    from kazma_core.swarm.engine import SwarmEngine
+
+    engine = SwarmEngine(empty_config)
+    engine.add_worker(WorkerConfig(name="alpha", type="in_process"))
+
+    seen_previous_values: list[str | None] = []
+
+    async def alpha_dispatch(task: str, context: str = "") -> dict[str, str | None]:
+        seen_previous_values.append(await context.blackboard.get("shared"))
+        await context.blackboard.set("shared", task)
+        return {
+            "worker": "alpha",
+            "task_id": f"task-{task}",
+            "status": "success",
+            "output": task,
+            "error": None,
+        }
+
+    engine.get_worker("alpha").dispatch = alpha_dispatch  # type: ignore[assignment,union-attr]
+
+    first = await engine.broadcast(
+        SwarmTask(
+            prompt="first",
+            context="ctx",
+            workers=["alpha"],
+            type=TaskType.BROADCAST,
+        )
+    )
+    second = await engine.broadcast(
+        SwarmTask(
+            prompt="second",
+            context="ctx",
+            workers=["alpha"],
+            type=TaskType.BROADCAST,
+        )
+    )
+
+    assert seen_previous_values == [None, None]
+    assert first.metadata["blackboard"]["shared"] == "first"
+    assert second.metadata["blackboard"]["shared"] == "second"
+
+
 def test_swarm_engine_singleton_accessors(empty_config):
     from kazma_core.swarm.engine import (
         SwarmEngine,
