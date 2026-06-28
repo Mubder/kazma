@@ -152,8 +152,12 @@ async def _stream_langgraph_events(
                     },
                 )
 
-            # ── on_chain_end at __end__: graph finished ────────────
-            elif kind == "on_chain_end" and name == "__end__":
+            # ── on_chain_end at graph terminal: graph finished ─────
+            # LangGraph 1.x emits the terminal on_chain_end with name
+            # "LangGraph"; older versions (and some test mocks) use
+            # "__end__".  Match both so the handler fires in production
+            # and in unit tests.
+            elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
                 # Extract final state if available
                 output = data.get("output", {})
                 if isinstance(output, dict):
@@ -164,6 +168,29 @@ async def _stream_langgraph_events(
                         total_cost = final_cost
                     if final_tokens:
                         total_tokens = final_tokens
+
+                    # ── Extract final assistant message from terminal state ──
+                    # CRITICAL FIX (Issue 3): LLMProvider uses custom httpx
+                    # calls (not LangChain BaseChatModel), so
+                    # on_chat_model_stream events never fire.  The response
+                    # exists in output["messages"][-1] but was never emitted.
+                    # Guard with 'if not content_acc' to prevent duplicates
+                    # if real streaming is ever added.
+                    if not content_acc:
+                        messages_list = output.get("messages", [])
+                        if isinstance(messages_list, list) and messages_list:
+                            last_msg = messages_list[-1]
+                            if isinstance(last_msg, dict):
+                                msg_content = last_msg.get("content", "")
+                                if (
+                                    last_msg.get("role") == "assistant"
+                                    and msg_content
+                                ):
+                                    content_acc = msg_content
+                                    yield _sse_frame(
+                                        "token",
+                                        {"content": msg_content},
+                                    )
 
         # ── Turn complete ──────────────────────────────────────────
         duration_ms = (time.monotonic() - turn_start) * 1000
