@@ -14,6 +14,7 @@ Usage::
     result = await manager.dispatch("core", "Fix the auth bug")
 """
 
+from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
 from kazma_core.swarm.engine import SwarmEngine, get_swarm_engine, set_swarm_engine
@@ -33,6 +34,7 @@ __all__ = [
     "SwarmConfig",
     "SwarmManager",
     "SwarmEngine",
+    "ResultAggregator",
     "SwarmWorker",
     "WorkerConfig",
     "WorkerCapabilities",

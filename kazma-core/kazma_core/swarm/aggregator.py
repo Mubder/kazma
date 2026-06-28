@@ -1,0 +1,207 @@
+"""Result aggregation strategies for fan-out style swarm tasks."""
+
+from __future__ import annotations
+
+import inspect
+import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+from kazma_core.swarm.task import SwarmTask, WorkerResult
+
+logger = logging.getLogger(__name__)
+
+SynthesisCallable = Callable[
+    [SwarmTask, list[WorkerResult]],
+    str | Awaitable[str],
+]
+
+_SYNTHESIS_SYSTEM_PROMPT = """You consolidate multiple worker responses into one answer.
+
+Preserve the important technical points from each response, resolve obvious
+conflicts, and write a concise unified answer. If a worker failed, ignore that
+failed response.
+"""
+
+
+@dataclass
+class AggregationResult:
+    """Normalized output returned by an aggregation strategy."""
+
+    aggregated_output: str | None = None
+    synthesized_output: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class ResultAggregator:
+    """Apply aggregation strategies to fan-out worker results."""
+
+    def __init__(self, synthesizer: SynthesisCallable | None = None) -> None:
+        self._synthesizer = synthesizer
+
+    async def aggregate(
+        self,
+        task: SwarmTask,
+        worker_results: list[WorkerResult],
+    ) -> AggregationResult:
+        """Aggregate *worker_results* according to *task.aggregation*."""
+        strategy = (task.aggregation or "collect").strip().lower()
+        metadata: dict[str, Any] = {
+            "aggregation_strategy": strategy,
+            "successful_workers": [
+                result.worker for result in worker_results if result.status == "success"
+            ],
+            "failed_workers": [
+                result.worker for result in worker_results if result.status != "success"
+            ],
+        }
+        successful_results = [
+            result for result in worker_results if result.status == "success"
+        ]
+
+        if strategy == "collect":
+            return AggregationResult(metadata=metadata)
+        if not successful_results:
+            return AggregationResult(metadata=metadata)
+
+        if strategy == "first_valid":
+            selected = successful_results[0]
+            metadata["selected_worker"] = selected.worker
+            return AggregationResult(
+                aggregated_output=selected.output,
+                metadata=metadata,
+            )
+
+        if strategy == "merge_all":
+            return AggregationResult(
+                aggregated_output="\n\n".join(
+                    f"[{result.worker}] {result.output}" for result in successful_results
+                ),
+                metadata=metadata,
+            )
+
+        if strategy == "vote":
+            tally: dict[str, int] = {}
+            first_seen_order: dict[str, int] = {}
+            first_seen_output: dict[str, str] = {}
+            first_seen_worker: dict[str, str] = {}
+
+            for index, result in enumerate(successful_results):
+                normalized_output = result.output.strip()
+                tally[normalized_output] = tally.get(normalized_output, 0) + 1
+                first_seen_order.setdefault(normalized_output, index)
+                first_seen_output.setdefault(normalized_output, result.output)
+                first_seen_worker.setdefault(normalized_output, result.worker)
+
+            winner_key = max(
+                tally,
+                key=lambda candidate: (
+                    tally[candidate],
+                    -first_seen_order[candidate],
+                ),
+            )
+            metadata["vote_tally"] = tally
+            metadata["selected_worker"] = first_seen_worker[winner_key]
+            return AggregationResult(
+                aggregated_output=first_seen_output[winner_key],
+                metadata=metadata,
+            )
+
+        if strategy == "synthesize":
+            synthesized_output = await self._synthesize(task, successful_results)
+            metadata["synthesized"] = True
+            return AggregationResult(
+                aggregated_output=synthesized_output,
+                synthesized_output=synthesized_output,
+                metadata=metadata,
+            )
+
+        raise ValueError(f"Unknown aggregation strategy: '{task.aggregation}'")
+
+    async def _synthesize(
+        self,
+        task: SwarmTask,
+        successful_results: list[WorkerResult],
+    ) -> str:
+        """Generate a consolidated answer from successful worker results."""
+        if self._synthesizer is not None:
+            synthesized = self._synthesizer(task, successful_results)
+            if inspect.isawaitable(synthesized):
+                return await synthesized
+            return synthesized
+
+        prompt_sections = [f"Task:\n{task.prompt}"]
+        if task.context.strip():
+            prompt_sections.append(f"Context:\n{task.context.strip()}")
+        prompt_sections.append(
+            "Worker responses:\n"
+            + "\n\n".join(
+                f"{result.worker}:\n{result.output}" for result in successful_results
+            )
+        )
+        prompt_sections.append("Produce a single consolidated answer.")
+        prompt = "\n\n".join(prompt_sections)
+
+        provider = None
+        try:
+            provider = _get_llm_provider()
+            if provider is None:
+                raise RuntimeError("LLM provider unavailable.")
+            response = await provider.chat(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": _SYNTHESIS_SYSTEM_PROMPT,
+                    },
+                    {"role": "user", "content": prompt},
+                ]
+            )
+            content = (response.content or "").strip()
+            if content:
+                return content
+            raise RuntimeError("LLM returned an empty synthesis.")
+        except Exception as exc:
+            logger.warning("[ResultAggregator] synthesis fallback used: %s", exc)
+            return self._fallback_synthesis(task, successful_results)
+        finally:
+            if provider is not None:
+                await provider.close()
+
+    @staticmethod
+    def _fallback_synthesis(
+        task: SwarmTask,
+        successful_results: list[WorkerResult],
+    ) -> str:
+        """Produce a deterministic synthesis if the LLM is unavailable."""
+        bullet_points = "\n".join(
+            f"- {result.worker}: {result.output}" for result in successful_results
+        )
+        return (
+            f"Synthesized answer for: {task.prompt}\n\n"
+            f"{bullet_points}"
+        )
+
+
+def _get_llm_provider() -> Any | None:
+    """Return an LLM provider configured from the runtime config."""
+    try:
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.llm_provider import LLMConfig, LLMProvider
+    except ImportError:
+        return None
+
+    try:
+        store = ConfigStore()
+        llm_cfg = store.get_category("llm") or {}
+        config = LLMConfig.from_dict(
+            {
+                "base_url": llm_cfg.get("llm.base_url", llm_cfg.get("base_url", "")),
+                "api_key": llm_cfg.get("llm.api_key", llm_cfg.get("api_key", "")),
+                "model": llm_cfg.get("llm.model", llm_cfg.get("model", "")),
+            }
+        )
+    except Exception:
+        config = LLMConfig()
+
+    return LLMProvider(config=config)

@@ -213,6 +213,20 @@ Kazma supports two sub-agent delegation modes:
 | **In-Process** | `SubAgentManager` — child LangGraph graphs in the same Python process | Quick parallel subtasks, isolated context |
 | **Distributed Swarm** | Swarm Panel — register workers, dispatch tasks, monitor health via Web UI | Multi-machine deployments, Telegram bot workers |
 
+### Orchestration patterns
+
+The swarm engine supports these worker orchestration patterns:
+
+- `dispatch` for one worker
+- `broadcast` for all registered workers
+- `pipeline` for sequential handoff between workers
+- `fan_out` for concurrent execution of the same prompt across selected workers
+
+Fan-out supports `first_valid`, `merge_all`, `vote`, `synthesize`, and
+`collect` aggregation strategies. Parallel dispatches are bounded by
+`swarm.max_concurrent` (default `5`), and requests can override the limit with
+`max_concurrent` when needed.
+
 ### Swarm Architecture
 
 ```

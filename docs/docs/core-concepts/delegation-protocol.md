@@ -75,3 +75,15 @@ results = await swarm.execute_parallel([
     {"task": "Collect data for region C", "capabilities": ["data_collection"]},
 ])
 ```
+
+The newer swarm engine also supports `fan_out` orchestration, where the same
+prompt is sent to multiple workers concurrently and then aggregated with one of
+these strategies:
+
+- `first_valid`
+- `merge_all`
+- `vote`
+- `synthesize`
+- `collect`
+
+Fan-out execution is bounded by a semaphore and defaults to `max_concurrent=5`.

@@ -79,6 +79,7 @@ class SwarmConfig:
 
     enabled: bool = False
     group_chat_id: int = 0
+    max_concurrent: int = 5
     orchestrator: OrchestratorConfig = field(default_factory=OrchestratorConfig)
     workers: list[WorkerConfig] = field(default_factory=list)
 
@@ -137,6 +138,7 @@ class SwarmConfig:
         return cls(
             enabled=data.get("enabled", False),
             group_chat_id=_resolve_chat_id(int(data.get("group_chat_id", 0))),
+            max_concurrent=max(1, int(data.get("max_concurrent", 5))),
             orchestrator=orchestrator,
             workers=workers,
         )
@@ -148,6 +150,8 @@ class SwarmConfig:
     def validate(self) -> list[str]:
         """Return all validation errors (empty = valid)."""
         errors: list[str] = []
+        if self.max_concurrent < 1:
+            errors.append("Swarm max_concurrent must be at least 1.")
         names_seen: set[str] = set()
         for wc in self.workers:
             errors.extend(wc.validate())

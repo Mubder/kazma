@@ -35,6 +35,27 @@ swarm = SwarmCoordinator(max_agents=5)
 results = await swarm.execute_parallel(tasks)
 ```
 
+## SwarmEngine fan-out
+
+```python
+from kazma_core.swarm import SwarmConfig, SwarmEngine, SwarmTask, TaskType
+
+engine = SwarmEngine(SwarmConfig(enabled=True, max_concurrent=5, workers=[]))
+result = await engine.dispatch(
+    SwarmTask(
+        prompt="Compare these implementation options",
+        workers=["builder", "reviewer", "researcher"],
+        type=TaskType.FAN_OUT,
+        aggregation="vote",
+        metadata={"max_concurrent": 2},
+    )
+)
+```
+
+Fan-out returns per-worker `worker_results` plus an `aggregated_output`.
+Supported aggregation strategies are `first_valid`, `merge_all`, `vote`,
+`synthesize`, and `collect`.
+
 ## Security Module
 
 ```python

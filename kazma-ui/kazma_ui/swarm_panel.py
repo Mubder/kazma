@@ -128,6 +128,8 @@ def _coerce_task_type(payload: dict[str, Any], worker_names: list[str]) -> Any:
     raw_value = str(payload.get("pattern") or payload.get("type") or "").strip().lower()
     normalized = raw_value.replace("-", "_")
 
+    if normalized in {"fan_out", "fanout"}:
+        return TaskType.FAN_OUT
     if normalized == "pipeline":
         return TaskType.PIPELINE
     if normalized == "broadcast":
@@ -325,6 +327,11 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
         missing = [name for name in worker_names if name not in dispatched]
         results: list[dict[str, Any]] = []
         task_result: Any | None = None
+        task_metadata = dict(payload.get("metadata", {})) if isinstance(
+            payload.get("metadata"), dict
+        ) else {}
+        if "max_concurrent" in payload:
+            task_metadata["max_concurrent"] = payload.get("max_concurrent")
 
         manager_engine = getattr(swarm_manager, "engine", None)
         if not isinstance(manager_engine, SwarmEngine):
@@ -332,7 +339,11 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
         uses_external_dispatch = (
             swarm_manager is not None
             and manager_engine is None
-            and task_type != getattr(TaskType, "PIPELINE", None)
+            and task_type
+            not in {
+                getattr(TaskType, "PIPELINE", None),
+                getattr(TaskType, "FAN_OUT", None),
+            }
         )
         if uses_external_dispatch:
             for name in dispatched:
@@ -360,6 +371,8 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 workers=dispatched,
                 type=task_type,
                 timeout=timeout,
+                aggregation=str(payload.get("aggregation") or "collect"),
+                metadata=task_metadata,
             )
             if task_type == TaskType.BROADCAST:
                 task_result = await engine.broadcast(swarm_task)
@@ -378,6 +391,9 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 "task_id": None if task_result is None else task_result.task_id,
                 "result_status": None if task_result is None else task_result.status,
                 "aggregated_output": None if task_result is None else task_result.aggregated_output,
+                "synthesized_output": (
+                    None if task_result is None else task_result.synthesized_output
+                ),
                 "error": None if task_result is None else task_result.error,
                 "metadata": None if task_result is None else task_result.metadata,
             }

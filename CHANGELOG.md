@@ -5,6 +5,17 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## Sprint 10 — Swarm Engine Overhaul (June 2026)
+
+### Swarm
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Fan-out Orchestration | Added concurrent `fan_out` execution with bounded concurrency, partial-failure handling, and single-worker passthrough | `swarm-fanout-pattern` |
+| ✅ | Result Aggregation | Added `first_valid`, `merge_all`, `vote`, `synthesize`, and `collect` fan-out aggregation strategies | `swarm-fanout-pattern` |
+
+---
+
 ## Sprint 9 — UI Bug Fixes & Bilingual Support (June 2026)
 
 ### UI Fixes & Features

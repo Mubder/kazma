@@ -8,9 +8,15 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
 
+from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
-from kazma_core.swarm.patterns import PipelineConfigurationError, execute_pipeline
+from kazma_core.swarm.patterns import (
+    FanOutConfigurationError,
+    PipelineConfigurationError,
+    execute_fan_out,
+    execute_pipeline,
+)
 from kazma_core.swarm.task import (
     SwarmTask,
     TaskResult,
@@ -45,9 +51,15 @@ def _utc_now_iso() -> str:
 class SwarmEngine:
     """Central async orchestrator for swarm workers."""
 
-    def __init__(self, config: SwarmConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: SwarmConfig | None = None,
+        *,
+        result_aggregator: ResultAggregator | None = None,
+    ) -> None:
         self.config = config or SwarmConfig(enabled=True, workers=[])
         self._workers: dict[str, SwarmWorker] = {}
+        self._result_aggregator = result_aggregator or ResultAggregator()
         self._build_workers()
 
     def _build_workers(self) -> None:
@@ -169,6 +181,42 @@ class SwarmEngine:
                 worker_results=pattern_result.worker_results,
                 status=pattern_result.status,
                 aggregated_output=pattern_result.aggregated_output,
+                error=pattern_result.error,
+                duration_seconds=perf_counter() - started,
+                metadata=pattern_result.metadata,
+            )
+
+        if task.type == TaskType.FAN_OUT:
+            try:
+                pattern_result = await execute_fan_out(
+                    task,
+                    dispatch_worker_by_name=self._dispatch_worker_by_name,
+                    aggregator=self._result_aggregator,
+                    max_concurrent=self._resolve_max_concurrent(task),
+                )
+            except FanOutConfigurationError as exc:
+                return self._finalize_task(
+                    task,
+                    worker_results=[],
+                    status="failed",
+                    error=str(exc),
+                    duration_seconds=perf_counter() - started,
+                )
+            except ValueError as exc:
+                return self._finalize_task(
+                    task,
+                    worker_results=[],
+                    status="failed",
+                    error=str(exc),
+                    duration_seconds=perf_counter() - started,
+                )
+
+            return self._finalize_task(
+                task,
+                worker_results=pattern_result.worker_results,
+                status=pattern_result.status,
+                aggregated_output=pattern_result.aggregated_output,
+                synthesized_output=pattern_result.synthesized_output,
                 error=pattern_result.error,
                 duration_seconds=perf_counter() - started,
                 metadata=pattern_result.metadata,
@@ -342,6 +390,7 @@ class SwarmEngine:
         status: str,
         duration_seconds: float,
         aggregated_output: str | None = None,
+        synthesized_output: str | None = None,
         error: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> TaskResult:
@@ -359,6 +408,7 @@ class SwarmEngine:
             status=status,
             worker_results=worker_results,
             aggregated_output=aggregated_output,
+            synthesized_output=synthesized_output,
             error=error,
             total_cost=sum(item.cost for item in worker_results),
             total_tokens=sum(item.tokens_used for item in worker_results),
@@ -395,3 +445,13 @@ class SwarmEngine:
             "blackboard": snapshot,
             "blackboard_snapshot": snapshot,
         }
+
+    def _resolve_max_concurrent(self, task: SwarmTask) -> int:
+        """Resolve the fan-out concurrency limit for a task."""
+        configured_default = max(1, int(getattr(self.config, "max_concurrent", 5) or 5))
+        configured_value = task.metadata.get("max_concurrent", configured_default)
+        try:
+            resolved = int(configured_value)
+        except (TypeError, ValueError):
+            return configured_default
+        return max(1, resolved)
