@@ -207,6 +207,14 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
     running = agent.is_running if hasattr(agent, "is_running") else False
     agent_state = _derive_agent_state(running, recent_traces)
 
+    # Build a human-readable description of the last activity (if any)
+    last_activity = ""
+    if recent_traces:
+        latest = recent_traces[-1]
+        last_activity = latest.label or latest.trace_type or "activity"
+    elif not running:
+        last_activity = "Agent stopped"
+
     # Session count from trace stats (proxied by total traces)
     session_count = stats["total_traces"]
 
@@ -214,6 +222,7 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
         "name": getattr(config, "name", "kazma") if config else "kazma",
         "running": running,
         "agent_state": agent_state,
+        "last_activity": last_activity,
         "session_count": session_count,
         "config": {
             "name": getattr(config, "name", "kazma") if config else "kazma",

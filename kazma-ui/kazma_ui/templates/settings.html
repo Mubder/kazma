@@ -637,7 +637,13 @@
             <template x-for="(keys, action) in shortcuts" :key="action">
                 <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
                     <span style="flex:1;font-size:0.9rem" x-text="action.replace(/_/g, ' ')"></span>
-                    <input type="text" class="form-input" :value="keys" @change="saveShortcut(action, $event.target.value)" style="width:180px;text-align:center;font-family:var(--font-mono)" placeholder="Ctrl+K">
+                    <input type="text" readonly
+                           class="form-input shortcut-capture-input"
+                           :value="keys"
+                           @keydown.prevent="captureShortcut(action, $event)"
+                           @blur="clearCaptureHint(action)"
+                           style="width:180px;text-align:center;font-family:var(--font-mono);cursor:pointer"
+                           :placeholder="capturingAction === action ? 'Press keys...' : 'Click & press keys'">
                 </div>
             </template>
         </div>

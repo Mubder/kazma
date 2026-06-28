@@ -19,6 +19,9 @@
             <span x-text="agent.running ? 'Running' : 'Stopped'"></span>
             <span style="margin:0 6px;color:var(--text-tertiary);">·</span>
             <span x-text="'State: ' + agent.agent_state"></span>
+            <template x-if="agent.last_activity">
+              <span style="margin-left:6px;color:var(--text-tertiary);">— <span x-text="agent.last_activity"></span></span>
+            </template>
           </div>
         </div>
       </div>
@@ -52,7 +55,7 @@
         <span x-text="agent.running ? 'Running' : 'Stopped'"
               :style="agent.running ? 'color:var(--success);' : 'color:var(--text-muted);'"></span>
       </div>
-      <div class="metric-sub">agent process</div>
+      <div class="metric-sub" x-text="agent.last_activity || (agent.agent_state !== 'idle' ? agent.agent_state : 'idle')"></div>
     </div>
     <div class="metric-card">
       <div class="metric-icon">🧠</div>

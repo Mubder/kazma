@@ -234,8 +234,16 @@ def create_app(config_path: str | None = None) -> FastAPI:
         return RedirectResponse("/", status_code=307)
 
     @app.get("/workspace", response_class=HTMLResponse)
-    async def workspace_redirect() -> RedirectResponse:
-        return RedirectResponse("/", status_code=307)
+    async def workspace_page(request: Request) -> HTMLResponse:
+        """Serve the workspace page (file browser, git status, terminal)."""
+        return templates.TemplateResponse(
+            request,
+            "workspace.html",
+            {
+                "config": agent.config,
+                "active_page": "workspace",
+            },
+        )
 
     # ── Models & Ollama Management Router ────────────────────────
     from kazma_ui.models_route import create_models_router
@@ -335,7 +343,16 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 vector_memory_path, vector_memory_collection, vector_memory_model,
             )
         except Exception as e:
-            logger.warning("[VectorMemory] Not available: %s", e)
+            # ChromaDB / sentence-transformers are optional (rag extra).
+            # Log at DEBUG so the default startup output stays clean, with a
+            # one-time hint about how to enable RAG memory.
+            logger.debug("[VectorMemory] Not available: %s", e)
+            if not getattr(app.state, "_vector_memory_hint_shown", False):
+                logger.info(
+                    "[VectorMemory] RAG memory disabled. "
+                    "Install the 'rag' extra (pip install -e '.[rag]') to enable."
+                )
+                app.state._vector_memory_hint_shown = True
 
         try:
             # Use the SSE graph built above if available

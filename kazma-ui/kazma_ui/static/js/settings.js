@@ -68,6 +68,7 @@ function settingsApp() {
         // ── Shortcuts Tab ──
         shortcuts: {},
         shortcutConflicts: [],
+        capturingAction: null,
 
         // ── Account Tab ──
         account: { username: 'admin', created_at: '' },
@@ -537,6 +538,66 @@ function settingsApp() {
         /* ══════════════════════════════════════════════════════════════════
            SHORTCUTS TAB
            ══════════════════════════════════════════════════════════════════ */
+
+        /**
+         * Capture a keyboard shortcut from a keydown event.
+         * Prevents default, detects modifier keys, and formats the
+         * combination string (e.g. "Ctrl+Shift+K").
+         *
+         * @param {string} action - The shortcut action name.
+         * @param {KeyboardEvent} event - The keydown event.
+         */
+        captureShortcut(action, event) {
+            this.capturingAction = action;
+
+            // Ignore lone modifier presses — wait for the actual key
+            const modifierKeys = ['Control', 'Alt', 'Shift', 'Meta'];
+            if (modifierKeys.includes(event.key)) {
+                return;
+            }
+
+            const parts = [];
+            if (event.ctrlKey) parts.push('Ctrl');
+            if (event.altKey) parts.push('Alt');
+            if (event.shiftKey) parts.push('Shift');
+            if (event.metaKey) parts.push((typeof navigator !== 'undefined' && navigator.platform.includes('Mac')) ? 'Cmd' : 'Meta');
+
+            // Normalize the key name
+            let keyName = event.key;
+            // Capitalize single letters
+            if (keyName.length === 1) {
+                keyName = keyName.toUpperCase();
+            }
+            // Handle special keys
+            const specialMap = {
+                ' ': 'Space',
+                'ArrowUp': 'Up',
+                'ArrowDown': 'Down',
+                'ArrowLeft': 'Left',
+                'ArrowRight': 'Right',
+                'Escape': 'Esc',
+                'Delete': 'Del',
+                'Backspace': 'Backspace',
+                'Enter': 'Enter',
+                'Tab': 'Tab',
+            };
+            keyName = specialMap[keyName] || keyName;
+
+            parts.push(keyName);
+            const combo = parts.join('+');
+
+            this.saveShortcut(action, combo);
+            this.capturingAction = null;
+        },
+
+        /**
+         * Clear the capturing hint when the input loses focus.
+         */
+        clearCaptureHint(action) {
+            if (this.capturingAction === action) {
+                this.capturingAction = null;
+            }
+        },
 
         async saveShortcut(action, keys) {
             this.shortcuts[action] = keys;
