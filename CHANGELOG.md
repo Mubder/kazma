@@ -5,6 +5,80 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## Sprint 9 — UI Bug Fixes & Bilingual Support (June 2026)
+
+### UI Fixes & Features
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Dark Mode Dropdown Fix | Corrected dropdown contrast in dark theme for WCAG-compliant readability | remediation-R2 |
+| ✅ | Model Selection Pipeline | Chat-model selector with provider switch on save, SSE model passthrough, API key validation | remediation-R2 |
+| ✅ | Bilingual Language System | EN/AR toggle with cookie middleware, shared Jinja2Templates, complete i18n | remediation-R2 |
+
+---
+
+## Sprint 8 — Architecture Remediation (June 2026)
+
+### P0 Correctness Bug Fixes
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | agent_handler Race Condition | Fixed concurrent access race in agent_handler | remediation-R1 |
+| ✅ | code_exec Windows Crash | Resolved Windows-specific crash in code_exec subprocess handling | remediation-R1 |
+| ✅ | Global Session Messages | Eliminated global mutable session message state | remediation-R1 |
+| ✅ | Config Write Race | Serialized config-store writes to prevent corruption | remediation-R1 |
+| ✅ | Session Store Deletion | Fixed deletion path in unified session store | remediation-R1 |
+
+### Dead Code Removal
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Module Purge | Deleted 6 dead modules: consumer.py, dispatcher.py (legacy), recovery.py, kazma_core/checkpoint.py (old), stub build_graph/create_app, compact_node | remediation-R1 |
+
+### Architecture Unification
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | UnifiedToolExecutor | Consolidated 3 separate tool registries onto a single UnifiedToolExecutor | remediation-R1 |
+| ✅ | Unified Session Stores | Merged session stores into a single coherent store layer | remediation-R1 |
+| ✅ | Service Facade | Introduced service layer facade — zero private attribute access from UI | remediation-R1 |
+
+### UI Features
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | HITL Approval UI | Inline approve/deny panel for tiered tool-safety gates | remediation-R1 |
+| ✅ | Session History Loading | Load and browse prior conversations from any session | remediation-R1 |
+| ✅ | Agents Page | Dedicated page for agent inspection and control | remediation-R1 |
+
+### UI Bug Fixes
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Telemetry Route Dedup | De-duplicated telemetry route streaming | remediation-R1 |
+| ✅ | Toast Null Reference | Null-safe toast notifications | remediation-R1 |
+| ✅ | Cost Breaker Type Fix | Corrected cost circuit-breaker type handling | remediation-R1 |
+| ✅ | Swarm Logs Endpoint | Fixed swarm logs endpoint response | remediation-R1 |
+| ✅ | Init Error Surfacing | Surface initialization errors to the UI | remediation-R1 |
+
+### Cross-Platform Hardening
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Windows setup.ps1 | PowerShell bootstrap script for Windows installs | remediation-R1 |
+| ✅ | Portable Paths | Removed hardcoded home paths; user-writable data dirs | remediation-R1 |
+| ✅ | PowerShell Completion | Tab completion for `kazma` CLI in PowerShell | remediation-R1 |
+| ✅ | Env Var Configuration | Environment-variable overrides for all paths and secrets | remediation-R1 |
+
+### RTL / Arabic Completion
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Cairo Font | Native Arabic typography with the Cairo font family | remediation-R1 |
+| ✅ | i18n System | Full internationalization layer (150+ Arabic translations, 71 RTL CSS selectors) | remediation-R1 |
+
+---
+
 ## Sprint 7 — Web UI Rebuild & Memory (June 2026)
 
 ### Web UI

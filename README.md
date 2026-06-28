@@ -2,11 +2,11 @@
 
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
-![Tests](https://img.shields.io/badge/tests-2,129_passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-2,382+_passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
-![Portability](https://img.shields.io/badge/portability-linux_|_macOS_|_docker_|_WSL-brightgreen)
+![Portability](https://img.shields.io/badge/portability-linux_|_macOS_|_Windows_|_docker_|_WSL-brightgreen)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
 
 ---
@@ -52,6 +52,23 @@ uv pip install -e ".[dev]"
 # Run tests
 uv run pytest tests/ -q
 ```
+
+### Windows Setup
+
+For Windows users, a PowerShell bootstrap script is provided that installs
+dependencies, validates the Python version, and configures portable paths:
+
+```powershell
+# From PowerShell (Run as Administrator for optional PATH integration)
+.\setup.ps1
+```
+
+The script:
+- Validates Python 3.11+ is available
+- Creates a virtual environment with `uv` (falls back to `pip`)
+- Installs all dependencies including optional extras
+- Configures portable, user-writable data paths (no hardcoded home folders)
+- Optionally installs PowerShell tab completion for the `kazma` CLI
 
 ### Run
 
@@ -115,7 +132,7 @@ docker compose up -d
 | ✅ | Voice Transcription | Telegram voice message transcription via STT |
 | ✅ | File I/O | Read, write, list, and search files through the agent (with HITL gates) |
 | ✅ | Export Session | Save conversation history to file |
-| ✅ | MCP Bridge | UnifiedToolExecutor — local + MCP tool routing |
+| ✅ | MCP Bridge | UnifiedToolExecutor — unified local + MCP tool routing across all registries |
 
 ### 🎭 Experience
 
@@ -129,8 +146,25 @@ docker compose up -d
 | ✅ | Rate Feedback | Friendly cooldown messages when user hits rate limits |
 | ✅ | Context Indicator | Token usage report with role breakdown via `/context` |
 | ✅ | Message Edit/Delete | `/undo` and `/edit` with platform-level sync |
-| ✅ | Shell Completions | Bash and zsh tab completion for all CLI commands |
+| ✅ | Shell Completions | Bash, zsh, and PowerShell tab completion for all CLI commands |
 | ✅ | Project Init | `.kazma/` directory system — rules, context, personality, tools |
+
+### 🎨 Web UI
+
+| ✅ | Feature | Description |
+|:---:|:---|:---|
+| ✅ | Dashboard | FastAPI + Jinja2 dashboard with 12-tab settings, SSE chat, Arabic RTL |
+| ✅ | Dark Mode | Theme toggle with accessible dropdown contrast (WCAG-compliant) |
+| ✅ | Model Selection | Chat-model selector with provider switch on save, SSE model passthrough, API key validation |
+| ✅ | Bilingual UI | EN/AR language toggle with cookie middleware and shared Jinja2Templates |
+| ✅ | i18n System | Complete internationalization layer with 150+ Arabic translations and 71 RTL CSS selectors |
+| ✅ | Arabic Typography | Cairo font for native Arabic rendering |
+| ✅ | HITL Approval UI | Inline approve/deny panel for tiered tool-safety gates |
+| ✅ | Session History | Load and browse prior conversations from any session |
+| ✅ | Agents Page | Dedicated page for agent inspection and control |
+| ✅ | Swarm Panel | Worker table, dispatch form, and lifecycle controls at `/swarm |
+| ✅ | Telemetry | SSE telemetry with deduplicated route streaming and null-safe toast notifications |
+| ✅ | Service Facade | Zero private attribute access from UI — all access via the service layer |
 
 ### 🌍 Platform
 
@@ -166,7 +200,7 @@ docker compose up -d
 | ✅ | MCP Server | IDE integration via MCP protocol (VS Code extensions) |
 | ✅ | Kazma Hub | Skill marketplace — search, install, publish, certify |
 | ✅ | Docusaurus Docs | Full documentation site with security guides |
-| ✅ | Portability | Runs on Linux, macOS, Docker, WSL — no OS-specific hooks |
+| ✅ | Portability | Runs on Linux, macOS, Windows, Docker, and WSL — no OS-specific hooks |
 
 ---
 
@@ -253,26 +287,28 @@ The panel shows:
 ```
 kazma-core/              Agent graph, ReAct supervisor, sub-agents, model router, cron
 │   └── kazma_core/
-│       ├── agent/            Graph builder, tool registry, sub-agent manager
+│       ├── agent/            Graph builder, UnifiedToolExecutor, sub-agent manager
 │       ├── memory/           VectorMemory (ChromaDB RAG), Knowledge Graph adapter
 │       ├── models/           ModelRouter (deepseek, openrouter), provider discovery
 │       ├── safety/           HITL approval gate, RBAC permissions
 │       ├── security/         Linter, dependency scanner, audit trail, disclosure
 │       ├── cron/             CronScheduler (SQLite)
-│       ├── mcp/              MCP bridge + tool router
+│       ├── mcp/              MCP bridge + UnifiedToolExecutor tool router
 │       └── tools/            15+ built-in tools (web, code, image, vision, files)
 ├── kazma-gateway/        Headless Gateway — adapters, SessionStore, rate limiting
 │   └── kazma_gateway/
 │       ├── adapters/         TelegramAdapter, DiscordAdapter, SlackAdapter
-│       ├── stores/           SQLiteSessionStore, checkpoint store
+│       ├── stores/           SQLiteSessionStore, unified checkpoint store
 │       ├── gateway.py        GatewayManager, MessageMetrics, RateLimiter
 │       ├── dispatcher.py     MessageDispatcher, slash command routing
 │       ├── suggestions.py    Post-task hints + tool-intent detection
 │       ├── rate_feedback.py  Friendly rate-limit cooldown messages
 │       └── mcp_server.py     IDE MCP server
-├── kazma-ui/             FastAPI + Jinja2 dashboard (Arabic RTL)
+├── kazma-ui/             FastAPI + Jinja2 dashboard (Arabic RTL, bilingual EN/AR)
 │   └── kazma_ui/
 │       ├── app.py            FastAPI app, shutdown handler, SSE endpoints
+│       ├── services.py       Service facade layer — zero private attr access from UI
+│       ├── i18n.py           Internationalization (150+ AR translations, cookie locale)
 │       ├── gateway_monitor.py /api/gateway/status endpoint
 │       └── metrics.py        Prometheus /metrics endpoint
 ├── kazma-tui/            Textual TUI with Arabic/RTL support
@@ -280,13 +316,15 @@ kazma-core/              Agent graph, ReAct supervisor, sub-agents, model router
 ├── kazma-memory/         SQLite FTS5 + Arabic tokenizer
 ├── kazma-skills/         YAML skill manifests + MCP server registry
 ├── kazma-providers/      LiteLLM router (multi-provider failover)
-├── tests/                1,781 tests (pytest + asyncio)
+├── tests/                2,382+ tests (pytest + asyncio)
 ├── docs/                 Docusaurus documentation site
 ├── docker-compose.yml    Single-command deployment
+├── setup.sh              POSIX bootstrap (Linux / macOS / WSL)
+├── setup.ps1             Windows PowerShell bootstrap
 └── archive/              Deprecated (kazma-comms, kazma-connectors)
 ```
 
-**Portability:** Kazma runs on any Linux, macOS, Docker, or WSL machine with zero modifications. No hardcoded home paths, no OS-specific hooks, no architecture assumptions. [Read the policy →](docs/portability.md)
+**Portability:** Kazma runs on any Linux, macOS, Windows, Docker, or WSL machine with zero modifications. No hardcoded home paths, no OS-specific hooks, no architecture assumptions. [Read the policy →](docs/portability.md)
 
 ---
 
@@ -378,7 +416,7 @@ For overrides, copy to `kazma.local.yaml` (git-ignored). Env vars take precedenc
 
 ## 🧪 Tests
 
-1837 collected, **2,129 passing** (4 failures + 10 skipped due to missing optional deps: chromadb, duckduckgo_search, trafilatura).
+2382+ collected and passing (a small number may be skipped due to missing optional deps: chromadb, duckduckgo_search, trafilatura).
 
 ```bash
 # Full suite
