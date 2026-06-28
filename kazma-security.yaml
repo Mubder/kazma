@@ -20,7 +20,7 @@ disclosure:
   pgp_key_url: "https://kazma.ai/.well-known/security.txt"
   encrypted_channels:
     - type: email
-      address: "admin@kazma.com"
+      address: "admin@kazma.ai"
     - type: signal
       number: "+1-XXX-XXX-XXXX"
 
