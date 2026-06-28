@@ -87,10 +87,10 @@ metadata:
 spec:
   tls:
   - hosts:
-    - hub.kazma.dev
+    - hub.kazma.ai
     secretName: kazma-hub-tls
   rules:
-  - host: hub.kazma.dev
+  - host: hub.kazma.ai
     http:
       paths:
       - path: /

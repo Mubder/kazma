@@ -118,7 +118,7 @@ def hub(ctx, registry_path: str, hub_url: str | None) -> None:
     """Kazma Hub — skill registry commands."""
     ctx.ensure_object(dict)
     ctx.obj["registry_path"] = registry_path
-    ctx.obj["hub_url"] = hub_url or "https://hub.kazma.dev"
+    ctx.obj["hub_url"] = hub_url or "https://hub.kazma.ai"
 
 
 # ─── register ─────────────────────────────────────────────────────────────

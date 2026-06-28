@@ -21,11 +21,11 @@ security vulnerability, please report it responsibly through the channels below.
 
 | Channel  | Contact                           | Use Case                        |
 | -------- | --------------------------------- | ------------------------------- |
-| Email    | admin@kazma.ai                | All vulnerabilities             |
+| Email    | admin@kazma.com                | All vulnerabilities             |
 | Signal   | +1-XXX-XXX-XXXX                  | Critical / actively exploited   |
 
 - **PGP Key**: A PGP key for encrypting email reports is available at
-  `https://kazma.dev/.well-known/security.txt`. Always encrypt sensitive
+  `https://kazma.ai/.well-known/security.txt`. Always encrypt sensitive
   details.
 - **Signal** is preferred for critical vulnerabilities that are actively being
   exploited or have immediate impact on production deployments.
@@ -135,7 +135,7 @@ Report → Acknowledge → Patch → CVE → Advisory → Notify
 4. **CVE**: A CVE identifier is requested (if applicable) and associated with
    the fix.
 5. **Advisory**: A security advisory is published on GitHub and at
-   `https://kazma.dev/security`.
+   `https://kazma.ai/security`.
 6. **Notify**: Affected users are notified via the mailing list, release notes,
    and (for critical issues) direct communication.
 
@@ -168,7 +168,7 @@ The following hardening measures are applied to all Kazma deployments:
 
 For questions about this security policy, contact the Kazma security team:
 
-- **Email**: admin@kazma.ai
+- **Email**: admin@kazma.com
 - **GitHub**: [github.com/kazma-dev/kazma](https://github.com/kazma-dev/kazma)
   (for non-sensitive inquiries only)
 

@@ -6,7 +6,7 @@ const config = {
   title: 'Kazma Hub',
   tagline: 'Autonomous AI Agent Framework — Skills, Hub & Marketplace',
   favicon: 'img/logo.svg',
-  url: 'https://kazma-ai.github.io',
+  url: 'https://kazma.ai',
   baseUrl: '/kazma/',
   organizationName: 'kazma-ai',
   projectName: 'kazma',
@@ -103,7 +103,7 @@ const config = {
             items: [
               { label: 'GitHub', href: 'https://github.com/kazma-ai/kazma' },
               { label: 'Discord', href: 'https://discord.gg/kazma' },
-              { label: 'Twitter', href: 'https://twitter.com/kazma_ai' },
+              { label: 'Twitter', href: 'https://x.com/kazma_ai' },
             ],
           },
           {

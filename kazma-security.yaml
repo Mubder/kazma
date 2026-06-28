@@ -17,10 +17,10 @@ disclosure:
   enabled: true
   response_window: "48h"
   assessment_window: "7d"
-  pgp_key_url: "https://kazma.dev/.well-known/security.txt"
+  pgp_key_url: "https://kazma.ai/.well-known/security.txt"
   encrypted_channels:
     - type: email
-      address: "security@kazma.dev"
+      address: "admin@kazma.com"
     - type: signal
       number: "+1-XXX-XXX-XXXX"
 

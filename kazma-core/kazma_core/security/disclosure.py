@@ -74,7 +74,7 @@ class VulnerabilityDisclosure:
     advisories, and maintains an audit trail of all status transitions.
     """
 
-    PGP_KEY_URL = "https://kazma.dev/.well-known/security.txt"
+    PGP_KEY_URL = "https://kazma.ai/.well-known/security.txt"
 
     def __init__(self, db_path: str | Path | None = None) -> None:
         """Initialise the disclosure tracker.
