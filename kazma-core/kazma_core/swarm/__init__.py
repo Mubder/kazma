@@ -16,6 +16,15 @@ Usage::
 
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
 from kazma_core.swarm.manager import SwarmManager
+from kazma_core.swarm.task import (
+    HandoffRecord,
+    SwarmTask,
+    TaskResult,
+    TaskStatus,
+    TaskType,
+    WorkerCapabilities,
+    WorkerResult,
+)
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
 
 __all__ = [
@@ -23,6 +32,13 @@ __all__ = [
     "SwarmManager",
     "SwarmWorker",
     "WorkerConfig",
+    "WorkerCapabilities",
+    "SwarmTask",
+    "TaskResult",
+    "TaskStatus",
+    "TaskType",
+    "WorkerResult",
+    "HandoffRecord",
     "InProcessWorker",
     "TelegramWorker",
 ]
