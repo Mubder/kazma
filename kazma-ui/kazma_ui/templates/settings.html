@@ -8,22 +8,22 @@
 
     <!-- ═══ Settings Navigation (12 tabs) ═══ -->
     <nav class="settings-nav">
-        <button class="settings-tab" :class="{ active: tab === 'providers' }" @click="onTabChange('providers')">Services</button>
-        <button class="settings-tab" :class="{ active: tab === 'models' }" @click="onTabChange('models')">Models</button>
-        <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">Agent</button>
-        <button class="settings-tab" :class="{ active: tab === 'connectors' }" @click="onTabChange('connectors')">Connectors</button>
-        <button class="settings-tab" :class="{ active: tab === 'mcp' }" @click="onTabChange('mcp')">MCP</button>
-        <button class="settings-tab" :class="{ active: tab === 'skills' }" @click="onTabChange('skills')">Skills</button>
-        <button class="settings-tab" :class="{ active: tab === 'appearance' }" @click="onTabChange('appearance')">Appearance</button>
-        <button class="settings-tab" :class="{ active: tab === 'shortcuts' }" @click="onTabChange('shortcuts')">Shortcuts</button>
-        <button class="settings-tab" :class="{ active: tab === 'account' }" @click="onTabChange('account')">Account</button>
-        <button class="settings-tab" :class="{ active: tab === 'tools' }" @click="onTabChange('tools')">Tools</button>
-        <button class="settings-tab" :class="{ active: tab === 'system' }" @click="onTabChange('system')">System</button>
-        <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">Import/Export</button>
+        <button class="settings-tab" :class="{ active: tab === 'providers' }" @click="onTabChange('providers')">{{ t('settings.tab_services') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'models' }" @click="onTabChange('models')">{{ t('settings.tab_models') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">{{ t('settings.tab_agent') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'connectors' }" @click="onTabChange('connectors')">{{ t('settings.tab_connectors') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'mcp' }" @click="onTabChange('mcp')">{{ t('settings.tab_mcp') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'skills' }" @click="onTabChange('skills')">{{ t('settings.tab_skills') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'appearance' }" @click="onTabChange('appearance')">{{ t('settings.tab_appearance') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'shortcuts' }" @click="onTabChange('shortcuts')">{{ t('settings.tab_shortcuts') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'account' }" @click="onTabChange('account')">{{ t('settings.tab_account') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'tools' }" @click="onTabChange('tools')">{{ t('settings.tab_tools') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'system' }" @click="onTabChange('system')">{{ t('settings.tab_system') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
     </nav>
 
     <!-- Loading indicator -->
-    <div x-show="loading" style="padding:40px;text-align:center;color:var(--text-muted)">Loading settings...</div>
+    <div x-show="loading" style="padding:40px;text-align:center;color:var(--text-muted)">{{ t('settings.loading') }}</div>
 
     <!-- ═══════════════════════════════════════════════════════════════
          TAB 1: SERVICES / PROVIDERS
@@ -31,8 +31,8 @@
     <div x-show="tab === 'providers'" x-transition>
         <div class="settings-group">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-                <h3>LLM Providers</h3>
-                <button class="btn btn-primary btn-sm" @click="openAddProvider()">+ Add Provider</button>
+                <h3>{{ t('settings.llm_providers') }}</h3>
+                <button class="btn btn-primary btn-sm" @click="openAddProvider()">+ {{ t('settings.add_provider') }}</button>
             </div>
 
             <!-- Provider List -->
@@ -50,7 +50,7 @@
                         </div>
                         <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" x-text="p.base_url"></div>
                         <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="p.models && p.models.length">
-                            Models: <span x-text="(p.models || []).join(', ')"></span>
+                            {{ t('settings.models_label') }} <span x-text="(p.models || []).join(', ')"></span>
                         </div>
                     </div>
                     <div style="display:flex;gap:6px;align-items:center">
@@ -58,20 +58,20 @@
                             <input type="checkbox" :checked="p.enabled" @change="toggleProvider(p.name, $event.target.checked)">
                             <span class="toggle-slider"></span>
                         </label>
-                        <button class="btn btn-secondary btn-sm" @click="testProvider(p.name)" :disabled="testingProvider === p.name" x-text="testingProvider === p.name ? '...' : 'Test'"></button>
+                        <button class="btn btn-secondary btn-sm" @click="testProvider(p.name)" :disabled="testingProvider === p.name" x-text="testingProvider === p.name ? '...' : '{{ t('settings.test') }}'"></button>
                         <button class="btn btn-danger btn-sm" @click="deleteProvider(p.name)">×</button>
                     </div>
                 </div>
             </template>
 
             <div x-show="providers.length === 0 && !loading" class="empty-state">
-                No providers configured. Click "Add Provider" to get started.
+                {{ t('settings.no_providers') }}
             </div>
 
             <!-- Provider Test Result -->
             <div x-show="providerTestResult" class="validation-result" style="margin-top:12px">
                 <template x-if="providerTestResult?.success">
-                    <span class="text-success">✓ Connected! Latency: <span x-text="providerTestResult?.latency_ms"></span>ms</span>
+                    <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="providerTestResult?.latency_ms"></span>ms</span>
                 </template>
                 <template x-if="providerTestResult && !providerTestResult.success">
                     <span class="text-error">✗ <span x-text="providerTestResult?.error"></span></span>
@@ -82,11 +82,11 @@
         <!-- Add Provider Modal -->
         <div x-show="showProviderModal" class="modal-overlay" @click.self="showProviderModal = false">
             <div class="modal">
-                <h2>Add Provider</h2>
+                <h2>{{ t('settings.add_provider') }}</h2>
                 <div class="form-group">
-                    <label>Preset</label>
+                    <label>{{ t('settings.preset') }}</label>
                     <select class="form-select" @change="applyProviderPreset($event.target.value)">
-                        <option value="">— Custom —</option>
+                        <option value="">{{ t('settings.custom') }}</option>
                         <template x-for="p in providerPresets" :key="p.key">
                             <option :value="p.key" x-text="p.name"></option>
                         </template>
@@ -94,29 +94,29 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Name (ID)</label>
+                        <label>{{ t('settings.name_id') }}</label>
                         <input type="text" class="form-input" x-model="newProvider.name" placeholder="openai">
                     </div>
                     <div class="form-group">
-                        <label>Display Name</label>
+                        <label>{{ t('settings.display_name') }}</label>
                         <input type="text" class="form-input" x-model="newProvider.display_name" placeholder="OpenAI">
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Base URL</label>
+                    <label>{{ t('settings.base_url') }}</label>
                     <input type="text" class="form-input" x-model="newProvider.base_url" placeholder="https://api.openai.com/v1">
                 </div>
                 <div class="form-group">
-                    <label>API Key</label>
+                    <label>{{ t('settings.api_key') }}</label>
                     <input type="password" class="form-input" x-model="newProvider.api_key" placeholder="sk-...">
                 </div>
                 <div class="form-group">
-                    <label>Models (comma-separated, or leave empty to auto-discover)</label>
+                    <label>{{ t('settings.models_comma') }}</label>
                     <input type="text" class="form-input" x-model="newProvider.models" placeholder="gpt-4o, gpt-4o-mini">
                 </div>
                 <div class="modal-actions">
-                    <button class="btn btn-secondary" @click="showProviderModal = false">Cancel</button>
-                    <button class="btn btn-primary" @click="saveProvider()" :disabled="saving" x-text="saving ? 'Saving...' : 'Add Provider'"></button>
+                    <button class="btn btn-secondary" @click="showProviderModal = false">{{ t('settings.cancel') }}</button>
+                    <button class="btn btn-primary" @click="saveProvider()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.add_provider') }}'"></button>
                 </div>
             </div>
         </div>
@@ -128,9 +128,9 @@
     <div x-show="tab === 'models'" x-transition>
         <!-- Current Model Configuration -->
         <div class="settings-group">
-            <h3>Active Model</h3>
+            <h3>{{ t('settings.active_model') }}</h3>
             <div class="form-group">
-                <label>Provider</label>
+                <label>{{ t('settings.provider') }}</label>
                 <select class="form-select" x-model="modelProvider" @change="onProviderChange()">
                     <option value="">Custom</option>
                     <template x-for="p in providerPresets" :key="p.key">
@@ -140,11 +140,11 @@
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Base URL</label>
+                    <label>{{ t('settings.base_url') }}</label>
                     <input type="text" class="form-input" x-model="currentModel.base_url" placeholder="https://api.openai.com/v1">
                 </div>
                 <div class="form-group">
-                    <label>API Key</label>
+                    <label>{{ t('settings.api_key') }}</label>
                     <div class="input-with-toggle">
                         <input :type="showKey ? 'text' : 'password'" class="form-input" x-model="currentModel.api_key" placeholder="sk-...">
                         <button class="btn btn-icon" @click="showKey = !showKey" x-text="showKey ? '🙈' : '👁'"></button>
@@ -153,38 +153,38 @@
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Model Name</label>
+                    <label>{{ t('settings.model_name') }}</label>
                     <div style="display:flex;gap:4px">
                         <input type="text" class="form-input" x-model="currentModel.model" placeholder="gpt-4o-mini" style="flex:1">
-                        <button class="btn btn-secondary btn-sm" @click="fetchModels()" x-text="fetchingModels ? '...' : 'Fetch'"></button>
+                        <button class="btn btn-secondary btn-sm" @click="fetchModels()" x-text="fetchingModels ? '...' : '{{ t('settings.fetch') }}'"></button>
                     </div>
                     <select x-show="availableModels.length > 0" class="form-select" x-model="currentModel.model" style="margin-top:4px">
-                        <option value="">— select model —</option>
+                        <option value="">{{ t('settings.select_model') }}</option>
                         <template x-for="m in availableModels">
                             <option :value="m" x-text="m"></option>
                         </template>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>Max Tokens</label>
+                    <label>{{ t('settings.max_tokens') }}</label>
                     <input type="number" class="form-input" x-model.number="currentModel.max_tokens" min="256" max="128000">
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Temperature: <span x-text="currentModel.temperature"></span></label>
+                    <label>{{ t('settings.temperature') }} <span x-text="currentModel.temperature"></span></label>
                     <input type="range" class="form-range" x-model.number="currentModel.temperature" min="0" max="2" step="0.1">
                 </div>
                 <div class="form-group">
-                    <label>Timeout (seconds)</label>
+                    <label>{{ t('settings.timeout_seconds') }}</label>
                     <input type="number" class="form-input" x-model.number="currentModel.timeout" min="5" max="300">
                 </div>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
-                <button class="btn btn-primary" @click="saveModel()" :disabled="saving" x-text="saving ? 'Saving...' : 'Save'"></button>
+                <button class="btn btn-primary" @click="saveModel()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save') }}'"></button>
                 <button class="btn btn-secondary" @click="testModel()" :disabled="testing">
-                    <span x-show="!testing">Test Connection</span>
-                    <span x-show="testing">Testing...</span>
+                    <span x-show="!testing">{{ t('settings.test_connection') }}</span>
+                    <span x-show="testing">{{ t('settings.testing') }}</span>
                 </button>
                 <span x-show="testResult" :class="testResult?.success ? 'text-success' : 'text-error'" x-text="testResult?.success ? '✓ Connected! ' + testResult?.model : '✗ ' + testResult?.error"></span>
             </div>
@@ -192,30 +192,30 @@
 
         <!-- Model Defaults per Task -->
         <div class="settings-group">
-            <h3>Default Models per Task</h3>
+            <h3>{{ t('settings.default_models_per_task') }}</h3>
             <template x-for="taskType in ['chat', 'code', 'summarize', 'translate']" :key="taskType">
                 <div class="form-row" style="align-items:end;margin-bottom:8px">
                     <div class="form-group" style="margin-bottom:0">
                         <label x-text="taskType.charAt(0).toUpperCase() + taskType.slice(1)"></label>
                         <input type="text" class="form-input" x-model="modelDefaults[taskType]" :placeholder="'e.g. gpt-4o-mini'">
                     </div>
-                    <button class="btn btn-secondary btn-sm" @click="saveModelDefault(taskType)" style="height:36px">Set</button>
+                    <button class="btn btn-secondary btn-sm" @click="saveModelDefault(taskType)" style="height:36px">{{ t('settings.set') }}</button>
                 </div>
             </template>
         </div>
 
         <!-- Model Comparison -->
         <div class="settings-group">
-            <h3>Model Comparison</h3>
+            <h3>{{ t('settings.model_comparison') }}</h3>
             <div class="form-group">
-                <label>Test Prompt</label>
-                <textarea class="form-textarea" x-model="comparePrompt" rows="2" placeholder="Enter a prompt to test across models..."></textarea>
+                <label>{{ t('settings.test_prompt') }}</label>
+                <textarea class="form-textarea" x-model="comparePrompt" rows="2" placeholder="{{ t('settings.test_prompt_placeholder') }}"></textarea>
             </div>
             <div class="form-group">
-                <label>Models to compare (comma-separated)</label>
+                <label>{{ t('settings.models_to_compare') }}</label>
                 <input type="text" class="form-input" x-model="compareModels" placeholder="gpt-4o-mini, claude-3-haiku, deepseek-chat">
             </div>
-            <button class="btn btn-primary" @click="runModelComparison()" :disabled="comparing" x-text="comparing ? 'Running...' : 'Run Comparison'"></button>
+            <button class="btn btn-primary" @click="runModelComparison()" :disabled="comparing" x-text="comparing ? '{{ t('settings.running') }}' : '{{ t('settings.run_comparison') }}'"></button>
             <div x-show="compareResults.length > 0" style="margin-top:16px">
                 <template x-for="(r, i) in compareResults" :key="i">
                     <div style="padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px">
@@ -223,7 +223,7 @@
                             <strong x-text="r.model" style="color:var(--accent-light)"></strong>
                             <span style="font-size:0.8rem;color:var(--text-muted)" x-text="r.latency_ms ? r.latency_ms + 'ms' : ''"></span>
                         </div>
-                        <div x-text="r.response || r.error || 'No response'" style="font-size:0.85rem;color:var(--text-secondary);white-space:pre-wrap"></div>
+                        <div x-text="r.response || r.error || '{{ t('settings.no_response') }}'" style="font-size:0.85rem;color:var(--text-secondary);white-space:pre-wrap"></div>
                     </div>
                 </template>
             </div>
@@ -236,30 +236,30 @@
     <div x-show="tab === 'agent'" x-transition>
         <!-- Basic Config -->
         <div class="settings-group">
-            <h3>Agent Configuration</h3>
+            <h3>{{ t('settings.agent_config') }}</h3>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Agent Name</label>
+                    <label>{{ t('settings.agent_name') }}</label>
                     <input type="text" class="form-input" x-model="agent.name">
                 </div>
                 <div class="form-group">
-                    <label>Language</label>
+                    <label>{{ t('settings.language') }}</label>
                     <select class="form-select" x-model="agent.language">
-                        <option value="ar">Arabic</option>
-                        <option value="en">English</option>
+                        <option value="ar">{{ t('settings.arabic') }}</option>
+                        <option value="en">{{ t('settings.english') }}</option>
                     </select>
                 </div>
             </div>
             <div class="form-group">
-                <label>System Prompt</label>
+                <label>{{ t('settings.system_prompt') }}</label>
                 <textarea class="form-textarea" x-model="agent.system_prompt" rows="6" placeholder="You are a helpful AI assistant..."></textarea>
             </div>
-            <button class="btn btn-primary" @click="saveAgent()" :disabled="saving" x-text="saving ? 'Saving...' : 'Save Agent'"></button>
+            <button class="btn btn-primary" @click="saveAgent()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save_agent') }}'"></button>
         </div>
 
         <!-- Personality Templates -->
         <div class="settings-group">
-            <h3>Personality Templates</h3>
+            <h3>{{ t('settings.personality_templates') }}</h3>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">
                 <template x-for="p in personalities" :key="p.name">
                     <div @click="setPersonality(p.name)" style="padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:all 0.15s" :style="agent.personality === p.name ? 'border-color:var(--accent);background:rgba(94,106,210,0.08)' : ''">
@@ -273,10 +273,10 @@
 
         <!-- Safety Settings -->
         <div class="settings-group">
-            <h3>Safety (HITL)</h3>
+            <h3>{{ t('settings.safety_hitl') }}</h3>
             <div class="form-group">
                 <label style="display:flex;align-items:center;gap:8px">
-                    <span>Enable Human-in-the-Loop</span>
+                    <span>{{ t('settings.enable_hitl') }}</span>
                     <label class="toggle">
                         <input type="checkbox" x-model="safety.hitl_enabled">
                         <span class="toggle-slider"></span>
@@ -284,17 +284,17 @@
                 </label>
             </div>
             <div class="form-group" x-show="safety.hitl_enabled">
-                <label>Tools Requiring Approval (comma-separated)</label>
+                <label>{{ t('settings.tools_requiring_approval') }}</label>
                 <input type="text" class="form-input" :value="(safety.require_approval_for || []).join(', ')" @input="safety.require_approval_for = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)" placeholder="file_write, file_delete, shell_exec">
             </div>
             <div class="form-row" x-show="safety.hitl_enabled">
                 <div class="form-group">
-                    <label>Approval Timeout (seconds)</label>
+                    <label>{{ t('settings.approval_timeout_seconds') }}</label>
                     <input type="number" class="form-input" x-model.number="safety.approval_timeout" min="10" max="600">
                 </div>
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px">
-                        <span>Auto-deny on Timeout</span>
+                        <span>{{ t('settings.auto_deny_on_timeout') }}</span>
                         <label class="toggle">
                             <input type="checkbox" x-model="safety.auto_deny_on_timeout">
                             <span class="toggle-slider"></span>
@@ -302,31 +302,31 @@
                     </label>
                 </div>
             </div>
-            <button class="btn btn-primary" @click="saveSafety()">Save Safety Settings</button>
+            <button class="btn btn-primary" @click="saveSafety()">{{ t('settings.save_safety') }}</button>
         </div>
 
         <!-- Context Window -->
         <div class="settings-group">
-            <h3>Context Window</h3>
+            <h3>{{ t('settings.context_window') }}</h3>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Max Context Tokens</label>
+                    <label>{{ t('settings.max_context_tokens') }}</label>
                     <input type="number" class="form-input" x-model.number="context.max_context_tokens" min="1024" max="1000000">
                 </div>
                 <div class="form-group">
-                    <label>Strategy</label>
+                    <label>{{ t('settings.strategy') }}</label>
                     <select class="form-select" x-model="context.context_strategy">
-                        <option value="sliding_window">Sliding Window</option>
-                        <option value="summarize">Summarize Old Messages</option>
-                        <option value="truncate">Truncate Oldest</option>
+                        <option value="sliding_window">{{ t('settings.sliding_window') }}</option>
+                        <option value="summarize">{{ t('settings.summarize_old') }}</option>
+                        <option value="truncate">{{ t('settings.truncate_oldest') }}</option>
                     </select>
                 </div>
             </div>
             <div class="form-group">
-                <label>Summarization Threshold: <span x-text="context.summarization_threshold"></span></label>
+                <label>{{ t('settings.summarization_threshold') }} <span x-text="context.summarization_threshold"></span></label>
                 <input type="range" class="form-range" x-model.number="context.summarization_threshold" min="0.5" max="0.95" step="0.05">
             </div>
-            <button class="btn btn-primary" @click="saveContext()">Save Context Settings</button>
+            <button class="btn btn-primary" @click="saveContext()">{{ t('settings.save_context') }}</button>
         </div>
     </div>
 
@@ -336,108 +336,108 @@
     <div x-show="tab === 'connectors'" x-transition>
         <!-- Telegram -->
         <div class="settings-group">
-            <h3>💬 Telegram</h3>
+            <h3>{{ t('settings.telegram') }}</h3>
             <div class="form-group">
-                <label>Bot Token</label>
+                <label>{{ t('settings.bot_token') }}</label>
                 <div class="input-with-toggle">
                     <input :type="showTelegramToken ? 'text' : 'password'" class="form-input" x-model="connectors.telegram.token" placeholder="123456789:ABC...">
                     <button class="btn btn-icon" @click="showTelegramToken = !showTelegramToken" x-text="showTelegramToken ? '🙈' : '👁'"></button>
                 </div>
             </div>
             <div class="form-group">
-                <label>Allowed User IDs (comma-separated)</label>
+                <label>{{ t('settings.allowed_user_ids') }}</label>
                 <input type="text" class="form-input" x-model="connectors.telegram.allowed_users" placeholder="1804015016">
             </div>
             <div style="display:flex;gap:8px">
-                <button class="btn btn-primary" @click="saveConnector('telegram')">Save</button>
-                <button class="btn btn-secondary" @click="testConnector('telegram')" :disabled="testingConnector === 'telegram'" x-text="testingConnector === 'telegram' ? 'Testing...' : 'Test'"></button>
+                <button class="btn btn-primary" @click="saveConnector('telegram')">{{ t('settings.save') }}</button>
+                <button class="btn btn-secondary" @click="testConnector('telegram')" :disabled="testingConnector === 'telegram'" x-text="testingConnector === 'telegram' ? '{{ t('settings.testing') }}' : '{{ t('settings.test') }}'"></button>
             </div>
         </div>
 
         <!-- Discord -->
         <div class="settings-group">
-            <h3>🎮 Discord</h3>
+            <h3>{{ t('settings.discord') }}</h3>
             <div class="form-group">
-                <label>Bot Token</label>
+                <label>{{ t('settings.bot_token') }}</label>
                 <input type="password" class="form-input" x-model="connectors.discord.token" placeholder="MTIzNDU2...">
             </div>
             <div style="display:flex;gap:8px">
-                <button class="btn btn-primary" @click="saveConnector('discord')">Save</button>
-                <button class="btn btn-secondary" @click="testConnector('discord')" :disabled="testingConnector === 'discord'" x-text="testingConnector === 'discord' ? 'Testing...' : 'Test'"></button>
+                <button class="btn btn-primary" @click="saveConnector('discord')">{{ t('settings.save') }}</button>
+                <button class="btn btn-secondary" @click="testConnector('discord')" :disabled="testingConnector === 'discord'" x-text="testingConnector === 'discord' ? '{{ t('settings.testing') }}' : '{{ t('settings.test') }}'"></button>
             </div>
         </div>
 
         <!-- Slack -->
         <div class="settings-group">
-            <h3>📱 Slack</h3>
+            <h3>{{ t('settings.slack') }}</h3>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Bot Token (xoxb-...)</label>
+                    <label>{{ t('settings.bot_token_xoxb') }}</label>
                     <input type="password" class="form-input" x-model="connectors.slack.token" placeholder="xoxb-...">
                 </div>
                 <div class="form-group">
-                    <label>App Token (xapp-...)</label>
+                    <label>{{ t('settings.app_token_xapp') }}</label>
                     <input type="password" class="form-input" x-model="connectors.slack.app_token" placeholder="xapp-...">
                 </div>
             </div>
             <div style="display:flex;gap:8px">
-                <button class="btn btn-primary" @click="saveConnector('slack')">Save</button>
-                <button class="btn btn-secondary" @click="testConnector('slack')" :disabled="testingConnector === 'slack'" x-text="testingConnector === 'slack' ? 'Testing...' : 'Test'"></button>
+                <button class="btn btn-primary" @click="saveConnector('slack')">{{ t('settings.save') }}</button>
+                <button class="btn btn-secondary" @click="testConnector('slack')" :disabled="testingConnector === 'slack'" x-text="testingConnector === 'slack' ? '{{ t('settings.testing') }}' : '{{ t('settings.test') }}'"></button>
             </div>
         </div>
 
         <!-- Email -->
         <div class="settings-group">
-            <h3>📧 Email</h3>
+            <h3>{{ t('settings.email') }}</h3>
             <div class="form-row">
                 <div class="form-group">
-                    <label>SMTP Host</label>
+                    <label>{{ t('settings.smtp_host') }}</label>
                     <input type="text" class="form-input" x-model="connectors.email.smtp_host" placeholder="smtp.gmail.com">
                 </div>
                 <div class="form-group">
-                    <label>SMTP Port</label>
+                    <label>{{ t('settings.smtp_port') }}</label>
                     <input type="number" class="form-input" x-model="connectors.email.smtp_port" placeholder="587">
                 </div>
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>Username</label>
+                    <label>{{ t('settings.username') }}</label>
                     <input type="text" class="form-input" x-model="connectors.email.username" placeholder="user@example.com">
                 </div>
                 <div class="form-group">
-                    <label>Password</label>
+                    <label>{{ t('settings.password') }}</label>
                     <input type="password" class="form-input" x-model="connectors.email.password" placeholder="App password">
                 </div>
             </div>
             <div class="form-group">
-                <label>IMAP Host</label>
+                <label>{{ t('settings.imap_host') }}</label>
                 <input type="text" class="form-input" x-model="connectors.email.imap_host" placeholder="imap.gmail.com">
             </div>
             <div style="display:flex;gap:8px">
-                <button class="btn btn-primary" @click="saveConnector('email')">Save</button>
-                <button class="btn btn-secondary" @click="testConnector('email')" :disabled="testingConnector === 'email'" x-text="testingConnector === 'email' ? 'Testing...' : 'Test'"></button>
+                <button class="btn btn-primary" @click="saveConnector('email')">{{ t('settings.save') }}</button>
+                <button class="btn btn-secondary" @click="testConnector('email')" :disabled="testingConnector === 'email'" x-text="testingConnector === 'email' ? '{{ t('settings.testing') }}' : '{{ t('settings.test') }}'"></button>
             </div>
         </div>
 
         <!-- Webhooks -->
         <div class="settings-group">
-            <h3>🔗 Webhooks</h3>
+            <h3>{{ t('settings.webhooks') }}</h3>
             <div class="form-group">
-                <label>Incoming Webhook URL</label>
+                <label>{{ t('settings.incoming_webhook_url') }}</label>
                 <input type="text" class="form-input" x-model="connectors.webhook.incoming_url" placeholder="https://your-domain.com/api/webhooks/incoming">
             </div>
             <div class="form-group">
-                <label>Outgoing Webhook URL</label>
+                <label>{{ t('settings.outgoing_webhook_url') }}</label>
                 <input type="text" class="form-input" x-model="connectors.webhook.outgoing_url" placeholder="https://hooks.example.com/...">
             </div>
             <div class="form-group">
-                <label>Webhook Secret</label>
+                <label>{{ t('settings.webhook_secret') }}</label>
                 <input type="password" class="form-input" x-model="connectors.webhook.secret" placeholder="Shared secret for verification">
             </div>
-            <button class="btn btn-primary" @click="saveConnector('webhook')">Save</button>
+            <button class="btn btn-primary" @click="saveConnector('webhook')">{{ t('settings.save') }}</button>
         </div>
 
-        <p class="text-muted" style="margin-top:8px">Gateway restart required after saving connector changes.</p>
+        <p class="text-muted" style="margin-top:8px">{{ t('settings.gateway_restart_required') }}</p>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════
@@ -446,8 +446,8 @@
     <div x-show="tab === 'mcp'" x-transition>
         <div class="settings-group">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-                <h3>MCP Servers</h3>
-                <button class="btn btn-primary btn-sm" @click="openAddMcpServer()">+ Add Server</button>
+                <h3>{{ t('settings.mcp_servers') }}</h3>
+                <button class="btn btn-primary btn-sm" @click="openAddMcpServer()">+ {{ t('settings.add_server') }}</button>
             </div>
 
             <template x-for="s in mcpServers" :key="s.name">
@@ -456,7 +456,7 @@
                         <span class="status-dot" :class="s.connected ? 'status-ok' : 'status-stopped'"></span>
                         <strong x-text="s.name"></strong>
                         <span class="badge" :class="s.transport === 'stdio' ? 'badge-stdio' : 'badge-sse'" x-text="s.transport"></span>
-                        <span style="font-size:0.8rem;color:var(--text-muted)" x-text="(s.tool_count || 0) + ' tools'"></span>
+                        <span style="font-size:0.8rem;color:var(--text-muted)" x-text="(s.tool_count || 0) + ' {{ t('settings.tools_count') }}'"></span>
                     </div>
                     <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:8px" x-text="s.transport === 'stdio' ? (s.command || []).join(' ') : s.url"></div>
                     <div style="display:flex;gap:6px">
@@ -464,7 +464,7 @@
                             <input type="checkbox" :checked="s.enabled !== false" @change="toggleMcpServer(s.name, $event.target.checked)">
                             <span class="toggle-slider"></span>
                         </label>
-                        <button class="btn btn-secondary btn-sm" @click="testMcpServer(s.name)" :disabled="testingMcp === s.name" x-text="testingMcp === s.name ? '...' : 'Test'"></button>
+                        <button class="btn btn-secondary btn-sm" @click="testMcpServer(s.name)" :disabled="testingMcp === s.name" x-text="testingMcp === s.name ? '...' : '{{ t('settings.test') }}'"></button>
                         <button class="btn btn-danger btn-sm" @click="deleteMcpServer(s.name)">×</button>
                     </div>
                     <!-- Tool list (expandable) -->
@@ -480,40 +480,40 @@
             </template>
 
             <div x-show="mcpServers.length === 0 && !loading" class="empty-state">
-                No MCP servers configured. Add one to extend Kazma's tool capabilities.
+                {{ t('settings.no_mcp_servers') }}
             </div>
         </div>
 
         <!-- Add MCP Server Modal -->
         <div x-show="showMcpModal" class="modal-overlay" @click.self="showMcpModal = false">
             <div class="modal">
-                <h2>Add MCP Server</h2>
+                <h2>{{ t('settings.add_server') }}</h2>
                 <div class="form-group">
-                    <label>Name</label>
+                    <label>{{ t('common.name') }}</label>
                     <input type="text" class="form-input" x-model="newMcpServer.name" placeholder="my-server">
                 </div>
                 <div class="form-group">
-                    <label>Transport</label>
+                    <label>{{ t('settings.transport') }}</label>
                     <select class="form-select" x-model="newMcpServer.transport">
-                        <option value="stdio">stdio (local process)</option>
-                        <option value="sse">SSE (HTTP)</option>
+                        <option value="stdio">{{ t('settings.stdio_local') }}</option>
+                        <option value="sse">{{ t('settings.sse_http') }}</option>
                     </select>
                 </div>
                 <div class="form-group" x-show="newMcpServer.transport === 'stdio'">
-                    <label>Command (space-separated)</label>
+                    <label>{{ t('settings.command_space_separated') }}</label>
                     <input type="text" class="form-input" x-model="newMcpServer.command" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
                 </div>
                 <div class="form-group" x-show="newMcpServer.transport === 'sse'">
-                    <label>URL</label>
+                    <label>{{ t('settings.url') }}</label>
                     <input type="text" class="form-input" x-model="newMcpServer.url" placeholder="http://localhost:8080/sse">
                 </div>
                 <div class="form-group">
-                    <label>Environment Variables (JSON)</label>
+                    <label>{{ t('settings.env_vars_json') }}</label>
                     <input type="text" class="form-input" x-model="newMcpServer.env" placeholder='{"KEY": "value"}'>
                 </div>
                 <div class="modal-actions">
-                    <button class="btn btn-secondary" @click="showMcpModal = false">Cancel</button>
-                    <button class="btn btn-primary" @click="saveMcpServer()" :disabled="saving" x-text="saving ? 'Adding...' : 'Add Server'"></button>
+                    <button class="btn btn-secondary" @click="showMcpModal = false">{{ t('settings.cancel') }}</button>
+                    <button class="btn btn-primary" @click="saveMcpServer()" :disabled="saving" x-text="saving ? '{{ t('settings.adding') }}' : '{{ t('settings.add_server') }}'"></button>
                 </div>
             </div>
         </div>
@@ -524,9 +524,9 @@
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'skills'" x-transition>
         <div class="settings-group">
-            <h3>Installed Skills</h3>
+            <h3>{{ t('settings.installed_skills') }}</h3>
             <div class="search-bar">
-                <input type="text" class="form-input" x-model="skillFilter" placeholder="Search skills...">
+                <input type="text" class="form-input" x-model="skillFilter" placeholder="{{ t('settings.search_skills') }}">
             </div>
 
             <div class="skills-grid">
@@ -539,21 +539,21 @@
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
-                        <div class="skill-desc" x-text="skill.description || 'No description'"></div>
+                        <div class="skill-desc" x-text="skill.description || '{{ t('settings.no_description') }}'"></div>
                         <div class="skill-meta">
                             <span x-show="skill.version">v<span x-text="skill.version"></span></span>
                             <span x-show="skill.category" x-text="skill.category"></span>
-                            <span x-show="skill.author" x-text="'by ' + skill.author"></span>
+                            <span x-show="skill.author" x-text="'{{ t('settings.by') }} ' + skill.author"></span>
                         </div>
                         <div class="skill-actions">
-                            <button class="btn btn-danger btn-sm" @click="uninstallSkill(skill.name)">Uninstall</button>
+                            <button class="btn btn-danger btn-sm" @click="uninstallSkill(skill.name)">{{ t('settings.uninstall') }}</button>
                         </div>
                     </div>
                 </template>
             </div>
 
             <div x-show="skills.length === 0 && !loading" class="empty-state">
-                No skills installed. Browse the skill marketplace to add capabilities.
+                {{ t('settings.no_skills') }}
             </div>
         </div>
     </div>
@@ -563,16 +563,16 @@
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'appearance'" x-transition>
         <div class="settings-group">
-            <h3>Theme</h3>
+            <h3>{{ t('settings.theme') }}</h3>
             <div style="display:flex;gap:12px;margin-bottom:16px">
-                <button class="btn" :class="appearance.theme === 'dark' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'dark'; previewTheme('dark')">🌙 Dark</button>
-                <button class="btn" :class="appearance.theme === 'light' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'light'; previewTheme('light')">☀️ Light</button>
-                <button class="btn" :class="appearance.theme === 'auto' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'auto'">🔄 Auto</button>
+                <button class="btn" :class="appearance.theme === 'dark' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'dark'; previewTheme('dark')">{{ t('settings.dark') }}</button>
+                <button class="btn" :class="appearance.theme === 'light' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'light'; previewTheme('light')">{{ t('settings.light') }}</button>
+                <button class="btn" :class="appearance.theme === 'auto' ? 'btn-primary' : 'btn-secondary'" @click="appearance.theme = 'auto'">{{ t('settings.auto') }}</button>
             </div>
         </div>
 
         <div class="settings-group">
-            <h3>Accent Color</h3>
+            <h3>{{ t('settings.accent_color') }}</h3>
             <div style="display:flex;gap:12px;align-items:center">
                 <input type="color" x-model="appearance.accent_color" style="width:48px;height:36px;border:none;cursor:pointer;background:none">
                 <input type="text" class="form-input" x-model="appearance.accent_color" style="width:120px" placeholder="#5e6ad2">
@@ -587,33 +587,33 @@
         </div>
 
         <div class="settings-group">
-            <h3>Font Size</h3>
+            <h3>{{ t('settings.font_size') }}</h3>
             <div class="form-group">
-                <label>Base Font Size: <span x-text="appearance.font_size"></span>px</label>
+                <label>{{ t('settings.base_font_size') }} <span x-text="appearance.font_size"></span>px</label>
                 <input type="range" class="form-range" x-model.number="appearance.font_size" min="12" max="18" step="1" @input="applyFontSize(appearance.font_size)">
             </div>
         </div>
 
         <div class="settings-group">
-            <h3>Layout</h3>
+            <h3>{{ t('settings.layout') }}</h3>
             <div class="form-group">
-                <label>Sidebar Position</label>
+                <label>{{ t('settings.sidebar_position') }}</label>
                 <select class="form-select" x-model="appearance.sidebar_position" style="width:200px">
-                    <option value="left">Left</option>
-                    <option value="right">Right</option>
+                    <option value="left">{{ t('settings.left') }}</option>
+                    <option value="right">{{ t('settings.right') }}</option>
                 </select>
             </div>
         </div>
 
         <div class="settings-group">
-            <h3>Custom CSS</h3>
+            <h3>{{ t('settings.custom_css') }}</h3>
             <div class="form-group">
-                <label>Inject custom CSS (advanced)</label>
+                <label>{{ t('settings.inject_custom_css') }}</label>
                 <textarea class="form-textarea" x-model="appearance.custom_css" rows="4" style="font-family:var(--font-mono)" placeholder="/* Custom overrides */"></textarea>
             </div>
         </div>
 
-        <button class="btn btn-primary" @click="saveAppearance()" :disabled="saving" x-text="saving ? 'Saving...' : 'Save Appearance'"></button>
+        <button class="btn btn-primary" @click="saveAppearance()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save_appearance') }}'"></button>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════
@@ -622,13 +622,13 @@
     <div x-show="tab === 'shortcuts'" x-transition>
         <div class="settings-group">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-                <h3>Keyboard Shortcuts</h3>
-                <button class="btn btn-secondary btn-sm" @click="resetShortcuts()">Reset to Defaults</button>
+                <h3>{{ t('settings.keyboard_shortcuts') }}</h3>
+                <button class="btn btn-secondary btn-sm" @click="resetShortcuts()">{{ t('settings.reset_to_defaults') }}</button>
             </div>
 
             <!-- Conflict warnings -->
             <div x-show="shortcutConflicts.length > 0" style="padding:12px;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:var(--radius);margin-bottom:16px">
-                <div style="color:var(--warning);font-weight:600;margin-bottom:4px">⚠️ Conflicts Detected</div>
+                <div style="color:var(--warning);font-weight:600;margin-bottom:4px">{{ t('settings.conflicts_detected') }}</div>
                 <template x-for="c in shortcutConflicts" :key="c.action1 + c.action2">
                     <div style="font-size:0.85rem;color:var(--text-secondary)" x-text="`"${c.action1}" and "${c.action2}" both use ${c.keys}`"></div>
                 </template>
@@ -649,53 +649,53 @@
     <div x-show="tab === 'account'" x-transition>
         <!-- Password -->
         <div class="settings-group">
-            <h3>Change Password</h3>
+            <h3>{{ t('settings.change_password') }}</h3>
             <div class="form-group">
-                <label>Current Password</label>
+                <label>{{ t('settings.current_password') }}</label>
                 <input type="password" class="form-input" x-model="passwordForm.old_password">
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label>New Password</label>
-                    <input type="password" class="form-input" x-model="passwordForm.new_password" placeholder="Min 8 characters">
+                    <label>{{ t('settings.new_password') }}</label>
+                    <input type="password" class="form-input" x-model="passwordForm.new_password" placeholder="{{ t('settings.min_8_chars') }}">
                 </div>
                 <div class="form-group">
-                    <label>Confirm Password</label>
+                    <label>{{ t('settings.confirm_password') }}</label>
                     <input type="password" class="form-input" x-model="passwordForm.confirm_password">
                 </div>
             </div>
-            <button class="btn btn-primary" @click="changePassword()">Change Password</button>
+            <button class="btn btn-primary" @click="changePassword()">{{ t('settings.change_password') }}</button>
         </div>
 
         <!-- API Tokens -->
         <div class="settings-group">
-            <h3>API Tokens</h3>
+            <h3>{{ t('settings.api_tokens') }}</h3>
             <div style="display:flex;gap:8px;margin-bottom:12px">
-                <input type="text" class="form-input" x-model="tokenName" placeholder="Token name" style="flex:1">
-                <button class="btn btn-primary" @click="createToken()">Create Token</button>
+                <input type="text" class="form-input" x-model="tokenName" placeholder="{{ t('settings.token_name') }}" style="flex:1">
+                <button class="btn btn-primary" @click="createToken()">{{ t('settings.create_token') }}</button>
             </div>
             <template x-for="t in apiTokens" :key="t.id">
                 <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
                     <span style="flex:1;font-size:0.9rem" x-text="t.name"></span>
                     <span style="font-size:0.8rem;color:var(--text-muted);font-family:var(--font-mono)" x-text="(t.token_prefix || '***') + '...'"></span>
                     <span style="font-size:0.8rem;color:var(--text-muted)" x-text="t.created_at || ''"></span>
-                    <button class="btn btn-danger btn-sm" @click="revokeToken(t.id)">Revoke</button>
+                    <button class="btn btn-danger btn-sm" @click="revokeToken(t.id)">{{ t('settings.revoke') }}</button>
                 </div>
             </template>
-            <div x-show="apiTokens.length === 0" class="empty-state" style="padding:16px">No API tokens</div>
+            <div x-show="apiTokens.length === 0" class="empty-state" style="padding:16px">{{ t('settings.no_api_tokens') }}</div>
         </div>
 
         <!-- Sessions -->
         <div class="settings-group">
-            <h3>Active Sessions</h3>
+            <h3>{{ t('settings.active_sessions') }}</h3>
             <template x-for="s in sessions" :key="s.id">
                 <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
                     <span style="flex:1;font-size:0.9rem" x-text="s.platform || 'Web'"></span>
                     <span style="font-size:0.8rem;color:var(--text-muted)" x-text="s.last_active || ''"></span>
-                    <span class="badge badge-stdio" x-show="s.current">Current</span>
+                    <span class="badge badge-stdio" x-show="s.current">{{ t('settings.current') }}</span>
                 </div>
             </template>
-            <div x-show="sessions.length === 0" class="empty-state" style="padding:16px">No active sessions</div>
+            <div x-show="sessions.length === 0" class="empty-state" style="padding:16px">{{ t('settings.no_active_sessions') }}</div>
         </div>
     </div>
 
@@ -704,9 +704,9 @@
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'tools'" x-transition>
         <div class="settings-group">
-            <h3>Tool Registry</h3>
+            <h3>{{ t('settings.tool_registry') }}</h3>
             <div class="search-bar">
-                <input type="text" class="form-input" x-model="toolSearch" placeholder="Search tools by name, description, or category...">
+                <input type="text" class="form-input" x-model="toolSearch" placeholder="{{ t('settings.search_tools') }}">
             </div>
 
             <div style="display:flex;flex-direction:column;gap:6px">
@@ -726,15 +726,15 @@
                         <div x-show="selectedTool === tool.name" x-transition style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle)">
                             <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px" x-text="tool.description || ''"></div>
                             <div x-show="tool.parameters" style="margin-bottom:8px">
-                                <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">Parameters:</div>
+                                <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">{{ t('settings.parameters') }}</div>
                                 <pre style="font-size:0.75rem;color:var(--text-secondary);background:var(--bg-primary);padding:8px;border-radius:var(--radius);overflow-x:auto" x-text="JSON.stringify(tool.parameters || {}, null, 2)"></pre>
                             </div>
                             <div style="display:flex;gap:8px;align-items:end">
                                 <div class="form-group" style="flex:1;margin-bottom:0">
-                                    <label>Test Arguments (JSON)</label>
+                                    <label>{{ t('settings.test_arguments_json') }}</label>
                                     <input type="text" class="form-input" x-model="toolTestArgs" placeholder='{}' style="font-family:var(--font-mono)">
                                 </div>
-                                <button class="btn btn-secondary btn-sm" @click.stop="testTool(tool.name)" style="height:36px">Test</button>
+                                <button class="btn btn-secondary btn-sm" @click.stop="testTool(tool.name)" style="height:36px">{{ t('settings.test') }}</button>
                             </div>
                             <div x-show="toolTestResult" style="margin-top:8px;padding:8px;background:var(--bg-primary);border-radius:var(--radius);font-size:0.8rem">
                                 <pre x-text="JSON.stringify(toolTestResult, null, 2)" style="white-space:pre-wrap"></pre>
@@ -745,7 +745,7 @@
             </div>
 
             <div x-show="tools.length === 0 && !loading" class="empty-state">
-                No tools registered. Tools are added via MCP servers or local tool definitions.
+                {{ t('settings.no_tools') }}
             </div>
         </div>
     </div>
@@ -756,72 +756,72 @@
     <div x-show="tab === 'system'" x-transition>
         <!-- Diagnostics -->
         <div class="settings-group">
-            <h3>System Diagnostics</h3>
+            <h3>{{ t('settings.system_diagnostics') }}</h3>
             <div class="metrics-row">
                 <div class="metric-card">
                     <div class="metric-value" x-text="diagnostics.uptime || '—'"></div>
-                    <div class="metric-label">Uptime</div>
+                    <div class="metric-label">{{ t('dashboard.uptime') }}</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value" x-text="diagnostics.cpu_percent !== undefined ? diagnostics.cpu_percent + '%' : '—'"></div>
-                    <div class="metric-label">CPU</div>
+                    <div class="metric-label">{{ t('dashboard.cpu') }}</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value" x-text="diagnostics.memory_mb ? diagnostics.memory_mb + ' MB' : '—'"></div>
-                    <div class="metric-label">Memory</div>
+                    <div class="metric-label">{{ t('dashboard.memory') }}</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value" x-text="diagnostics.disk_free_gb ? diagnostics.disk_free_gb + ' GB' : '—'"></div>
-                    <div class="metric-label">Disk Free</div>
+                    <div class="metric-label">{{ t('settings.disk_free') }}</div>
                 </div>
                 <div class="metric-card">
                     <div class="metric-value" x-text="diagnostics.python_version || '—'"></div>
-                    <div class="metric-label">Python</div>
+                    <div class="metric-label">{{ t('settings.python') }}</div>
                 </div>
             </div>
-            <button class="btn btn-secondary btn-sm" @click="loadDiagnostics()">Refresh</button>
+            <button class="btn btn-secondary btn-sm" @click="loadDiagnostics()">{{ t('dashboard.refresh') }}</button>
         </div>
 
         <!-- Logs -->
         <div class="settings-group">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-                <h3>System Logs</h3>
+                <h3>{{ t('settings.system_logs') }}</h3>
                 <div style="display:flex;gap:8px">
                     <select class="form-select" x-model.number="logLines" style="width:100px" @change="loadLogs()">
-                        <option value="50">50 lines</option>
-                        <option value="100">100 lines</option>
-                        <option value="200">200 lines</option>
-                        <option value="500">500 lines</option>
+                        <option value="50">50 {{ t('settings.lines') }}</option>
+                        <option value="100">100 {{ t('settings.lines') }}</option>
+                        <option value="200">200 {{ t('settings.lines') }}</option>
+                        <option value="500">500 {{ t('settings.lines') }}</option>
                     </select>
-                    <button class="btn btn-secondary btn-sm" @click="loadLogs()">Refresh</button>
+                    <button class="btn btn-secondary btn-sm" @click="loadLogs()">{{ t('dashboard.refresh') }}</button>
                 </div>
             </div>
             <div style="background:var(--bg-deep);border:1px solid var(--border);border-radius:var(--radius);padding:12px;max-height:400px;overflow-y:auto;font-family:var(--font-mono);font-size:0.8rem;line-height:1.6">
                 <template x-for="(line, i) in logs" :key="i">
                     <div x-text="line" :style="line.includes('ERROR') || line.includes('error') ? 'color:var(--danger)' : line.includes('WARNING') ? 'color:var(--warning)' : 'color:var(--text-secondary)'"></div>
                 </template>
-                <div x-show="logs.length === 0" style="color:var(--text-muted)">No logs available</div>
+                <div x-show="logs.length === 0" style="color:var(--text-muted)">{{ t('settings.no_logs_available') }}</div>
             </div>
         </div>
 
         <!-- Backup/Restore -->
         <div class="settings-group">
-            <h3>Backup & Maintenance</h3>
+            <h3>{{ t('settings.backup_maintenance') }}</h3>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button class="btn btn-secondary" @click="createBackup()">📦 Download Backup</button>
-                <button class="btn btn-secondary" @click="checkUpdates()">🔄 Check for Updates</button>
-                <button class="btn btn-danger" @click="systemReset()">⚠️ System Reset</button>
+                <button class="btn btn-secondary" @click="createBackup()">{{ t('settings.download_backup') }}</button>
+                <button class="btn btn-secondary" @click="checkUpdates()">{{ t('settings.check_updates') }}</button>
+                <button class="btn btn-danger" @click="systemReset()">{{ t('settings.system_reset') }}</button>
             </div>
             <div x-show="updateInfo" style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
                 <template x-if="updateInfo?.update_available">
                     <div>
-                        <span class="text-warning">Update available:</span>
+                        <span class="text-warning">{{ t('settings.update_available') }}</span>
                         <span x-text="updateInfo?.latest_version"></span>
-                        <span style="color:var(--text-muted)" x-text="'(current: ' + updateInfo?.current_version + ')'"></span>
+                        <span style="color:var(--text-muted)" x-text="'{{ t('settings.latest_version') }} ' + updateInfo?.current_version + ')'"></span>
                     </div>
                 </template>
                 <template x-if="updateInfo && !updateInfo?.update_available && !updateInfo?.error">
-                    <span class="text-success">✓ Running the latest version</span>
+                    <span class="text-success">{{ t('settings.running_latest') }}</span>
                 </template>
                 <template x-if="updateInfo?.error">
                     <span class="text-error" x-text="updateInfo.error"></span>
@@ -836,41 +836,41 @@
     <div x-show="tab === 'import'" x-transition>
         <!-- Export -->
         <div class="settings-group">
-            <h3>Export Configuration</h3>
-            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">Download your complete Kazma configuration.</p>
+            <h3>{{ t('settings.export_config') }}</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.download_complete_config') }}</p>
             <div style="display:flex;gap:8px;align-items:center">
                 <select class="form-select" x-model="exportFormat" style="width:120px">
                     <option value="yaml">YAML</option>
                     <option value="json">JSON</option>
                 </select>
-                <button class="btn btn-primary" @click="exportConfig()">Download Config</button>
+                <button class="btn btn-primary" @click="exportConfig()">{{ t('settings.download_config') }}</button>
             </div>
         </div>
 
         <!-- Import -->
         <div class="settings-group">
-            <h3>Import Configuration</h3>
-            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">Upload or paste a configuration file to import settings.</p>
+            <h3>{{ t('settings.import_config') }}</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.upload_or_paste') }}</p>
             <div class="form-group">
-                <label>Format</label>
+                <label>{{ t('settings.format') }}</label>
                 <select class="form-select" x-model="importFormat" style="width:120px">
                     <option value="yaml">YAML</option>
                     <option value="json">JSON</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>Configuration Data</label>
-                <textarea class="form-textarea" x-model="importData" rows="8" style="font-family:var(--font-mono)" placeholder="Paste YAML or JSON configuration here..."></textarea>
+                <label>{{ t('settings.config_data') }}</label>
+                <textarea class="form-textarea" x-model="importData" rows="8" style="font-family:var(--font-mono)" placeholder="{{ t('settings.paste_yaml_json') }}"></textarea>
             </div>
             <div style="display:flex;gap:12px;margin-bottom:12px">
                 <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem">
                     <input type="file" accept=".yaml,.yml,.json" @change="handleFileUpload($event)" style="display:none" id="import-file-input">
-                    <button class="btn btn-secondary btn-sm" @click="document.getElementById('import-file-input').click()">📁 Upload File</button>
+                    <button class="btn btn-secondary btn-sm" @click="document.getElementById('import-file-input').click()">{{ t('settings.upload_file') }}</button>
                 </label>
             </div>
             <div class="form-group">
                 <label style="display:flex;align-items:center;gap:8px">
-                    <span>Selective Import</span>
+                    <span>{{ t('settings.selective_import') }}</span>
                     <label class="toggle">
                         <input type="checkbox" x-model="importSelective">
                         <span class="toggle-slider"></span>
@@ -878,7 +878,7 @@
                 </label>
             </div>
             <div x-show="importSelective" class="form-group">
-                <label>Select sections to import</label>
+                <label>{{ t('settings.select_sections') }}</label>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
                     <template x-for="section in availableSections" :key="section">
                         <label style="display:flex;align-items:center;gap:4px;font-size:0.85rem;padding:4px 8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer" :style="importSections.includes(section) ? 'border-color:var(--accent);background:rgba(94,106,210,0.08)' : ''">
@@ -888,14 +888,14 @@
                     </template>
                 </div>
             </div>
-            <button class="btn btn-primary" @click="importConfig()" :disabled="saving" x-text="saving ? 'Importing...' : 'Import Configuration'"></button>
+            <button class="btn btn-primary" @click="importConfig()" :disabled="saving" x-text="saving ? '{{ t('settings.importing') }}' : '{{ t('settings.import_configuration') }}'"></button>
         </div>
 
         <!-- Reset -->
         <div class="settings-group">
-            <h3>Reset to Defaults</h3>
-            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">Clear all saved settings and revert to factory defaults. This cannot be undone.</p>
-            <button class="btn btn-danger" @click="resetToDefaults()">Reset All Settings</button>
+            <h3>{{ t('settings.reset_to_defaults_section') }}</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.reset_description') }}</p>
+            <button class="btn btn-danger" @click="resetToDefaults()">{{ t('settings.reset_all_settings') }}</button>
         </div>
     </div>
 

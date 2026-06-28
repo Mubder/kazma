@@ -15,9 +15,18 @@ def client() -> TestClient:
 
 class TestDashboardRoutes:
     def test_dashboard_page(self, client: TestClient) -> None:
-        resp = client.get("/dashboard")
+        # Default language is Arabic (from kazma.yaml). Test with English
+        # cookie so the assertion checks for the English heading.
+        resp = client.get("/dashboard", cookies={"kazma-lang": "en"})
         assert resp.status_code == 200
         assert "Observability Dashboard" in resp.text
+
+    def test_dashboard_page_arabic_default(self, client: TestClient) -> None:
+        """Without a cookie, dashboard renders in the default (Arabic) language."""
+        resp = client.get("/dashboard")
+        assert resp.status_code == 200
+        # Arabic translation of 'Observability Dashboard'
+        assert "لوحة المراقبة" in resp.text
 
     def test_dashboard_api_status(self, client: TestClient) -> None:
         resp = client.get("/api/dashboard/status")

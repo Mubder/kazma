@@ -17,6 +17,11 @@
   // DOM refs
   var messagesEl, inputEl, sendBtn, typingEl, sessionListEl, searchInputEl;
   var costBadge, tokensBadge;
+  var modelSelectorEl;
+
+  // Currently selected model (persisted in localStorage)
+  var selectedModel = '';
+  var MODEL_LS_KEY = 'kazma.selectedModel';
 
   function $(id) { return document.getElementById(id); }
 
@@ -30,6 +35,7 @@
     searchInputEl = $('session-search');
     costBadge = $('session-cost');
     tokensBadge = $('session-tokens');
+    modelSelectorEl = $('model-selector');
 
     if (!messagesEl) return; // not on chat page
 
@@ -39,6 +45,11 @@
       inputEl.addEventListener('input', onInputResize);
     }
     if (sendBtn) sendBtn.addEventListener('click', sendMessage);
+
+    // Model selector
+    if (modelSelectorEl) {
+      modelSelectorEl.addEventListener('change', onModelChange);
+    }
 
     // New session button
     var newBtn = $('new-session-btn');
@@ -72,6 +83,9 @@
 
     // Load sessions and connect
     loadSessions();
+
+    // Load available models for the model selector
+    loadModels();
   }
 
   // ── Input handling ────────────────────────────────────
@@ -125,6 +139,68 @@
     e.target.value = '';
   }
 
+  // ── Model selector ───────────────────────────────────
+  function loadModels() {
+    if (!modelSelectorEl) return;
+
+    // Restore persisted selection
+    try { selectedModel = localStorage.getItem(MODEL_LS_KEY) || ''; } catch(e) { selectedModel = ''; }
+
+    // Fetch the active provider to get the current model + base_url
+    fetch('/api/provider/active')
+      .then(function(r) { return r.ok ? r.json() : {}; })
+      .then(function(active) {
+        var models = [];
+        if (active && active.model) {
+          models.push(active.model);
+          if (!selectedModel) selectedModel = active.model;
+        }
+
+        // Also try /api/models for a richer list
+        fetch('/api/models')
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .then(function(data) {
+            if (data && Array.isArray(data.models)) {
+              data.models.forEach(function(m) {
+                var name = typeof m === 'string' ? m : (m.name || m.id || m.model);
+                if (name && models.indexOf(name) === -1) models.push(name);
+              });
+            }
+            populateModelSelector(models);
+          })
+          .catch(function() { populateModelSelector(models); });
+      })
+      .catch(function() {
+        // If provider/active fails, at least show the persisted model
+        var models = selectedModel ? [selectedModel] : [];
+        populateModelSelector(models);
+      });
+  }
+
+  function populateModelSelector(models) {
+    if (!modelSelectorEl) return;
+    if (!models || models.length === 0) {
+      modelSelectorEl.innerHTML = '<option value="">— default —</option>';
+      return;
+    }
+    var html = '';
+    models.forEach(function(m) {
+      var sel = (m === selectedModel) ? ' selected' : '';
+      html += '<option value="' + escapeHtml(m) + '"' + sel + '>' + escapeHtml(m) + '</option>';
+    });
+    modelSelectorEl.innerHTML = html;
+    // Ensure dropdown reflects persisted value
+    if (selectedModel && models.indexOf(selectedModel) !== -1) {
+      modelSelectorEl.value = selectedModel;
+    }
+  }
+
+  function onModelChange() {
+    if (!modelSelectorEl) return;
+    selectedModel = modelSelectorEl.value || '';
+    try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
+  }
+
   // ── Send message via SSE ──────────────────────────────
   function sendMessage() {
     var text = (inputEl.value || '').trim();
@@ -163,6 +239,7 @@
     activeStream = KS.sse('/api/chat/stream', {
       message: content,
       session_id: chatSessionId,
+      model: selectedModel || '',
     }, {
       onToken: function(data) {
         KS.hideTyping(typingEl);

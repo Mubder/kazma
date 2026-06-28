@@ -31,6 +31,14 @@
 
   <!-- ── Chat Main ── -->
   <main class="chat-main">
+    <!-- Model selector bar -->
+    <div class="chat-model-bar">
+      <label for="model-selector" style="font-size:0.75rem;color:var(--text-muted);margin-right:6px;">{{ t('chat.model') | default('Model') }}</label>
+      <select id="model-selector" class="form-select" style="font-size:0.8rem;padding:4px 8px;max-width:280px;">
+        <option value="">— loading models —</option>
+      </select>
+    </div>
+
     <div id="chat-messages" class="chat-messages">
       <div class="chat-welcome">
         <div class="welcome-icon">🌊</div>

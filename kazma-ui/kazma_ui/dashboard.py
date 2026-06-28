@@ -24,8 +24,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["dashboard"])
 
+# Start with a fallback templates instance (gets English defaults from the
+# i18n Jinja2 patch).  ``create_app()`` will replace this with the shared
+# app-level instance via ``set_templates()`` so the dashboard uses the
+# correct per-request language globals.
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+
+
+def set_templates(tmpl: Jinja2Templates) -> None:
+    """Replace the module-level templates instance with the app's shared one.
+
+    Called by ``create_app()`` after building the main Jinja2Templates so
+    that the dashboard route renders with the correct per-request i18n
+    globals (t, lang, dir) instead of its own isolated instance.
+    """
+    global templates
+    templates = tmpl
 
 _tracer: KazmaTracer | None = None
 _cost_breaker: CostCircuitBreaker | None = None

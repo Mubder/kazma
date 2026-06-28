@@ -74,6 +74,29 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # send it as the X-Kazma-Secret header on /api/approve requests.
     templates.env.globals["kazma_secret"] = os.environ.get("KAZMA_SECRET", "")
 
+    # ── i18n Middleware: read kazma-lang cookie per-request ────────────
+    # The cookie is set by the language toggle button (JS) and overrides
+    # the startup language from kazma.yaml.  The middleware mutates the
+    # shared Jinja2 env globals before each request so that server-side
+    # rendering reflects the user's language choice.
+    from kazma_ui.i18n import make_translator as _make_translator
+
+    _startup_lang = _lang  # default language from kazma.yaml
+
+    @app.middleware("http")
+    async def language_middleware(request: Request, call_next):
+        """Set i18n globals (t, lang, dir) per-request based on kazma-lang cookie."""
+        cookie_lang = request.cookies.get("kazma-lang")
+        if cookie_lang in ("ar", "en"):
+            req_lang = cookie_lang
+        else:
+            req_lang = _startup_lang
+        req_dir = "rtl" if req_lang == "ar" else "ltr"
+        templates.env.globals["t"] = _make_translator(req_lang)
+        templates.env.globals["lang"] = req_lang
+        templates.env.globals["dir"] = req_dir
+        return await call_next(request)
+
     # Create routers
     from kazma_ui.agents import create_agents_router
     from kazma_ui.chat import chat_websocket_handler, create_chat_router
@@ -136,6 +159,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     # Dashboard (legacy)
     from kazma_ui.dashboard import router as dashboard_router
+    from kazma_ui.dashboard import set_templates as set_dashboard_templates
+
+    # Reuse the app's shared templates instance so the dashboard renders
+    # in the correct per-request language (middleware-driven i18n globals).
+    set_dashboard_templates(templates)
 
     app.include_router(dashboard_router)
 

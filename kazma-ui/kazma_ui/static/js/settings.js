@@ -241,6 +241,22 @@ function settingsApp() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(updates),
                 });
+                // Reconfigure the live LLM provider so subsequent chat
+                // requests use the new model/base_url/api_key (Bug 3 fix).
+                try {
+                    await fetch('/api/provider/switch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            provider: this.modelProvider || 'custom',
+                            base_url: this.currentModel.base_url,
+                            model: this.currentModel.model,
+                            api_key: this.currentModel.api_key,
+                        }),
+                    });
+                } catch (switchErr) {
+                    console.warn('[Settings] provider/switch failed:', switchErr);
+                }
                 showToast('Model settings saved', 'success');
             } catch (e) {
                 showToast('Save failed', 'error');

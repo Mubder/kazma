@@ -111,6 +111,7 @@ document.addEventListener('alpine:init', () => {
 function kazmaApp() {
     return {
         theme: 'dark',
+        lang: 'ar',
         sidebarCollapsed: false,
 
         init() {
@@ -124,6 +125,9 @@ function kazmaApp() {
             }
             this._applyTheme();
 
+            // Read current language from <html lang="..."> attribute (set server-side)
+            this.lang = document.documentElement.lang || 'ar';
+
             // Restore sidebar state
             this.sidebarCollapsed = localStorage.getItem('kazma-sidebar-collapsed') === 'true';
 
@@ -135,6 +139,18 @@ function kazmaApp() {
             this.theme = this.theme === 'dark' ? 'light' : 'dark';
             localStorage.setItem('kazma-theme', this.theme);
             this._applyTheme();
+        },
+
+        toggleLanguage() {
+            // Switch between 'ar' and 'en', persist, then reload for SSR pickup
+            const newLang = this.lang === 'ar' ? 'en' : 'ar';
+            this.lang = newLang;
+            // Store in localStorage
+            localStorage.setItem('kazma-lang', newLang);
+            // Store in cookie so server-side middleware reads it on next request
+            document.cookie = 'kazma-lang=' + newLang + ';path=/;max-age=31536000;samesite=lax';
+            // Reload so server-side rendering picks up the new language
+            window.location.reload();
         },
 
         toggleSidebar() {

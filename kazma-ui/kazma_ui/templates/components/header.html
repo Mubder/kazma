@@ -41,6 +41,11 @@
             <span class="notification-dot" x-show="$store.notifications.count > 0" x-text="$store.notifications.count"></span>
         </button>
 
+        {# Language Toggle #}
+        <button class="theme-toggle lang-toggle" @click="toggleLanguage()" :title="lang === 'ar' ? 'English' : 'العربية'">
+            <span style="font-size:0.85rem;font-weight:600;" x-text="lang === 'ar' ? 'EN' : 'ع'"></span>
+        </button>
+
         {# Theme Toggle #}
         <button class="theme-toggle" @click="toggleTheme()" :title="theme === 'dark' ? 'Switch to light' : 'Switch to dark'">
             <template x-if="theme === 'dark'">

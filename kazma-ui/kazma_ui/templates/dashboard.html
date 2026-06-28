@@ -15,9 +15,9 @@
     </div>
     <div style="display:flex;gap:12px;align-items:center;">
       <div class="range-selector">
-        <button class="range-btn active" data-range="hour">1H</button>
-        <button class="range-btn" data-range="day">24H</button>
-        <button class="range-btn" data-range="week">7D</button>
+        <button class="range-btn active" data-range="hour">{{ t('dashboard.range_hour') }}</button>
+        <button class="range-btn" data-range="day">{{ t('dashboard.range_day') }}</button>
+        <button class="range-btn" data-range="week">{{ t('dashboard.range_week') }}</button>
       </div>
       <button id="dash-refresh" class="btn btn-sm btn-secondary" title="{{ t('dashboard.refresh') }}">↻ {{ t('dashboard.refresh') }}</button>
       <span id="connection-status" style="font-size:0.8rem;color:var(--text-muted);">● {{ t('dashboard.connecting') }}</span>
@@ -59,23 +59,23 @@
       <div class="metric-icon">🔢</div>
       <div class="metric-label">{{ t('dashboard.total_tokens') }}</div>
       <div class="metric-value" id="metric-tokens">{{ metrics.total_tokens }}</div>
-      <div class="metric-sub" id="metric-llm-calls">{{ metrics.total_llm_calls }} LLM calls</div>
+      <div class="metric-sub" id="metric-llm-calls">{{ metrics.total_llm_calls }} {{ t('dashboard.llm_calls') }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon">🔧</div>
-      <div class="metric-label">Tool Calls</div>
+      <div class="metric-label">{{ t('dashboard.tool_calls') }}</div>
       <div class="metric-value" id="metric-tools">{{ metrics.total_tool_calls }}</div>
-      <div class="metric-sub" id="metric-traces">{{ metrics.total_traces }} traces</div>
+      <div class="metric-sub" id="metric-traces">{{ metrics.total_traces }} {{ t('dashboard.traces_count') }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon">🔌</div>
-      <div class="metric-label">Circuit Breaker</div>
+      <div class="metric-label">{{ t('dashboard.circuit_breaker') }}</div>
       <div class="metric-value {{ breaker_color }}" id="metric-breaker">{{ breaker_status }}</div>
-      <div class="metric-sub">{{ tracing_backend }} backend</div>
+      <div class="metric-sub">{{ tracing_backend }} {{ t('dashboard.backend') }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon">⏱</div>
-      <div class="metric-label">Uptime</div>
+      <div class="metric-label">{{ t('dashboard.uptime') }}</div>
       <div class="metric-value" id="metric-uptime" style="color:var(--text-primary);">{{ metrics.uptime }}</div>
       <div class="metric-sub" id="silence-info">{{ silence_info }}</div>
     </div>
@@ -84,22 +84,22 @@
   <!-- ── Charts Row ── -->
   <div class="charts-row">
     <div class="chart-card">
-      <h3 class="chart-title">Tokens Over Time</h3>
+      <h3 class="chart-title">{{ t('dashboard.tokens_over_time') }}</h3>
       <canvas id="token-chart" width="600" height="150" style="width:100%;height:150px;"></canvas>
     </div>
     <div class="chart-card">
-      <h3 class="chart-title">Cost Over Time</h3>
+      <h3 class="chart-title">{{ t('dashboard.cost_over_time') }}</h3>
       <canvas id="cost-chart" width="600" height="150" style="width:100%;height:150px;"></canvas>
     </div>
   </div>
 
   <!-- ── System Resources ── -->
   <div id="resources-section" class="chart-card" style="margin-bottom:1.5rem;">
-    <h3 class="chart-title">System Resources</h3>
+    <h3 class="chart-title">{{ t('dashboard.system_resources') }}</h3>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div>
         <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-          <span style="font-size:0.8rem;color:var(--text-tertiary);">CPU</span>
+          <span style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.cpu') }}</span>
           <span style="font-size:0.8rem;font-family:var(--font-mono);color:var(--text-secondary);" id="res-cpu">–</span>
         </div>
         <div class="progress-bar">
@@ -108,7 +108,7 @@
       </div>
       <div>
         <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
-          <span style="font-size:0.8rem;color:var(--text-tertiary);">Memory</span>
+          <span style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.memory') }}</span>
           <span style="font-size:0.8rem;font-family:var(--font-mono);color:var(--text-secondary);" id="res-memory">–</span>
         </div>
       </div>
@@ -119,9 +119,9 @@
   <div class="card" style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle);">
       <h2 style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
-        Session Management
+        {{ t('dashboard.session_management') }}
       </h2>
-      <button id="clear-all-btn" class="btn btn-sm btn-danger">Clear All</button>
+      <button id="clear-all-btn" class="btn btn-sm btn-danger">{{ t('dashboard.clear_all') }}</button>
     </div>
     <div style="padding:16px 20px;">
       <div id="sessions-loading" style="text-align:center;padding:20px;color:var(--text-muted);">
@@ -131,20 +131,20 @@
       </div>
       <div id="sessions-empty" style="display:none;text-align:center;padding:40px 20px;color:var(--text-muted);">
         <div style="font-size:2rem;margin-bottom:8px;">📭</div>
-        <p>No active sessions</p>
-        <p style="font-size:0.8rem;color:var(--text-tertiary);">Sessions appear here when users start chatting</p>
+        <p>{{ t('dashboard.no_active_sessions') }}</p>
+        <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.sessions_hint') }}</p>
       </div>
       <div style="overflow-x:auto;">
         <table id="sessions-table" style="width:100%;border-collapse:collapse;font-size:0.85rem;display:none;">
           <thead>
             <tr style="border-bottom:1px solid var(--border-subtle);">
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Thread ID</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Platform</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">User</th>
-              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Messages</th>
-              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Tokens</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Created</th>
-              <th style="padding:10px 16px;text-align:center;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Actions</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_thread_id') }}</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_platform') }}</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_user') }}</th>
+              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_messages') }}</th>
+              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_tokens') }}</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_created') }}</th>
+              <th style="padding:10px 16px;text-align:center;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_actions') }}</th>
             </tr>
           </thead>
           <tbody id="sessions-tbody"></tbody>
@@ -157,21 +157,21 @@
   <div class="card" style="padding:0;overflow:hidden;">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle);">
       <h2 style="font-size:0.875rem;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.05em;font-weight:500;">
-        Recent Traces
+        {{ t('dashboard.recent_traces') }}
       </h2>
-      <span id="trace-count" style="font-size:0.8rem;color:var(--text-muted);">{{ traces|length }} traces</span>
+      <span id="trace-count" style="font-size:0.8rem;color:var(--text-muted);">{{ traces|length }} {{ t('dashboard.traces_count') }}</span>
     </div>
     <div style="overflow-x:auto;">
       <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
         <thead>
           <tr style="border-bottom:1px solid var(--border-subtle);">
-            <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Time</th>
-            <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Type</th>
-            <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Label</th>
-            <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Status</th>
-            <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Duration</th>
-            <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Tokens</th>
-            <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Cost</th>
+            <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_time') }}</th>
+            <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_type') }}</th>
+            <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_label') }}</th>
+            <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_status') }}</th>
+            <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_duration') }}</th>
+            <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_tokens') }}</th>
+            <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('dashboard.col_cost') }}</th>
           </tr>
         </thead>
         <tbody id="traces-tbody">
@@ -192,8 +192,8 @@
     {% if not traces %}
     <div style="text-align:center;padding:40px 20px;color:var(--text-muted);">
       <div style="font-size:2rem;margin-bottom:8px;">📊</div>
-      <p>No traces yet</p>
-      <p style="font-size:0.8rem;color:var(--text-tertiary);">Traces appear when Kazma processes requests</p>
+      <p>{{ t('dashboard.no_traces') }}</p>
+      <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.no_traces_hint') }}</p>
     </div>
     {% endif %}
   </div>
@@ -209,6 +209,16 @@
 (function() {
   // Session management (preserve existing functionality)
   var loadSessions, deleteSession, clearAllSessions;
+
+  // i18n strings rendered server-side for client-side use
+  var I18N = {
+    delete: "{{ t('dashboard.delete') }}",
+    confirmDelete: "{{ t('dashboard.confirm_delete_session', thread_id='') }}",
+    confirmClearAll: "{{ t('dashboard.confirm_clear_all') }}",
+    errorDeleting: "{{ t('dashboard.error_deleting') }}",
+    errorClearing: "{{ t('dashboard.error_clearing') }}",
+    na: "{{ t('dashboard.na') }}"
+  };
 
   async function _loadSessions() {
     try {
@@ -233,8 +243,8 @@
           '<td style="padding:10px 16px;font-weight:500;">' + (s.display_name||'anonymous') + '</td>' +
           '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + (s.message_count||0) + '</td>' +
           '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + (s.context_tokens||0) + '</td>' +
-          '<td style="padding:10px 16px;font-size:0.75rem;color:var(--text-muted);">' + (s.created_at?new Date(s.created_at).toLocaleString():'N/A') + '</td>' +
-          '<td style="padding:10px 16px;text-align:center;"><button onclick="window._deleteSession(\'' + s.thread_id + '\')" class="btn btn-sm btn-danger" style="padding:4px 8px;font-size:0.7rem;">Delete</button></td>';
+          '<td style="padding:10px 16px;font-size:0.75rem;color:var(--text-muted);">' + (s.created_at?new Date(s.created_at).toLocaleString():I18N.na) + '</td>' +
+          '<td style="padding:10px 16px;text-align:center;"><button onclick="window._deleteSession(\'' + s.thread_id + '\')" class="btn btn-sm btn-danger" style="padding:4px 8px;font-size:0.7rem;">' + I18N.delete + '</button></td>';
         tbody.appendChild(tr);
       });
     } catch(e) {
@@ -244,19 +254,19 @@
   }
 
   window._deleteSession = async function(threadId) {
-    if (!confirm('Delete session ' + threadId + '?')) return;
+    if (!confirm(I18N.confirmDelete + threadId + '?')) return;
     try {
       await fetch('/api/sessions/' + threadId, { method: 'DELETE' });
       _loadSessions();
-    } catch(e) { alert('Error deleting session'); }
+    } catch(e) { alert(I18N.errorDeleting); }
   };
 
   window._clearAllSessions = async function() {
-    if (!confirm('Delete ALL sessions? This cannot be undone.')) return;
+    if (!confirm(I18N.confirmClearAll)) return;
     try {
       await fetch('/api/sessions/clear-all', { method: 'POST' });
       _loadSessions();
-    } catch(e) { alert('Error clearing sessions'); }
+    } catch(e) { alert(I18N.errorClearing); }
   };
 
   document.getElementById('clear-all-btn').addEventListener('click', window._clearAllSessions);

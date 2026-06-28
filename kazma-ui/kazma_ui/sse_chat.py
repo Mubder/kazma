@@ -199,6 +199,30 @@ async def _stream_langgraph_events(
 # ══════════════════════════════════════════════════════════════════════════
 
 
+def _is_cloud_url(base_url: str) -> bool:
+    """Return True if *base_url* points to a real cloud LLM API.
+
+    Local endpoints (localhost, 127.0.0.1, 0.0.0.0) and known local
+    services (Ollama port 11434, LM Studio port 1234, LiteLLM port 4000)
+    do NOT require a real API key and are excluded.
+    """
+    if not base_url:
+        return False
+    from urllib.parse import urlparse
+
+    parsed = urlparse(base_url)
+    hostname = (parsed.hostname or "").lower()
+    port = parsed.port
+
+    # Local addresses never need a real API key
+    if hostname in ("localhost", "127.0.0.1", "0.0.0.0"):
+        return False
+    # Known local-service ports
+    if port in (11434, 1234, 4000):
+        return False
+    return True
+
+
 def create_sse_chat_router(
     graph: Any,
     checkpointer: Any,
@@ -295,6 +319,40 @@ def create_sse_chat_router(
 
         # ── Resolve session and thread_id (shared store) ───────────
         session, thread_id = _resolve_session(session_id)
+
+        # ── Apply model from request body (Bug 2/4 fix) ─────────────
+        # The chat frontend sends the selected model so the server can
+        # reconfigure the live LLM provider before streaming. This
+        # closes the gap where settings.js saved the model but it never
+        # reached the graph.
+        requested_model = (body.get("model") or "").strip()
+        if requested_model and llm_provider is not None:
+            llm_provider.reconfigure(model=requested_model)
+            logger.info("SSE chat: model applied from body: %s", requested_model)
+
+        # ── Pre-stream API key validation (Bug 4 fix) ───────────────
+        # If the provider is a real cloud API but the API key is the
+        # placeholder "not-needed" (meaning the user never configured a
+        # real key), return an immediate, helpful error frame instead of
+        # silently failing with a 401 deep in the graph.
+        _cur_key = (
+            getattr(llm_provider, "config", None) and getattr(llm_provider.config, "api_key", "")
+        ) or _active_profile.get("api_key", "")
+        _cur_url = (
+            getattr(llm_provider, "config", None) and getattr(llm_provider.config, "base_url", "")
+        ) or _active_profile.get("base_url", "")
+        if _cur_key in ("not-needed", "", None) and _is_cloud_url(_cur_url):
+            _help_msg = (
+                "⚠️ No API key configured for "
+                f"{_cur_url}. "
+                "Please go to Settings > Models, enter your API key, "
+                "and click Save before chatting."
+            )
+            return StreamingResponse(
+                iter([_sse_frame("error", {"content": _help_msg})]),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
         # ── Cost breaker gate ──────────────────────────────────────
         if cost_breaker and cost_breaker.should_halt():

@@ -1017,6 +1017,15 @@ tbody tr:last-child td {
   overflow-y: auto;
 }
 
+.chat-model-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+
 .chat-input-area {
   padding: var(--sp-4) var(--sp-6);
   border-top: 1px solid var(--border-subtle);
@@ -1523,6 +1532,30 @@ tbody tr:last-child td {
 }
 [data-theme="light"] .input-wrapper {
   background: var(--bg-surface);
+}
+
+/* ── 23b. Dark Mode Dropdown Options ────────────────────────────── */
+/* Bug 1: native <option> elements render with a browser-default white
+   background while inheriting the light text color from the parent
+   <select> in dark mode, making options invisible (white on white).
+   Scope explicit dark background + light text under [data-theme="dark"]
+   so light mode is unaffected. */
+[data-theme="dark"] select option,
+[data-theme="dark"] .form-select option,
+[data-theme="dark"] select.form-select option {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+}
+[data-theme="dark"] select option:checked,
+[data-theme="dark"] .form-select option:checked,
+[data-theme="dark"] select.form-select option:checked {
+  background-color: var(--accent);
+  color: #fff;
+}
+/* Ensure the closed <select> itself keeps readable text in dark mode. */
+[data-theme="dark"] .form-select {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
 }
 
 /* ── 24. RTL Overrides ──────────────────────────────────────────── */
