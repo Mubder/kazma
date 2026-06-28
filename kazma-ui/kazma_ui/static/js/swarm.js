@@ -17,6 +17,8 @@
   function init() {
     // Load models/providers for dropdowns
     fetchModels();
+    // Load saved model profiles for dropdown
+    fetchSavedProfiles();
 
     // Load worker list
     refreshStatus();
@@ -70,6 +72,49 @@
         populateSelect('add-provider', data.providers || []);
       })
       .catch(function() {});
+  }
+
+  function fetchSavedProfiles() {
+    fetch('/api/models/saved')
+      .then(function(r) { return r.ok ? r.json() : []; })
+      .then(function(profiles) {
+        if (!Array.isArray(profiles)) profiles = [];
+        // Populate the saved profile dropdown
+        var select = document.getElementById('add-saved-profile');
+        if (select) {
+          var currentVal = select.value;
+          var html = '<option value="">— Select Profile —</option>';
+          profiles.forEach(function(p) {
+            html += '<option value="' + esc(p.name) + '" data-model="' + esc(p.model || '') + '" data-provider="' + esc(p.provider || '') + '" data-base-url="' + esc(p.base_url || '') + '">' +
+              esc(p.name) + ' (' + esc(p.model || '?') + ')</option>';
+          });
+          select.innerHTML = html;
+          select.value = currentVal;
+        }
+        // Also populate the datalist for the model input
+        var datalist = document.getElementById('saved-profiles-datalist');
+        if (datalist) {
+          datalist.innerHTML = profiles.map(function(p) {
+            return '<option value="' + esc(p.model || '') + '">';
+          }).join('');
+        }
+      })
+      .catch(function() {});
+  }
+
+  function applySavedProfile(profileName) {
+    if (!profileName) return;
+    var select = document.getElementById('add-saved-profile');
+    if (!select) return;
+    var opt = select.querySelector('option[value="' + profileName + '"]');
+    if (!opt) return;
+    var modelEl = document.getElementById('add-model');
+    var providerEl = document.getElementById('add-provider');
+    var endpointEl = document.getElementById('add-endpoint');
+    if (modelEl && opt.dataset.model) modelEl.value = opt.dataset.model;
+    if (providerEl && opt.dataset.provider) providerEl.value = opt.dataset.provider;
+    if (endpointEl && opt.dataset.baseUrl) endpointEl.value = opt.dataset.baseUrl;
+    showToast('Loaded profile "' + profileName + '"', true);
   }
 
   function refreshStatus() {
@@ -242,14 +287,28 @@
 
   // ── Task Dispatch ─────────────────────────────────────
   function dispatchTask() {
-    var workersInput = ($('dispatch-workers') || {}).value || '';
+    // Gather selected workers from the multi-select
+    var selectEl = $('dispatch-workers');
+    var workerList = [];
+    if (selectEl && selectEl.selectedOptions) {
+      for (var i = 0; i < selectEl.selectedOptions.length; i++) {
+        var v = selectEl.selectedOptions[i].value;
+        if (v) workerList.push(v);
+      }
+    }
+    // Fallback: if the multi-select is absent or empty, accept comma-separated text
+    if (workerList.length === 0 && selectEl) {
+      workerList = (selectEl.value || '').split(',').map(function(w) { return w.trim(); }).filter(Boolean);
+    }
+
     var task = ($('dispatch-task') || {}).value || '';
     var context = ($('dispatch-context') || {}).value || '';
 
-    if (!workersInput.trim()) { showError('Specify at least one worker'); return; }
+    if (!workerList.length) { showError('Specify at least one worker'); return; }
     if (!task.trim()) { showError('Task description is required'); return; }
 
-    var workerList = workersInput.split(',').map(function(w) { return w.trim(); }).filter(Boolean);
+    // Show a pending state in the results panel
+    appendPendingResult(workerList, task);
 
     fetch('/api/swarm/dispatch', {
       method: 'POST',
@@ -259,11 +318,18 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok' || data.status === 'warning') {
-          var msg = 'Task dispatched to ' + (data.dispatched || []).length + ' worker(s)';
+          var dispatchedCount = (data.dispatched || []).length;
+          var msg = 'Task dispatched to ' + dispatchedCount + ' worker(s)';
           if (data.missing && data.missing.length) {
             msg += ' (missing: ' + data.missing.join(', ') + ')';
           }
           showToast(msg, true);
+
+          // Display task results if returned
+          if (data.results && data.results.length) {
+            renderTaskResults(data.results, task);
+          }
+
           // Clear form
           var taskEl = $('dispatch-task'); if (taskEl) taskEl.value = '';
           var ctxEl = $('dispatch-context'); if (ctxEl) ctxEl.value = '';
@@ -275,6 +341,82 @@
       .catch(function(err) {
         showError(err.message);
       });
+  }
+
+  // ── Task Results Rendering ────────────────────────────
+  function appendPendingResult(workerNames, task) {
+    var emptyEl = $('task-results-empty');
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    var listEl = $('task-results-list');
+    if (!listEl) return;
+
+    var card = document.createElement('div');
+    card.className = 'task-result-card';
+    card.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--border-subtle);border-radius:6px;background:rgba(255,255,255,0.02);';
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+        '<span style="font-weight:600;font-size:0.85rem;color:var(--accent);">' +
+          esc(workerNames.join(', ')) +
+        '</span>' +
+        '<span style="font-size:0.75rem;padding:2px 8px;border-radius:10px;background:rgba(210,153,34,0.10);color:var(--warning);">● pending</span>' +
+      '</div>' +
+      '<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px;">' + esc(task.slice(0, 120)) + '</div>' +
+      '<div class="task-result-output" style="font-size:0.75rem;color:var(--text-tertiary);">Waiting for result…</div>';
+    listEl.insertBefore(card, listEl.firstChild);
+  }
+
+  function renderTaskResults(results, task) {
+    var emptyEl = $('task-results-empty');
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    var listEl = $('task-results-list');
+    if (!listEl) return;
+
+    // Remove the most recent pending card (top item) before inserting real results
+    var pendingCard = listEl.querySelector('.task-result-card');
+    if (pendingCard && pendingCard.textContent.indexOf('pending') >= 0) {
+      pendingCard.remove();
+    }
+
+    results.forEach(function(r) {
+      var statusColor = r.status === 'success' ? 'var(--success)' :
+                        r.status === 'error' ? 'var(--danger)' :
+                        r.status === 'timeout' ? 'var(--warning)' :
+                        'var(--text-muted)';
+      var statusBg = r.status === 'success' ? 'rgba(16,185,129,0.10)' :
+                     r.status === 'error' ? 'rgba(248,81,73,0.10)' :
+                     r.status === 'timeout' ? 'rgba(210,153,34,0.10)' :
+                     'rgba(255,255,255,0.05)';
+
+      var card = document.createElement('div');
+      card.className = 'task-result-card';
+      card.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--border-subtle);border-radius:6px;background:rgba(255,255,255,0.02);';
+
+      var header = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
+        '<span style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(r.worker || '?') + '</span>' +
+        '<span style="font-size:0.75rem;padding:2px 8px;border-radius:10px;background:' + statusBg + ';color:' + statusColor + ';">● ' + esc(r.status || 'unknown') + '</span>' +
+      '</div>';
+
+      var taskLine = task ? '<div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;">' + esc(task.slice(0, 120)) + '</div>' : '';
+
+      var outputSection = '';
+      if (r.output) {
+        outputSection = '<div style="margin-top:6px;padding:8px;background:rgba(0,0,0,0.20);border-radius:4px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;">' + esc(r.output) + '</div>';
+      }
+
+      var errorSection = '';
+      if (r.error) {
+        errorSection = '<div style="margin-top:6px;padding:8px;background:rgba(248,81,73,0.08);border-radius:4px;font-family:var(--font-mono);font-size:0.75rem;color:var(--danger);white-space:pre-wrap;word-break:break-word;">⚠ ' + esc(r.error) + '</div>';
+      }
+
+      var taskIdLine = r.task_id ? '<div style="font-size:0.7rem;color:var(--text-tertiary);margin-top:4px;">Task ID: ' + esc(r.task_id) + '</div>' : '';
+
+      card.innerHTML = header + taskLine + outputSection + errorSection + taskIdLine;
+
+      // Insert at top (most recent first)
+      listEl.insertBefore(card, listEl.firstChild);
+    });
   }
 
   // ── Logs Viewer ───────────────────────────────────────
@@ -418,5 +560,6 @@
     viewLogs: viewLogs,
     closeLogs: closeLogs,
     applyRole: applyRole,
+    applySavedProfile: applySavedProfile,
   };
 })();

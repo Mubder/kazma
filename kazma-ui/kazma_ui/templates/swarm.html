@@ -124,6 +124,27 @@
                 <option value="reviewer">Reviewer (Code Review)</option>
               </select>
             </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Model</label>
+              <input type="text" id="add-model" class="form-input" placeholder="e.g., deepseek-chat, gpt-4o" value="deepseek-chat" list="saved-profiles-datalist">
+              <datalist id="saved-profiles-datalist">
+                <!-- Populated dynamically by swarm.js from /api/models/saved -->
+              </datalist>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Saved Profile</label>
+              <select id="add-saved-profile" class="form-select" onchange="KazmaSwarm.applySavedProfile(this.value)">
+                <option value="">— Select Profile —</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">API Endpoint <span style="font-size:0.7rem;color:var(--text-muted);">(optional)</span></label>
+              <input type="text" id="add-endpoint" class="form-input" placeholder="https://api.example.com/v1">
+            </div>
             <div class="form-group">
               <label class="form-label">Provider</label>
               <select id="add-provider" class="form-select">
@@ -133,16 +154,6 @@
                 <option value="google">Google</option>
                 <option value="custom">Custom</option>
               </select>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Model</label>
-              <input type="text" id="add-model" class="form-input" placeholder="e.g., deepseek-chat, gpt-4o" value="deepseek-chat">
-            </div>
-            <div class="form-group">
-              <label class="form-label">API Endpoint <span style="font-size:0.7rem;color:var(--text-muted);">(optional)</span></label>
-              <input type="text" id="add-endpoint" class="form-input" placeholder="https://api.example.com/v1">
             </div>
           </div>
           <div class="form-row">
@@ -193,6 +204,19 @@
             <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.dispatch()">Send Task</button>
           </div>
         </form>
+      </div>
+
+      <!-- ── Task Results ── -->
+      <div class="card" id="task-results-card">
+        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:16px;">📋 Task Results</h3>
+        <div id="task-results-container">
+          <div id="task-results-empty" style="text-align:center;padding:24px;color:var(--text-muted);">
+            <div style="font-size:1.5rem;margin-bottom:6px;">📭</div>
+            <p style="font-size:0.85rem;">No tasks dispatched yet</p>
+            <p style="font-size:0.75rem;color:var(--text-tertiary);">Results will appear here after dispatching a task</p>
+          </div>
+          <div id="task-results-list"></div>
+        </div>
       </div>
 
       <!-- Performance Metrics -->

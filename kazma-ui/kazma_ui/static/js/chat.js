@@ -146,8 +146,21 @@
     // Restore persisted selection
     try { selectedModel = localStorage.getItem(MODEL_LS_KEY) || ''; } catch(e) { selectedModel = ''; }
 
-    // Fetch the active provider to get the current model + base_url
-    fetch('/api/provider/active')
+    // Fetch saved profiles first (these take priority in the dropdown)
+    var savedModels = [];
+    fetch('/api/models/saved')
+      .then(function(r) { return r.ok ? r.json() : []; })
+      .then(function(profiles) {
+        if (Array.isArray(profiles)) {
+          profiles.forEach(function(p) {
+            if (p.model) {
+              var label = p.name + ' (' + p.model + ')';
+              savedModels.push({ value: p.model, label: label, isProfile: true });
+            }
+          });
+        }
+        return fetch('/api/provider/active');
+      })
       .then(function(r) { return r.ok ? r.json() : {}; })
       .then(function(active) {
         var models = [];
@@ -166,32 +179,57 @@
                 if (name && models.indexOf(name) === -1) models.push(name);
               });
             }
-            populateModelSelector(models);
+            populateModelSelector(models, savedModels);
           })
-          .catch(function() { populateModelSelector(models); });
+          .catch(function() { populateModelSelector(models, savedModels); });
       })
       .catch(function() {
-        // If provider/active fails, at least show the persisted model
+        // If both fetches fail, at least show the persisted model
         var models = selectedModel ? [selectedModel] : [];
-        populateModelSelector(models);
+        populateModelSelector(models, savedModels);
       });
   }
 
-  function populateModelSelector(models) {
+  function populateModelSelector(models, savedProfiles) {
     if (!modelSelectorEl) return;
-    if (!models || models.length === 0) {
+    savedProfiles = savedProfiles || [];
+    var allEmpty = (!models || models.length === 0) && savedProfiles.length === 0;
+    if (allEmpty) {
       modelSelectorEl.innerHTML = '<option value="">— default —</option>';
       return;
     }
     var html = '';
-    models.forEach(function(m) {
-      var sel = (m === selectedModel) ? ' selected' : '';
-      html += '<option value="' + escapeHtml(m) + '"' + sel + '>' + escapeHtml(m) + '</option>';
-    });
+    // Saved profiles first (group label via optgroup)
+    if (savedProfiles.length > 0) {
+      html += '<optgroup label="Saved Profiles">';
+      savedProfiles.forEach(function(p) {
+        var sel = (p.value === selectedModel) ? ' selected' : '';
+        html += '<option value="' + escapeHtml(p.value) + '"' + sel + '>' + escapeHtml(p.label) + '</option>';
+      });
+      html += '</optgroup>';
+    }
+    // Discovered models
+    if (models && models.length > 0) {
+      if (savedProfiles.length > 0) html += '<optgroup label="Discovered">';
+      models.forEach(function(m) {
+        var sel = (m === selectedModel) ? ' selected' : '';
+        html += '<option value="' + escapeHtml(m) + '"' + sel + '>' + escapeHtml(m) + '</option>';
+      });
+      if (savedProfiles.length > 0) html += '</optgroup>';
+    }
     modelSelectorEl.innerHTML = html;
     // Ensure dropdown reflects persisted value
-    if (selectedModel && models.indexOf(selectedModel) !== -1) {
-      modelSelectorEl.value = selectedModel;
+    if (selectedModel) {
+      if (models && models.indexOf(selectedModel) !== -1) {
+        modelSelectorEl.value = selectedModel;
+      } else {
+        for (var i = 0; i < savedProfiles.length; i++) {
+          if (savedProfiles[i].value === selectedModel) {
+            modelSelectorEl.value = selectedModel;
+            break;
+          }
+        }
+      }
     }
   }
 

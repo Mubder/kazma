@@ -40,6 +40,10 @@ function settingsApp() {
         testing: false,
         testResult: null,
 
+        // ── Saved Model Profiles ──
+        savedModels: [],
+        profileName: '',
+
         // ── Agent Tab ──
         agent: { name: 'kazma', language: 'ar', system_prompt: '', personality: 'default' },
         personalities: [],
@@ -128,6 +132,10 @@ function settingsApp() {
                 // Load model defaults
                 const defaults = await this._fetch('/api/settings/models/defaults');
                 if (defaults) Object.assign(this.modelDefaults, defaults);
+
+                // Load saved model profiles
+                const saved = await this._fetch('/api/models/saved');
+                if (Array.isArray(saved)) this.savedModels = saved;
 
                 // Load provider presets
                 this.providerPresets = ProvidersManager.getPresetKeys();
@@ -258,6 +266,12 @@ function settingsApp() {
                 } catch (switchErr) {
                     console.warn('[Settings] provider/switch failed:', switchErr);
                 }
+
+                // If a profile name was entered, save as a named profile
+                if (this.profileName && this.profileName.trim()) {
+                    await this.saveModelProfile();
+                }
+
                 showToast('Model settings saved', 'success');
             } catch (e) {
                 showToast('Save failed', 'error');
@@ -289,6 +303,70 @@ function settingsApp() {
         async saveModelDefault(taskType) {
             await ModelsManager.setDefault(taskType, this.modelDefaults[taskType]);
             showToast(`Default for "${taskType}" set to ${this.modelDefaults[taskType]}`, 'success');
+        },
+
+        /* ══════════════════════════════════════════════════════════════════
+           SAVED MODEL PROFILES
+           ══════════════════════════════════════════════════════════════════ */
+
+        async saveModelProfile() {
+            const name = (this.profileName || '').trim();
+            if (!name) { showToast('Enter a profile name', 'error'); return; }
+            try {
+                const resp = await fetch('/api/models/saved', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: name,
+                        base_url: this.currentModel.base_url || '',
+                        api_key: this.currentModel.api_key || '',
+                        model: this.currentModel.model || '',
+                        provider: this.modelProvider || 'custom',
+                    }),
+                });
+                const result = await resp.json();
+                if (result.error) {
+                    showToast(result.error, 'error');
+                    return;
+                }
+                this.profileName = '';
+                await this.loadSavedModels();
+                showToast(`Profile "${name}" saved`, 'success');
+            } catch (e) {
+                showToast('Failed to save profile: ' + e.message, 'error');
+            }
+        },
+
+        async deleteModelProfile(name) {
+            if (!confirm(`Delete profile "${name}"?`)) return;
+            try {
+                await fetch(`/api/models/saved/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                await this.loadSavedModels();
+                showToast(`Profile "${name}" deleted`, 'success');
+            } catch (e) {
+                showToast('Failed to delete profile: ' + e.message, 'error');
+            }
+        },
+
+        async loadSavedModels() {
+            const saved = await this._fetch('/api/models/saved');
+            if (Array.isArray(saved)) this.savedModels = saved;
+        },
+
+        /** Load a saved profile's fields into the current model form. */
+        loadModelProfile(name) {
+            const profile = this.savedModels.find(p => p.name === name);
+            if (!profile) return;
+            if (profile.base_url) this.currentModel.base_url = profile.base_url;
+            if (profile.model) this.currentModel.model = profile.model;
+            if (profile.provider) {
+                this.modelProvider = profile.provider;
+            }
+            // api_key is masked (***), so only overwrite if it's a real key
+            if (profile.api_key && profile.api_key !== '***') {
+                this.currentModel.api_key = profile.api_key;
+            }
+            showToast(`Loaded profile "${name}"`, 'success');
         },
 
         async runModelComparison() {

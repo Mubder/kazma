@@ -296,6 +296,103 @@ class SettingsManager:
         return results
 
     # ══════════════════════════════════════════════════════════════════
+    # SAVED MODEL PROFILES
+    # ══════════════════════════════════════════════════════════════════
+
+    _SAVED_PROFILE_FIELDS = ("base_url", "api_key", "model", "provider")
+
+    def save_model_profile(self, name: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Save a named model profile to ConfigStore.
+
+        Stores the profile under ``models.saved.{name}`` with the fields
+        ``base_url``, ``api_key``, ``model``, and ``provider``.
+
+        Args:
+            name: Profile name (sanitized, must be non-empty).
+            data: Dict containing at least ``base_url``, ``api_key``,
+                ``model``, and optionally ``provider``.
+
+        Returns:
+            The saved profile dict (without the raw api_key).
+        """
+        clean_name = (name or "").strip()
+        if not clean_name:
+            return {"error": "Profile name is required"}
+
+        profile: dict[str, Any] = {}
+        for field in self._SAVED_PROFILE_FIELDS:
+            if field in data:
+                profile[field] = data[field]
+            elif field != "provider":
+                profile[field] = ""
+        # provider defaults to "custom"
+        if not profile.get("provider"):
+            profile["provider"] = "custom"
+        profile["name"] = clean_name
+
+        self._cs.set(f"models.saved.{clean_name}", profile, category="models")
+        logger.info("Saved model profile: %s", clean_name)
+
+        # Return a safe copy (mask api_key)
+        safe = dict(profile)
+        if safe.get("api_key"):
+            safe["api_key"] = "***"
+        return safe
+
+    def get_saved_model_profiles(self) -> list[dict[str, Any]]:
+        """Return all saved model profiles.
+
+        Reads all keys in the ``models`` category that start with
+        ``models.saved.`` and returns a list of profile dicts with
+        masked api_key values.
+
+        Returns:
+            List of profile dicts, each with keys: name, base_url,
+            api_key (masked), model, provider.
+        """
+        cat = self._cs.get_category("models")
+        profiles: list[dict[str, Any]] = []
+        for key, val in cat.items():
+            if not key.startswith("models.saved."):
+                continue
+            if not isinstance(val, dict):
+                continue
+            profile = dict(val)
+            name = key[len("models.saved."):]
+            profile["name"] = name
+            if profile.get("api_key"):
+                profile["api_key"] = "***"
+            profiles.append(profile)
+        # Sort by name for stable ordering
+        profiles.sort(key=lambda p: p.get("name", ""))
+        return profiles
+
+    def get_model_profile(self, name: str) -> dict[str, Any] | None:
+        """Return a single saved model profile by name (with raw api_key).
+
+        Args:
+            name: Profile name.
+
+        Returns:
+            Profile dict or ``None`` if not found.
+        """
+        return self._cs.get(f"models.saved.{name}", None)
+
+    def delete_model_profile(self, name: str) -> bool:
+        """Delete a saved model profile.
+
+        Args:
+            name: Profile name.
+
+        Returns:
+            True if a profile was deleted, False otherwise.
+        """
+        deleted = self._cs.delete(f"models.saved.{name}")
+        if deleted:
+            logger.info("Deleted model profile: %s", name)
+        return deleted
+
+    # ══════════════════════════════════════════════════════════════════
     # AGENT
     # ══════════════════════════════════════════════════════════════════
 

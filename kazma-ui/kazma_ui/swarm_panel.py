@@ -26,6 +26,17 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 logger = logging.getLogger(__name__)
 
+# Optional imports from kazma_core.swarm — degrade gracefully if absent.
+try:
+    from kazma_core.swarm.config import SwarmConfig, WorkerConfig
+    from kazma_core.swarm.manager import SwarmManager
+    from kazma_core.swarm.worker import InProcessWorker
+except ImportError:  # pragma: no cover — exercised only when core is absent
+    SwarmConfig = None  # type: ignore[assignment]
+    WorkerConfig = None  # type: ignore[assignment]
+    SwarmManager = None  # type: ignore[assignment]
+    InProcessWorker = None  # type: ignore[assignment]
+
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
 # ---------------------------------------------------------------------------
@@ -72,6 +83,39 @@ def _has_swarm_core() -> bool:
         return False
 
 
+def _register_ui_worker_with_manager(swarm_manager: Any, worker: dict[str, Any]) -> None:
+    """Register a UI-added worker with the SwarmManager.
+
+    For in-process workers we build a ``WorkerConfig`` so SwarmManager can
+    construct an :class:`InProcessWorker`. If the worker is already
+    registered (e.g. loaded from YAML config), this is a no-op.
+    """
+    if WorkerConfig is None or swarm_manager is None:
+        return
+
+    name = worker.get("name", "")
+    if not name:
+        return
+
+    # Skip if already registered in the manager (e.g. from YAML config).
+    if swarm_manager.get_worker(name) is not None:
+        return
+
+    worker_type_raw = worker.get("type", "in-process")
+    # Map UI type names to config type names.
+    type_map = {"in-process": "in_process", "telegram": "telegram_bot"}
+    cfg_type = type_map.get(worker_type_raw, "in_process")
+
+    wc = WorkerConfig(
+        name=name,
+        type=cfg_type,
+        model=worker.get("model", ""),
+        provider=worker.get("provider", ""),
+        role=worker.get("role", ""),
+    )
+    swarm_manager.add_worker(wc)
+
+
 def _worker_status(worker: dict) -> str:
     """Derive display status: online / offline / busy."""
     if not _started:
@@ -81,11 +125,16 @@ def _worker_status(worker: dict) -> str:
     return "online"
 
 
-def create_swarm_router(templates: Any) -> APIRouter:
+def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
     """Create the Swarm Panel API router.
 
     Args:
         templates: Jinja2Templates instance for HTML rendering.
+        swarm_manager: Optional :class:`SwarmManager` instance. When provided,
+            the dispatch endpoint delegates task execution to it (real execution
+            via ``InProcessWorker`` / ``TelegramWorker``). When ``None``, the
+            panel operates in local-only mode (metadata tracking without real
+            execution).
 
     Returns:
         APIRouter mounted at /api/swarm + /swarm page.
@@ -93,6 +142,7 @@ def create_swarm_router(templates: Any) -> APIRouter:
     router = APIRouter(tags=["swarm"])
 
     _has_core = _has_swarm_core()
+    _swarm_manager = swarm_manager
 
     # ── Web UI Page ──────────────────────────────────────────────────
     @router.get("/swarm", response_class=HTMLResponse)
@@ -189,7 +239,10 @@ def create_swarm_router(templates: Any) -> APIRouter:
 
         dispatched = []
         missing = []
+        results: list[dict[str, Any]] = []
         now_ts = datetime.now(UTC).isoformat()
+
+        # Identify which workers exist in the local registry.
         with _lock:
             for name in worker_names:
                 if name in _workers:
@@ -205,6 +258,41 @@ def create_swarm_router(templates: Any) -> APIRouter:
                 else:
                     missing.append(name)
 
+        # Execute tasks via SwarmManager when available.
+        if _swarm_manager is not None and _has_core:
+            for name in dispatched:
+                try:
+                    result = await _swarm_manager.dispatch(name, task, context)
+                    results.append(result)
+                except Exception as exc:
+                    logger.exception("[Swarm] dispatch failed for worker '%s'", name)
+                    results.append({
+                        "worker": name,
+                        "task_id": "",
+                        "status": "error",
+                        "output": "",
+                        "error": str(exc)[:500],
+                    })
+
+            # Clear busy flags now that execution is complete.
+            with _lock:
+                for name in dispatched:
+                    if name in _workers:
+                        _workers[name]["busy"] = False
+                        _workers[name]["last_heartbeat"] = datetime.now(UTC).isoformat()
+
+            return JSONResponse(
+                {
+                    "status": "ok",
+                    "message": f"Task dispatched to {len(dispatched)} worker(s)",
+                    "dispatched": dispatched,
+                    "missing": missing,
+                    "task": task,
+                    "results": results,
+                }
+            )
+
+        # No SwarmManager wired — local-only mode (metadata tracking).
         if not _has_core:
             return JSONResponse(
                 {
@@ -215,6 +303,7 @@ def create_swarm_router(templates: Any) -> APIRouter:
                     ),
                     "dispatched": dispatched,
                     "missing": missing,
+                    "results": results,
                 }
             )
 
@@ -225,6 +314,7 @@ def create_swarm_router(templates: Any) -> APIRouter:
                 "dispatched": dispatched,
                 "missing": missing,
                 "task": task,
+                "results": results,
             }
         )
 
@@ -269,6 +359,18 @@ def create_swarm_router(templates: Any) -> APIRouter:
             }
             _workers[name] = worker
 
+        # Register with the SwarmManager if available so dispatch can route
+        # to this worker. For UI-added in-process workers, we create an
+        # InProcessWorker (or a WorkerConfig) dynamically.
+        if _swarm_manager is not None:
+            try:
+                _register_ui_worker_with_manager(_swarm_manager, worker)
+            except Exception as exc:
+                logger.warning(
+                    "[Swarm] Failed to register worker '%s' with SwarmManager: %s",
+                    name, exc,
+                )
+
         logger.info("[Swarm] Worker added: %s (%s/%s)", name, worker["model"], worker["provider"])
         return JSONResponse({"status": "ok", "worker": worker}, status_code=201)
 
@@ -283,6 +385,17 @@ def create_swarm_router(templates: Any) -> APIRouter:
                     status_code=404,
                 )
             del _workers[name]
+
+        # Also unregister from the SwarmManager if present.
+        if _swarm_manager is not None:
+            try:
+                if _swarm_manager.get_worker(name) is not None:
+                    _swarm_manager.remove_worker(name)
+            except Exception as exc:
+                logger.warning(
+                    "[Swarm] Failed to remove worker '%s' from SwarmManager: %s",
+                    name, exc,
+                )
 
         logger.info("[Swarm] Worker removed: %s", name)
         return JSONResponse({"status": "ok", "message": f"Worker '{name}' removed"})

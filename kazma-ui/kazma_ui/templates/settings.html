@@ -180,7 +180,7 @@
                     <input type="number" class="form-input" x-model.number="currentModel.timeout" min="5" max="300">
                 </div>
             </div>
-            <div style="display:flex;gap:8px;align-items:center">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <button class="btn btn-primary" @click="saveModel()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save') }}'"></button>
                 <button class="btn btn-secondary" @click="testModel()" :disabled="testing">
                     <span x-show="!testing">{{ t('settings.test_connection') }}</span>
@@ -188,6 +188,33 @@
                 </button>
                 <span x-show="testResult" :class="testResult?.success ? 'text-success' : 'text-error'" x-text="testResult?.success ? '✓ Connected! ' + testResult?.model : '✗ ' + testResult?.error"></span>
             </div>
+            <!-- Save as named profile -->
+            <div class="form-row" style="margin-top:12px;align-items:end">
+                <div class="form-group" style="margin-bottom:0;flex:1">
+                    <label>{{ t('settings.profile_name') | default('Profile Name (save as)') }}</label>
+                    <input type="text" class="form-input" x-model="profileName" :placeholder="'e.g., my-gpt4o'" @keydown.enter="saveModelProfile()">
+                </div>
+                <button class="btn btn-secondary" @click="saveModelProfile()" style="height:36px">{{ t('settings.save_profile') | default('Save Profile') }}</button>
+            </div>
+        </div>
+
+        <!-- Saved Model Profiles -->
+        <div class="settings-group">
+            <h3>{{ t('settings.saved_profiles') | default('Saved Model Profiles') }}</h3>
+            <div x-show="savedModels.length === 0" class="empty-state" style="padding:16px">
+                {{ t('settings.no_saved_profiles') | default('No saved profiles. Enter a profile name above and click "Save Profile".') }}
+            </div>
+            <template x-for="p in savedModels" :key="p.name">
+                <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px">
+                    <div style="flex:1">
+                        <div style="font-weight:600;font-size:0.9rem" x-text="p.name"></div>
+                        <div style="font-size:0.8rem;color:var(--text-muted)" x-text="(p.provider || 'custom') + ' / ' + (p.model || '?')"></div>
+                        <div style="font-size:0.75rem;color:var(--text-tertiary)" x-text="p.base_url || ''"></div>
+                    </div>
+                    <button class="btn btn-secondary btn-sm" @click="loadModelProfile(p.name)">{{ t('settings.load') | default('Load') }}</button>
+                    <button class="btn btn-danger btn-sm" @click="deleteModelProfile(p.name)">×</button>
+                </div>
+            </template>
         </div>
 
         <!-- Model Defaults per Task -->
@@ -195,13 +222,19 @@
             <h3>{{ t('settings.default_models_per_task') }}</h3>
             <template x-for="taskType in ['chat', 'code', 'summarize', 'translate']" :key="taskType">
                 <div class="form-row" style="align-items:end;margin-bottom:8px">
-                    <div class="form-group" style="margin-bottom:0">
+                    <div class="form-group" style="margin-bottom:0;flex:1">
                         <label x-text="taskType.charAt(0).toUpperCase() + taskType.slice(1)"></label>
-                        <input type="text" class="form-input" x-model="modelDefaults[taskType]" :placeholder="'e.g. gpt-4o-mini'">
+                        <input type="text" class="form-input" x-model="modelDefaults[taskType]" :placeholder="'e.g. gpt-4o-mini'" list="saved-models-datalist">
                     </div>
                     <button class="btn btn-secondary btn-sm" @click="saveModelDefault(taskType)" style="height:36px">{{ t('settings.set') }}</button>
                 </div>
             </template>
+            <!-- Datalist populated from saved profiles for autocomplete -->
+            <datalist id="saved-models-datalist">
+                <template x-for="p in savedModels" :key="p.name">
+                    <option :value="p.model" x-text="p.name + ' (' + p.model + ')'"></option>
+                </template>
+            </datalist>
         </div>
 
         <!-- Model Comparison -->

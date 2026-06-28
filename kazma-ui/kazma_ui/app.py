@@ -248,7 +248,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # ── Models & Ollama Management Router ────────────────────────
     from kazma_ui.models_route import create_models_router
 
-    models_router = create_models_router()
+    models_router = create_models_router(config_store=config_store)
     app.include_router(models_router)
     logger.info("Models router mounted at /api/models, /api/ollama/*")
 

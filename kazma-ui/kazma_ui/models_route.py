@@ -4,6 +4,9 @@ Provides:
   GET  /api/models         — Unified model discovery (provider-aware)
   GET  /api/ollama/check   — Ollama health check
   POST /api/ollama/pull    — Pull a model via ollama pull (background)
+  GET  /api/models/saved   — List all saved model profiles
+  POST /api/models/saved   — Save a new named model profile
+  DELETE /api/models/saved/{name} — Delete a saved model profile
 """
 
 from __future__ import annotations
@@ -23,13 +26,40 @@ class OllamaPullRequest(BaseModel):
     model: str
 
 
-def create_models_router() -> APIRouter:
+class SaveModelProfileRequest(BaseModel):
+    """Request body for POST /api/models/saved."""
+
+    name: str
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    provider: str = "custom"
+
+
+def create_models_router(config_store: Any = None) -> APIRouter:
     """Create the models & Ollama management router.
 
+    Args:
+        config_store: Optional :class:`ConfigStore` instance. When provided,
+            the saved-model-profiles endpoints (GET/POST/DELETE
+            /api/models/saved) are registered. When ``None``, those
+            endpoints return a 503 indicating profiles are unavailable.
+
     Returns:
-        APIRouter with /api/models, /api/ollama/check, /api/ollama/pull.
+        APIRouter with /api/models, /api/ollama/check, /api/ollama/pull,
+        and (conditionally) /api/models/saved.
     """
     r = APIRouter(tags=["models"])
+
+    # Lazily initialize SettingsManager for profile operations
+    _sm = None
+
+    def _get_sm():
+        nonlocal _sm
+        if _sm is None and config_store is not None:
+            from kazma_core.settings_manager import SettingsManager
+            _sm = SettingsManager(config_store)
+        return _sm
 
     # ── Background pull tasks (tracked by PID) ────────────────────
     _pull_tasks: dict[str, dict[str, Any]] = {}
@@ -108,5 +138,51 @@ def create_models_router() -> APIRouter:
             List of {"model": "...", "pid": ..., "status": "..."}
         """
         return list(_pull_tasks.values())
+
+    # ── Saved Model Profiles ───────────────────────────────────────
+
+    @r.get("/api/models/saved")
+    async def list_saved_models() -> list[dict[str, Any]]:
+        """List all saved model profiles.
+
+        Returns:
+            List of profile dicts with masked api_key.
+        """
+        sm = _get_sm()
+        if sm is None:
+            return []
+        return sm.get_saved_model_profiles()
+
+    @r.post("/api/models/saved", status_code=201)
+    async def save_model_profile(req: SaveModelProfileRequest) -> dict[str, Any]:
+        """Save a named model profile.
+
+        Request body:
+            {"name": "my-gpt4", "base_url": "...", "api_key": "...",
+             "model": "gpt-4o", "provider": "openai"}
+        """
+        sm = _get_sm()
+        if sm is None:
+            return {"error": "ConfigStore not available"}
+        result = sm.save_model_profile(req.name, req.model_dump())
+        if "error" in result:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(result, status_code=400)
+        return result
+
+    @r.delete("/api/models/saved/{name}")
+    async def delete_model_profile(name: str) -> dict[str, str]:
+        """Delete a saved model profile by name."""
+        sm = _get_sm()
+        if sm is None:
+            return {"status": "error", "message": "ConfigStore not available"}
+        deleted = sm.delete_model_profile(name)
+        if not deleted:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                {"status": "error", "message": f"Profile '{name}' not found"},
+                status_code=404,
+            )
+        return {"status": "ok"}
 
     return r
