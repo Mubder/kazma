@@ -470,7 +470,13 @@
             <button class="btn btn-primary" @click="saveConnector('webhook')">{{ t('settings.save') }}</button>
         </div>
 
-        <p class="text-muted" style="margin-top:8px">{{ t('settings.gateway_restart_required') }}</p>
+        <div style="margin-top:16px;padding:12px 16px;background:rgba(94,106,210,0.06);border:1px solid var(--border);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <div>
+                <strong>Gateway Adapters</strong>
+                <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">Connector changes are auto-applied on save. Use this button to manually reload all adapters without restarting the server.</p>
+            </div>
+            <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving" x-text="saving ? 'Refreshing...' : '🔄 Refresh Gateway'"></button>
+        </div>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════

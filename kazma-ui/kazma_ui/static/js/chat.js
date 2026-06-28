@@ -90,18 +90,21 @@
 
   // ── Input handling ────────────────────────────────────
   function onInputKeydown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    // Enter (without Shift and without Ctrl) sends the message.
+    // Ctrl+Enter also sends the message (so users who press Ctrl+Enter
+    // from muscle-memory get the expected behaviour).
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
       sendMessage();
+      return;
     }
-    // Ctrl+Enter to add newline
-    if (e.key === 'Enter' && e.ctrlKey) {
-      var start = this.selectionStart;
-      var end = this.selectionEnd;
-      this.value = this.value.slice(0, start) + '\n' + this.value.slice(end);
-      this.selectionStart = this.selectionEnd = start + 1;
-      onInputResize.call(this);
+    // Ctrl+Enter or Cmd+Enter sends the message
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      sendMessage();
+      return;
     }
+    // Shift+Enter inserts a newline (default textarea behaviour — no preventDefault)
   }
 
   function onInputResize() {

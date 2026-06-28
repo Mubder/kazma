@@ -45,6 +45,22 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # Create config store for runtime settings
     config_store = ConfigStore()
 
+    # ── Configure the agent workspace (config-relative, not drive root) ──
+    # file_write / file_read default to Path.cwd() when no workspace is
+    # configured, which can create a C:\workspace folder at the drive root
+    # on Windows. Pin the workspace to kazma-data/workspace (under the
+    # current working directory) so all file operations stay scoped.
+    # KAZMA_WORKSPACE env var overrides this for custom deployments.
+    try:
+        from kazma_core.tools.file_write import configure_workspace
+
+        _workspace_env = os.environ.get("KAZMA_WORKSPACE", "").strip()
+        _workspace_path = _workspace_env or "kazma-data/workspace"
+        configure_workspace(workspace=_workspace_path)
+        logger.info("[Workspace] Configured to %s", _workspace_path)
+    except Exception as e:
+        logger.warning("[Workspace] Failed to configure: %s", e)
+
     # Create FastAPI app
     app = FastAPI(
         title="Kazma",
@@ -442,20 +458,28 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
             if telegram_token:
                 tg_adapter = TelegramAdapter(token=telegram_token)
+                # Set allowed users from config store
+                allowed = config_store.get("connectors.telegram.allowed_users", "")
+                if allowed:
+                    try:
+                        allowed_ids = [int(uid.strip()) for uid in allowed.split(",") if uid.strip()]
+                        tg_adapter.set_allowed_users(allowed_ids)
+                    except ValueError:
+                        logger.warning("[Gateway] Invalid allowed_users format: %s", allowed)
                 gateway.add_adapter(tg_adapter)
                 logger.info("[Gateway] Telegram adapter re-registered via refresh")
 
-            # Discord adapter
-            discord_token = os.environ.get("DISCORD_BOT_TOKEN", "")
+            # Discord adapter (config_store > env)
+            discord_token = config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
             if discord_token:
                 from kazma_gateway.adapters.discord import DiscordAdapter
                 discord_adapter = DiscordAdapter(token=discord_token)
                 gateway.add_adapter(discord_adapter)
                 logger.info("[Gateway] Discord adapter re-registered via refresh")
 
-            # Slack adapter
-            slack_bot_token = os.environ.get("SLACK_BOT_TOKEN", "")
-            slack_app_token = os.environ.get("SLACK_APP_TOKEN", "")
+            # Slack adapter (config_store > env)
+            slack_bot_token = config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
+            slack_app_token = config_store.get("connectors.slack.app_token", "") or os.environ.get("SLACK_APP_TOKEN", "")
             if slack_bot_token and slack_app_token:
                 from kazma_gateway.adapters.slack import SlackAdapter
                 slack_adapter = SlackAdapter(bot_token=slack_bot_token, app_token=slack_app_token)

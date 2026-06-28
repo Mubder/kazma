@@ -16,7 +16,7 @@
         <div>
           <div style="font-size:1rem;font-weight:500;color:var(--text-primary);" x-text="agent.name || 'kazma'"></div>
           <div style="font-size:0.8rem;color:var(--text-muted);">
-            <span x-text="agent.running ? 'Running' : 'Stopped'"></span>
+            <span x-text="agent.running ? (agent.agent_state === 'idle' ? 'Ready — waiting for messages' : (agent.agent_state === 'thinking' ? 'Thinking...' : 'Acting...')) : 'Stopped'"></span>
             <span style="margin:0 6px;color:var(--text-tertiary);">·</span>
             <span x-text="'State: ' + agent.agent_state"></span>
             <template x-if="agent.last_activity">
@@ -52,10 +52,10 @@
       <div class="metric-icon">⚙️</div>
       <div class="metric-label">Status</div>
       <div class="metric-value" id="metric-running" style="color:var(--text-primary);">
-        <span x-text="agent.running ? 'Running' : 'Stopped'"
+        <span x-text="agent.running ? (agent.agent_state === 'idle' ? 'Ready' : (agent.agent_state === 'thinking' ? 'Thinking' : 'Acting')) : 'Stopped'"
               :style="agent.running ? 'color:var(--success);' : 'color:var(--text-muted);'"></span>
       </div>
-      <div class="metric-sub" x-text="agent.last_activity || (agent.agent_state !== 'idle' ? agent.agent_state : 'idle')"></div>
+      <div class="metric-sub" x-text="agent.running ? (agent.agent_state === 'idle' ? 'waiting for messages' : agent.agent_state) : (agent.last_activity || 'idle')"></div>
     </div>
     <div class="metric-card">
       <div class="metric-icon">🧠</div>

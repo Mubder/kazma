@@ -31,10 +31,22 @@ def configure_workspace(workspace: str | None = None, allow_absolute: bool = Fal
 
 
 def _get_workspace() -> Path:
-    """Get the configured workspace root, defaulting to cwd."""
+    """Get the configured workspace root.
+
+    Defaults to ``kazma-data/workspace`` relative to the current working
+    directory (NOT the drive root) when no workspace has been explicitly
+    configured. This prevents accidental creation of a ``C:\\workspace``
+    folder on Windows. The ``KAZMA_WORKSPACE`` env var, if set, is
+    honored as an override.
+    """
     if _WORKSPACE_ROOT is not None:
         return _WORKSPACE_ROOT
-    return Path.cwd().resolve()
+    import os
+
+    env_ws = os.environ.get("KAZMA_WORKSPACE", "").strip()
+    if env_ws:
+        return Path(env_ws).expanduser().resolve()
+    return (Path.cwd() / "kazma-data" / "workspace").resolve()
 
 
 def _is_within_workspace(target: Path, workspace: Path) -> bool:

@@ -73,7 +73,7 @@
           rows="1"
           placeholder="{{ t('chat.placeholder') }}"
         ></textarea>
-        <button id="send-btn" class="send-btn" title="{{ t('chat.send') }} (Enter)">
+        <button id="send-btn" class="send-btn" title="{{ t('chat.send') }} (Enter / Ctrl+Enter)">
           <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
             <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
           </svg>
@@ -83,7 +83,7 @@
         <span id="session-cost" class="cost-badge">$0.0000</span>
         <span id="session-tokens" class="token-badge">0 {{ t('chat.tokens') }}</span>
         <span style="margin-left:auto;font-size:0.7rem;color:var(--text-muted);">
-          <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Enter</kbd> {{ t('chat.send_shortcut') }} ·
+          <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Enter</kbd> / <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+Enter</kbd> {{ t('chat.send_shortcut') }} ·
           <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Shift+Enter</kbd> {{ t('chat.newline_shortcut') }}
         </span>
       </div>

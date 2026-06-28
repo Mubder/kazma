@@ -450,9 +450,41 @@ function settingsApp() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ platform, settings: this.connectors[platform] || {} }),
                 });
-                showToast(`${platform} settings saved. Restart gateway to apply.`, 'success');
+                // Auto-refresh gateway adapters so the new connector config
+                // takes effect immediately (no manual server restart needed).
+                try {
+                    const refreshResp = await fetch('/api/gateway/refresh-adapters', { method: 'POST' });
+                    const refreshData = await refreshResp.json();
+                    showToast(`${platform} settings saved. Gateway refreshed (${refreshData.adapters_count || 0} adapters).`, 'success');
+                } catch (refreshErr) {
+                    console.warn('[Settings] Gateway refresh failed:', refreshErr);
+                    showToast(`${platform} settings saved, but gateway refresh failed. Use "Refresh Gateway" button.`, 'warning');
+                }
             } catch (e) {
                 showToast('Save failed', 'error');
+            }
+            this.saving = false;
+        },
+
+        /**
+         * Manually trigger a gateway adapter refresh via the
+         * /api/gateway/refresh-adapters endpoint. Re-reads connector tokens
+         * from the config store and hot-reloads all adapters without
+         * restarting the server.
+         */
+        async refreshGateway() {
+            this.saving = true;
+            try {
+                const resp = await fetch('/api/gateway/refresh-adapters', { method: 'POST' });
+                const data = await resp.json();
+                if (resp.ok) {
+                    const names = (data.adapters || []).join(', ') || 'none';
+                    showToast(`Gateway refreshed — ${data.adapters_count || 0} adapter(s): ${names}`, 'success');
+                } else {
+                    showToast('Gateway refresh failed: ' + (data.detail || resp.statusText), 'error');
+                }
+            } catch (e) {
+                showToast('Gateway refresh failed: ' + e.message, 'error');
             }
             this.saving = false;
         },
