@@ -3,6 +3,11 @@
 Follows the Hermes read_file format: "{LINE_NUM}|{CONTENT}".
 Supports offset/limit pagination. 1-indexed lines.
 
+Safety: reads are restricted to the agent workspace by default, mirroring
+``file_write``.  The workspace root and absolute-path policy are shared
+with ``file_write`` via ``configure_workspace`` so both tools enforce the
+same boundary.
+
 Usage:
     from kazma_core.tools.file_read import file_read
     content = await file_read("/path/to/file.py", offset=10, limit=50)
@@ -11,6 +16,15 @@ Usage:
 from __future__ import annotations
 
 from pathlib import Path
+
+# Shared workspace configuration (re-exported for convenience so callers
+# can import ``configure_workspace`` from either module).
+import kazma_core.tools.file_write as _fw
+
+# Re-export helpers so callers can ``from file_read import configure_workspace``
+configure_workspace = _fw.configure_workspace
+_get_workspace = _fw._get_workspace
+_is_within_workspace = _fw._is_within_workspace
 
 MAX_CHARS = 100_000
 
@@ -42,7 +56,13 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     if not path or not path.strip():
         return "Error: No path provided."
 
+    workspace = _get_workspace()
     p = Path(path).expanduser().resolve()
+
+    # ── Safety check (mirrors file_write) ─────────────────────────
+    within = _is_within_workspace(p, workspace)
+    if not within and not _fw._ALLOW_ABSOLUTE:
+        return "Safety: reads outside workspace are not allowed."
 
     try:
         if not p.exists():

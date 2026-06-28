@@ -12,9 +12,14 @@ from kazma_core.tools.file_write import configure_workspace
 class TestFileRead:
     """Tests for the file_read tool."""
 
+    def setup_method(self) -> None:
+        """Reset workspace config before each test."""
+        configure_workspace(workspace=None, allow_absolute=False)
+
     @pytest.mark.asyncio
     async def test_file_read_returns_content(self, tmp_path: Path) -> None:
         """file_read returns line-numbered content from a file."""
+        configure_workspace(workspace=str(tmp_path))
         test_file = tmp_path / "hello.txt"
         test_file.write_text("line one\nline two\nline three\n")
 
@@ -29,6 +34,7 @@ class TestFileRead:
     @pytest.mark.asyncio
     async def test_file_read_with_offset(self, tmp_path: Path) -> None:
         """file_read respects offset and limit parameters."""
+        configure_workspace(workspace=str(tmp_path))
         test_file = tmp_path / "ten_lines.txt"
         test_file.write_text("\n".join(f"line {i}" for i in range(1, 11)) + "\n")
 
@@ -45,6 +51,7 @@ class TestFileRead:
     @pytest.mark.asyncio
     async def test_file_read_not_found(self) -> None:
         """file_read returns a friendly error for missing files."""
+        configure_workspace(workspace=".", allow_absolute=True)
         from kazma_core.tools.file_read import file_read
 
         result = await file_read("/nonexistent/path/xyz.txt")
@@ -56,6 +63,7 @@ class TestFileRead:
     @pytest.mark.asyncio
     async def test_read_file_returns_content(self, tmp_path: Path) -> None:
         """Alias test — same as test_file_read_returns_content for naming parity."""
+        configure_workspace(workspace=str(tmp_path))
         test_file = tmp_path / "data.txt"
         test_file.write_text("hello world\n")
 

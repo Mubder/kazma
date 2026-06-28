@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,10 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of per-thread locks retained in memory.  When exceeded
+# the least-recently-used lock is evicted (LRU via OrderedDict).
+_MAX_THREAD_LOCKS = 10_000
+
 
 class CheckpointManager(BaseCheckpointSaver):
     """Thread-safe wrapper around AsyncSqliteSaver.
@@ -29,19 +34,39 @@ class CheckpointManager(BaseCheckpointSaver):
     Prevents race conditions during concurrent writes to the same
     thread_id by acquiring a per-thread asyncio.Lock before save.
 
+    The internal ``_locks`` dict is bounded by ``max_locks`` (default
+    10 000).  When the limit is exceeded the least-recently-used lock
+    entry is evicted using an :class:`~collections.OrderedDict`
+    (``move_to_end`` on access, ``popitem(last=False)`` on overflow).
+
     Args:
-        saver: The underlying AsyncSqliteSaver instance.
+        saver:     The underlying AsyncSqliteSaver instance.
+        max_locks: Maximum number of per-thread locks to retain.
     """
 
-    def __init__(self, saver: AsyncSqliteSaver) -> None:
+    def __init__(self, saver: AsyncSqliteSaver, max_locks: int = _MAX_THREAD_LOCKS) -> None:
         self._saver = saver
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
+        self._max_locks = max_locks
 
     def _get_lock(self, thread_id: str) -> asyncio.Lock:
-        """Get or create a lock for a specific thread_id."""
-        if thread_id not in self._locks:
-            self._locks[thread_id] = asyncio.Lock()
-        return self._locks[thread_id]
+        """Get or create a lock for a specific thread_id.
+
+        Uses LRU ordering: existing entries are moved to the end
+        (most-recently-used) and the oldest entry is evicted when the
+        bound is exceeded.
+        """
+        lock = self._locks.get(thread_id)
+        if lock is not None:
+            # LRU: mark as most-recently-used.
+            self._locks.move_to_end(thread_id)
+            return lock
+        lock = asyncio.Lock()
+        self._locks[thread_id] = lock
+        # Evict oldest entries when the bound is exceeded.
+        while len(self._locks) > self._max_locks:
+            self._locks.popitem(last=False)
+        return lock
 
     async def aput(self, config: dict[str, Any], checkpoint: Any, metadata: Any, new_versions: Any) -> dict[str, Any]:
         """Save a checkpoint with per-thread locking.

@@ -21,12 +21,19 @@ import asyncio
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of entries retained in per-handler in-memory dicts.
+# When exceeded the least-recently-used entry is evicted (LRU via
+# OrderedDict).  This bounds memory usage for long-running gateways
+# that see many distinct senders / threads.
+_MAX_DICT_ENTRIES = 10_000
 
 # Platform-specific keys that must NEVER enter graph state
 _PLATFORM_KEYS = frozenset(
@@ -189,14 +196,20 @@ def create_graph_handler(
     # Per-sender session tracking (sender_id → thread_id).
     # Guarded by _sessions_lock because concurrent handler invocations for
     # different senders read/write this shared dict.
-    _sessions: dict[str, str] = {}
+    #
+    # Bounded LRU: evicts the least-recently-used sender when the store
+    # exceeds _MAX_DICT_ENTRIES (default 10 000).
+    _sessions: OrderedDict[str, str] = OrderedDict()
     _sessions_lock = asyncio.Lock()
 
     # Per-thread_id serialization lock. Two concurrent messages for the same
     # thread_id must not interleave graph.ainvoke() / checkpoint writes, or
     # the LangGraph state and SQLite checkpoint will corrupt. Each distinct
     # thread_id gets its own asyncio.Lock so unrelated threads stay parallel.
-    _thread_locks: dict[str, asyncio.Lock] = {}
+    #
+    # Bounded LRU: evicts the least-recently-used lock when the store
+    # exceeds _MAX_DICT_ENTRIES (default 10 000).
+    _thread_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
     _thread_locks_lock = asyncio.Lock()
 
     # Session TTL: entries survive agent replies (for crash-recovery routing)
@@ -204,12 +217,21 @@ def create_graph_handler(
     _session_ttl_seconds = 300  # 5 minutes
 
     async def _get_thread_lock(thread_id: str) -> asyncio.Lock:
-        """Return (creating if needed) the serialization lock for a thread_id."""
+        """Return (creating if needed) the serialization lock for a thread_id.
+
+        Uses LRU ordering: existing entries are moved to the end
+        (most-recently-used) and the oldest entry is evicted when the
+        bound is exceeded.
+        """
         async with _thread_locks_lock:
             lock = _thread_locks.get(thread_id)
-            if lock is None:
-                lock = asyncio.Lock()
-                _thread_locks[thread_id] = lock
+            if lock is not None:
+                _thread_locks.move_to_end(thread_id)
+                return lock
+            lock = asyncio.Lock()
+            _thread_locks[thread_id] = lock
+            while len(_thread_locks) > _MAX_DICT_ENTRIES:
+                _thread_locks.popitem(last=False)
             return lock
 
     async def handler(msg: IncomingMessage) -> None:
@@ -218,9 +240,15 @@ def create_graph_handler(
 
         # Resolve thread_id using standardized resolver (synchronized)
         async with _sessions_lock:
-            if sender not in _sessions:
+            if sender in _sessions:
+                # LRU: mark as most-recently-used.
+                _sessions.move_to_end(sender)
+                thread_id = _sessions[sender]
+            else:
                 _sessions[sender] = _resolve_thread(msg)
-            thread_id = _sessions[sender]
+                while len(_sessions) > _MAX_DICT_ENTRIES:
+                    _sessions.popitem(last=False)
+                thread_id = _sessions[sender]
 
         # Inject the resolved thread_id into context_metadata
         # so _build_initial_state can pick it up

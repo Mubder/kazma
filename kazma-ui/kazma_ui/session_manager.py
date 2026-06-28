@@ -14,15 +14,21 @@ can import it from one canonical location.
 from __future__ import annotations
 
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 __all__ = [
     "ChatSession",
+    "MAX_SESSIONS",
     "SessionManager",
     "get_session_manager",
 ]
+
+# Maximum number of sessions retained in memory.  When exceeded the
+# least-recently-used entry is evicted (LRU via OrderedDict).
+MAX_SESSIONS = 10_000
 
 
 @dataclass
@@ -59,16 +65,31 @@ class SessionManager:
     Both WebSocket and SSE handlers obtain the singleton via
     :func:`get_session_manager` so a session created on one transport
     is immediately visible to the other.
+
+    The store is bounded by :data:`MAX_SESSIONS`.  When the limit is
+    exceeded the least-recently-used session is evicted using an
+    :class:`~collections.OrderedDict` (``move_to_end`` on access,
+    ``popitem(last=False)`` on overflow).
     """
 
-    def __init__(self) -> None:
-        self._sessions: dict[str, ChatSession] = {}
+    def __init__(self, max_sessions: int = MAX_SESSIONS) -> None:
+        self._sessions: OrderedDict[str, ChatSession] = OrderedDict()
+        self._max_sessions = max_sessions
+
+    def _evict_if_needed(self) -> None:
+        """Evict the oldest session when the store exceeds the bound."""
+        while len(self._sessions) > self._max_sessions:
+            self._sessions.popitem(last=False)
 
     # ── core CRUD ──────────────────────────────────────────────────
 
     def get(self, session_id: str) -> ChatSession | None:
         """Return the session for ``session_id`` or ``None``."""
-        return self._sessions.get(session_id)
+        session = self._sessions.get(session_id)
+        if session is not None:
+            # LRU: mark as most-recently-used.
+            self._sessions.move_to_end(session_id)
+        return session
 
     def get_or_create(self, session_id: str | None = None) -> ChatSession:
         """Get an existing session or create a new one.
@@ -77,15 +98,21 @@ class SessionManager:
         session with the given ID already exists it is returned as-is.
         """
         if session_id and session_id in self._sessions:
+            # LRU: mark as most-recently-used.
+            self._sessions.move_to_end(session_id)
             return self._sessions[session_id]
         sid = session_id or str(uuid.uuid4())
         session = ChatSession(session_id=sid)
         self._sessions[sid] = session
+        self._evict_if_needed()
         return session
 
     def put(self, session: ChatSession) -> None:
         """Insert or replace a session in the store."""
         self._sessions[session.session_id] = session
+        # LRU: mark as most-recently-used.
+        self._sessions.move_to_end(session.session_id)
+        self._evict_if_needed()
 
     def delete(self, session_id: str) -> None:
         """Remove a session.  No-op if not found."""
@@ -112,6 +139,9 @@ class SessionManager:
         session.messages = list(data.get("messages", []))
         session.total_cost = data.get("total_cost", 0.0)
         session.total_tokens = data.get("total_tokens", 0)
+        # LRU: mark as most-recently-used.
+        self._sessions.move_to_end(session_id)
+        self._evict_if_needed()
         return session
 
     def clear(self) -> None:

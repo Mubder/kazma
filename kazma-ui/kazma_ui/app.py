@@ -910,30 +910,34 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     @app.exception_handler(404)
     async def not_found(request: Request, exc: Any) -> HTMLResponse:
+        # 404s are safe to surface to the user — the path is visible in the
+        # URL bar anyway. We do NOT log at error level to avoid noise.
         return templates.TemplateResponse(
             request,
             "error.html",
-            {"code": 404, "message": "Page not found", "detail": str(exc)},
+            {"code": 404, "message": "Page not found", "detail": ""},
             status_code=404,
         )
 
     @app.exception_handler(500)
     async def server_error(request: Request, exc: Any) -> HTMLResponse:
-        logger.error("Internal server error: %s", exc)
+        # Log full traceback server-side; never expose internals to clients.
+        logger.exception("[app] Internal server error on %s %s", request.method, request.url.path)
         return templates.TemplateResponse(
             request,
             "error.html",
-            {"code": 500, "message": "Internal server error", "detail": str(exc)},
+            {"code": 500, "message": "Internal server error", "detail": ""},
             status_code=500,
         )
 
     @app.exception_handler(Exception)
     async def catch_all(request: Request, exc: Any) -> HTMLResponse:
-        logger.error("Unhandled exception: %s", exc)
+        # Log full traceback server-side; never expose internals to clients.
+        logger.exception("[app] Unhandled exception on %s %s", request.method, request.url.path)
         return templates.TemplateResponse(
             request,
             "error.html",
-            {"code": 500, "message": "Something went wrong", "detail": str(exc)},
+            {"code": 500, "message": "Internal server error", "detail": ""},
             status_code=500,
         )
 

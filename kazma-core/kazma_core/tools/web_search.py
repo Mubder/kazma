@@ -7,6 +7,8 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
+
 
 def _friendly_error(exc: Exception) -> str:
     """Map low-level exceptions to user-friendly messages."""
@@ -17,6 +19,19 @@ def _friendly_error(exc: Exception) -> str:
     if isinstance(exc, OSError):
         return f"Error: Network error — {exc}"
     return f"Error: Search failed — {exc}"
+
+
+def _run_search(query: str, max_results: int) -> list[dict[str, str]]:
+    """Synchronous DuckDuckGo search — called via ``asyncio.to_thread``.
+
+    Kept as a standalone module-level function so it is picklable and
+    easy to test in isolation.  MUST be executed in a worker thread
+    because ``DDGS().text()`` performs blocking network I/O.
+    """
+    from duckduckgo_search import DDGS
+
+    with DDGS() as ddgs:
+        return list(ddgs.text(query, max_results=max_results))
 
 
 async def web_search(query: str, max_results: int = 5) -> str:
@@ -30,13 +45,14 @@ async def web_search(query: str, max_results: int = 5) -> str:
         Markdown-formatted search results, or an error message.
     """
     try:
-        from duckduckgo_search import DDGS
+        import duckduckgo_search  # noqa: F401
     except ImportError:
         return "Error: duckduckgo-search package not installed. Run: pip install duckduckgo-search"
 
     try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
+        # DDGS() uses blocking ``requests`` / ``httpx`` I/O. Run it in a
+        # thread pool so it does NOT stall the asyncio event loop.
+        results = await asyncio.to_thread(_run_search, query, max_results)
     except ConnectionError:
         return _friendly_error(ConnectionError())
     except TimeoutError:
