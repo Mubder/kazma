@@ -212,7 +212,7 @@ class TestMissingApiKeyValidation:
     def test_real_key_on_cloud_does_not_block(self):
         """A real API key on a cloud URL should NOT trigger the gate."""
         mock_provider = MagicMock()
-        mock_provider.config.api_key = "sk-real-key-123"
+        mock_provider.config.api_key = "test-key-123-123"
         mock_provider.config.base_url = "https://api.openai.com/v1"
 
         app, _ = _make_app(llm_provider=mock_provider)
