@@ -284,6 +284,33 @@ with `status=failed` (or `status=timeout`) and no downstream worker
 executes. The routing decision is always recorded in
 `metadata.route_taken` (or `null` when no route was taken).
 
+### Reliability layer
+
+The swarm engine includes a reliability layer in `kazma_core/swarm/reliability.py`
+with five components that protect worker dispatches:
+
+- **RetryPolicy** — configurable retry with exponential backoff and jitter.
+  Per-worker via `engine.set_retry_policy()`. Default `max_retries=0` for
+  backward compatibility.
+- **CircuitBreaker** — per-worker closed/open/half-open state machine. Trips
+  after N consecutive failures, auto-recovers after cooldown. Open breaker
+  rejects dispatch immediately.
+- **TimeoutGuard** — per-task timeout via `asyncio.wait_for` with clean
+  coroutine cancellation. Configurable `on_timeout` behavior:
+  `fail` (terminal), `retry` (counts against retry budget), `skip` (continue
+  without worker). Default 300s, `timeout=0` rejected.
+- **OutputValidator** — validates worker output against Pydantic BaseModel,
+  dict schema, or JSON schema before acceptance. Parses string output as JSON
+  when the schema expects a structure. No schema = skip validation. Invalid
+  output triggers retry. Error details surfaced in result.
+- **BoundedConcurrency** — `asyncio.Semaphore` wrapper (default 5) for
+  limiting parallel dispatches. Configurable per engine, task
+  (`metadata.max_concurrent`), or global. Semaphore released on failure/timeout.
+  Applied to `fan_out`, `broadcast`, and `consult` patterns.
+
+The dispatch chain is: retry -> timeout -> circuit breaker -> validation ->
+bounded concurrency. All components are configurable per-worker or per-task.
+
 ### Swarm Architecture
 
 ```

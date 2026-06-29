@@ -24,9 +24,12 @@ from kazma_core.swarm.patterns import (
     execute_pipeline,
 )
 from kazma_core.swarm.reliability import (
+    BoundedConcurrency,
     CircuitBreaker,
     CircuitBreakerOpenError,
+    OutputValidator,
     RetryPolicy,
+    TimeoutGuard,
 )
 from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
 from kazma_core.swarm.task import (
@@ -78,6 +81,9 @@ class SwarmEngine:
         self._circuit_breakers: dict[str, CircuitBreaker] = {}
         self._retry_policies: dict[str, RetryPolicy] = {}
         self._default_retry_policy = RetryPolicy(max_retries=0)
+        self._timeout_guards: dict[str, TimeoutGuard] = {}
+        self._default_timeout_guard = TimeoutGuard()
+        self._output_validators: dict[str, OutputValidator] = {}
         self._build_workers()
 
     def _build_workers(self) -> None:
@@ -354,7 +360,13 @@ class SwarmEngine:
                 duration_seconds=perf_counter() - started,
             )
 
-        worker_result = await self._dispatch_worker(worker, task.prompt, task.context)
+        worker_result = await self._dispatch_worker(
+            worker,
+            task.prompt,
+            task.context,
+            timeout=task.timeout,
+            validation_schema=task.validation_schema,
+        )
         result_status = self._overall_status([worker_result])
         aggregated_output = worker_result.output if worker_result.status == "success" else None
 
@@ -387,11 +399,21 @@ class SwarmEngine:
                 metadata=await self._build_result_metadata(blackboard),
             )
 
+        max_concurrent = self._resolve_max_concurrent(task)
+        concurrency = BoundedConcurrency(max_concurrent=max_concurrent)
+
+        async def _dispatch_with_concurrency(name: str) -> WorkerResult:
+            async with concurrency:
+                return await self._dispatch_worker_by_name(
+                    name,
+                    task.prompt,
+                    dispatch_context,
+                    timeout=task.timeout,
+                    validation_schema=task.validation_schema,
+                )
+
         worker_results = await asyncio.gather(
-            *(
-                self._dispatch_worker_by_name(name, task.prompt, dispatch_context)
-                for name in target_names
-            )
+            *(_dispatch_with_concurrency(name) for name in target_names)
         )
         result_status = self._overall_status(worker_results)
         aggregated_output = self._aggregate_outputs(worker_results)
@@ -433,6 +455,9 @@ class SwarmEngine:
         worker_name: str,
         prompt: str,
         context: str | SwarmDispatchContext,
+        *,
+        timeout: float | None = None,
+        validation_schema: dict[str, Any] | None = None,
     ) -> WorkerResult:
         worker = self.get_worker(worker_name)
         if worker is None:
@@ -443,16 +468,27 @@ class SwarmEngine:
                 output="",
                 error=f"Worker '{worker_name}' not found.",
             )
-        return await self._dispatch_worker(worker, prompt, context)
+        return await self._dispatch_worker(
+            worker,
+            prompt,
+            context,
+            timeout=timeout,
+            validation_schema=validation_schema,
+        )
 
     async def _dispatch_worker(
         self,
         worker: SwarmWorker,
         prompt: str,
         context: str | SwarmDispatchContext,
+        *,
+        timeout: float | None = None,
+        validation_schema: dict[str, Any] | None = None,
     ) -> WorkerResult:
         breaker = self.get_circuit_breaker(worker.name)
         retry_policy = self.get_retry_policy(worker.name)
+        timeout_guard = self.get_timeout_guard(worker.name)
+        output_validator = self.get_output_validator(worker.name, validation_schema)
 
         # Circuit breaker pre-check: reject immediately if open.
         try:
@@ -473,7 +509,11 @@ class SwarmEngine:
         async def _attempt() -> dict[str, Any]:
             worker.mark_dispatched(prompt)
             try:
-                raw_result = await worker.dispatch(prompt, context=context)
+                raw_result = await timeout_guard.execute(
+                    lambda: worker.dispatch(prompt, context=context),
+                    timeout=timeout,
+                    worker_name=worker.name,
+                )
             except Exception as exc:
                 logger.exception(
                     "[SwarmEngine] dispatch failed for worker '%s'", worker.name
@@ -485,6 +525,18 @@ class SwarmEngine:
                     "output": "",
                     "error": str(exc)[:500],
                 }
+
+            # Validate output on success.
+            if raw_result.get("status") == "success" and output_validator is not None:
+                validation_error = output_validator.validate(
+                    raw_result.get("output", "")
+                )
+                if validation_error is not None:
+                    raw_result["status"] = "error"
+                    raw_result["error"] = (
+                        f"Output validation failed: {validation_error}"
+                    )
+
             return raw_result
 
         raw_result = await retry_policy.execute_with_retry(
@@ -670,3 +722,71 @@ class SwarmEngine:
             name: self.get_circuit_breaker(name).to_dict()
             for name in self._workers
         }
+
+    # ------------------------------------------------------------------
+    # Reliability layer — timeout guard management
+    # ------------------------------------------------------------------
+
+    def get_timeout_guard(
+        self,
+        worker_name: str,
+        task_timeout: float | None = None,
+    ) -> TimeoutGuard:
+        """Return (or create) the timeout guard for a worker."""
+        if task_timeout is not None and task_timeout > 0:
+            return TimeoutGuard(default_timeout=task_timeout)
+        if worker_name not in self._timeout_guards:
+            self._timeout_guards[worker_name] = self._default_timeout_guard
+        return self._timeout_guards[worker_name]
+
+    def set_timeout_guard(
+        self,
+        worker_name: str,
+        guard: TimeoutGuard,
+    ) -> None:
+        """Set a per-worker timeout guard."""
+        self._timeout_guards[worker_name] = guard
+
+    # ------------------------------------------------------------------
+    # Reliability layer — output validator management
+    # ------------------------------------------------------------------
+
+    def get_output_validator(
+        self,
+        worker_name: str,
+        task_schema: dict[str, Any] | None = None,
+    ) -> OutputValidator | None:
+        """Return the output validator for a worker or task schema.
+
+        Returns ``None`` when no schema is configured (validation skipped).
+        """
+        if task_schema is not None:
+            return OutputValidator(schema=task_schema)
+        return self._output_validators.get(worker_name)
+
+    def set_output_validator(
+        self,
+        worker_name: str,
+        validator: OutputValidator,
+    ) -> None:
+        """Set a per-worker output validator."""
+        self._output_validators[worker_name] = validator
+
+    # ------------------------------------------------------------------
+    # Reliability layer — bounded concurrency management
+    # ------------------------------------------------------------------
+
+    def get_bounded_concurrency(
+        self,
+        task_max_concurrent: int | None = None,
+    ) -> BoundedConcurrency:
+        """Return a BoundedConcurrency instance for the given concurrency limit.
+
+        Task-level override takes precedence over the engine default.
+        """
+        limit = task_max_concurrent or self._resolve_max_concurrent_from_config()
+        return BoundedConcurrency(max_concurrent=limit)
+
+    def _resolve_max_concurrent_from_config(self) -> int:
+        """Resolve the default concurrency limit from engine config."""
+        return max(1, int(getattr(self.config, "max_concurrent", 5) or 5))

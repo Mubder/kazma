@@ -1,19 +1,26 @@
 """Reliability layer for swarm worker dispatch.
 
-Provides two core components:
+Provides five core components:
 
 * **RetryPolicy** -- configurable retry with exponential backoff, jitter, and
   transient-failure detection.
 * **CircuitBreaker** -- per-worker failure tracking with closed/open/half-open
   state machine and manual reset support.
+* **TimeoutGuard** -- per-task timeout enforcement via ``asyncio.wait_for`` with
+  configurable on-timeout behaviors (fail, retry, skip).
+* **OutputValidator** -- Pydantic / dict / JSON-schema validation on worker
+  output before acceptance.
+* **BoundedConcurrency** -- asyncio.Semaphore wrapper for limiting parallel
+  dispatches across fan-out, broadcast, and consult patterns.
 
-Both are designed for use inside :class:`kazma_core.swarm.engine.SwarmEngine`
-dispatch paths.
+All components are designed for use inside
+:class:`kazma_core.swarm.engine.SwarmEngine` dispatch paths.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import time
@@ -314,3 +321,389 @@ class CircuitBreaker:
             "failure_threshold": self.failure_threshold,
             "cooldown_seconds": self.cooldown_seconds,
         }
+
+
+# ---------------------------------------------------------------------------
+# TimeoutGuard
+# ---------------------------------------------------------------------------
+
+
+class TimeoutGuardError(Exception):
+    """Raised when a worker exceeds its configured timeout."""
+
+
+@dataclass
+class TimeoutGuard:
+    """Per-task timeout enforcement via ``asyncio.wait_for``.
+
+    Wraps a worker coroutine with a timeout.  When the timeout fires the
+    worker's coroutine is cleanly cancelled and a result dict is returned
+    whose ``status`` is ``"timeout"`` and whose ``retry`` / ``skipped``
+    flags indicate how the caller (typically :class:`RetryPolicy`) should
+    proceed.
+
+    Args:
+        default_timeout: Default timeout in seconds applied when the caller
+            does not supply an explicit ``timeout`` value.  Must be > 0.
+        on_timeout: Behaviour when the timeout fires.
+
+            ``"fail"``   -- terminal failure; the result has
+                ``status="timeout"`` and no retry hint.
+            ``"retry"``  -- signals that the timeout should count against
+                the retry budget (``result["retry"] = True``).
+            ``"skip"``   -- signals that the worker should be skipped
+                (``result["skipped"] = True``).
+    """
+
+    default_timeout: float = 300.0
+    on_timeout: str = "fail"
+
+    def __post_init__(self) -> None:
+        if self.default_timeout <= 0:
+            raise ValueError(
+                f"default_timeout must be > 0, got {self.default_timeout}"
+            )
+        if self.on_timeout not in ("fail", "retry", "skip"):
+            raise ValueError(
+                f"on_timeout must be 'fail', 'retry', or 'skip', got '{self.on_timeout}'"
+            )
+
+    async def execute(
+        self,
+        fn: Callable[..., Awaitable[Any]],
+        *,
+        timeout: float | None = None,
+        worker_name: str = "",
+    ) -> dict[str, Any]:
+        """Execute *fn* with a timeout.
+
+        Args:
+            fn: The async callable to execute (typically a worker dispatch).
+            timeout: Override the default timeout.  Must be > 0 if provided.
+            worker_name: Name of the worker for error messages.
+
+        Returns:
+            On success, whatever *fn* returns.
+            On timeout, a dict with ``status="timeout"`` and appropriate
+            ``retry`` / ``skipped`` flags.
+        """
+        effective_timeout = timeout if timeout is not None else self.default_timeout
+        if effective_timeout <= 0:
+            raise ValueError(
+                f"timeout must be > 0, got {effective_timeout}"
+            )
+
+        try:
+            return await asyncio.wait_for(fn(), timeout=effective_timeout)
+        except TimeoutError:
+            logger.warning(
+                "[TimeoutGuard] worker '%s' timed out after %.2fs (on_timeout=%s)",
+                worker_name,
+                effective_timeout,
+                self.on_timeout,
+            )
+            result: dict[str, Any] = {
+                "worker": worker_name,
+                "task_id": "",
+                "status": "timeout",
+                "output": "",
+                "error": (
+                    f"Worker '{worker_name}' timed out after {effective_timeout:g}s."
+                ),
+            }
+            if self.on_timeout == "retry":
+                result["retry"] = True
+            elif self.on_timeout == "skip":
+                result["skipped"] = True
+            return result
+
+
+# ---------------------------------------------------------------------------
+# OutputValidator
+# ---------------------------------------------------------------------------
+
+
+class OutputValidator:
+    """Validate worker output against a schema before acceptance.
+
+    Supports three schema forms:
+
+    * **Pydantic BaseModel subclass** -- validated via ``model_validate``.
+    * **JSON Schema dict** (has ``"type": "object"`` or ``"properties"``)
+      -- validated via ``jsonschema.validate`` if available, otherwise a
+      lightweight built-in check.
+    * **Simple type dict** (e.g. ``{"name": "str", "age": "int"}``) -- each
+      key must be present and its value must match the declared Python type
+      name.
+
+    When the schema expects a structured type and the output is a string,
+    the validator attempts to parse the string as JSON first.
+
+    Args:
+        schema: The schema to validate against.  ``None`` or ``{}`` means
+            validation is skipped entirely.
+    """
+
+    def __init__(self, schema: Any | None = None) -> None:
+        self.schema = schema
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def validate(self, output: Any) -> str | None:
+        """Validate *output* against the configured schema.
+
+        Returns:
+            ``None`` if the output is valid.
+            A human-readable error string describing the validation failure
+            if the output is invalid.
+        """
+        if not self.schema:
+            return None
+
+        # If output is a string and the schema expects a structure, parse JSON.
+        parsed_output = self._maybe_parse_json(output)
+
+        # Try Pydantic BaseModel first.
+        if self._is_pydantic_model(self.schema):
+            return self._validate_pydantic(self.schema, parsed_output)
+
+        # Try JSON Schema dict.
+        if self._is_json_schema(self.schema):
+            return self._validate_json_schema(self.schema, parsed_output)
+
+        # Fall back to simple type dict.
+        if isinstance(self.schema, dict):
+            return self._validate_dict_schema(self.schema, parsed_output)
+
+        return None
+
+    # ------------------------------------------------------------------
+    # Schema detection helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_pydantic_model(schema: Any) -> bool:
+        """Return True if *schema* is a Pydantic BaseModel subclass."""
+        try:
+            import pydantic
+
+            return isinstance(schema, type) and issubclass(schema, pydantic.BaseModel)
+        except ImportError:
+            return False
+
+    @staticmethod
+    def _is_json_schema(schema: Any) -> bool:
+        """Return True if *schema* looks like a JSON Schema object."""
+        if not isinstance(schema, dict):
+            return False
+        return "type" in schema or "properties" in schema or "$schema" in schema
+
+    # ------------------------------------------------------------------
+    # JSON parsing
+    # ------------------------------------------------------------------
+
+    def _maybe_parse_json(self, output: Any) -> Any:
+        """If *output* is a string and the schema expects a structure, parse."""
+        if not isinstance(output, str):
+            return output
+        if not self.schema:
+            return output
+        # Only attempt JSON parsing if schema expects an object/array.
+        if self._is_pydantic_model(self.schema):
+            try:
+                return json.loads(output)
+            except (json.JSONDecodeError, ValueError):
+                return output
+        if isinstance(self.schema, dict):
+            schema_type = self.schema.get("type", "")
+            # JSON schema with explicit type/properties.
+            if schema_type in ("object", "array") or "properties" in self.schema:
+                try:
+                    return json.loads(output)
+                except (json.JSONDecodeError, ValueError):
+                    return output
+            # Simple type dict (e.g. {"name": "str"}) also expects a dict.
+            if not self._is_json_schema(self.schema):
+                try:
+                    return json.loads(output)
+                except (json.JSONDecodeError, ValueError):
+                    return output
+        return output
+
+    # ------------------------------------------------------------------
+    # Pydantic validation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_pydantic(model_class: Any, output: Any) -> str | None:
+        """Validate *output* against a Pydantic BaseModel subclass."""
+        try:
+            model_class.model_validate(output)
+            return None
+        except Exception as exc:
+            return f"Pydantic validation failed: {exc}"
+
+    # ------------------------------------------------------------------
+    # JSON Schema validation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_json_schema(schema: dict[str, Any], output: Any) -> str | None:
+        """Validate *output* against a JSON Schema dict."""
+        # Try the jsonschema library first if available.
+        try:
+            import jsonschema
+
+            jsonschema.validate(output, schema)
+            return None
+        except ImportError:
+            pass  # Fall through to built-in.
+        except Exception as exc:
+            return f"JSON schema validation failed: {exc}"
+
+        # Lightweight built-in check: verify required fields and basic types.
+        return OutputValidator._builtin_json_schema_check(schema, output)
+
+    @staticmethod
+    def _builtin_json_schema_check(
+        schema: dict[str, Any],
+        output: Any,
+    ) -> str | None:
+        """Perform a minimal JSON Schema validation without external deps."""
+        schema_type = schema.get("type")
+        if schema_type == "object" or "properties" in schema:
+            if not isinstance(output, dict):
+                return (
+                    f"Expected object, got {type(output).__name__}."
+                )
+            required = schema.get("required", [])
+            for field_name in required:
+                if field_name not in output:
+                    return f"Missing required field: '{field_name}'"
+            properties = schema.get("properties", {})
+            for field_name, field_schema in properties.items():
+                if field_name not in output:
+                    continue
+                expected_type = field_schema.get("type")
+                if expected_type and not _json_type_matches(
+                    output[field_name], expected_type
+                ):
+                    return (
+                        f"Field '{field_name}': expected {expected_type}, "
+                        f"got {type(output[field_name]).__name__}"
+                    )
+        return None
+
+    # ------------------------------------------------------------------
+    # Simple dict schema validation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_dict_schema(
+        schema: dict[str, Any],
+        output: Any,
+    ) -> str | None:
+        """Validate *output* against a simple type dict schema.
+
+        Each key in the schema must be present in the output, and the
+        output value's type name must match the schema value (a string
+        like ``"str"``, ``"int"``, ``"float"``, ``"bool"``, ``"list"``,
+        ``"dict"``).
+        """
+        if not isinstance(output, dict):
+            return f"Expected dict, got {type(output).__name__}."
+
+        for field_name, expected_type_name in schema.items():
+            if field_name not in output:
+                return f"Missing required field: '{field_name}'"
+            actual_value = output[field_name]
+            if not _python_type_matches(actual_value, str(expected_type_name)):
+                return (
+                    f"Field '{field_name}': expected {expected_type_name}, "
+                    f"got {type(actual_value).__name__}"
+                )
+        return None
+
+
+def _json_type_matches(value: Any, json_type: str) -> bool:
+    """Check if *value* matches a JSON Schema type string."""
+    mapping: dict[str, tuple[type, ...]] = {
+        "string": (str,),
+        "integer": (int,),
+        "number": (int, float),
+        "boolean": (bool,),
+        "array": (list, tuple),
+        "object": (dict,),
+        "null": (type(None),),
+    }
+    expected_types = mapping.get(json_type)
+    if expected_types is None:
+        return True  # Unknown type -> accept anything.
+    return isinstance(value, expected_types)
+
+
+def _python_type_matches(value: Any, type_name: str) -> bool:
+    """Check if *value* matches a Python type name string."""
+    mapping: dict[str, type] = {
+        "str": str,
+        "int": int,
+        "float": float,
+        "bool": bool,
+        "list": list,
+        "dict": dict,
+        "tuple": tuple,
+        "set": set,
+        "none": type(None),
+        "nonetype": type(None),
+    }
+    expected_type = mapping.get(type_name.strip().lower())
+    if expected_type is None:
+        return True  # Unknown type -> accept anything.
+    return isinstance(value, expected_type)
+
+
+# ---------------------------------------------------------------------------
+# BoundedConcurrency
+# ---------------------------------------------------------------------------
+
+
+class BoundedConcurrency:
+    """Semaphore-based concurrency limiter for parallel worker dispatches.
+
+    Use as an async context manager to acquire and release the semaphore::
+
+        bc = BoundedConcurrency(max_concurrent=3)
+        async with bc:
+            await do_work()
+
+    The semaphore is released when the block exits, whether normally or via
+    an exception, preventing deadlocks from failed or timed-out workers.
+
+    Args:
+        max_concurrent: Maximum number of workers that may execute
+            simultaneously.  Must be >= 1.  Defaults to 5.
+    """
+
+    def __init__(self, max_concurrent: int = 5) -> None:
+        if max_concurrent < 1:
+            raise ValueError(
+                f"max_concurrent must be >= 1, got {max_concurrent}"
+            )
+        self.max_concurrent = max_concurrent
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def __aenter__(self) -> BoundedConcurrency:
+        """Acquire the semaphore."""
+        await self._semaphore.acquire()
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: Any,
+    ) -> None:
+        """Release the semaphore, even if an exception was raised."""
+        self._semaphore.release()

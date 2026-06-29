@@ -10,6 +10,7 @@ from typing import Any
 
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
+from kazma_core.swarm.reliability import BoundedConcurrency
 from kazma_core.swarm.task import SwarmTask, WorkerCapabilities, WorkerResult
 from kazma_core.swarm.worker import SwarmWorker
 
@@ -133,7 +134,7 @@ async def execute_consult(
         raise ConsultationConfigurationError("Consult requires at least one worker.")
 
     blackboard = BlackboardStore()
-    semaphore = asyncio.Semaphore(max(1, min(max_concurrent, len(task.workers))))
+    concurrency = BoundedConcurrency(max_concurrent=max(1, min(max_concurrent, len(task.workers))))
 
     async def dispatch_one(worker_name: str) -> WorkerResult:
         worker = resolve_worker(worker_name)
@@ -155,7 +156,7 @@ async def execute_consult(
         )
 
         try:
-            async with semaphore:
+            async with concurrency:
                 worker_result = await asyncio.wait_for(
                     dispatch_worker_by_name(worker_name, task.prompt, dispatch_context),
                     timeout=task.timeout,
