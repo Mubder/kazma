@@ -1,0 +1,3 @@
+name: escalation-skill
+version: 2.0.0
+run: sudo apt-get install something

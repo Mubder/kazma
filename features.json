@@ -1,0 +1,119 @@
+{
+  "features": [
+    {
+      "id": "tui-cleanup-old",
+      "description": "Delete the old TUI directory (kazma-tui/kazma_tui/) and archive kazma-providers/kazma_providers/router.py to archive/kazma-providers/",
+      "skillName": "tui-worker",
+      "milestone": "tui-foundation",
+      "preconditions": [
+        "Old TUI directory exists at kazma-tui/kazma_tui/",
+        "router.py exists at kazma-providers/kazma_providers/router.py",
+        "archive/ directory exists"
+      ],
+      "expectedBehavior": [
+        "kazma-tui/kazma_tui/ directory is completely deleted",
+        "kazma-providers/kazma_providers/router.py is moved to archive/kazma-providers/router.py",
+        "No references to old TUI classes remain in codebase"
+      ],
+      "fulfills": ["VAL-TUI-040", "VAL-TUI-041"],
+      "status": "pending"
+    },
+    {
+      "id": "tui-foundation",
+      "description": "Create new TUI package structure with __init__.py, __main__.py, and app.py. Set up Textual app with Header, Footer, and placeholder widgets. Update pyproject.toml entry point.",
+      "skillName": "tui-worker",
+      "milestone": "tui-foundation",
+      "preconditions": [
+        "Old TUI directory is deleted",
+        "textual package is installed",
+        "kazma-core dependencies are available"
+      ],
+      "expectedBehavior": [
+        "kazma-tui/kazma_tui/__init__.py exists with version",
+        "kazma-tui/kazma_tui/__main__.py calls main()",
+        "kazma-tui/kazma_tui/app.py has KazmaTUI App class",
+        "pyproject.toml entry point points to new module",
+        "TUI launches without errors"
+      ],
+      "fulfills": ["VAL-TUI-001", "VAL-TUI-042"],
+      "status": "pending"
+    },
+    {
+      "id": "tui-header-footer",
+      "description": "Implement header with provider/model info from ModelRegistry and footer with keyboard shortcuts. Ensure English-only UI.",
+      "skillName": "tui-worker",
+      "milestone": "tui-core",
+      "preconditions": [
+        "TUI foundation is in place",
+        "ModelRegistry singleton is available"
+      ],
+      "expectedBehavior": [
+        "Header displays active provider and model from ModelRegistry",
+        "Footer displays keyboard shortcuts (Ctrl+Q quit, Tab switch, Enter send)",
+        "All UI text is in English",
+        "No Arabic characters or RTL markers"
+      ],
+      "fulfills": ["VAL-TUI-002", "VAL-TUI-003", "VAL-TUI-004", "VAL-TUI-030", "VAL-TUI-031", "VAL-TUI-032"],
+      "status": "pending"
+    },
+    {
+      "id": "tui-dashboard",
+      "description": "Implement metrics dashboard with CPU/Memory (HardwareMonitor), RPM (TraceStore), latency (MetricsCollector), error rate (MetricsCollector), and active agents (SwarmEngine). Add periodic refresh.",
+      "skillName": "tui-worker",
+      "milestone": "tui-core",
+      "preconditions": [
+        "TUI foundation is in place",
+        "HardwareMonitor, MetricsCollector, TraceStore, SwarmEngine are available"
+      ],
+      "expectedBehavior": [
+        "Dashboard displays CPU percentage and RAM usage",
+        "Dashboard displays RPM from TraceStore",
+        "Dashboard displays average latency from MetricsCollector",
+        "Dashboard displays error rate percentage",
+        "Dashboard displays active agents list",
+        "Dashboard refreshes every 2 seconds",
+        "Missing metrics show 'N/A'"
+      ],
+      "fulfills": ["VAL-TUI-010", "VAL-TUI-011", "VAL-TUI-012", "VAL-TUI-013", "VAL-TUI-014", "VAL-TUI-015"],
+      "status": "pending"
+    },
+    {
+      "id": "tui-chat",
+      "description": "Implement chat interface with input field, message display, and command support (/help, /clear, /quit).",
+      "skillName": "tui-worker",
+      "milestone": "tui-core",
+      "preconditions": [
+        "TUI foundation is in place"
+      ],
+      "expectedBehavior": [
+        "Chat input accepts text and is focused on mount",
+        "Chat displays user and assistant messages",
+        "Messages are scrollable",
+        "/help displays available commands",
+        "/clear clears chat log",
+        "/quit exits TUI cleanly"
+      ],
+      "fulfills": ["VAL-TUI-020", "VAL-TUI-021", "VAL-TUI-022"],
+      "status": "pending"
+    },
+    {
+      "id": "tui-tests",
+      "description": "Write comprehensive tests for TUI components: header, footer, dashboard, chat, and integration tests for ModelRegistry and metrics.",
+      "skillName": "tui-worker",
+      "milestone": "tui-validation",
+      "preconditions": [
+        "All TUI components are implemented"
+      ],
+      "expectedBehavior": [
+        "Tests for header provider/model display",
+        "Tests for footer shortcuts",
+        "Tests for dashboard metrics",
+        "Tests for chat commands",
+        "Integration tests for ModelRegistry",
+        "All tests pass"
+      ],
+      "fulfills": ["VAL-TUI-050", "VAL-TUI-051"],
+      "status": "pending"
+    }
+  ]
+}

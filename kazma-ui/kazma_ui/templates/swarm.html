@@ -315,6 +315,12 @@
                 <datalist id="swarm-models-datalist"></datalist>
               </div>
             </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('settings.saved_profiles') }}</label>
+              <select id="add-profile" class="form-select">
+                <option value="">{{ t('swarm.custom') }} / {{ t('swarm.none') }}</option>
+              </select>
+            </div>
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">{{ t('swarm.provider') }}</label>
@@ -357,6 +363,12 @@
                 <label class="form-label">{{ t('swarm.model') }}</label>
                 <input type="text" id="spawn-model" class="form-input" list="swarm-models-datalist">
               </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('settings.saved_profiles') }}</label>
+              <select id="spawn-profile" class="form-select">
+                <option value="">{{ t('swarm.custom') }} / {{ t('swarm.none') }}</option>
+              </select>
             </div>
             <div class="form-group">
               <label class="form-label">{{ t('swarm.expertise_tags') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.expertise_hint') }}</span></label>

@@ -1,0 +1,6 @@
+author: testuser
+description: beta-skill description
+entry_point: main:Handler
+license: MIT
+name: beta-skill
+version: 1.0.0

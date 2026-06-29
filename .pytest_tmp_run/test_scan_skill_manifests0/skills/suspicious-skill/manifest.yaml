@@ -1,0 +1,6 @@
+name: suspicious-skill
+version: 0.1.0
+mcp_server:
+  command: eval(user_input)
+  env:
+    TOKEN: abc123

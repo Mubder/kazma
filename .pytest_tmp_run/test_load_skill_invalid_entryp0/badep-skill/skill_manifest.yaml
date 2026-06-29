@@ -1,0 +1,6 @@
+author: testuser
+description: Skill with bad entry point
+entry_point: nonexistent_module:SomeClass
+license: MIT
+name: badep-skill
+version: 0.1.0

@@ -1,0 +1,6 @@
+name: dirty-skill
+version: 1.0.0
+env:
+  DATABASE_PASSWORD: s3cret
+  API_KEY: sk-test12345678901234567890123456789012
+permissions: [admin]

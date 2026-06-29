@@ -58,6 +58,14 @@
     if (addForm) addForm.addEventListener('submit', function(e) { e.preventDefault(); addWorker(); });
     var spawnForm = $('spawn-worker-form');
     if (spawnForm) spawnForm.addEventListener('submit', function(e) { e.preventDefault(); spawnWorker(); });
+    var addProfile = $('add-profile');
+    if (addProfile) {
+      addProfile.addEventListener('change', function(e) { applySavedProfile('add', e.target.value); });
+    }
+    var spawnProfile = $('spawn-profile');
+    if (spawnProfile) {
+      spawnProfile.addEventListener('change', function(e) { applySavedProfile('spawn', e.target.value); });
+    }
 
     // Start/Stop buttons
     var startBtn = $('swarm-start');
@@ -113,11 +121,15 @@
         modelOptions.defaults = data.defaults && typeof data.defaults === 'object' ? data.defaults : {};
 
         populateModelDatalist();
+        populateProfileSelect('add-profile');
+        populateProfileSelect('spawn-profile');
         populateProviderSelect('add-provider');
         populateProviderSelect('spawn-provider');
         applyModelProviderDefaults();
       })
       .catch(function() {
+        populateProfileSelect('add-profile');
+        populateProfileSelect('spawn-profile');
         populateProviderSelect('add-provider');
         populateProviderSelect('spawn-provider');
         applyModelProviderDefaults();
@@ -155,6 +167,54 @@
     }).join('');
   }
 
+  function profileOptionLabel(profile) {
+    if (!profile || typeof profile !== 'object') return '';
+    var name = String(profile.name || '').trim();
+    var provider = String(profile.provider || '').trim();
+    var model = String(profile.model || '').trim();
+    if (!name) return '';
+    if (provider && model) return name + ' (' + provider + ' / ' + model + ')';
+    if (model) return name + ' (' + model + ')';
+    if (provider) return name + ' (' + provider + ')';
+    return name;
+  }
+
+  function findProfileByName(profileName) {
+    var target = String(profileName || '').trim();
+    if (!target) return null;
+    for (var i = 0; i < modelOptions.profiles.length; i++) {
+      var profile = modelOptions.profiles[i] || {};
+      if (String(profile.name || '').trim() === target) return profile;
+    }
+    return null;
+  }
+
+  function populateProfileSelect(selectId) {
+    var select = $(selectId);
+    if (!select) return;
+
+    var previousValue = select.value || '';
+    var defaultLabel = 'Custom / none';
+    var existingDefaultOption = select.querySelector('option[value=""]');
+    if (existingDefaultOption && existingDefaultOption.textContent) {
+      defaultLabel = existingDefaultOption.textContent;
+    }
+
+    var options = ['<option value="">' + esc(defaultLabel) + '</option>'];
+    (modelOptions.profiles || []).forEach(function(profile) {
+      var name = String((profile || {}).name || '').trim();
+      var label = profileOptionLabel(profile);
+      if (!name || !label) return;
+      options.push('<option value="' + esc(name) + '">' + esc(label) + '</option>');
+    });
+    select.innerHTML = options.join('');
+
+    if (previousValue) {
+      select.value = previousValue;
+      if (select.value !== previousValue) select.value = '';
+    }
+  }
+
   function providerDisplayName(providerName) {
     var name = providerName || '';
     for (var i = 0; i < modelOptions.providerEntries.length; i++) {
@@ -164,6 +224,19 @@
       }
     }
     return name;
+  }
+
+  function ensureProviderOption(select, providerName) {
+    if (!select) return;
+    var cleanName = String(providerName || '').trim();
+    if (!cleanName) return;
+    for (var i = 0; i < select.options.length; i++) {
+      if (select.options[i].value === cleanName) return;
+    }
+    var option = document.createElement('option');
+    option.value = cleanName;
+    option.textContent = providerDisplayName(cleanName) || cleanName;
+    select.appendChild(option);
   }
 
   function populateProviderSelect(selectId) {
@@ -824,6 +897,7 @@
     if (!p) return;
     var m = $('add-model'); if (m) m.value = p.model;
     var pr = $('add-provider'); if (pr) pr.value = p.provider;
+    var profile = $('add-profile'); if (profile) profile.value = '';
   }
 
   // ══════════════════════════════════════════════════════
@@ -1060,8 +1134,35 @@
       .catch(function(err) { showError(err.message); });
   }
 
-  function applySavedProfile(name) {
-    // no-op for now, model input uses datalist
+  function applySavedProfile(target, profileName) {
+    var scope = profileName === undefined ? 'add' : String(target || '').trim();
+    var selectedName = profileName === undefined ? target : profileName;
+    if (scope !== 'add' && scope !== 'spawn') scope = 'add';
+
+    var modelInput = $(scope + '-model');
+    var providerSelect = $(scope + '-provider');
+    if (!modelInput || !providerSelect) return;
+
+    var cleanName = String(selectedName || '').trim();
+    if (!cleanName) {
+      var fallbackModel = defaultModelOption();
+      var fallbackProvider = defaultProviderOption();
+      modelInput.value = fallbackModel;
+      ensureProviderOption(providerSelect, fallbackProvider);
+      providerSelect.value = fallbackProvider;
+      return;
+    }
+
+    var profile = findProfileByName(cleanName);
+    if (!profile) return;
+
+    var profileModel = String(profile.model || '').trim();
+    var profileProvider = String(profile.provider || '').trim();
+    if (profileModel) modelInput.value = profileModel;
+    if (profileProvider) {
+      ensureProviderOption(providerSelect, profileProvider);
+      providerSelect.value = profileProvider;
+    }
   }
 
   // ══════════════════════════════════════════════════════

@@ -1,0 +1,3 @@
+agent:
+  name: test-agent
+  version: "1.0"

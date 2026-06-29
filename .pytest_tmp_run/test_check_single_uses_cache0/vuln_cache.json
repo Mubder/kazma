@@ -1,0 +1,8 @@
+{
+  "requests==2.28.0": [
+    {
+      "id": "CACHED-001",
+      "summary": "cached vuln"
+    }
+  ]
+}

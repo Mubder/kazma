@@ -1,0 +1,8 @@
+author: test-author
+description: A test skill
+license: MIT
+name: test-skill
+permissions:
+- file_read
+- totally_fake_permission
+version: 1.0.0

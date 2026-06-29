@@ -1,0 +1,6 @@
+author: testuser
+description: A test skill for loader tests
+entry_point: main:TestSkill
+license: MIT
+name: test-skill
+version: 0.1.0

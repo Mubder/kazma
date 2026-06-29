@@ -1,0 +1,30 @@
+{
+  "requests==2.28.0": [
+    {
+      "id": "GHSA-test-123",
+      "summary": "Critical RCE in requests",
+      "severity": [
+        {
+          "type": "CVSS_V3",
+          "score": "9.8"
+        }
+      ],
+      "affected": [
+        {
+          "ranges": [
+            {
+              "events": [
+                {
+                  "introduced": "0"
+                },
+                {
+                  "fixed": "2.28.1"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
