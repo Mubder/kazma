@@ -1,6 +1,0 @@
-author: testuser
-description: Valid skill
-entry_point: main:Runner
-license: MIT
-name: valid-skill
-version: 0.1.0

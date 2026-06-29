@@ -1,6 +1,0 @@
-users:
-  default:
-    allowed:
-    - '*'
-    denied:
-    - dangerous

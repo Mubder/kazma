@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 if TYPE_CHECKING:
     from kazma_core.cost_breaker import CostCircuitBreaker
     from kazma_core.tracing import KazmaTracer
+    from kazma_gateway.gateway import SessionStore
     from kazma_gateway.stores.checkpoint import CheckpointManager
 
 logger = logging.getLogger(__name__)
@@ -45,18 +46,21 @@ def set_templates(tmpl: Jinja2Templates) -> None:
 _tracer: KazmaTracer | None = None
 _cost_breaker: CostCircuitBreaker | None = None
 _checkpoint_manager: CheckpointManager | None = None
+_session_store: SessionStore | None = None
 
 
 def set_dashboard_context(
     tracer: KazmaTracer | None = None,
     cost_breaker: CostCircuitBreaker | None = None,
     checkpoint_manager: CheckpointManager | None = None,
+    session_store: SessionStore | None = None,
 ) -> None:
-    """Set the tracer, cost breaker, and checkpoint manager for the dashboard to read."""
-    global _tracer, _cost_breaker, _checkpoint_manager
+    """Set the tracer, cost breaker, checkpoint manager, and session store for the dashboard."""
+    global _tracer, _cost_breaker, _checkpoint_manager, _session_store
     _tracer = tracer
     _cost_breaker = cost_breaker
     _checkpoint_manager = checkpoint_manager
+    _session_store = session_store
 
 
 def _get_trace_data() -> list[dict[str, Any]]:
@@ -237,24 +241,37 @@ async def list_sessions(limit: int = 50) -> JSONResponse:
     """
     if not _checkpoint_manager:
         return JSONResponse({"sessions": [], "error": "CheckpointManager not initialized"})
-    
+
     try:
         checkpoints = await _checkpoint_manager.list_checkpoints(limit=limit)
-        
-        # Enrich with platform/display_name from session store if available
-        # For now, return raw checkpoint data
+
+        # Build a lookup of session metadata from the session store so we can
+        # enrich checkpointed sessions with platform and display_name.
+        session_meta: dict[str, dict[str, Any]] = {}
+        if _session_store is not None:
+            try:
+                for entry in await _session_store.list_active():
+                    session_meta[entry["thread_id"]] = {
+                        "platform": entry.get("platform", "unknown"),
+                        "display_name": entry.get("display_name", "unknown"),
+                    }
+            except Exception:
+                logger.exception("Failed to load session metadata")
+
         sessions = []
         for cp in checkpoints:
+            thread_id = cp.get("thread_id", cp.get("id", "unknown"))
+            meta = session_meta.get(thread_id, {})
             sessions.append({
-                "thread_id": cp.get("thread_id", cp.get("id", "unknown")),
+                "thread_id": thread_id,
                 "checkpoint_id": cp.get("id", ""),
                 "created_at": cp.get("created_at", ""),
                 "context_tokens": cp.get("context_tokens", 0),
                 "message_count": cp.get("message_count", 0),
-                "platform": None,  # TODO: Extract from session store
-                "display_name": None,  # TODO: Extract from session store
+                "platform": meta.get("platform"),
+                "display_name": meta.get("display_name"),
             })
-        
+
         return JSONResponse({"sessions": sessions, "count": len(sessions)})
     except Exception as e:
         logger.exception("Failed to list sessions")

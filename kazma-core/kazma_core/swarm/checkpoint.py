@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from kazma_core.swarm.task import SwarmTask, TaskResult, WorkerResult
@@ -167,9 +168,7 @@ class HITLCheckpointHandler:
         )
         entry.final_result = result
         entry.task.status = "failed"  # type: ignore[assignment]
-        entry.task.completed_at = __import__("datetime").datetime.now(
-            __import__("datetime").UTC
-        ).isoformat()
+        entry.task.completed_at = datetime.now(UTC).isoformat()
         entry.task.result = result
 
         # Remove from active pausing.

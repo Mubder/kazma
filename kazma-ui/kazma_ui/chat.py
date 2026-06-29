@@ -198,20 +198,20 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                     if not chat_base_url.endswith("/v1"):
                         chat_base_url += "/v1"
 
-                # If using a custom endpoint, force openai/ model prefix and dummy key
+                # If using a custom endpoint, force openai/ model prefix and no key
                 chat_model = active_model
                 chat_api_key = llm_cfg["api_key"]
                 if chat_base_url and chat_base_url != llm_cfg["base_url"]:
                     if not chat_model.startswith("openai/"):
                         chat_model = f"openai/{chat_model}"
-                    chat_api_key = "sk-local-dev"  # Prevent cloud fallback
+                    chat_api_key = None  # No auth for local/custom endpoints
 
                 # Fallback to LM Studio if base_url is empty but model is local
                 if not chat_base_url or chat_base_url == llm_cfg["base_url"]:
                     if active_model and not active_model.startswith("openai/"):
                         chat_base_url = "http://127.0.0.1:1234/v1"
                         chat_model = f"openai/{active_model}"
-                        chat_api_key = "sk-local-dev"
+                        chat_api_key = None  # No auth for LM Studio
 
                 async for event in stream_chat(
                     client=await agent.get_llm_client(),

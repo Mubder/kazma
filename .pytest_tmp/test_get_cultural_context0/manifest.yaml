@@ -1,6 +1,0 @@
-tools:
-  baz:
-    cultural_context:
-      date_format: hijri
-      direction: rtl
-      number_format: arabic-indic

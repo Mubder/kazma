@@ -15,6 +15,7 @@ import json
 import logging
 import sqlite3
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -74,7 +75,7 @@ class FTS5Memory:
         """
         doc_id = doc_id or str(uuid.uuid4())
         meta_json = json.dumps(metadata or {"source": "agent"})
-        timestamp = __import__('datetime').datetime.now(__import__('datetime').timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).isoformat()
 
         self._conn.execute(
             f"INSERT INTO {self._table_name} (text, metadata, doc_id, timestamp) VALUES (?, ?, ?, ?)",

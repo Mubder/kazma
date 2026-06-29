@@ -1,6 +1,0 @@
-users:
-  default:
-    allowed:
-    - web_search
-    denied:
-    - shell_exec

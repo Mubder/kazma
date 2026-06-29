@@ -1,3 +1,0 @@
-# This is a comment
-requests>=2.28.0
-# another comment

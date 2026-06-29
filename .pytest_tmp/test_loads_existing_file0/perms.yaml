@@ -1,6 +1,0 @@
-users:
-  alice:
-    allowed:
-      - read
-    denied:
-      - write

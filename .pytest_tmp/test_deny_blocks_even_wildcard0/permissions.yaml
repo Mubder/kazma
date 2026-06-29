@@ -1,6 +1,0 @@
-users:
-  default:
-    allowed:
-    - '*'
-    denied:
-    - shell_exec

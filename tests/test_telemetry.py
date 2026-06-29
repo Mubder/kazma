@@ -20,6 +20,20 @@ from kazma_core.telemetry import (
     parse_nvidia_smi_output,
 )
 
+
+@pytest.fixture(autouse=True)
+def _reset_shutdown_event() -> None:
+    """Ensure the global shutdown event is clear before each telemetry test.
+
+    Telemetry streams exit immediately when ``is_shutting_down()`` returns
+    True. Prior tests may have signaled shutdown, so reset it to avoid
+    flakiness in the stream tests.
+    """
+    from kazma_core.shutdown import reset_shutdown
+
+    reset_shutdown()
+
+
 # ═══════════════════════════════════════════════════════════════════
 # parse_nvidia_smi_output
 # ═══════════════════════════════════════════════════════════════════

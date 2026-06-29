@@ -9,6 +9,7 @@ and revocation operations.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -75,7 +76,7 @@ class KazmaCertification:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
-        self._db_lock = __import__("threading").Lock()
+        self._db_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # DB helpers

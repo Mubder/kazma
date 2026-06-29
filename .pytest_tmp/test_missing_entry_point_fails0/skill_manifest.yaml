@@ -1,6 +1,0 @@
-author: tester
-description: A valid test skill
-entry_point: nonexistent
-license: MIT
-name: valid-skill
-version: 1.0.0

@@ -1,5 +1,0 @@
-tools:
-  bad_tool:
-    certified: false
-  good_tool:
-    certified: true
