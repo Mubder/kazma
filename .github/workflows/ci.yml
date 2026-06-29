@@ -29,7 +29,7 @@ jobs:
       - name: Lint
         run: |
           pip install ruff
-          ruff check kazma-core/ kazma-gateway/ kazma-ui/
+          ruff check kazma-core/ kazma-gateway/ kazma-ui/ kazma-cli/
 
       - name: Portability lint
         run: |
