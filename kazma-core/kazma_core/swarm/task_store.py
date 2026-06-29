@@ -104,6 +104,14 @@ class TaskStore:
             self._conn.close()
             self._conn = None
 
+    def clear(self) -> None:
+        """Delete all rows from both tables. Useful for test isolation."""
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute("DELETE FROM swarm_tasks")
+            conn.execute("DELETE FROM swarm_worker_metrics")
+            conn.commit()
+
     # ------------------------------------------------------------------
     # Task CRUD
     # ------------------------------------------------------------------

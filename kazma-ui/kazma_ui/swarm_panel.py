@@ -106,7 +106,12 @@ def _reset_swarm_state() -> None:
     """Reset the shared engine for tests."""
     if not _has_swarm_core():
         return
-    set_swarm_engine(_create_empty_engine())
+    engine = _create_empty_engine()
+    # Clear persisted task/metric data so tests start with a clean slate.
+    store = getattr(engine, "_task_store", None)
+    if store is not None and hasattr(store, "clear"):
+        store.clear()
+    set_swarm_engine(engine)
 
 
 def _swarm_started(engine: Any) -> bool:

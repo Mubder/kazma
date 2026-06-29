@@ -15,7 +15,10 @@ import logging
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from kazma_core.swarm.task_store import TaskStore
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +69,8 @@ class MetricsCollector:
         snapshot = collector.get_worker_metrics("analyst")
     """
 
-    def __init__(self, task_store: Any | None = None) -> None:
-        self._task_store = task_store
+    def __init__(self, task_store: TaskStore | None = None) -> None:
+        self._task_store: TaskStore | None = task_store
         self._lock = threading.Lock()
         # In-memory accumulators keyed by (worker, date).
         self._metrics: dict[tuple[str, str], WorkerMetricSnapshot] = {}
