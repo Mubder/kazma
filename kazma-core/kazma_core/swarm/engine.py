@@ -288,7 +288,7 @@ class SwarmEngine:
 
         if task.type == TaskType.CONSULT:
             try:
-                pattern_result = await execute_consult(
+                consult_result = await execute_consult(
                     task,
                     resolve_worker=self.get_worker,
                     dispatch_worker_by_name=self._dispatch_worker_by_name,
@@ -306,14 +306,14 @@ class SwarmEngine:
 
             return self._finalize_task(
                 task,
-                worker_results=pattern_result.worker_results,
-                individual_opinions=pattern_result.individual_opinions,
-                status=pattern_result.status,
-                aggregated_output=pattern_result.aggregated_output,
-                synthesized_output=pattern_result.synthesized_output,
-                error=pattern_result.error,
+                worker_results=consult_result.worker_results,
+                individual_opinions=consult_result.individual_opinions,
+                status=consult_result.status,
+                aggregated_output=consult_result.aggregated_output,
+                synthesized_output=consult_result.synthesized_output,
+                error=consult_result.error,
                 duration_seconds=perf_counter() - started,
-                metadata=pattern_result.metadata,
+                metadata=consult_result.metadata,
             )
 
         if task.type == TaskType.CONDITIONAL:

@@ -68,8 +68,8 @@ class RetryPolicy:
         Args:
             attempt: 1-based attempt number (1 = first retry).
         """
-        delay = self.base_delay * (2 ** (attempt - 1))
-        return min(delay, self.max_delay)
+        delay: float = self.base_delay * (2 ** (attempt - 1))
+        return float(min(delay, self.max_delay))
 
     def compute_delay(self, attempt: int) -> float:
         """Return the exponential backoff delay, optionally with jitter.

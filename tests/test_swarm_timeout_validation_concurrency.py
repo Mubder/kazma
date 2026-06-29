@@ -47,7 +47,8 @@ class TestTimeoutGuardRejectsZero:
         with pytest.raises(ValueError, match="timeout"):
             TimeoutGuard(default_timeout=0)
 
-    def test_zero_timeout_rejected_on_execute(self):
+    @pytest.mark.asyncio
+    async def test_zero_timeout_rejected_on_execute(self):
         guard = TimeoutGuard()
         with pytest.raises(ValueError, match="timeout"):
 
@@ -55,11 +56,7 @@ class TestTimeoutGuardRejectsZero:
                 return {"status": "success", "output": ""}
 
             # Use an explicit timeout=0 override
-            import asyncio
-
-            asyncio.get_event_loop().run_until_complete(
-                guard.execute(noop, timeout=0)
-            )
+            await guard.execute(noop, timeout=0)
 
 
 class TestTimeoutGuardAbortsWithTimeoutStatus:
