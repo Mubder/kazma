@@ -2,13 +2,7 @@
 
 from __future__ import annotations
 
-import importlib
-import subprocess
-import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 
 class TestPackageStructure:
@@ -49,9 +43,8 @@ class TestKazmaTUIApp:
 
     def test_app_is_textual_app(self) -> None:
         """KazmaTUI must be a subclass of textual.app.App."""
-        from textual.app import App
-
         from kazma_tui.app import KazmaTUI
+        from textual.app import App
 
         assert issubclass(KazmaTUI, App), "KazmaTUI must inherit from textual.app.App"
 
@@ -62,9 +55,7 @@ class TestKazmaTUIApp:
         assert callable(main), "main must be callable"
 
     def test_app_compose_returns_widgets(self) -> None:
-        """KazmaTUI.compose() must yield Header, Footer, and at least one placeholder widget."""
-        from textual.widgets import Footer, Header
-
+        """KazmaTUI.compose() must yield HeaderProviderModel, FooterShortcuts, and at least one placeholder widget."""
         from kazma_tui.app import KazmaTUI
 
         app = KazmaTUI()
@@ -72,8 +63,8 @@ class TestKazmaTUIApp:
         widgets = list(app.compose())
         widget_types = [type(w).__name__ for w in widgets]
 
-        assert "Header" in widget_types, f"Header not found in compose output: {widget_types}"
-        assert "Footer" in widget_types, f"Footer not found in compose output: {widget_types}"
+        assert "HeaderProviderModel" in widget_types, f"HeaderProviderModel not found in compose output: {widget_types}"
+        assert "FooterShortcuts" in widget_types, f"FooterShortcuts not found in compose output: {widget_types}"
         # Must have at least one placeholder beyond Header/Footer
         assert len(widgets) >= 3, f"Expected at least 3 widgets (Header + placeholder + Footer), got {len(widgets)}"
 

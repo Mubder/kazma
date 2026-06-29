@@ -6,7 +6,10 @@ import logging
 import sys
 
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Static
+
+from kazma_tui.footer import FooterShortcuts
+from kazma_tui.header import HeaderProviderModel
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +45,9 @@ class KazmaTUI(App[None]):
 
     def compose(self) -> ComposeResult:
         """Create the application layout."""
-        yield Header()
+        yield HeaderProviderModel()
         yield PlaceholderWidget("Dashboard")
-        yield Footer()
+        yield FooterShortcuts()
 
 
 def main() -> None:
