@@ -215,6 +215,7 @@
       pattern: pattern,
       timeout: parseFloat(($('adv-timeout') || {}).value) || 300,
       aggregation: ($('adv-aggregation') || {}).value || 'collect',
+      max_retries: parseInt(($('adv-retries') || {}).value, 10) || 0,
     };
 
     // Add validation schema if provided

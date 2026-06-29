@@ -397,6 +397,8 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
         ) else {}
         if "max_concurrent" in payload:
             task_metadata["max_concurrent"] = payload.get("max_concurrent")
+        if "max_retries" in payload:
+            task_metadata["max_retries"] = payload.get("max_retries")
 
         manager_engine = getattr(swarm_manager, "engine", None)
         if not isinstance(manager_engine, SwarmEngine):

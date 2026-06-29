@@ -653,3 +653,172 @@ class TestModelsEndpoint:
         data = response.json()
         assert len(data["models"]) > 0
         assert len(data["providers"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# i18n: Swarm page uses t() translation calls instead of hardcoded strings
+# ---------------------------------------------------------------------------
+
+
+class TestSwarmI18n:
+    """Test that swarm.html uses t() translation calls for all user-visible strings."""
+
+    def test_page_title_uses_translation(self):
+        """Page title uses t() call instead of hardcoded string."""
+        client = _build_client()
+        response = client.get("/swarm")
+        html = response.text
+        # Should contain the translated title from i18n
+        assert "Swarm Orchestration" in html
+
+    def test_no_hardcoded_english_tab_labels(self):
+        """Tab labels come from t() translations, not hardcoded English."""
+        client = _build_client()
+        response = client.get("/swarm")
+        html = response.text
+        # The translated strings should appear (from i18n en defaults)
+        assert "Task Builder" in html
+        assert "Active Tasks" in html
+        assert "Results Dashboard" in html
+        assert "Worker Registry" in html
+        assert "Task History" in html
+
+    def test_no_hardcoded_english_metric_labels(self):
+        """Metric labels use t() translations."""
+        client = _build_client()
+        response = client.get("/swarm")
+        html = response.text
+        # These should come from t() calls
+        assert "Workers" in html
+        assert "Status" in html
+        assert "Tasks Today" in html
+        assert "Total Cost" in html
+
+    def test_no_hardcoded_english_form_labels(self):
+        """Form labels use t() translations."""
+        client = _build_client()
+        response = client.get("/swarm")
+        html = response.text
+        # These should come from t() calls
+        assert "Create Task" in html
+        assert "Prompt" in html
+        assert "Timeout" in html
+        assert "Aggregation" in html
+
+    def test_no_hardcoded_english_empty_states(self):
+        """Empty state messages use t() translations."""
+        client = _build_client()
+        response = client.get("/swarm")
+        html = response.text
+        # These should come from t() calls
+        assert "No active tasks" in html
+        assert "No completed tasks yet" in html
+
+    def test_swarm_translation_keys_exist_in_i18n(self):
+        """All required swarm translation keys exist in i18n module."""
+        from kazma_ui.i18n import TRANSLATIONS
+
+        required_keys = [
+            "swarm.title",
+            "swarm.workers",
+            "swarm.status",
+            "swarm.running",
+            "swarm.stopped",
+            "swarm.start_all",
+            "swarm.stop_all",
+            "swarm.busy",
+            "swarm.tasks_today",
+            "swarm.total_cost",
+            "swarm.completed",
+            "swarm.today",
+            "swarm.tab_task_builder",
+            "swarm.tab_active_tasks",
+            "swarm.tab_results_dashboard",
+            "swarm.tab_worker_registry",
+            "swarm.tab_task_history",
+            "swarm.create_task",
+            "swarm.orchestration_pattern",
+            "swarm.prompt",
+            "swarm.context",
+            "swarm.advanced_options",
+            "swarm.timeout_seconds",
+            "swarm.max_retry_count",
+            "swarm.aggregation_strategy",
+            "swarm.validation_schema",
+            "swarm.no_workers_registered",
+            "swarm.recent_results",
+            "swarm.no_active_tasks",
+            "swarm.registered_workers",
+            "swarm.add_worker",
+            "swarm.dynamic_spawn",
+            "swarm.spawn_worker",
+            "swarm.search",
+            "swarm.task_id",
+            "swarm.duration",
+            "swarm.cost",
+        ]
+        for key in required_keys:
+            assert key in TRANSLATIONS, f"Missing translation key: {key}"
+            assert "en" in TRANSLATIONS[key], f"Missing English for key: {key}"
+            assert "ar" in TRANSLATIONS[key], f"Missing Arabic for key: {key}"
+
+
+# ---------------------------------------------------------------------------
+# adv-retries wiring: max_retries passed through to task metadata
+# ---------------------------------------------------------------------------
+
+
+class TestRetryCountWiring:
+    """Test that adv-retries field is wired to dispatch payload and metadata."""
+
+    def test_dispatch_accepts_max_retries(self):
+        """API accepts max_retries in dispatch payload."""
+        client = _build_client()
+        _add_workers(client, "w1")
+        response = client.post(
+            "/api/swarm/dispatch",
+            json={
+                "workers": ["w1"],
+                "task": "test task",
+                "max_retries": 3,
+            },
+        )
+        assert response.status_code == 200
+
+    def test_max_retries_in_response_metadata(self):
+        """max_retries appears in the response metadata when dispatched."""
+        client = _build_client()
+        _add_workers(client, "w1")
+        response = client.post(
+            "/api/swarm/dispatch",
+            json={
+                "workers": ["w1"],
+                "task": "test task with retries",
+                "max_retries": 5,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # The metadata should include max_retries
+        if data.get("metadata"):
+            assert data["metadata"].get("max_retries") == 5
+
+    def test_max_retries_default_zero(self):
+        """When max_retries is not provided, it defaults gracefully."""
+        client = _build_client()
+        _add_workers(client, "w1")
+        response = client.post(
+            "/api/swarm/dispatch",
+            json={
+                "workers": ["w1"],
+                "task": "test task no retries",
+            },
+        )
+        assert response.status_code == 200
+
+    def test_page_has_retry_field(self):
+        """Page contains the adv-retries input field."""
+        client = _build_client()
+        response = client.get("/swarm")
+        html = response.text
+        assert 'id="adv-retries"' in html

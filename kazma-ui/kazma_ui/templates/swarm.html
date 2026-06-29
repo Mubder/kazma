@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "swarm" %}
-{% block title %}Kazma — Swarm Orchestration{% endblock %}
-{% block page_title %}🐝 Swarm Orchestration{% endblock %}
+{% block title %}Kazma — {{ t('swarm.title') }}{% endblock %}
+{% block page_title %}🐝 {{ t('swarm.title') }}{% endblock %}
 
 {% block content %}
 <div class="swarm-container" style="max-width:1500px;margin:0 auto;">
@@ -18,27 +18,27 @@
   <div class="metrics-grid" style="margin-bottom:1.5rem;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
     <div class="metric-card">
       <div class="metric-icon">🐝</div>
-      <div class="metric-label">Workers</div>
+      <div class="metric-label">{{ t('swarm.workers') }}</div>
       <div class="metric-value" id="metric-worker-count" style="color:var(--text-primary);">{{ worker_count }}</div>
-      <div class="metric-sub"><span id="metric-busy">0</span> busy</div>
+      <div class="metric-sub"><span id="metric-busy">0</span> {{ t('swarm.busy') }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon">⚡</div>
-      <div class="metric-label">Status</div>
-      <div class="metric-value" id="metric-swarm-status" style="color:var(--text-muted);">{{ 'Running' if started else 'Stopped' }}</div>
-      <div class="metric-sub">swarm {{ 'active' if started else 'idle' }}</div>
+      <div class="metric-label">{{ t('swarm.status') }}</div>
+      <div class="metric-value" id="metric-swarm-status" style="color:var(--text-muted);">{{ t('swarm.running') if started else t('swarm.stopped') }}</div>
+      <div class="metric-sub">{{ t('swarm.swarm_active') if started else t('swarm.swarm_idle') }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon">📊</div>
-      <div class="metric-label">Tasks Today</div>
+      <div class="metric-label">{{ t('swarm.tasks_today') }}</div>
       <div class="metric-value" id="metric-tasks-today" style="color:var(--text-primary);">0</div>
-      <div class="metric-sub">completed</div>
+      <div class="metric-sub">{{ t('swarm.completed') }}</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon">💰</div>
-      <div class="metric-label">Total Cost</div>
+      <div class="metric-label">{{ t('swarm.total_cost') }}</div>
       <div class="metric-value" id="metric-total-cost" style="color:var(--text-primary);">$0.00</div>
-      <div class="metric-sub">today</div>
+      <div class="metric-sub">{{ t('swarm.today') }}</div>
     </div>
   </div>
 
@@ -46,23 +46,23 @@
   <div class="card" style="margin-bottom:1.5rem;">
     <div style="display:flex;align-items:center;justify-content:space-between;">
       <div>
-        <span id="swarm-status-text" style="font-size:0.9rem;color:var(--text-muted);">● Loading swarm status…</span>
+        <span id="swarm-status-text" style="font-size:0.9rem;color:var(--text-muted);">● {{ t('swarm.loading_status') }}</span>
       </div>
       <div style="display:flex;gap:8px;">
-        <button id="swarm-start" class="btn btn-primary" onclick="KazmaSwarm.start()" {% if started %}disabled{% endif %}>▶ Start All</button>
-        <button id="swarm-stop" class="btn btn-danger" onclick="KazmaSwarm.stop()" {% if not started %}disabled{% endif %}>⏹ Stop All</button>
-        <button class="btn btn-secondary" onclick="KazmaSwarm.refresh()" title="Manual refresh">↻</button>
+        <button id="swarm-start" class="btn btn-primary" onclick="KazmaSwarm.start()" {% if started %}disabled{% endif %}>▶ {{ t('swarm.start_all') }}</button>
+        <button id="swarm-stop" class="btn btn-danger" onclick="KazmaSwarm.stop()" {% if not started %}disabled{% endif %}>⏹ {{ t('swarm.stop_all') }}</button>
+        <button class="btn btn-secondary" onclick="KazmaSwarm.refresh()" title="{{ t('swarm.refresh') }}">↻</button>
       </div>
     </div>
   </div>
 
   <!-- ── Tab Navigation ── -->
   <div class="tabs" id="swarm-tabs" style="margin-bottom:0;">
-    <button class="tab active" data-tab="task-builder" onclick="KazmaSwarm.switchTab('task-builder')">🔧 Task Builder</button>
-    <button class="tab" data-tab="active-tasks" onclick="KazmaSwarm.switchTab('active-tasks')">⚡ Active Tasks</button>
-    <button class="tab" data-tab="results-dashboard" onclick="KazmaSwarm.switchTab('results-dashboard')">📊 Results Dashboard</button>
-    <button class="tab" data-tab="worker-registry" onclick="KazmaSwarm.switchTab('worker-registry')">👷 Worker Registry</button>
-    <button class="tab" data-tab="task-history" onclick="KazmaSwarm.switchTab('task-history')">📜 Task History</button>
+    <button class="tab active" data-tab="task-builder" onclick="KazmaSwarm.switchTab('task-builder')">🔧 {{ t('swarm.tab_task_builder') }}</button>
+    <button class="tab" data-tab="active-tasks" onclick="KazmaSwarm.switchTab('active-tasks')">⚡ {{ t('swarm.tab_active_tasks') }}</button>
+    <button class="tab" data-tab="results-dashboard" onclick="KazmaSwarm.switchTab('results-dashboard')">📊 {{ t('swarm.tab_results_dashboard') }}</button>
+    <button class="tab" data-tab="worker-registry" onclick="KazmaSwarm.switchTab('worker-registry')">👷 {{ t('swarm.tab_worker_registry') }}</button>
+    <button class="tab" data-tab="task-history" onclick="KazmaSwarm.switchTab('task-history')">📜 {{ t('swarm.tab_task_history') }}</button>
   </div>
 
   <!-- ═══════════════════════════════════════════════════════════════ -->
@@ -73,12 +73,12 @@
 
       <!-- Left: Task Configuration -->
       <div class="card">
-        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">📤 Create Task</h3>
+        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">📤 {{ t('swarm.create_task') }}</h3>
         <form id="dispatch-form" onsubmit="return false;">
 
           <!-- Orchestration Pattern Selector (VAL-UI-001, VAL-ORCH-042) -->
           <div class="form-group">
-            <label class="form-label">Orchestration Pattern *</label>
+            <label class="form-label">{{ t('swarm.orchestration_pattern') }} *</label>
             <select id="pattern-select" class="form-select" onchange="KazmaSwarm.onPatternChange(this.value)">
               <option value="dispatch">🎯 Dispatch — Single worker execution</option>
               <option value="broadcast">📢 Broadcast — All workers in parallel</option>
@@ -91,7 +91,7 @@
 
           <!-- Worker Multi-Select with Capability Badges (VAL-UI-002, VAL-ORCH-043) -->
           <div class="form-group">
-            <label class="form-label">Workers *</label>
+            <label class="form-label">{{ t('swarm.workers_label') }} *</label>
             <div id="worker-select-container" style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;min-height:80px;background:rgba(255,255,255,0.02);max-height:200px;overflow-y:auto;">
               <!-- Worker checkboxes rendered by JS with capability badges -->
               <div id="worker-checkboxes" style="display:flex;flex-direction:column;gap:4px;">
@@ -109,47 +109,47 @@
                 </label>
                 {% endfor %}
                 {% if not workers %}
-                <div style="color:var(--text-muted);font-size:0.85rem;padding:8px;">No workers registered. Add workers in the Worker Registry tab.</div>
+                <div style="color:var(--text-muted);font-size:0.85rem;padding:8px;">{{ t('swarm.no_workers_registered') }}</div>
                 {% endif %}
               </div>
             </div>
-            <span style="font-size:0.7rem;color:var(--text-muted);" id="pattern-hint">Select one or more workers for dispatch</span>
+            <span style="font-size:0.7rem;color:var(--text-muted);" id="pattern-hint">{{ t('swarm.pattern_hint_dispatch') }}</span>
           </div>
 
           <!-- Prompt Textarea (VAL-UI-003) -->
           <div class="form-group">
-            <label class="form-label">Prompt *</label>
-            <textarea id="dispatch-task" class="form-textarea" rows="4" placeholder="Describe the task for the workers…" required></textarea>
+            <label class="form-label">{{ t('swarm.prompt') }} *</label>
+            <textarea id="dispatch-task" class="form-textarea" rows="4" placeholder="{{ t('swarm.prompt_placeholder') }}" required></textarea>
           </div>
 
           <!-- Context Textarea (VAL-UI-003) -->
           <div class="form-group">
-            <label class="form-label">Context <span style="font-size:0.7rem;color:var(--text-muted);">— optional background information</span></label>
-            <textarea id="dispatch-context" class="form-textarea" rows="2" placeholder="Additional context, constraints, or background…"></textarea>
+            <label class="form-label">{{ t('swarm.context') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.context_hint') }}</span></label>
+            <textarea id="dispatch-context" class="form-textarea" rows="2" placeholder="{{ t('swarm.context_placeholder') }}"></textarea>
           </div>
 
           <!-- Conditional Routes (shown only for conditional pattern) -->
           <div id="conditional-routes-group" class="form-group" style="display:none;">
-            <label class="form-label">Routing Rules <span style="font-size:0.7rem;color:var(--text-muted);">— JSON mapping of route names to worker names</span></label>
+            <label class="form-label">{{ t('swarm.routing_rules') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.routing_rules_hint') }}</span></label>
             <textarea id="conditional-routes" class="form-textarea" rows="3" placeholder='{"approve": "worker-a", "reject": "worker-b", "default": "worker-c"}'></textarea>
           </div>
 
           <!-- Advanced Options (VAL-UI-004) -->
           <details style="margin-top:12px;border:1px solid var(--border);border-radius:var(--radius);padding:0;">
             <summary style="padding:10px 12px;cursor:pointer;font-size:0.85rem;font-weight:500;color:var(--text-secondary);background:rgba(255,255,255,0.02);border-radius:var(--radius);">
-              ⚙️ Advanced Options
+              ⚙️ {{ t('swarm.advanced_options') }}
             </summary>
             <div style="padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
               <div class="form-group" style="margin:0;">
-                <label class="form-label" style="font-size:0.8rem;">Timeout (seconds)</label>
+                <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.timeout_seconds') }}</label>
                 <input type="number" id="adv-timeout" class="form-input" value="300" min="1" max="3600" step="1">
               </div>
               <div class="form-group" style="margin:0;">
-                <label class="form-label" style="font-size:0.8rem;">Max Retry Count</label>
+                <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.max_retry_count') }}</label>
                 <input type="number" id="adv-retries" class="form-input" value="0" min="0" max="10" step="1">
               </div>
               <div class="form-group" style="margin:0;">
-                <label class="form-label" style="font-size:0.8rem;">Aggregation Strategy</label>
+                <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.aggregation_strategy') }}</label>
                 <select id="adv-aggregation" class="form-select">
                   <option value="collect">Collect — Return all results</option>
                   <option value="first_valid">First Valid — Earliest non-error</option>
@@ -159,7 +159,7 @@
                 </select>
               </div>
               <div class="form-group" style="margin:0;">
-                <label class="form-label" style="font-size:0.8rem;">Validation Schema (JSON)</label>
+                <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.validation_schema') }}</label>
                 <input type="text" id="adv-validation" class="form-input" placeholder='{"type":"object"}'>
               </div>
             </div>
@@ -168,7 +168,7 @@
           <!-- Submit -->
           <div class="form-actions" style="margin-top:16px;">
             <button type="button" class="btn btn-primary btn-full" id="btn-dispatch" onclick="KazmaSwarm.dispatch()">
-              🚀 Create Task
+              🚀 {{ t('swarm.create_task_btn') }}
             </button>
           </div>
         </form>
@@ -177,12 +177,12 @@
       <!-- Right: Recent Results Preview -->
       <div style="display:flex;flex-direction:column;gap:16px;">
         <div class="card" id="task-results-card">
-          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:12px;">📋 Recent Results</h3>
+          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:12px;">📋 {{ t('swarm.recent_results') }}</h3>
           <div id="task-results-container">
             <div id="task-results-empty" style="text-align:center;padding:24px;color:var(--text-muted);">
               <div style="font-size:1.5rem;margin-bottom:6px;">📭</div>
-              <p style="font-size:0.85rem;">No tasks dispatched yet</p>
-              <p style="font-size:0.75rem;color:var(--text-tertiary);">Results will appear here after dispatching a task</p>
+              <p style="font-size:0.85rem;">{{ t('swarm.no_tasks_dispatched') }}</p>
+              <p style="font-size:0.75rem;color:var(--text-tertiary);">{{ t('swarm.results_appear_hint') }}</p>
             </div>
             <div id="task-results-list"></div>
           </div>
@@ -198,9 +198,9 @@
     <div id="active-tasks-container">
       <div id="active-tasks-empty" style="text-align:center;padding:48px;color:var(--text-muted);">
         <div style="font-size:2rem;margin-bottom:8px;">⚡</div>
-        <p style="font-size:0.9rem;">No active tasks</p>
-        <p style="font-size:0.8rem;color:var(--text-tertiary);">Submit a task from the Task Builder to see live progress here</p>
-        <p style="font-size:0.75rem;color:var(--text-tertiary);margin-top:8px;">Handoff chains, HITL checkpoints, and per-worker progress shown in real-time via SSE</p>
+        <p style="font-size:0.9rem;">{{ t('swarm.no_active_tasks') }}</p>
+        <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('swarm.active_tasks_hint') }}</p>
+        <p style="font-size:0.75rem;color:var(--text-tertiary);margin-top:8px;">{{ t('swarm.active_tasks_sse_hint') }}</p>
       </div>
       <div id="active-tasks-list"></div>
     </div>
@@ -212,7 +212,7 @@
   <div class="tab-panel" id="panel-results-dashboard" style="display:none;">
     <!-- Pattern-specific result sub-tabs -->
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
-      <button class="tab-btn active" data-result-tab="all" onclick="KazmaSwarm.filterResults('all')">All Results</button>
+      <button class="tab-btn active" data-result-tab="all" onclick="KazmaSwarm.filterResults('all')">{{ t('swarm.all_results') }}</button>
       <button class="tab-btn" data-result-tab="pipeline" onclick="KazmaSwarm.filterResults('pipeline')">🔗 Pipeline</button>
       <button class="tab-btn" data-result-tab="fan_out" onclick="KazmaSwarm.filterResults('fan_out')">🌀 Fan-Out</button>
       <button class="tab-btn" data-result-tab="consult" onclick="KazmaSwarm.filterResults('consult')">💬 Consult</button>
@@ -223,8 +223,8 @@
     <div id="results-dashboard-container">
       <div id="results-dashboard-empty" style="text-align:center;padding:48px;color:var(--text-muted);">
         <div style="font-size:2rem;margin-bottom:8px;">📊</div>
-        <p style="font-size:0.9rem;">No completed tasks yet</p>
-        <p style="font-size:0.8rem;color:var(--text-tertiary);">Complete tasks will appear here with pattern-specific visualizations</p>
+        <p style="font-size:0.9rem;">{{ t('swarm.no_completed_tasks') }}</p>
+        <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('swarm.completed_tasks_hint') }}</p>
       </div>
       <div id="results-dashboard-list"></div>
     </div>
@@ -238,7 +238,7 @@
 
       <!-- Left: Worker Cards -->
       <div>
-        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:12px;">👷 Registered Workers</h3>
+        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:12px;">👷 {{ t('swarm.registered_workers') }}</h3>
         <div id="worker-cards-container" class="worker-list-body">
           {% if workers %}
           {% for w in workers %}
@@ -251,9 +251,9 @@
                   {% if w.get('role') %}<span class="badge badge-accent">{{ w.role }}</span>{% endif %}
                 </div>
                 <div style="display:flex;gap:16px;font-size:0.8rem;color:var(--text-tertiary);">
-                  <span>Model: <span style="color:var(--text-secondary);font-family:var(--font-mono);">{{ w.get('model', '?') }}</span></span>
-                  <span>Provider: <span style="color:var(--text-secondary);">{{ w.get('provider', '?') }}</span></span>
-                  <span>Type: <span style="color:var(--text-secondary);">{{ w.get('type', '?') }}</span></span>
+                  <span>{{ t('swarm.model') }}: <span style="color:var(--text-secondary);font-family:var(--font-mono);">{{ w.get('model', '?') }}</span></span>
+                  <span>{{ t('swarm.provider') }}: <span style="color:var(--text-secondary);">{{ w.get('provider', '?') }}</span></span>
+                  <span>{{ t('swarm.type_label') }}: <span style="color:var(--text-secondary);">{{ w.get('type', '?') }}</span></span>
                 </div>
                 {% if w.get('capabilities') and w.capabilities.get('expertise') %}
                 <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
@@ -270,8 +270,8 @@
                 </div>
               </div>
               <div style="display:flex;gap:4px;">
-                <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="logs" title="View logs">📋</button>
-                <button class="btn btn-sm btn-danger" data-worker="{{ w.name }}" data-action="remove" title="Remove worker">✕</button>
+                <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="logs" title="{{ t('swarm.view_logs') }}">📋</button>
+                <button class="btn btn-sm btn-danger" data-worker="{{ w.name }}" data-action="remove" title="{{ t('swarm.remove_worker') }}">✕</button>
               </div>
             </div>
           </div>
@@ -279,8 +279,8 @@
           {% else %}
           <div style="text-align:center;padding:48px;color:var(--text-muted);">
             <div style="font-size:2rem;margin-bottom:8px;">🐝</div>
-            <p>No workers registered</p>
-            <p style="font-size:0.8rem;color:var(--text-tertiary);">Use the form to add or spawn workers</p>
+            <p>{{ t('swarm.no_workers') }}</p>
+            <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('swarm.add_workers_hint') }}</p>
           </div>
           {% endif %}
         </div>
@@ -290,34 +290,34 @@
       <div style="display:flex;flex-direction:column;gap:16px;">
         <!-- Add Worker Form -->
         <div class="card">
-          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">➕ Add Worker</h3>
+          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">➕ {{ t('swarm.add_worker') }}</h3>
           <form id="add-worker-form" onsubmit="return false;">
             <div class="form-group">
-              <label class="form-label">Worker Name *</label>
-              <input type="text" id="add-name" class="form-input" placeholder="e.g., worker-1, code-reviewer" required>
+              <label class="form-label">{{ t('swarm.worker_name') }} *</label>
+              <input type="text" id="add-name" class="form-input" placeholder="{{ t('swarm.worker_name_hint') }}" required>
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label">Role</label>
+                <label class="form-label">{{ t('swarm.role') }}</label>
                 <select id="add-role" class="form-select" onchange="KazmaSwarm.applyRole(this.value)">
-                  <option value="">Custom</option>
-                  <option value="orchestrator">Orchestrator</option>
-                  <option value="observer">Observer</option>
-                  <option value="backend">Backend</option>
-                  <option value="frontend">Frontend</option>
-                  <option value="researcher">Researcher</option>
-                  <option value="reviewer">Reviewer</option>
+                  <option value="">{{ t('swarm.custom') }}</option>
+                  <option value="orchestrator">{{ t('swarm.orchestrator') }}</option>
+                  <option value="observer">{{ t('swarm.observer') }}</option>
+                  <option value="backend">{{ t('swarm.backend') }}</option>
+                  <option value="frontend">{{ t('swarm.frontend') }}</option>
+                  <option value="researcher">{{ t('swarm.researcher') }}</option>
+                  <option value="reviewer">{{ t('swarm.reviewer') }}</option>
                 </select>
               </div>
               <div class="form-group">
-                <label class="form-label">Model</label>
+                <label class="form-label">{{ t('swarm.model') }}</label>
                 <input type="text" id="add-model" class="form-input" value="deepseek-chat" list="saved-profiles-datalist">
                 <datalist id="saved-profiles-datalist"></datalist>
               </div>
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label">Provider</label>
+                <label class="form-label">{{ t('swarm.provider') }}</label>
                 <select id="add-provider" class="form-select">
                   <option value="deepseek">DeepSeek</option>
                   <option value="openai">OpenAI</option>
@@ -327,7 +327,7 @@
                 </select>
               </div>
               <div class="form-group">
-                <label class="form-label">Type</label>
+                <label class="form-label">{{ t('swarm.type_label') }}</label>
                 <select id="add-type" class="form-select">
                   <option value="in-process">In-Process</option>
                   <option value="telegram">Telegram</option>
@@ -335,54 +335,54 @@
               </div>
             </div>
             <div class="form-group">
-              <label class="form-label">API Key <span style="font-size:0.7rem;color:var(--text-muted);">(optional)</span></label>
+              <label class="form-label">{{ t('swarm.api_key_optional') }} <span style="font-size:0.7rem;color:var(--text-muted);">({{ t('swarm.api_key_hint') }})</span></label>
               <input type="password" id="add-apikey" class="form-input" placeholder="sk-...">
             </div>
             <div class="form-actions">
-              <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.addWorker()">Add Worker</button>
+              <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.addWorker()">{{ t('swarm.add_worker') }}</button>
             </div>
           </form>
         </div>
 
         <!-- Dynamic Spawn Form (VAL-UI-009) -->
         <div class="card">
-          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">🧬 Dynamic Spawn</h3>
+          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">🧬 {{ t('swarm.dynamic_spawn') }}</h3>
           <form id="spawn-worker-form" onsubmit="return false;">
             <div class="form-group">
-              <label class="form-label">Worker Name *</label>
-              <input type="text" id="spawn-name" class="form-input" placeholder="e.g., python-expert" required>
+              <label class="form-label">{{ t('swarm.worker_name') }} *</label>
+              <input type="text" id="spawn-name" class="form-input" placeholder="{{ t('swarm.spawn_name_hint') }}" required>
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label">Role *</label>
-                <input type="text" id="spawn-role" class="form-input" placeholder="e.g., backend, researcher">
+                <label class="form-label">{{ t('swarm.role') }} *</label>
+                <input type="text" id="spawn-role" class="form-input" placeholder="{{ t('swarm.role_hint') }}">
               </div>
               <div class="form-group">
-                <label class="form-label">Model</label>
+                <label class="form-label">{{ t('swarm.model') }}</label>
                 <input type="text" id="spawn-model" class="form-input" placeholder="deepseek-chat" value="deepseek-chat">
               </div>
             </div>
             <div class="form-group">
-              <label class="form-label">Expertise Tags <span style="font-size:0.7rem;color:var(--text-muted);">— comma separated</span></label>
-              <input type="text" id="spawn-expertise" class="form-input" placeholder="python, api_design, database">
+              <label class="form-label">{{ t('swarm.expertise_tags') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.expertise_hint') }}</span></label>
+              <input type="text" id="spawn-expertise" class="form-input" placeholder="{{ t('swarm.expertise_placeholder') }}">
             </div>
             <div class="form-group">
-              <label class="form-label">Tools <span style="font-size:0.7rem;color:var(--text-muted);">— comma separated</span></label>
-              <input type="text" id="spawn-tools" class="form-input" placeholder="file_edit, terminal, browser">
+              <label class="form-label">{{ t('swarm.tools_label') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.tools_hint') }}</span></label>
+              <input type="text" id="spawn-tools" class="form-input" placeholder="{{ t('swarm.tools_placeholder') }}">
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label">Model Specialty</label>
+                <label class="form-label">{{ t('swarm.model_specialty') }}</label>
                 <select id="spawn-specialty" class="form-select">
-                  <option value="">None</option>
-                  <option value="reasoning">Reasoning</option>
-                  <option value="coding">Coding</option>
-                  <option value="creative">Creative</option>
-                  <option value="fast">Fast</option>
+                  <option value="">{{ t('swarm.none') }}</option>
+                  <option value="reasoning">{{ t('swarm.reasoning') }}</option>
+                  <option value="coding">{{ t('swarm.coding') }}</option>
+                  <option value="creative">{{ t('swarm.creative') }}</option>
+                  <option value="fast">{{ t('swarm.fast') }}</option>
                 </select>
               </div>
               <div class="form-group">
-                <label class="form-label">Provider</label>
+                <label class="form-label">{{ t('swarm.provider') }}</label>
                 <select id="spawn-provider" class="form-select">
                   <option value="deepseek">DeepSeek</option>
                   <option value="openai">OpenAI</option>
@@ -392,7 +392,7 @@
               </div>
             </div>
             <div class="form-actions">
-              <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.spawnWorker()">🧬 Spawn Worker</button>
+              <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.spawnWorker()">🧬 {{ t('swarm.spawn_worker') }}</button>
             </div>
           </form>
         </div>
@@ -408,13 +408,13 @@
     <div class="card" style="margin-bottom:16px;">
       <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
         <div class="form-group" style="flex:1;min-width:200px;margin:0;">
-          <label class="form-label" style="font-size:0.8rem;">Search</label>
-          <input type="text" id="history-search" class="form-input" placeholder="Search by task ID or prompt…" oninput="KazmaSwarm.filterHistory()">
+          <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.search') }}</label>
+          <input type="text" id="history-search" class="form-input" placeholder="{{ t('swarm.search_placeholder') }}" oninput="KazmaSwarm.filterHistory()">
         </div>
         <div class="form-group" style="margin:0;">
-          <label class="form-label" style="font-size:0.8rem;">Type</label>
+          <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.type') }}</label>
           <select id="history-filter-type" class="form-select" onchange="KazmaSwarm.filterHistory()">
-            <option value="">All Types</option>
+            <option value="">{{ t('swarm.all_types') }}</option>
             <option value="dispatch">Dispatch</option>
             <option value="broadcast">Broadcast</option>
             <option value="pipeline">Pipeline</option>
@@ -424,16 +424,16 @@
           </select>
         </div>
         <div class="form-group" style="margin:0;">
-          <label class="form-label" style="font-size:0.8rem;">Status</label>
+          <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.status_col') }}</label>
           <select id="history-filter-status" class="form-select" onchange="KazmaSwarm.filterHistory()">
-            <option value="">All Statuses</option>
+            <option value="">{{ t('swarm.all_statuses') }}</option>
             <option value="completed">Completed</option>
             <option value="failed">Failed</option>
             <option value="timeout">Timeout</option>
             <option value="partial">Partial</option>
           </select>
         </div>
-        <button class="btn btn-secondary" onclick="KazmaSwarm.loadTaskHistory()" title="Refresh history">↻</button>
+        <button class="btn btn-secondary" onclick="KazmaSwarm.loadTaskHistory()" title="{{ t('swarm.refresh') }}">↻</button>
       </div>
     </div>
 
@@ -443,20 +443,20 @@
         <table style="width:100%;border-collapse:collapse;font-size:0.85rem;" id="history-table">
           <thead>
             <tr style="border-bottom:1px solid var(--border-subtle);">
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Task ID</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Type</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Prompt</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Workers</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Status</th>
-              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Duration</th>
-              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Cost</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.task_id') }}</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.type') }}</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.prompt_col') }}</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.workers_col') }}</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.status_col') }}</th>
+              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.duration') }}</th>
+              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">{{ t('swarm.cost') }}</th>
             </tr>
           </thead>
           <tbody id="history-table-body">
             <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted);">
               <div style="font-size:1.5rem;margin-bottom:6px;">📜</div>
-              <p>No task history loaded</p>
-              <p style="font-size:0.75rem;color:var(--text-tertiary);">Click refresh or navigate here to load history</p>
+              <p>{{ t('swarm.no_task_history') }}</p>
+              <p style="font-size:0.75rem;color:var(--text-tertiary);">{{ t('swarm.load_history_hint') }}</p>
             </td></tr>
           </tbody>
         </table>
@@ -476,7 +476,7 @@
     <div id="task-detail-modal" class="modal-overlay" style="display:none;" onclick="KazmaSwarm.closeTaskDetail(event)">
       <div class="modal modal-xl" onclick="event.stopPropagation()">
         <div class="modal-header">
-          <h2 id="task-detail-title">Task Detail</h2>
+          <h2 id="task-detail-title">{{ t('swarm.task_detail') }}</h2>
           <button class="modal-close" onclick="KazmaSwarm.closeTaskDetail()">✕</button>
         </div>
         <div class="modal-body" id="task-detail-body" style="max-height:70vh;overflow-y:auto;">
@@ -492,7 +492,7 @@
 <div id="logs-modal" class="modal-overlay" style="display:none;" onclick="KazmaSwarm.closeLogs(event)">
   <div class="modal modal-lg" onclick="event.stopPropagation()">
     <div class="modal-header">
-      <h2 id="logs-worker-name">Logs</h2>
+      <h2 id="logs-worker-name">{{ t('swarm.logs') }}</h2>
       <button class="modal-close" onclick="KazmaSwarm.closeLogs()">✕</button>
     </div>
     <div id="logs-content" class="modal-body" style="max-height:60vh;overflow-y:auto;font-family:var(--font-mono);font-size:0.8rem;">
