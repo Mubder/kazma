@@ -14,11 +14,18 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import OrderedDict
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
-from langgraph.checkpoint.base import BaseCheckpointSaver
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import (
+    BaseCheckpointSaver,
+    ChannelVersions,
+    Checkpoint,
+    CheckpointMetadata,
+)
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 logger = logging.getLogger(__name__)
@@ -45,6 +52,7 @@ class CheckpointManager(BaseCheckpointSaver):
     """
 
     def __init__(self, saver: AsyncSqliteSaver, max_locks: int = _MAX_THREAD_LOCKS) -> None:
+        super().__init__(serde=getattr(saver, "serde", None))
         self._saver = saver
         self._locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
         self._max_locks = max_locks
@@ -68,7 +76,13 @@ class CheckpointManager(BaseCheckpointSaver):
             self._locks.popitem(last=False)
         return lock
 
-    async def aput(self, config: dict[str, Any], checkpoint: Any, metadata: Any, new_versions: Any) -> dict[str, Any]:
+    async def aput(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig:
         """Save a checkpoint with per-thread locking.
 
         Extracts thread_id from config["configurable"]["thread_id"]
@@ -79,6 +93,20 @@ class CheckpointManager(BaseCheckpointSaver):
 
         async with lock:
             return await self._saver.aput(config, checkpoint, metadata, new_versions)
+
+    async def aput_writes(
+        self,
+        config: RunnableConfig,
+        writes: Sequence[tuple[str, Any]],
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
+        """Save pending writes with per-thread locking."""
+        thread_id = config.get("configurable", {}).get("thread_id", "default")
+        lock = self._get_lock(thread_id)
+
+        async with lock:
+            await self._saver.aput_writes(config, writes, task_id, task_path)
 
     async def aget(self, config: dict[str, Any]) -> Any:
         """Retrieve a checkpoint (read-only, no lock needed)."""

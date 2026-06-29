@@ -10,11 +10,34 @@
 
 from __future__ import annotations
 
+import asyncio
 import tempfile
 from pathlib import Path
 
 import pytest
-from kazma_gateway.stores.checkpoint import create_checkpointer
+from kazma_gateway.stores.checkpoint import CheckpointManager, create_checkpointer
+
+
+class _ConcurrentWriteSaver:
+    """Test double that tracks concurrent aput_writes calls."""
+
+    def __init__(self) -> None:
+        self._active = 0
+        self.max_active = 0
+
+    async def aput_writes(
+        self,
+        config: dict[str, object],
+        writes: list[tuple[str, object]],
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
+        self._active += 1
+        self.max_active = max(self.max_active, self._active)
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            self._active -= 1
 
 
 class TestCheckpointer:
@@ -138,3 +161,59 @@ class TestCheckpointer:
         assert "message_id" not in gw
 
         await store.close()
+
+    @pytest.mark.asyncio
+    async def test_aput_writes_supported_and_persisted(self) -> None:
+        """CheckpointManager must implement aput_writes for LangGraph runtime writes."""
+        from langgraph.checkpoint.base import empty_checkpoint
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = str(Path(tmpdir) / "writes.db")
+            saver = await create_checkpointer(db_path)
+
+            base_config = {"configurable": {"thread_id": "writes-thread", "checkpoint_ns": ""}}
+            checkpoint_config = await saver.aput(
+                base_config,
+                empty_checkpoint(),
+                {},
+                {},
+            )
+
+            await saver.aput_writes(
+                checkpoint_config,
+                [("messages", {"role": "assistant", "content": "hello"})],
+                task_id="task-1",
+            )
+
+            checkpoint_tuple = await saver.aget_tuple(checkpoint_config)
+            assert checkpoint_tuple is not None
+            assert checkpoint_tuple.pending_writes is not None
+            assert len(checkpoint_tuple.pending_writes) == 1
+
+            task_id, channel, value = checkpoint_tuple.pending_writes[0]
+            assert task_id == "task-1"
+            assert channel == "messages"
+            assert value["content"] == "hello"
+
+            await saver.close()
+
+    @pytest.mark.asyncio
+    async def test_aput_writes_serialized_per_thread(self) -> None:
+        """Concurrent writes for the same thread_id must be serialized by thread lock."""
+        backend = _ConcurrentWriteSaver()
+        manager = CheckpointManager(saver=backend)  # type: ignore[arg-type]
+
+        config = {
+            "configurable": {
+                "thread_id": "same-thread",
+                "checkpoint_ns": "",
+                "checkpoint_id": "cp-1",
+            }
+        }
+
+        await asyncio.gather(
+            manager.aput_writes(config, [("messages", "one")], task_id="task-1"),
+            manager.aput_writes(config, [("messages", "two")], task_id="task-2"),
+        )
+
+        assert backend.max_active == 1, "aput_writes calls for the same thread must not overlap"
