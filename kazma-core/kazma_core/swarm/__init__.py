@@ -42,6 +42,7 @@ from kazma_core.swarm.task import (
     WorkerCapabilities,
     WorkerResult,
 )
+from kazma_core.swarm.task_store import TaskStore
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
 
 __all__ = [
@@ -70,6 +71,7 @@ __all__ = [
     "SwarmTask",
     "TaskResult",
     "TaskStatus",
+    "TaskStore",
     "TaskType",
     "WorkerResult",
     "HandoffRecord",

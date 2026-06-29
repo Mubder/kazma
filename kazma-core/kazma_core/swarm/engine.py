@@ -46,6 +46,7 @@ from kazma_core.swarm.task import (
     WorkerCapabilities,
     WorkerResult,
 )
+from kazma_core.swarm.task_store import TaskStore
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,7 @@ class SwarmEngine:
         *,
         result_aggregator: ResultAggregator | None = None,
         capability_router: CapabilityRouter | None = None,
+        task_store: TaskStore | None = None,
     ) -> None:
         self.config = config or SwarmConfig(enabled=True, workers=[])
         self._workers: dict[str, SwarmWorker] = {}
@@ -91,6 +93,7 @@ class SwarmEngine:
         self._default_timeout_guard = TimeoutGuard()
         self._output_validators: dict[str, OutputValidator] = {}
         self._checkpoint_handler = HITLCheckpointHandler()
+        self._task_store = task_store
         self._build_workers()
 
     def _build_workers(self) -> None:
@@ -875,6 +878,16 @@ class SwarmEngine:
         )
         task.result = result
         self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
+
+        # Persist to SQLite when a task store is configured.
+        if self._task_store is not None:
+            try:
+                self._task_store.persist_task(task)
+            except Exception:
+                logger.exception(
+                    "[SwarmEngine] failed to persist task '%s'", task.id
+                )
+
         return result
 
     @staticmethod
@@ -1025,6 +1038,15 @@ class SwarmEngine:
         task.result = result
         self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
 
+        # Persist paused state to SQLite so it survives restart.
+        if self._task_store is not None:
+            try:
+                self._task_store.persist_task(task)
+            except Exception:
+                logger.exception(
+                    "[SwarmEngine] failed to persist paused task '%s'", task.id
+                )
+
         logger.info(
             "[SwarmEngine] pipeline '%s' paused at HITL checkpoint step %d",
             task.id,
@@ -1056,6 +1078,51 @@ class SwarmEngine:
     def get_checkpoint_info(self, task_id: str) -> HITLCheckpoint | None:
         """Return checkpoint info for a paused task, or ``None``."""
         return self._checkpoint_handler.get_checkpoint(task_id)
+
+    @property
+    def task_store(self) -> TaskStore | None:
+        """Return the configured task store, or ``None``."""
+        return self._task_store
+
+    def restore_paused_tasks(self) -> list[SwarmTask]:
+        """Load paused tasks from SQLite so they can be resumed.
+
+        Called on engine startup to restore HITL checkpoint state that
+        was persisted before a restart.  Returns the list of restored
+        paused tasks.
+        """
+        if self._task_store is None:
+            return []
+        paused_tasks = self._task_store.get_paused_tasks()
+        for task in paused_tasks:
+            self._task_history[task.id] = task
+            # Restore the checkpoint handler state if metadata is present.
+            checkpoint_meta = task.metadata.get("hitl_checkpoint", {})
+            if checkpoint_meta:
+                checkpoint = HITLCheckpoint(
+                    task_id=task.id,
+                    step=checkpoint_meta.get("step", 0),
+                    worker=checkpoint_meta.get("worker", ""),
+                    output_preview=checkpoint_meta.get("output_preview", ""),
+                    needs_approval=True,
+                    status="pending",
+                )
+                worker_results = (
+                    list(task.result.worker_results) if task.result else []
+                )
+                blackboard_data = task.metadata.get("paused_blackboard", {})
+                self._checkpoint_handler.store_paused_pipeline(
+                    task=task,
+                    checkpoint=checkpoint,
+                    worker_results=worker_results,
+                    blackboard_data=blackboard_data,
+                )
+                logger.info(
+                    "[SwarmEngine] restored paused pipeline '%s' at step %d",
+                    task.id,
+                    checkpoint.step,
+                )
+        return paused_tasks
 
     async def approve_checkpoint(self, task_id: str) -> TaskResult | None:
         """Approve a paused HITL checkpoint and resume the pipeline.
@@ -1146,6 +1213,15 @@ class SwarmEngine:
                 task.completed_at = _utc_now_iso()
                 task.result = result
                 self._task_history[task_id] = SwarmTask.from_dict(task.to_dict())
+                # Persist to SQLite.
+                if self._task_store is not None:
+                    try:
+                        self._task_store.persist_task(task)
+                    except Exception:
+                        logger.exception(
+                            "[SwarmEngine] failed to persist rejected task '%s'",
+                            task_id,
+                        )
             else:
                 # If task not in history, store the result directly.
                 self._checkpoint_handler.complete_pipeline(task_id, result)

@@ -17,6 +17,7 @@ try:
         SwarmEngine,
         SwarmManager,
         SwarmTask,
+        TaskStore,
         TaskType,
         WorkerCapabilities,
         WorkerConfig,
@@ -28,6 +29,7 @@ except ImportError:  # pragma: no cover
     SwarmEngine = None  # type: ignore[assignment,misc]
     SwarmManager = None  # type: ignore[assignment,misc]
     SwarmTask = None  # type: ignore[assignment,misc]
+    TaskStore = None  # type: ignore[assignment,misc]
     TaskType = None  # type: ignore[assignment,misc]
     WorkerCapabilities = None  # type: ignore[assignment,misc]
     WorkerConfig = None  # type: ignore[assignment,misc]
@@ -75,7 +77,8 @@ def _create_empty_engine() -> Any:
     """Create an empty shared engine when swarm core is available."""
     if not _has_swarm_core():
         return None
-    return SwarmEngine(SwarmConfig(enabled=True, workers=[]))
+    store = TaskStore() if TaskStore is not None else None
+    return SwarmEngine(SwarmConfig(enabled=True, workers=[]), task_store=store)
 
 
 def _resolve_engine(swarm_manager: Any = None) -> Any:
@@ -456,14 +459,101 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
     @router.get("/api/swarm/tasks")
     async def swarm_tasks(
         task_type: str | None = Query(default=None, alias="type"),
+        status: str | None = Query(default=None),
+        worker: str | None = Query(default=None),
+        page: int = Query(default=1, ge=1),
+        page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
     ) -> JSONResponse:
-        """Return completed swarm tasks, optionally filtered by task type."""
+        """Return completed swarm tasks with pagination and filtering.
+
+        Query parameters:
+            type: Filter by task type (dispatch, consult, etc.)
+            status: Filter by task status (completed, failed, etc.)
+            worker: Filter to tasks involving this worker name
+            page: 1-based page number (default: 1)
+            pageSize: Items per page (default: 20, max: 100)
+        """
         engine = _current_engine()
         if not _has_swarm_core() or engine is None:
             return JSONResponse({"tasks": [], "count": 0})
 
+        # Use TaskStore for paginated queries when available.
+        store = getattr(engine, "task_store", None)
+        if store is not None:
+            tasks, total = store.list_tasks(
+                page=page,
+                page_size=page_size,
+                status=status,
+                task_type=task_type,
+                worker=worker,
+                include_count=True,
+            )
+            return JSONResponse({
+                "tasks": [task.to_dict() for task in tasks],
+                "count": len(tasks),
+                "total": total,
+                "page": page,
+                "pageSize": page_size,
+            })
+
+        # Fallback to in-memory history.
         tasks = [task.to_dict() for task in engine.list_tasks(task_type)]
         return JSONResponse({"tasks": tasks, "count": len(tasks)})
+
+    @router.get("/api/swarm/tasks/{task_id}")
+    async def swarm_task_detail(task_id: str) -> JSONResponse:
+        """Return full detail for a single swarm task."""
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse(
+                {"status": "error", "message": "Swarm core is not available"},
+                status_code=503,
+            )
+
+        # Try TaskStore first (survives restart), then in-memory history.
+        store = getattr(engine, "task_store", None)
+        task = None
+        if store is not None:
+            task = store.get_task(task_id)
+        if task is None:
+            task = engine.get_task(task_id)
+        if task is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Task '{task_id}' not found"},
+                status_code=404,
+            )
+
+        return JSONResponse({
+            "task": task.to_dict(),
+        })
+
+    @router.get("/api/swarm/workers/{name}/metrics")
+    async def swarm_worker_metrics(name: str) -> JSONResponse:
+        """Return daily metrics for a specific worker."""
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse({"metrics": [], "worker": name})
+
+        store = getattr(engine, "task_store", None)
+        if store is None:
+            return JSONResponse({"metrics": [], "worker": name})
+
+        metrics = store.get_worker_metrics(name)
+        return JSONResponse({"metrics": metrics, "worker": name})
+
+    @router.get("/api/swarm/workers/metrics/all")
+    async def swarm_all_worker_metrics() -> JSONResponse:
+        """Return aggregated metrics for all workers."""
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse({"metrics": []})
+
+        store = getattr(engine, "task_store", None)
+        if store is None:
+            return JSONResponse({"metrics": []})
+
+        metrics = store.get_all_worker_metrics()
+        return JSONResponse({"metrics": metrics})
 
     @router.post("/api/swarm/workers/spawn", status_code=201)
     async def swarm_spawn_worker(payload: dict[str, Any]) -> JSONResponse:
