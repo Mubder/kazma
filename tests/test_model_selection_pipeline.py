@@ -347,11 +347,11 @@ class TestChatJsModelPersistence:
             "'kazma.selectedModel'"
         )
 
-    def test_chat_js_has_loadModels_function(self):
+    def test_chat_js_has_load_models_function(self):
         js = _CHAT_JS.read_text(encoding="utf-8")
         assert "function loadModels" in js, "chat.js must have a loadModels function"
 
-    def test_chat_js_calls_loadModels_on_init(self):
+    def test_chat_js_calls_load_models_on_init(self):
         js = _CHAT_JS.read_text(encoding="utf-8")
         # loadModels() must be called during init
         assert "loadModels()" in js
@@ -361,7 +361,7 @@ class TestChatJsModelPersistence:
         js = _CHAT_JS.read_text(encoding="utf-8")
         assert "model:" in js, "chat.js sendMessage must include model in the SSE body"
 
-    def test_chat_js_has_onModelChange_handler(self):
+    def test_chat_js_has_on_model_change_handler(self):
         js = _CHAT_JS.read_text(encoding="utf-8")
         assert "onModelChange" in js, "chat.js must have an onModelChange handler"
 
@@ -374,13 +374,13 @@ class TestChatJsModelPersistence:
 class TestSettingsJsProviderSwitch:
     """VAL-UI-004: settings.js saveModel must call POST /api/provider/switch."""
 
-    def test_settings_js_saveModel_calls_provider_switch(self):
+    def test_settings_js_save_model_calls_provider_switch(self):
         js = _SETTINGS_JS.read_text(encoding="utf-8")
         assert "/api/provider/switch" in js, (
             "settings.js saveModel() must call POST /api/provider/switch"
         )
 
-    def test_settings_js_saveModel_sends_model_and_key(self):
+    def test_settings_js_save_model_sends_model_and_key(self):
         js = _SETTINGS_JS.read_text(encoding="utf-8")
         # The switch body must include model, base_url, and api_key
         assert "api_key" in js
@@ -395,7 +395,7 @@ class TestSettingsJsProviderSwitch:
 class TestChatJsErrorDisplay:
     """VAL-UI-006: error frames must display even when no tokens preceded."""
 
-    def test_onError_creates_assistant_message(self):
+    def test_on_error_creates_assistant_message(self):
         """onError must call createAssistantMessage when currentMsgEl is null."""
         js = _CHAT_JS.read_text(encoding="utf-8")
         # The onError callback should contain the pattern that creates
@@ -404,7 +404,7 @@ class TestChatJsErrorDisplay:
             "chat.js onError must create an assistant message to display errors"
         )
 
-    def test_onError_renders_error_message_class(self):
+    def test_on_error_renders_error_message_class(self):
         js = _CHAT_JS.read_text(encoding="utf-8")
         assert "error-message" in js, (
             "chat.js must render errors with an 'error-message' CSS class"
