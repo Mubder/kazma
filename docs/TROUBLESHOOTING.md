@@ -362,6 +362,82 @@ Every `IncomingMessage` in `kazma-gateway/kazma_gateway/gateway.py` gets a `corr
 
 ---
 
+## 2a. Provider & Connector Connectivity
+
+### Symptom: LLM provider shows "down" or "degraded" in the Providers & Connectors hub
+
+**Diagnosis:**
+A provider card in Settings > Providers & Connectors shows `down` or `degraded`, or the **Test Connection** button returns an error such as `Cannot connect to <base_url>` or `HTTP 401`.
+
+**Root Cause:**
+- The **Base URL** is incorrect or unreachable.
+- The **API Key** is missing, expired, or invalid.
+- The provider is disabled.
+- The provider's `/models` endpoint does not match the expected OpenAI-compatible format.
+
+**Solution:**
+
+1. Open **Settings > Providers & Connectors** and select the **LLM Providers & Models** sub-tab.
+2. Click **Edit** on the provider, verify the **Base URL**, and paste the current API key.
+3. Click **Test Connection**. The backend calls the provider's `/models` endpoint and reports latency or the exact HTTP error.
+4. If the test succeeds, the **Save** button becomes enabled. Save only after a successful test.
+5. If the test fails with `401`, regenerate the API key from the provider's dashboard (OpenAI, Anthropic, DeepSeek, etc.) and retry.
+6. For local servers (Ollama, LM Studio), ensure the server is running and the base URL includes the `/v1` suffix (e.g., `http://127.0.0.1:11434/v1`).
+
+### Symptom: Platform connector test fails (Telegram, Discord, Slack)
+
+**Diagnosis:**
+Clicking **Test Connection** on a connector card returns `No token configured`, `HTTP 401`, or `invalid_auth`.
+
+**Root Cause:**
+- The connector token/key has not been saved.
+- The token is revoked or invalid.
+- Slack requires both a **Bot Token** (`xoxb-...`) and an **App Token** (`xapp-...`) for Socket Mode.
+- Discord expects the token to be sent as `Bot <TOKEN>`.
+
+**Solution:**
+
+1. Open **Settings > Providers & Connectors** and select the **Platform Connectors** sub-tab.
+2. Click **Edit** on the connector, enter the token, and fill in any extra fields (Slack app token, Discord guild ID, etc.).
+3. Click **Test Connection**. The backend performs a non-destructive health check:
+   - Telegram: `GET https://api.telegram.org/bot<TOKEN>/getMe`
+   - Discord: `GET https://discord.com/api/v10/users/@me` with `Authorization: Bot <TOKEN>`
+   - Slack: `POST https://slack.com/api/auth.test` with the bot token
+4. The **Save** button stays disabled until the test succeeds. Save only after a successful test.
+5. After saving, click **Refresh Gateway** on the legacy Connectors tab or restart the server so the new token is picked up by the gateway adapters.
+
+### Symptom: Masked secret looks wrong or saving a provider does not update the key
+
+**Diagnosis:**
+You edit an existing provider, leave the API key field as `****XXXX`, save, and the provider no longer authenticates.
+
+**Root Cause:**
+The UI sends the masked placeholder back to the backend. The backend preserves the existing secret **only** when it recognizes the value as a masked placeholder (`***` or containing `****`). If the placeholder format is unexpected, the placeholder itself may be saved as the new key.
+
+**Solution:**
+
+1. When editing, leave the masked value unchanged to keep the existing secret, or clear the field and paste the full new secret.
+2. If you suspect the placeholder was saved as the real key, open the provider edit modal, clear the API key field, paste the real key, run **Test Connection**, and then save.
+3. Verify the stored value directly:
+
+   ```python
+   from kazma_core.config_store import ConfigStore
+   from kazma_core.model_registry import get_model_registry
+
+   cs = ConfigStore()
+   registry = get_model_registry()
+   provider = registry.get_provider("openai")
+   print(provider.get("api_key", "")[:4])  # Should not be "****"
+   ```
+
+### Test-before-save behavior
+
+- **Save is disabled** for any provider or connector until **Test Connection** succeeds.
+- This applies to new entries and edits. For existing entries, opening the modal pre-fills the masked secret and marks the entry as tested, so you can save without re-testing if you did not change the secret.
+- A failed test shows the exact error under the card or in the modal, so you can fix the URL, token, or network issue before persisting the configuration.
+
+---
+
 ## 3. TUI / Metrics
 
 ### Symptom: kazma-tui dashboard freezes or metrics stop updating

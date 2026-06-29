@@ -4,12 +4,11 @@
 {% block page_title %}{{ t('settings.title') }}{% endblock %}
 
 {% block content %}
-<div x-data="settingsApp()" x-init="init()" x-cloak>
+<div x-data="settingsApp()" x-init="init()">
 
-    <!-- ═══ Settings Navigation (12 tabs) ═══ -->
+    <!-- ═══ Settings Navigation (11 tabs) ═══ -->
     <nav class="settings-nav">
-        <button class="settings-tab" :class="{ active: tab === 'providers' }" @click="onTabChange('providers')">{{ t('settings.tab_services') }}</button>
-        <button class="settings-tab" :class="{ active: tab === 'models' }" @click="onTabChange('models')">{{ t('settings.tab_models') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'providers_connectors' }" @click="onTabChange('providers_connectors')">{{ t('settings.tab_providers_connectors') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">{{ t('settings.tab_agent') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'connectors' }" @click="onTabChange('connectors')">{{ t('settings.tab_connectors') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'mcp' }" @click="onTabChange('mcp')">{{ t('settings.tab_mcp') }}</button>
@@ -23,69 +22,165 @@
     </nav>
 
     <!-- Loading indicator -->
-    <div x-show="loading" style="padding:40px;text-align:center;color:var(--text-muted)">{{ t('settings.loading') }}</div>
+    <div :class="{ hidden: !loading }" style="padding:40px;text-align:center;color:var(--text-muted)">{{ t('settings.loading') }}</div>
 
     <!-- ═══════════════════════════════════════════════════════════════
-         TAB 1: SERVICES / PROVIDERS
+         TAB 1: PROVIDERS & CONNECTORS (Unified Secrets Hub)
          ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'providers'" x-transition>
-        <div class="settings-group">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-                <h3>{{ t('settings.llm_providers') }}</h3>
-                <button class="btn btn-primary btn-sm" @click="openAddProvider()">+ {{ t('settings.add_provider') }}</button>
+    <div :class="{ hidden: tab !== 'providers_connectors' }">
+        <!-- Sub-tab switcher -->
+        <div class="settings-group" style="padding-bottom:0">
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+                <button class="btn btn-sm" :class="hubSubtab === 'providers' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'providers'">{{ t('settings.llm_providers_models') }}</button>
+                <button class="btn btn-sm" :class="hubSubtab === 'connectors' ? 'btn-primary' : 'btn-secondary'" @click="hubSubtab = 'connectors'">{{ t('settings.platform_connectors') }}</button>
             </div>
+        </div>
 
-            <!-- Provider List -->
-            <template x-for="p in providers" :key="p.name">
-                <div class="provider-card" style="display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:8px">
-                    <div style="flex:1">
-                        <div style="display:flex;align-items:center;gap:8px">
-                            <strong x-text="p.display_name || p.name" style="font-size:0.95rem"></strong>
-                            <span class="badge" :class="p.enabled ? 'badge-stdio' : 'badge-sse'" x-text="p.enabled ? 'Enabled' : 'Disabled'"></span>
-                            <span class="badge" :class="{
-                                'badge-stdio': p.health === 'healthy',
-                                'badge-standard': p.health === 'degraded',
-                                'badge-premium': p.health === 'down'
-                            }" x-text="p.health || 'unknown'" x-show="p.health"></span>
-                        </div>
-                        <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" x-text="p.base_url"></div>
-                        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="p.models && p.models.length">
-                            {{ t('settings.models_label') }} <span x-text="(p.models || []).join(', ')"></span>
-                        </div>
-                    </div>
-                    <div style="display:flex;gap:6px;align-items:center">
-                        <label class="toggle" :title="p.enabled ? 'Disable' : 'Enable'">
-                            <input type="checkbox" :checked="p.enabled" @change="toggleProvider(p.name, $event.target.checked)">
-                            <span class="toggle-slider"></span>
-                        </label>
-                        <button class="btn btn-secondary btn-sm" @click="testProvider(p.name)" :disabled="testingProvider === p.name" x-text="testingProvider === p.name ? '...' : '{{ t('settings.test') }}'"></button>
-                        <button class="btn btn-danger btn-sm" @click="deleteProvider(p.name)">×</button>
-                    </div>
+        <!-- ═══════════════════════════════════════════════════════════
+             SUB-SECTION: LLM Providers & Models
+             ═══════════════════════════════════════════════════════════ -->
+        <div :class="{ hidden: hubSubtab !== 'providers' }">
+            <div class="settings-group">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+                    <h3>{{ t('settings.llm_providers') }}</h3>
+                    <button class="btn btn-primary btn-sm" @click="openHubProviderModal()">+ {{ t('settings.add_provider') }}</button>
                 </div>
-            </template>
 
-            <div x-show="providers.length === 0 && !loading" class="empty-state">
-                {{ t('settings.no_providers') }}
+                <template x-for="p in hubProviders" :key="p.name">
+                    <div class="provider-card" style="display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:8px">
+                        <div style="flex:1">
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                <strong x-text="p.display_name || p.name" style="font-size:0.95rem"></strong>
+                                <span class="badge" :class="p.enabled ? 'badge-stdio' : 'badge-sse'" x-text="p.enabled ? 'Enabled' : 'Disabled'"></span>
+                                <span class="badge" :class="{
+                                    'badge-stdio': p.health === 'healthy',
+                                    'badge-standard': p.health === 'degraded',
+                                    'badge-premium': p.health === 'down'
+                                }" x-text="p.health || 'unknown'" x-show="p.health"></span>
+                            </div>
+                            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" x-text="p.base_url"></div>
+                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">
+                                {{ t('settings.api_key') }}: <span x-text="p.api_key || '—'" style="font-family:var(--font-mono)"></span>
+                            </div>
+                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="p.models && p.models.length">
+                                {{ t('settings.models_label') }} <span x-text="(p.models || []).join(', ')"></span>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                            <label class="toggle" :title="p.enabled ? 'Disable' : 'Enable'">
+                                <input type="checkbox" :checked="p.enabled" @change="toggleHubProvider(p.name, $event.target.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <button class="btn btn-secondary btn-sm" @click="testHubProvider(p.name)" :disabled="hubTestingProvider === p.name" x-text="hubTestingProvider === p.name ? '...' : '{{ t('settings.test') }}'"></button>
+                            <button class="btn btn-secondary btn-sm" @click="discoverHubProvider(p.name)" :disabled="hubDiscoveringProvider === p.name" x-text="hubDiscoveringProvider === p.name ? '...' : '{{ t('settings.discover') }}'"></button>
+                            <button class="btn btn-secondary btn-sm" @click="editHubProvider(p.name)">{{ t('common.edit') }}</button>
+                            <button class="btn btn-danger btn-sm" @click="deleteHubProvider(p.name)">×</button>
+                        </div>
+                    </div>
+                </template>
+
+                <div x-show="hubProviders.length === 0 && !loading" class="empty-state">
+                    {{ t('settings.no_providers') }}
+                </div>
+
+                <div x-show="hubTestResult && hubTestResult.type === 'provider'" class="validation-result" style="margin-top:12px">
+                    <template x-if="hubTestResult.success">
+                        <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>
+                    </template>
+                    <template x-if="!hubTestResult.success">
+                        <span class="text-error">✗ <span x-text="hubTestResult.error"></span></span>
+                    </template>
+                </div>
             </div>
 
-            <!-- Provider Test Result -->
-            <div x-show="providerTestResult" class="validation-result" style="margin-top:12px">
-                <template x-if="providerTestResult?.success">
-                    <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="providerTestResult?.latency_ms"></span>ms</span>
-                </template>
-                <template x-if="providerTestResult && !providerTestResult.success">
-                    <span class="text-error">✗ <span x-text="providerTestResult?.error"></span></span>
+            <div class="settings-group">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+                    <h3>{{ t('settings.saved_profiles') }}</h3>
+                    <button class="btn btn-primary btn-sm" @click="openHubProfileModal()">+ {{ t('settings.save_profile') }}</button>
+                </div>
+                <div x-show="hubProfiles.length === 0" class="empty-state" style="padding:16px">
+                    {{ t('settings.no_saved_profiles') }}
+                </div>
+                <template x-for="p in hubProfiles" :key="p.name">
+                    <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px">
+                        <div style="flex:1">
+                            <div style="font-weight:600;font-size:0.9rem" x-text="p.name"></div>
+                            <div style="font-size:0.8rem;color:var(--text-muted)" x-text="(p.provider || 'custom') + ' / ' + (p.model || '?')"></div>
+                            <div style="font-size:0.75rem;color:var(--text-tertiary)" x-text="p.base_url || ''"></div>
+                        </div>
+                        <button class="btn btn-secondary btn-sm" @click="loadHubProfile(p.name)">{{ t('settings.load') }}</button>
+                        <button class="btn btn-danger btn-sm" @click="deleteHubProfile(p.name)">×</button>
+                    </div>
                 </template>
             </div>
         </div>
 
-        <!-- Add Provider Modal -->
-        <div x-show="showProviderModal" class="modal-overlay" @click.self="showProviderModal = false">
+        <!-- ═══════════════════════════════════════════════════════════
+             SUB-SECTION: Platform Connectors
+             ═══════════════════════════════════════════════════════════ -->
+        <div :class="{ hidden: hubSubtab !== 'connectors' }">
+            <div class="settings-group">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+                    <h3>{{ t('settings.platform_connectors') }}</h3>
+                    <button class="btn btn-primary btn-sm" @click="openHubConnectorModal()">+ {{ t('settings.add_connector') }}</button>
+                </div>
+
+                <template x-for="c in hubConnectors" :key="c.name">
+                    <div style="display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:8px">
+                        <div style="flex:1">
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                <strong x-text="c.name" style="font-size:0.95rem;text-transform:capitalize"></strong>
+                                <span class="badge" :class="c.enabled ? 'badge-stdio' : 'badge-sse'" x-text="c.enabled ? 'Enabled' : 'Disabled'"></span>
+                                <span class="badge" :class="c.status === 'configured' ? 'badge-stdio' : 'badge-premium'" x-text="c.status || 'unknown'"></span>
+                            </div>
+                            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" x-text="c.endpoint || '—'"></div>
+                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">
+                                {{ t('settings.token') }}: <span x-text="c.token || '—'" style="font-family:var(--font-mono)"></span>
+                            </div>
+                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="Object.keys(c.extras || {}).length">
+                                <template x-for="(val, key) in c.extras" :key="key">
+                                    <span x-text="key + ': ' + val" style="margin-right:12px"></span>
+                                </template>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                            <label class="toggle" :title="c.enabled ? 'Disable' : 'Enable'">
+                                <input type="checkbox" :checked="c.enabled" @change="toggleHubConnector(c.name, $event.target.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <button class="btn btn-secondary btn-sm" @click="testHubConnector(c.name)" :disabled="hubTestingConnector === c.name" x-text="hubTestingConnector === c.name ? '...' : '{{ t('settings.test') }}'"></button>
+                            <button class="btn btn-secondary btn-sm" @click="editHubConnector(c.name)">{{ t('common.edit') }}</button>
+                            <button class="btn btn-danger btn-sm" @click="deleteHubConnector(c.name)">×</button>
+                        </div>
+                    </div>
+                </template>
+
+                <div x-show="hubConnectors.length === 0 && !loading" class="empty-state">
+                    {{ t('settings.no_connectors') }}
+                </div>
+
+                <div x-show="hubTestResult && hubTestResult.type === 'connector'" class="validation-result" style="margin-top:12px">
+                    <template x-if="hubTestResult.success">
+                        <span class="text-success">{{ t('settings.connected') }} <span x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
+                    </template>
+                    <template x-if="!hubTestResult.success">
+                        <span class="text-error">✗ <span x-text="hubTestResult.error"></span></span>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             MODALS
+             ═══════════════════════════════════════════════════════════ -->
+
+        <!-- Provider Add/Edit Modal -->
+        <div x-show="hubProviderModal" class="modal-overlay" @click.self="hubProviderModal = false">
             <div class="modal">
-                <h2>{{ t('settings.add_provider') }}</h2>
+                <h2 x-text="hubEditingProvider.name ? '{{ t('settings.edit_provider') }}' : '{{ t('settings.add_provider') }}'"></h2>
                 <div class="form-group">
                     <label>{{ t('settings.preset') }}</label>
-                    <select class="form-select" @change="applyProviderPreset($event.target.value)">
+                    <select class="form-select" @change="applyHubProviderPreset($event.target.value)" :disabled="hubEditingProvider.name">
                         <option value="">{{ t('settings.custom') }}</option>
                         <template x-for="p in providerPresets" :key="p.key">
                             <option :value="p.key" x-text="p.name"></option>
@@ -95,170 +190,177 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>{{ t('settings.name_id') }}</label>
-                        <input type="text" class="form-input" x-model="newProvider.name" placeholder="openai">
+                        <input type="text" class="form-input" x-model="hubEditingProvider.name" placeholder="openai" :disabled="hubEditingProvider.name && hubEditingProvider._existing">
                     </div>
                     <div class="form-group">
                         <label>{{ t('settings.display_name') }}</label>
-                        <input type="text" class="form-input" x-model="newProvider.display_name" placeholder="OpenAI">
+                        <input type="text" class="form-input" x-model="hubEditingProvider.display_name" placeholder="OpenAI">
                     </div>
                 </div>
                 <div class="form-group">
                     <label>{{ t('settings.base_url') }}</label>
-                    <input type="text" class="form-input" x-model="newProvider.base_url" placeholder="https://api.openai.com/v1">
-                </div>
-                <div class="form-group">
-                    <label>{{ t('settings.api_key') }}</label>
-                    <input type="password" class="form-input" x-model="newProvider.api_key" placeholder="sk-...">
-                </div>
-                <div class="form-group">
-                    <label>{{ t('settings.models_comma') }}</label>
-                    <input type="text" class="form-input" x-model="newProvider.models" placeholder="gpt-4o, gpt-4o-mini">
-                </div>
-                <div class="modal-actions">
-                    <button class="btn btn-secondary" @click="showProviderModal = false">{{ t('settings.cancel') }}</button>
-                    <button class="btn btn-primary" @click="saveProvider()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.add_provider') }}'"></button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════════
-         TAB 2: MODELS
-         ═══════════════════════════════════════════════════════════════ -->
-    <div x-show="tab === 'models'" x-transition>
-        <!-- Current Model Configuration -->
-        <div class="settings-group">
-            <h3>{{ t('settings.active_model') }}</h3>
-            <div class="form-group">
-                <label>{{ t('settings.provider') }}</label>
-                <select class="form-select" x-model="modelProvider" @change="onProviderChange()">
-                    <option value="">Custom</option>
-                    <template x-for="p in providerPresets" :key="p.key">
-                        <option :value="p.key" x-text="p.name"></option>
-                    </template>
-                </select>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>{{ t('settings.base_url') }}</label>
-                    <input type="text" class="form-input" x-model="currentModel.base_url" placeholder="https://api.openai.com/v1">
+                    <input type="text" class="form-input" x-model="hubEditingProvider.base_url" placeholder="https://api.openai.com/v1">
                 </div>
                 <div class="form-group">
                     <label>{{ t('settings.api_key') }}</label>
                     <div class="input-with-toggle">
-                        <input :type="showKey ? 'text' : 'password'" class="form-input" x-model="currentModel.api_key" placeholder="sk-...">
-                        <button class="btn btn-icon" @click="showKey = !showKey" x-text="showKey ? '🙈' : '👁'"></button>
+                        <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" placeholder="sk-...">
+                        <button class="btn btn-icon" @click="hubShowProviderKey = !hubShowProviderKey" x-text="hubShowProviderKey ? '🙈' : '👁'"></button>
                     </div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>
+                </div>
+                <div class="form-group">
+                    <label>{{ t('settings.models_comma') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingProvider.models" placeholder="gpt-4o, gpt-4o-mini">
+                </div>
+                <div class="form-group">
+                    <label style="display:flex;align-items:center;gap:8px">
+                        <span>{{ t('settings.enabled_label') }}</span>
+                        <label class="toggle">
+                            <input type="checkbox" x-model="hubEditingProvider.enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </label>
+                </div>
+                <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
+                    <button class="btn btn-secondary" @click="hubProviderModal = false">{{ t('settings.cancel') }}</button>
+                    <button class="btn btn-secondary" @click="testHubProviderFromModal()" :disabled="hubTestingProvider === 'modal'" x-text="hubTestingProvider === 'modal' ? '{{ t('settings.testing') }}' : '{{ t('settings.test_connection') }}'"></button>
+                    <button class="btn btn-primary" @click="saveHubProvider()" :disabled="saving || !hubProviderTested" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save') }}'"></button>
+                </div>
+                <div x-show="!hubProviderTested" style="font-size:0.8rem;color:var(--warning);margin-top:8px">
+                    {{ t('settings.test_before_save') }}
                 </div>
             </div>
-            <div class="form-row">
+        </div>
+
+        <!-- Connector Add/Edit Modal -->
+        <div x-show="hubConnectorModal" class="modal-overlay" @click.self="hubConnectorModal = false">
+            <div class="modal">
+                <h2 x-text="hubEditingConnector.name ? '{{ t('settings.edit_connector') }}' : '{{ t('settings.add_connector') }}'"></h2>
                 <div class="form-group">
-                    <label>{{ t('settings.model_name') }}</label>
-                    <div style="display:flex;gap:4px">
-                        <input type="text" class="form-input" x-model="currentModel.model" placeholder="gpt-4o-mini" style="flex:1">
-                        <button class="btn btn-secondary btn-sm" @click="fetchModels()" x-text="fetchingModels ? '...' : '{{ t('settings.fetch') }}'"></button>
-                    </div>
-                    <select x-show="availableModels.length > 0" class="form-select" x-model="currentModel.model" style="margin-top:4px">
-                        <option value="">{{ t('settings.select_model') }}</option>
-                        <template x-for="m in availableModels">
-                            <option :value="m" x-text="m"></option>
-                        </template>
+                    <label>{{ t('settings.connector_name') }}</label>
+                    <select class="form-select" x-model="hubEditingConnector.name" :disabled="hubEditingConnector._existing" @change="onHubConnectorPlatformChange()">
+                        <option value="">{{ t('settings.select_connector') }}</option>
+                        <option value="telegram">Telegram</option>
+                        <option value="discord">Discord</option>
+                        <option value="slack">Slack</option>
+                        <option value="email">Email</option>
+                        <option value="webhook">Webhook</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.max_tokens') }}</label>
-                    <input type="number" class="form-input" x-model.number="currentModel.max_tokens" min="256" max="128000">
+                    <label>{{ t('settings.token') }}</label>
+                    <div class="input-with-toggle">
+                        <input :type="hubShowConnectorToken ? 'text' : 'password'" class="form-input" x-model="hubEditingConnector.token" placeholder="token / key">
+                        <button class="btn btn-icon" @click="hubShowConnectorToken = !hubShowConnectorToken" x-text="hubShowConnectorToken ? '🙈' : '👁'"></button>
+                    </div>
+                    <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>
                 </div>
-            </div>
-            <div class="form-row">
+                <div class="form-group" x-show="hubEditingConnector.name === 'telegram'">
+                    <label>{{ t('settings.allowed_user_ids') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.allowed_users" placeholder="1804015016">
+                </div>
+                <div class="form-row" x-show="hubEditingConnector.name === 'slack'">
+                    <div class="form-group">
+                        <label>{{ t('settings.app_token_xapp') }}</label>
+                        <input type="text" class="form-input" x-model="hubEditingConnector.extras.app_token" placeholder="xapp-...">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ t('settings.workspace') }}</label>
+                        <input type="text" class="form-input" x-model="hubEditingConnector.extras.workspace" placeholder="workspace-name">
+                    </div>
+                </div>
+                <div class="form-group" x-show="hubEditingConnector.name === 'discord'">
+                    <label>{{ t('settings.guild_id') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.guild_id" placeholder="Guild ID">
+                </div>
+                <div class="form-row" x-show="hubEditingConnector.name === 'email'">
+                    <div class="form-group">
+                        <label>{{ t('settings.smtp_host') }}</label>
+                        <input type="text" class="form-input" x-model="hubEditingConnector.extras.smtp_host" placeholder="smtp.gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ t('settings.smtp_port') }}</label>
+                        <input type="number" class="form-input" x-model="hubEditingConnector.extras.smtp_port" placeholder="587">
+                    </div>
+                </div>
+                <div class="form-row" x-show="hubEditingConnector.name === 'email'">
+                    <div class="form-group">
+                        <label>{{ t('settings.username') }}</label>
+                        <input type="text" class="form-input" x-model="hubEditingConnector.extras.username" placeholder="user@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label>{{ t('settings.password') }}</label>
+                        <input type="password" class="form-input" x-model="hubEditingConnector.extras.password" placeholder="App password">
+                    </div>
+                </div>
+                <div class="form-group" x-show="hubEditingConnector.name === 'email'">
+                    <label>{{ t('settings.imap_host') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.imap_host" placeholder="imap.gmail.com">
+                </div>
+                <div class="form-group" x-show="hubEditingConnector.name === 'webhook'">
+                    <label>{{ t('settings.incoming_webhook_url') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.incoming_url" placeholder="https://your-domain.com/api/webhooks/incoming">
+                </div>
+                <div class="form-group" x-show="hubEditingConnector.name === 'webhook'">
+                    <label>{{ t('settings.outgoing_webhook_url') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.outgoing_url" placeholder="https://hooks.example.com/...">
+                </div>
+                <div class="form-group" x-show="hubEditingConnector.name === 'webhook'">
+                    <label>{{ t('settings.webhook_secret') }}</label>
+                    <input type="password" class="form-input" x-model="hubEditingConnector.extras.secret" placeholder="Shared secret">
+                </div>
                 <div class="form-group">
-                    <label>{{ t('settings.temperature') }} <span x-text="currentModel.temperature"></span></label>
-                    <input type="range" class="form-range" x-model.number="currentModel.temperature" min="0" max="2" step="0.1">
+                    <label style="display:flex;align-items:center;gap:8px">
+                        <span>{{ t('settings.enabled_label') }}</span>
+                        <label class="toggle">
+                            <input type="checkbox" x-model="hubEditingConnector.enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </label>
+                </div>
+                <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
+                    <button class="btn btn-secondary" @click="hubConnectorModal = false">{{ t('settings.cancel') }}</button>
+                    <button class="btn btn-secondary" @click="testHubConnectorFromModal()" :disabled="hubTestingConnector === 'modal'" x-text="hubTestingConnector === 'modal' ? '{{ t('settings.testing') }}' : '{{ t('settings.test_connection') }}'"></button>
+                    <button class="btn btn-primary" @click="saveHubConnector()" :disabled="saving || !hubConnectorTested" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save') }}'"></button>
+                </div>
+                <div x-show="!hubConnectorTested" style="font-size:0.8rem;color:var(--warning);margin-top:8px">
+                    {{ t('settings.test_before_save') }}
+                </div>
+            </div>
+        </div>
+
+        <!-- Saved Profile Modal -->
+        <div x-show="hubProfileModal" class="modal-overlay" @click.self="hubProfileModal = false">
+            <div class="modal">
+                <h2 x-text="hubEditingProfile._existing ? '{{ t('settings.edit_profile') }}' : '{{ t('settings.save_profile') }}'"></h2>
+                <div class="form-group">
+                    <label>{{ t('settings.profile_name') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingProfile.name" placeholder="my-gpt4o" :disabled="hubEditingProfile._existing">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.timeout_seconds') }}</label>
-                    <input type="number" class="form-input" x-model.number="currentModel.timeout" min="5" max="300">
+                    <label>{{ t('settings.provider') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingProfile.provider" placeholder="openai">
                 </div>
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-                <button class="btn btn-primary" @click="saveModel()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save') }}'"></button>
-                <button class="btn btn-secondary" @click="testModel()" :disabled="testing">
-                    <span x-show="!testing">{{ t('settings.test_connection') }}</span>
-                    <span x-show="testing">{{ t('settings.testing') }}</span>
-                </button>
-                <span x-show="testResult" :class="testResult?.success ? 'text-success' : 'text-error'" x-text="testResult?.success ? '✓ Connected! ' + testResult?.model : '✗ ' + testResult?.error"></span>
-            </div>
-            <!-- Save as named profile -->
-            <div class="form-row" style="margin-top:12px;align-items:end">
-                <div class="form-group" style="margin-bottom:0;flex:1">
-                    <label>{{ t('settings.profile_name') | default('Profile Name (save as)') }}</label>
-                    <input type="text" class="form-input" x-model="profileName" :placeholder="'e.g., my-gpt4o'" @keydown.enter="saveModelProfile()">
+                <div class="form-group">
+                    <label>{{ t('settings.base_url') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingProfile.base_url" placeholder="https://api.openai.com/v1">
                 </div>
-                <button class="btn btn-secondary" @click="saveModelProfile()" style="height:36px">{{ t('settings.save_profile') | default('Save Profile') }}</button>
-            </div>
-        </div>
-
-        <!-- Saved Model Profiles -->
-        <div class="settings-group">
-            <h3>{{ t('settings.saved_profiles') | default('Saved Model Profiles') }}</h3>
-            <div x-show="savedModels.length === 0" class="empty-state" style="padding:16px">
-                {{ t('settings.no_saved_profiles') | default('No saved profiles. Enter a profile name above and click "Save Profile".') }}
-            </div>
-            <template x-for="p in savedModels" :key="p.name">
-                <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px">
-                    <div style="flex:1">
-                        <div style="font-weight:600;font-size:0.9rem" x-text="p.name"></div>
-                        <div style="font-size:0.8rem;color:var(--text-muted)" x-text="(p.provider || 'custom') + ' / ' + (p.model || '?')"></div>
-                        <div style="font-size:0.75rem;color:var(--text-tertiary)" x-text="p.base_url || ''"></div>
+                <div class="form-group">
+                    <label>{{ t('settings.api_key') }}</label>
+                    <div class="input-with-toggle">
+                        <input :type="hubShowProfileKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProfile.api_key" placeholder="sk-...">
+                        <button class="btn btn-icon" @click="hubShowProfileKey = !hubShowProfileKey" x-text="hubShowProfileKey ? '🙈' : '👁'"></button>
                     </div>
-                    <button class="btn btn-secondary btn-sm" @click="loadModelProfile(p.name)">{{ t('settings.load') | default('Load') }}</button>
-                    <button class="btn btn-danger btn-sm" @click="deleteModelProfile(p.name)">×</button>
                 </div>
-            </template>
-        </div>
-
-        <!-- Model Defaults per Task -->
-        <div class="settings-group">
-            <h3>{{ t('settings.default_models_per_task') }}</h3>
-            <template x-for="taskType in ['chat', 'code', 'summarize', 'translate']" :key="taskType">
-                <div class="form-row" style="align-items:end;margin-bottom:8px">
-                    <div class="form-group" style="margin-bottom:0;flex:1">
-                        <label x-text="taskType.charAt(0).toUpperCase() + taskType.slice(1)"></label>
-                        <input type="text" class="form-input" x-model="modelDefaults[taskType]" :placeholder="'e.g. gpt-4o-mini'" list="saved-models-datalist">
-                    </div>
-                    <button class="btn btn-secondary btn-sm" @click="saveModelDefault(taskType)" style="height:36px">{{ t('settings.set') }}</button>
+                <div class="form-group">
+                    <label>{{ t('settings.model_name') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingProfile.model" placeholder="gpt-4o-mini">
                 </div>
-            </template>
-            <!-- Datalist populated from saved profiles for autocomplete -->
-            <datalist id="saved-models-datalist">
-                <template x-for="p in savedModels" :key="p.name">
-                    <option :value="p.model" x-text="p.name + ' (' + p.model + ')'"></option>
-                </template>
-            </datalist>
-        </div>
-
-        <!-- Model Comparison -->
-        <div class="settings-group">
-            <h3>{{ t('settings.model_comparison') }}</h3>
-            <div class="form-group">
-                <label>{{ t('settings.test_prompt') }}</label>
-                <textarea class="form-textarea" x-model="comparePrompt" rows="2" placeholder="{{ t('settings.test_prompt_placeholder') }}"></textarea>
-            </div>
-            <div class="form-group">
-                <label>{{ t('settings.models_to_compare') }}</label>
-                <input type="text" class="form-input" x-model="compareModels" placeholder="gpt-4o-mini, claude-3-haiku, deepseek-chat">
-            </div>
-            <button class="btn btn-primary" @click="runModelComparison()" :disabled="comparing" x-text="comparing ? '{{ t('settings.running') }}' : '{{ t('settings.run_comparison') }}'"></button>
-            <div x-show="compareResults.length > 0" style="margin-top:16px">
-                <template x-for="(r, i) in compareResults" :key="i">
-                    <div style="padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px">
-                        <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-                            <strong x-text="r.model" style="color:var(--accent-light)"></strong>
-                            <span style="font-size:0.8rem;color:var(--text-muted)" x-text="r.latency_ms ? r.latency_ms + 'ms' : ''"></span>
-                        </div>
-                        <div x-text="r.response || r.error || '{{ t('settings.no_response') }}'" style="font-size:0.85rem;color:var(--text-secondary);white-space:pre-wrap"></div>
-                    </div>
-                </template>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" @click="hubProfileModal = false">{{ t('settings.cancel') }}</button>
+                    <button class="btn btn-primary" @click="saveHubProfile()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save') }}'"></button>
+                </div>
             </div>
         </div>
     </div>
@@ -364,110 +466,17 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════
-         TAB 4: CONNECTORS
+         TAB 4: CONNECTORS (deprecated inputs)
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'connectors'" x-transition>
-        <!-- Telegram -->
         <div class="settings-group">
-            <h3>{{ t('settings.telegram') }}</h3>
-            <div class="form-group">
-                <label>{{ t('settings.bot_token') }}</label>
-                <div class="input-with-toggle">
-                    <input :type="showTelegramToken ? 'text' : 'password'" class="form-input" x-model="connectors.telegram.token" placeholder="123456789:ABC...">
-                    <button class="btn btn-icon" @click="showTelegramToken = !showTelegramToken" x-text="showTelegramToken ? '🙈' : '👁'"></button>
-                </div>
-            </div>
-            <div class="form-group">
-                <label>{{ t('settings.allowed_user_ids') }}</label>
-                <input type="text" class="form-input" x-model="connectors.telegram.allowed_users" placeholder="1804015016">
-            </div>
-            <div style="display:flex;gap:8px">
-                <button class="btn btn-primary" @click="saveConnector('telegram')">{{ t('settings.save') }}</button>
-                <button class="btn btn-secondary" @click="testConnector('telegram')" :disabled="testingConnector === 'telegram'" x-text="testingConnector === 'telegram' ? '{{ t('settings.testing') }}' : '{{ t('settings.test') }}'"></button>
-            </div>
-        </div>
-
-        <!-- Discord -->
-        <div class="settings-group">
-            <h3>{{ t('settings.discord') }}</h3>
-            <div class="form-group">
-                <label>{{ t('settings.bot_token') }}</label>
-                <input type="password" class="form-input" x-model="connectors.discord.token" placeholder="MTIzNDU2...">
-            </div>
-            <div style="display:flex;gap:8px">
-                <button class="btn btn-primary" @click="saveConnector('discord')">{{ t('settings.save') }}</button>
-                <button class="btn btn-secondary" @click="testConnector('discord')" :disabled="testingConnector === 'discord'" x-text="testingConnector === 'discord' ? '{{ t('settings.testing') }}' : '{{ t('settings.test') }}'"></button>
-            </div>
-        </div>
-
-        <!-- Slack -->
-        <div class="settings-group">
-            <h3>{{ t('settings.slack') }}</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>{{ t('settings.bot_token_xoxb') }}</label>
-                    <input type="password" class="form-input" x-model="connectors.slack.token" placeholder="xoxb-...">
-                </div>
-                <div class="form-group">
-                    <label>{{ t('settings.app_token_xapp') }}</label>
-                    <input type="password" class="form-input" x-model="connectors.slack.app_token" placeholder="xapp-...">
-                </div>
-            </div>
-            <div style="display:flex;gap:8px">
-                <button class="btn btn-primary" @click="saveConnector('slack')">{{ t('settings.save') }}</button>
-                <button class="btn btn-secondary" @click="testConnector('slack')" :disabled="testingConnector === 'slack'" x-text="testingConnector === 'slack' ? '{{ t('settings.testing') }}' : '{{ t('settings.test') }}'"></button>
-            </div>
-        </div>
-
-        <!-- Email -->
-        <div class="settings-group">
-            <h3>{{ t('settings.email') }}</h3>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>{{ t('settings.smtp_host') }}</label>
-                    <input type="text" class="form-input" x-model="connectors.email.smtp_host" placeholder="smtp.gmail.com">
-                </div>
-                <div class="form-group">
-                    <label>{{ t('settings.smtp_port') }}</label>
-                    <input type="number" class="form-input" x-model="connectors.email.smtp_port" placeholder="587">
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>{{ t('settings.username') }}</label>
-                    <input type="text" class="form-input" x-model="connectors.email.username" placeholder="user@example.com">
-                </div>
-                <div class="form-group">
-                    <label>{{ t('settings.password') }}</label>
-                    <input type="password" class="form-input" x-model="connectors.email.password" placeholder="App password">
-                </div>
-            </div>
-            <div class="form-group">
-                <label>{{ t('settings.imap_host') }}</label>
-                <input type="text" class="form-input" x-model="connectors.email.imap_host" placeholder="imap.gmail.com">
-            </div>
-            <div style="display:flex;gap:8px">
-                <button class="btn btn-primary" @click="saveConnector('email')">{{ t('settings.save') }}</button>
-                <button class="btn btn-secondary" @click="testConnector('email')" :disabled="testingConnector === 'email'" x-text="testingConnector === 'email' ? '{{ t('settings.testing') }}' : '{{ t('settings.test') }}'"></button>
-            </div>
-        </div>
-
-        <!-- Webhooks -->
-        <div class="settings-group">
-            <h3>{{ t('settings.webhooks') }}</h3>
-            <div class="form-group">
-                <label>{{ t('settings.incoming_webhook_url') }}</label>
-                <input type="text" class="form-input" x-model="connectors.webhook.incoming_url" placeholder="https://your-domain.com/api/webhooks/incoming">
-            </div>
-            <div class="form-group">
-                <label>{{ t('settings.outgoing_webhook_url') }}</label>
-                <input type="text" class="form-input" x-model="connectors.webhook.outgoing_url" placeholder="https://hooks.example.com/...">
-            </div>
-            <div class="form-group">
-                <label>{{ t('settings.webhook_secret') }}</label>
-                <input type="password" class="form-input" x-model="connectors.webhook.secret" placeholder="Shared secret for verification">
-            </div>
-            <button class="btn btn-primary" @click="saveConnector('webhook')">{{ t('settings.save') }}</button>
+            <h3>{{ t('settings.connectors_moved') }}</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">
+                {{ t('settings.connectors_moved_description') }}
+            </p>
+            <button class="btn btn-primary" @click="onTabChange('providers_connectors'); hubSubtab = 'connectors'">
+                {{ t('settings.go_to_providers_connectors') }}
+            </button>
         </div>
 
         <div style="margin-top:16px;padding:12px 16px;background:rgba(94,106,210,0.06);border:1px solid var(--border);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">

@@ -154,6 +154,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     from kazma_ui.agents import create_agents_router
     from kazma_ui.chat import chat_websocket_handler, create_chat_router
     from kazma_ui.mcp_ui import create_mcp_router
+    from kazma_ui.providers import create_providers_router
     from kazma_ui.settings import create_settings_router
     from kazma_ui.skills_ui import create_skills_router
 
@@ -162,6 +163,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     skills_router = create_skills_router(agent, templates)
     mcp_router = create_mcp_router(agent, templates)
     agents_router = create_agents_router(agent, templates)
+    providers_router = create_providers_router(config_store)
 
     # Mount routers
     app.include_router(chat_router)
@@ -169,6 +171,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
     app.include_router(skills_router)
     app.include_router(mcp_router)
     app.include_router(agents_router)
+    app.include_router(providers_router)
+    logger.info("Providers & Connectors router mounted at /api/providers, /api/connectors, /api/models/profiles")
 
     # ── SSE Chat Router (LangGraph astream_events → HTMX/Alpine) ──
     _init_errors: list[dict[str, str]] = []

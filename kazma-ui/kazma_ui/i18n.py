@@ -132,6 +132,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.loading": {"en": "Loading settings…", "ar": "جاري تحميل الإعدادات…"},
 
     # Settings — Tab labels
+    "settings.tab_providers_connectors": {"en": "Providers & Connectors", "ar": "المزودون والموصلات"},
     "settings.tab_services": {"en": "Services", "ar": "الخدمات"},
     "settings.tab_models": {"en": "Models", "ar": "النماذج"},
     "settings.tab_agent": {"en": "Agent", "ar": "الوكيل"},
@@ -147,12 +148,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # Settings — Providers tab
     "settings.llm_providers": {"en": "LLM Providers", "ar": "مزودو النماذج"},
+    "settings.llm_providers_models": {"en": "LLM Providers & Models", "ar": "مزودو النماذج والملفات"},
+    "settings.platform_connectors": {"en": "Platform Connectors", "ar": "موصلات المنصات"},
     "settings.add_provider": {"en": "Add Provider", "ar": "إضافة مزود"},
+    "settings.edit_provider": {"en": "Edit Provider", "ar": "تعديل المزود"},
     "settings.enabled_label": {"en": "Enabled", "ar": "مفعّل"},
     "settings.disabled_label": {"en": "Disabled", "ar": "معطّل"},
     "settings.unknown": {"en": "unknown", "ar": "غير معروف"},
     "settings.models_label": {"en": "Models:", "ar": "النماذج:"},
     "settings.test": {"en": "Test", "ar": "اختبار"},
+    "settings.discover": {"en": "Discover", "ar": "اكتشاف"},
     "settings.no_providers": {"en": "No providers configured. Click \"Add Provider\" to get started.", "ar": "لا يوجد مزودون مُعدّون. انقر على \"إضافة مزود\" للبدء."},
     "settings.connected_latency": {"en": "✓ Connected! Latency:", "ar": "✓ تم الاتصال! زمن الاستجابة:"},
     "settings.preset": {"en": "Preset", "ar": "القالب"},
@@ -163,6 +168,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.api_key": {"en": "API Key", "ar": "مفتاح API"},
     "settings.models_comma": {"en": "Models (comma-separated, or leave empty to auto-discover)", "ar": "النماذج (مفصولة بفواصل، أو اتركها فارغة لاكتشاف تلقائي)"},
     "settings.adding": {"en": "Adding…", "ar": "جاري الإضافة…"},
+    "settings.test_before_save": {"en": "Test the connection before saving.", "ar": "اختبر الاتصال قبل الحفظ."},
+    "settings.masked_placeholder_hint": {"en": "Leave the masked value unchanged to keep the existing secret.", "ar": "اترك القيمة المقنعة كما هي للحفاظ على السر الموجود."},
 
     # Settings — Models tab
     "settings.active_model": {"en": "Active Model", "ar": "النموذج النشط"},
@@ -235,6 +242,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.outgoing_webhook_url": {"en": "Outgoing Webhook URL", "ar": "رابط الويب هوك الصادر"},
     "settings.webhook_secret": {"en": "Webhook Secret", "ar": "سر الويب هوك"},
     "settings.gateway_restart_required": {"en": "Gateway restart required after saving connector changes.", "ar": "مطلوب إعادة تشغيل البوابة بعد حفظ تغييرات الموصلات."},
+    "settings.connectors_moved": {"en": "Connectors have moved", "ar": "تم نقل الموصلات"},
+    "settings.connectors_moved_description": {"en": "LLM providers and all platform connector tokens are now managed in the unified \"Providers & Connectors\" tab.", "ar": "تم نقل مزودي النماذج وجميع رموز موصلات المنصات إلى تبويب \"المزودون والموصلات\" الموحد."},
+    "settings.go_to_providers_connectors": {"en": "Go to Providers & Connectors", "ar": "انتقل إلى المزودون والموصلات"},
+    "settings.add_connector": {"en": "Add Connector", "ar": "إضافة موصل"},
+    "settings.edit_connector": {"en": "Edit Connector", "ar": "تعديل الموصل"},
+    "settings.connector_name": {"en": "Connector Name", "ar": "اسم الموصل"},
+    "settings.select_connector": {"en": "— select connector —", "ar": "— اختر موصلاً —"},
+    "settings.token": {"en": "Token / Key", "ar": "الرمز / المفتاح"},
+    "settings.no_connectors": {"en": "No connectors configured. Click \"Add Connector\" to get started.", "ar": "لا توجد موصلات مُعدّة. انقر على \"إضافة موصل\" للبدء."},
+    "settings.connected": {"en": "✓ Connected!", "ar": "✓ تم الاتصال!"},
+    "settings.guild_id": {"en": "Guild ID", "ar": "معرّف السيرفر"},
+    "settings.workspace": {"en": "Workspace", "ar": "مساحة العمل"},
+    "settings.edit_profile": {"en": "Edit Profile", "ar": "تعديل الملف"},
 
     # Settings — MCP tab
     "settings.mcp_servers": {"en": "MCP Servers", "ar": "خوادم MCP"},
@@ -478,6 +498,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "common.error": {"en": "Error", "ar": "خطأ"},
     "common.close": {"en": "Close", "ar": "إغلاق"},
     "common.delete": {"en": "Delete", "ar": "حذف"},
+    "common.edit": {"en": "Edit", "ar": "تعديل"},
     "common.confirm": {"en": "Confirm", "ar": "تأكيد"},
     "common.yes": {"en": "Yes", "ar": "نعم"},
     "common.no": {"en": "No", "ar": "لا"},

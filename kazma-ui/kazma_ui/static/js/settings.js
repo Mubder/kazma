@@ -10,7 +10,7 @@
 function settingsApp() {
     return {
         // ── Global State ──
-        tab: 'providers',
+        tab: 'providers_connectors',
         loading: false,
         saving: false,
 
@@ -55,6 +55,27 @@ function settingsApp() {
         connectorStatuses: {},
         testingConnector: null,
         showTelegramToken: false,
+
+        // ── Unified Providers & Connectors Hub ──
+        hubSubtab: 'providers',
+        hubProviders: [],
+        hubConnectors: [],
+        hubProfiles: [],
+        hubProviderModal: false,
+        hubConnectorModal: false,
+        hubProfileModal: false,
+        hubEditingProvider: { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, _existing: false },
+        hubEditingConnector: { name: '', token: '', enabled: true, extras: {} },
+        hubEditingProfile: { name: '', provider: '', base_url: '', api_key: '', model: '', _existing: false },
+        hubShowProviderKey: false,
+        hubShowConnectorToken: false,
+        hubShowProfileKey: false,
+        hubProviderTested: false,
+        hubConnectorTested: false,
+        hubTestingProvider: null,
+        hubTestingConnector: null,
+        hubDiscoveringProvider: null,
+        hubTestResult: null,
 
         // ── MCP Tab ──
         mcpServers: [],
@@ -139,6 +160,13 @@ function settingsApp() {
 
                 // Load provider presets
                 this.providerPresets = ProvidersManager.getPresetKeys();
+
+                // Load unified hub data
+                await Promise.all([
+                    this.loadHubProviders(),
+                    this.loadHubConnectors(),
+                    this.loadHubProfiles(),
+                ]);
             } catch (e) {
                 console.error('[Settings] Init failed:', e);
             }
@@ -503,6 +531,413 @@ function settingsApp() {
                 showToast(`Test failed: ${e.message}`, 'error');
             }
             this.testingConnector = null;
+        },
+
+        /* ══════════════════════════════════════════════════════════════════
+           UNIFIED PROVIDERS & CONNECTORS HUB
+           ══════════════════════════════════════════════════════════════════ */
+
+        async loadHubProviders() {
+            try {
+                const resp = await fetch('/api/providers');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                this.hubProviders = await resp.json();
+            } catch (e) {
+                console.error('[Hub] Failed to load providers:', e);
+                this.hubProviders = [];
+            }
+        },
+
+        async loadHubConnectors() {
+            try {
+                const resp = await fetch('/api/connectors');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                this.hubConnectors = await resp.json();
+            } catch (e) {
+                console.error('[Hub] Failed to load connectors:', e);
+                this.hubConnectors = [];
+            }
+        },
+
+        async loadHubProfiles() {
+            try {
+                const resp = await fetch('/api/models/profiles');
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                this.hubProfiles = await resp.json();
+            } catch (e) {
+                console.error('[Hub] Failed to load profiles:', e);
+                this.hubProfiles = [];
+            }
+        },
+
+        _defaultConnectorExtras(name) {
+            const defaults = {
+                telegram: { allowed_users: '' },
+                discord: { guild_id: '' },
+                slack: { app_token: '', workspace: '' },
+                email: { smtp_host: '', smtp_port: '', username: '', password: '', imap_host: '' },
+                webhook: { incoming_url: '', outgoing_url: '', secret: '' },
+            };
+            return { ...(defaults[name] || {}) };
+        },
+
+        openHubProviderModal(name) {
+            this.hubProviderTested = false;
+            this.hubShowProviderKey = false;
+            this.hubTestResult = null;
+            if (name) {
+                const p = this.hubProviders.find(x => x.name === name);
+                if (p) {
+                    this.hubEditingProvider = {
+                        name: p.name,
+                        display_name: p.display_name || '',
+                        base_url: p.base_url || '',
+                        api_key: p.api_key || '',
+                        models: Array.isArray(p.models) ? p.models.join(', ') : (p.models || ''),
+                        enabled: p.enabled !== false,
+                        _existing: true,
+                    };
+                    this.hubProviderTested = true; // editing an existing tested provider is acceptable
+                }
+            } else {
+                this.hubEditingProvider = { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, _existing: false };
+            }
+            this.hubProviderModal = true;
+        },
+
+        editHubProvider(name) {
+            this.openHubProviderModal(name);
+        },
+
+        applyHubProviderPreset(presetKey) {
+            const preset = ProvidersManager.getPreset(presetKey);
+            if (preset) {
+                this.hubEditingProvider.name = presetKey;
+                this.hubEditingProvider.display_name = preset.name;
+                this.hubEditingProvider.base_url = preset.base_url;
+            }
+        },
+
+        async saveHubProvider() {
+            if (!this.hubEditingProvider.name || !this.hubEditingProvider.base_url) {
+                showToast('Name and Base URL are required', 'error');
+                return;
+            }
+            this.saving = true;
+            try {
+                const data = { ...this.hubEditingProvider };
+                if (typeof data.models === 'string') {
+                    data.models = data.models.split(',').map(m => m.trim()).filter(Boolean);
+                }
+                delete data._existing;
+                const resp = await fetch('/api/providers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                const result = await resp.json();
+                if (result.error) {
+                    showToast(result.error, 'error');
+                } else {
+                    this.hubProviderModal = false;
+                    await this.loadHubProviders();
+                    showToast('Provider saved', 'success');
+                }
+            } catch (e) {
+                showToast('Failed to save provider: ' + e.message, 'error');
+            }
+            this.saving = false;
+        },
+
+        async deleteHubProvider(name) {
+            if (!confirm(`Delete provider "${name}"?`)) return;
+            try {
+                await fetch(`/api/providers/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                await this.loadHubProviders();
+                showToast('Provider removed', 'success');
+            } catch (e) {
+                showToast('Failed to delete provider: ' + e.message, 'error');
+            }
+        },
+
+        async toggleHubProvider(name, enabled) {
+            try {
+                await fetch(`/api/providers/${encodeURIComponent(name)}/toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled }),
+                });
+                await this.loadHubProviders();
+            } catch (e) {
+                showToast('Toggle failed: ' + e.message, 'error');
+            }
+        },
+
+        async testHubProvider(name) {
+            this.hubTestingProvider = name;
+            this.hubTestResult = { type: 'provider' };
+            try {
+                const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/test`, { method: 'POST' });
+                this.hubTestResult = { type: 'provider', ...await resp.json() };
+            } catch (e) {
+                this.hubTestResult = { type: 'provider', success: false, error: e.message };
+            }
+            this.hubTestingProvider = null;
+        },
+
+        async testHubProviderFromModal() {
+            const name = this.hubEditingProvider.name;
+            if (!name || !this.hubEditingProvider.base_url) {
+                showToast('Enter a provider name and base URL first', 'error');
+                return;
+            }
+            this.hubTestingProvider = 'modal';
+            this.hubTestResult = null;
+            try {
+                // Upsert a temporary provider so the test can run against the modal values.
+                const temp = { ...this.hubEditingProvider };
+                if (typeof temp.models === 'string') {
+                    temp.models = temp.models.split(',').map(m => m.trim()).filter(Boolean);
+                }
+                delete temp._existing;
+                await fetch('/api/providers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(temp),
+                });
+                const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/test`, { method: 'POST' });
+                const result = await resp.json();
+                this.hubTestResult = { type: 'provider', ...result };
+                if (result.success) {
+                    this.hubProviderTested = true;
+                }
+                showToast(result.success ? 'Connection test succeeded' : `Test failed: ${result.error}`, result.success ? 'success' : 'error');
+            } catch (e) {
+                this.hubTestResult = { type: 'provider', success: false, error: e.message };
+                showToast('Test failed: ' + e.message, 'error');
+            }
+            this.hubTestingProvider = null;
+        },
+
+        async discoverHubProvider(name) {
+            this.hubDiscoveringProvider = name;
+            try {
+                const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/discover`, { method: 'POST' });
+                const data = await resp.json();
+                const count = data.count || 0;
+                showToast(`${count} models discovered`, count > 0 ? 'success' : 'warning');
+                await this.loadHubProviders();
+            } catch (e) {
+                showToast('Discover failed: ' + e.message, 'error');
+            }
+            this.hubDiscoveringProvider = null;
+        },
+
+        openHubConnectorModal(name) {
+            this.hubConnectorTested = false;
+            this.hubShowConnectorToken = false;
+            this.hubTestResult = null;
+            if (name) {
+                const c = this.hubConnectors.find(x => x.name === name);
+                if (c) {
+                    this.hubEditingConnector = {
+                        name: c.name,
+                        token: c.token || '',
+                        enabled: c.enabled !== false,
+                        extras: { ...(c.extras || {}), _existing: true },
+                        _existing: true,
+                    };
+                    this.hubConnectorTested = true; // existing connectors can be saved without re-test
+                }
+            } else {
+                this.hubEditingConnector = { name: '', token: '', enabled: true, extras: {}, _existing: false };
+            }
+            this.hubConnectorModal = true;
+        },
+
+        editHubConnector(name) {
+            this.openHubConnectorModal(name);
+        },
+
+        onHubConnectorPlatformChange() {
+            const name = this.hubEditingConnector.name;
+            this.hubEditingConnector.extras = this._defaultConnectorExtras(name);
+            this.hubConnectorTested = false;
+        },
+
+        async saveHubConnector() {
+            if (!this.hubEditingConnector.name) {
+                showToast('Connector name is required', 'error');
+                return;
+            }
+            this.saving = true;
+            try {
+                const data = { ...this.hubEditingConnector };
+                const extras = { ...(data.extras || {}) };
+                delete extras._existing;
+                data.extras = extras;
+                delete data._existing;
+                const resp = await fetch('/api/connectors', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                const result = await resp.json();
+                if (result.error) {
+                    showToast(result.error, 'error');
+                } else {
+                    this.hubConnectorModal = false;
+                    await this.loadHubConnectors();
+                    try {
+                        await fetch('/api/gateway/refresh-adapters', { method: 'POST' });
+                    } catch (refreshErr) {
+                        console.warn('[Hub] Gateway refresh failed:', refreshErr);
+                    }
+                    showToast('Connector saved', 'success');
+                }
+            } catch (e) {
+                showToast('Failed to save connector: ' + e.message, 'error');
+            }
+            this.saving = false;
+        },
+
+        async deleteHubConnector(name) {
+            if (!confirm(`Delete connector "${name}"?`)) return;
+            try {
+                await fetch(`/api/connectors/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                await this.loadHubConnectors();
+                showToast('Connector removed', 'success');
+            } catch (e) {
+                showToast('Failed to delete connector: ' + e.message, 'error');
+            }
+        },
+
+        async toggleHubConnector(name, enabled) {
+            try {
+                await fetch(`/api/connectors/${encodeURIComponent(name)}/toggle`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled }),
+                });
+                await this.loadHubConnectors();
+            } catch (e) {
+                showToast('Toggle failed: ' + e.message, 'error');
+            }
+        },
+
+        async testHubConnector(name) {
+            this.hubTestingConnector = name;
+            this.hubTestResult = { type: 'connector' };
+            try {
+                const resp = await fetch(`/api/connectors/${encodeURIComponent(name)}/test`, { method: 'POST' });
+                this.hubTestResult = { type: 'connector', ...await resp.json() };
+            } catch (e) {
+                this.hubTestResult = { type: 'connector', success: false, error: e.message };
+            }
+            this.hubTestingConnector = null;
+        },
+
+        async testHubConnectorFromModal() {
+            const name = this.hubEditingConnector.name;
+            if (!name) {
+                showToast('Select a connector name first', 'error');
+                return;
+            }
+            this.hubTestingConnector = 'modal';
+            this.hubTestResult = null;
+            try {
+                // Save a temporary connector so the test can run against the modal values.
+                const data = { ...this.hubEditingConnector };
+                const extras = { ...(data.extras || {}) };
+                delete extras._existing;
+                data.extras = extras;
+                delete data._existing;
+                await fetch('/api/connectors', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data),
+                });
+                const resp = await fetch(`/api/connectors/${encodeURIComponent(name)}/test`, { method: 'POST' });
+                const result = await resp.json();
+                this.hubTestResult = { type: 'connector', ...result };
+                if (result.success) {
+                    this.hubConnectorTested = true;
+                }
+                showToast(result.success ? 'Connection test succeeded' : `Test failed: ${result.error}`, result.success ? 'success' : 'error');
+            } catch (e) {
+                this.hubTestResult = { type: 'connector', success: false, error: e.message };
+                showToast('Test failed: ' + e.message, 'error');
+            }
+            this.hubTestingConnector = null;
+        },
+
+        openHubProfileModal(name) {
+            this.hubShowProfileKey = false;
+            if (name) {
+                const p = this.hubProfiles.find(x => x.name === name);
+                if (p) {
+                    this.hubEditingProfile = {
+                        name: p.name,
+                        provider: p.provider || '',
+                        base_url: p.base_url || '',
+                        api_key: p.api_key || '',
+                        model: p.model || '',
+                        _existing: true,
+                    };
+                }
+            } else {
+                this.hubEditingProfile = { name: '', provider: '', base_url: '', api_key: '', model: '', _existing: false };
+            }
+            this.hubProfileModal = true;
+        },
+
+        editHubProfile(name) {
+            this.openHubProfileModal(name);
+        },
+
+        loadHubProfile(name) {
+            const p = this.hubProfiles.find(x => x.name === name);
+            if (!p) return;
+            this.currentModel.base_url = p.base_url || '';
+            this.currentModel.model = p.model || '';
+            this.currentModel.api_key = (p.api_key && p.api_key !== '***') ? p.api_key : this.currentModel.api_key;
+            this.modelProvider = p.provider || '';
+            showToast(`Loaded profile "${name}"`, 'success');
+        },
+
+        async saveHubProfile() {
+            const name = (this.hubEditingProfile.name || '').trim();
+            if (!name) { showToast('Profile name is required', 'error'); return; }
+            this.saving = true;
+            try {
+                const resp = await fetch('/api/models/profiles', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.hubEditingProfile),
+                });
+                const result = await resp.json();
+                if (result.error) {
+                    showToast(result.error, 'error');
+                } else {
+                    this.hubProfileModal = false;
+                    await this.loadHubProfiles();
+                    showToast(`Profile "${name}" saved`, 'success');
+                }
+            } catch (e) {
+                showToast('Failed to save profile: ' + e.message, 'error');
+            }
+            this.saving = false;
+        },
+
+        async deleteHubProfile(name) {
+            if (!confirm(`Delete profile "${name}"?`)) return;
+            try {
+                await fetch(`/api/models/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                await this.loadHubProfiles();
+                showToast(`Profile "${name}" deleted`, 'success');
+            } catch (e) {
+                showToast('Failed to delete profile: ' + e.message, 'error');
+            }
         },
 
         /* ══════════════════════════════════════════════════════════════════
@@ -993,6 +1428,13 @@ function settingsApp() {
             this.tab = newTab;
             switch (newTab) {
                 case 'providers': await this.loadProviders(); break;
+                case 'providers_connectors':
+                    await Promise.all([
+                        this.loadHubProviders(),
+                        this.loadHubConnectors(),
+                        this.loadHubProfiles(),
+                    ]);
+                    break;
                 case 'models': break; // Loaded on init
                 case 'agent': break;
                 case 'connectors': break;

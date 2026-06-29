@@ -649,3 +649,213 @@ class TestSettingsAPI:
         resp = client.post("/api/settings/account/tokens", json={"name": "test"})
         assert resp.status_code == 200
         assert "token" in resp.json()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# TestUnifiedProvidersRouterAPI — New unified providers & connectors hub
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestUnifiedProvidersRouterAPI:
+    """Integration tests for the new /api/providers, /api/connectors, and
+    /api/models/profiles endpoints in kazma_ui/providers.py.
+    """
+
+    @pytest.fixture
+    def client(self, tmp_path):
+        """Create a FastAPI TestClient with the unified providers router."""
+        from fastapi import FastAPI
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.model_registry import (
+            initialize_model_registry,
+            reset_model_registry,
+        )
+        from kazma_ui.providers import create_providers_router
+
+        db_path = str(tmp_path / "providers_test.db")
+        cs = ConfigStore(db_path=db_path)
+        initialize_model_registry(cs)
+
+        app = FastAPI()
+        router = create_providers_router(cs)
+        app.include_router(router)
+
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+        yield client
+        reset_model_registry()
+
+    def test_providers_list_empty(self, client):
+        """GET /api/providers returns a list of providers with masked keys."""
+        resp = client.get("/api/providers")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        # Preset providers should have empty/masked keys
+        for provider in data:
+            assert "api_key" in provider
+            assert not provider["api_key"].startswith("sk-") or provider["api_key"] == ""
+
+    def test_providers_add_and_mask(self, client):
+        """POST /api/providers adds a provider and GET masks the API key."""
+        resp = client.post("/api/providers", json={
+            "name": "unified-test",
+            "display_name": "Unified Test",
+            "base_url": "https://test.example.com/v1",
+            "api_key": "test-api-key-1234",
+            "models": ["model-a"],
+            "enabled": True,
+        })
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["name"] == "unified-test"
+        assert result["api_key"] == "****1234"  # masked last 4 of test-api-key-1234
+
+        # Verify GET returns masked key
+        resp = client.get("/api/providers")
+        data = resp.json()
+        found = [p for p in data if p["name"] == "unified-test"]
+        assert len(found) == 1
+        assert found[0]["api_key"] == "****1234"
+
+    def test_providers_update_preserves_secret_with_placeholder(self, client):
+        """POST /api/providers preserves the existing secret when the UI sends a masked placeholder."""
+        client.post("/api/providers", json={
+            "name": "preserve-secret",
+            "base_url": "https://preserve.example.com/v1",
+            "api_key": "sk-original-secret",
+        })
+        # Update with masked placeholder
+        resp = client.post("/api/providers", json={
+            "name": "preserve-secret",
+            "base_url": "https://preserve.example.com/v1",
+            "api_key": "****cret",
+        })
+        assert resp.status_code == 200
+        # GET should still show the original masked secret (last 4 of original)
+        resp = client.get("/api/providers")
+        found = [p for p in resp.json() if p["name"] == "preserve-secret"]
+        assert len(found) == 1
+        assert found[0]["api_key"] == "****cret"
+
+    def test_providers_delete(self, client):
+        """DELETE /api/providers/{name} removes a provider."""
+        client.post("/api/providers", json={
+            "name": "to-delete-unified",
+            "base_url": "https://x.com/v1",
+        })
+        resp = client.delete("/api/providers/to-delete-unified")
+        assert resp.status_code == 200
+        resp = client.get("/api/providers")
+        found = [p for p in resp.json() if p["name"] == "to-delete-unified"]
+        assert len(found) == 0
+
+    def test_providers_toggle(self, client):
+        """POST /api/providers/{name}/toggle toggles a provider."""
+        client.post("/api/providers", json={
+            "name": "toggle-unified",
+            "base_url": "https://x.com/v1",
+            "enabled": True,
+        })
+        resp = client.post("/api/providers/toggle-unified/toggle", json={"enabled": False})
+        assert resp.status_code == 200
+        resp = client.get("/api/providers")
+        found = [p for p in resp.json() if p["name"] == "toggle-unified"]
+        assert found[0]["enabled"] is False
+
+    def test_providers_discover(self, client):
+        """POST /api/providers/{name}/discover returns model discovery results."""
+        # Use a local-only provider with a dummy URL so the discovery fails gracefully
+        client.post("/api/providers", json={
+            "name": "discover-unified",
+            "base_url": "http://localhost:99999/v1",
+        })
+        resp = client.post("/api/providers/discover-unified/discover")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "models" in data
+        assert "count" in data
+
+    def test_model_profiles_crud(self, client):
+        """GET/POST/DELETE /api/models/profiles handles saved profiles."""
+        resp = client.post("/api/models/profiles", json={
+            "name": "my-profile",
+            "provider": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-profile-secret",
+            "model": "gpt-4o-mini",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "my-profile"
+
+        resp = client.get("/api/models/profiles")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert any(p["name"] == "my-profile" for p in data)
+        profile = [p for p in data if p["name"] == "my-profile"][0]
+        assert profile["api_key"] == "****cret" or profile["api_key"] == "***"
+
+        resp = client.delete("/api/models/profiles/my-profile")
+        assert resp.status_code == 200
+        resp = client.get("/api/models/profiles")
+        assert not any(p["name"] == "my-profile" for p in resp.json())
+
+    def test_connectors_list(self, client):
+        """GET /api/connectors returns all connector entries with masked tokens."""
+        resp = client.get("/api/connectors")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert any(c["name"] == "telegram" for c in data)
+        for connector in data:
+            assert "token" in connector
+            assert not connector["token"].startswith("123") or connector["token"] == ""
+
+    def test_connectors_upsert_and_mask(self, client):
+        """POST /api/connectors saves a token and GET returns it masked."""
+        resp = client.post("/api/connectors", json={
+            "name": "telegram",
+            "token": "123456789:ABCDEFGHIJKLMNOP",
+            "enabled": True,
+            "extras": {"allowed_users": "12345"},
+        })
+        assert resp.status_code == 200
+        result = resp.json()
+        assert result["token"] == "****MNOP"  # last 4
+        assert result["extras"]["allowed_users"] == "12345"
+
+        resp = client.get("/api/connectors")
+        telegram = [c for c in resp.json() if c["name"] == "telegram"][0]
+        assert telegram["token"] == "****MNOP"
+
+    def test_connectors_delete(self, client):
+        """DELETE /api/connectors/{name} removes a connector config."""
+        client.post("/api/connectors", json={
+            "name": "discord",
+            "token": "discord-token",
+        })
+        resp = client.delete("/api/connectors/discord")
+        assert resp.status_code == 200
+        resp = client.get("/api/connectors")
+        discord = [c for c in resp.json() if c["name"] == "discord"][0]
+        assert discord["token"] == ""
+
+    def test_connectors_toggle(self, client):
+        """POST /api/connectors/{name}/toggle toggles a connector."""
+        resp = client.post("/api/connectors/telegram/toggle", json={"enabled": False})
+        assert resp.status_code == 200
+        resp = client.get("/api/connectors")
+        telegram = [c for c in resp.json() if c["name"] == "telegram"][0]
+        assert telegram["enabled"] is False
+
+    @pytest.mark.parametrize("platform", ["telegram", "discord", "slack"])
+    def test_connectors_test_missing_token(self, client, platform):
+        """POST /api/connectors/{name}/test fails gracefully when no token is configured."""
+        # Ensure no token is stored
+        client.delete(f"/api/connectors/{platform}")
+        resp = client.post(f"/api/connectors/{platform}/test")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "No token" in data["error"] or "token" in data["error"].lower()

@@ -142,6 +142,61 @@ class ProviderToggleRequest(BaseModel):
     enabled: bool
 
 
+class ProviderUpdateRequest(BaseModel):
+    """Request to add or update an LLM provider in the unified hub."""
+
+    name: str
+    display_name: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    models: list[str] = Field(default_factory=list)
+    enabled: bool = True
+
+
+class ConnectorUpdateRequest(BaseModel):
+    """Request to add or update a platform connector token."""
+
+    name: str
+    token: str = ""
+    enabled: bool = True
+    extras: dict[str, str] = Field(default_factory=dict)
+
+
+class ProviderTestResponse(BaseModel):
+    """Response from a non-destructive LLM provider health check."""
+
+    success: bool
+    latency_ms: int | None = None
+    error: str | None = None
+
+
+class ConnectorTestResponse(BaseModel):
+    """Response from a platform connector health check."""
+
+    success: bool
+    bot_name: str | None = None
+    error: str | None = None
+
+
+class MaskedSecretResponse(BaseModel):
+    """Generic masked secret representation returned by the secrets hub."""
+
+    name: str
+    type: str
+    value: str
+    masked: bool = True
+
+
+class ModelProfileUpdateRequest(BaseModel):
+    """Request to save a named model profile."""
+
+    name: str
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    provider: str = "custom"
+
+
 # ── Agent Models ──────────────────────────────────────────────────────
 
 
