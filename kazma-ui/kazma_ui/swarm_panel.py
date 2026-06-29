@@ -248,9 +248,14 @@ def _sync_external_manager_remove(
             )
 
 
-def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
+def create_swarm_router(
+    templates: Any,
+    swarm_manager: Any = None,
+    config_store: Any = None,
+) -> APIRouter:
     """Create the Swarm Panel router backed by the shared engine."""
     router = APIRouter(tags=["swarm"])
+    _registry = None
 
     # Wire the SSE streaming endpoint.
     try:
@@ -274,6 +279,20 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
             except Exception:
                 logger.debug("[Swarm] failed to wire SSE events to engine", exc_info=True)
         return engine
+
+    def _registry_options() -> dict[str, Any] | None:
+        nonlocal _registry
+        if config_store is None:
+            return None
+        if _registry is None:
+            from kazma_core.model_registry import UnifiedModelRegistry
+
+            _registry = UnifiedModelRegistry(config_store)
+        try:
+            return _registry.list_unified_options()
+        except Exception:
+            logger.warning("[Swarm] Failed to read unified model options", exc_info=True)
+            return None
 
     @router.get("/swarm", response_class=HTMLResponse)
     async def swarm_page(request: Request) -> HTMLResponse:
@@ -761,7 +780,28 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
     @router.get("/api/swarm/models")
     async def swarm_models() -> dict[str, Any]:
         """Return supported models and providers."""
-        return {"models": _SUPPORTED_MODELS, "providers": _SUPPORTED_PROVIDERS}
+        options = _registry_options()
+        if options is not None:
+            models = options.get("models", [])
+            providers = options.get("providers", [])
+            return {
+                "models": models if models else list(_SUPPORTED_MODELS),
+                "providers": providers if providers else list(_SUPPORTED_PROVIDERS),
+                "provider_entries": options.get("provider_entries", []),
+                "provider_models": options.get("provider_models", {}),
+                "profiles": options.get("profiles", []),
+                "defaults": options.get("defaults", {}),
+                "source": "registry",
+            }
+        return {
+            "models": list(_SUPPORTED_MODELS),
+            "providers": list(_SUPPORTED_PROVIDERS),
+            "provider_entries": [],
+            "provider_models": {},
+            "profiles": [],
+            "defaults": {},
+            "source": "fallback",
+        }
 
     @router.get("/api/swarm/circuit-breakers")
     async def swarm_circuit_breakers() -> JSONResponse:

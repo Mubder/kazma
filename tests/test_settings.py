@@ -113,6 +113,33 @@ class TestSettingsManager:
         registry = sm.get_model_registry()
         assert isinstance(registry, list)
 
+    def test_unified_model_options(self, sm):
+        """Unified options merge providers, profiles, and llm defaults."""
+        sm.add_provider({
+            "name": "merged-provider",
+            "models": ["provider-model"],
+            "base_url": "https://provider.example/v1",
+        })
+        sm.save_model_profile("saved-one", {
+            "model": "saved-model",
+            "provider": "saved-provider",
+            "base_url": "https://saved.example/v1",
+        })
+        sm._cs.set("llm.model", "runtime-model", category="llm")
+        sm.set_default_model("chat", "chat-default")
+
+        options = sm.get_unified_model_options()
+        assert "models" in options
+        assert "providers" in options
+        assert "profiles" in options
+        assert "provider-model" in options["models"]
+        assert "saved-model" in options["models"]
+        assert "runtime-model" in options["models"]
+        assert "chat-default" in options["models"]
+        assert "merged-provider" in options["providers"]
+        assert "saved-provider" in options["providers"]
+        assert any(p["name"] == "saved-one" for p in options["profiles"])
+
     def test_set_default_model(self, sm):
         """Setting a default model persists it."""
         sm.set_default_model("chat", "gpt-4o")
@@ -435,6 +462,28 @@ class TestSettingsAPI:
         assert resp.status_code == 200
         data = resp.json()
         assert "chat" in data
+
+    def test_model_options_endpoint(self, client):
+        """GET /api/settings/models/options returns unified options."""
+        client.post("/api/settings/providers", json={
+            "name": "settings-provider",
+            "models": ["settings-model"],
+            "base_url": "https://provider.example/v1",
+        })
+        client.put("/api/settings/single", json={
+            "key": "llm.model",
+            "value": "settings-runtime-model",
+            "category": "llm",
+        })
+
+        resp = client.get("/api/settings/models/options")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "models" in data
+        assert "providers" in data
+        assert "settings-provider" in data["providers"]
+        assert "settings-model" in data["models"]
+        assert "settings-runtime-model" in data["models"]
 
     def test_set_model_default(self, client):
         """PUT /api/settings/models/defaults sets a default."""

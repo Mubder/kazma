@@ -214,8 +214,14 @@ def _run_completion(args: list[str]) -> None:
         kazma completion powershell      — print PowerShell completion script
         kazma completion install [bash|zsh|powershell]  — auto-install
         kazma completion --list-models   — print available model names
+        kazma completion --list-providers — print available provider names
     """
-    from kazma_cli.completions import generate_completions, install_completion, list_available_models
+    from kazma_cli.completions import (
+        generate_completions,
+        install_completion,
+        list_available_models,
+        list_available_providers,
+    )
 
     if not args:
         print("Usage: kazma completion <bash|zsh|powershell|install>")
@@ -228,6 +234,7 @@ def _run_completion(args: list[str]) -> None:
         print("  install zsh          Install zsh completion")
         print("  install powershell   Install PowerShell completion")
         print("  --list-models        Print available model names")
+        print("  --list-providers     Print available provider names")
         return
 
     subcmd = args[0]
@@ -235,6 +242,11 @@ def _run_completion(args: list[str]) -> None:
     if subcmd == "--list-models":
         for model in list_available_models():
             print(model)
+        return
+
+    if subcmd == "--list-providers":
+        for provider in list_available_providers():
+            print(provider)
         return
 
     if subcmd == "bash":

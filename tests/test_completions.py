@@ -17,6 +17,7 @@ from kazma_cli.completions import (
     generate_completions,
     install_completion,
     list_available_models,
+    list_available_providers,
 )
 
 
@@ -48,6 +49,12 @@ class TestCompletionBashGenerates:
         assert '"--model"' in output or "--model" in output
         assert "kazma completion --list-models" in output
 
+    def test_bash_handles_dynamic_provider(self) -> None:
+        """Bash script has --provider handling with dynamic provider list."""
+        output = _bash_completion_script()
+        assert '"--provider"' in output or "--provider" in output
+        assert "kazma completion --list-providers" in output
+
 
 class TestCompletionZshGenerates:
     """Zsh completion script generation."""
@@ -72,6 +79,12 @@ class TestCompletionZshGenerates:
         output = _zsh_completion_script()
         assert "->models" in output
         assert "kazma completion --list-models" in output
+
+    def test_zsh_has_provider_state_handler(self) -> None:
+        """Zsh script has the ->providers state handler."""
+        output = _zsh_completion_script()
+        assert "->providers" in output
+        assert "kazma completion --list-providers" in output
 
 
 class TestDynamicModelList:
@@ -100,6 +113,64 @@ class TestDynamicModelList:
         assert len(models) >= 1
         # Each line should be a model name (no empty strings)
         assert all(isinstance(m, str) and len(m) > 0 for m in models)
+
+    def test_registry_models_are_included(self, tmp_path: Path) -> None:
+        """list_available_models includes entries saved in unified registry."""
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.model_registry import UnifiedModelRegistry
+
+        root = tmp_path
+        (root / "kazma-data").mkdir(parents=True, exist_ok=True)
+        (root / "kazma.yaml").write_text("llm:\n  model: yaml-fallback-model\n")
+
+        store = ConfigStore(
+            db_path=str(root / "kazma-data" / "settings.db"),
+            yaml_path=str(root / "kazma.yaml"),
+        )
+        registry = UnifiedModelRegistry(store)
+        registry.upsert_provider({
+            "name": "registry-provider",
+            "models": ["registry-provider-model"],
+            "base_url": "https://provider.example/v1",
+        })
+        registry.save_model_profile("registry-profile", {
+            "model": "registry-profile-model",
+            "provider": "registry-provider",
+            "base_url": "https://profile.example/v1",
+        })
+        store.close()
+
+        with patch("kazma_cli.banner._find_project_root", return_value=root):
+            models = list_available_models()
+
+        assert "registry-provider-model" in models
+        assert "registry-profile-model" in models
+
+    def test_registry_providers_are_included(self, tmp_path: Path) -> None:
+        """list_available_providers includes entries from unified registry."""
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.model_registry import UnifiedModelRegistry
+
+        root = tmp_path
+        (root / "kazma-data").mkdir(parents=True, exist_ok=True)
+        (root / "kazma.yaml").write_text("llm:\n  model: yaml-fallback-model\n")
+
+        store = ConfigStore(
+            db_path=str(root / "kazma-data" / "settings.db"),
+            yaml_path=str(root / "kazma.yaml"),
+        )
+        registry = UnifiedModelRegistry(store)
+        registry.upsert_provider({
+            "name": "registry-provider-only",
+            "models": ["registry-model"],
+            "base_url": "https://provider.example/v1",
+        })
+        store.close()
+
+        with patch("kazma_cli.banner._find_project_root", return_value=root):
+            providers = list_available_providers()
+
+        assert "registry-provider-only" in providers
 
 
 class TestInstallCommand:
@@ -168,8 +239,9 @@ class TestEdgeCases:
     def test_list_models_deduplicates(self) -> None:
         """list_available_models returns no duplicates."""
         with patch("kazma_cli.completions.FALLBACK_MODELS", ["a", "b", "a", "a", "b"]):
-            with patch("kazma_cli.banner._load_config", return_value={}):
-                models = list_available_models()
+            with patch("kazma_cli.completions._load_registry_options", return_value={"models": [], "providers": []}):
+                with patch("kazma_cli.banner._load_config", return_value={}):
+                    models = list_available_models()
         assert models == ["a", "b"]
 
     def test_generated_scripts_are_non_empty_strings(self) -> None:
