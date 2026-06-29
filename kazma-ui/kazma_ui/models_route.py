@@ -81,11 +81,18 @@ def create_models_router(config_store: Any = None) -> APIRouter:
             {"models": ["gpt-4o-mini", ...], "provider": "openai", "online": true}
         """
         from kazma_core.models.discovery import discover_models
-        from kazma_core.providers import PROVIDER_PRESETS
 
         # Use preset base_url if a known provider and none provided
-        if provider in PROVIDER_PRESETS and not base_url:
-            base_url = PROVIDER_PRESETS[provider]["base_url"]
+        try:
+            from kazma_core.model_registry import get_model_registry
+            registry = get_model_registry()
+            preset = registry.get_provider(provider)
+            if preset and not base_url:
+                base_url = preset.get("base_url", "")
+        except RuntimeError:
+            from kazma_core.providers import PROVIDER_PRESETS
+            if provider in PROVIDER_PRESETS and not base_url:
+                base_url = PROVIDER_PRESETS[provider]["base_url"]
 
         result = await discover_models(provider, base_url=base_url, api_key=api_key)
 

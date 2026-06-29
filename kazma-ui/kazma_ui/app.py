@@ -26,93 +26,6 @@ _TEMPLATES_DIR = _PACKAGE_DIR / "templates"
 _STATIC_DIR = _PACKAGE_DIR / "static"
 
 
-def _mask_api_key_for_log(api_key: str) -> str:
-    """Return a redacted API key string for logs."""
-    if not api_key:
-        return "(empty)"
-    if len(api_key) <= 8:
-        return "***"
-    return f"{api_key[:4]}***{api_key[-2:]}"
-
-
-def _infer_provider_from_base_url(base_url: str) -> str:
-    """Infer provider key from base_url for startup profile."""
-    from urllib.parse import urlparse
-
-    from kazma_core.providers import PROVIDER_PRESETS
-
-    if not base_url:
-        return "custom"
-
-    parsed = urlparse(base_url)
-    hostname = (parsed.hostname or "").lower()
-    port = parsed.port
-
-    if port == 11434 or "ollama" in hostname:
-        return "ollama"
-    if port == 1234 or "lm-studio" in hostname or "lmstudio" in hostname:
-        return "lm-studio"
-
-    normalized_base = base_url.rstrip("/")
-    for provider_key, preset in PROVIDER_PRESETS.items():
-        preset_url = str(preset.get("base_url", "")).rstrip("/")
-        if preset_url and normalized_base == preset_url:
-            return provider_key
-
-    return "custom"
-
-
-def _hydrate_startup_llm_profile(agent: Any, config_store: Any) -> tuple[dict[str, str], str]:
-    """Hydrate runtime LLM settings from ConfigStore and return startup profile."""
-    runtime_keys = ("llm.base_url", "llm.api_key", "llm.model")
-    runtime_values: dict[str, Any] = {}
-
-    for category_values in config_store.get_all().values():
-        if not isinstance(category_values, dict):
-            continue
-        for key in runtime_keys:
-            if key in category_values:
-                runtime_values[key] = category_values[key]
-
-    def _pick(key: str, fallback: str) -> str:
-        if key not in runtime_values:
-            return fallback
-        val = runtime_values.get(key)
-        return fallback if val is None else str(val)
-
-    if runtime_values:
-        active_base_url = _pick("llm.base_url", agent.llm.config.base_url)
-        active_api_key = _pick("llm.api_key", agent.llm.config.api_key)
-        active_model = _pick("llm.model", agent.llm.config.model)
-        agent.llm.reconfigure(
-            base_url=active_base_url,
-            api_key=active_api_key,
-            model=active_model,
-        )
-        source = "runtime store"
-    else:
-        active_base_url = str(agent.llm.config.base_url or "")
-        active_api_key = str(agent.llm.config.api_key or "")
-        active_model = str(agent.llm.config.model or "")
-        source = "yaml defaults"
-
-    profile = {
-        "provider": _infer_provider_from_base_url(active_base_url),
-        "base_url": active_base_url,
-        "model": active_model,
-        "api_key": active_api_key,
-    }
-    logger.info(
-        "[LLM] Startup config source: %s (provider=%s, base_url=%s, model=%s, api_key=%s)",
-        source,
-        profile["provider"],
-        profile["base_url"],
-        profile["model"],
-        _mask_api_key_for_log(profile["api_key"]),
-    )
-    return profile, source
-
-
 def create_app(config_path: str | None = None) -> FastAPI:
     """Create and configure the Kazma FastAPI application.
 
@@ -124,14 +37,15 @@ def create_app(config_path: str | None = None) -> FastAPI:
     """
     from kazma_core.agent import KazmaAgent, load_config
     from kazma_core.config_store import ConfigStore
+    from kazma_core.model_registry import initialize_model_registry
 
-    # Load agent config and create agent
+    # Load config and initialize registry BEFORE creating agent,
+    # because KazmaAgent.__init__ calls get_model_registry().
     config = load_config(config_path)
-    agent = KazmaAgent(config)
-
-    # Create config store for runtime settings
     config_store = ConfigStore()
-    startup_provider_profile = _hydrate_startup_llm_profile(agent, config_store)[0]
+    registry = initialize_model_registry(config_store)
+    agent = KazmaAgent(config)
+    startup_provider_profile = registry.get_active_profile()
 
     # ── Configure the agent workspace (config-relative, not drive root) ──
     # file_write / file_read default to Path.cwd() when no workspace is
@@ -276,6 +190,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
             tracer=agent.tracer,
             provider_profile=startup_provider_profile,
             llm_provider=agent.llm,
+            registry=registry,
         )
         app.include_router(sse_router)
         logger.info("SSE chat router mounted at /api/chat/stream")

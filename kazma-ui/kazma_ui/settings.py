@@ -61,14 +61,27 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         """Render the settings page."""
         # Use the agent's facade method to avoid direct llm_config access.
         llm_cfg = agent.get_llm_config()
-        model_settings = {
-            "base_url": config_store.get("llm.base_url", llm_cfg["base_url"]),
-            "api_key": config_store.get("llm.api_key", llm_cfg["api_key"]),
-            "model": config_store.get("llm.model", llm_cfg["model"]),
-            "max_tokens": config_store.get("llm.max_tokens", llm_cfg["max_tokens"]),
-            "temperature": config_store.get("llm.temperature", llm_cfg["temperature"]),
-            "timeout": config_store.get("llm.timeout", llm_cfg["timeout"]),
-        }
+        try:
+            from kazma_core.model_registry import get_model_registry
+            reg = get_model_registry()
+            profile = reg.get_active_profile()
+            model_settings = {
+                "base_url": profile.get("base_url") or llm_cfg["base_url"],
+                "api_key": profile.get("api_key") or llm_cfg["api_key"],
+                "model": profile.get("model") or llm_cfg["model"],
+                "max_tokens": config_store.get("llm.max_tokens", llm_cfg["max_tokens"]),
+                "temperature": config_store.get("llm.temperature", llm_cfg["temperature"]),
+                "timeout": config_store.get("llm.timeout", llm_cfg["timeout"]),
+            }
+        except RuntimeError:
+            model_settings = {
+                "base_url": config_store.get("llm.base_url", llm_cfg["base_url"]),
+                "api_key": config_store.get("llm.api_key", llm_cfg["api_key"]),
+                "model": config_store.get("llm.model", llm_cfg["model"]),
+                "max_tokens": config_store.get("llm.max_tokens", llm_cfg["max_tokens"]),
+                "temperature": config_store.get("llm.temperature", llm_cfg["temperature"]),
+                "timeout": config_store.get("llm.timeout", llm_cfg["timeout"]),
+            }
         agent_settings = {
             "name": config_store.get("agent.name", agent.config.name),
             "language": config_store.get("agent.language", agent.config.language),

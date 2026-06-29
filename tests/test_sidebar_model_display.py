@@ -28,61 +28,56 @@ _JS_DIR = _STATIC_DIR / "js"
 
 
 class TestStartupLlmHydration:
-    """Startup runtime LLM settings should seed active provider profile."""
+    """Startup runtime LLM settings should seed active provider profile via ModelRegistry."""
 
-    def _make_agent(self, *, base_url: str, model: str, api_key: str) -> SimpleNamespace:
-        llm = MagicMock()
-        llm.config = SimpleNamespace(base_url=base_url, model=model, api_key=api_key)
-        llm.reconfigure = MagicMock()
-        return SimpleNamespace(llm=llm)
-
-    def test_runtime_settings_hydrate_profile(self) -> None:
-        from kazma_ui.app import _hydrate_startup_llm_profile
-
-        agent = self._make_agent(
-            base_url="https://api.openai.com/v1",
-            model="gpt-4o-mini",
-            api_key="yaml-key",
+    def test_registry_active_profile_returns_model(self, tmp_path) -> None:
+        """ModelRegistry.get_active_profile() returns the active model from config store."""
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.model_registry import (
+            initialize_model_registry,
+            reset_model_registry,
         )
-        config_store = MagicMock()
-        config_store.get_all.return_value = {
-            "model": {
-                "llm.base_url": "https://api.deepseek.com/v1",
-                "llm.model": "deepseek-chat",
-                "llm.api_key": "test-api-key-placeholder",
-            }
-        }
 
-        profile, source = _hydrate_startup_llm_profile(agent, config_store)
+        db_path = str(tmp_path / "test.db")
+        config_store = ConfigStore(db_path=db_path)
+        config_store.set("llm.base_url", "https://api.deepseek.com/v1", category="model")
+        config_store.set("llm.model", "deepseek-chat", category="model")
+        config_store.set("llm.api_key", "test-api-key-placeholder", category="model")
 
-        agent.llm.reconfigure.assert_called_once_with(
-            base_url="https://api.deepseek.com/v1",
-            model="deepseek-chat",
-            api_key="test-api-key-placeholder",
+        registry = initialize_model_registry(config_store)
+        try:
+            profile = registry.get_active_profile()
+            assert profile["base_url"] == "https://api.deepseek.com/v1"
+            assert profile["model"] == "deepseek-chat"
+            assert profile["provider"] == "custom"  # no explicit provider set
+        finally:
+            reset_model_registry()
+
+    def test_registry_set_active_provider(self, tmp_path) -> None:
+        """ModelRegistry.set_active_provider() persists and returns normalized profile."""
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.model_registry import (
+            initialize_model_registry,
+            reset_model_registry,
         )
-        assert source == "runtime store"
-        assert profile["base_url"] == "https://api.deepseek.com/v1"
-        assert profile["model"] == "deepseek-chat"
-        assert profile["provider"] == "deepseek"
 
-    def test_yaml_defaults_used_when_no_runtime_values(self) -> None:
-        from kazma_ui.app import _hydrate_startup_llm_profile
+        db_path = str(tmp_path / "test.db")
+        config_store = ConfigStore(db_path=db_path)
 
-        agent = self._make_agent(
-            base_url="https://api.openai.com/v1",
-            model="gpt-4o-mini",
-            api_key="yaml-key",
-        )
-        config_store = MagicMock()
-        config_store.get_all.return_value = {}
-
-        profile, source = _hydrate_startup_llm_profile(agent, config_store)
-
-        agent.llm.reconfigure.assert_not_called()
-        assert source == "yaml defaults"
-        assert profile["base_url"] == "https://api.openai.com/v1"
-        assert profile["model"] == "gpt-4o-mini"
-        assert profile["provider"] == "openai"
+        registry = initialize_model_registry(config_store)
+        try:
+            result = registry.set_active_provider(
+                provider="openai",
+                base_url="https://api.openai.com/v1",
+                model="gpt-4o-mini",
+                api_key="sk-test",
+            )
+            assert result["provider"] == "openai"
+            assert result["model"] == "gpt-4o-mini"
+            assert result["base_url"] == "https://api.openai.com/v1"
+            assert result["api_key"] == "***"  # masked
+        finally:
+            reset_model_registry()
 
 
 # ══════════════════════════════════════════════════════════════════════════

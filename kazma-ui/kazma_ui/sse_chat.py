@@ -259,6 +259,7 @@ def create_sse_chat_router(
     tracer: Any = None,
     provider_profile: dict[str, Any] | None = None,
     llm_provider: Any = None,
+    registry: Any = None,
 ) -> APIRouter:
     """Create the SSE chat router wired to the compiled Supervisor graph.
 
@@ -353,8 +354,11 @@ def create_sse_chat_router(
         # closes the gap where settings.js saved the model but it never
         # reached the graph.
         requested_model = (body.get("model") or "").strip()
-        if requested_model and llm_provider is not None:
-            llm_provider.reconfigure(model=requested_model)
+        if requested_model:
+            if registry is not None:
+                registry.set_active_model(requested_model)
+            if llm_provider is not None:
+                llm_provider.reconfigure(model=requested_model)
             logger.info("SSE chat: model applied from body: %s", requested_model)
 
         # ── Pre-stream API key validation (Bug 4 fix) ───────────────
@@ -526,6 +530,9 @@ def create_sse_chat_router(
         Returns:
             {"provider": "ollama", "base_url": "...", "model": "...", "api_key": "..."}
         """
+        if registry is not None:
+            return registry.get_active_profile()
+        # Fallback to local profile
         if not _active_profile:
             return {"provider": "none", "base_url": "", "model": "", "api_key": ""}
         # Don't expose real API keys
@@ -552,12 +559,29 @@ def create_sse_chat_router(
         Returns:
             The normalized provider profile.
         """
-        from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
-
         try:
             body = await request.json()
         except Exception:
             return {"error": "Invalid JSON"}
+
+        if registry is not None:
+            result = registry.set_active_provider(
+                provider=body.get("provider", ""),
+                base_url=body.get("base_url", ""),
+                model=body.get("model", ""),
+                api_key=body.get("api_key", ""),
+            )
+            # Also reconfigure the live llm_provider if passed
+            if llm_provider is not None:
+                llm_provider.reconfigure(
+                    base_url=result.get("base_url", ""),
+                    model=result.get("model", ""),
+                    api_key=result.get("api_key", ""),
+                )
+            return {**result, "status": "ok"}
+
+        # Fallback: old behavior
+        from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
 
         prov = body.get("provider", "").lower().strip()
         raw_url = body.get("base_url", "")

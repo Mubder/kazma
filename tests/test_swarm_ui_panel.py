@@ -645,14 +645,59 @@ class TestTabNavigation:
 class TestModelsEndpoint:
     """Test models/providers endpoint."""
 
-    def test_models_endpoint(self):
-        """Models endpoint returns lists."""
+    def test_models_endpoint(self, tmp_path):
+        """Models endpoint returns lists when registry is initialized."""
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.model_registry import (
+            initialize_model_registry,
+            reset_model_registry,
+        )
+
+        db_path = str(tmp_path / "swarm_ui_models.db")
+        config_store = ConfigStore(db_path=db_path)
+        registry = initialize_model_registry(config_store)
+        try:
+            registry.upsert_provider({
+                "name": "test-provider",
+                "models": ["test-model"],
+                "base_url": "https://test.example/v1",
+            })
+            client = _build_client()
+            response = client.get("/api/swarm/models")
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data["models"]) > 0
+            assert len(data["providers"]) > 0
+        finally:
+            reset_model_registry()
+
+
+# ---------------------------------------------------------------------------
+# Saved model profile dropdown wiring
+# ---------------------------------------------------------------------------
+
+
+class TestSavedModelProfileDropdowns:
+    """Test saved profile dropdowns and JS wiring."""
+
+    def test_page_has_saved_profile_dropdowns(self):
+        """Swarm page renders explicit saved-profile selects."""
         client = _build_client()
-        response = client.get("/api/swarm/models")
-        assert response.status_code == 200
-        data = response.json()
-        assert len(data["models"]) > 0
-        assert len(data["providers"]) > 0
+        response = client.get("/swarm")
+        html = response.text
+        assert 'id="add-profile"' in html
+        assert 'id="spawn-profile"' in html
+
+    def test_swarm_js_wires_saved_profile_autofill(self):
+        """swarm.js populates profile selects and applies model/provider autofill."""
+        from pathlib import Path
+
+        js_path = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "static" / "js" / "swarm.js"
+        source = js_path.read_text(encoding="utf-8")
+        assert "populateProfileSelect('add-profile')" in source
+        assert "populateProfileSelect('spawn-profile')" in source
+        assert "applySavedProfile('add'" in source
+        assert "applySavedProfile('spawn'" in source
 
 
 # ---------------------------------------------------------------------------

@@ -38,23 +38,8 @@ except ImportError:  # pragma: no cover
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
-_SUPPORTED_MODELS = [
-    "deepseek-chat",
-    "deepseek-reasoner",
-    "gpt-4o-mini",
-    "gpt-4o",
-    "claude-sonnet-4",
-    "claude-haiku-3.5",
-    "llama-3.1-70b",
-]
-
-_SUPPORTED_PROVIDERS = [
-    "deepseek",
-    "openai",
-    "openrouter",
-    "anthropic",
-    "ollama",
-]
+_SUPPORTED_MODELS: list[str] = []
+_SUPPORTED_PROVIDERS: list[str] = []
 
 
 def _has_swarm_core() -> bool:
@@ -282,12 +267,12 @@ def create_swarm_router(
 
     def _registry_options() -> dict[str, Any] | None:
         nonlocal _registry
-        if config_store is None:
-            return None
         if _registry is None:
-            from kazma_core.model_registry import UnifiedModelRegistry
-
-            _registry = UnifiedModelRegistry(config_store)
+            try:
+                from kazma_core.model_registry import get_model_registry
+                _registry = get_model_registry()
+            except RuntimeError:
+                return None
         try:
             return _registry.list_unified_options()
         except Exception:
@@ -782,11 +767,9 @@ def create_swarm_router(
         """Return supported models and providers."""
         options = _registry_options()
         if options is not None:
-            models = options.get("models", [])
-            providers = options.get("providers", [])
             return {
-                "models": models if models else list(_SUPPORTED_MODELS),
-                "providers": providers if providers else list(_SUPPORTED_PROVIDERS),
+                "models": options.get("models", []),
+                "providers": options.get("providers", []),
                 "provider_entries": options.get("provider_entries", []),
                 "provider_models": options.get("provider_models", {}),
                 "profiles": options.get("profiles", []),
@@ -794,13 +777,13 @@ def create_swarm_router(
                 "source": "registry",
             }
         return {
-            "models": list(_SUPPORTED_MODELS),
-            "providers": list(_SUPPORTED_PROVIDERS),
+            "models": [],
+            "providers": [],
             "provider_entries": [],
             "provider_models": {},
             "profiles": [],
             "defaults": {},
-            "source": "fallback",
+            "source": "unavailable",
         }
 
     @router.get("/api/swarm/circuit-breakers")
@@ -1040,13 +1023,9 @@ def _fallback_html(has_core: bool, workers: list[dict[str, Any]]) -> str:
         <label>Name</label>
         <input id="add-name" placeholder="worker-1">
         <label>Model</label>
-        <select id="add-model">
-          {''.join(f'<option value="{model}">{model}</option>' for model in _SUPPORTED_MODELS)}
-        </select>
+        <input id="add-model" placeholder="gpt-4o-mini">
         <label>Provider</label>
-        <select id="add-provider">
-          {''.join(f'<option value="{provider}">{provider}</option>' for provider in _SUPPORTED_PROVIDERS)}
-        </select>
+        <input id="add-provider" placeholder="openai">
         <label>Bot Token (optional)</label>
         <input id="add-token" placeholder="telegram-bot-token" type="password">
         <label>Type</label>

@@ -247,27 +247,47 @@ class TestSwarmPanel:
 class TestSwarmModels:
     """Test GET /api/swarm/models."""
 
-    def test_models_returns_lists(self):
-        """Returns models and providers for dropdowns."""
-        client = _build_client()
-        response = client.get("/api/swarm/models")
-        assert response.status_code == 200
-        data = response.json()
-        assert "models" in data
-        assert "providers" in data
-        assert isinstance(data["models"], list)
-        assert isinstance(data["providers"], list)
-        assert len(data["models"]) > 0
-        assert len(data["providers"]) > 0
+    def test_models_returns_lists(self, tmp_path):
+        """Returns models and providers for dropdowns when registry is initialized."""
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.model_registry import (
+            initialize_model_registry,
+            reset_model_registry,
+        )
+
+        db_path = str(tmp_path / "swarm_models_list.db")
+        config_store = ConfigStore(db_path=db_path)
+        registry = initialize_model_registry(config_store)
+        try:
+            registry.upsert_provider({
+                "name": "test-provider",
+                "models": ["test-model"],
+                "base_url": "https://test.example/v1",
+            })
+            client = _build_client(config_store=config_store)
+            response = client.get("/api/swarm/models")
+            assert response.status_code == 200
+            data = response.json()
+            assert "models" in data
+            assert "providers" in data
+            assert isinstance(data["models"], list)
+            assert isinstance(data["providers"], list)
+            assert len(data["models"]) > 0
+            assert len(data["providers"]) > 0
+        finally:
+            reset_model_registry()
 
     def test_models_endpoint_uses_registry_options(self, tmp_path):
-        """When ConfigStore is provided, endpoint uses unified registry values."""
+        """When singleton is initialized, endpoint uses unified registry values."""
         from kazma_core.config_store import ConfigStore
-        from kazma_core.model_registry import UnifiedModelRegistry
+        from kazma_core.model_registry import (
+            initialize_model_registry,
+            reset_model_registry,
+        )
 
         db_path = str(tmp_path / "swarm_models.db")
         config_store = ConfigStore(db_path=db_path)
-        registry = UnifiedModelRegistry(config_store)
+        registry = initialize_model_registry(config_store)
         registry.upsert_provider({
             "name": "custom-registry-provider",
             "models": ["custom-registry-model"],
@@ -280,15 +300,22 @@ class TestSwarmModels:
         })
         config_store.set("llm.model", "runtime-registry-model", category="llm")
 
-        client = _build_client(config_store=config_store)
-        response = client.get("/api/swarm/models")
-        assert response.status_code == 200
-        data = response.json()
-        assert data["source"] == "registry"
-        assert "custom-registry-provider" in data["providers"]
-        assert "custom-registry-model" in data["models"]
-        assert "saved-registry-model" in data["models"]
-        assert "runtime-registry-model" in data["models"]
+        try:
+            client = _build_client(config_store=config_store)
+            response = client.get("/api/swarm/models")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["source"] == "registry"
+            assert "custom-registry-provider" in data["providers"]
+            assert "custom-registry-model" in data["models"]
+            assert "saved-registry-model" in data["models"]
+            assert "runtime-registry-model" in data["models"]
+            assert "profiles" in data
+            profile = next(p for p in data["profiles"] if p["name"] == "saved-registry-profile")
+            assert profile["model"] == "saved-registry-model"
+            assert profile["provider"] == "profile-provider"
+        finally:
+            reset_model_registry()
 
 
 # ---------------------------------------------------------------------------

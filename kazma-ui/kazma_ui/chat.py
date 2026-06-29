@@ -113,6 +113,15 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
     # avoiding direct access to agent.llm_config.* attributes.
     llm_cfg = agent.get_llm_config()
 
+    # Try to get the LLM client from the singleton ModelRegistry.
+    # Falls back to agent.get_llm_client() if the registry is not initialized.
+    _registry_client = None
+    try:
+        from kazma_core.model_registry import get_model_registry
+        _registry_client = get_model_registry().get_client()
+    except RuntimeError:
+        pass
+
     await websocket.accept()
     session_id = str(uuid.uuid4())
     session = get_or_create_session(session_id)
@@ -214,7 +223,7 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                         chat_api_key = None  # No auth for LM Studio
 
                 async for event in stream_chat(
-                    client=await agent.get_llm_client(),
+                    client=_registry_client or await agent.get_llm_client(),
                     model=chat_model,
                     base_url=chat_base_url,
                     api_key=chat_api_key,
@@ -312,7 +321,7 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                         from kazma_core.streaming import stream_chat as _stream
 
                         async for followup in _stream(
-                            client=await agent.get_llm_client(),
+                            client=_registry_client or await agent.get_llm_client(),
                             model=chat_model,
                             base_url=chat_base_url,
                             api_key=chat_api_key,
