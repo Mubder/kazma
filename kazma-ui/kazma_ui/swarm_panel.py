@@ -247,8 +247,28 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
     """Create the Swarm Panel router backed by the shared engine."""
     router = APIRouter(tags=["swarm"])
 
+    # Wire the SSE streaming endpoint.
+    try:
+        from kazma_ui.swarm_sse import SSEEventBus, create_sse_router
+
+        _sse_bus = SSEEventBus()
+        _sse_router = create_sse_router(event_bus=_sse_bus)
+        router.include_router(_sse_router)
+        logger.info("[Swarm] SSE streaming router mounted at /api/swarm/tasks/{id}/stream")
+    except ImportError:
+        _sse_bus = None  # type: ignore[assignment]
+        logger.debug("[Swarm] swarm_sse module not available, SSE streaming disabled")
+
     def _current_engine() -> Any:
-        return _resolve_engine(swarm_manager)
+        engine = _resolve_engine(swarm_manager)
+        # Wire the SSE event bus to the engine on first use.
+        if engine is not None and _sse_bus is not None:
+            try:
+                from kazma_ui.swarm_sse import wire_engine_events
+                wire_engine_events(engine, _sse_bus)
+            except Exception:
+                logger.debug("[Swarm] failed to wire SSE events to engine", exc_info=True)
+        return engine
 
     @router.get("/swarm", response_class=HTMLResponse)
     async def swarm_page(request: Request) -> HTMLResponse:
