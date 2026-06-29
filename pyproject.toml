@@ -28,6 +28,8 @@ dependencies = [
     "markdown>=3.6",
     "tenacity>=8.0.0",
     "networkx>=3.1",
+    "click>=8.1.0",
+    "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
@@ -37,10 +39,6 @@ dev = [
     "pytest-cov>=5.0.0",
     "ruff>=0.4.0",
     "mypy>=1.10.0",
-]
-cli = [
-    "click>=8.1.0",
-    "rich>=13.0.0",
 ]
 tui = [
     "textual>=8.0.0",
