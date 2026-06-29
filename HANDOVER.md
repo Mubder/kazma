@@ -272,6 +272,36 @@ This section lists the major work done on the project in rough chronological ord
 - **Dark mode dropdown contrast, model selection pipeline, bilingual language system** (remediation-R2, Sprint 9). WCAG-compliant dropdowns, chat model selector with SSE model passthrough, EN/AR cookie middleware with 150+ Arabic translations.
 - **Architecture remediation** (Sprint 8): race condition fixes, dead code removal, `UnifiedToolExecutor`, unified session stores, HITL approval UI, session history loading, Windows `setup.ps1`, PowerShell completions, portable paths, env var configuration, Cairo Arabic font.
 
+### 2.10 Unified Providers & Connectors Hub
+
+**Commit:** `f3b0945` (`feat(ui): unified Providers & Connectors management hub`).
+
+**Files affected:** `kazma-ui/kazma_ui/providers.py` (new), `kazma-ui/kazma_ui/models.py`, `kazma-ui/kazma_ui/app.py`, `kazma-ui/kazma_ui/templates/settings.html`, `kazma-ui/kazma_ui/static/js/settings.js`, `kazma-ui/kazma_ui/i18n.py`, `tests/test_settings.py`, `docs/TROUBLESHOOTING.md`.
+
+**What changed and why:**
+- Created a single unified hub (`providers.py`) for managing all LLM providers AND platform connector tokens (Telegram, Discord, Slack, Email, Webhook) through a consistent API.
+- LLM provider operations are backed by `ModelRegistry` methods (`list_providers()`, `upsert_provider()`, `delete_provider()`, `toggle_provider()`, `set_provider_health()`, `discover_models()`, `list_model_profiles()`, `save_model_profile()`, `delete_model_profile()`).
+- Platform connector operations are backed by `ConfigStore` with keys under `connectors.{name}.*`.
+- All secrets (API keys and connector tokens) are masked with `****XXXX` (last 4 chars) before being sent to the UI. The masking helper `_mask_secret()` handles values shorter than 4 characters with `***`.
+- Masked-placeholder preservation: when the UI sends back a masked value (e.g., `****1234`), the backend detects it via `_is_masked_placeholder()` and preserves the existing secret instead of overwriting it with the placeholder.
+- Test-before-save enforcement: the frontend disables the **Save** button until **Test Connection** succeeds. Providers are tested via `GET {base_url}/models` with Bearer auth; connectors are tested with platform-specific health checks (Telegram `getMe`, Discord `users/@me`, Slack `auth.test`).
+- New Pydantic models in `models.py`: `ProviderUpdateRequest`, `ConnectorUpdateRequest`, `ProviderTestResponse`, `ConnectorTestResponse`, `ModelProfileUpdateRequest`, `MaskedSecretResponse`.
+- Comprehensive integration tests added in `tests/test_settings.py` (`TestUnifiedProvidersRouterAPI` class) covering CRUD, masking, secret preservation, toggle, discover, and connector test-missing-token scenarios.
+- Troubleshooting guide updated with a new "Provider & Connector Connectivity" section (section 2a) covering masked-secret issues, test-before-save behavior, and platform-specific test diagnostics.
+
+**Key features:**
+- **API key masking**: `****XXXX` pattern (last 4 chars) for all secrets.
+- **Test-before-save**: Save disabled until connection test succeeds.
+- **Masked-placeholder preservation**: Editing a provider with `****1234` in the key field keeps the original secret.
+- **Unified CRUD**: Single set of endpoints for providers, connectors, and model profiles.
+- **14 total endpoints**: 6 for providers, 3 for model profiles, 5 for connectors.
+
+**Gotchas:**
+- The `create_providers_router(config_store)` factory requires a `ConfigStore` instance for connector persistence. The `ModelRegistry` singleton must be initialized before the router is mounted.
+- `_CONNECTOR_PLATFORMS` is a fixed tuple: `("telegram", "discord", "slack", "email", "webhook")`. Adding a new platform connector type requires updating this constant.
+- The connector test for generic platforms (email, webhook) always returns `success: True` with a "Token configured" message since there is no standard health-check endpoint.
+- Provider health status is stored via `registry.set_provider_health(name, status)` where status is `"healthy"`, `"degraded"`, or `"down"`. This is used by the UI to color-code provider cards.
+
 ---
 
 ## 3. Repository Map (Detailed)
@@ -411,6 +441,7 @@ FastAPI web application.
 - **`kazma_ui/chat.py`**: WebSocket chat handler.
 - **`kazma_ui/dashboard.py`**: Dashboard route, `set_dashboard_context()`, `set_templates()`.
 - **`kazma_ui/settings.py`**: 12-tab settings page (models, connectors, appearance, tools, MCP, skills, etc.).
+- **`kazma_ui/providers.py`**: **NEW.** Unified providers & connectors router with 14 endpoints. Single hub for LLM provider CRUD, platform connector token management, model profile CRUD, and connection testing. Backed by `ModelRegistry` for providers and `ConfigStore` for connectors. All secrets masked with `****XXXX`. Factory: `create_providers_router(config_store)`.
 - **`kazma_ui/models_route.py`**: `/api/models`, `/api/ollama/*`, model discovery and provider switching.
 - **`kazma_ui/swarm_panel.py`**: Swarm Panel router (`/swarm`, `/api/swarm/*`). Dispatches tasks, manages workers, history, metrics, circuit breakers, HITL checkpoints.
 - **`kazma_ui/swarm_sse.py`**: `SSEEventBus`, `create_sse_router()`, `wire_engine_events()`. Real-time swarm task SSE streaming.
@@ -743,6 +774,69 @@ Web UI (JS/Alpine) -> POST /api/swarm/dispatch
 - Methods: `trace_llm_call()`, `trace_tool_execution()`, `trace_state_transition()`, `trace_compaction()`, `flush()`, `shutdown()`.
 - Every trace is also written to the in-memory `TraceStore`.
 
+### 4.6 Unified Secrets Management Hub
+
+**File:** `kazma-ui/kazma_ui/providers.py`
+
+**Architecture overview:**
+The Providers & Connectors Hub unifies all secret management (LLM provider API keys and platform connector tokens) behind a single set of REST endpoints with consistent masking, CRUD, and test-before-save semantics.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                  Web UI (Settings)                       │
+│  Providers & Connectors tab                              │
+│  - LLM Providers sub-tab                                │
+│  - Platform Connectors sub-tab                           │
+│  - Model Profiles sub-tab                                │
+└───────────────┬─────────────────────────────────────────┘
+                │ REST API
+                ▼
+┌─────────────────────────────────────────────────────────┐
+│         providers.py (create_providers_router)           │
+│                                                          │
+│  _mask_secret()         ****XXXX masking                 │
+│  _is_masked_placeholder()  Detect UI placeholders        │
+│  _mask_provider_entry()  Mask provider API keys          │
+│  _mask_connector_entry() Mask connector tokens            │
+└───────┬────────────────────────────────┬────────────────┘
+        │                                │
+        ▼                                ▼
+┌──────────────────────┐    ┌──────────────────────────────┐
+│  ModelRegistry       │    │  ConfigStore                 │
+│  (LLM providers)     │    │  (Platform connectors)       │
+│  - list_providers()  │    │  - connectors.{name}.token   │
+│  - upsert_provider() │    │  - connectors.{name}.enabled │
+│  - delete_provider() │    │  - connectors.{name}.*       │
+│  - toggle_provider() │    │                              │
+│  - set_provider_health│   │                              │
+│  - discover_models() │    │                              │
+│  - model profiles    │    │                              │
+└──────────────────────┘    └──────────────────────────────┘
+```
+
+**Dual backing stores:**
+- **LLM Providers** are stored in `ModelRegistry` via `providers.list` in `ConfigStore`. All provider CRUD goes through `registry.upsert_provider()`, `registry.delete_provider()`, `registry.toggle_provider()`.
+- **Platform Connectors** (Telegram, Discord, Slack, Email, Webhook) are stored directly in `ConfigStore` under `connectors.{name}.*` keys (e.g., `connectors.telegram.token`, `connectors.slack.app_token`).
+
+**Masking rules:**
+- `_mask_secret(value)` returns `****XXXX` where `XXXX` is the last 4 characters. Values shorter than 4 characters return `***`.
+- `_is_masked_placeholder(value)` detects common patterns: `***`, `****`, or any value containing `****`. This is used to prevent the UI from accidentally overwriting real secrets with masked placeholders.
+- `_is_secret_key(key)` checks if a config key name contains hints like `token`, `secret`, `password`, `key`, or `api_key`.
+
+**Test-before-save semantics:**
+- **Providers**: `POST /api/providers/{name}/test` calls `GET {base_url}/models` with `Authorization: Bearer {api_key}`. Returns latency in ms on success, or the HTTP error. Updates provider health status via `registry.set_provider_health()`.
+- **Connectors**: `POST /api/connectors/{name}/test` uses platform-specific checks:
+  - Telegram: `GET https://api.telegram.org/bot{token}/getMe`
+  - Discord: `GET https://discord.com/api/v10/users/@me` with `Authorization: Bot {token}`
+  - Slack: `POST https://slack.com/api/auth.test` with `Authorization: Bearer {token}`
+  - Generic (email, webhook): Always succeeds if token is present.
+- The frontend disables the **Save** button until **Test Connection** returns `success: true`.
+
+**Model Profile management:**
+- `GET /api/models/profiles` lists saved profiles with masked API keys.
+- `POST /api/models/profiles` saves a named profile under `models.saved.{name}` in `ConfigStore`. Masked-placeholder preservation applies.
+- `DELETE /api/models/profiles/{name}` removes a saved profile.
+
 ---
 
 ## 5. Development Environment & Tooling
@@ -954,6 +1048,45 @@ data: <json>
 4. Add/update tests in `tests/test_sse_chat.py` or `tests/test_swarm_sse.py`.
 5. Update the frontend JS in `kazma-ui/kazma_ui/static/js/` to consume the event.
 
+#### Add a New LLM Provider via the Web UI
+
+1. Open **Settings > Providers & Connectors** and select the **LLM Providers & Models** sub-tab.
+2. Click **Add Provider** and fill in: Name, Display Name, Base URL, API Key, and available Models.
+3. Click **Test Connection**. The backend calls `GET {base_url}/models` with the API key and reports latency or the exact HTTP error.
+4. Once the test succeeds, the **Save** button becomes enabled. Click **Save** to persist.
+5. The provider is stored via `ModelRegistry.upsert_provider()` and appears in the provider list with a masked API key (`****XXXX`).
+6. To add model discovery, click **Discover Models** after saving. The backend calls the provider's `/models` endpoint.
+7. Add tests in `tests/test_settings.py` (`TestUnifiedProvidersRouterAPI`).
+
+#### Add a New Platform Connector via the Web UI
+
+1. Open **Settings > Providers & Connectors** and select the **Platform Connectors** sub-tab.
+2. Click **Edit** on the desired connector (Telegram, Discord, Slack, Email, Webhook).
+3. Enter the token and any extra fields (e.g., Slack App Token, Discord Guild ID, allowed users).
+4. Click **Test Connection**. The backend performs a platform-specific health check:
+   - Telegram: `GET https://api.telegram.org/bot{token}/getMe`
+   - Discord: `GET https://discord.com/api/v10/users/@me` with `Authorization: Bot {token}`
+   - Slack: `POST https://slack.com/api/auth.test` with the bot token
+   - Generic (email, webhook): always succeeds if token is present
+5. Once the test succeeds, click **Save**. The token is stored under `connectors.{name}.token` in `ConfigStore`.
+6. After saving, click **Refresh Gateway** or restart the server so the new token is picked up by the gateway adapters.
+
+#### Use the Test Connection Button to Diagnose Issues
+
+1. Open **Settings > Providers & Connectors** and find the provider or connector card.
+2. Click **Test Connection**. The button triggers a non-destructive health check.
+3. **For LLM providers**: The test hits `{base_url}/models` with Bearer auth. Common failure reasons:
+   - `Cannot connect to {base_url}`: URL is wrong or the server is unreachable.
+   - `HTTP 401`: API key is invalid, expired, or missing.
+   - `HTTP 403`: API key lacks permission for the `/models` endpoint.
+   - `HTTP 404`: Base URL does not expose `/models` (some providers use `/v1/models`).
+4. **For platform connectors**: The test uses platform-specific endpoints (see above). Common failures:
+   - `No token configured`: Token field is empty.
+   - `HTTP 401`: Token is revoked or invalid.
+   - `invalid_auth` (Slack): Bot token or app token is wrong.
+5. The **Save** button stays disabled until the test succeeds. Fix the URL/token and retry.
+6. Provider health status (`healthy`, `degraded`, `down`) is stored via `ModelRegistry.set_provider_health()` and reflected in the UI card color.
+
 #### Change Model/Provider Behavior
 
 1. All changes go through `kazma-core/kazma_core/model_registry.py`.
@@ -1097,6 +1230,7 @@ data: <json>
 | `kazma-gateway/kazma_gateway/adapters/telegram.py` | TelegramAdapter (polling, webhook, voice, reactions, callbacks). |
 | `kazma-gateway/kazma_gateway/stores/checkpoint.py` | CheckpointManager with per-thread locking. |
 | `kazma-ui/kazma_ui/app.py` | FastAPI app factory; wires all subsystems. |
+| `kazma-ui/kazma_ui/providers.py` | **NEW.** Unified providers & connectors router (14 endpoints). Masking, CRUD, test-before-save. |
 | `kazma-ui/kazma_ui/sse_chat.py` | SSE chat streaming from LangGraph. |
 | `kazma-ui/kazma_ui/swarm_panel.py` | Swarm Panel API and UI flattening. |
 | `kazma-ui/kazma_ui/swarm_sse.py` | Swarm task SSE event bus and engine wiring. |
@@ -1135,6 +1269,7 @@ data: <json>
 | `TelegramAdapter` | `adapters/telegram.py` | Telegram polling/webhook adapter. |
 | `create_checkpoint_manager(path)` | `stores/checkpoint.py` | Factory for CheckpointManager. |
 | `create_app(config_path)` | `kazma_ui/app.py` | FastAPI app factory. |
+| `create_providers_router(cs)` | `kazma_ui/providers.py` | Unified providers & connectors router. |
 | `create_sse_chat_router(...)` | `kazma_ui/sse_chat.py` | SSE chat router. |
 | `create_swarm_router(...)` | `kazma_ui/swarm_panel.py` | Swarm panel router. |
 | `create_sse_router(...)` | `kazma_ui/swarm_sse.py` | Swarm SSE router. |
@@ -1182,6 +1317,20 @@ data: <json>
 | `/api/approve/{thread_id}` | POST | HITL graph approval/deny | `kazma_ui/app.py` |
 | `/api/pending-approvals` | GET | List pending HITL approvals | `kazma_ui/app.py` |
 | `/api/metrics` | GET | Prometheus metrics | `kazma_ui/metrics.py` |
+| `/api/providers` | GET | List LLM providers with masked keys | `kazma_ui/providers.py` |
+| `/api/providers` | POST | Add/update LLM provider | `kazma_ui/providers.py` |
+| `/api/providers/{name}` | DELETE | Delete LLM provider | `kazma_ui/providers.py` |
+| `/api/providers/{name}/toggle` | POST | Enable/disable provider | `kazma_ui/providers.py` |
+| `/api/providers/{name}/test` | POST | Test provider connection | `kazma_ui/providers.py` |
+| `/api/providers/{name}/discover` | POST | Discover provider models | `kazma_ui/providers.py` |
+| `/api/models/profiles` | GET | List saved model profiles | `kazma_ui/providers.py` |
+| `/api/models/profiles` | POST | Save model profile | `kazma_ui/providers.py` |
+| `/api/models/profiles/{name}` | DELETE | Delete model profile | `kazma_ui/providers.py` |
+| `/api/connectors` | GET | List platform connectors with masked tokens | `kazma_ui/providers.py` |
+| `/api/connectors` | POST | Add/update connector | `kazma_ui/providers.py` |
+| `/api/connectors/{name}` | DELETE | Delete connector | `kazma_ui/providers.py` |
+| `/api/connectors/{name}/test` | POST | Test connector connection | `kazma_ui/providers.py` |
+| `/api/connectors/{name}/toggle` | POST | Enable/disable connector | `kazma_ui/providers.py` |
 | `/api/webhooks/telegram` | POST | Telegram webhook ingress | `kazma_gateway/adapters/telegram.py` |
 
 ### 7.4 CLI Commands
@@ -1251,6 +1400,7 @@ The following are known limitations or deferred work discovered in the codebase.
 
 - **Checkpoint concurrency lock (historical deferred bug):** `BUG_FIX_TASK.md` listed a `database is locked` issue in `kazma-core/kazma_core/checkpoint.py` (legacy file). The current gateway `CheckpointManager` in `kazma-gateway/kazma_gateway/stores/checkpoint.py` already uses per-thread locks. If the legacy `kazma_core/checkpoint.py` is still used by any code, it should be audited for the same lock pattern.
 - **Settings export content-type (historical deferred bug):** `BUG_FIX_TASK.md` listed an issue where `/api/settings/export` returned `application/json`. Verify the endpoint in `kazma-ui/kazma_ui/settings.py` returns `text/yaml` with a `Content-Disposition` header.
+- **Providers hub tests now exist:** Prior to the Providers & Connectors Hub (commit `f3b0945`), there was no dedicated test coverage for the unified provider/connector API endpoints. The `TestUnifiedProvidersRouterAPI` class in `tests/test_settings.py` now covers CRUD, masking, secret preservation, toggle, discover, and connector test scenarios. The hub's `_mask_secret()` and `_is_masked_placeholder()` helpers are implicitly tested through the API integration tests but do not have standalone unit tests; consider adding them if edge cases arise (e.g., Unicode secrets, empty strings, very long keys).
 - **Local STT provider:** `TelegramAdapter._transcribe_voice()` logs "Local STT provider not yet implemented" for `voice_provider="local"`. Only `openai` and `groq` are implemented.
 - **Vector memory optional dependency:** RAG memory via ChromaDB/sentence-transformers requires the `rag` extra. Without it, the UI logs a hint at startup but does not fail.
 - **TelegramWorker external dependency:** `TelegramWorker` shells out to `kazma -p <profile>`. `kazma` is not bundled with Kazma. If not installed, Telegram workers return errors. Prefer `InProcessWorker` for environments without `kazma`.
