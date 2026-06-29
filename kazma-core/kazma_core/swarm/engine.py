@@ -132,10 +132,15 @@ class SwarmEngine:
         return worker
 
     def remove_worker(self, name: str) -> SwarmWorker:
-        """Unregister a worker by name."""
+        """Unregister a worker by name and clean up reliability state."""
         if name not in self._workers:
             raise KeyError(f"Worker '{name}' not found.")
         worker = self._workers.pop(name)
+        # Clean up reliability-layer state to prevent memory leaks.
+        self._circuit_breakers.pop(name, None)
+        self._retry_policies.pop(name, None)
+        self._timeout_guards.pop(name, None)
+        self._output_validators.pop(name, None)
         logger.info("[SwarmEngine] removed worker '%s'", name)
         return worker
 

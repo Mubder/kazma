@@ -18,6 +18,7 @@ try:
         SwarmManager,
         SwarmTask,
         TaskType,
+        WorkerCapabilities,
         WorkerConfig,
         get_swarm_engine,
         set_swarm_engine,
@@ -28,6 +29,7 @@ except ImportError:  # pragma: no cover
     SwarmManager = None  # type: ignore[assignment,misc]
     SwarmTask = None  # type: ignore[assignment,misc]
     TaskType = None  # type: ignore[assignment,misc]
+    WorkerCapabilities = None  # type: ignore[assignment,misc]
     WorkerConfig = None  # type: ignore[assignment,misc]
     get_swarm_engine = None  # type: ignore[assignment,misc]
     set_swarm_engine = None  # type: ignore[assignment,misc]
@@ -153,6 +155,12 @@ def _coerce_timeout(payload: dict[str, Any]) -> float:
 
 def _serialize_worker(worker: Any) -> dict[str, Any]:
     """Convert a worker object into a response-friendly dict."""
+    capabilities = None
+    if hasattr(worker, "capabilities") and worker.capabilities is not None:
+        if hasattr(worker.capabilities, "to_dict"):
+            capabilities = worker.capabilities.to_dict()
+        else:
+            capabilities = {"role": getattr(worker.capabilities, "role", "")}
     return {
         "name": worker.name,
         "model": worker.model or "?",
@@ -165,6 +173,7 @@ def _serialize_worker(worker: Any) -> dict[str, Any]:
         "last_task": worker.last_task,
         "last_heartbeat": worker.last_heartbeat,
         "logs": list(worker.logs),
+        "capabilities": capabilities,
     }
 
 
@@ -445,6 +454,65 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
 
         tasks = [task.to_dict() for task in engine.list_tasks(task_type)]
         return JSONResponse({"tasks": tasks, "count": len(tasks)})
+
+    @router.post("/api/swarm/workers/spawn", status_code=201)
+    async def swarm_spawn_worker(payload: dict[str, Any]) -> JSONResponse:
+        """Dynamically spawn a worker at runtime.
+
+        Creates an InProcessWorker with the given name, role, and
+        capabilities.  The worker is immediately available in the
+        registry and dispatchable by all orchestration patterns.
+        Duplicate names are rejected with 409 Conflict.
+        """
+        name = (payload.get("name") or "").strip()
+        if not name:
+            return JSONResponse(
+                {"status": "error", "message": "Worker name is required"},
+                status_code=400,
+            )
+
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse(
+                {"status": "error", "message": "Swarm core is not available"},
+                status_code=503,
+            )
+
+        if engine.get_worker(name) is not None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' already exists"},
+                status_code=409,
+            )
+
+        role = (payload.get("role") or "").strip()
+        capabilities_data = payload.get("capabilities") or {"role": role}
+        model = payload.get("model", "")
+        provider = payload.get("provider", "")
+        worker_type = payload.get("worker_type", "in_process")
+
+        try:
+            worker = await engine.spawn_worker(
+                name=name,
+                role=role,
+                capabilities=capabilities_data,
+                model=model,
+                provider=provider,
+                worker_type=worker_type,
+            )
+        except ValueError as exc:
+            return JSONResponse(
+                {"status": "error", "message": str(exc)},
+                status_code=409,
+            )
+
+        logger.info(
+            "[Swarm] Worker spawned: %s (role=%s, model=%s/%s)",
+            name, role, model, provider,
+        )
+        return JSONResponse(
+            {"status": "ok", "worker": _serialize_worker(worker)},
+            status_code=201,
+        )
 
     @router.post("/api/swarm/workers", status_code=201)
     async def swarm_add_worker(payload: dict[str, Any]) -> JSONResponse:
