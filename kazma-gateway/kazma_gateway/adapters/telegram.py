@@ -165,6 +165,47 @@ class TelegramAdapter(BaseAdapter):
         )
 
         try:
+            # ── Delete any pending webhook before polling ──────────────────
+            # If a webhook was previously set (e.g. by the archived
+            # telegram_bridge.py), getUpdates returns HTTP 409 Conflict for
+            # every call and no messages are ever received.
+            try:
+                dw_resp = await self._http.post(
+                    f"/bot{self._token}/deleteWebhook",
+                    json={"drop_pending_updates": False},
+                )
+                logger.info(
+                    "[telegram] deleteWebhook called (status=%d)",
+                    dw_resp.status_code,
+                )
+            except Exception:
+                logger.warning("[telegram] deleteWebhook failed — continuing anyway")
+
+            # ── Validate bot token via getMe ──────────────────────────────
+            # If the token is wrong/expired/revoked, every getUpdates returns
+            # 401. Validating up front prevents a silent "connected but dead"
+            # state where the adapter reports healthy but never receives.
+            try:
+                me_resp = await self._http.get(f"/bot{self._token}/getMe")
+                if me_resp.status_code != 200:
+                    me_data = me_resp.json()
+                    logger.error(
+                        "[telegram] Bot token validation failed: %s",
+                        me_data.get("description", "unknown error"),
+                    )
+                    self._running = False
+                    return
+                bot_info = me_resp.json().get("result", {})
+                logger.info(
+                    "[telegram] Connected as @%s (%s)",
+                    bot_info.get("username", "unknown"),
+                    bot_info.get("first_name", ""),
+                )
+            except Exception:
+                logger.exception("[telegram] getMe failed — cannot validate bot token")
+                self._running = False
+                return
+
             logger.info("[telegram] Starting getUpdates polling loop")
 
             while not shutdown_event.is_set():
@@ -194,85 +235,92 @@ class TelegramAdapter(BaseAdapter):
                     if shutdown_event.is_set():
                         break
 
-                    # Handle inline keyboard callbacks
-                    if "callback_query" in update:
-                        asyncio.create_task(
-                            self._handle_callback_query(
-                                update["callback_query"],
-                            )
-                        )
-                        continue
-
-                    # Handle voice messages (async download + transcribe)
-                    msg = self._parse_update(update)
-                    if msg is None:
-                        message = (
-                            update.get("message")
-                            or update.get("channel_post")
-                            or update.get("edited_message")
-                        )
-                        if message and self.detect_voice_message(message):
-                            voice_result = await self._handle_voice_message(message)
-                            if voice_result is None:
-                                continue
-                            from_user = message.get("from", {})
-                            user_id = from_user.get("id", 0)
-                            chat_id = message.get("chat", {}).get("id", 0)
-                            username = (
-                                from_user.get("username", "")
-                                or from_user.get("first_name", "")
-                                or f"tg_{user_id}"
-                            )
-                            sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
-                            msg = IncomingMessage(
-                                platform="telegram",
-                                sender_id=sender_id,
-                                text=voice_result,
-                                context_metadata={
-                                    "chat_id": chat_id,
-                                    "user_id": user_id,
-                                    "username": username,
-                                    "message_id": message.get("message_id", 0),
-                                    "chat_type": message.get("chat", {}).get("type", "private"),
-                                    "update_id": update.get("update_id", 0),
-                                    "voice_transcribed": True,
-                                },
-                            )
-                        else:
-                            continue
-
-                    # User whitelist
-                    if self._allowed_users:
-                        user_id = msg.context_metadata.get("user_id", 0)
-                        if user_id not in self._allowed_users:
-                            logger.debug(
-                                "[telegram] Ignoring user %d (not whitelisted)",
-                                user_id,
-                            )
-                            continue
-
                     try:
-                        queue.put_nowait(msg)
-                        logger.info(
-                            "[telegram] Enqueued from %s (chat=%d): %.80s",
-                            msg.context_metadata.get("username", "?"),
-                            msg.context_metadata.get("chat_id", 0),
-                            msg.text,
-                        )
-                        # Fire 👀 reaction on the user's message
-                        if msg.context_metadata.get("message_id"):
+                        # Handle inline keyboard callbacks
+                        if "callback_query" in update:
                             asyncio.create_task(
-                                self._set_reaction(
-                                    msg.context_metadata["chat_id"],
-                                    msg.context_metadata["message_id"],
-                                    "👀",
+                                self._handle_callback_query(
+                                    update["callback_query"],
                                 )
                             )
-                    except asyncio.QueueFull:
-                        logger.warning(
-                            "[telegram] Queue full — dropping message from chat=%d",
-                            msg.context_metadata.get("chat_id", 0),
+                            continue
+
+                        # Handle voice messages (async download + transcribe)
+                        msg = self._parse_update(update)
+                        if msg is None:
+                            message = (
+                                update.get("message")
+                                or update.get("channel_post")
+                                or update.get("edited_message")
+                            )
+                            if message and self.detect_voice_message(message):
+                                voice_result = await self._handle_voice_message(message)
+                                if voice_result is None:
+                                    continue
+                                from_user = message.get("from", {})
+                                user_id = from_user.get("id", 0)
+                                chat_id = message.get("chat", {}).get("id", 0)
+                                username = (
+                                    from_user.get("username", "")
+                                    or from_user.get("first_name", "")
+                                    or f"tg_{user_id}"
+                                )
+                                sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
+                                msg = IncomingMessage(
+                                    platform="telegram",
+                                    sender_id=sender_id,
+                                    text=voice_result,
+                                    context_metadata={
+                                        "chat_id": chat_id,
+                                        "user_id": user_id,
+                                        "username": username,
+                                        "message_id": message.get("message_id", 0),
+                                        "chat_type": message.get("chat", {}).get("type", "private"),
+                                        "update_id": update.get("update_id", 0),
+                                        "voice_transcribed": True,
+                                    },
+                                )
+                            else:
+                                continue
+
+                        # User whitelist
+                        if self._allowed_users:
+                            user_id = msg.context_metadata.get("user_id", 0)
+                            if user_id not in self._allowed_users:
+                                logger.debug(
+                                    "[telegram] Ignoring user %d (not whitelisted)",
+                                    user_id,
+                                )
+                                continue
+
+                        try:
+                            queue.put_nowait(msg)
+                            logger.info(
+                                "[telegram] Enqueued from %s (chat=%d): %.80s",
+                                msg.context_metadata.get("username", "?"),
+                                msg.context_metadata.get("chat_id", 0),
+                                msg.text,
+                            )
+                            # Fire 👀 reaction on the user's message
+                            if msg.context_metadata.get("message_id"):
+                                asyncio.create_task(
+                                    self._set_reaction(
+                                        msg.context_metadata["chat_id"],
+                                        msg.context_metadata["message_id"],
+                                        "👀",
+                                    )
+                                )
+                        except asyncio.QueueFull:
+                            logger.warning(
+                                "[telegram] Queue full — dropping message from chat=%d",
+                                msg.context_metadata.get("chat_id", 0),
+                            )
+                    except Exception:
+                        logger.exception(
+                            "[telegram] Error processing update %s",
+                            update.get("update_id", "?"),
                         )
+                        continue
 
                 # ── Jitter (mandatory 1-3s delay) ───────────────────
                 if await self.jitter_sleep(shutdown_event):
@@ -282,6 +330,7 @@ class TelegramAdapter(BaseAdapter):
             if self._http:
                 await self._http.aclose()
                 self._http = None
+            self._running = False
             logger.info("[telegram] Polling stopped")
 
     async def _poll(self) -> list[dict[str, Any]]:
@@ -844,6 +893,11 @@ class TelegramAdapter(BaseAdapter):
         if reply_markup:
             payload["reply_markup"] = reply_markup
 
+        # One-time fallback flag: if sendMessage returns 400 (e.g. Markdown
+        # parse errors from unescaped _, *, `, [ in agent responses), retry
+        # once without parse_mode so the message still reaches the user.
+        parse_mode_fallback_done = False
+
         for attempt in range(_SEND_MAX_RETRIES):
             try:
                 await self._rate_limiter.acquire()
@@ -899,6 +953,20 @@ class TelegramAdapter(BaseAdapter):
                     return False
 
             except httpx.HTTPStatusError as exc:
+                # Retry once without parse_mode on 400 (Markdown parse errors
+                # from unescaped _, *, `, [ characters in agent responses)
+                if (
+                    exc.response.status_code == 400
+                    and "parse_mode" in payload
+                    and not parse_mode_fallback_done
+                ):
+                    logger.debug(
+                        "[telegram] sendMessage returned 400 — retrying "
+                        "without parse_mode (Markdown fallback)"
+                    )
+                    payload.pop("parse_mode", None)
+                    parse_mode_fallback_done = True
+                    continue
                 logger.error(
                     "[telegram] HTTP %d on send to %d: %s",
                     exc.response.status_code,

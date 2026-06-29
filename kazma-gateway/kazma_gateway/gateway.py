@@ -276,6 +276,25 @@ class BaseAdapter(ABC):
             self.listen(queue, shutdown_event),
             name=f"adapter-{self.name}",
         )
+
+        def _on_task_done(task: asyncio.Task[None]) -> None:
+            """Reset _running and log if the listen task crashes unexpectedly.
+
+            This catches the case where listen() raises an unhandled exception
+            (e.g. a malformed update or network error that escapes the loop's
+            own exception handling). Without this callback _running would stay
+            True forever and get_status() would report "connected" even though
+            polling has stopped.
+            """
+            if task.exception() and not task.cancelled():
+                self._running = False
+                logger.error(
+                    "[%s] Adapter listen task crashed: %s",
+                    self.name,
+                    task.exception(),
+                )
+
+        self._task.add_done_callback(_on_task_done)
         logger.info("[%s] Adapter started", self.name)
 
     async def stop(self) -> None:
@@ -461,12 +480,13 @@ class GatewayManager:
         for adapter in self.adapters:
             await adapter.start(self.queue, self._shutdown)
 
-        # Start the consumer that dispatches to the Brain
-        if self._handler:
-            self._consumer_task = asyncio.create_task(
-                self._consume(),
-                name="gateway-consumer",
-            )
+        # Start the consumer that dispatches to the Brain (always start,
+        # even if no handler is registered — messages are dropped with a
+        # warning instead of piling up and being silently lost)
+        self._consumer_task = asyncio.create_task(
+            self._consume(),
+            name="gateway-consumer",
+        )
 
         self._started = True
         logger.info(
@@ -604,6 +624,11 @@ class GatewayManager:
                             "Handler error for message from %s",
                             msg.sender_id,
                         )
+                else:
+                    logger.warning(
+                        "[Gateway] Message from %s dropped — no handler registered",
+                        msg.sender_id,
+                    )
             except TimeoutError:
                 continue
             except asyncio.CancelledError:

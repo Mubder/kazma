@@ -493,10 +493,22 @@ def create_app(config_path: str | None = None) -> FastAPI:
             Call this after saving connector settings to hot-reload adapters
             without restarting the server.
             """
-            # Remove existing adapters (keep gateway running)
+            logger.info("[Gateway] Refreshing adapters — stopping old adapters")
+
+            # 1. Stop old adapters before clearing (cancel their listen tasks)
+            for old_adapter in gateway.adapters:
+                try:
+                    await old_adapter.stop()
+                except Exception:
+                    logger.warning(
+                        "[Gateway] Error stopping adapter %s during refresh",
+                        old_adapter.name,
+                    )
+
+            # 2. Clear old adapters
             gateway.adapters.clear()
 
-            # Re-resolve Telegram token from config_store > YAML > env
+            # 3. Re-resolve Telegram token from config_store > YAML > env
             telegram_token = config_store.get("connectors.telegram.token", "") or \
                              config.raw.get("connectors", {}).get("telegram", {}).get("token", "")
             if not telegram_token:
@@ -531,6 +543,25 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 slack_adapter = SlackAdapter(bot_token=slack_bot_token, app_token=slack_app_token)
                 gateway.add_adapter(slack_adapter)
                 logger.info("[Gateway] Slack adapter re-registered via refresh")
+
+            # 4. Start new adapters so they begin polling
+            for new_adapter in gateway.adapters:
+                try:
+                    await new_adapter.start(gateway.queue, gateway._shutdown)
+                    logger.info(
+                        "[Gateway] Adapter %s started via refresh",
+                        new_adapter.name,
+                    )
+                except Exception:
+                    logger.warning(
+                        "[Gateway] Failed to start adapter %s during refresh",
+                        new_adapter.name,
+                    )
+
+            logger.info(
+                "[Gateway] Adapter refresh complete — %d adapter(s) running",
+                len(gateway.adapters),
+            )
 
             return {
                 "status": "ok",
