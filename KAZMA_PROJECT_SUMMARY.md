@@ -20,8 +20,8 @@ Kazma is an autonomous, domain-agnostic, open-source AI agent framework built fo
 | **Total Tasks Completed** | 30+ |
 | **Sprints** | 7 |
 | **Python Files** | 280+ |
-| **Lines of Code** | ~50,000+ |
-| **Test Suite** | 2,129 tests |
+| **Lines of Code** | 52,333 |
+| **Test Suite** | 3,510 tests |
 | **Agent Profiles Used** | 3 (core, bridge, ux) |
 | **Monorepo Packages** | 8 |
 
@@ -107,6 +107,14 @@ kazma/
 ├── kazma-cli/           # CLI entry point
 │   └── kazma_cli/
 │       └── main.py                  # `kazma` command tree
+│
+├── kazma-ui/            # FastAPI web dashboard (Arabic RTL, bilingual EN/AR)
+│   └── kazma_ui/
+│       └── app.py                   # FastAPI application factory
+│
+├── kazma-tui/           # English-only Textual terminal dashboard
+│   └── kazma_tui/
+│       └── app.py                   # Main Textual TUI application
 │
 ├── examples/            # Reference implementations
 │   └── almuhalab_custom_skills/     # ALMuhalab-specific skills
@@ -246,7 +254,7 @@ kazma/
 
 ## Test Suite
 
-**954 tests collected** across 52 test files:
+**3,510 tests collected** across the test suite:
 
 | Category | Tests | Files |
 |----------|-------|-------|

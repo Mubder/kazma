@@ -23,6 +23,7 @@ kazma-skills/       Built-in skills
 kazma-connectors/   External service connectors
 kazma-providers/    LLM provider integrations
 kazma-ui/           Arabic RTL dashboard
+kazma-tui/          English-only Textual TUI
 kazma-cli/          Command-line interface
 kazma-memory/       Persistent memory subsystem
 ```

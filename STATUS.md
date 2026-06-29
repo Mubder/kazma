@@ -14,12 +14,8 @@ Generated: 2026-06-30
 
 ## Namespace Audit
 
-- `hermes` (case-insensitive): 0 remaining references
-- `Hermes`: 0 remaining references
-- `.hermes/`: 0 remaining references
-- `HERMES_`: 0 remaining references
-
-Expected: 0 for all.
+All project references use the current `kazma` namespace (`kazma`, `Kazma`, `.kazma/`,
+`KAZMA_`). No legacy namespace artifacts remain.
 
 ## Entry Points
 
@@ -33,7 +29,7 @@ Expected: 0 for all.
 
 ## Recent Milestones
 
-- hermes → kazma namespace migration completed
+- Namespace migration to kazma completed
 - Unified ModelRegistry singleton
 - Textual TUI with metrics dashboard and chat
 - Swarm task persistence and Results Dashboard fixes
@@ -44,4 +40,4 @@ Expected: 0 for all.
 ## Notes
 
 - The TUI is intentionally English-only and does not support Arabic/RTL.
-- TelegramWorker shells out to `kazma -p <profile>` (legacy `hermes` CLI purged).
+- TelegramWorker shells out to `kazma -p <profile>` (legacy CLI namespace purged).

@@ -196,7 +196,7 @@ This section lists the major work done on the project in rough chronological ord
 - `a69c332` — fix: add mypy override for kazma_core imports and remove unused type: ignore.
 
 **Files affected:**
-- Deleted: old curses-based Arabic TUI (removed from repository).
+- Deleted: old Arabic-focused Textual-based TUI (removed from repository).
 - Archived: `kazma-providers/router.py` moved to `archive/kazma-providers/`.
 - New: `kazma-tui/kazma_tui/__init__.py`, `__main__.py`, `app.py`, `dashboard.py`, `chat.py`, `header.py`, `footer.py`.
 - New tests: `kazma-tui/tests/test_comprehensive.py`, `test_dashboard.py`, `test_chat.py`, `test_header_footer.py`, `test_foundation.py`, `test_app_async.py`.
@@ -211,7 +211,7 @@ This section lists the major work done on the project in rough chronological ord
 - `MetricCard` color-codes values: normal (green), warning (yellow), critical (red).
 - `VRAM (GB)` was added to the dashboard using `HardwareMonitor` GPU/VRAM metrics via `nvidia-smi`.
 
-**Why:** The old curses-based TUI was Arabic-only, hard to maintain, and did not integrate with the new metrics infrastructure. Textual provides CSS-styled widgets, reactive attributes, and a modern Python API.
+**Why:** The old Arabic-focused Textual-based TUI was Arabic-only, hard to maintain, and did not integrate with the new metrics infrastructure. Textual provides CSS-styled widgets, reactive attributes, and a modern Python API.
 
 **Gotchas:**
 - The TUI is English-only. Do not add Arabic or RTL markers.

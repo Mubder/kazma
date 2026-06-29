@@ -1,7 +1,7 @@
 # Validation Contract: TUI Replacement Mission
 
 ## Overview
-This document defines the validation assertions for replacing the old Arabic-focused curses-based TUI with a new professional Textual-based TUI dashboard.
+This document defines the validation assertions for replacing the old Arabic-focused Textual-based TUI with a new professional English-only Textual-based TUI dashboard.
 
 ---
 
@@ -160,7 +160,7 @@ This document defines the validation assertions for replacing the old Arabic-foc
 
 ### VAL-TUI-040: Old TUI Directory Deleted
 - **Title**: `kazma-tui/kazma_tui/` directory is removed
-- **Behavioral Description**: The old curses-based TUI directory must be completely deleted. No files from the old TUI (`tui.py` with Arabic support, `ArabicInput`, `_fix_arabic`) should remain.
+- **Behavioral Description**: The old Textual-based TUI directory must be completely deleted. No files from the old TUI (`tui.py` with Arabic support, `ArabicInput`, `_fix_arabic`) should remain.
 - **Tool**: Filesystem check
 - **Evidence Requirements**:
   - `ls kazma-tui/` showing directory is empty or removed

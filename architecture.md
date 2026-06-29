@@ -2,7 +2,7 @@
 
 ## Overview
 
-Replace the old Arabic-focused curses-based TUI with a new professional Textual-based TUI dashboard. The new TUI provides a metrics dashboard, chat interface, and ModelRegistry integration.
+Replace the old Arabic-focused Textual-based TUI with a new professional English-only Textual-based TUI dashboard. The new TUI provides a metrics dashboard, chat interface, and ModelRegistry integration.
 
 ## System Components
 

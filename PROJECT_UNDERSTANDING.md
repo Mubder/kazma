@@ -7,14 +7,14 @@ Kazma is a production-grade, domain-agnostic, open-source autonomous AI agent fr
 **Status**: Production-Ready (All Sprints Complete)
 **Version**: 0.1.0 ALPHA
 **Architecture**: Local-first, monorepo structure with 8 packages
-**Test Suite**: 2,129 tests (99.8% pass rate)
-**Lines of Code**: ~50,000+
+**Test Suite**: 3,510 tests (99.8% pass rate)
+**Lines of Code**: 52,333
 
 ---
 
 ## Project Structure
 
-### Monorepo Packages (7)
+### Monorepo Packages (8)
 
 ```
 kazma/
@@ -98,7 +98,7 @@ kazma/
 │       ├── __init__.py
 │       └── app.py                   # FastAPI application factory
 │
-├── kazma-tui/           # Textual TUI with Arabic/RTL
+├── kazma-tui/           # Textual TUI with English-only metrics/chat dashboard
 │   └── kazma_tui/
 │       ├── __init__.py
 │       └── tui.py                    # Terminal UI
@@ -115,7 +115,7 @@ kazma/
 │       ├── asset_generation/        # Image/video generation
 │       └── tests/                   # Example skill tests
 │
-├── tests/               # 1125 tests (pytest + asyncio)
+├── tests/               # 3,510 tests (pytest + asyncio)
 │   ├── test_checkpoint.py
 │   ├── test_sqlite_search_backend.py  # New SQLite FTS5 tests
 │   └── [many more test files...]
@@ -194,7 +194,7 @@ kazma/
 
 ### 7. Interfaces
 - **Web UI**: FastAPI + HTMX (Arabic RTL, Linear design)
-- **TUI**: Textual terminal UI with Arabic/RTL support
+- **TUI**: Textual terminal UI with English-only metrics/chat dashboard
 - **CLI**: Command-line interface (`kazma` command)
 
 ---
@@ -295,7 +295,7 @@ python -m kazma_ui.app --port 8080    # Web UI custom port
 
 ## Test Suite
 
-- **Total Tests**: 1125
+- **Total Tests**: 3,510
 - **Framework**: pytest + pytest-asyncio
 - **Coverage**: Core agent, memory, Arabic tokenization
 - **CI**: GitHub Actions (lint + test jobs)
@@ -364,7 +364,7 @@ ruff format .
 ## Current State Summary
 
 ### ✅ Working
-- All 1125 tests passing
+- All 3,510 tests passing
 - GitHub CI passing (lint + test)
 - Web UI functional
 - TUI functional

@@ -13,7 +13,7 @@ Kazma is an open-source, Arabic-first autonomous AI agent framework engineered f
 * **Frontend/Dashboard:** HTMX + Jinja2 + Alpine.js (12-tab settings, SSE chat, Arabic RTL)
 * **Tool Execution:** UnifiedToolExecutor (single registry unifying local built-in tools and MCP remote tools)
 * **Internationalization (i18n):** Bilingual EN/AR system with cookie middleware, shared Jinja2Templates, 150+ Arabic translations, and 71 RTL CSS selectors; Cairo font for native typography
-* **Testing:** Pytest (2,382+ tests, asyncio-native)
+* **Testing:** Pytest (3,510+ tests, asyncio-native)
 
 ## 3. Hardware & Deployment Profile
 * **Target Architecture:** Local edge inference, WSL2/Ubuntu Linux environments, and native Windows.
@@ -46,7 +46,7 @@ All Web UI interactions are routed through a dedicated service-layer facade that
 ### Phase 1: Foundation & Bootstrapping ✅ Complete
 * ✅ Configure `uv` environment synchronization and dependency locking.
 * ✅ Establish `setup.sh` (POSIX) and `setup.ps1` (Windows) for resilient environment validation.
-* ✅ Integrate Pytest suite for baseline CI/CD checks (2,382+ tests).
+* ✅ Integrate Pytest suite for baseline CI/CD checks (3,510+ tests).
 * ✅ Set up basic configuration mapping (`kazma.yaml`).
 * ✅ Portable, user-writable data paths with environment-variable overrides.
 
@@ -111,7 +111,7 @@ Identified by the post-remediation weak-points audit:
 * **الواجهة الأمامية/لوحة التحكم (Frontend/Dashboard):** HTMX + Jinja2 + Alpine.js (12 تبويب إعدادات، دردشة SSE، دعم العربية RTL).
 * **تنفيذ الأدوات (Tool Execution):** UnifiedToolExecutor (سجل موحد يجمع الأدوات المحلية المدمجة وأدوات MCP البعيدة في سطح توجيه واحد).
 * **التدويل (Internationalization / i18n):** نظام ثنائي اللغة (EN/AR) مع middleware قائم على الكوكيز، Jinja2Templates مشتركة، أكثر من 150 ترجمة عربية، و71 محدد RTL في CSS، مع خط Cairo للطباعة العربية الأصلية.
-* **الاختبار (Testing):** Pytest (أكثر من 2,382 اختبار، أصلي لـ asyncio).
+* **الاختبار (Testing):** Pytest (أكثر من 3,510 اختبار، أصلي لـ asyncio).
 
 ## 3. مواصفات الأجهزة والنشر (Hardware & Deployment Profile)
 * **البنية المستهدفة:** الاستدلال المحلي على الحافة (Local edge inference)، بيئات WSL2/Ubuntu Linux، و Windows الأصلي.
@@ -144,7 +144,7 @@ Identified by the post-remediation weak-points audit:
 ### المرحلة 1: التأسيس والتهيئة (Phase 1: Foundation & Bootstrapping) ✅ مكتملة
 * ✅ إعداد مزامنة بيئة `uv` وتأمين الاعتمادات (dependency locking).
 * ✅ إنشاء سكربتات `setup.sh` (POSIX) و`setup.ps1` (Windows) للتحقق المرن من البيئة وتجاوز مشاكل التثبيت.
-* ✅ دمج حزمة Pytest لفحوصات CI/CD الأساسية (أكثر من 2,382 اختبار ناجح).
+* ✅ دمج حزمة Pytest لفحوصات CI/CD الأساسية (أكثر من 3,510 اختبار ناجح).
 * ✅ إعداد ربط التكوينات الأساسية (`kazma.yaml`).
 * ✅ مسارات بيانات محمولة وقابلة للكتابة من قبل المستخدم مع إمكانية التجاوز عبر متغيرات البيئة.
 

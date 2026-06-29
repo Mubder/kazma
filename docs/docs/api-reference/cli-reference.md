@@ -32,7 +32,7 @@ or `kazma help` for a quick command list.
 |:---|:---|:---|
 | CLI | `kazma` | Banner, status, hub, gateway, and swarm management |
 | Web UI | `kazma-web [--port 8000]` | FastAPI dashboard (equivalent to `kazma serve`) |
-| Terminal UI | `kazma-tui` | Textual TUI with Arabic/RTL support |
+| Terminal UI | `kazma-tui` | Textual TUI with English-only metrics/chat dashboard |
 
 ---
 
@@ -800,7 +800,7 @@ kazma-web --port 8080
 
 ### `kazma-tui`
 
-Start the terminal UI (Textual TUI with Arabic/RTL support).
+Start the terminal UI (Textual TUI with English-only metrics/chat dashboard).
 
 ```bash
 kazma-tui

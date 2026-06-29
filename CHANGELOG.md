@@ -295,7 +295,7 @@ Features are listed with their implementation PR/commit where available.
 | ✅ | Dynamic Model Discovery | Local provider auto-detection and runtime switching | `56cc5ae` |
 | ✅ | Provider Config UI | Settings tab with API config + model test | `aa650f5` |
 | ✅ | Web UI Dashboard | FastAPI + Jinja2 with Arabic RTL support | `aa05135` |
-| ✅ | Terminal UI | Textual TUI with Arabic/RTL support | `743c2b4` |
+| ✅ | Terminal UI | Textual TUI with English-only metrics/chat dashboard | `743c2b4` |
 | ✅ | CLI Entry Point | `kazma status`, `serve`, `wizard`, `hub`, `docs` | `743c2b4` |
 | ✅ | Context Authority | Compaction loop architecture — 80% threshold system | `ec860cc` |
 | ✅ | Omnichannel Support | Multi-platform UI with shared model config store | `e8be750` |
