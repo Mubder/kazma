@@ -51,7 +51,7 @@ rag = [
 
 [project.scripts]
 kazma = "kazma_cli.main:main"
-kazma-tui = "kazma_tui.tui:main"
+kazma-tui = "kazma_tui.app:main"
 kazma-web = "kazma_ui.app:main"
 
 [build-system]
