@@ -19,8 +19,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from kazma_core.model_registry import UnifiedModelRegistry
-
 logger = logging.getLogger(__name__)
 
 # ── Default shortcuts ─────────────────────────────────────────────────
@@ -69,7 +67,12 @@ class SettingsManager:
 
     def __init__(self, config_store: Any) -> None:
         self._cs = config_store
-        self._registry = UnifiedModelRegistry(config_store)
+        try:
+            from kazma_core.model_registry import get_model_registry
+            self._registry = get_model_registry()
+        except RuntimeError:
+            from kazma_core.model_registry import ModelRegistry
+            self._registry = ModelRegistry(config_store)
 
     # ══════════════════════════════════════════════════════════════════
     # PROVIDERS

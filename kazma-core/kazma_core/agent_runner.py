@@ -23,7 +23,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from kazma_core.authority import ContextAuthority, create_authority
 from kazma_core.cost_breaker import create_cost_breaker
-from kazma_core.llm_provider import LLMConfig, LLMProvider
+from kazma_core.llm_provider import LLMProvider
 from kazma_core.mcp.manager import UnifiedToolExecutor
 from kazma_core.state import AgentState
 from kazma_core.tracing import create_tracer
@@ -121,11 +121,12 @@ class KazmaAgent:
         # Separate from _graph which includes a checkpointer for run().
         self._streaming_graph: Any = None
 
-        # LLM Provider
-        llm_cfg_dict = self.config.raw.get("llm", {})
-        llm_cfg_dict.setdefault("model", self.config.default_model)
-        self.llm_config = LLMConfig.from_dict(llm_cfg_dict)
-        self.llm = LLMProvider(self.llm_config)
+        # LLM Provider — route through the singleton ModelRegistry
+        from kazma_core.model_registry import get_model_registry
+
+        registry = get_model_registry()
+        self.llm = registry.get_client()
+        self.llm_config = self.llm.config  # keep llm_config for backward compat
 
         # Tool Registry — unified executor over local built-in tools + MCP.
         # ``UnifiedToolExecutor`` is the single canonical tool abstraction:

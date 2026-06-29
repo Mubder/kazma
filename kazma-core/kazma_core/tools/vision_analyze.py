@@ -224,30 +224,17 @@ def _build_vision_messages(
 
 
 def _get_llm_provider():
-    """Return an LLMProvider configured from the environment / kazma.yaml.
+    """Return an LLM provider from the global registry.
 
-    Returns None if the provider module or config is unavailable.
+    Returns None if the registry is not initialized or the provider module
+    is unavailable.
     """
     try:
-        from kazma_core.llm_provider import LLMConfig, LLMProvider
-    except ImportError:
-        return None
-
-    # Try loading from ConfigStore (kazma.yaml + DB overrides)
-    try:
-        from kazma_core.config_store import ConfigStore
-
-        store = ConfigStore()
-        llm_cfg = store.get_category("llm") or {}
-        config = LLMConfig.from_dict({
-            "base_url": llm_cfg.get("llm.base_url", llm_cfg.get("base_url", "")),
-            "api_key": llm_cfg.get("llm.api_key", llm_cfg.get("api_key", "")),
-            "model": llm_cfg.get("llm.model", llm_cfg.get("model", "")),
-        })
+        from kazma_core.model_registry import get_model_registry
+        registry = get_model_registry()
+        return registry.get_client()
     except Exception:
-        config = LLMConfig()  # defaults
-
-    return LLMProvider(config=config)
+        return None
 
 
 # ── Main entry point ───────────────────────────────────────────────────
