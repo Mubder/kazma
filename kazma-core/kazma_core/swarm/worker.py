@@ -4,8 +4,8 @@ Two concrete implementations:
 
 * **InProcessWorker** — wraps ``kazma_core.agent.sub_agent.SubAgentManager.spawn``
   for fast, in-process delegation (same model, shared memory).
-* **TelegramWorker** — launches a separate Hermes profile via subprocess
-  (``hermes -p <profile>``), targeting a Telegram group chat.
+* **TelegramWorker** — launches a separate Kazma profile via subprocess
+  (``kazma -p <profile>``), targeting a Telegram group chat.
 """
 
 from __future__ import annotations
@@ -212,27 +212,27 @@ class InProcessWorker(SwarmWorker):
 
 
 # ---------------------------------------------------------------------------
-# Telegram bot (subprocess hermes -p)
+# Telegram bot (subprocess kazma -p)
 # ---------------------------------------------------------------------------
 
 class TelegramWorker(SwarmWorker):
-    """Runs a dedicated Hermes profile as a subprocess.
+    """Runs a dedicated Kazma profile as a subprocess.
 
-    The worker shells out to ``hermes -p <profile>`` and pipes the task as
+    The worker shells out to ``kazma -p <profile>`` and pipes the task as
     a one-shot prompt.  The bot token is read from the environment variable
     named by ``bot_token_env``.
 
     .. note::
 
-        **External dependency:** This worker requires the ``hermes`` CLI to be
-        installed and available on ``PATH``.  ``hermes`` is a separate Telegram
+        **External dependency:** This worker requires the ``kazma`` CLI to be
+        installed and available on ``PATH``.  ``kazma`` is a separate Telegram
         bot runner (not bundled with Kazma).  If it is not installed, dispatch
         will return an ``error`` result.  Install it separately or use
         :class:`InProcessWorker` instead.
 
     Args:
         name:          Worker identifier.
-        profile:       Hermes profile name (e.g. ``core``).
+        profile:       Kazma profile name (e.g. ``core``).
         bot_token_env: Env var holding the Telegram bot token.
         group_chat_id: Telegram group chat ID to target (read from
                        ``SWARM_CHAT_ID`` env var by the config loader).
@@ -290,9 +290,9 @@ class TelegramWorker(SwarmWorker):
         task: str,
         context: str | SwarmDispatchContext = "",
     ) -> dict[str, Any]:
-        """Send *task* to the Hermes profile via ``hermes -p <profile>`` CLI.
+        """Send *task* to the Kazma profile via ``kazma -p <profile>`` CLI.
 
-        This is a one-shot invocation — hermes processes the prompt and exits.
+        This is a one-shot invocation — kazma processes the prompt and exits.
         """
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
         logger.info("[TelegramWorker:%s] dispatching %s", self.name, task_id)
@@ -302,7 +302,7 @@ class TelegramWorker(SwarmWorker):
         if context_value:
             prompt = f"{task}\n\nContext:\n{context_value}"
 
-        cmd = f"hermes -p {shlex.quote(self.profile)} {shlex.quote(prompt)}"
+        cmd = f"kazma -p {shlex.quote(self.profile)} {shlex.quote(prompt)}"
 
         try:
             proc = await asyncio.create_subprocess_shell(

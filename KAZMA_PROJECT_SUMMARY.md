@@ -317,6 +317,6 @@ Potential future phases:
 
 ---
 
-*Kazma was built using the Hermes Agent Kanban framework with 3 specialized agent profiles across 5 phases and 30 dependency-locked tasks. The architecture was validated against 12 AI model reviews and 500+ real-world user complaints about existing agent frameworks.*
+*Kazma was built using the Kazma Agent Kanban framework with 3 specialized agent profiles across 5 phases and 30 dependency-locked tasks. The architecture was validated against 12 AI model reviews and 500+ real-world user complaints about existing agent frameworks.*
 
 **كاظمه — Built to remember. Built to last.**

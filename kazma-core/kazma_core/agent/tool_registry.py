@@ -2,7 +2,7 @@
 
 This module provides a decorator-based system for registering Python
 functions as agent tools.  Each tool is automatically introspected to
-produce an OpenAI-compatible JSON schema that LiteLLM / Hermes can
+produce an OpenAI-compatible JSON schema that LiteLLM / Kazma can
 consume for function-calling.
 
 Unlike the MCP-based ``ToolRegistry`` in ``kazma_core.tool_registry``,
@@ -282,7 +282,7 @@ class LocalToolRegistry:
         Compatible with:
           - OpenAI ``tools`` parameter
           - LiteLLM ``tools`` parameter
-          - Hermes tool schema format
+          - Kazma tool schema format
         """
         definitions = []
         for tool in self._tools.values():

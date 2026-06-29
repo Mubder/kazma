@@ -1,6 +1,6 @@
 """File read tool — Read files from the agent workspace with line-numbered output.
 
-Follows the Hermes read_file format: "{LINE_NUM}|{CONTENT}".
+Follows the Kazma read_file format: "{LINE_NUM}|{CONTENT}".
 Supports offset/limit pagination. 1-indexed lines.
 
 Safety: reads are restricted to the agent workspace by default, mirroring

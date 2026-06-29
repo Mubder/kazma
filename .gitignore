@@ -43,8 +43,8 @@ Thumbs.db
 kazma-data/
 kazma-core/kazma-data/
 
-# Hermes Agent
-.hermes/
+# Kazma Agent
+.kazma-agent/
 
 # Environment / Secrets
 .env

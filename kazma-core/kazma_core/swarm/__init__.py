@@ -2,7 +2,7 @@
 
 Provides a single orchestration layer for managing Kazma workers in two modes:
 - in_process: lightweight sub-agent spawning (same model, fast)
-- telegram_bot: persistent Hermes profile bots (separate process, different model)
+- telegram_bot: persistent Kazma profile bots (separate process, different model)
 
 Usage::
 
