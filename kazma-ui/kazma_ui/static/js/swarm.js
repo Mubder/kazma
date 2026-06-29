@@ -389,8 +389,20 @@
       }
     }
 
-    // Show pending state
+    // Show pending state in the builder results preview
     appendPendingResult(workerList, task, pattern);
+
+    // Create an active task card immediately so the user sees the task
+    // before the network round-trip completes. Fast tasks may finish
+    // before the response; the card stays visible and the SSE stream
+    // (or subsequent dashboard refresh) will update it.
+    var pendingTaskId = 'pending-' + Date.now();
+    var pendingData = {
+      task: task,
+      pattern: pattern,
+      workers: workerList,
+    };
+    connectSSE(pendingTaskId, pendingData);
 
     // Switch to active tasks tab (VAL-UI-005)
     switchTab('active-tasks');
@@ -406,7 +418,10 @@
           var dispatchedCount = (data.dispatched || []).length;
           showToast('Task dispatched to ' + dispatchedCount + ' worker(s)', true);
 
-          // Connect SSE for live updates
+          // Upgrade the pending active card to the real task id.
+          upgradePendingTaskCard(pendingTaskId, data.task_id || pendingTaskId, data);
+
+          // Connect SSE for live updates using the real task id.
           if (data.task_id) {
             connectSSE(data.task_id, data);
           }
@@ -420,13 +435,57 @@
           var taskEl = $('dispatch-task'); if (taskEl) taskEl.value = '';
           var ctxEl = $('dispatch-context'); if (ctxEl) ctxEl.value = '';
         } else {
+          // Dispatch failed: remove the optimistic card and notify the user.
+          removeActiveTaskCard(pendingTaskId);
           showError(data.message || 'Dispatch failed');
         }
         refreshStatus();
       })
       .catch(function(err) {
+        removeActiveTaskCard(pendingTaskId);
         showError(err.message);
       });
+  }
+
+  // ══════════════════════════════════════════════════════
+  // ACTIVE TASK CARD HELPERS
+  // ══════════════════════════════════════════════════════
+
+  function removeActiveTaskCard(taskId) {
+    var card = $('active-task-' + taskId);
+    if (card) card.remove();
+    var state = activeTasks[taskId];
+    if (state && state.timer) clearInterval(state.timer);
+    if (state && state.sse) {
+      try { state.sse.close(); } catch (e) {}
+    }
+    delete activeTasks[taskId];
+    var listEl = $('active-tasks-list');
+    var emptyEl = $('active-tasks-empty');
+    if (listEl && emptyEl && !listEl.children.length) emptyEl.style.display = 'block';
+  }
+
+  function upgradePendingTaskCard(pendingTaskId, realTaskId, data) {
+    if (pendingTaskId === realTaskId) return;
+    var oldCard = $('active-task-' + pendingTaskId);
+    if (!oldCard) return;
+    oldCard.id = 'active-task-' + realTaskId;
+    var statusEl = $('status-' + pendingTaskId);
+    var timerEl = $('timer-' + pendingTaskId);
+    var eventsEl = $('events-' + pendingTaskId);
+    var checkpointEl = $('checkpoint-' + pendingTaskId);
+    var handoffEl = $('handoff-' + pendingTaskId);
+    if (statusEl) statusEl.id = 'status-' + realTaskId;
+    if (timerEl) timerEl.id = 'timer-' + realTaskId;
+    if (eventsEl) eventsEl.id = 'events-' + realTaskId;
+    if (checkpointEl) checkpointEl.id = 'checkpoint-' + realTaskId;
+    if (handoffEl) handoffEl.id = 'handoff-' + realTaskId;
+    var oldState = activeTasks[pendingTaskId];
+    if (oldState) {
+      oldState.sse.close();
+      clearInterval(oldState.timer);
+      delete activeTasks[pendingTaskId];
+    }
   }
 
   // ══════════════════════════════════════════════════════
@@ -529,7 +588,13 @@
       }
       addEventLine(taskId, '🏁', 'Task completed');
       evtSource.close();
-      delete activeTasks[taskId];
+      // Keep the completed card visible for a few seconds so the user can see
+      // it finished, then refresh the dashboard. The activeTasks entry is
+      // removed without deleting the DOM card immediately.
+      if (activeTasks[taskId]) {
+        clearInterval(activeTasks[taskId].timer);
+        delete activeTasks[taskId];
+      }
 
       // Store result for dashboard
       if (data.result) {
@@ -537,6 +602,19 @@
         data.result._pattern = initialData.pattern || ($('pattern-select') || {}).value || 'dispatch';
         completedResults.unshift(data.result);
       }
+      // Refresh the dashboard so the completed task appears immediately.
+      if ($('panel-results-dashboard') && $('panel-results-dashboard').style.display === 'block') {
+        loadResultsDashboard();
+      }
+      // Optionally prune the active card after a short delay so completed work
+      // does not pile up indefinitely in the active panel.
+      setTimeout(function() {
+        var card = $('active-task-' + taskId);
+        if (card) card.remove();
+        var listEl = $('active-tasks-list');
+        var emptyEl = $('active-tasks-empty');
+        if (listEl && emptyEl && !listEl.children.length) emptyEl.style.display = 'block';
+      }, 5000);
     });
 
     evtSource.onerror = function() {

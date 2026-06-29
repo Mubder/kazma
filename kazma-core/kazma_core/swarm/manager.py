@@ -8,6 +8,7 @@ from typing import Any
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
 from kazma_core.swarm.engine import SwarmEngine
 from kazma_core.swarm.task import SwarmTask, TaskType
+from kazma_core.swarm.task_store import TaskStore
 from kazma_core.swarm.worker import SwarmWorker
 
 logger = logging.getLogger(__name__)
@@ -18,11 +19,12 @@ class SwarmManager:
 
     Args:
         config: A :class:`SwarmConfig` describing the swarm topology.
+        task_store: Optional persistence store for tasks and metrics.
     """
 
-    def __init__(self, config: SwarmConfig) -> None:
+    def __init__(self, config: SwarmConfig, task_store: TaskStore | None = None) -> None:
         self.config = config
-        self.engine = SwarmEngine(config)
+        self.engine = SwarmEngine(config, task_store=task_store)
         self._workers = self.engine._workers
 
     def add_worker(self, wc: WorkerConfig) -> None:

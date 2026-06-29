@@ -476,21 +476,22 @@
         </div>
       </div>
     </div>
-
-    <!-- Task Detail Modal -->
-    <div id="task-detail-modal" class="modal-overlay" style="display:none;" onclick="KazmaSwarm.closeTaskDetail(event)">
-      <div class="modal modal-xl" onclick="event.stopPropagation()">
-        <div class="modal-header">
-          <h2 id="task-detail-title">{{ t('swarm.task_detail') }}</h2>
-          <button class="modal-close" onclick="KazmaSwarm.closeTaskDetail()">✕</button>
-        </div>
-        <div class="modal-body" id="task-detail-body" style="max-height:70vh;overflow-y:auto;">
-          Loading…
-        </div>
-      </div>
-    </div>
   </div>
 
+</div>
+
+<!-- Task Detail Modal -->
+<!-- Moved outside all tab panels so it is reachable from any tab. -->
+<div id="task-detail-modal" class="modal-overlay" style="display:none;" onclick="KazmaSwarm.closeTaskDetail(event)">
+  <div class="modal modal-xl" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h2 id="task-detail-title">{{ t('swarm.task_detail') }}</h2>
+      <button class="modal-close" onclick="KazmaSwarm.closeTaskDetail()">✕</button>
+    </div>
+    <div class="modal-body" id="task-detail-body" style="max-height:70vh;overflow-y:auto;">
+      Loading…
+    </div>
+  </div>
 </div>
 
 <!-- ── Logs Modal ── -->

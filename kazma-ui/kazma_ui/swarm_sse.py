@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def _sse_frame(event: str, data: str | dict | list) -> str:
+def _sse_frame(event: str, data: str | dict[str, Any] | list[Any]) -> str:
     """Format a single SSE frame.
 
     Args:
@@ -60,13 +60,16 @@ class SSEEventBus:
     """Per-task event pub/sub bus with history for catch-up replays.
 
     The bus stores emitted events in a per-task history list so that late
-    subscribers (reconnecting clients) can replay missed events.
+    subscribers (reconnecting clients) can replay missed events. History
+    for terminal tasks is pruned periodically to avoid unbounded growth.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_history_per_task: int = 1000) -> None:
         self._history: dict[str, list[dict[str, Any]]] = {}
         self._subscribers: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
         self._lock = asyncio.Lock()
+        self._max_history_per_task = max_history_per_task
+        self._last_cleanup_time = 0.0
 
     def emit(self, task_id: str, event: str, data: dict[str, Any]) -> None:
         """Emit an event for a task.
@@ -76,10 +79,13 @@ class SSEEventBus:
         """
         entry: dict[str, Any] = {"event": event, "data": data}
 
-        # Store in history.
+        # Store in history with bounded size to avoid memory growth.
         if task_id not in self._history:
             self._history[task_id] = []
-        self._history[task_id].append(entry)
+        history = self._history[task_id]
+        history.append(entry)
+        if len(history) > self._max_history_per_task:
+            self._history[task_id] = history[-self._max_history_per_task :]
 
         # Deliver to active subscribers.
         for queue in self._subscribers.get(task_id, []):
@@ -91,6 +97,33 @@ class SSEEventBus:
                     task_id,
                     event,
                 )
+
+        # Periodic cleanup of old terminal history (roughly every 60s).
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                now = loop.time()
+                if now - self._last_cleanup_time > 60:
+                    self._cleanup_terminal_history()
+                    self._last_cleanup_time = now
+        except RuntimeError:
+            pass
+
+    def _cleanup_terminal_history(self) -> None:
+        """Remove history for terminal tasks that have no subscribers."""
+        terminal_events = frozenset({"task_completed", "task_failed"})
+        tasks_to_remove: list[str] = []
+        for task_id, history in self._history.items():
+            if self._subscribers.get(task_id):
+                continue
+            if not history:
+                tasks_to_remove.append(task_id)
+                continue
+            last_event = history[-1].get("event")
+            if last_event in terminal_events:
+                tasks_to_remove.append(task_id)
+        for task_id in tasks_to_remove:
+            self._history.pop(task_id, None)
 
     def subscribe(self, task_id: str) -> asyncio.Queue[dict[str, Any]]:
         """Subscribe to live events for a task.
@@ -150,7 +183,7 @@ def create_sse_router(*, event_bus: SSEEventBus | None = None) -> APIRouter:
             return JSONResponse(
                 {"status": "error", "message": "Swarm engine not available"},
                 status_code=404,
-            )
+            )  # type: ignore[return-value]
 
         # Resolve the task from the store or in-memory history.
         task = None
@@ -165,7 +198,7 @@ def create_sse_router(*, event_bus: SSEEventBus | None = None) -> APIRouter:
             return JSONResponse(
                 {"status": "error", "message": f"Task '{task_id}' not found"},
                 status_code=404,
-            )
+            )  # type: ignore[return-value]
 
         task_status = task.status.value if hasattr(task.status, "value") else str(task.status)
         is_terminal = task_status in _TERMINAL_STATUSES
@@ -254,15 +287,19 @@ def wire_engine_events(engine: Any, bus: SSEEventBus) -> None:
     (task_started, worker_started, worker_completed, task_completed)
     are emitted automatically.
 
-    Safe to call multiple times; subsequent calls are no-ops.
+    Safe to call multiple times; subsequent calls are no-ops. If the
+    engine is already wired with a different bus, the new bus takes over.
 
     All dispatch paths (basic dispatch, pipeline, fan_out, broadcast,
     consult, conditional) funnel through ``_dispatch_worker``, so
     patching that single method ensures worker events are emitted for
     every orchestration pattern.
     """
-    if getattr(engine, "_sse_wired", False):
+    if getattr(engine, "_sse_wired", False) and getattr(engine, "_sse_bus", None) is bus:
         return
+
+    engine._sse_wired = False
+    engine._sse_bus = bus
 
     original_dispatch = engine.dispatch
     original_finalize = engine._finalize_task
@@ -277,6 +314,17 @@ def wire_engine_events(engine: Any, bus: SSEEventBus) -> None:
         engine._sse_step_counter = 0
         try:
             return await original_dispatch(task)
+        except Exception as exc:
+            logger.exception("[SSE] dispatch failed for task '%s'", task.id)
+            bus.emit(
+                task.id,
+                "task_failed",
+                {
+                    "task_id": task.id,
+                    "error": str(exc)[:500],
+                },
+            )
+            raise
         finally:
             engine._active_task_id = ""
             engine._sse_step_counter = 0
@@ -373,7 +421,7 @@ def wire_engine_events(engine: Any, bus: SSEEventBus) -> None:
         return result
 
     # Apply patches.
-    engine.dispatch = _patched_dispatch  # type: ignore[assignment]
-    engine._finalize_task = _patched_finalize  # type: ignore[assignment]
-    engine._dispatch_worker = _patched_dispatch_worker  # type: ignore[assignment]
-    engine._sse_wired = True  # type: ignore[attr-defined]
+    engine.dispatch = _patched_dispatch
+    engine._finalize_task = _patched_finalize
+    engine._dispatch_worker = _patched_dispatch_worker
+    engine._sse_wired = True

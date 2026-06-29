@@ -1,8 +1,0 @@
-author: tester
-description: A valid test skill
-license: MIT
-name: valid-skill
-permissions:
-- file_read
-- network_outbound
-version: 1.0.0

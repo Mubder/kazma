@@ -335,22 +335,32 @@ def create_app(config_path: str | None = None) -> FastAPI:
         from kazma_core.swarm import (
             SwarmConfig,
             SwarmManager,
+            TaskStore,
             set_swarm_engine,
         )
 
+        swarm_task_store = TaskStore()
         swarm_cfg_path = config_path or "kazma.yaml"
         swarm_cfg = SwarmConfig.from_yaml(swarm_cfg_path)
         if swarm_cfg is not None and swarm_cfg.enabled:
-            _swarm_mgr = SwarmManager(swarm_cfg)
+            _swarm_mgr = SwarmManager(swarm_cfg, task_store=swarm_task_store)
             logger.info(
                 "[Swarm] SwarmManager initialized from %s — %d worker(s)",
                 swarm_cfg_path,
                 len(_swarm_mgr.worker_names),
             )
         else:
-            _swarm_mgr = SwarmManager(SwarmConfig(enabled=True, workers=[]))
+            _swarm_mgr = SwarmManager(
+                SwarmConfig(enabled=True, workers=[]),
+                task_store=swarm_task_store,
+            )
             logger.info("[Swarm] SwarmManager initialized (empty — UI-driven mode)")
         set_swarm_engine(_swarm_mgr.engine)
+        try:
+            _swarm_mgr.engine.restore_paused_tasks()
+            logger.info("[Swarm] Restored paused tasks from TaskStore")
+        except Exception as e:
+            logger.warning("[Swarm] Failed to restore paused tasks: %s", e)
     except Exception as e:
         logger.warning("[Swarm] SwarmManager not available: %s", e)
         _swarm_mgr = None

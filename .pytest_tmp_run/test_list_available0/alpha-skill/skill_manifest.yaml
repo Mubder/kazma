@@ -1,6 +1,0 @@
-author: testuser
-description: alpha-skill description
-entry_point: main:Handler
-license: MIT
-name: alpha-skill
-version: 1.0.0

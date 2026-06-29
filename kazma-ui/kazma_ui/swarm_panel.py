@@ -33,8 +33,8 @@ except ImportError:  # pragma: no cover
     TaskType = None  # type: ignore[assignment,misc]
     WorkerCapabilities = None  # type: ignore[assignment,misc]
     WorkerConfig = None  # type: ignore[assignment,misc]
-    get_swarm_engine = None  # type: ignore[assignment,misc]
-    set_swarm_engine = None  # type: ignore[assignment,misc]
+    get_swarm_engine = None  # type: ignore[assignment]
+    set_swarm_engine = None  # type: ignore[assignment]
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -58,16 +58,24 @@ def _has_swarm_core() -> bool:
     )
 
 
-def _create_empty_engine() -> Any:
-    """Create an empty shared engine when swarm core is available."""
+def _create_empty_engine(task_store: Any = None) -> Any:
+    """Create an empty shared engine when swarm core is available.
+
+    Args:
+        task_store: Optional shared store to keep persistence consistent.
+    """
     if not _has_swarm_core():
         return None
-    store = TaskStore() if TaskStore is not None else None
+    store = task_store or (TaskStore() if TaskStore is not None else None)
     return SwarmEngine(SwarmConfig(enabled=True, workers=[]), task_store=store)
+
+
+_SHARED_TASK_STORE: Any | None = None
 
 
 def _resolve_engine(swarm_manager: Any = None) -> Any:
     """Resolve the engine used by the router at request time."""
+    global _SHARED_TASK_STORE
     if not _has_swarm_core():
         return None
 
@@ -82,15 +90,20 @@ def _resolve_engine(swarm_manager: Any = None) -> Any:
             engine = get_swarm_engine()
 
     if engine is None:
-        engine = _create_empty_engine()
+        engine = _create_empty_engine(_SHARED_TASK_STORE)
+    else:
+        # Share the existing engine's task store with fallback engines.
+        _SHARED_TASK_STORE = getattr(engine, "task_store", None) or _SHARED_TASK_STORE
     set_swarm_engine(engine)
     return engine
 
 
 def _reset_swarm_state() -> None:
     """Reset the shared engine for tests."""
+    global _SHARED_TASK_STORE
     if not _has_swarm_core():
         return
+    _SHARED_TASK_STORE = None
     engine = _create_empty_engine()
     # Clear persisted task/metric data so tests start with a clean slate.
     store = getattr(engine, "_task_store", None)
@@ -144,6 +157,40 @@ def _coerce_timeout(payload: dict[str, Any]) -> float:
         return float(payload.get("timeout", 300.0))
     except (TypeError, ValueError):
         return 300.0
+
+
+def _flatten_swarm_task(task: Any) -> dict[str, Any]:
+    """Flatten a SwarmTask (with nested result) to the UI-expected shape.
+
+    The dashboard and detail view expect TaskResult-like fields at the top
+    level: ``task_id``, ``status``, ``worker_results``, ``aggregated_output``,
+    ``synthesized_output``, ``duration_seconds``, etc.  ``SwarmTask.to_dict()``
+    nests those under a ``result`` key, so this helper promotes them while
+    preserving task-level identity fields (``id``/``type``/``prompt``).
+    """
+    data = task.to_dict() if hasattr(task, "to_dict") else dict(task)
+    result = data.get("result") or {}
+    return {
+        "id": data.get("id"),
+        "task_id": data.get("id"),
+        "type": data.get("type"),
+        "prompt": data.get("prompt"),
+        "context": data.get("context"),
+        "workers": data.get("workers", []),
+        "status": result.get("status", data.get("status")),
+        "created_at": data.get("created_at"),
+        "started_at": data.get("started_at"),
+        "completed_at": data.get("completed_at"),
+        "duration_seconds": result.get("duration_seconds"),
+        "total_cost": result.get("total_cost"),
+        "total_tokens": result.get("total_tokens"),
+        "worker_results": result.get("worker_results", []),
+        "individual_opinions": result.get("individual_opinions", []),
+        "aggregated_output": result.get("aggregated_output"),
+        "synthesized_output": result.get("synthesized_output"),
+        "error": result.get("error"),
+        "metadata": result.get("metadata", data.get("metadata", {})),
+    }
 
 
 def _serialize_worker(worker: Any) -> dict[str, Any]:
@@ -251,7 +298,7 @@ def create_swarm_router(
         router.include_router(_sse_router)
         logger.info("[Swarm] SSE streaming router mounted at /api/swarm/tasks/{id}/stream")
     except ImportError:
-        _sse_bus = None  # type: ignore[assignment]
+        _sse_bus = None
         logger.debug("[Swarm] swarm_sse module not available, SSE streaming disabled")
 
     def _current_engine() -> Any:
@@ -520,7 +567,7 @@ def create_swarm_router(
                 include_count=True,
             )
             return JSONResponse({
-                "tasks": [task.to_dict() for task in tasks],
+                "tasks": [_flatten_swarm_task(task) for task in tasks],
                 "count": len(tasks),
                 "total": total,
                 "page": page,
@@ -555,7 +602,7 @@ def create_swarm_router(
             )
 
         return JSONResponse({
-            "task": task.to_dict(),
+            "task": _flatten_swarm_task(task),
         })
 
     @router.get("/api/swarm/workers/{name}/metrics")
