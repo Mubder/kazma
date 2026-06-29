@@ -215,6 +215,11 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         """Get model registry."""
         return _get_sm().get_model_registry()
 
+    @router.get("/api/settings/models/options")
+    async def api_model_options() -> dict[str, Any]:
+        """Get unified model/provider/profile options."""
+        return _get_sm().get_unified_model_options()
+
     @router.get("/api/settings/models/defaults")
     async def api_model_defaults() -> dict[str, str]:
         """Get default models per task type."""

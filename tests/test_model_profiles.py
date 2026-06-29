@@ -179,6 +179,44 @@ class TestSettingsManagerModelProfiles:
 
 
 # ══════════════════════════════════════════════════════════════════════
+# UnifiedModelRegistry unit tests
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestUnifiedModelRegistry:
+    """Unit tests for unified provider/model options aggregation."""
+
+    def test_unified_options_merge_sources(self, config_store):
+        """Registry options include provider models, profiles, llm model, and defaults."""
+        from kazma_core.model_registry import UnifiedModelRegistry
+
+        registry = UnifiedModelRegistry(config_store)
+        registry.upsert_provider({
+            "name": "reg-provider",
+            "models": ["provider-model"],
+            "base_url": "https://provider.example/v1",
+        })
+        registry.save_model_profile("reg-profile", {
+            "model": "profile-model",
+            "provider": "profile-provider",
+            "base_url": "https://profile.example/v1",
+            "api_key": "secret-key",
+        })
+        config_store.set("llm.model", "runtime-model", category="llm")
+        config_store.set("models.defaults.chat", "chat-model", category="models")
+
+        options = registry.list_unified_options()
+        assert "provider-model" in options["models"]
+        assert "profile-model" in options["models"]
+        assert "runtime-model" in options["models"]
+        assert "chat-model" in options["models"]
+        assert "reg-provider" in options["providers"]
+        assert "profile-provider" in options["providers"]
+        profile = next(p for p in options["profiles"] if p["name"] == "reg-profile")
+        assert profile["api_key"] == "***"
+
+
+# ══════════════════════════════════════════════════════════════════════
 # API Endpoint tests
 # ══════════════════════════════════════════════════════════════════════
 

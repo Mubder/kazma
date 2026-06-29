@@ -351,7 +351,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
         logger.warning("[Swarm] SwarmManager not available: %s", e)
         _swarm_mgr = None
 
-    swarm_router = create_swarm_router(templates, swarm_manager=_swarm_mgr)
+    swarm_router = create_swarm_router(
+        templates,
+        swarm_manager=_swarm_mgr,
+        config_store=config_store,
+    )
     app.include_router(swarm_router)
     logger.info("[Swarm] Swarm Panel mounted at /api/swarm/*, /swarm")
 
@@ -424,6 +428,16 @@ def create_app(config_path: str | None = None) -> FastAPI:
         gateway.set_persistence(
             session_store=session_store,
             session_store_path="kazma-data/sessions.db",
+        )
+
+        # Wire the dashboard's legacy route so it can enrich sessions with
+        # platform/display_name from the persistent session store.
+        from kazma_ui.dashboard import set_dashboard_context
+
+        set_dashboard_context(
+            tracer=agent.tracer,
+            cost_breaker=agent.cost_breaker,
+            session_store=session_store,
         )
 
         # ── Vector Memory (RAG) ───────────────────────────────────
@@ -733,6 +747,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
                 checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
                 logger.info("[Checkpoint] SQLite checkpointer initialized")
+
+                # Wire the legacy dashboard route so it can list checkpoints.
+                from kazma_ui.dashboard import set_dashboard_context
+
+                set_dashboard_context(checkpoint_manager=checkpointer)
 
                 if _sse_graph_ref is not None:
                     from kazma_core.agent.graph_builder import build_supervisor_graph

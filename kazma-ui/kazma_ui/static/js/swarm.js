@@ -15,6 +15,13 @@
   var historyPageSize = 20;
   var historyTotal = 0;
   var historyData = [];
+  var modelOptions = {
+    models: [],
+    providers: [],
+    providerEntries: [],
+    profiles: [],
+    defaults: {}
+  };
 
   function $(id) { return document.getElementById(id); }
   function esc(str) {
@@ -41,7 +48,6 @@
 
   function init() {
     fetchModels();
-    fetchSavedProfiles();
     refreshStatus();
     pollInterval = setInterval(refreshStatus, 5000);
 
@@ -99,24 +105,95 @@
     fetch('/api/swarm/models')
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        // Models are now in datalist, not select population
+        if (!data || typeof data !== 'object') data = {};
+        modelOptions.models = Array.isArray(data.models) ? data.models : [];
+        modelOptions.providers = Array.isArray(data.providers) ? data.providers : [];
+        modelOptions.providerEntries = Array.isArray(data.provider_entries) ? data.provider_entries : [];
+        modelOptions.profiles = Array.isArray(data.profiles) ? data.profiles : [];
+        modelOptions.defaults = data.defaults && typeof data.defaults === 'object' ? data.defaults : {};
+
+        populateModelDatalist();
+        populateProviderSelect('add-provider');
+        populateProviderSelect('spawn-provider');
+        applyModelProviderDefaults();
       })
-      .catch(function() {});
+      .catch(function() {
+        populateProviderSelect('add-provider');
+        populateProviderSelect('spawn-provider');
+        applyModelProviderDefaults();
+      });
   }
 
-  function fetchSavedProfiles() {
-    fetch('/api/models/saved')
-      .then(function(r) { return r.ok ? r.json() : []; })
-      .then(function(profiles) {
-        if (!Array.isArray(profiles)) profiles = [];
-        var datalist = $('saved-profiles-datalist');
-        if (datalist) {
-          datalist.innerHTML = profiles.map(function(p) {
-            return '<option value="' + esc(p.model || '') + '">';
-          }).join('');
-        }
-      })
-      .catch(function() {});
+  function defaultModelOption() {
+    var llmModel = (((modelOptions || {}).defaults || {}).llm_model) || '';
+    if (llmModel) return llmModel;
+    if (modelOptions.models.length) return modelOptions.models[0];
+    return 'deepseek-chat';
+  }
+
+  function defaultProviderOption() {
+    if (modelOptions.providers.length) return modelOptions.providers[0];
+    return 'deepseek';
+  }
+
+  function populateModelDatalist() {
+    var datalist = $('swarm-models-datalist');
+    if (!datalist) return;
+
+    var merged = {};
+    (modelOptions.models || []).forEach(function(modelName) {
+      if (modelName) merged[modelName] = true;
+    });
+    (modelOptions.profiles || []).forEach(function(profile) {
+      var modelName = (profile && profile.model) ? String(profile.model) : '';
+      if (modelName) merged[modelName] = true;
+    });
+
+    var items = Object.keys(merged).sort();
+    datalist.innerHTML = items.map(function(modelName) {
+      return '<option value="' + esc(modelName) + '">';
+    }).join('');
+  }
+
+  function providerDisplayName(providerName) {
+    var name = providerName || '';
+    for (var i = 0; i < modelOptions.providerEntries.length; i++) {
+      var entry = modelOptions.providerEntries[i] || {};
+      if (entry.name === name && entry.display_name) {
+        return String(entry.display_name);
+      }
+    }
+    return name;
+  }
+
+  function populateProviderSelect(selectId) {
+    var select = $(selectId);
+    if (!select) return;
+
+    var providers = modelOptions.providers || [];
+    if (!providers.length) {
+      select.innerHTML = '<option value="">' + esc(defaultProviderOption()) + '</option>';
+      return;
+    }
+
+    select.innerHTML = providers.map(function(providerName) {
+      var label = providerDisplayName(providerName);
+      return '<option value="' + esc(providerName) + '">' + esc(label) + '</option>';
+    }).join('');
+  }
+
+  function applyModelProviderDefaults() {
+    var addModel = $('add-model');
+    var spawnModel = $('spawn-model');
+    var addProvider = $('add-provider');
+    var spawnProvider = $('spawn-provider');
+    var modelValue = defaultModelOption();
+    var providerValue = defaultProviderOption();
+
+    if (addModel && !addModel.value) addModel.value = modelValue;
+    if (spawnModel && !spawnModel.value) spawnModel.value = modelValue;
+    if (addProvider && !addProvider.value) addProvider.value = providerValue;
+    if (spawnProvider && !spawnProvider.value) spawnProvider.value = providerValue;
   }
 
   function refreshStatus() {
@@ -618,8 +695,8 @@
 
   function addWorker() {
     var name = ($('add-name') || {}).value || '';
-    var model = ($('add-model') || {}).value || 'deepseek-chat';
-    var provider = ($('add-provider') || {}).value || 'deepseek';
+    var model = ($('add-model') || {}).value || defaultModelOption();
+    var provider = ($('add-provider') || {}).value || defaultProviderOption();
     var type = ($('add-type') || {}).value || 'in-process';
     var role = ($('add-role') || {}).value || '';
     var apikey = ($('add-apikey') || {}).value || '';
@@ -651,11 +728,11 @@
   function spawnWorker() {
     var name = ($('spawn-name') || {}).value || '';
     var role = ($('spawn-role') || {}).value || '';
-    var model = ($('spawn-model') || {}).value || 'deepseek-chat';
+    var model = ($('spawn-model') || {}).value || defaultModelOption();
     var expertiseStr = ($('spawn-expertise') || {}).value || '';
     var toolsStr = ($('spawn-tools') || {}).value || '';
     var specialty = ($('spawn-specialty') || {}).value || '';
-    var provider = ($('spawn-provider') || {}).value || 'deepseek';
+    var provider = ($('spawn-provider') || {}).value || defaultProviderOption();
 
     if (!name.trim()) { showError('Worker name is required'); return; }
     if (!role.trim()) { showError('Role is required for spawning'); return; }
@@ -736,12 +813,12 @@
 
   function applyRole(role) {
     var presets = {
-      orchestrator: { model: 'deepseek-chat', provider: 'deepseek' },
-      observer: { model: 'deepseek-chat', provider: 'deepseek' },
-      backend: { model: 'deepseek-chat', provider: 'deepseek' },
-      frontend: { model: 'deepseek-chat', provider: 'deepseek' },
-      researcher: { model: 'deepseek-chat', provider: 'deepseek' },
-      reviewer: { model: 'deepseek-chat', provider: 'deepseek' },
+      orchestrator: { model: defaultModelOption(), provider: defaultProviderOption() },
+      observer: { model: defaultModelOption(), provider: defaultProviderOption() },
+      backend: { model: defaultModelOption(), provider: defaultProviderOption() },
+      frontend: { model: defaultModelOption(), provider: defaultProviderOption() },
+      researcher: { model: defaultModelOption(), provider: defaultProviderOption() },
+      reviewer: { model: defaultModelOption(), provider: defaultProviderOption() },
     };
     var p = presets[role];
     if (!p) return;

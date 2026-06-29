@@ -20,6 +20,14 @@ FALLBACK_MODELS = [
     "gemini-2.5-flash", "gemini-2.5-pro",
     "deepseek-chat", "deepseek-v4-pro",
 ]
+FALLBACK_PROVIDERS = [
+    "anthropic",
+    "deepseek",
+    "google",
+    "ollama",
+    "openai",
+    "openrouter",
+]
 
 
 def generate_completions(shell: str = "bash") -> str:
@@ -84,8 +92,14 @@ def install_completion(shell: str = "bash") -> str:
 
 
 def list_available_models() -> list[str]:
-    """Return deduplicated, sorted model names from config or a built-in fallback."""
-    models: list[str] = []
+    """Return deduplicated, sorted model names from unified registry with fallback."""
+    registry_options = _load_registry_options()
+    models = registry_options["models"]
+    if models:
+        return models
+
+    # Backward-compatible fallback from YAML config.
+    models = []
     try:
         from kazma_cli.banner import _load_config
 
@@ -113,7 +127,36 @@ def list_available_models() -> list[str]:
     if not models:
         models = FALLBACK_MODELS
 
-    return sorted(set(models))
+    return _normalize_name_list(models)
+
+
+def list_available_providers() -> list[str]:
+    """Return deduplicated, sorted provider names from unified registry with fallback."""
+    registry_options = _load_registry_options()
+    providers = registry_options["providers"]
+    if providers:
+        return providers
+
+    names: list[str] = []
+    try:
+        from kazma_cli.banner import _load_config
+
+        config = _load_config()
+        models_cfg = config.get("models", {})
+        if isinstance(models_cfg, dict):
+            providers = models_cfg.get("providers", {})
+            if isinstance(providers, dict):
+                names.extend(providers.keys())
+        providers_cfg = config.get("providers", {})
+        if isinstance(providers_cfg, dict):
+            names.extend(providers_cfg.keys())
+    except Exception:
+        pass
+
+    if not names:
+        names = FALLBACK_PROVIDERS
+
+    return _normalize_name_list(names)
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +189,16 @@ _kazma_completion() {{
         models=$(kazma completion --list-models 2>/dev/null || true)
         if [[ -n "$models" ]]; then
             COMPREPLY=($(compgen -W "$models" -- "$cur"))
+        fi
+        return
+    fi
+
+    # --provider → dynamic provider list
+    if [[ "$prev" == "--provider" ]]; then
+        local providers
+        providers=$(kazma completion --list-providers 2>/dev/null || true)
+        if [[ -n "$providers" ]]; then
+            COMPREPLY=($(compgen -W "$providers" -- "$cur"))
         fi
         return
     fi
@@ -198,7 +251,7 @@ _kazma() {{
     local -a flags
     flags=(
         '--model[Model name to use]:model:->models'
-        '--provider[Provider to use]:provider:()'
+        '--provider[Provider to use]:provider:->providers'
         '--yolo[Skip confirmation prompts]'
         '--verbose[Enable verbose output]'
         '--no-banner[Suppress startup banner]'
@@ -216,6 +269,11 @@ _kazma() {{
             local -a model_list
             model_list=($(kazma completion --list-models 2>/dev/null || echo "gpt-4o gpt-4o-mini claude-sonnet-4 deepseek-chat"))
             _describe 'model' model_list
+            ;;
+        providers)
+            local -a provider_list
+            provider_list=($(kazma completion --list-providers 2>/dev/null || echo "openai deepseek anthropic"))
+            _describe 'provider' provider_list
             ;;
     esac
 }}
@@ -306,6 +364,18 @@ Register-ArgumentCompleter -Native -CommandName kazma -ScriptBlock {{
         return
     }}
 
+    if ($prev -eq '--provider') {{
+        $providers = (kazma completion --list-providers 2>$null) -split "`n"
+        if (-not $providers) {{
+            $providers = @('openai', 'deepseek', 'anthropic')
+        }}
+        $providers | Where-Object {{ $_ -like "$wordToComplete*" }} |
+            ForEach-Object {{
+                [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+            }}
+        return
+    }}
+
     # Otherwise complete subcommands
     $subcommands | Where-Object {{ $_ -like "$wordToComplete*" }} |
         ForEach-Object {{
@@ -313,3 +383,34 @@ Register-ArgumentCompleter -Native -CommandName kazma -ScriptBlock {{
         }}
 }}
 """
+
+
+def _load_registry_options() -> dict[str, list[str]]:
+    """Load unified model/provider options from ConfigStore when available."""
+    try:
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.model_registry import UnifiedModelRegistry
+
+        from kazma_cli.banner import _find_project_root
+
+        project_root = _find_project_root()
+        settings_db = project_root / "kazma-data" / "settings.db"
+        yaml_path = project_root / "kazma.yaml"
+        store = ConfigStore(db_path=str(settings_db), yaml_path=str(yaml_path))
+        try:
+            options = UnifiedModelRegistry(store).list_unified_options()
+        finally:
+            store.close()
+        models = options.get("models", [])
+        providers = options.get("providers", [])
+        return {
+            "models": _normalize_name_list(models if isinstance(models, list) else []),
+            "providers": _normalize_name_list(providers if isinstance(providers, list) else []),
+        }
+    except Exception:
+        return {"models": [], "providers": []}
+
+
+def _normalize_name_list(values: list[str]) -> list[str]:
+    """Normalize arbitrary value lists into sorted unique non-empty strings."""
+    return sorted({str(value).strip() for value in values if str(value).strip()})

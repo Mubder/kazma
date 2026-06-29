@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from kazma_core.model_registry import UnifiedModelRegistry
+
 logger = logging.getLogger(__name__)
 
 # ── Default shortcuts ─────────────────────────────────────────────────
@@ -67,6 +69,7 @@ class SettingsManager:
 
     def __init__(self, config_store: Any) -> None:
         self._cs = config_store
+        self._registry = UnifiedModelRegistry(config_store)
 
     # ══════════════════════════════════════════════════════════════════
     # PROVIDERS
@@ -74,74 +77,19 @@ class SettingsManager:
 
     def get_all_providers(self) -> list[dict[str, Any]]:
         """List all configured providers."""
-        raw = self._cs.get("providers.list", [])
-        if isinstance(raw, str):
-            try:
-                raw = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
-                raw = []
-        providers = raw if isinstance(raw, list) else []
-        # Inject defaults from provider presets if empty
-        if not providers:
-            try:
-                from kazma_core.providers import PROVIDER_PRESETS
-                for key, preset in PROVIDER_PRESETS.items():
-                    if key == "custom":
-                        continue
-                    providers.append({
-                        "name": key,
-                        "display_name": preset.get("name", key),
-                        "base_url": preset.get("base_url", ""),
-                        "api_key": "",
-                        "models": [],
-                        "enabled": False,
-                        "health": "unknown",
-                    })
-            except ImportError:
-                pass
-        return providers
+        return self._registry.list_providers()
 
     def add_provider(self, data: dict[str, Any]) -> dict[str, Any]:
         """Add a new provider."""
-        providers = self.get_all_providers()
-        name = data.get("name", "")
-        if not name:
-            return {"error": "Provider name is required"}
-        # Check for duplicates
-        for p in providers:
-            if p.get("name") == name:
-                # Update existing
-                p.update(data)
-                self._cs.set("providers.list", json.dumps(providers), category="providers")
-                return p
-        # Add new
-        provider = {
-            "name": name,
-            "display_name": data.get("display_name", name),
-            "base_url": data.get("base_url", ""),
-            "api_key": data.get("api_key", ""),
-            "models": data.get("models", []),
-            "enabled": data.get("enabled", True),
-            "health": "unknown",
-        }
-        providers.append(provider)
-        self._cs.set("providers.list", json.dumps(providers), category="providers")
-        return provider
+        return self._registry.upsert_provider(data)
 
     def delete_provider(self, name: str) -> None:
         """Delete a provider by name."""
-        providers = self.get_all_providers()
-        providers = [p for p in providers if p.get("name") != name]
-        self._cs.set("providers.list", json.dumps(providers), category="providers")
+        self._registry.delete_provider(name)
 
     def toggle_provider(self, name: str, enabled: bool) -> None:
         """Enable/disable a provider."""
-        providers = self.get_all_providers()
-        for p in providers:
-            if p.get("name") == name:
-                p["enabled"] = enabled
-                break
-        self._cs.set("providers.list", json.dumps(providers), category="providers")
+        self._registry.toggle_provider(name, enabled)
 
     async def test_provider(self, name: str) -> dict[str, Any]:
         """Test a provider connection with a real HTTP call."""
@@ -194,13 +142,7 @@ class SettingsManager:
         """Update provider health status in store."""
         self._cs.set(f"providers.health.{name}", status, category="providers")
         self._cs.set(f"providers.health.{name}.last_check", datetime.now(UTC).isoformat(), category="providers")
-        # Also update in the list
-        providers = self.get_all_providers()
-        for p in providers:
-            if p.get("name") == name:
-                p["health"] = status
-                break
-        self._cs.set("providers.list", json.dumps(providers), category="providers")
+        self._registry.set_provider_health(name, status)
 
     # ══════════════════════════════════════════════════════════════════
     # MODELS
@@ -215,6 +157,10 @@ class SettingsManager:
             except (json.JSONDecodeError, TypeError):
                 registry = []
         return registry if isinstance(registry, list) else []
+
+    def get_unified_model_options(self) -> dict[str, Any]:
+        """Return unified model/provider/profile options from the registry."""
+        return self._registry.list_unified_options()
 
     def set_default_model(self, task_type: str, model_name: str) -> None:
         """Set default model for a task type."""
@@ -315,29 +261,10 @@ class SettingsManager:
         Returns:
             The saved profile dict (without the raw api_key).
         """
-        clean_name = (name or "").strip()
-        if not clean_name:
-            return {"error": "Profile name is required"}
-
-        profile: dict[str, Any] = {}
-        for field in self._SAVED_PROFILE_FIELDS:
-            if field in data:
-                profile[field] = data[field]
-            elif field != "provider":
-                profile[field] = ""
-        # provider defaults to "custom"
-        if not profile.get("provider"):
-            profile["provider"] = "custom"
-        profile["name"] = clean_name
-
-        self._cs.set(f"models.saved.{clean_name}", profile, category="models")
-        logger.info("Saved model profile: %s", clean_name)
-
-        # Return a safe copy (mask api_key)
-        safe = dict(profile)
-        if safe.get("api_key"):
-            safe["api_key"] = "***"
-        return safe
+        result = self._registry.save_model_profile(name, data)
+        if "error" not in result:
+            logger.info("Saved model profile: %s", (name or "").strip())
+        return result
 
     def get_saved_model_profiles(self) -> list[dict[str, Any]]:
         """Return all saved model profiles.
@@ -350,22 +277,7 @@ class SettingsManager:
             List of profile dicts, each with keys: name, base_url,
             api_key (masked), model, provider.
         """
-        cat = self._cs.get_category("models")
-        profiles: list[dict[str, Any]] = []
-        for key, val in cat.items():
-            if not key.startswith("models.saved."):
-                continue
-            if not isinstance(val, dict):
-                continue
-            profile = dict(val)
-            name = key[len("models.saved."):]
-            profile["name"] = name
-            if profile.get("api_key"):
-                profile["api_key"] = "***"
-            profiles.append(profile)
-        # Sort by name for stable ordering
-        profiles.sort(key=lambda p: p.get("name", ""))
-        return profiles
+        return self._registry.list_model_profiles(mask_api_key=True)
 
     def get_model_profile(self, name: str) -> dict[str, Any] | None:
         """Return a single saved model profile by name (with raw api_key).
@@ -376,7 +288,7 @@ class SettingsManager:
         Returns:
             Profile dict or ``None`` if not found.
         """
-        return self._cs.get(f"models.saved.{name}", None)
+        return self._registry.get_model_profile(name)
 
     def delete_model_profile(self, name: str) -> bool:
         """Delete a saved model profile.
@@ -387,7 +299,7 @@ class SettingsManager:
         Returns:
             True if a profile was deleted, False otherwise.
         """
-        deleted = self._cs.delete(f"models.saved.{name}")
+        deleted = self._registry.delete_model_profile(name)
         if deleted:
             logger.info("Deleted model profile: %s", name)
         return deleted

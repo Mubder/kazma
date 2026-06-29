@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 
 
-def _build_client():
+def _build_client(config_store=None):
     """Build a FastAPI TestClient with the swarm router for testing."""
     from fastapi import FastAPI
     from fastapi.templating import Jinja2Templates
@@ -19,7 +19,7 @@ def _build_client():
 
     from kazma_ui.swarm_panel import create_swarm_router
 
-    router = create_swarm_router(templates)
+    router = create_swarm_router(templates, config_store=config_store)
     app.include_router(router)
 
     return TestClient(app)
@@ -259,6 +259,36 @@ class TestSwarmModels:
         assert isinstance(data["providers"], list)
         assert len(data["models"]) > 0
         assert len(data["providers"]) > 0
+
+    def test_models_endpoint_uses_registry_options(self, tmp_path):
+        """When ConfigStore is provided, endpoint uses unified registry values."""
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.model_registry import UnifiedModelRegistry
+
+        db_path = str(tmp_path / "swarm_models.db")
+        config_store = ConfigStore(db_path=db_path)
+        registry = UnifiedModelRegistry(config_store)
+        registry.upsert_provider({
+            "name": "custom-registry-provider",
+            "models": ["custom-registry-model"],
+            "base_url": "https://provider.example/v1",
+        })
+        registry.save_model_profile("saved-registry-profile", {
+            "model": "saved-registry-model",
+            "provider": "profile-provider",
+            "base_url": "https://profile.example/v1",
+        })
+        config_store.set("llm.model", "runtime-registry-model", category="llm")
+
+        client = _build_client(config_store=config_store)
+        response = client.get("/api/swarm/models")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["source"] == "registry"
+        assert "custom-registry-provider" in data["providers"]
+        assert "custom-registry-model" in data["models"]
+        assert "saved-registry-model" in data["models"]
+        assert "runtime-registry-model" in data["models"]
 
 
 # ---------------------------------------------------------------------------

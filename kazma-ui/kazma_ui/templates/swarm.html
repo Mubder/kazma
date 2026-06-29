@@ -311,19 +311,15 @@
               </div>
               <div class="form-group">
                 <label class="form-label">{{ t('swarm.model') }}</label>
-                <input type="text" id="add-model" class="form-input" value="deepseek-chat" list="saved-profiles-datalist">
-                <datalist id="saved-profiles-datalist"></datalist>
+                <input type="text" id="add-model" class="form-input" list="swarm-models-datalist">
+                <datalist id="swarm-models-datalist"></datalist>
               </div>
             </div>
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">{{ t('swarm.provider') }}</label>
                 <select id="add-provider" class="form-select">
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="google">Google</option>
-                  <option value="custom">Custom</option>
+                  <option value="">Loading...</option>
                 </select>
               </div>
               <div class="form-group">
@@ -359,7 +355,7 @@
               </div>
               <div class="form-group">
                 <label class="form-label">{{ t('swarm.model') }}</label>
-                <input type="text" id="spawn-model" class="form-input" placeholder="deepseek-chat" value="deepseek-chat">
+                <input type="text" id="spawn-model" class="form-input" list="swarm-models-datalist">
               </div>
             </div>
             <div class="form-group">
@@ -384,10 +380,7 @@
               <div class="form-group">
                 <label class="form-label">{{ t('swarm.provider') }}</label>
                 <select id="spawn-provider" class="form-select">
-                  <option value="deepseek">DeepSeek</option>
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="google">Google</option>
+                  <option value="">Loading...</option>
                 </select>
               </div>
             </div>

@@ -59,6 +59,31 @@ def _has_arabic(text: str) -> bool:
     )
 
 
+def _resolve_runtime_model_name(config: AgentConfig) -> str:
+    """Resolve active model from runtime store, fallback to YAML config."""
+    llm_cfg = config.raw.get("llm", {})
+    fallback = llm_cfg.get("model", config.default_model) if isinstance(llm_cfg, dict) else config.default_model
+
+    try:
+        from kazma_core.config_store import ConfigStore
+        from kazma_core.model_registry import UnifiedModelRegistry
+
+        store = ConfigStore()
+        try:
+            options = UnifiedModelRegistry(store).list_unified_options()
+        finally:
+            store.close()
+
+        defaults = options.get("defaults", {}) if isinstance(options, dict) else {}
+        llm_model = defaults.get("llm_model", "") if isinstance(defaults, dict) else ""
+        if isinstance(llm_model, str) and llm_model.strip():
+            return llm_model.strip()
+    except Exception:
+        pass
+
+    return fallback
+
+
 # ── Arabic-aware Input ──────────────────────────────────────────────
 
 
@@ -153,14 +178,14 @@ class KazmaTUI(App):
     def __init__(self, config: AgentConfig | None = None) -> None:
         super().__init__()
         self._config = config or load_config()
+        self._resolved_model = _resolve_runtime_model_name(self._config)
         self._agent: KazmaAgent | None = None
         self._running = False
 
     def compose(self) -> ComposeResult:
         """Build the TUI layout."""
-        model_info = self._config.raw.get("llm", {}).get("model", self._config.default_model)
         yield Static(
-            _fix_arabic(f" 🇰🇼 كاظمه v{self._config.version}  •  {model_info}"),
+            _fix_arabic(f" 🇰🇼 كاظمه v{self._config.version}  •  {self._resolved_model}"),
             id="status-bar",
         )
         with Vertical(id="chat-area"):
@@ -187,6 +212,9 @@ class KazmaTUI(App):
 
         try:
             self._agent = KazmaAgent(self._config)
+            if self._resolved_model and self._agent.llm_config.model != self._resolved_model:
+                self._agent.llm_config.model = self._resolved_model
+                self._agent.llm.reconfigure(model=self._resolved_model)
             n_tools = await self._agent.connect_mcp_servers()
             self._running = True
             status = self.query_one("#status-bar", Static)
