@@ -148,6 +148,37 @@ class TestBaseAdapter:
         await adapter.stop()
 
     @pytest.mark.asyncio
+    async def test_done_callback_ignores_cancelled_task(self) -> None:
+        """Done callback must not call task.exception() on cancelled tasks."""
+        adapter = DummyAdapter()
+        queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
+        shutdown = asyncio.Event()
+        await adapter.start(queue, shutdown)
+        assert adapter._task is not None
+
+        loop = asyncio.get_running_loop()
+        callback_errors: list[dict[str, object]] = []
+        previous_handler = loop.get_exception_handler()
+
+        def _capture_exception(
+            _loop: asyncio.AbstractEventLoop,
+            context: dict[str, object],
+        ) -> None:
+            callback_errors.append(context)
+
+        loop.set_exception_handler(_capture_exception)
+        try:
+            adapter._task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await adapter._task
+            await asyncio.sleep(0)
+        finally:
+            loop.set_exception_handler(previous_handler)
+
+        await adapter.stop()
+        assert callback_errors == []
+
+    @pytest.mark.asyncio
     async def test_jitter_sleep_returns_false_on_timeout(self) -> None:
         """jitter_sleep returns False when no shutdown (normal expiry)."""
         shutdown = asyncio.Event()
@@ -486,6 +517,7 @@ class TestTelegramAdapter:
         )
         assert ok is True
         mock_http.post.assert_called_once()
+        assert mock_http.post.await_args.args[0] == "/sendMessage"
 
     @pytest.mark.asyncio
     async def test_send_fallback_target_id(self) -> None:

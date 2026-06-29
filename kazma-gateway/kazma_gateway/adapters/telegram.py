@@ -159,7 +159,7 @@ class TelegramAdapter(BaseAdapter):
             shutdown_event: Signals when to stop.
         """
         self._http = httpx.AsyncClient(
-            base_url=_TELEGRAM_API.format(token=self._token),
+            base_url=self._api_base,
             timeout=httpx.Timeout(30.0, connect=5.0),
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         )
@@ -171,7 +171,7 @@ class TelegramAdapter(BaseAdapter):
             # every call and no messages are ever received.
             try:
                 dw_resp = await self._http.post(
-                    f"/bot{self._token}/deleteWebhook",
+                    "/deleteWebhook",
                     json={"drop_pending_updates": False},
                 )
                 logger.info(
@@ -186,7 +186,7 @@ class TelegramAdapter(BaseAdapter):
             # 401. Validating up front prevents a silent "connected but dead"
             # state where the adapter reports healthy but never receives.
             try:
-                me_resp = await self._http.get(f"/bot{self._token}/getMe")
+                me_resp = await self._http.get("/getMe")
                 if me_resp.status_code != 200:
                     me_data = me_resp.json()
                     logger.error(
@@ -349,7 +349,7 @@ class TelegramAdapter(BaseAdapter):
             params["offset"] = self._offset
 
         resp = await self._http.get(
-            f"/bot{self._token}/getUpdates",
+            "/getUpdates",
             params=params,
         )
         resp.raise_for_status()
@@ -502,7 +502,7 @@ class TelegramAdapter(BaseAdapter):
         assert self._http is not None, "HTTP client not initialized -- adapter not started"
         try:
             resp = await self._http.get(
-                f"/bot{self._token}/getFile",
+                "/getFile",
                 params={"file_id": file_id},
             )
             resp.raise_for_status()
@@ -631,7 +631,7 @@ class TelegramAdapter(BaseAdapter):
                 try:
                     assert self._http is not None
                     await self._http.post(
-                        f"/bot{self._token}/sendMessage",
+                        "/sendMessage",
                         json={
                             "chat_id": chat_id,
                             "text": "Voice received but transcription is unavailable. Please configure an STT provider (openai/groq) or type your message.",
@@ -648,9 +648,8 @@ class TelegramAdapter(BaseAdapter):
         """Send a 'typing…' chat action to the user (fire-and-forget)."""
         chat_id = target_id.split(":", 1)[1] if ":" in target_id else target_id
         try:
-            url = f"{_TELEGRAM_API.format(token=self._token)}/sendChatAction"
-            async with httpx.AsyncClient(timeout=5.0) as c:
-                await c.post(url, json={"chat_id": chat_id, "action": "typing"})
+            async with httpx.AsyncClient(base_url=self._api_base, timeout=5.0) as c:
+                await c.post("/sendChatAction", json={"chat_id": chat_id, "action": "typing"})
         except Exception:
             pass  # fire-and-forget — never block
 
@@ -674,10 +673,9 @@ class TelegramAdapter(BaseAdapter):
         """
         reaction = _EMOJI_MAP.get(emoji, [{"type": "emoji", "emoji": emoji}])
         try:
-            url = f"{_TELEGRAM_API.format(token=self._token)}/setMessageReaction"
-            async with httpx.AsyncClient(timeout=5.0) as c:
+            async with httpx.AsyncClient(base_url=self._api_base, timeout=5.0) as c:
                 resp = await c.post(
-                    url,
+                    "/setMessageReaction",
                     json={
                         "chat_id": chat_id,
                         "message_id": message_id,
@@ -711,12 +709,11 @@ class TelegramAdapter(BaseAdapter):
             text:              Optional notification text to show.
         """
         try:
-            url = f"{_TELEGRAM_API.format(token=self._token)}/answerCallbackQuery"
-            async with httpx.AsyncClient(timeout=5.0) as c:
+            async with httpx.AsyncClient(base_url=self._api_base, timeout=5.0) as c:
                 payload: dict[str, Any] = {"callback_query_id": callback_query_id}
                 if text:
                     payload["text"] = text
-                await c.post(url, json=payload)
+                await c.post("/answerCallbackQuery", json=payload)
         except Exception:
             logger.debug("[telegram] answerCallbackQuery error (fire-and-forget)")
 
@@ -859,7 +856,7 @@ class TelegramAdapter(BaseAdapter):
 
         if not self._http:
             self._http = httpx.AsyncClient(
-                base_url=_TELEGRAM_API.format(token=self._token),
+                base_url=self._api_base,
                 timeout=httpx.Timeout(30.0, connect=5.0),
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             )
@@ -902,7 +899,7 @@ class TelegramAdapter(BaseAdapter):
             try:
                 await self._rate_limiter.acquire()
                 resp = await self._http.post(
-                    f"/bot{self._token}/sendMessage",
+                    "/sendMessage",
                     json=payload,
                 )
 

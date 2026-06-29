@@ -151,6 +151,7 @@ class TestDownloadVoiceFile:
         result = await adapter.download_voice_file("AgACAgIAAxkBAAI")
         assert result == b"\x4f\x67\x67\x53"
         assert adapter._http.get.call_count == 2
+        assert adapter._http.get.await_args_list[0].args[0] == "/getFile"
 
     @pytest.mark.asyncio
     async def test_download_voice_file_getfile_fails(self) -> None:
@@ -377,8 +378,8 @@ class TestVoicePipeline:
         assert result is None
         # Verify fallback message was sent
         adapter._http.post.assert_called_once()
-        call_args = adapter._http.post.call_args
-        payload = call_args[1]["json"] if "json" in call_args[1] else call_args[0][1]
+        assert adapter._http.post.await_args.args[0] == "/sendMessage"
+        payload = adapter._http.post.await_args.kwargs["json"]
         assert payload["chat_id"] == 12345
         assert "Voice received but transcription is unavailable" in payload["text"]
 

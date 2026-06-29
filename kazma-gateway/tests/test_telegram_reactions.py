@@ -1,6 +1,7 @@
 """Tests for emoji reactions and quick reply buttons in Telegram adapter."""
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -119,3 +120,98 @@ class TestSendMethodReactions:
         assert callable(adapter._set_reaction)
         assert callable(adapter._answer_callback_query)
         assert callable(adapter._handle_callback_query)
+
+
+class TestTelegramRelativePaths:
+    """Regression tests for relative endpoint usage with tokenized base_url."""
+
+    @pytest.fixture
+    def adapter(self):
+        from kazma_gateway.adapters.telegram import TelegramAdapter
+        return TelegramAdapter(token="test_token")
+
+    @pytest.mark.asyncio
+    async def test_listen_startup_uses_relative_delete_webhook_and_get_me(self, adapter):
+        """listen() should call /deleteWebhook and /getMe (without /bot token prefix)."""
+        mock_http = AsyncMock()
+        delete_webhook_resp = MagicMock()
+        delete_webhook_resp.status_code = 200
+        get_me_resp = MagicMock()
+        get_me_resp.status_code = 200
+        get_me_resp.json.return_value = {
+            "result": {"username": "test_bot", "first_name": "Test"},
+        }
+        mock_http.post = AsyncMock(return_value=delete_webhook_resp)
+        mock_http.get = AsyncMock(return_value=get_me_resp)
+        mock_http.aclose = AsyncMock()
+
+        with patch("kazma_gateway.adapters.telegram.httpx.AsyncClient", return_value=mock_http):
+            queue: asyncio.Queue = asyncio.Queue()
+            shutdown_event = asyncio.Event()
+            shutdown_event.set()  # run startup section then exit loop
+            await adapter.listen(queue, shutdown_event)
+
+        mock_http.post.assert_awaited_once_with(
+            "/deleteWebhook",
+            json={"drop_pending_updates": False},
+        )
+        mock_http.get.assert_awaited_once_with("/getMe")
+
+    @pytest.mark.asyncio
+    async def test_poll_uses_relative_get_updates(self, adapter):
+        """_poll() should call /getUpdates, not /bot{token}/getUpdates."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"ok": True, "result": []}
+
+        adapter._http = AsyncMock()
+        adapter._http.get = AsyncMock(return_value=mock_resp)
+
+        await adapter._poll()
+
+        adapter._http.get.assert_awaited_once_with(
+            "/getUpdates",
+            params={"timeout": adapter._poll_timeout},
+        )
+
+    @pytest.mark.asyncio
+    async def test_trigger_typing_uses_relative_send_chat_action(self, adapter):
+        """_trigger_typing should call /sendChatAction on the tokenized base_url."""
+        with patch("kazma_gateway.adapters.telegram.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = False
+            mock_client.post = AsyncMock(return_value=MagicMock(status_code=200))
+            mock_cls.return_value = mock_client
+
+            await adapter._trigger_typing("telegram:12345")
+
+        assert mock_client.post.await_args.args[0] == "/sendChatAction"
+
+    @pytest.mark.asyncio
+    async def test_set_reaction_uses_relative_set_message_reaction(self, adapter):
+        """_set_reaction should call /setMessageReaction without duplicated token path."""
+        with patch("kazma_gateway.adapters.telegram.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = False
+            mock_client.post = AsyncMock(return_value=MagicMock(status_code=200))
+            mock_cls.return_value = mock_client
+
+            await adapter._set_reaction(12345, 678, "✅")
+
+        assert mock_client.post.await_args.args[0] == "/setMessageReaction"
+
+    @pytest.mark.asyncio
+    async def test_answer_callback_query_uses_relative_endpoint(self, adapter):
+        """_answer_callback_query should call /answerCallbackQuery."""
+        with patch("kazma_gateway.adapters.telegram.httpx.AsyncClient") as mock_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__.return_value = mock_client
+            mock_client.__aexit__.return_value = False
+            mock_client.post = AsyncMock(return_value=MagicMock(status_code=200))
+            mock_cls.return_value = mock_client
+
+            await adapter._answer_callback_query("cb_123")
+
+        assert mock_client.post.await_args.args[0] == "/answerCallbackQuery"

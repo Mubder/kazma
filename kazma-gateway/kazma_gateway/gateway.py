@@ -286,12 +286,15 @@ class BaseAdapter(ABC):
             True forever and get_status() would report "connected" even though
             polling has stopped.
             """
-            if task.exception() and not task.cancelled():
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc:
                 self._running = False
                 logger.error(
                     "[%s] Adapter listen task crashed: %s",
                     self.name,
-                    task.exception(),
+                    exc,
                 )
 
         self._task.add_done_callback(_on_task_done)
