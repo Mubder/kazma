@@ -274,6 +274,16 @@ class TestMyFeature:
 | Unit        | `tests/`          | Single-function tests            |
 | Integration | `tests/integration/` | Multi-module interactions     |
 | Security    | `tests/`          | Permission, auth, sandbox tests  |
+| CLI         | `tests/`          | CLI command parsing and behavior |
+
+### CLI Testing
+
+The `kazma` CLI (`kazma-cli/kazma_cli/`) is tested alongside the rest of the
+suite. When adding or changing a CLI command (core, gateway, swarm, hub,
+project, or docs), add a test that exercises the command path. Tests typically
+invoke the CLI handler directly or via `subprocess` and assert on exit code and
+output. Keep the `completions.py` `SUBCMDS` list in sync with the available
+commands so shell tab-completion stays accurate.
 
 ## Skill Development
 

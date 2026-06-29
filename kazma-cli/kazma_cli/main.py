@@ -29,7 +29,7 @@ def main() -> None:
     sys.argv = [sys.argv[0]] + filtered
 
     if cmd == "status":
-        print("Kazma status: OK")
+        _run_status()
 
     elif cmd == "serve":
         port = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
@@ -50,6 +50,15 @@ def main() -> None:
     elif cmd == "project":
         _run_project(sys.argv[2:])
 
+    elif cmd == "gateway":
+        _run_gateway(sys.argv[2:])
+
+    elif cmd == "swarm":
+        _run_swarm(sys.argv[2:])
+
+    elif cmd == "update":
+        _run_update(sys.argv[2:])
+
     elif cmd in ("--help", "-h", "help"):
         print("Kazma CLI v0.1.0")
         print("Commands:")
@@ -60,6 +69,9 @@ def main() -> None:
         print("  docs       Documentation commands (build, serve)")
         print("  completion Shell tab completion (bash, zsh, powershell, install)")
         print("  project    Project-level config (.kazma/) — init, show, validate")
+        print("  gateway    Gateway control (status, start, stop, restart, refresh)")
+        print("  swarm      Swarm orchestration (workers, dispatch, metrics, ...)")
+        print("  update     Check for and install Kazma CLI updates")
         print("")
         print("Options:")
         print("  serve [port]  Start server on specified port (default: 8000)")
@@ -286,6 +298,135 @@ def _run_project(args: list[str]) -> None:
     else:
         print(f"Unknown project command: {subcmd}")
         print("Available: init, show, validate")
+
+
+def _run_gateway(args: list[str]) -> None:
+    """Handle 'kazma gateway' subcommands (delegates to kazma_cli.gateway)."""
+    from kazma_cli.gateway import run as gateway_run
+
+    gateway_run(args)
+
+
+def _run_swarm(args: list[str]) -> None:
+    """Handle 'kazma swarm' subcommands (delegates to kazma_cli.swarm)."""
+    from kazma_cli.swarm import run as swarm_run
+
+    swarm_run(args)
+
+
+def _run_update(args: list[str]) -> None:
+    """Handle 'kazma update' subcommand (delegates to kazma_cli.update)."""
+    from kazma_cli.update import run as update_run
+
+    update_run(args)
+
+
+def _run_status() -> None:
+    """Show real Kazma status: server health, gateway, swarm, and environment."""
+    import os
+    import platform
+
+    from kazma_cli.banner import _find_project_root, _get_version, show_banner
+
+    version = _get_version()
+    print(show_banner(suppress=True))
+    print()
+
+    # --- Server / gateway / swarm health (best-effort) ---------------------
+    port = 8000
+    env_port = os.environ.get("KAZMA_PORT")
+    if env_port:
+        try:
+            port = int(env_port)
+        except ValueError:
+            pass
+
+    server_running = False
+    gateway_summary = "n/a"
+    swarm_count = "n/a"
+
+    try:
+        import httpx
+    except ImportError:
+        httpx = None  # type: ignore[assignment]
+
+    if httpx is not None:
+        base_url = f"http://localhost:{port}"
+        try:
+            with httpx.Client(base_url=base_url, timeout=5.0) as client:
+                gw = client.get("/api/gateway/status")
+                if gw.status_code == 200:
+                    server_running = True
+                    gw_data = gw.json()
+                    adapters = gw_data.get("adapters", []) or []
+                    active = [
+                        a.get("platform", "?")
+                        for a in adapters
+                        if a.get("status") == "running"
+                    ]
+                    gateway_summary = (
+                        f"{len(active)} adapter(s) active"
+                        + (f": {', '.join(active)}" if active else "")
+                    )
+                else:
+                    server_running = True
+                    gateway_summary = f"unreachable (HTTP {gw.status_code})"
+        except Exception:
+            server_running = False
+
+        if server_running:
+            try:
+                with httpx.Client(base_url=base_url, timeout=5.0) as client:
+                    sw = client.get("/api/swarm/status")
+                    if sw.status_code == 200:
+                        swarm_count = str(sw.json().get("count", 0))
+            except Exception:
+                swarm_count = "n/a"
+
+    print("─" * 52)
+    print("  Server Status")
+    if server_running:
+        print(f"  Server:    running on http://localhost:{port}")
+        print(f"  Gateway:   {gateway_summary}")
+        print(f"  Swarm:     {swarm_count} worker(s) registered")
+    else:
+        print("  Server:    [!] not running")
+        print("  Start with: kazma serve" + (f" {port}" if env_port else ""))
+    print("─" * 52)
+
+    # --- Environment -------------------------------------------------------
+    root = _find_project_root()
+    config_path = root / "kazma.yaml"
+    print("  Environment")
+    print(f"  Python:    {platform.python_version()}")
+    print(f"  Kazma:     v{version}")
+    print(f"  Config:    {config_path if config_path.exists() else '[!] not found'}")
+
+    # Package versions
+    pkg_versions = _collect_package_versions()
+    if pkg_versions:
+        print(f"  Packages:  {', '.join(pkg_versions)}")
+
+    print("─" * 52)
+    print("  Run 'kazma --help' for available commands.")
+
+
+def _collect_package_versions() -> list[str]:
+    """Return 'name==version' strings for kazma packages, best-effort."""
+    try:
+        from importlib.metadata import PackageNotFoundError
+        from importlib.metadata import version as pkg_version
+    except ImportError:  # pragma: no cover
+        return []
+
+    results: list[str] = []
+    for dist in ("kazma", "kazma-core", "kazma-cli", "kazma-ui", "kazma-gateway"):
+        try:
+            ver = pkg_version(dist)
+            results.append(f"{dist}=={ver}")
+        except PackageNotFoundError:
+            continue
+    return results
 
 
 def _detect_shell() -> str:

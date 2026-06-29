@@ -5,6 +5,28 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## Sprint 11 — CLI Control Plane (June 2026)
+
+### CLI
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Gateway CLI Commands | Added `kazma gateway` subcommands for headless gateway lifecycle management: `status` (adapter status), `start`, `stop`, `restart` (stop + start), and `refresh` (reload adapters) | `cli-gateway-commands` |
+| ✅ | Swarm CLI Commands | Added `kazma swarm` subcommands exposing the full swarm engine from the terminal: `status`, `workers`, `worker add/spawn/remove`, `dispatch`, `broadcast`, `consult`, `pipeline`, `fanout`, `history`, `task`, `metrics`, `start`, `stop`, `approve`, `reject`, and `circuit-breaker` (status + reset). Supports `--model`, `--provider`, `--type`, `--role`, `--context`, `--workers`, and `--aggregation` flags. | `cli-swarm-commands` |
+| ✅ | Real `kazma status` Health | Reworked `kazma status` to report real system health (gateway adapters, swarm workers, and server health) instead of a static "OK" string | `cli-status-health` |
+| ✅ | Update CLI Command | Added `kazma update` command to check for and install Kazma CLI updates. For pip-installed copies, checks PyPI for the latest version and runs `pip install --upgrade kazma`. For git/editable installs, fetches from origin and pulls if behind, then reinstalls. Supports `--check` (dry run), `--force` (reinstall even if latest), and `--yes` (skip confirmation) flags. Shows current vs latest version, a changelog summary, and prompts for confirmation before updating. | `cli-update-command` |
+| ✅ | Completions SUBCMDS Fix | Updated `completions.py` `SUBCMDS` to include the full command set (`gateway`, `swarm`, `project`, `serve`, `hub`, `docs`, `wizard`, `completion`, `status`) so shell tab-completion covers every subcommand | `cli-completions-fix` |
+
+### Documentation
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | CLI Reference Rewrite | Completely rewrote `docs/docs/api-reference/cli-reference.md` as the definitive guide for all CLI commands, organized by category (Core, Gateway, Swarm, Hub, Project, Docs) with syntax, flags, examples, and exit codes | `cli-docs-reference` |
+| ✅ | README CLI Section | Added a comprehensive CLI Commands section and CLI Quick Reference table to `README.md`; documented all three entry points (`kazma`, `kazma-web`, `kazma-tui`) | `cli-docs-readme` |
+| ✅ | Quickstart & Config Updates | Updated `docs/docs/getting-started/quickstart.md` and `configuration.md` to reference `kazma serve`, `kazma swarm status`, and gateway/swarm configuration | `cli-docs-getting-started` |
+
+---
+
 ## Sprint 10 — Swarm Engine Overhaul (June 2026)
 
 ### Swarm

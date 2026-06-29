@@ -96,23 +96,30 @@ The script:
 
 ### Run
 
+Kazma ships with **three entry points**:
+
+| Entry point | Command | Description |
+|:---|:---|:---|
+| **Web UI** | `kazma-web` (or `kazma serve`) | FastAPI dashboard with chat, swarm panel, settings |
+| **Terminal UI** | `kazma-tui` | Textual TUI with Arabic/RTL support |
+| **CLI** | `kazma` | Banner, status, hub, gateway, and swarm management |
+
 ```bash
-# Web UI (default port 8000)
-uv run kazma-web
+# --- Web UI (default port 8000) ---
+uv run kazma-web                 # start WebUI
+uv run kazma-web --port 8080     # custom port
+uv run kazma serve 8080          # same thing via the CLI
+uv run python -m kazma_ui.app --port 8080   # via Python module
 
-# Web UI with custom port
-uv run kazma-web --port 8080
-
-# Via Python module
-uv run python -m kazma_ui.app --port 8080
-
-# Terminal UI
+# --- Terminal UI ---
 uv run kazma-tui
 
-# CLI
-uv run kazma status
-uv run kazma serve 8080
-uv run kazma hub search <query>
+# --- CLI ---
+uv run kazma                     # banner + config check + status overview
+uv run kazma status              # real system status (gateway, swarm, server)
+uv run kazma serve 8080          # start WebUI server on a custom port
+uv run kazma hub search <query>  # search the skill marketplace
+uv run kazma swarm status        # show swarm workers and health
 ```
 
 Then open http://localhost:8000 (or your chosen port).
@@ -123,6 +130,144 @@ Then open http://localhost:8000 (or your chosen port).
 cp .env.example .env   # fill in API keys
 docker compose up -d
 ```
+
+---
+
+## 🖥️ CLI Commands
+
+The `kazma` CLI is the unified control plane for Kazma. Run `kazma` with no
+arguments for a banner, config check, and status overview, or `kazma help` for
+a quick command list. Commands are grouped into **Core**, **Gateway**, **Swarm**,
+**Hub**, **Project**, and **Docs**.
+
+### Core Commands
+
+| Command | Description |
+|:---|:---|
+| `kazma` | Banner, config check, and status overview |
+| `kazma status` | Real system status (gateway, swarm, server health) |
+| `kazma serve [port]` | Start the WebUI server (default port `8000`) |
+| `kazma wizard` | Interactive skill installation wizard |
+| `kazma completion <bash\|zsh\|powershell\|install>` | Generate or install shell tab-completion |
+| `kazma update [--check] [--force] [--yes]` | Check for and install Kazma CLI updates |
+| `kazma help` / `--help` / `-h` | Show help |
+
+### Gateway Commands
+
+| Command | Description |
+|:---|:---|
+| `kazma gateway status` | Show gateway adapter status (Telegram, Discord, Slack) |
+| `kazma gateway start` | Start the gateway |
+| `kazma gateway stop` | Stop the gateway |
+| `kazma gateway restart` | Restart the gateway (stop + start) |
+| `kazma gateway refresh` | Refresh/reload gateway adapters |
+
+### Swarm Commands
+
+| Command | Description |
+|:---|:---|
+| `kazma swarm status` | Show swarm workers and health |
+| `kazma swarm workers` | List all registered workers |
+| `kazma swarm worker add <name>` | Add a worker |
+| `kazma swarm worker spawn <name> <role>` | Spawn a dynamic worker |
+| `kazma swarm worker remove <name>` | Remove a worker |
+| `kazma swarm dispatch <worker> <prompt>` | Dispatch a task to a single worker |
+| `kazma swarm broadcast <prompt>` | Broadcast a prompt to all workers |
+| `kazma swarm consult <prompt> --workers a,b` | Consult multiple workers |
+| `kazma swarm pipeline --workers a,b,c <prompt>` | Sequential pipeline |
+| `kazma swarm fanout --workers a,b <prompt>` | Fan-out / fan-in |
+| `kazma swarm history` | Task history (filterable) |
+| `kazma swarm task <id>` | Show task detail |
+| `kazma swarm metrics [--worker W]` | Worker metrics |
+| `kazma swarm start` | Start all workers |
+| `kazma swarm stop` | Stop all workers |
+| `kazma swarm approve <task_id>` | Approve a HITL checkpoint |
+| `kazma swarm reject <task_id>` | Reject a HITL checkpoint |
+| `kazma swarm circuit-breaker [worker] [--reset]` | Circuit breaker status or reset |
+
+### Hub Commands (skill marketplace)
+
+| Command | Description |
+|:---|:---|
+| `kazma hub register <name>` | Register a skill locally |
+| `kazma hub search <query>` | Search the skill marketplace |
+| `kazma hub install <name>` | Install a skill |
+| `kazma hub list` | List installed skills |
+| `kazma hub info <name>` | Show skill details |
+| `kazma hub validate <path>` | Validate a skill manifest |
+| `kazma hub uninstall <name>` | Uninstall a skill |
+| `kazma hub submit <path>` | Submit a skill to the hub |
+| `kazma hub status` | Show hub connection status |
+| `kazma hub badge <name>` | Show a skill's certification badge |
+| `kazma hub certified` | List certified skills |
+| `kazma hub stats` | Show hub statistics |
+
+### Project Commands
+
+| Command | Description |
+|:---|:---|
+| `kazma project init` | Initialize a `.kazma/` project directory |
+| `kazma project show` | Show project configuration |
+| `kazma project validate` | Validate project configuration |
+
+### Docs Commands
+
+| Command | Description |
+|:---|:---|
+| `kazma docs build` | Build the Docusaurus documentation site |
+| `kazma docs serve [port]` | Serve documentation locally (default port `3000`) |
+
+### Examples
+
+```bash
+# Gateway lifecycle
+kazma gateway start
+kazma gateway status
+
+# Add and dispatch a swarm worker
+kazma swarm worker add researcher --model gpt-4o-mini --provider openai --type in-process --role researcher
+kazma swarm dispatch researcher "Summarize today's news in 3 bullets"
+
+# Orchestrate a pipeline across three workers
+kazma swarm pipeline --workers researcher,writer,reviewer "Draft a blog post about LangGraph"
+
+# Fan-out with vote aggregation
+kazma swarm fanout --workers a,b,c "Rate this PR 1-10" --aggregation vote
+
+# Consult two experts and get a synthesized answer
+kazma swarm consult "Best database for time-series?" --workers dba,architect --context "100TB scale"
+
+# Approve a paused HITL checkpoint
+kazma swarm approve task_42
+
+# Inspect task history and metrics
+kazma swarm history --type pipeline --status completed --page 1 --page-size 20
+kazma swarm metrics --worker researcher
+```
+
+### CLI Quick Reference
+
+| What you want to do | Command |
+|:---|:---|
+| See overall status | `kazma status` |
+| Start the Web UI | `kazma serve` (or `kazma-web`) |
+| Start the terminal UI | `kazma-tui` |
+| Start the gateway | `kazma gateway start` |
+| List swarm workers | `kazma swarm workers` |
+| Send one task to one worker | `kazma swarm dispatch <worker> <prompt>` |
+| Send one task to all workers | `kazma swarm broadcast <prompt>` |
+| Chain workers sequentially | `kazma swarm pipeline --workers a,b <prompt>` |
+| Run the same task in parallel | `kazma swarm fanout --workers a,b <prompt>` |
+| Get expert opinions + synthesis | `kazma swarm consult <prompt> --workers a,b` |
+| Approve a paused task | `kazma swarm approve <id>` |
+| Search the skill marketplace | `kazma hub search <query>` |
+| Install a skill | `kazma hub install <name>` |
+| Initialize a project | `kazma project init` |
+| Install shell completion | `kazma completion install` |
+| Check for and install updates | `kazma update` |
+
+> Full syntax, flags, and exit codes for every command are in the
+> [CLI Reference](docs/docs/api-reference/cli-reference.md).
 
 ---
 
@@ -562,6 +707,7 @@ uv run pytest tests/ -f
 
 ## 📚 Documentation
 
+- [CLI Reference](docs/docs/api-reference/cli-reference.md)
 - [Slash Commands Reference](docs/slash-commands.md)
 - [Portability Policy](docs/portability.md)
 - [Context Compaction](docs/compaction.md)

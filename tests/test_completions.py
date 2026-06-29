@@ -62,9 +62,10 @@ class TestCompletionZshGenerates:
     def test_zsh_includes_subcommand_descriptions(self) -> None:
         """Zsh script has descriptive subcommand entries."""
         output = _zsh_completion_script()
-        assert "chat[Start an interactive chat session]" in output
         assert "serve[Start the WebUI server]" in output
         assert "completion[Manage shell completions]" in output
+        assert "gateway[Gateway control]" in output
+        assert "swarm[Swarm orchestration]" in output
 
     def test_zsh_has_model_state_handler(self) -> None:
         """Zsh script has the ->models state handler."""

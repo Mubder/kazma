@@ -12,7 +12,7 @@ from pathlib import Path
 # Public API
 # ---------------------------------------------------------------------------
 
-SUBCMDS = ["chat", "serve", "status", "help", "completion", "wizard", "hub", "docs"]
+SUBCMDS = ["serve", "status", "help", "completion", "wizard", "hub", "docs", "project", "gateway", "swarm", "update"]
 FLAGS = ["--model", "--provider", "--yolo", "--verbose", "--no-banner", "--help", "-h"]
 FALLBACK_MODELS = [
     "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
@@ -171,7 +171,6 @@ complete -F _kazma_completion kazma
 def _zsh_subcmd_descs() -> list[str]:
     """Return zsh-style subcommand descriptions (``"name[desc]"``)."""
     return [
-        "chat[Start an interactive chat session]",
         "serve[Start the WebUI server]",
         "status[Show Kazma status]",
         "help[Show help text]",
@@ -179,6 +178,10 @@ def _zsh_subcmd_descs() -> list[str]:
         "wizard[Interactive skill installation wizard]",
         "hub[Kazma Hub commands]",
         "docs[Documentation commands]",
+        "project[Project-level config]",
+        "gateway[Gateway control]",
+        "swarm[Swarm orchestration]",
+        "update[Check for and install CLI updates]",
     ]
 
 
