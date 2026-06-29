@@ -94,6 +94,32 @@ def _split_workers(raw: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Registry-aware defaults
+# ---------------------------------------------------------------------------
+
+def _default_model() -> str:
+    """Return the active model from ModelRegistry, or a hardcoded fallback."""
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        profile = get_model_registry().get_active_profile()
+        return profile.get("model", "deepseek-chat")
+    except (RuntimeError, ImportError):
+        return "deepseek-chat"
+
+
+def _default_provider() -> str:
+    """Return the active provider from ModelRegistry, or a hardcoded fallback."""
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        profile = get_model_registry().get_active_profile()
+        return profile.get("provider", "deepseek")
+    except (RuntimeError, ImportError):
+        return "deepseek"
+
+
+# ---------------------------------------------------------------------------
 # Command implementations
 # ---------------------------------------------------------------------------
 
@@ -137,8 +163,8 @@ async def cmd_worker_add(base_url: str, positionals: list[str], flags: dict[str,
     name = positionals[0]
     payload: dict[str, Any] = {
         "name": name,
-        "model": flags.get("--model", "deepseek-chat"),
-        "provider": flags.get("--provider", "deepseek"),
+        "model": flags.get("--model", _default_model()),
+        "provider": flags.get("--provider", _default_provider()),
         "type": flags.get("--type", "in-process"),
         "role": flags.get("--role", ""),
     }
@@ -168,8 +194,8 @@ async def cmd_worker_spawn(base_url: str, positionals: list[str], flags: dict[st
         "name": name,
         "role": role,
         "capabilities": {"role": role},
-        "model": flags.get("--model", ""),
-        "provider": flags.get("--provider", ""),
+        "model": flags.get("--model", _default_model()),
+        "provider": flags.get("--provider", _default_provider()),
         "worker_type": flags.get("--type", "in_process"),
     }
     async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:

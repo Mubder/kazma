@@ -14,20 +14,6 @@ from pathlib import Path
 
 SUBCMDS = ["serve", "status", "help", "completion", "wizard", "hub", "docs", "project", "gateway", "swarm", "update"]
 FLAGS = ["--model", "--provider", "--yolo", "--verbose", "--no-banner", "--help", "-h"]
-FALLBACK_MODELS = [
-    "gpt-4o", "gpt-4o-mini", "gpt-4-turbo",
-    "claude-sonnet-4-20250514", "claude-3-haiku",
-    "gemini-2.5-flash", "gemini-2.5-pro",
-    "deepseek-chat", "deepseek-v4-pro",
-]
-FALLBACK_PROVIDERS = [
-    "anthropic",
-    "deepseek",
-    "google",
-    "ollama",
-    "openai",
-    "openrouter",
-]
 
 
 def generate_completions(shell: str = "bash") -> str:
@@ -92,13 +78,18 @@ def install_completion(shell: str = "bash") -> str:
 
 
 def list_available_models() -> list[str]:
-    """Return deduplicated, sorted model names from unified registry with fallback."""
-    registry_options = _load_registry_options()
-    models = registry_options["models"]
-    if models:
-        return models
+    """Return deduplicated, sorted model names from the registry or config."""
+    try:
+        from kazma_core.model_registry import get_model_registry
 
-    # Backward-compatible fallback from YAML config.
+        registry = get_model_registry()
+        models = registry.get_discovered_models()
+        if models:
+            return sorted(set(models))
+    except (RuntimeError, ImportError):
+        pass
+
+    # Fallback: read from ConfigStore/YAML
     models = []
     try:
         from kazma_cli.banner import _load_config
@@ -106,18 +97,15 @@ def list_available_models() -> list[str]:
         config = _load_config()
         models_cfg = config.get("models", {})
         if isinstance(models_cfg, dict):
-            # Direct list
             for key in ("available", "model_list"):
                 val = models_cfg.get(key, [])
                 if isinstance(val, list):
                     models.extend(val)
-            # Per-provider models
             providers = models_cfg.get("providers", {})
             if isinstance(providers, dict):
                 for provider_models in providers.values():
                     if isinstance(provider_models, list):
                         models.extend(provider_models)
-        # llm.model
         llm = config.get("llm", {})
         if isinstance(llm, dict) and "model" in llm:
             models.append(llm["model"])
@@ -125,38 +113,21 @@ def list_available_models() -> list[str]:
         pass
 
     if not models:
-        models = FALLBACK_MODELS
+        models = ["deepseek-chat", "gpt-4o-mini", "claude-sonnet-4"]
 
-    return _normalize_name_list(models)
+    return sorted(set(models))
 
 
 def list_available_providers() -> list[str]:
-    """Return deduplicated, sorted provider names from unified registry with fallback."""
-    registry_options = _load_registry_options()
-    providers = registry_options["providers"]
-    if providers:
-        return providers
-
-    names: list[str] = []
+    """Return sorted provider names from the registry."""
     try:
-        from kazma_cli.banner import _load_config
+        from kazma_core.model_registry import get_model_registry
 
-        config = _load_config()
-        models_cfg = config.get("models", {})
-        if isinstance(models_cfg, dict):
-            providers = models_cfg.get("providers", {})
-            if isinstance(providers, dict):
-                names.extend(providers.keys())
-        providers_cfg = config.get("providers", {})
-        if isinstance(providers_cfg, dict):
-            names.extend(providers_cfg.keys())
-    except Exception:
-        pass
-
-    if not names:
-        names = FALLBACK_PROVIDERS
-
-    return _normalize_name_list(names)
+        registry = get_model_registry()
+        providers = registry.list_providers()
+        return sorted(p.get("name", "") for p in providers if p.get("name"))
+    except (RuntimeError, ImportError):
+        return ["deepseek", "openai", "anthropic", "google", "ollama"]
 
 
 # ---------------------------------------------------------------------------
@@ -385,32 +356,4 @@ Register-ArgumentCompleter -Native -CommandName kazma -ScriptBlock {{
 """
 
 
-def _load_registry_options() -> dict[str, list[str]]:
-    """Load unified model/provider options from ConfigStore when available."""
-    try:
-        from kazma_core.config_store import ConfigStore
-        from kazma_core.model_registry import UnifiedModelRegistry
 
-        from kazma_cli.banner import _find_project_root
-
-        project_root = _find_project_root()
-        settings_db = project_root / "kazma-data" / "settings.db"
-        yaml_path = project_root / "kazma.yaml"
-        store = ConfigStore(db_path=str(settings_db), yaml_path=str(yaml_path))
-        try:
-            options = UnifiedModelRegistry(store).list_unified_options()
-        finally:
-            store.close()
-        models = options.get("models", [])
-        providers = options.get("providers", [])
-        return {
-            "models": _normalize_name_list(models if isinstance(models, list) else []),
-            "providers": _normalize_name_list(providers if isinstance(providers, list) else []),
-        }
-    except Exception:
-        return {"models": [], "providers": []}
-
-
-def _normalize_name_list(values: list[str]) -> list[str]:
-    """Normalize arbitrary value lists into sorted unique non-empty strings."""
-    return sorted({str(value).strip() for value in values if str(value).strip()})

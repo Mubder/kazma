@@ -140,15 +140,22 @@ def show_status(config: dict[str, Any] | None = None) -> str:
     lines.append("─" * 52)
     lines.append("  System Status")
 
-    # Model
-    model = "unknown"
-    llm = config.get("llm", {})
-    if isinstance(llm, dict):
-        model = llm.get("model", config.get("models", {}).get("default", "unknown"))
-    lines.append(f"  Model:     {model}")
+    # Model / Provider — prefer ModelRegistry, fall back to YAML
+    try:
+        from kazma_core.model_registry import get_model_registry
 
-    # Provider
-    provider = config.get("models", {}).get("router", "litellm") if isinstance(config.get("models"), dict) else "litellm"
+        profile = get_model_registry().get_active_profile()
+        model = profile.get("model", "unknown")
+        provider = profile.get("provider", "unknown")
+    except (RuntimeError, ImportError):
+        llm = config.get("llm", {})
+        model = llm.get("model", config.get("models", {}).get("default", "unknown"))
+        provider = (
+            config.get("models", {}).get("router", "litellm")
+            if isinstance(config.get("models"), dict)
+            else "litellm"
+        )
+    lines.append(f"  Model:     {model}")
     lines.append(f"  Provider:  {provider}")
 
     # Tools (slash commands)
