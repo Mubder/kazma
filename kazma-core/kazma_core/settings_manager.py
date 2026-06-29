@@ -67,12 +67,12 @@ class SettingsManager:
 
     def __init__(self, config_store: Any) -> None:
         self._cs = config_store
-        try:
-            from kazma_core.model_registry import get_model_registry
-            self._registry = get_model_registry()
-        except RuntimeError:
-            from kazma_core.model_registry import ModelRegistry
-            self._registry = ModelRegistry(config_store)
+        # Always create a local ModelRegistry from the provided config_store.
+        # The global singleton may point to a different ConfigStore instance
+        # (e.g. in tests), so we must not use it here.
+        from kazma_core.model_registry import ModelRegistry
+
+        self._registry = ModelRegistry(config_store)
 
     # ══════════════════════════════════════════════════════════════════
     # PROVIDERS
