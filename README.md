@@ -186,7 +186,7 @@ docker compose up -d
 | ✅ | HITL Approval UI | Inline approve/deny panel for tiered tool-safety gates |
 | ✅ | Session History | Load and browse prior conversations from any session |
 | ✅ | Agents Page | Dedicated page for agent inspection and control |
-| ✅ | Swarm Panel | Worker table, dispatch form, and lifecycle controls at `/swarm |
+| ✅ | Swarm Panel | Redesigned tabbed UI with Task Builder (orchestration pattern selector, worker multi-select with capability badges, advanced options), Active Tasks (SSE-connected live progress, HITL checkpoints, handoff chains), Results Dashboard (pipeline steps, fan-out cards, consult comparison, conditional routing), Worker Registry (cards with metrics, add/remove, dynamic spawn), Task History (searchable/filterable table with detail modal) |
 | ✅ | Telemetry | SSE telemetry with deduplicated route streaming and null-safe toast notifications |
 | ✅ | Service Facade | Zero private attribute access from UI — all access via the service layer |
 
@@ -236,6 +236,16 @@ Kazma supports two sub-agent delegation modes:
 |:---|:---|:---|
 | **In-Process** | `SubAgentManager` — child LangGraph graphs in the same Python process | Quick parallel subtasks, isolated context |
 | **Distributed Swarm** | Swarm Panel — register workers, dispatch tasks, monitor health via Web UI | Multi-machine deployments, Telegram bot workers |
+
+### Swarm Panel UI
+
+The redesigned Swarm Panel at `/swarm` provides a tabbed interface:
+
+- **Task Builder** — Orchestration pattern selector (dispatch, broadcast, pipeline, fan-out, consult, conditional), worker multi-select with capability badges (role + expertise tags), prompt/context textareas, advanced options (timeout, max retry count, aggregation strategy, validation schema), conditional routing rules
+- **Active Tasks** — SSE-connected live progress with per-worker status events, HITL checkpoint cards with approve/reject buttons, handoff chain visualization
+- **Results Dashboard** — Pattern-specific result views: pipeline step-by-step, fan-out per-worker grid, consult side-by-side comparison with synthesized answer, conditional routing decision display. Sub-tab filtering by orchestration type
+- **Worker Registry** — Worker cards with name, status, role, model, capabilities, and per-worker metrics (success rate, avg latency, cost). Add/remove workers. Dynamic spawn form with expertise tags, tools, and model specialty
+- **Task History** — Searchable and filterable table with pagination. Click any row to view full task detail with worker results and handoff chains
 
 ### Orchestration patterns
 

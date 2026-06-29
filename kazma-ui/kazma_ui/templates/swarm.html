@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% set active_page = "swarm" %}
-{% block title %}Kazma — {{ t('swarm.title') }}{% endblock %}
-{% block page_title %}{{ t('swarm.title') }}{% endblock %}
+{% block title %}Kazma — Swarm Orchestration{% endblock %}
+{% block page_title %}🐝 Swarm Orchestration{% endblock %}
 
 {% block content %}
-<div class="swarm-container" style="max-width:1400px;margin:0 auto;">
+<div class="swarm-container" style="max-width:1500px;margin:0 auto;">
 
   <!-- ── Setup Banner ── -->
   <div id="setup-banner" style="display:none;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:8px;padding:12px 16px;margin-bottom:16px;">
@@ -15,18 +15,30 @@
   </div>
 
   <!-- ── Metrics Bar ── -->
-  <div class="metrics-grid" style="margin-bottom:1.5rem;">
+  <div class="metrics-grid" style="margin-bottom:1.5rem;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
     <div class="metric-card">
       <div class="metric-icon">🐝</div>
-      <div class="metric-label">{{ t('swarm.workers') }}</div>
+      <div class="metric-label">Workers</div>
       <div class="metric-value" id="metric-worker-count" style="color:var(--text-primary);">{{ worker_count }}</div>
-      <div class="metric-sub"><span id="metric-busy">0</span> {{ t('swarm.busy') }}</div>
+      <div class="metric-sub"><span id="metric-busy">0</span> busy</div>
     </div>
     <div class="metric-card">
       <div class="metric-icon">⚡</div>
-      <div class="metric-label">{{ t('swarm.status') }}</div>
-      <div class="metric-value" id="metric-swarm-status" style="color:var(--text-muted);">{{ t('swarm.running') if started else t('swarm.stopped') }}</div>
+      <div class="metric-label">Status</div>
+      <div class="metric-value" id="metric-swarm-status" style="color:var(--text-muted);">{{ 'Running' if started else 'Stopped' }}</div>
       <div class="metric-sub">swarm {{ 'active' if started else 'idle' }}</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-icon">📊</div>
+      <div class="metric-label">Tasks Today</div>
+      <div class="metric-value" id="metric-tasks-today" style="color:var(--text-primary);">0</div>
+      <div class="metric-sub">completed</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-icon">💰</div>
+      <div class="metric-label">Total Cost</div>
+      <div class="metric-value" id="metric-total-cost" style="color:var(--text-primary);">$0.00</div>
+      <div class="metric-sub">today</div>
     </div>
   </div>
 
@@ -37,212 +49,451 @@
         <span id="swarm-status-text" style="font-size:0.9rem;color:var(--text-muted);">● Loading swarm status…</span>
       </div>
       <div style="display:flex;gap:8px;">
-        <button id="swarm-start" class="btn btn-primary" onclick="KazmaSwarm.start()" {% if started %}disabled{% endif %}>
-          ▶ Start All
-        </button>
-        <button id="swarm-stop" class="btn btn-danger" onclick="KazmaSwarm.stop()" {% if not started %}disabled{% endif %}>
-          ⏹ Stop All
-        </button>
+        <button id="swarm-start" class="btn btn-primary" onclick="KazmaSwarm.start()" {% if started %}disabled{% endif %}>▶ Start All</button>
+        <button id="swarm-stop" class="btn btn-danger" onclick="KazmaSwarm.stop()" {% if not started %}disabled{% endif %}>⏹ Stop All</button>
         <button class="btn btn-secondary" onclick="KazmaSwarm.refresh()" title="Manual refresh">↻</button>
       </div>
     </div>
   </div>
 
-  <!-- ── Main Grid ── -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+  <!-- ── Tab Navigation ── -->
+  <div class="tabs" id="swarm-tabs" style="margin-bottom:0;">
+    <button class="tab active" data-tab="task-builder" onclick="KazmaSwarm.switchTab('task-builder')">🔧 Task Builder</button>
+    <button class="tab" data-tab="active-tasks" onclick="KazmaSwarm.switchTab('active-tasks')">⚡ Active Tasks</button>
+    <button class="tab" data-tab="results-dashboard" onclick="KazmaSwarm.switchTab('results-dashboard')">📊 Results Dashboard</button>
+    <button class="tab" data-tab="worker-registry" onclick="KazmaSwarm.switchTab('worker-registry')">👷 Worker Registry</button>
+    <button class="tab" data-tab="task-history" onclick="KazmaSwarm.switchTab('task-history')">📜 Task History</button>
+  </div>
 
-    <!-- Worker Table -->
-    <div class="card" style="padding:0;overflow:hidden;grid-column:1;">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle);">
-        <h3 style="font-size:0.9rem;font-weight:600;">👷 Workers</h3>
-        <span style="font-size:0.75rem;color:var(--text-muted);" id="worker-count-badge">{{ worker_count }} registered</span>
-      </div>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
-          <thead>
-            <tr style="border-bottom:1px solid var(--border-subtle);">
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Name</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Model</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Status</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Provider</th>
-              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Type</th>
-              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Actions</th>
-            </tr>
-          </thead>
-          <tbody id="worker-list-body">
-            {% if workers %}
-            {% for w in workers %}
-            <tr class="worker-row" data-worker="{{ w.name }}">
-              <td style="padding:10px 16px;">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--text-muted);"></span>
-                  <span style="font-weight:500;">{{ w.name }}</span>
-                </div>
-              </td>
-              <td style="padding:10px 16px;font-family:var(--font-mono);font-size:0.8rem;">{{ w.get('model', '?') }}</td>
-              <td style="padding:10px 16px;">{{ w.get('status', 'offline') }}</td>
-              <td style="padding:10px 16px;font-size:0.8rem;color:var(--text-tertiary);">{{ w.get('provider', '?') }}</td>
-              <td style="padding:10px 16px;font-size:0.8rem;color:var(--text-tertiary);">{{ w.get('type', '?') }}</td>
-              <td style="padding:10px 16px;text-align:right;">
-                <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="logs" style="margin-right:4px;">📋</button>
-                <button class="btn btn-sm btn-danger" data-worker="{{ w.name }}" data-action="remove">✕</button>
-              </td>
-            </tr>
-            {% endfor %}
-            {% else %}
-            <tr><td colspan="6" style="padding:40px;text-align:center;color:var(--text-muted);">
-              <div style="font-size:2rem;margin-bottom:8px;">🐝</div>
-              <p>No workers registered</p>
-              <p style="font-size:0.8rem;color:var(--text-tertiary);">Add a worker using the form on the right</p>
-            </td></tr>
-            {% endif %}
-          </tbody>
-        </table>
-      </div>
-    </div>
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB: Task Builder                                                -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="panel-task-builder" style="display:block;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
 
-    <!-- Right Column: Add Worker + Dispatch -->
-    <div style="display:flex;flex-direction:column;gap:20px;">
-      <!-- Add Worker Form -->
+      <!-- Left: Task Configuration -->
       <div class="card">
-        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:16px;">➕ Add Worker</h3>
-        <form id="add-worker-form" onsubmit="return false;">
-          <div class="form-group">
-            <label class="form-label">Worker Name *</label>
-            <input type="text" id="add-name" class="form-input" placeholder="e.g., worker-1, code-reviewer" required>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Role Preset</label>
-              <select id="add-role" class="form-select" onchange="KazmaSwarm.applyRole(this.value)">
-                <option value="">Custom</option>
-                <option value="orchestrator">Orchestrator (Supervisor)</option>
-                <option value="observer">Observer (Watcher)</option>
-                <option value="backend">Backend (Code/Tools)</option>
-                <option value="frontend">Frontend (UI/UX)</option>
-                <option value="researcher">Researcher (Analysis)</option>
-                <option value="reviewer">Reviewer (Code Review)</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Model</label>
-              <input type="text" id="add-model" class="form-input" placeholder="e.g., deepseek-chat, gpt-4o" value="deepseek-chat" list="saved-profiles-datalist">
-              <datalist id="saved-profiles-datalist">
-                <!-- Populated dynamically by swarm.js from /api/models/saved -->
-              </datalist>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Saved Profile</label>
-              <select id="add-saved-profile" class="form-select" onchange="KazmaSwarm.applySavedProfile(this.value)">
-                <option value="">— Select Profile —</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">API Endpoint <span style="font-size:0.7rem;color:var(--text-muted);">(optional)</span></label>
-              <input type="text" id="add-endpoint" class="form-input" placeholder="https://api.example.com/v1">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Provider</label>
-              <select id="add-provider" class="form-select">
-                <option value="deepseek">DeepSeek</option>
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="google">Google</option>
-                <option value="custom">Custom</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Type</label>
-              <select id="add-type" class="form-select">
-                <option value="in-process">In-Process</option>
-                <option value="telegram">Telegram</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Bot Token (optional)</label>
-              <input type="password" id="add-token" class="form-input" placeholder="tg-bot-token">
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">API Key <span style="font-size:0.7rem;color:var(--text-muted);">(optional)</span></label>
-            <input type="password" id="add-apikey" class="form-input" placeholder="sk-...">
-          </div>
-          <div class="form-actions">
-            <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.addWorker()">Add Worker</button>
-          </div>
-        </form>
-      </div>
-
-      <!-- Dispatch Task Form -->
-      <div class="card">
-        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:16px;">📤 Dispatch Task</h3>
+        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">📤 Create Task</h3>
         <form id="dispatch-form" onsubmit="return false;">
+
+          <!-- Orchestration Pattern Selector (VAL-UI-001, VAL-ORCH-042) -->
           <div class="form-group">
-            <label class="form-label">Worker(s) *</label>
-            <select id="dispatch-workers" class="form-select" multiple style="height:100px;">
-              {% for w in workers %}
-              <option value="{{ w.name }}">{{ w.name }} ({{ w.get('model', '?') }})</option>
-              {% endfor %}
+            <label class="form-label">Orchestration Pattern *</label>
+            <select id="pattern-select" class="form-select" onchange="KazmaSwarm.onPatternChange(this.value)">
+              <option value="dispatch">🎯 Dispatch — Single worker execution</option>
+              <option value="broadcast">📢 Broadcast — All workers in parallel</option>
+              <option value="pipeline">🔗 Pipeline — Sequential chain (A → B → C)</option>
+              <option value="fan_out">🌀 Fan-Out — Parallel execution + aggregation</option>
+              <option value="consult">💬 Consult — Multi-opinion + synthesis</option>
+              <option value="conditional">🔀 Conditional — Route based on evaluation</option>
             </select>
-            <span style="font-size:0.7rem;color:var(--text-muted);">Hold Ctrl to select multiple workers</span>
           </div>
+
+          <!-- Worker Multi-Select with Capability Badges (VAL-UI-002, VAL-ORCH-043) -->
           <div class="form-group">
-            <label class="form-label">Task *</label>
-            <textarea id="dispatch-task" class="form-textarea" rows="3" placeholder="Describe the task to dispatch…" required></textarea>
+            <label class="form-label">Workers *</label>
+            <div id="worker-select-container" style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;min-height:80px;background:rgba(255,255,255,0.02);max-height:200px;overflow-y:auto;">
+              <!-- Worker checkboxes rendered by JS with capability badges -->
+              <div id="worker-checkboxes" style="display:flex;flex-direction:column;gap:4px;">
+                {% for w in workers %}
+                <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
+                  <input type="checkbox" name="selected_workers" value="{{ w.name }}" style="accent-color:var(--accent);">
+                  <span style="font-weight:500;">{{ w.name }}</span>
+                  {% if w.get('role') %}<span class="badge badge-accent" style="font-size:0.7rem;">{{ w.role }}</span>{% endif %}
+                  {% if w.get('capabilities') and w.capabilities.get('expertise') %}
+                    {% for tag in w.capabilities.expertise[:3] %}
+                    <span class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
+                    {% endfor %}
+                  {% endif %}
+                  <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ w.get('model', '?') }}</span>
+                </label>
+                {% endfor %}
+                {% if not workers %}
+                <div style="color:var(--text-muted);font-size:0.85rem;padding:8px;">No workers registered. Add workers in the Worker Registry tab.</div>
+                {% endif %}
+              </div>
+            </div>
+            <span style="font-size:0.7rem;color:var(--text-muted);" id="pattern-hint">Select one or more workers for dispatch</span>
           </div>
+
+          <!-- Prompt Textarea (VAL-UI-003) -->
           <div class="form-group">
-            <label class="form-label">Context <span style="font-size:0.7rem;color:var(--text-muted);">— optional</span></label>
-            <input type="text" id="dispatch-context" class="form-input" placeholder="Additional context or instructions">
+            <label class="form-label">Prompt *</label>
+            <textarea id="dispatch-task" class="form-textarea" rows="4" placeholder="Describe the task for the workers…" required></textarea>
           </div>
-          <div class="form-actions">
-            <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.dispatch()">Send Task</button>
+
+          <!-- Context Textarea (VAL-UI-003) -->
+          <div class="form-group">
+            <label class="form-label">Context <span style="font-size:0.7rem;color:var(--text-muted);">— optional background information</span></label>
+            <textarea id="dispatch-context" class="form-textarea" rows="2" placeholder="Additional context, constraints, or background…"></textarea>
+          </div>
+
+          <!-- Conditional Routes (shown only for conditional pattern) -->
+          <div id="conditional-routes-group" class="form-group" style="display:none;">
+            <label class="form-label">Routing Rules <span style="font-size:0.7rem;color:var(--text-muted);">— JSON mapping of route names to worker names</span></label>
+            <textarea id="conditional-routes" class="form-textarea" rows="3" placeholder='{"approve": "worker-a", "reject": "worker-b", "default": "worker-c"}'></textarea>
+          </div>
+
+          <!-- Advanced Options (VAL-UI-004) -->
+          <details style="margin-top:12px;border:1px solid var(--border);border-radius:var(--radius);padding:0;">
+            <summary style="padding:10px 12px;cursor:pointer;font-size:0.85rem;font-weight:500;color:var(--text-secondary);background:rgba(255,255,255,0.02);border-radius:var(--radius);">
+              ⚙️ Advanced Options
+            </summary>
+            <div style="padding:12px;display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div class="form-group" style="margin:0;">
+                <label class="form-label" style="font-size:0.8rem;">Timeout (seconds)</label>
+                <input type="number" id="adv-timeout" class="form-input" value="300" min="1" max="3600" step="1">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label" style="font-size:0.8rem;">Max Retry Count</label>
+                <input type="number" id="adv-retries" class="form-input" value="0" min="0" max="10" step="1">
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label" style="font-size:0.8rem;">Aggregation Strategy</label>
+                <select id="adv-aggregation" class="form-select">
+                  <option value="collect">Collect — Return all results</option>
+                  <option value="first_valid">First Valid — Earliest non-error</option>
+                  <option value="merge_all">Merge All — Combine outputs</option>
+                  <option value="vote">Vote — Majority agreement</option>
+                  <option value="synthesize">Synthesize — LLM-powered consolidation</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label" style="font-size:0.8rem;">Validation Schema (JSON)</label>
+                <input type="text" id="adv-validation" class="form-input" placeholder='{"type":"object"}'>
+              </div>
+            </div>
+          </details>
+
+          <!-- Submit -->
+          <div class="form-actions" style="margin-top:16px;">
+            <button type="button" class="btn btn-primary btn-full" id="btn-dispatch" onclick="KazmaSwarm.dispatch()">
+              🚀 Create Task
+            </button>
           </div>
         </form>
       </div>
 
-      <!-- ── Task Results ── -->
-      <div class="card" id="task-results-card">
-        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:16px;">📋 Task Results</h3>
-        <div id="task-results-container">
-          <div id="task-results-empty" style="text-align:center;padding:24px;color:var(--text-muted);">
-            <div style="font-size:1.5rem;margin-bottom:6px;">📭</div>
-            <p style="font-size:0.85rem;">No tasks dispatched yet</p>
-            <p style="font-size:0.75rem;color:var(--text-tertiary);">Results will appear here after dispatching a task</p>
-          </div>
-          <div id="task-results-list"></div>
-        </div>
-      </div>
-
-      <!-- Performance Metrics -->
-      <div class="card">
-        <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:12px;">📊 Performance</h3>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-          <div style="text-align:center;padding:12px;background:rgba(255,255,255,0.02);border-radius:6px;">
-            <div style="font-size:1.5rem;font-weight:600;color:var(--accent);">—</div>
-            <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Tasks Today</div>
-          </div>
-          <div style="text-align:center;padding:12px;background:rgba(255,255,255,0.02);border-radius:6px;">
-            <div style="font-size:1.5rem;font-weight:600;color:var(--accent);">—</div>
-            <div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Avg Latency</div>
+      <!-- Right: Recent Results Preview -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div class="card" id="task-results-card">
+          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:12px;">📋 Recent Results</h3>
+          <div id="task-results-container">
+            <div id="task-results-empty" style="text-align:center;padding:24px;color:var(--text-muted);">
+              <div style="font-size:1.5rem;margin-bottom:6px;">📭</div>
+              <p style="font-size:0.85rem;">No tasks dispatched yet</p>
+              <p style="font-size:0.75rem;color:var(--text-tertiary);">Results will appear here after dispatching a task</p>
+            </div>
+            <div id="task-results-list"></div>
           </div>
         </div>
       </div>
     </div>
   </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB: Active Tasks (SSE-connected)                               -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="panel-active-tasks" style="display:none;">
+    <div id="active-tasks-container">
+      <div id="active-tasks-empty" style="text-align:center;padding:48px;color:var(--text-muted);">
+        <div style="font-size:2rem;margin-bottom:8px;">⚡</div>
+        <p style="font-size:0.9rem;">No active tasks</p>
+        <p style="font-size:0.8rem;color:var(--text-tertiary);">Submit a task from the Task Builder to see live progress here</p>
+        <p style="font-size:0.75rem;color:var(--text-tertiary);margin-top:8px;">Handoff chains, HITL checkpoints, and per-worker progress shown in real-time via SSE</p>
+      </div>
+      <div id="active-tasks-list"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB: Results Dashboard                                          -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="panel-results-dashboard" style="display:none;">
+    <!-- Pattern-specific result sub-tabs -->
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+      <button class="tab-btn active" data-result-tab="all" onclick="KazmaSwarm.filterResults('all')">All Results</button>
+      <button class="tab-btn" data-result-tab="pipeline" onclick="KazmaSwarm.filterResults('pipeline')">🔗 Pipeline</button>
+      <button class="tab-btn" data-result-tab="fan_out" onclick="KazmaSwarm.filterResults('fan_out')">🌀 Fan-Out</button>
+      <button class="tab-btn" data-result-tab="consult" onclick="KazmaSwarm.filterResults('consult')">💬 Consult</button>
+      <button class="tab-btn" data-result-tab="conditional" onclick="KazmaSwarm.filterResults('conditional')">🔀 Conditional</button>
+      <button class="tab-btn" data-result-tab="dispatch" onclick="KazmaSwarm.filterResults('dispatch')">🎯 Dispatch</button>
+    </div>
+
+    <div id="results-dashboard-container">
+      <div id="results-dashboard-empty" style="text-align:center;padding:48px;color:var(--text-muted);">
+        <div style="font-size:2rem;margin-bottom:8px;">📊</div>
+        <p style="font-size:0.9rem;">No completed tasks yet</p>
+        <p style="font-size:0.8rem;color:var(--text-tertiary);">Complete tasks will appear here with pattern-specific visualizations</p>
+      </div>
+      <div id="results-dashboard-list"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB: Worker Registry                                            -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="panel-worker-registry" style="display:none;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+
+      <!-- Left: Worker Cards -->
+      <div>
+        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:12px;">👷 Registered Workers</h3>
+        <div id="worker-cards-container">
+          {% if workers %}
+          {% for w in workers %}
+          <div class="card" style="margin-bottom:12px;" id="worker-card-{{ w.name }}">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+              <div>
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                  <span style="display:inline-block;width:10px;height:10px;border-radius:50;background:{% if w.get('status') == 'online' %}var(--success){% elif w.get('status') == 'busy' %}var(--warning){% else %}var(--danger){% endif %};"></span>
+                  <span style="font-weight:600;font-size:0.95rem;">{{ w.name }}</span>
+                  {% if w.get('role') %}<span class="badge badge-accent">{{ w.role }}</span>{% endif %}
+                </div>
+                <div style="display:flex;gap:16px;font-size:0.8rem;color:var(--text-tertiary);">
+                  <span>Model: <span style="color:var(--text-secondary);font-family:var(--font-mono);">{{ w.get('model', '?') }}</span></span>
+                  <span>Provider: <span style="color:var(--text-secondary);">{{ w.get('provider', '?') }}</span></span>
+                  <span>Type: <span style="color:var(--text-secondary);">{{ w.get('type', '?') }}</span></span>
+                </div>
+                {% if w.get('capabilities') and w.capabilities.get('expertise') %}
+                <div style="display:flex;gap:4px;margin-top:8px;flex-wrap:wrap;">
+                  {% for tag in w.capabilities.expertise %}
+                  <span class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
+                  {% endfor %}
+                </div>
+                {% endif %}
+                <!-- Per-worker metrics placeholder (VAL-UI-010) -->
+                <div class="worker-metrics" data-worker="{{ w.name }}" style="display:flex;gap:16px;margin-top:8px;font-size:0.75rem;color:var(--text-muted);">
+                  <span>Success: <strong id="metric-success-{{ w.name }}">—</strong></span>
+                  <span>Avg Latency: <strong id="metric-latency-{{ w.name }}">—</strong></span>
+                  <span>Cost: <strong id="metric-cost-{{ w.name }}">—</strong></span>
+                </div>
+              </div>
+              <div style="display:flex;gap:4px;">
+                <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="logs" title="View logs">📋</button>
+                <button class="btn btn-sm btn-danger" data-worker="{{ w.name }}" data-action="remove" title="Remove worker">✕</button>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+          {% else %}
+          <div style="text-align:center;padding:48px;color:var(--text-muted);">
+            <div style="font-size:2rem;margin-bottom:8px;">🐝</div>
+            <p>No workers registered</p>
+            <p style="font-size:0.8rem;color:var(--text-tertiary);">Use the form to add or spawn workers</p>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Right: Add Worker + Dynamic Spawn Form -->
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <!-- Add Worker Form -->
+        <div class="card">
+          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">➕ Add Worker</h3>
+          <form id="add-worker-form" onsubmit="return false;">
+            <div class="form-group">
+              <label class="form-label">Worker Name *</label>
+              <input type="text" id="add-name" class="form-input" placeholder="e.g., worker-1, code-reviewer" required>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Role</label>
+                <select id="add-role" class="form-select" onchange="KazmaSwarm.applyRole(this.value)">
+                  <option value="">Custom</option>
+                  <option value="orchestrator">Orchestrator</option>
+                  <option value="observer">Observer</option>
+                  <option value="backend">Backend</option>
+                  <option value="frontend">Frontend</option>
+                  <option value="researcher">Researcher</option>
+                  <option value="reviewer">Reviewer</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Model</label>
+                <input type="text" id="add-model" class="form-input" value="deepseek-chat" list="saved-profiles-datalist">
+                <datalist id="saved-profiles-datalist"></datalist>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Provider</label>
+                <select id="add-provider" class="form-select">
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="google">Google</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Type</label>
+                <select id="add-type" class="form-select">
+                  <option value="in-process">In-Process</option>
+                  <option value="telegram">Telegram</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">API Key <span style="font-size:0.7rem;color:var(--text-muted);">(optional)</span></label>
+              <input type="password" id="add-apikey" class="form-input" placeholder="sk-...">
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.addWorker()">Add Worker</button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Dynamic Spawn Form (VAL-UI-009) -->
+        <div class="card">
+          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">🧬 Dynamic Spawn</h3>
+          <form id="spawn-worker-form" onsubmit="return false;">
+            <div class="form-group">
+              <label class="form-label">Worker Name *</label>
+              <input type="text" id="spawn-name" class="form-input" placeholder="e.g., python-expert" required>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Role *</label>
+                <input type="text" id="spawn-role" class="form-input" placeholder="e.g., backend, researcher">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Model</label>
+                <input type="text" id="spawn-model" class="form-input" placeholder="deepseek-chat" value="deepseek-chat">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Expertise Tags <span style="font-size:0.7rem;color:var(--text-muted);">— comma separated</span></label>
+              <input type="text" id="spawn-expertise" class="form-input" placeholder="python, api_design, database">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Tools <span style="font-size:0.7rem;color:var(--text-muted);">— comma separated</span></label>
+              <input type="text" id="spawn-tools" class="form-input" placeholder="file_edit, terminal, browser">
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Model Specialty</label>
+                <select id="spawn-specialty" class="form-select">
+                  <option value="">None</option>
+                  <option value="reasoning">Reasoning</option>
+                  <option value="coding">Coding</option>
+                  <option value="creative">Creative</option>
+                  <option value="fast">Fast</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Provider</label>
+                <select id="spawn-provider" class="form-select">
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="google">Google</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.spawnWorker()">🧬 Spawn Worker</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB: Task History                                               -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="panel-task-history" style="display:none;">
+    <!-- Search and Filter Bar (VAL-ORCH-053) -->
+    <div class="card" style="margin-bottom:16px;">
+      <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+        <div class="form-group" style="flex:1;min-width:200px;margin:0;">
+          <label class="form-label" style="font-size:0.8rem;">Search</label>
+          <input type="text" id="history-search" class="form-input" placeholder="Search by task ID or prompt…" oninput="KazmaSwarm.filterHistory()">
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label" style="font-size:0.8rem;">Type</label>
+          <select id="history-filter-type" class="form-select" onchange="KazmaSwarm.filterHistory()">
+            <option value="">All Types</option>
+            <option value="dispatch">Dispatch</option>
+            <option value="broadcast">Broadcast</option>
+            <option value="pipeline">Pipeline</option>
+            <option value="fan_out">Fan-Out</option>
+            <option value="consult">Consult</option>
+            <option value="conditional">Conditional</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;">
+          <label class="form-label" style="font-size:0.8rem;">Status</label>
+          <select id="history-filter-status" class="form-select" onchange="KazmaSwarm.filterHistory()">
+            <option value="">All Statuses</option>
+            <option value="completed">Completed</option>
+            <option value="failed">Failed</option>
+            <option value="timeout">Timeout</option>
+            <option value="partial">Partial</option>
+          </select>
+        </div>
+        <button class="btn btn-secondary" onclick="KazmaSwarm.loadTaskHistory()" title="Refresh history">↻</button>
+      </div>
+    </div>
+
+    <!-- History Table -->
+    <div class="card" style="padding:0;overflow:hidden;">
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:0.85rem;" id="history-table">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border-subtle);">
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Task ID</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Type</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Prompt</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Workers</th>
+              <th style="padding:10px 16px;text-align:left;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Status</th>
+              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Duration</th>
+              <th style="padding:10px 16px;text-align:right;font-weight:500;color:var(--text-tertiary);font-size:0.75rem;text-transform:uppercase;">Cost</th>
+            </tr>
+          </thead>
+          <tbody id="history-table-body">
+            <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted);">
+              <div style="font-size:1.5rem;margin-bottom:6px;">📜</div>
+              <p>No task history loaded</p>
+              <p style="font-size:0.75rem;color:var(--text-tertiary);">Click refresh or navigate here to load history</p>
+            </td></tr>
+          </tbody>
+        </table>
+      </div>
+      <!-- Pagination -->
+      <div id="history-pagination" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-top:1px solid var(--border-subtle);font-size:0.8rem;color:var(--text-muted);">
+        <span id="history-count">0 tasks</span>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-sm btn-secondary" id="history-prev" onclick="KazmaSwarm.historyPrev()" disabled>← Prev</button>
+          <span id="history-page-info">Page 1</span>
+          <button class="btn btn-sm btn-secondary" id="history-next" onclick="KazmaSwarm.historyNext()" disabled>Next →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Task Detail Modal -->
+    <div id="task-detail-modal" class="modal-overlay" style="display:none;" onclick="KazmaSwarm.closeTaskDetail(event)">
+      <div class="modal modal-xl" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h2 id="task-detail-title">Task Detail</h2>
+          <button class="modal-close" onclick="KazmaSwarm.closeTaskDetail()">✕</button>
+        </div>
+        <div class="modal-body" id="task-detail-body" style="max-height:70vh;overflow-y:auto;">
+          Loading…
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <!-- ── Logs Modal ── -->
-<div id="logs-modal" class="modal-overlay" style="display:none;" @click.self="KazmaSwarm.closeLogs()">
-  <div class="modal-content" style="width:700px;max-height:80vh;">
+<div id="logs-modal" class="modal-overlay" style="display:none;" onclick="KazmaSwarm.closeLogs(event)">
+  <div class="modal modal-lg" onclick="event.stopPropagation()">
     <div class="modal-header">
-      <h3 id="logs-worker-name" style="font-size:0.95rem;font-weight:600;">Logs</h3>
-      <button class="btn-icon" onclick="KazmaSwarm.closeLogs()">✕</button>
+      <h2 id="logs-worker-name">Logs</h2>
+      <button class="modal-close" onclick="KazmaSwarm.closeLogs()">✕</button>
     </div>
     <div id="logs-content" class="modal-body" style="max-height:60vh;overflow-y:auto;font-family:var(--font-mono);font-size:0.8rem;">
       Loading logs…
