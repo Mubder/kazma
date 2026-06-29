@@ -7,6 +7,7 @@ import sys
 
 from textual.app import App, ComposeResult
 
+from kazma_tui.chat import ChatPanel
 from kazma_tui.dashboard import MetricsDashboard
 from kazma_tui.footer import FooterShortcuts
 from kazma_tui.header import HeaderProviderModel
@@ -34,6 +35,7 @@ class KazmaTUI(App[None]):
         """Create the application layout."""
         yield HeaderProviderModel()
         yield MetricsDashboard()
+        yield ChatPanel()
         yield FooterShortcuts()
 
 
