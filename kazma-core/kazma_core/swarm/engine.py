@@ -23,6 +23,11 @@ from kazma_core.swarm.patterns import (
     execute_fan_out,
     execute_pipeline,
 )
+from kazma_core.swarm.reliability import (
+    CircuitBreaker,
+    CircuitBreakerOpenError,
+    RetryPolicy,
+)
 from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
 from kazma_core.swarm.task import (
     SwarmTask,
@@ -70,6 +75,9 @@ class SwarmEngine:
         self._task_history: dict[str, SwarmTask] = {}
         self._result_aggregator = result_aggregator or ResultAggregator()
         self._capability_router = capability_router or CapabilityRouter()
+        self._circuit_breakers: dict[str, CircuitBreaker] = {}
+        self._retry_policies: dict[str, RetryPolicy] = {}
+        self._default_retry_policy = RetryPolicy(max_retries=0)
         self._build_workers()
 
     def _build_workers(self) -> None:
@@ -443,23 +451,56 @@ class SwarmEngine:
         prompt: str,
         context: str | SwarmDispatchContext,
     ) -> WorkerResult:
-        started = perf_counter()
-        worker.mark_dispatched(prompt)
+        breaker = self.get_circuit_breaker(worker.name)
+        retry_policy = self.get_retry_policy(worker.name)
+
+        # Circuit breaker pre-check: reject immediately if open.
         try:
-            raw_result = await worker.dispatch(prompt, context=context)
-        except Exception as exc:
-            logger.exception("[SwarmEngine] dispatch failed for worker '%s'", worker.name)
-            raw_result = {
-                "worker": worker.name,
-                "task_id": "",
-                "status": "error",
-                "output": "",
-                "error": str(exc)[:500],
-            }
+            breaker.check_or_raise(worker.name)
+        except CircuitBreakerOpenError as exc:
+            logger.warning("[SwarmEngine] %s", exc)
+            return WorkerResult(
+                worker=worker.name,
+                task_id="",
+                status="error",
+                output="",
+                error=str(exc),
+            )
+
+        # Execute with retry policy.
+        started = perf_counter()
+
+        async def _attempt() -> dict[str, Any]:
+            worker.mark_dispatched(prompt)
+            try:
+                raw_result = await worker.dispatch(prompt, context=context)
+            except Exception as exc:
+                logger.exception(
+                    "[SwarmEngine] dispatch failed for worker '%s'", worker.name
+                )
+                raw_result = {
+                    "worker": worker.name,
+                    "task_id": "",
+                    "status": "error",
+                    "output": "",
+                    "error": str(exc)[:500],
+                }
+            return raw_result
+
+        raw_result = await retry_policy.execute_with_retry(
+            _attempt, worker_name=worker.name
+        )
 
         worker_result = WorkerResult.from_dict(raw_result)
         if worker_result.duration_seconds <= 0:
             worker_result.duration_seconds = perf_counter() - started
+
+        # Update circuit breaker based on outcome.
+        if worker_result.status == "success":
+            breaker.record_success()
+        else:
+            breaker.record_failure()
+
         worker.mark_completed(worker_result.status)
         return worker_result
 
@@ -574,3 +615,58 @@ class SwarmEngine:
             }
             for worker in self._workers.values()
         ]
+
+    # ------------------------------------------------------------------
+    # Reliability layer — circuit breaker & retry policy management
+    # ------------------------------------------------------------------
+
+    def get_circuit_breaker(self, worker_name: str) -> CircuitBreaker:
+        """Return (or create) the circuit breaker for a worker."""
+        if worker_name not in self._circuit_breakers:
+            self._circuit_breakers[worker_name] = CircuitBreaker()
+        return self._circuit_breakers[worker_name]
+
+    def reset_circuit_breaker(self, worker_name: str) -> CircuitBreaker:
+        """Manually reset a worker's circuit breaker to closed state."""
+        breaker = self.get_circuit_breaker(worker_name)
+        breaker.reset()
+        logger.info("[SwarmEngine] circuit breaker reset for worker '%s'", worker_name)
+        return breaker
+
+    def get_retry_policy(self, worker_name: str) -> RetryPolicy:
+        """Return the retry policy for a worker (or the default)."""
+        return self._retry_policies.get(worker_name, self._default_retry_policy)
+
+    def set_retry_policy(
+        self,
+        worker_name: str,
+        policy: RetryPolicy,
+    ) -> None:
+        """Set a per-worker retry policy."""
+        self._retry_policies[worker_name] = policy
+
+    def set_circuit_breaker_config(
+        self,
+        worker_name: str,
+        *,
+        failure_threshold: int = 5,
+        cooldown_seconds: float = 60.0,
+    ) -> CircuitBreaker:
+        """Create or reconfigure a per-worker circuit breaker."""
+        self._circuit_breakers[worker_name] = CircuitBreaker(
+            failure_threshold=failure_threshold,
+            cooldown_seconds=cooldown_seconds,
+        )
+        return self._circuit_breakers[worker_name]
+
+    def get_circuit_breaker_status(self, worker_name: str) -> dict[str, Any]:
+        """Return a JSON-serializable snapshot of a worker's circuit breaker."""
+        breaker = self.get_circuit_breaker(worker_name)
+        return breaker.to_dict()
+
+    def get_all_circuit_breaker_status(self) -> dict[str, dict[str, Any]]:
+        """Return circuit breaker status for all registered workers."""
+        return {
+            name: self.get_circuit_breaker(name).to_dict()
+            for name in self._workers
+        }

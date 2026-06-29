@@ -568,6 +568,55 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
         """Return supported models and providers."""
         return {"models": _SUPPORTED_MODELS, "providers": _SUPPORTED_PROVIDERS}
 
+    @router.get("/api/swarm/circuit-breakers")
+    async def swarm_circuit_breakers() -> JSONResponse:
+        """Return circuit breaker status for all workers."""
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse({"breakers": {}, "count": 0})
+        breakers = engine.get_all_circuit_breaker_status()
+        return JSONResponse({"breakers": breakers, "count": len(breakers)})
+
+    @router.get("/api/swarm/workers/{name}/circuit-breaker")
+    async def swarm_worker_circuit_breaker(name: str) -> JSONResponse:
+        """Return circuit breaker status for a single worker."""
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse(
+                {"status": "error", "message": "Swarm core is not available"},
+                status_code=503,
+            )
+        if engine.get_worker(name) is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+        breaker_status = engine.get_circuit_breaker_status(name)
+        return JSONResponse({"worker": name, "circuit_breaker": breaker_status})
+
+    @router.post("/api/swarm/workers/{name}/circuit-breaker/reset")
+    async def swarm_reset_circuit_breaker(name: str) -> JSONResponse:
+        """Manually reset a worker's circuit breaker to closed state."""
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse(
+                {"status": "error", "message": "Swarm core is not available"},
+                status_code=503,
+            )
+        if engine.get_worker(name) is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+        breaker = engine.reset_circuit_breaker(name)
+        logger.info("[Swarm] Circuit breaker reset for worker '%s'", name)
+        return JSONResponse({
+            "status": "ok",
+            "message": f"Circuit breaker reset for worker '{name}'",
+            "worker": name,
+            "circuit_breaker": breaker.to_dict(),
+        })
+
     return router
 
 
