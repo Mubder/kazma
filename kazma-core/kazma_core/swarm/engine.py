@@ -16,8 +16,10 @@ from kazma_core.swarm.consultation import (
     execute_consult,
 )
 from kazma_core.swarm.patterns import (
+    ConditionalConfigurationError,
     FanOutConfigurationError,
     PipelineConfigurationError,
+    execute_conditional,
     execute_fan_out,
     execute_pipeline,
 )
@@ -274,6 +276,31 @@ class SwarmEngine:
                 status=pattern_result.status,
                 aggregated_output=pattern_result.aggregated_output,
                 synthesized_output=pattern_result.synthesized_output,
+                error=pattern_result.error,
+                duration_seconds=perf_counter() - started,
+                metadata=pattern_result.metadata,
+            )
+
+        if task.type == TaskType.CONDITIONAL:
+            try:
+                pattern_result = await execute_conditional(
+                    task,
+                    dispatch_worker_by_name=self._dispatch_worker_by_name,
+                )
+            except ConditionalConfigurationError as exc:
+                return self._finalize_task(
+                    task,
+                    worker_results=[],
+                    status="failed",
+                    error=str(exc),
+                    duration_seconds=perf_counter() - started,
+                )
+
+            return self._finalize_task(
+                task,
+                worker_results=pattern_result.worker_results,
+                status=pattern_result.status,
+                aggregated_output=pattern_result.aggregated_output,
                 error=pattern_result.error,
                 duration_seconds=perf_counter() - started,
                 metadata=pattern_result.metadata,

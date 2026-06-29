@@ -134,6 +134,8 @@ def _coerce_task_type(payload: dict[str, Any], worker_names: list[str]) -> Any:
         return TaskType.PIPELINE
     if normalized == "consult":
         return TaskType.CONSULT
+    if normalized == "conditional":
+        return TaskType.CONDITIONAL
     if normalized == "broadcast":
         return TaskType.BROADCAST
     if normalized == "dispatch":
@@ -307,6 +309,22 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 },
                 status_code=400,
             )
+        if task_type == getattr(TaskType, "CONDITIONAL", None) and not worker_names:
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "message": "Conditional requires at least one worker.",
+                },
+                status_code=400,
+            )
+        if task_type == getattr(TaskType, "CONDITIONAL", None) and not payload.get("metadata", {}).get("routes"):
+            return JSONResponse(
+                {
+                    "status": "error",
+                    "message": "Conditional requires a 'routes' mapping in task metadata.",
+                },
+                status_code=400,
+            )
         if not worker_names:
             return JSONResponse(
                 {"status": "error", "message": "No workers specified"},
@@ -354,6 +372,7 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 getattr(TaskType, "PIPELINE", None),
                 getattr(TaskType, "FAN_OUT", None),
                 getattr(TaskType, "CONSULT", None),
+                getattr(TaskType, "CONDITIONAL", None),
             }
         )
         if uses_external_dispatch:

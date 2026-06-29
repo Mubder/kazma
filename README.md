@@ -246,6 +246,7 @@ The swarm engine supports these worker orchestration patterns:
 - `pipeline` for sequential handoff between workers
 - `fan_out` for concurrent execution of the same prompt across selected workers
 - `consult` for collecting independent role-aware worker opinions and synthesizing a consolidated answer
+- `conditional` for routing to different workers based on a router worker's evaluation of the prompt
 
 Fan-out supports `first_valid`, `merge_all`, `vote`, `synthesize`, and
 `collect` aggregation strategies. Parallel dispatches are bounded by
@@ -266,6 +267,21 @@ Consult handles partial failure by synthesizing from available opinions
 and the single-worker edge case with a passthrough synthesis. Completed
 consult tasks are persisted to the in-memory task history and are queryable
 via `GET /api/swarm/tasks?type=consult`.
+
+#### Conditional routing
+`conditional` uses a two-step dispatch. First, a router worker evaluates the
+prompt and outputs a routing decision (e.g., `"code"`, `"research"`). The
+engine then looks up that decision in `metadata.routes` (a dict mapping
+decision strings to worker names) and dispatches to the matched worker.
+
+If the router output does not match any route key, the engine falls back to
+the worker named in `metadata.default` (if set), or returns `status=failed`
+with a `"No route matched."` error listing the available routes.
+
+If the router worker itself fails or times out, the task halts immediately
+with `status=failed` (or `status=timeout`) and no downstream worker
+executes. The routing decision is always recorded in
+`metadata.route_taken` (or `null` when no route was taken).
 
 ### Swarm Architecture
 

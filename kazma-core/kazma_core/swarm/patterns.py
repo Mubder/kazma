@@ -29,6 +29,10 @@ class FanOutConfigurationError(ValueError):
     """Raised when a fan-out task is missing required configuration."""
 
 
+class ConditionalConfigurationError(ValueError):
+    """Raised when a conditional task is missing required configuration."""
+
+
 @dataclass
 class PatternExecution:
     """Normalized result returned by an orchestration pattern."""
@@ -207,6 +211,145 @@ async def execute_pipeline(
         status="success",
         aggregated_output=worker_results[-1].output,
         metadata=await _build_blackboard_metadata(blackboard),
+    )
+
+
+def _extract_route_decision(router_output: str) -> str:
+    """Normalize router output into a route key.
+
+    Strips whitespace and lowercases the output so that route matching is
+    tolerant of minor formatting differences in the router's response.
+    """
+    return router_output.strip().lower()
+
+
+async def execute_conditional(
+    task: SwarmTask,
+    *,
+    dispatch_worker_by_name: DispatchWorkerByName,
+) -> PatternExecution:
+    """Execute a conditional routing pattern.
+
+    1. Dispatch to the router worker (first in task.workers).
+    2. Parse the router's output to determine the route key.
+    3. Look up the route key in ``task.metadata["routes"]`` to find the target worker.
+    4. If no match and a ``task.metadata["default"]`` worker exists, dispatch there.
+    5. If no match and no default, return a clear failure.
+    6. Record ``metadata.route_taken`` in the result.
+    """
+    if not task.workers:
+        raise ConditionalConfigurationError(
+            "Conditional requires at least one worker."
+        )
+
+    routes: dict[str, str] = task.metadata.get("routes", {})
+    if not routes:
+        raise ConditionalConfigurationError(
+            "Conditional requires a 'routes' mapping in task metadata."
+        )
+
+    default_worker: str | None = task.metadata.get("default")
+    router_name = task.workers[0]
+    worker_results: list[WorkerResult] = []
+
+    # Step 1: Execute the router worker.
+    try:
+        router_result = await asyncio.wait_for(
+            dispatch_worker_by_name(router_name, task.prompt, task.context),
+            timeout=task.timeout,
+        )
+    except TimeoutError:
+        logger.warning(
+            "[SwarmPatterns] conditional router '%s' timed out after %.2fs",
+            router_name,
+            task.timeout,
+        )
+        router_result = WorkerResult(
+            worker=router_name,
+            task_id=task.id,
+            status="timeout",
+            output="",
+            error=f"Router worker '{router_name}' timed out after {task.timeout:g}s.",
+        )
+
+    if not router_result.task_id:
+        router_result.task_id = task.id
+    worker_results.append(router_result)
+
+    # Step 2: If the router itself failed, halt immediately.
+    if router_result.status != "success":
+        return PatternExecution(
+            worker_results=worker_results,
+            status="timeout" if router_result.status == "timeout" else "failed",
+            error=router_result.error or f"Router worker '{router_name}' failed.",
+            metadata={"route_taken": None},
+        )
+
+    # Step 3: Parse the route decision from the router's output.
+    route_decision = _extract_route_decision(router_result.output)
+    target_worker: str | None = routes.get(route_decision)
+    route_taken = route_decision
+
+    # Step 4: Handle unmatched route.
+    if target_worker is None:
+        if default_worker is not None:
+            target_worker = default_worker
+            route_taken = "default"
+        else:
+            logger.warning(
+                "[SwarmPatterns] no route matched for decision '%s'; "
+                "available routes: %s",
+                route_decision,
+                list(routes.keys()),
+            )
+            return PatternExecution(
+                worker_results=worker_results,
+                status="failed",
+                error=(
+                    f"No route matched for decision '{route_decision}'. "
+                    f"Available routes: {list(routes.keys())}"
+                ),
+                metadata={"route_taken": None},
+            )
+
+    # Step 5: Dispatch to the target worker.
+    try:
+        target_result = await asyncio.wait_for(
+            dispatch_worker_by_name(target_worker, task.prompt, task.context),
+            timeout=task.timeout,
+        )
+    except TimeoutError:
+        logger.warning(
+            "[SwarmPatterns] conditional target '%s' timed out after %.2fs",
+            target_worker,
+            task.timeout,
+        )
+        target_result = WorkerResult(
+            worker=target_worker,
+            task_id=task.id,
+            status="timeout",
+            output="",
+            error=f"Worker '{target_worker}' timed out after {task.timeout:g}s.",
+        )
+
+    if not target_result.task_id:
+        target_result.task_id = task.id
+    worker_results.append(target_result)
+
+    # Step 6: Build final result.
+    status = _dispatch_like_status(target_result)
+    return PatternExecution(
+        worker_results=worker_results,
+        status=status,
+        aggregated_output=(
+            target_result.output if target_result.status == "success" else None
+        ),
+        error=(
+            None
+            if target_result.status == "success"
+            else target_result.error or f"Worker '{target_worker}' failed."
+        ),
+        metadata={"route_taken": route_taken},
     )
 
 
