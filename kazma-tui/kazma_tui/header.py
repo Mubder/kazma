@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from kazma_core.model_registry import get_model_registry  # type: ignore[import-untyped]
+from kazma_core.model_registry import get_model_registry
 from textual.app import ComposeResult
 from textual.reactive import reactive
 from textual.widget import Widget
