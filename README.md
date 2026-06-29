@@ -129,6 +129,8 @@ cp .env.example .env   # fill in API keys
 docker compose up -d
 ```
 
+> **Troubleshooting:** See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common errors and solutions.
+
 ---
 
 ## 🖥️ CLI Commands
