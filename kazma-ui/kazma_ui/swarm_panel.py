@@ -320,7 +320,7 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
     async def swarm_dispatch(payload: dict[str, Any]) -> JSONResponse:
         """Dispatch a task to one or more workers."""
         worker_names = payload.get("workers", [])
-        task = payload.get("task", "")
+        task = str(payload.get("task", "")).strip()
         context = payload.get("context", "")
         task_type = _coerce_task_type(payload, worker_names)
         timeout = _coerce_timeout(payload)
