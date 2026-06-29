@@ -16,6 +16,7 @@ Usage::
 
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
+from kazma_core.swarm.checkpoint import HITLCheckpoint, HITLCheckpointHandler
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
 from kazma_core.swarm.engine import SwarmEngine, get_swarm_engine, set_swarm_engine
 from kazma_core.swarm.handoff import HandoffRequest, request_handoff
@@ -50,6 +51,8 @@ __all__ = [
     "CircuitBreakerOpenError",
     "CircuitState",
     "FallbackChain",
+    "HITLCheckpoint",
+    "HITLCheckpointHandler",
     "HandoffRequest",
     "NoCapableWorkersError",
     "OutputValidator",

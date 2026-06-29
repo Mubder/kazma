@@ -131,10 +131,18 @@ async def execute_pipeline(
     *,
     dispatch_worker_by_name: DispatchWorkerByName,
 ) -> PatternExecution:
-    """Execute a task through workers sequentially, sharing one blackboard."""
+    """Execute a task through workers sequentially, sharing one blackboard.
+
+    If the task's ``metadata.hitl_checkpoints`` contains the current step
+    index (1-based), the pipeline pauses after that step completes and
+    returns a ``PatternExecution`` with ``status="paused"`` and checkpoint
+    metadata.  The engine is responsible for storing the paused state and
+    resuming later via :func:`resume_pipeline`.
+    """
     if not task.workers:
         raise PipelineConfigurationError("Pipeline requires at least one worker.")
 
+    hitl_checkpoints: set[int] = set(task.metadata.get("hitl_checkpoints", []))
     blackboard = BlackboardStore()
     worker_results: list[WorkerResult] = []
     previous_result: WorkerResult | None = None
@@ -208,6 +216,163 @@ async def execute_pipeline(
             ],
         )
         previous_result = worker_result
+
+        # HITL checkpoint: pause if this step is a checkpoint.
+        if step_index in hitl_checkpoints:
+            output_preview = (
+                worker_result.output[:500] if worker_result.output else ""
+            )
+            blackboard_snapshot = await blackboard.snapshot()
+            logger.info(
+                "[SwarmPatterns] HITL checkpoint reached at step %d (worker '%s')",
+                step_index,
+                worker_name,
+            )
+            return PatternExecution(
+                worker_results=worker_results,
+                status="paused",
+                aggregated_output=worker_result.output,
+                metadata={
+                    **(await _build_blackboard_metadata(blackboard)),
+                    "checkpoint": {
+                        "step": step_index,
+                        "worker": worker_name,
+                        "output_preview": output_preview,
+                        "needs_approval": True,
+                        "task_id": task.id,
+                    },
+                    "paused_step": step_index,
+                    "paused_blackboard": blackboard_snapshot,
+                },
+            )
+
+    return PatternExecution(
+        worker_results=worker_results,
+        status="success",
+        aggregated_output=worker_results[-1].output,
+        metadata=await _build_blackboard_metadata(blackboard),
+    )
+
+
+async def resume_pipeline(
+    task: SwarmTask,
+    *,
+    starting_step: int,
+    worker_results: list[WorkerResult],
+    blackboard_data: dict[str, Any],
+    dispatch_worker_by_name: DispatchWorkerByName,
+) -> PatternExecution:
+    """Resume a paused pipeline from *starting_step* (1-based inclusive).
+
+    Rebuilds the blackboard from *blackboard_data* and continues executing
+    remaining workers.  Returns the final ``PatternExecution``.
+    """
+    blackboard = BlackboardStore.from_snapshot(blackboard_data)
+    hitl_checkpoints: set[int] = set(task.metadata.get("hitl_checkpoints", []))
+
+    # Rebuild previous_result from the last completed worker.
+    previous_result = worker_results[-1] if worker_results else None
+
+    remaining_workers = task.workers[starting_step - 1:]
+    for offset, worker_name in enumerate(remaining_workers):
+        step_index = starting_step + offset
+        context_text = await _build_pipeline_context_text(
+            task,
+            previous_result,
+            blackboard,
+        )
+        dispatch_context = SwarmDispatchContext(
+            context_text,
+            blackboard=blackboard,
+            metadata={
+                **task.metadata,
+                "pipeline_step": step_index,
+                "worker_name": worker_name,
+            },
+            task_id=task.id,
+            task_type=task.type.value,
+        )
+
+        try:
+            worker_result = await asyncio.wait_for(
+                dispatch_worker_by_name(
+                    worker_name,
+                    task.prompt,
+                    dispatch_context,
+                    fallback_chain=task.fallback_chain or None,
+                ),
+                timeout=task.timeout,
+            )
+        except TimeoutError:
+            logger.warning(
+                "[SwarmPatterns] resumed pipeline worker '%s' timed out after %.2fs",
+                worker_name,
+                task.timeout,
+            )
+            worker_result = WorkerResult(
+                worker=worker_name,
+                task_id=task.id,
+                status="timeout",
+                output="",
+                error=f"Worker '{worker_name}' timed out after {task.timeout:g}s.",
+            )
+
+        if not worker_result.task_id:
+            worker_result.task_id = task.id
+        worker_results.append(worker_result)
+
+        if worker_result.status != "success":
+            return PatternExecution(
+                worker_results=worker_results,
+                status=_failure_status(worker_results, worker_result),
+                aggregated_output=_last_success_output(worker_results),
+                error=worker_result.error or f"Worker '{worker_name}' failed.",
+                metadata=await _build_blackboard_metadata(blackboard),
+            )
+
+        await blackboard.set("last_worker", worker_result.worker)
+        await blackboard.set("last_output", worker_result.output)
+        await blackboard.set("pipeline_step", step_index)
+        await blackboard.update(
+            "pipeline_outputs",
+            lambda current: [
+                *(current or []),
+                {
+                    "worker": worker_result.worker,
+                    "output": worker_result.output,
+                },
+            ],
+        )
+        previous_result = worker_result
+
+        # HITL checkpoint: pause again if this step is also a checkpoint.
+        if step_index in hitl_checkpoints:
+            output_preview = (
+                worker_result.output[:500] if worker_result.output else ""
+            )
+            blackboard_snapshot = await blackboard.snapshot()
+            logger.info(
+                "[SwarmPatterns] HITL checkpoint reached at step %d (worker '%s')",
+                step_index,
+                worker_name,
+            )
+            return PatternExecution(
+                worker_results=worker_results,
+                status="paused",
+                aggregated_output=worker_result.output,
+                metadata={
+                    **(await _build_blackboard_metadata(blackboard)),
+                    "checkpoint": {
+                        "step": step_index,
+                        "worker": worker_name,
+                        "output_preview": output_preview,
+                        "needs_approval": True,
+                        "task_id": task.id,
+                    },
+                    "paused_step": step_index,
+                    "paused_blackboard": blackboard_snapshot,
+                },
+            )
 
     return PatternExecution(
         worker_results=worker_results,

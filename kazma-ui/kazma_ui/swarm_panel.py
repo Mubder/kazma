@@ -419,6 +419,15 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 task_result = await engine.dispatch(swarm_task)
             results = [item.to_dict() for item in task_result.worker_results]
 
+        # Include checkpoint info for HITL paused pipelines.
+        checkpoint_info = None
+        if (
+            task_result is not None
+            and task_result.status == "paused"
+            and task_result.metadata
+        ):
+            checkpoint_info = task_result.metadata.get("checkpoint")
+
         return JSONResponse(
             {
                 "status": "ok",
@@ -440,6 +449,7 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
                 ),
                 "error": None if task_result is None else task_result.error,
                 "metadata": None if task_result is None else task_result.metadata,
+                "checkpoint": checkpoint_info,
             }
         )
 
@@ -683,6 +693,97 @@ def create_swarm_router(templates: Any, swarm_manager: Any = None) -> APIRouter:
             "message": f"Circuit breaker reset for worker '{name}'",
             "worker": name,
             "circuit_breaker": breaker.to_dict(),
+        })
+
+    # ------------------------------------------------------------------
+    # HITL Checkpoint endpoints
+    # ------------------------------------------------------------------
+
+    @router.post("/api/swarm/tasks/{task_id}/approve")
+    async def swarm_approve_checkpoint(task_id: str) -> JSONResponse:
+        """Approve an HITL checkpoint and resume the pipeline."""
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse(
+                {"status": "error", "message": "Swarm core is not available"},
+                status_code=503,
+            )
+
+        checkpoint_info = engine.get_checkpoint_info(task_id)
+        if checkpoint_info is None:
+            # Check if the task exists but is not paused.
+            task_obj = engine.get_task(task_id)
+            if task_obj is not None and task_obj.status != "paused":
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": f"Task '{task_id}' is not paused (status: {task_obj.status.value})",
+                    },
+                    status_code=409,
+                )
+            return JSONResponse(
+                {"status": "error", "message": f"Task '{task_id}' not found"},
+                status_code=404,
+            )
+
+        result = await engine.approve_checkpoint(task_id)
+        if result is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Failed to approve checkpoint for task '{task_id}'"},
+                status_code=500,
+            )
+
+        return JSONResponse({
+            "status": result.status,
+            "message": "Checkpoint approved, pipeline resumed",
+            "task_id": result.task_id,
+            "worker_results": [item.to_dict() for item in result.worker_results],
+            "aggregated_output": result.aggregated_output,
+            "error": result.error,
+            "metadata": result.metadata,
+        })
+
+    @router.post("/api/swarm/tasks/{task_id}/reject")
+    async def swarm_reject_checkpoint(task_id: str) -> JSONResponse:
+        """Reject an HITL checkpoint and abort the pipeline."""
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse(
+                {"status": "error", "message": "Swarm core is not available"},
+                status_code=503,
+            )
+
+        checkpoint_info = engine.get_checkpoint_info(task_id)
+        if checkpoint_info is None:
+            task_obj = engine.get_task(task_id)
+            if task_obj is not None and task_obj.status != "paused":
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": f"Task '{task_id}' is not paused (status: {task_obj.status.value})",
+                    },
+                    status_code=409,
+                )
+            return JSONResponse(
+                {"status": "error", "message": f"Task '{task_id}' not found"},
+                status_code=404,
+            )
+
+        result = await engine.reject_checkpoint(task_id)
+        if result is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Failed to reject checkpoint for task '{task_id}'"},
+                status_code=500,
+            )
+
+        return JSONResponse({
+            "status": result.status,
+            "message": "Checkpoint rejected, pipeline aborted",
+            "task_id": result.task_id,
+            "worker_results": [item.to_dict() for item in result.worker_results],
+            "aggregated_output": result.aggregated_output,
+            "error": result.error,
+            "metadata": result.metadata,
         })
 
     return router

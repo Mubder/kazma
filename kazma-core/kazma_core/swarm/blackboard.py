@@ -58,6 +58,11 @@ class BlackboardStore:
         async with self._lock:
             self._values.clear()
 
+    @classmethod
+    def from_snapshot(cls, data: Mapping[str, Any]) -> BlackboardStore:
+        """Create a new store pre-populated from a snapshot dict."""
+        return cls(initial=data)
+
 
 class SwarmDispatchContext(str):
     """String-compatible worker context carrying shared task-group state."""

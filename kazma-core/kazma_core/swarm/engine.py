@@ -10,6 +10,7 @@ from typing import Any
 
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
+from kazma_core.swarm.checkpoint import HITLCheckpoint, HITLCheckpointHandler
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
 from kazma_core.swarm.consultation import (
     ConsultationConfigurationError,
@@ -19,10 +20,12 @@ from kazma_core.swarm.handoff import HandoffRequest
 from kazma_core.swarm.patterns import (
     ConditionalConfigurationError,
     FanOutConfigurationError,
+    PatternExecution,
     PipelineConfigurationError,
     execute_conditional,
     execute_fan_out,
     execute_pipeline,
+    resume_pipeline,
 )
 from kazma_core.swarm.reliability import (
     BoundedConcurrency,
@@ -87,6 +90,7 @@ class SwarmEngine:
         self._timeout_guards: dict[str, TimeoutGuard] = {}
         self._default_timeout_guard = TimeoutGuard()
         self._output_validators: dict[str, OutputValidator] = {}
+        self._checkpoint_handler = HITLCheckpointHandler()
         self._build_workers()
 
     def _build_workers(self) -> None:
@@ -245,6 +249,14 @@ class SwarmEngine:
                     status="failed",
                     error=str(exc),
                     duration_seconds=perf_counter() - started,
+                )
+
+            # HITL checkpoint: pipeline paused at a checkpoint step.
+            if pattern_result.status == "paused":
+                return self._handle_pipeline_checkpoint(
+                    task=task,
+                    pattern_result=pattern_result,
+                    started=started,
                 )
 
             return self._finalize_task(
@@ -943,6 +955,201 @@ class SwarmEngine:
             }
             for worker in self._workers.values()
         ]
+
+    # ------------------------------------------------------------------
+    # HITL Checkpoint management
+    # ------------------------------------------------------------------
+
+    def _handle_pipeline_checkpoint(
+        self,
+        *,
+        task: SwarmTask,
+        pattern_result: PatternExecution,
+        started: float,
+    ) -> TaskResult:
+        """Handle a pipeline that paused at an HITL checkpoint.
+
+        Stores the paused state, sets up auto-reject timeout if configured,
+        and returns a ``TaskResult`` with ``status="paused"``.
+        """
+        checkpoint_data = pattern_result.metadata.get("checkpoint", {})
+        step = checkpoint_data.get("step", 0)
+        worker = checkpoint_data.get("worker", "")
+        output_preview = checkpoint_data.get("output_preview", "")
+        task_id = checkpoint_data.get("task_id", task.id)
+
+        checkpoint = HITLCheckpoint(
+            task_id=task_id,
+            step=step,
+            worker=worker,
+            output_preview=output_preview,
+            needs_approval=True,
+            status="pending",
+        )
+
+        blackboard_data = pattern_result.metadata.get("paused_blackboard", {})
+
+        self._checkpoint_handler.store_paused_pipeline(
+            task=task,
+            checkpoint=checkpoint,
+            worker_results=pattern_result.worker_results,
+            blackboard_data=blackboard_data,
+        )
+
+        # Set up checkpoint timeout auto-reject if configured.
+        timeout_seconds = task.metadata.get("checkpoint_timeout")
+        if timeout_seconds and float(timeout_seconds) > 0:
+            timeout_task = asyncio.create_task(
+                self._checkpoint_timeout_reject(
+                    task_id,
+                    float(timeout_seconds),
+                )
+            )
+            self._checkpoint_handler.set_timeout_task(task_id, timeout_task)
+
+        # Store in task history as paused.
+        task.status = TaskStatus.PAUSED
+        task.completed_at = None  # Not completed yet.
+        duration = perf_counter() - started
+
+        result = TaskResult(
+            task_id=task.id,
+            status="paused",
+            worker_results=pattern_result.worker_results,
+            aggregated_output=pattern_result.aggregated_output,
+            total_cost=sum(item.cost for item in pattern_result.worker_results),
+            total_tokens=sum(item.tokens_used for item in pattern_result.worker_results),
+            duration_seconds=duration,
+            metadata=pattern_result.metadata,
+        )
+        task.result = result
+        self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
+
+        logger.info(
+            "[SwarmEngine] pipeline '%s' paused at HITL checkpoint step %d",
+            task.id,
+            step,
+        )
+        return result
+
+    async def _checkpoint_timeout_reject(
+        self,
+        task_id: str,
+        timeout_seconds: float,
+    ) -> None:
+        """Auto-reject a checkpoint after the timeout expires."""
+        try:
+            await asyncio.sleep(timeout_seconds)
+        except asyncio.CancelledError:
+            return
+
+        logger.warning(
+            "[SwarmEngine] HITL checkpoint for task '%s' timed out after %.2fs, auto-rejecting",
+            task_id,
+            timeout_seconds,
+        )
+        await self.reject_checkpoint(
+            task_id,
+            reason=f"Checkpoint timed out after {timeout_seconds:g}s.",
+        )
+
+    def get_checkpoint_info(self, task_id: str) -> HITLCheckpoint | None:
+        """Return checkpoint info for a paused task, or ``None``."""
+        return self._checkpoint_handler.get_checkpoint(task_id)
+
+    async def approve_checkpoint(self, task_id: str) -> TaskResult | None:
+        """Approve a paused HITL checkpoint and resume the pipeline.
+
+        Returns the final ``TaskResult`` after the remaining pipeline steps
+        complete, or ``None`` if no active checkpoint exists for *task_id*.
+        """
+        entry = self._checkpoint_handler._paused.get(task_id)
+        if entry is None:
+            return None
+
+        checkpoint = entry.checkpoint
+        task = entry.task
+        worker_results = list(entry.worker_results)
+        blackboard_data = dict(entry.blackboard_data)
+
+        # Cancel the timeout task if present.
+        if entry.timeout_task is not None and not entry.timeout_task.done():
+            entry.timeout_task.cancel()
+            entry.timeout_task = None
+
+        checkpoint.status = "approved"
+        checkpoint.needs_approval = False
+        logger.info(
+            "[SwarmEngine] checkpoint approved for pipeline '%s' at step %d, resuming",
+            task_id,
+            checkpoint.step,
+        )
+
+        # Remove from paused state before resuming.
+        self._checkpoint_handler._paused.pop(task_id, None)
+
+        # Resume from the next step.
+        next_step = checkpoint.step + 1
+        started = perf_counter()
+
+        try:
+            pattern_result = await resume_pipeline(
+                task,
+                starting_step=next_step,
+                worker_results=worker_results,
+                blackboard_data=blackboard_data,
+                dispatch_worker_by_name=self._dispatch_worker_by_name,
+            )
+        except PipelineConfigurationError as exc:
+            return self._finalize_task(
+                task,
+                worker_results=worker_results,
+                status="failed",
+                error=str(exc),
+                duration_seconds=perf_counter() - started,
+            )
+
+        # If the resumed pipeline hit another checkpoint, handle it.
+        if pattern_result.status == "paused":
+            return self._handle_pipeline_checkpoint(
+                task=task,
+                pattern_result=pattern_result,
+                started=started,
+            )
+
+        return self._finalize_task(
+            task,
+            worker_results=pattern_result.worker_results,
+            status=pattern_result.status,
+            aggregated_output=pattern_result.aggregated_output,
+            error=pattern_result.error,
+            duration_seconds=perf_counter() - started,
+            metadata=pattern_result.metadata,
+        )
+
+    async def reject_checkpoint(
+        self,
+        task_id: str,
+        reason: str = "Checkpoint rejected by user",
+    ) -> TaskResult | None:
+        """Reject a paused HITL checkpoint and abort the pipeline.
+
+        Returns the finalized ``TaskResult`` with ``status="failed"``, or
+        ``None`` if no active checkpoint exists for *task_id*.
+        """
+        result = await self._checkpoint_handler.reject(task_id, reason=reason)
+        if result is not None:
+            # Update task history with the failed result.
+            task = self._task_history.get(task_id)
+            if task:
+                task.status = TaskStatus.FAILED
+                task.completed_at = _utc_now_iso()
+                task.result = result
+                self._task_history[task_id] = SwarmTask.from_dict(task.to_dict())
+            else:
+                # If task not in history, store the result directly.
+                self._checkpoint_handler.complete_pipeline(task_id, result)
+        return result
 
     # ------------------------------------------------------------------
     # Reliability layer — circuit breaker & retry policy management
