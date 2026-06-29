@@ -1,0 +1,12 @@
+users:
+  alice:
+    allowed:
+    - foo
+    denied: []
+  bob:
+    allowed:
+    - bar
+    denied: []
+  default:
+    allowed: []
+    denied: []
