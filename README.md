@@ -2,7 +2,7 @@
 
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
-![Tests](https://img.shields.io/badge/tests-3,248+_passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3510_passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
@@ -11,7 +11,7 @@
 [![Framework][langgraph-shield]][langgraph-url]
 [![Package Manager][uv-shield]][uv-url]
 [![Status][status-shield]][status-url]
-[![swarm-orchestration](https://img.shields.io/badge/swarm-orchestration-blueviolet.svg)](https://your-link-here.com)
+![swarm-orchestration](https://img.shields.io/badge/swarm-orchestration-blueviolet.svg)
 ![FastAPI](https://img.shields.io/badge/FastAPI-05998b?style=flat&logo=fastapi&logoColor=white)
 ![ChromaDB](https://img.shields.io/badge/ChromaDB-6a5acd?style=flat&logo=chromadb&logoColor=white)
 ![SQLite](https://img.shields.io/badge/SQLite-07405e?style=flat&logo=sqlite&logoColor=white)
@@ -25,7 +25,7 @@
 [langgraph-url]: https://www.langchain.com/langgraph
 [uv-shield]: https://img.shields.io/badge/uv-managed-purple.svg
 [uv-url]: https://github.com/astral-sh/uv
-[tests-shield]: https://img.shields.io/badge/tests-1781_passing-success.svg
+[tests-shield]: https://img.shields.io/badge/tests-3510_passing-success.svg
 [tests-url]: https://github.com/Mubder/kazma
 [license-shield]: https://img.shields.io/github/license/Mubder/kazma.svg
 [license-url]: https://github.com/Mubder/kazma/blob/main/LICENSE
@@ -99,7 +99,7 @@ Kazma ships with **three entry points**:
 | Entry point | Command | Description |
 |:---|:---|:---|
 | **Web UI** | `kazma-web` (or `kazma serve`) | FastAPI dashboard with chat, swarm panel, settings |
-| **Terminal UI** | `kazma-tui` | Textual TUI with Arabic/RTL support |
+| **Terminal UI** | `kazma-tui` | Textual TUI with English-only metrics/chat dashboard |
 | **CLI** | `kazma` | Banner, status, hub, gateway, and swarm management |
 
 ```bash
@@ -342,7 +342,7 @@ kazma swarm metrics --worker researcher
 | ✅ | Slack Adapter | Socket Mode with 429 retry and event parsing |
 | ✅ | Cross-Platform Gateway | Platform-agnostic backend registry, reply metadata envelope |
 | ✅ | Web UI | FastAPI + Jinja2 dashboard with 12-tab settings, SSE chat, provider management, Arabic RTL |
-| ✅ | Terminal UI | Textual TUI with Arabic/RTL support |
+| ✅ | Terminal UI | Textual TUI with English-only metrics/chat dashboard |
 
 ### 🔒 Safety & Security
 
@@ -562,7 +562,7 @@ kazma-core/              Agent graph, ReAct supervisor, sub-agents, model router
 │       ├── i18n.py           Internationalization (150+ AR translations, cookie locale)
 │       ├── gateway_monitor.py /api/gateway/status endpoint
 │       └── metrics.py        Prometheus /metrics endpoint
-├── kazma-tui/            Textual TUI with Arabic/RTL support
+├── kazma-tui/            Textual TUI with English-only metrics/chat dashboard
 ├── kazma-cli/            CLI entry point (status, serve, hub, docs, wizard, project)
 ├── kazma-memory/         SQLite FTS5 + Arabic tokenizer
 ├── kazma-skills/         YAML skill manifests + MCP server registry
@@ -667,7 +667,7 @@ For overrides, copy to `kazma.local.yaml` (git-ignored). Env vars take precedenc
 
 ## 🧪 Tests
 
-2382+ collected and passing (a small number may be skipped due to missing optional deps: chromadb, duckduckgo_search, trafilatura).
+3510 collected and passing across `tests/` and `kazma-tui/tests/` (a small number may be skipped due to missing optional deps; the `tests/` suite currently has 7 pre-existing platform-related failures).
 
 ```bash
 # Full suite
