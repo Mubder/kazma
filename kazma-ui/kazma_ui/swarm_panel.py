@@ -94,7 +94,8 @@ def _resolve_engine(swarm_manager: Any = None) -> Any:
     else:
         # Share the existing engine's task store with fallback engines.
         _SHARED_TASK_STORE = getattr(engine, "task_store", None) or _SHARED_TASK_STORE
-    set_swarm_engine(engine)
+    if engine is not None:
+        set_swarm_engine(engine)
     return engine
 
 
