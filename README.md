@@ -8,12 +8,8 @@
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
 ![Portability](https://img.shields.io/badge/portability-linux_|_macOS_|_Windows_|_docker_|_WSL-brightgreen)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
-<!-- PROJECT SHIELDS -->
-[![Python Version][python-shield]][python-url]
 [![Framework][langgraph-shield]][langgraph-url]
 [![Package Manager][uv-shield]][uv-url]
-[![Tests][tests-shield]][tests-url]
-[![License][license-shield]][license-url]
 [![Status][status-shield]][status-url]
 
 <!-- TECHNOLOGY STACK BADGES -->
