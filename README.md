@@ -12,7 +12,6 @@
 [![Package Manager][uv-shield]][uv-url]
 [![Status][status-shield]][status-url]
 [![swarm-orchestration](https://img.shields.io/badge/swarm-orchestration-blueviolet.svg)](https://your-link-here.com)
-
 <!-- TECHNOLOGY STACK BADGES -->
 ![FastAPI](https://img.shields.io/badge/FastAPI-05998b?style=flat&logo=fastapi&logoColor=white)
 ![ChromaDB](https://img.shields.io/badge/ChromaDB-6a5acd?style=flat&logo=chromadb&logoColor=white)
@@ -20,7 +19,6 @@
 ![Docker](https://img.shields.io/badge/Docker-2496ed?style=flat&logo=docker&logoColor=white)
 ![Prometheus](https://img.shields.io/badge/Prometheus-e6522c?style=flat&logo=prometheus&logoColor=white)
 ![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-000000?style=flat&logo=opentelemetry&logoColor=white)
-
 <!-- LINKS -->
 [python-shield]: https://img.shields.io/badge/python-3.11+-blue.svg
 [python-url]: https://www.python.org/downloads/
