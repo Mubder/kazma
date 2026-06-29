@@ -8,7 +8,35 @@
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
 ![Portability](https://img.shields.io/badge/portability-linux_|_macOS_|_Windows_|_docker_|_WSL-brightgreen)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
+<!-- PROJECT SHIELDS -->
+[![Python Version][python-shield]][python-url]
+[![Framework][langgraph-shield]][langgraph-url]
+[![Package Manager][uv-shield]][uv-url]
+[![Tests][tests-shield]][tests-url]
+[![License][license-shield]][license-url]
+[![Status][status-shield]][status-url]
 
+<!-- TECHNOLOGY STACK BADGES -->
+![FastAPI](https://img.shields.io/badge/FastAPI-05998b?style=flat&logo=fastapi&logoColor=white)
+![ChromaDB](https://img.shields.io/badge/ChromaDB-6a5acd?style=flat&logo=chromadb&logoColor=white)
+![SQLite](https://img.shields.io/badge/SQLite-07405e?style=flat&logo=sqlite&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ed?style=flat&logo=docker&logoColor=white)
+![Prometheus](https://img.shields.io/badge/Prometheus-e6522c?style=flat&logo=prometheus&logoColor=white)
+![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-000000?style=flat&logo=opentelemetry&logoColor=white)
+
+<!-- LINKS -->
+[python-shield]: https://img.shields.io/badge/python-3.11+-blue.svg
+[python-url]: https://www.python.org/downloads/
+[langgraph-shield]: https://img.shields.io/badge/LangGraph-build-brightgreen.svg
+[langgraph-url]: https://www.langchain.com/langgraph
+[uv-shield]: https://img.shields.io/badge/uv-managed-purple.svg
+[uv-url]: https://github.com/astral-sh/uv
+[tests-shield]: https://img.shields.io/badge/tests-1781_passing-success.svg
+[tests-url]: https://github.com/Mubder/kazma
+[license-shield]: https://img.shields.io/github/license/Mubder/kazma.svg
+[license-url]: https://github.com/Mubder/kazma/blob/main/LICENSE
+[status-shield]: https://img.shields.io/badge/status-production_ready-gold.svg
+[status-url]: https://kazma.ai
 ---
 
 ## 🌍 Overview
