@@ -6,6 +6,7 @@ Displays real-time system and application metrics:
 - Average latency (from MetricsCollector)
 - Error rate percentage (from MetricsCollector)
 - Active agents list (from SwarmEngine)
+- VRAM usage (from HardwareMonitor)
 
 Refreshes every 2 seconds using Textual's ``set_interval``.
 Missing or unavailable metrics are shown as "N/A".
@@ -26,35 +27,113 @@ logger = logging.getLogger(__name__)
 _NA = "N/A"
 
 
+class MetricCard(Widget):
+    """A single metric display card with label, value, and color status.
+
+    Renders a metric with a label and color-coded value based on status.
+
+    Args:
+        label: Metric name (e.g. "VRAM", "Latency").
+        value: Formatted value string.
+        status: One of "normal", "warning", "critical".
+        card_id: Optional widget ID.
+    """
+
+    DEFAULT_CSS = """
+    MetricCard {
+        height: auto;
+        width: 1fr;
+        padding: 0 1;
+    }
+
+    MetricCard > .card-label {
+        color: $text-muted;
+    }
+    """
+
+    def __init__(
+        self,
+        label: str = "",
+        value: str = "",
+        status: str = "normal",
+        *,
+        card_id: str | None = None,
+    ) -> None:
+        super().__init__(id=card_id)
+        self._label = label
+        self._value = value
+        self._status = status
+
+    def compose(self) -> ComposeResult:
+        """Compose the card with label and value."""
+        yield Static(self._label, classes="card-label")
+        yield Static(self._render_value())
+
+    def update_card(self, label: str, value: str, status: str = "normal") -> None:
+        """Update the card content and refresh the display.
+
+        Args:
+            label: New metric label.
+            value: New formatted value.
+            status: New status ("normal", "warning", "critical").
+        """
+        self._label = label
+        self._value = value
+        self._status = status
+        try:
+            self.query_one(".card-label", Static).update(label)
+            # The value is the second Static child
+            value_widgets = self.query(Static)
+            if len(value_widgets) >= 2:
+                value_widgets[1].update(self._render_value())
+        except Exception:
+            logger.debug("MetricCard widgets not yet mounted", exc_info=True)
+
+    def _render_value(self) -> str:
+        """Render value with Rich markup based on status."""
+        if self._status == "critical":
+            return f"[bold red]{self._value}[/bold red]"
+        if self._status == "warning":
+            return f"[bold yellow]{self._value}[/bold yellow]"
+        return f"[bold green]{self._value}[/bold green]"
+
+
 class MetricsDashboard(Widget):
     """Real-time metrics dashboard widget.
 
-    Displays CPU, RAM, RPM, latency, error rate, and active agents.
+    Displays 6 metrics in a 3x2 grid with color-coded cards:
+    Row 1: Throughput (RPM)  |  Latency (ms)  |  Health (CPU/Mem)
+    Row 2: VRAM (GB)         |  Error Rate (%) |  Active Agents
+
     Refreshes every 2 seconds. Data sources are injectable for testing.
-
-    Layout::
-
-        CPU: 45.2%  |  RAM: 16.4 / 32.0 GB
-        RPM: 120    |  Latency: 250.0ms
-        Errors: 5.88%  |  Agents: analyst, researcher
     """
 
     REFRESH_INTERVAL: float = 2.0
 
     DEFAULT_CSS = """
     MetricsDashboard {
-        height: 1fr;
+        height: auto;
         border: solid $primary;
         padding: 1 2;
     }
 
-    MetricsDashboard > .metric-row {
+    .metrics-grid {
         height: auto;
-        margin: 0 0 1 0;
     }
 
-    MetricsDashboard > .metric-row > Static {
+    .metric-row {
+        height: auto;
+        layout: horizontal;
+    }
+
+    MetricCard {
         width: 1fr;
+        height: auto;
+        padding: 0 1;
+    }
+
+    MetricCard > .card-label {
+        color: $text-muted;
     }
     """
 
@@ -80,16 +159,48 @@ class MetricsDashboard(Widget):
     # ── Textual lifecycle ───────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
-        """Compose the dashboard layout with metric rows."""
-        with Static(classes="metric-row"):
-            yield Static(self._format_cpu(None), id="metric-cpu")
-            yield Static(self._format_ram(None, None), id="metric-ram")
-        with Static(classes="metric-row"):
-            yield Static(self._format_rpm(None), id="metric-rpm")
-            yield Static(self._format_latency(None), id="metric-latency")
-        with Static(classes="metric-row"):
-            yield Static(self._format_error_rate(None), id="metric-errors")
-            yield Static(self._format_agents([]), id="metric-agents")
+        """Compose the dashboard as a 3x2 grid of MetricCard widgets."""
+        from textual.containers import Horizontal, Vertical
+
+        with Vertical(classes="metrics-grid"):
+            with Horizontal(classes="metric-row"):
+                yield MetricCard(
+                    label="Throughput (RPM)",
+                    value=self._format_rpm(None),
+                    status="normal",
+                    card_id="metric-rpm",
+                )
+                yield MetricCard(
+                    label="Latency (ms)",
+                    value=self._format_latency(None),
+                    status="normal",
+                    card_id="metric-latency",
+                )
+                yield MetricCard(
+                    label="Health (CPU/Mem)",
+                    value=self._format_health(None, None, None),
+                    status="normal",
+                    card_id="metric-health",
+                )
+            with Horizontal(classes="metric-row"):
+                yield MetricCard(
+                    label="VRAM (GB)",
+                    value=self._format_vram(None, None),
+                    status="normal",
+                    card_id="metric-vram",
+                )
+                yield MetricCard(
+                    label="Error Rate (%)",
+                    value=self._format_error_rate(None),
+                    status="normal",
+                    card_id="metric-errors",
+                )
+                yield MetricCard(
+                    label="Active Agents",
+                    value=self._format_agents([]),
+                    status="normal",
+                    card_id="metric-agents",
+                )
 
     def on_mount(self) -> None:
         """Start periodic refresh on mount."""
@@ -104,10 +215,13 @@ class MetricsDashboard(Widget):
             logger.exception("Dashboard refresh failed")
 
     def _do_refresh(self) -> None:
-        """Fetch metrics from all sources and update display widgets."""
-        # ── CPU / RAM ───────────────────────────────────────────────
-        cpu_text = self._format_cpu(None)
-        ram_text = self._format_ram(None, None)
+        """Fetch metrics from all sources and update MetricCard widgets."""
+        # ── CPU / RAM / VRAM ────────────────────────────────────────
+        cpu_value: float | None = None
+        ram_used: float | None = None
+        ram_total: float | None = None
+        vram_used: float | None = None
+        vram_total: float | None = None
         monitor = self._get_hardware_monitor()
         if monitor is not None:
             try:
@@ -115,75 +229,123 @@ class MetricsDashboard(Widget):
 
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    # Schedule async fetch; update on next tick
                     import asyncio as _aio
 
                     _aio.ensure_future(self._update_hardware(monitor))
                 else:
                     snapshot = loop.run_until_complete(monitor.get_stats())
-                    cpu_text = self._format_cpu(snapshot.cpu)
-                    ram_text = self._format_ram(
-                        snapshot.ram_used_gb, snapshot.ram_total_gb
-                    )
+                    cpu_value = snapshot.cpu
+                    ram_used = snapshot.ram_used_gb
+                    ram_total = snapshot.ram_total_gb
+                    vram_used = snapshot.vram_used_gb
+                    vram_total = snapshot.vram_total_gb
             except Exception:
                 logger.debug("HardwareMonitor unavailable", exc_info=True)
 
         # ── RPM ─────────────────────────────────────────────────────
-        rpm_text = self._format_rpm(None)
+        rpm_val: int | None = None
         store = self._get_trace_store()
         if store is not None:
             try:
                 entries = store.recent(limit=200)
-                rpm = self._calculate_rpm(entries)
-                rpm_text = self._format_rpm(rpm)
+                rpm_val = self._calculate_rpm(entries)
             except Exception:
                 logger.debug("TraceStore unavailable", exc_info=True)
 
         # ── Latency / Error Rate ────────────────────────────────────
-        latency_text = self._format_latency(None)
-        error_text = self._format_error_rate(None)
+        latency_val: float | None = None
+        error_val: float | None = None
         collector = self._get_metrics_collector()
         if collector is not None:
             try:
                 all_metrics = collector.get_all_metrics()
-                avg_lat = self._calculate_avg_latency(all_metrics)
-                err_rate = self._calculate_error_rate(all_metrics)
-                latency_text = self._format_latency(avg_lat)
-                error_text = self._format_error_rate(err_rate)
+                latency_val = self._calculate_avg_latency(all_metrics)
+                error_val = self._calculate_error_rate(all_metrics)
             except Exception:
                 logger.debug("MetricsCollector unavailable", exc_info=True)
 
         # ── Active Agents ───────────────────────────────────────────
-        agents_text = self._format_agents([])
+        agent_names: list[str] = []
         engine = self._get_swarm_engine()
         if engine is not None:
             try:
-                names = self._get_agent_names(engine)
-                agents_text = self._format_agents(names)
+                agent_names = self._get_agent_names(engine)
             except Exception:
                 logger.debug("SwarmEngine unavailable", exc_info=True)
 
-        # ── Update widgets ──────────────────────────────────────────
+        # ── Update MetricCard widgets ───────────────────────────────
         try:
-            self.query_one("#metric-cpu", Static).update(cpu_text)
-            self.query_one("#metric-ram", Static).update(ram_text)
-            self.query_one("#metric-rpm", Static).update(rpm_text)
-            self.query_one("#metric-latency", Static).update(latency_text)
-            self.query_one("#metric-errors", Static).update(error_text)
-            self.query_one("#metric-agents", Static).update(agents_text)
+            rpm_card = self.query_one("#metric-rpm", MetricCard)
+            rpm_card.update_card(
+                label="Throughput (RPM)",
+                value=self._format_rpm(rpm_val),
+                status="normal",
+            )
+
+            latency_card = self.query_one("#metric-latency", MetricCard)
+            latency_status = self._determine_latency_status(latency_val)
+            latency_card.update_card(
+                label="Latency (ms)",
+                value=self._format_latency(latency_val),
+                status=latency_status,
+            )
+
+            health_card = self.query_one("#metric-health", MetricCard)
+            health_card.update_card(
+                label="Health (CPU/Mem)",
+                value=self._format_health(cpu_value, ram_used, ram_total),
+                status="normal",
+            )
+
+            vram_card = self.query_one("#metric-vram", MetricCard)
+            vram_status = self._determine_vram_status(vram_used, vram_total)
+            vram_card.update_card(
+                label="VRAM (GB)",
+                value=self._format_vram(vram_used, vram_total),
+                status=vram_status,
+            )
+
+            error_card = self.query_one("#metric-errors", MetricCard)
+            error_status = self._determine_error_status(error_val)
+            error_card.update_card(
+                label="Error Rate (%)",
+                value=self._format_error_rate(error_val),
+                status=error_status,
+            )
+
+            agents_card = self.query_one("#metric-agents", MetricCard)
+            agents_card.update_card(
+                label="Active Agents",
+                value=self._format_agents(agent_names),
+                status="normal",
+            )
         except Exception:
-            logger.debug("Dashboard widgets not yet mounted", exc_info=True)
+            logger.debug("Dashboard MetricCard widgets not yet mounted", exc_info=True)
 
     async def _update_hardware(self, monitor: Any) -> None:
         """Async helper to fetch hardware metrics and update widgets."""
         try:
             snapshot = await monitor.get_stats()
-            cpu_text = self._format_cpu(snapshot.cpu)
-            ram_text = self._format_ram(
-                snapshot.ram_used_gb, snapshot.ram_total_gb
+            cpu_value = snapshot.cpu
+            ram_used = snapshot.ram_used_gb
+            ram_total = snapshot.ram_total_gb
+            vram_used = snapshot.vram_used_gb
+            vram_total = snapshot.vram_total_gb
+
+            health_card = self.query_one("#metric-health", MetricCard)
+            health_card.update_card(
+                label="Health (CPU/Mem)",
+                value=self._format_health(cpu_value, ram_used, ram_total),
+                status="normal",
             )
-            self.query_one("#metric-cpu", Static).update(cpu_text)
-            self.query_one("#metric-ram", Static).update(ram_text)
+
+            vram_card = self.query_one("#metric-vram", MetricCard)
+            vram_status = self._determine_vram_status(vram_used, vram_total)
+            vram_card.update_card(
+                label="VRAM (GB)",
+                value=self._format_vram(vram_used, vram_total),
+                status=vram_status,
+            )
         except Exception:
             logger.debug("Async hardware update failed", exc_info=True)
 
@@ -257,29 +419,93 @@ class MetricsDashboard(Widget):
             return f"RAM: {_NA}"
         return f"RAM: {used:.1f} / {total:.1f} GB"
 
+    def _format_health(
+        self,
+        cpu: float | None,
+        ram_used: float | None,
+        ram_total: float | None,
+    ) -> str:
+        """Format combined CPU/Memory health string.
+
+        Returns e.g. ``"CPU: 45.2%  RAM: 16.4 / 32.0 GB"`` or ``"N/A"``
+        when data is unavailable.
+        """
+        cpu_part = "N/A" if cpu is None else f"{cpu:.1f}%"
+        if ram_used is None or ram_total is None:
+            ram_part = "N/A"
+        else:
+            ram_part = f"{ram_used:.1f}/{ram_total:.1f} GB"
+        return f"CPU: {cpu_part}  RAM: {ram_part}"
+
+    def _format_vram(self, used: float | None, total: float | None) -> str:
+        """Format VRAM as used/total GB. Returns 'N/A' when values are None."""
+        if used is None or total is None:
+            return _NA
+        return f"{used:.1f} / {total:.1f} GB"
+
     def _format_rpm(self, value: int | None) -> str:
         """Format requests per minute. Returns 'N/A' when value is None."""
         if value is None:
-            return f"RPM: {_NA}"
-        return f"RPM: {value}"
+            return _NA
+        return str(value)
 
     def _format_latency(self, value: float | None) -> str:
         """Format average latency in ms. Returns 'N/A' when value is None."""
         if value is None:
-            return f"Latency: {_NA}"
-        return f"Latency: {value:.1f}ms"
+            return _NA
+        return f"{value:.1f}ms"
 
     def _format_error_rate(self, value: float | None) -> str:
         """Format error rate as percentage. Returns 'N/A' when value is None."""
         if value is None:
-            return f"Errors: {_NA}"
-        return f"Errors: {value:.2f}%"
+            return _NA
+        return f"{value:.2f}%"
 
     def _format_agents(self, names: list[str]) -> str:
         """Format agent names as comma-separated list. Returns 'N/A' when empty."""
         if not names:
-            return f"Agents: {_NA}"
-        return f"Agents: {', '.join(names)}"
+            return _NA
+        return ", ".join(names)
+
+    # ── Status determination helpers ────────────────────────────────
+
+    @staticmethod
+    def _determine_vram_status(
+        used: float | None, total: float | None
+    ) -> str:
+        """Determine VRAM status based on usage percentage.
+
+        Returns ``"critical"`` if usage > 90%, ``"warning"`` if > 70%,
+        otherwise ``"normal"``.
+        """
+        if used is None or total is None or total <= 0:
+            return "normal"
+        pct = (used / total) * 100.0
+        if pct > 90:
+            return "critical"
+        if pct > 70:
+            return "warning"
+        return "normal"
+
+    @staticmethod
+    def _determine_error_status(error_rate: float | None) -> str:
+        """Determine error rate status.
+
+        Returns ``"critical"`` if error_rate > 0, otherwise ``"normal"``.
+        """
+        if error_rate is not None and error_rate > 0:
+            return "critical"
+        return "normal"
+
+    @staticmethod
+    def _determine_latency_status(latency: float | None) -> str:
+        """Determine latency status.
+
+        Returns ``"warning"`` if latency > 200ms, otherwise ``"normal"``.
+        """
+        if latency is not None and latency > 200:
+            return "warning"
+        return "normal"
 
     # ── Calculation helpers (public for testing) ────────────────────
 

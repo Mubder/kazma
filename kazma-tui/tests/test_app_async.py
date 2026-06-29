@@ -238,31 +238,29 @@ class TestDashboardAsyncRefresh:
 
     @pytest.mark.asyncio
     async def test_dashboard_mounts_metric_widgets(self) -> None:
-        """VAL-TUI-010: Dashboard must mount CPU, RAM, RPM, latency, errors, agents widgets."""
+        """VAL-TUI-010: Dashboard must mount RPM, latency, health, VRAM, errors, agents widgets."""
         from kazma_tui.app import KazmaTUI
+        from kazma_tui.dashboard import MetricCard
 
         mock_reg = _mock_model_registry()
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
             app = KazmaTUI()
             async with app.run_test(size=(120, 40)) as pilot:
-                cpu = app.query_one("#metric-cpu")
-                ram = app.query_one("#metric-ram")
-                rpm = app.query_one("#metric-rpm")
-                latency = app.query_one("#metric-latency")
-                errors = app.query_one("#metric-errors")
-                agents = app.query_one("#metric-agents")
-                assert cpu is not None
-                assert ram is not None
-                assert rpm is not None
-                assert latency is not None
-                assert errors is not None
-                assert agents is not None
+                dashboard = pilot.app.query_one("MetricsDashboard")
+                cards = dashboard.query(MetricCard)
+                card_ids = {w.id for w in cards if w.id}
+                assert "metric-rpm" in card_ids
+                assert "metric-latency" in card_ids
+                assert "metric-health" in card_ids
+                assert "metric-vram" in card_ids
+                assert "metric-errors" in card_ids
+                assert "metric-agents" in card_ids
 
     @pytest.mark.asyncio
     async def test_dashboard_shows_na_without_data_sources(self) -> None:
         """VAL-TUI-010: Without data sources, metrics should show N/A."""
         from kazma_tui.app import KazmaTUI
-        from textual.widgets import Static
+        from kazma_tui.dashboard import MetricCard
 
         mock_reg = _mock_model_registry()
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
@@ -270,21 +268,22 @@ class TestDashboardAsyncRefresh:
             with patch.dict("sys.modules", {"kazma_core": None}):
                 app = KazmaTUI()
                 async with app.run_test(size=(120, 40)) as pilot:
-                    cpu_widget = app.query_one("#metric-cpu", Static)
-                    rendered = cpu_widget.content
-                    assert "N/A" in rendered
+                    dashboard = pilot.app.query_one("MetricsDashboard")
+                    vram_card = dashboard.query_one("#metric-vram", MetricCard)
+                    assert vram_card._value == "N/A"
 
     @pytest.mark.asyncio
     async def test_dashboard_refreshes_with_mock_data(self) -> None:
         """VAL-TUI-051: Dashboard fetches from HardwareMonitor on mount and refresh."""
         from kazma_tui.app import KazmaTUI
-        from kazma_tui.dashboard import MetricsDashboard
-        from textual.widgets import Static
+        from kazma_tui.dashboard import MetricCard, MetricsDashboard
 
         mock_reg = _mock_model_registry()
         from unittest.mock import AsyncMock
         mock_monitor = MagicMock()
         snapshot = _mock_telemetry_snapshot(75.5, 8.0, 16.0)
+        snapshot.vram_used_gb = 17.6
+        snapshot.vram_total_gb = 22.5
         mock_monitor.get_stats = AsyncMock(return_value=snapshot)
 
         mock_store = MagicMock()
@@ -310,13 +309,9 @@ class TestDashboardAsyncRefresh:
                 # Trigger a manual refresh
                 dashboard._do_refresh()
                 await pilot.pause()
-                # Check that RPM and agents were updated
-                rpm_widget = app.query_one("#metric-rpm", Static)
-                agents_widget = app.query_one("#metric-agents", Static)
-                rpm_text = rpm_widget.content
-                agents_text = agents_widget.content
-                assert "N/A" not in rpm_text or True  # RPM may still be N/A if async
-                assert "w1" in agents_text
+                # Check that agents card was updated
+                agents_card = app.query_one("#metric-agents", MetricCard)
+                assert "w1" in agents_card._value
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ Validates:
 - VAL-TUI-014: Active Agents List
 - VAL-TUI-015: Real-Time Metrics Updates (periodic refresh)
 - VAL-TUI-051: Metrics Dashboard -> Real-Time Updates Flow
+- VRAM metric display and color-coded MetricCard dashboard
 """
 
 from __future__ import annotations
@@ -24,6 +25,8 @@ def _make_telemetry_snapshot(
     cpu: float = 45.2,
     ram_used_gb: float = 16.4,
     ram_total_gb: float = 32.0,
+    vram_used_gb: float = 17.6,
+    vram_total_gb: float = 22.5,
 ) -> MagicMock:
     """Create a mock TelemetrySnapshot."""
     snapshot = MagicMock()
@@ -31,8 +34,8 @@ def _make_telemetry_snapshot(
     snapshot.ram_used_gb = ram_used_gb
     snapshot.ram_total_gb = ram_total_gb
     snapshot.gpu = 0.0
-    snapshot.vram_used_gb = 0.0
-    snapshot.vram_total_gb = 0.0
+    snapshot.vram_used_gb = vram_used_gb
+    snapshot.vram_total_gb = vram_total_gb
     snapshot.error = ""
     return snapshot
 
@@ -418,6 +421,341 @@ class TestDataSourceIntegration:
 
         widget = MetricsDashboard()
         assert hasattr(widget, "_get_agent_names") or hasattr(widget, "_format_agents")
+
+
+# ---------------------------------------------------------------------------
+# VRAM Display
+# ---------------------------------------------------------------------------
+
+
+class TestVRAMDisplay:
+    """VRAM metric display and formatting."""
+
+    def test_format_vram_normal(self) -> None:
+        """VRAM must be formatted as used/total GB."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        widget = MetricsDashboard()
+        text = widget._format_vram(17.6, 22.5)
+        assert "17.6" in text
+        assert "22.5" in text
+        assert "GB" in text
+
+    def test_format_vram_na_when_none(self) -> None:
+        """VRAM must show N/A when values are None."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        widget = MetricsDashboard()
+        text = widget._format_vram(None, None)
+        assert text == "N/A"
+
+    def test_format_vram_na_when_used_none(self) -> None:
+        """VRAM must show N/A when used is None."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        widget = MetricsDashboard()
+        text = widget._format_vram(None, 22.5)
+        assert text == "N/A"
+
+    def test_format_vram_na_when_total_none(self) -> None:
+        """VRAM must show N/A when total is None."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        widget = MetricsDashboard()
+        text = widget._format_vram(17.6, None)
+        assert text == "N/A"
+
+
+# ---------------------------------------------------------------------------
+# VRAM Color Thresholds
+# ---------------------------------------------------------------------------
+
+
+class TestVRAMColorThresholds:
+    """VRAM color-coding based on usage percentage."""
+
+    def test_vram_critical_above_90_percent(self) -> None:
+        """VRAM status must be 'critical' when usage > 90%."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        # 20.0 / 22.0 = 90.9%
+        status = MetricsDashboard._determine_vram_status(20.0, 22.0)
+        assert status == "critical"
+
+    def test_vram_warning_above_70_percent(self) -> None:
+        """VRAM status must be 'warning' when usage > 70%."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        # 17.0 / 22.0 = 77.3%
+        status = MetricsDashboard._determine_vram_status(17.0, 22.0)
+        assert status == "warning"
+
+    def test_vram_normal_at_70_percent(self) -> None:
+        """VRAM status must be 'normal' when usage <= 70%."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        # 15.0 / 22.0 = 68.2%
+        status = MetricsDashboard._determine_vram_status(15.0, 22.0)
+        assert status == "normal"
+
+    def test_vram_normal_when_none(self) -> None:
+        """VRAM status must be 'normal' when values are None."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        status = MetricsDashboard._determine_vram_status(None, None)
+        assert status == "normal"
+
+    def test_vram_normal_when_total_zero(self) -> None:
+        """VRAM status must be 'normal' when total is zero."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        status = MetricsDashboard._determine_vram_status(0.0, 0.0)
+        assert status == "normal"
+
+    def test_vram_warning_below_90_percent(self) -> None:
+        """VRAM status below 90% but above 70% must be 'warning'."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        # 17.6 / 22.5 = 78.2%
+        status = MetricsDashboard._determine_vram_status(17.6, 22.5)
+        assert status == "warning"
+
+    def test_vram_critical_above_threshold(self) -> None:
+        """VRAM status above 90% must be 'critical'."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        # 21.0 / 22.0 = 95.5%
+        status = MetricsDashboard._determine_vram_status(21.0, 22.0)
+        assert status == "critical"
+
+
+# ---------------------------------------------------------------------------
+# Error Rate Color Thresholds
+# ---------------------------------------------------------------------------
+
+
+class TestErrorRateColorThresholds:
+    """Error rate color-coding based on value."""
+
+    def test_error_critical_when_positive(self) -> None:
+        """Error status must be 'critical' when error rate > 0."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        status = MetricsDashboard._determine_error_status(5.88)
+        assert status == "critical"
+
+    def test_error_normal_when_zero(self) -> None:
+        """Error status must be 'normal' when error rate == 0."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        status = MetricsDashboard._determine_error_status(0.0)
+        assert status == "normal"
+
+    def test_error_normal_when_none(self) -> None:
+        """Error status must be 'normal' when error rate is None."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        status = MetricsDashboard._determine_error_status(None)
+        assert status == "normal"
+
+
+# ---------------------------------------------------------------------------
+# Latency Color Thresholds
+# ---------------------------------------------------------------------------
+
+
+class TestLatencyColorThresholds:
+    """Latency color-coding based on value."""
+
+    def test_latency_warning_above_200ms(self) -> None:
+        """Latency status must be 'warning' when latency > 200ms."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        status = MetricsDashboard._determine_latency_status(250.0)
+        assert status == "warning"
+
+    def test_latency_normal_at_200ms(self) -> None:
+        """Latency status must be 'normal' when latency <= 200ms."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        status = MetricsDashboard._determine_latency_status(200.0)
+        assert status == "normal"
+
+    def test_latency_normal_below_200ms(self) -> None:
+        """Latency status must be 'normal' when latency < 200ms."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        status = MetricsDashboard._determine_latency_status(150.0)
+        assert status == "normal"
+
+    def test_latency_normal_when_none(self) -> None:
+        """Latency status must be 'normal' when latency is None."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        status = MetricsDashboard._determine_latency_status(None)
+        assert status == "normal"
+
+
+# ---------------------------------------------------------------------------
+# Health Display
+# ---------------------------------------------------------------------------
+
+
+class TestHealthDisplay:
+    """Health (CPU/Mem) metric display and formatting."""
+
+    def test_format_health_normal(self) -> None:
+        """Health must show CPU% and RAM used/total GB."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        widget = MetricsDashboard()
+        text = widget._format_health(45.2, 16.4, 32.0)
+        assert "45.2" in text
+        assert "16.4" in text
+        assert "32.0" in text
+
+    def test_format_health_na_when_cpu_none(self) -> None:
+        """Health must show N/A for CPU when cpu is None."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        widget = MetricsDashboard()
+        text = widget._format_health(None, 16.4, 32.0)
+        assert "N/A" in text
+
+    def test_format_health_na_when_ram_none(self) -> None:
+        """Health must show N/A for RAM when ram values are None."""
+        from kazma_tui.dashboard import MetricsDashboard
+
+        widget = MetricsDashboard()
+        text = widget._format_health(45.2, None, None)
+        assert "N/A" in text
+
+    def test_health_always_normal_status(self) -> None:
+        """Health color should always be 'normal' (green)."""
+        # Health doesn't have a dedicated status helper;
+        # it's always set to "normal" in _do_refresh.
+        # This test verifies the convention by checking format_health works.
+        from kazma_tui.dashboard import MetricsDashboard
+
+        widget = MetricsDashboard()
+        text = widget._format_health(99.9, 31.0, 32.0)
+        assert "99.9" in text  # Even extreme values format normally
+
+
+# ---------------------------------------------------------------------------
+# MetricCard Widget
+# ---------------------------------------------------------------------------
+
+
+class TestMetricCard:
+    """MetricCard widget rendering and status colors."""
+
+    def test_metric_card_render_normal(self) -> None:
+        """MetricCard with 'normal' status wraps value in green markup."""
+        from kazma_tui.dashboard import MetricCard
+
+        card = MetricCard(label="Test", value="42", status="normal")
+        rendered = card._render_value()
+        assert "[bold green]" in rendered
+        assert "42" in rendered
+        assert "[/bold green]" in rendered
+
+    def test_metric_card_render_warning(self) -> None:
+        """MetricCard with 'warning' status wraps value in yellow markup."""
+        from kazma_tui.dashboard import MetricCard
+
+        card = MetricCard(label="Test", value="slow", status="warning")
+        rendered = card._render_value()
+        assert "[bold yellow]" in rendered
+        assert "slow" in rendered
+        assert "[/bold yellow]" in rendered
+
+    def test_metric_card_render_critical(self) -> None:
+        """MetricCard with 'critical' status wraps value in red markup."""
+        from kazma_tui.dashboard import MetricCard
+
+        card = MetricCard(label="Test", value="error", status="critical")
+        rendered = card._render_value()
+        assert "[bold red]" in rendered
+        assert "error" in rendered
+        assert "[/bold red]" in rendered
+
+    def test_metric_card_has_label(self) -> None:
+        """MetricCard must store label."""
+        from kazma_tui.dashboard import MetricCard
+
+        card = MetricCard(label="VRAM", value="17.6 / 22.5 GB", status="normal")
+        assert card._label == "VRAM"
+
+
+# ---------------------------------------------------------------------------
+# Dashboard Grid Layout
+# ---------------------------------------------------------------------------
+
+import pytest
+
+
+class TestDashboardGridLayout:
+    """Dashboard must render 6 MetricCard widgets in a 3x2 grid."""
+
+    @pytest.mark.asyncio
+    async def test_compose_yields_six_metric_cards(self) -> None:
+        """compose() must yield exactly 6 MetricCard widgets."""
+        from kazma_tui.dashboard import MetricCard, MetricsDashboard
+        from textual.app import App
+
+        class _TestApp(App[None]):
+            def compose(self):  # type: ignore[override]
+                yield MetricsDashboard()
+
+        async with _TestApp().run_test() as pilot:
+            dashboard = pilot.app.query_one(MetricsDashboard)
+            cards = dashboard.query(MetricCard)
+            assert len(cards) == 6, (
+                f"Expected 6 MetricCard widgets, got {len(cards)}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_metric_card_ids(self) -> None:
+        """All 6 metric cards must have correct IDs."""
+        from kazma_tui.dashboard import MetricCard, MetricsDashboard
+        from textual.app import App
+
+        expected_ids = {
+            "metric-rpm",
+            "metric-latency",
+            "metric-health",
+            "metric-vram",
+            "metric-errors",
+            "metric-agents",
+        }
+
+        class _TestApp(App[None]):
+            def compose(self):  # type: ignore[override]
+                yield MetricsDashboard()
+
+        async with _TestApp().run_test() as pilot:
+            dashboard = pilot.app.query_one(MetricsDashboard)
+            cards = dashboard.query(MetricCard)
+            card_ids = {w.id for w in cards if w.id}
+            assert card_ids == expected_ids, (
+                f"Expected IDs {expected_ids}, got {card_ids}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_vram_card_present(self) -> None:
+        """Dashboard must include a VRAM MetricCard."""
+        from kazma_tui.dashboard import MetricsDashboard
+        from textual.app import App
+
+        class _TestApp(App[None]):
+            def compose(self):  # type: ignore[override]
+                yield MetricsDashboard()
+
+        async with _TestApp().run_test() as pilot:
+            dashboard = pilot.app.query_one(MetricsDashboard)
+            vram_cards = dashboard.query("#metric-vram")
+            assert len(vram_cards) == 1, "Expected exactly one VRAM MetricCard"
 
 
 # ---------------------------------------------------------------------------
