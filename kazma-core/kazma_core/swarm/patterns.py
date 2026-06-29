@@ -16,10 +16,7 @@ from kazma_core.swarm.task import SwarmTask, WorkerResult
 
 logger = logging.getLogger(__name__)
 
-DispatchWorkerByName = Callable[
-    [str, str, str | SwarmDispatchContext],
-    Awaitable[WorkerResult],
-]
+DispatchWorkerByName = Callable[..., Awaitable[WorkerResult]]
 
 
 class PipelineConfigurationError(ValueError):
@@ -162,7 +159,12 @@ async def execute_pipeline(
 
         try:
             worker_result = await asyncio.wait_for(
-                dispatch_worker_by_name(worker_name, task.prompt, dispatch_context),
+                dispatch_worker_by_name(
+                    worker_name,
+                    task.prompt,
+                    dispatch_context,
+                    fallback_chain=task.fallback_chain or None,
+                ),
                 timeout=task.timeout,
             )
         except TimeoutError:
@@ -256,7 +258,12 @@ async def execute_conditional(
     # Step 1: Execute the router worker.
     try:
         router_result = await asyncio.wait_for(
-            dispatch_worker_by_name(router_name, task.prompt, task.context),
+            dispatch_worker_by_name(
+                router_name,
+                task.prompt,
+                task.context,
+                fallback_chain=task.fallback_chain or None,
+            ),
             timeout=task.timeout,
         )
     except TimeoutError:
@@ -384,7 +391,12 @@ async def execute_fan_out(
         try:
             async with concurrency:
                 worker_result = await asyncio.wait_for(
-                    dispatch_worker_by_name(worker_name, task.prompt, dispatch_context),
+                    dispatch_worker_by_name(
+                        worker_name,
+                        task.prompt,
+                        dispatch_context,
+                        fallback_chain=task.fallback_chain or None,
+                    ),
                     timeout=task.timeout,
                 )
         except TimeoutError:

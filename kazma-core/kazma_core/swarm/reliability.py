@@ -1,6 +1,6 @@
 """Reliability layer for swarm worker dispatch.
 
-Provides five core components:
+Provides six core components:
 
 * **RetryPolicy** -- configurable retry with exponential backoff, jitter, and
   transient-failure detection.
@@ -10,6 +10,8 @@ Provides five core components:
   configurable on-timeout behaviors (fail, retry, skip).
 * **OutputValidator** -- Pydantic / dict / JSON-schema validation on worker
   output before acceptance.
+* **FallbackChain** -- ordered fallback worker list invoked sequentially when
+  the primary worker fails (after retries and circuit breaker evaluation).
 * **BoundedConcurrency** -- asyncio.Semaphore wrapper for limiting parallel
   dispatches across fan-out, broadcast, and consult patterns.
 
@@ -27,7 +29,10 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from kazma_core.swarm.task import WorkerResult
 
 logger = logging.getLogger(__name__)
 
@@ -662,6 +667,144 @@ def _python_type_matches(value: Any, type_name: str) -> bool:
     if expected_type is None:
         return True  # Unknown type -> accept anything.
     return isinstance(value, expected_type)
+
+
+# ---------------------------------------------------------------------------
+# FallbackChain
+# ---------------------------------------------------------------------------
+
+
+class FallbackChain:
+    """Ordered fallback worker list for resilient task dispatch.
+
+    When the primary worker fails (after retries and circuit breaker
+    evaluation), the fallback chain is consulted.  Fallback workers are
+    invoked **sequentially** in the declared order.  Each fallback is
+    subject to its own retry policy and circuit breaker (managed by the
+    caller / engine).  The first successful fallback ends the chain.
+
+    If all fallbacks fail the last fallback's result is returned as a
+    terminal failure with a summary mentioning fallback exhaustion.
+
+    An empty chain means no fallback is attempted -- the primary result
+    is returned unchanged.
+
+    Every fallback invocation is recorded as a
+    :class:`~kazma_core.swarm.task.HandoffRecord` on the returned
+    :class:`~kazma_core.swarm.task.WorkerResult`, enabling tracing of the
+    full fallback path.
+
+    Args:
+        fallback_workers: Ordered list of fallback worker names.
+    """
+
+    def __init__(self, fallback_workers: list[str] | None = None) -> None:
+        self.fallback_workers: list[str] = list(fallback_workers or [])
+        self.attempted_results: list[WorkerResult] = []
+
+    async def execute(
+        self,
+        primary_result: WorkerResult,
+        *,
+        dispatch_worker: Callable[[str], Awaitable[WorkerResult]],
+    ) -> WorkerResult:
+        """Attempt fallbacks after a primary failure.
+
+        Args:
+            primary_result: The primary worker's result.  If its status is
+                ``"success"`` it is returned immediately.
+            dispatch_worker: Async callable that dispatches to a named
+                worker and returns a :class:`WorkerResult`.
+
+        Returns:
+            The first successful result (primary or fallback), or the last
+            fallback result on terminal failure.  Handoff records are
+            accumulated on the returned result.
+        """
+        # Successful primary -- nothing to do.
+        if primary_result.status == "success":
+            return primary_result
+
+        # Empty chain -- no fallback.
+        if not self.fallback_workers:
+            return primary_result
+
+        # Lazy import to avoid circular dependency.
+        from kazma_core.swarm.task import HandoffRecord as _HandoffRecord
+
+        # Track all attempted results for the caller to inspect.
+        self.attempted_results = []
+        handoffs: list[_HandoffRecord] = list(primary_result.handoffs)
+        previous_worker = primary_result.worker
+        last_result = primary_result
+        errors: list[str] = []
+        if primary_result.error:
+            errors.append(f"[{primary_result.worker}] {primary_result.error}")
+
+        for fallback_name in self.fallback_workers:
+            # Record the handoff from the previous worker to this fallback.
+            handoffs.append(
+                _HandoffRecord(
+                    from_worker=previous_worker,
+                    to_worker=fallback_name,
+                    context_transferred=(
+                        f"Fallback after {previous_worker} failed. "
+                        f"Error: {last_result.error or 'unknown'}"
+                    ),
+                )
+            )
+
+            logger.info(
+                "[FallbackChain] attempting fallback '%s' after '%s' failed",
+                fallback_name,
+                previous_worker,
+            )
+
+            try:
+                fallback_result = await dispatch_worker(fallback_name)
+            except Exception as exc:
+                logger.warning(
+                    "[FallbackChain] fallback '%s' raised: %s",
+                    fallback_name,
+                    exc,
+                )
+                fallback_result = WorkerResult(
+                    worker=fallback_name,
+                    task_id=primary_result.task_id,
+                    status="error",
+                    output="",
+                    error=str(exc)[:500],
+                )
+
+            self.attempted_results.append(fallback_result)
+
+            # Merge handoff records from fallback (it may have its own).
+            if fallback_result.handoffs:
+                handoffs.extend(fallback_result.handoffs)
+            fallback_result.handoffs = list(handoffs)
+
+            if fallback_result.status == "success":
+                logger.info(
+                    "[FallbackChain] fallback '%s' succeeded", fallback_name
+                )
+                return fallback_result
+
+            # Fallback failed -- record error and continue.
+            errors.append(
+                f"[{fallback_name}] {fallback_result.error or 'unknown error'}"
+            )
+            previous_worker = fallback_name
+            last_result = fallback_result
+
+        # All fallbacks exhausted.
+        exhaustion_summary = (
+            f"All fallback workers exhausted for primary '{primary_result.worker}'. "
+            f"Chain: {self.fallback_workers}. Errors: {'; '.join(errors)}"
+        )
+        logger.warning("[FallbackChain] %s", exhaustion_summary)
+        last_result.error = exhaustion_summary
+        last_result.handoffs = list(handoffs)
+        return last_result
 
 
 # ---------------------------------------------------------------------------

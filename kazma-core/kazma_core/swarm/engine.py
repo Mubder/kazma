@@ -27,6 +27,7 @@ from kazma_core.swarm.reliability import (
     BoundedConcurrency,
     CircuitBreaker,
     CircuitBreakerOpenError,
+    FallbackChain,
     OutputValidator,
     RetryPolicy,
     TimeoutGuard,
@@ -360,6 +361,7 @@ class SwarmEngine:
                 duration_seconds=perf_counter() - started,
             )
 
+        # Dispatch the primary worker.
         worker_result = await self._dispatch_worker(
             worker,
             task.prompt,
@@ -367,12 +369,34 @@ class SwarmEngine:
             timeout=task.timeout,
             validation_schema=task.validation_schema,
         )
-        result_status = self._overall_status([worker_result])
+        all_worker_results: list[WorkerResult] = [worker_result]
+
+        # Execute fallback chain if the primary failed and a chain is configured.
+        if worker_result.status != "success" and task.fallback_chain:
+            fallback_result, fallback_all = await self._execute_fallback_chain(
+                worker_result,
+                task.fallback_chain,
+                prompt=task.prompt,
+                context=task.context,
+                timeout=task.timeout,
+                validation_schema=task.validation_schema,
+            )
+            all_worker_results = fallback_all
+            worker_result = fallback_result
+
+        # Determine overall status: if fallbacks ran, the final result's
+        # status determines the outcome (intermediate failures are expected).
+        if len(all_worker_results) > 1 and task.fallback_chain:
+            result_status = (
+                "success" if worker_result.status == "success" else "failed"
+            )
+        else:
+            result_status = self._overall_status(all_worker_results)
         aggregated_output = worker_result.output if worker_result.status == "success" else None
 
         return self._finalize_task(
             task,
-            worker_results=[worker_result],
+            worker_results=all_worker_results,
             status=result_status,
             aggregated_output=aggregated_output,
             error=worker_result.error if result_status != "success" else None,
@@ -458,6 +482,7 @@ class SwarmEngine:
         *,
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
+        fallback_chain: list[str] | None = None,
     ) -> WorkerResult:
         worker = self.get_worker(worker_name)
         if worker is None:
@@ -468,13 +493,77 @@ class SwarmEngine:
                 output="",
                 error=f"Worker '{worker_name}' not found.",
             )
-        return await self._dispatch_worker(
+        result = await self._dispatch_worker(
             worker,
             prompt,
             context,
             timeout=timeout,
             validation_schema=validation_schema,
         )
+
+        # If the primary worker succeeded or no fallback chain, return.
+        if result.status == "success" or not fallback_chain:
+            return result
+
+        # Execute the fallback chain (returns final result + all attempted).
+        final_result, _all_results = await self._execute_fallback_chain(
+            result,
+            fallback_chain,
+            prompt=prompt,
+            context=context,
+            timeout=timeout,
+            validation_schema=validation_schema,
+        )
+        return final_result
+
+    async def _execute_fallback_chain(
+        self,
+        primary_result: WorkerResult,
+        fallback_chain: list[str],
+        *,
+        prompt: str,
+        context: str | SwarmDispatchContext,
+        timeout: float | None = None,
+        validation_schema: dict[str, Any] | None = None,
+    ) -> tuple[WorkerResult, list[WorkerResult]]:
+        """Execute fallback workers sequentially after primary failure.
+
+        Each fallback is dispatched through the full reliability path
+        (circuit breaker check, retry, timeout, validation).  The first
+        successful fallback ends the chain.  If all fail, a terminal
+        failure result is returned with a summary error.
+
+        Returns:
+            A tuple of ``(final_result, all_attempted_results)``.  The
+            ``all_attempted_results`` list includes the primary result
+            followed by each fallback result in order.
+        """
+        chain = FallbackChain(fallback_workers=fallback_chain)
+        task_id = primary_result.task_id
+
+        async def _dispatch_fallback(name: str) -> WorkerResult:
+            fallback_worker = self.get_worker(name)
+            if fallback_worker is None:
+                return WorkerResult(
+                    worker=name,
+                    task_id=task_id,
+                    status="error",
+                    output="",
+                    error=f"Worker '{name}' not found.",
+                )
+            return await self._dispatch_worker(
+                fallback_worker,
+                prompt,
+                context,
+                timeout=timeout,
+                validation_schema=validation_schema,
+            )
+
+        final_result = await chain.execute(
+            primary_result, dispatch_worker=_dispatch_fallback
+        )
+        all_results = [primary_result] + list(chain.attempted_results)
+        return final_result, all_results
 
     async def _dispatch_worker(
         self,
