@@ -12,10 +12,7 @@ Validates:
 from __future__ import annotations
 
 import re
-from typing import Any
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 # ── Arabic / RTL Unicode ranges ──────────────────────────────────────
 _ARABIC_RANGES = re.compile(
