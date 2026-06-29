@@ -1,31 +1,373 @@
-"""Unified provider and model profile registry backed by ConfigStore.
+"""Singleton ModelRegistry — single source of truth for providers, models, and LLM clients.
 
-This module is the single source of truth for provider and model-profile
-operations. It keeps backward compatibility with existing storage keys:
+This module replaces the former ``UnifiedModelRegistry`` with a true singleton
+that owns provider configuration, API keys, and LLM client creation.
 
+Singleton lifecycle::
+
+    initialize_model_registry(config_store)  # create + deserialize
+    get_model_registry()                     # retrieve
+    reset_model_registry()                   # teardown (tests)
+
+Backward-compatible storage keys:
 - ``providers.list``
 - ``providers.health.*``
 - ``models.saved.*``
 - ``models.defaults.*``
 - ``llm.model``
+- ``registry.active_provider``
+- ``registry.active_model``
+- ``registry.discovered_models``
 """
 
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
+import httpx
+
+from kazma_core.llm_provider import LLMConfig, LLMProvider
 from kazma_core.providers import PROVIDER_PRESETS
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_TASKS = ("chat", "code", "summarize", "translate")
 _PROFILE_FIELDS = ("base_url", "api_key", "model", "provider")
 
+# ── Singleton lifecycle ──────────────────────────────────────────────
 
-class UnifiedModelRegistry:
-    """Unified provider/model registry facade over ``ConfigStore``."""
+_registry: ModelRegistry | None = None
+
+
+def initialize_model_registry(config_store: Any) -> ModelRegistry:
+    """Create and return the module-level singleton ``ModelRegistry``.
+
+    Calling this again replaces any existing instance.
+    """
+    global _registry
+    _registry = ModelRegistry(config_store)
+    _registry._deserialize()
+    return _registry
+
+
+def get_model_registry() -> ModelRegistry:
+    """Return the singleton ``ModelRegistry``.
+
+    Raises ``RuntimeError`` if ``initialize_model_registry`` has not been called.
+    """
+    if _registry is None:
+        raise RuntimeError(
+            "ModelRegistry not initialized. Call initialize_model_registry() first."
+        )
+    return _registry
+
+
+def reset_model_registry() -> None:
+    """Tear down the singleton (primarily for tests)."""
+    global _registry
+    _registry = None
+
+
+# ── ModelRegistry ────────────────────────────────────────────────────
+
+
+class ModelRegistry:
+    """Singleton registry — the ONLY owner of provider config and LLM clients.
+
+    All existing ``UnifiedModelRegistry`` methods are preserved for backward
+    compatibility.  New methods add active-profile management, LLM client
+    caching, and model discovery.
+    """
 
     def __init__(self, config_store: Any) -> None:
         self._cs = config_store
+        self._clients: dict[str, LLMProvider] = {}
+        self._active_provider: str = ""
+        self._active_model: str = ""
+        self._discovered_models: dict[str, list[str]] = {}
+
+    # ── Active profile management ──────────────────────────────────
+
+    def get_active_profile(self) -> dict[str, str]:
+        """Return the active provider profile.
+
+        Returns a dict with keys ``provider``, ``base_url``, ``model``,
+        ``api_key`` (masked).  Falls back to legacy ``llm.*`` keys when no
+        active profile has been explicitly set.
+        """
+        provider_name = self._active_provider
+        model = self._active_model
+
+        # Try to resolve from stored providers first
+        provider_entry = self.get_provider(provider_name) if provider_name else None
+
+        base_url = ""
+        api_key = ""
+
+        if provider_entry:
+            base_url = str(provider_entry.get("base_url", ""))
+            api_key = str(provider_entry.get("api_key", ""))
+        elif not provider_name or not provider_entry:
+            # Fallback: legacy llm.* keys
+            base_url = str(self._cs.get("llm.base_url", "") or "")
+            api_key = str(self._cs.get("llm.api_key", "") or "")
+            if not model:
+                model = str(self._cs.get("llm.model", "") or "")
+            if not provider_name:
+                provider_name = "custom"
+
+        masked_key = "***" if api_key else ""
+        return {
+            "provider": provider_name,
+            "base_url": base_url,
+            "model": model,
+            "api_key": masked_key,
+        }
+
+    def set_active_provider(
+        self,
+        provider: str,
+        base_url: str = "",
+        model: str = "",
+        api_key: str = "",
+    ) -> dict[str, str]:
+        """Switch the active provider.
+
+        Persists to ConfigStore and invalidates any cached client for this
+        provider.  Returns the normalized profile (api_key masked).
+        """
+        clean_provider = (provider or "").strip()
+        if not clean_provider:
+            return {"error": "Provider name is required"}
+
+        self._active_provider = clean_provider
+
+        # If explicit base_url/api_key provided, store them in the provider list
+        if base_url or api_key:
+            existing = self.get_provider(clean_provider)
+            if existing:
+                upsert_data: dict[str, Any] = {"name": clean_provider}
+                if base_url:
+                    upsert_data["base_url"] = base_url
+                if api_key:
+                    upsert_data["api_key"] = api_key
+                self.upsert_provider(upsert_data)
+            else:
+                self.upsert_provider({
+                    "name": clean_provider,
+                    "base_url": base_url,
+                    "api_key": api_key,
+                })
+
+        if model:
+            self._active_model = model
+
+        # Persist
+        self._cs.set("registry.active_provider", clean_provider, category="registry")
+        if self._active_model:
+            self._cs.set("registry.active_model", self._active_model, category="registry")
+
+        # Invalidate cached client
+        self._clients.pop(clean_provider, None)
+
+        return self.get_active_profile()
+
+    def set_active_model(self, model: str) -> None:
+        """Change just the model within the active provider."""
+        self._active_model = (model or "").strip()
+        self._cs.set("registry.active_model", self._active_model, category="registry")
+        # Invalidate cached client so it picks up the new model
+        if self._active_provider:
+            self._clients.pop(self._active_provider, None)
+
+    # ── LLM client management ──────────────────────────────────────
+
+    def get_client(self, model: str | None = None) -> LLMProvider:
+        """Return a pre-configured ``LLMProvider`` for the active profile.
+
+        Clients are cached by provider name.  Pass *model* to override the
+        model within the active provider (does not change the cached entry).
+        """
+        provider_name = self._active_provider or "custom"
+        effective_model = model or self._active_model
+
+        if model is None and provider_name in self._clients:
+            return self._clients[provider_name]
+
+        provider_entry = self.get_provider(provider_name)
+        base_url = ""
+        api_key = ""
+        if provider_entry:
+            base_url = str(provider_entry.get("base_url", ""))
+            api_key = str(provider_entry.get("api_key", ""))
+
+        if not base_url:
+            # Fallback to legacy keys
+            base_url = str(self._cs.get("llm.base_url", "") or "")
+        if not api_key:
+            api_key = str(self._cs.get("llm.api_key", "") or "")
+        if not effective_model:
+            effective_model = str(self._cs.get("llm.model", "") or "gpt-4o-mini")
+
+        config = LLMConfig.from_dict({
+            "base_url": base_url,
+            "api_key": api_key,
+            "model": effective_model,
+        })
+        client = LLMProvider(config)
+
+        if model is None:
+            self._clients[provider_name] = client
+
+        return client
+
+    def get_model(self, model_id: str) -> LLMProvider:
+        """Return a pre-configured ``LLMProvider`` for a specific model ID.
+
+        Looks up which provider owns *model_id* from the provider list, then
+        builds a client.
+        """
+        clean_id = (model_id or "").strip()
+        if not clean_id:
+            raise ValueError("model_id is required")
+
+        # Search providers for one that lists this model
+        for provider in self.list_providers():
+            models = self._normalize_models(provider.get("models", []))
+            if clean_id in models:
+                config = LLMConfig.from_dict({
+                    "base_url": str(provider.get("base_url", "")),
+                    "api_key": str(provider.get("api_key", "")),
+                    "model": clean_id,
+                })
+                return LLMProvider(config)
+
+        # Fallback: use active profile with overridden model
+        return self.get_client(model=clean_id)
+
+    # ── Model discovery ────────────────────────────────────────────
+
+    async def discover_models(self, provider_name: str) -> list[str]:
+        """Hit the provider's ``/models`` endpoint and return model IDs.
+
+        Results are cached in ``self._discovered_models``.
+        """
+        clean_name = (provider_name or "").strip()
+        if not clean_name:
+            return []
+
+        provider_entry = self.get_provider(clean_name)
+        if not provider_entry:
+            logger.warning("discover_models: provider %r not found", clean_name)
+            return []
+
+        base_url = str(provider_entry.get("base_url", ""))
+        api_key = str(provider_entry.get("api_key", ""))
+
+        if not base_url:
+            logger.warning("discover_models: no base_url for %r", clean_name)
+            return []
+
+        # Resolve the models endpoint
+        preset = PROVIDER_PRESETS.get(clean_name, {})
+        models_path = preset.get("models_endpoint", "/models")
+
+        # Build the full URL — strip /v1 if present, then append models path
+        url = base_url.rstrip("/")
+        if url.endswith("/v1"):
+            url = url[: -len("/v1")]
+        url = f"{url}{models_path}"
+
+        # Build auth header
+        auth_header_type = preset.get("auth_header", "Bearer")
+        headers: dict[str, str] = {}
+        if api_key and auth_header_type:
+            headers["Authorization"] = f"{auth_header_type} {api_key}"
+        elif api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(url, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+
+            model_ids: list[str] = []
+            for item in data.get("data", []):
+                model_id = item.get("id", "")
+                if model_id:
+                    model_ids.append(str(model_id))
+
+            model_ids.sort()
+            self._discovered_models[clean_name] = model_ids
+            return model_ids
+
+        except Exception as exc:
+            logger.error("discover_models failed for %r: %s", clean_name, exc)
+            return self._discovered_models.get(clean_name, [])
+
+    async def discover_all(self) -> dict[str, list[str]]:
+        """Discover models for all enabled providers."""
+        results: dict[str, list[str]] = {}
+        for provider in self.list_providers():
+            name = str(provider.get("name", "")).strip()
+            if not name or not provider.get("enabled", True):
+                continue
+            results[name] = await self.discover_models(name)
+        return results
+
+    def get_discovered_models(self, provider_name: str | None = None) -> list[str]:
+        """Return cached discovered models.
+
+        If *provider_name* is given, returns models for that provider only.
+        Otherwise returns all discovered models across all providers.
+        """
+        if provider_name:
+            return list(self._discovered_models.get(provider_name.strip(), []))
+        all_models: list[str] = []
+        for models in self._discovered_models.values():
+            all_models.extend(models)
+        return sorted(set(all_models))
+
+    # ── Persistence ────────────────────────────────────────────────
+
+    def _deserialize(self) -> None:
+        """Load active profile and discovered models from ConfigStore."""
+        self._active_provider = str(self._cs.get("registry.active_provider", "") or "")
+        self._active_model = str(self._cs.get("registry.active_model", "") or "")
+
+        raw = self._cs.get("registry.discovered_models", {})
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                raw = {}
+        if isinstance(raw, dict):
+            self._discovered_models = {
+                str(k): [str(m) for m in v]
+                for k, v in raw.items()
+                if isinstance(v, list)
+            }
+
+        # Legacy fallback: if no active provider, check llm.* keys
+        if not self._active_provider:
+            legacy_url = str(self._cs.get("llm.base_url", "") or "")
+            if legacy_url:
+                self._active_provider = "custom"
+                if not self._active_model:
+                    self._active_model = str(self._cs.get("llm.model", "") or "")
+
+    def serialize(self) -> None:
+        """Save current state to ConfigStore."""
+        self._cs.set("registry.active_provider", self._active_provider, category="registry")
+        self._cs.set("registry.active_model", self._active_model, category="registry")
+        self._cs.set(
+            "registry.discovered_models",
+            json.dumps(self._discovered_models),
+            category="registry",
+        )
 
     # ── Providers ──────────────────────────────────────────────────
 
@@ -65,6 +407,8 @@ class UnifiedModelRegistry:
                 if not provider.get("display_name"):
                     provider["display_name"] = name
                 self._save_providers(providers)
+                # Invalidate cached client for this provider
+                self._clients.pop(name, None)
                 return dict(provider)
 
         provider = {
@@ -87,6 +431,7 @@ class UnifiedModelRegistry:
             return
         providers = [p for p in self.list_providers() if p.get("name") != clean_name]
         self._save_providers(providers)
+        self._clients.pop(clean_name, None)
 
     def toggle_provider(self, name: str, enabled: bool) -> None:
         """Toggle provider enabled flag."""
@@ -298,3 +643,7 @@ class UnifiedModelRegistry:
                         names.append(value.strip())
                         break
         return names
+
+
+# Backward-compatible alias for existing consumers.
+UnifiedModelRegistry = ModelRegistry
