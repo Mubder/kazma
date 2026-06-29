@@ -15,6 +15,7 @@ Features are listed with their implementation PR/commit where available.
 | ✅ | Result Aggregation | Added `first_valid`, `merge_all`, `vote`, `synthesize`, and `collect` fan-out aggregation strategies | `swarm-fanout-pattern` |
 | ✅ | Consult Orchestration | Added `consult` pattern in `kazma_core/swarm/consultation.py` — role-aware independent worker opinions, attributed synthesis, partial/all-fail/single-worker handling, persisted `individual_opinions` + `synthesized_output`, and `GET /api/swarm/tasks?type=consult` history | `swarm-consult-pattern` |
 | ✅ | Conditional Orchestration | Added `conditional` routing pattern in `kazma_core/swarm/patterns.py` — router worker evaluates prompt, engine dispatches to mapped worker via `metadata.routes`, graceful fallback on unmatched route (default worker or clear error), router failure halts with no downstream execution, `metadata.route_taken` recorded | `swarm-conditional-pattern` |
+| ✅ | Capability Router | Added `CapabilityRouter` in `kazma_core/swarm/router.py` — when `task.workers=["auto"]`, scores registered workers by keyword overlap between task prompt/context/requirements and worker capabilities (expertise, role, tools, model_specialty). Returns top N workers, records `metadata.routed_workers` and `metadata.routing_scores`. Raises `NoCapableWorkersError` when no workers match. Spawned workers are considered by the router. | `swarm-capability-router` |
 
 ---
 

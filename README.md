@@ -247,6 +247,7 @@ The swarm engine supports these worker orchestration patterns:
 - `fan_out` for concurrent execution of the same prompt across selected workers
 - `consult` for collecting independent role-aware worker opinions and synthesizing a consolidated answer
 - `conditional` for routing to different workers based on a router worker's evaluation of the prompt
+- `auto` routing via `CapabilityRouter` — when `workers=["auto"]`, the engine scores registered workers by keyword overlap between the task prompt/context/requirements and each worker's declared capabilities (expertise, role, tools, model specialty), then selects the top N matches
 
 Fan-out supports `first_valid`, `merge_all`, `vote`, `synthesize`, and
 `collect` aggregation strategies. Parallel dispatches are bounded by

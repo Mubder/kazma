@@ -23,6 +23,7 @@ from kazma_core.swarm.patterns import (
     execute_fan_out,
     execute_pipeline,
 )
+from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
 from kazma_core.swarm.task import (
     SwarmTask,
     TaskResult,
@@ -62,11 +63,13 @@ class SwarmEngine:
         config: SwarmConfig | None = None,
         *,
         result_aggregator: ResultAggregator | None = None,
+        capability_router: CapabilityRouter | None = None,
     ) -> None:
         self.config = config or SwarmConfig(enabled=True, workers=[])
         self._workers: dict[str, SwarmWorker] = {}
         self._task_history: dict[str, SwarmTask] = {}
         self._result_aggregator = result_aggregator or ResultAggregator()
+        self._capability_router = capability_router or CapabilityRouter()
         self._build_workers()
 
     def _build_workers(self) -> None:
@@ -189,6 +192,23 @@ class SwarmEngine:
         started = perf_counter()
         task.started_at = task.started_at or _utc_now_iso()
         task.status = TaskStatus.RUNNING
+
+        # Auto-routing: resolve workers=["auto"] via CapabilityRouter.
+        if list(task.workers) == ["auto"]:
+            try:
+                routed = self._capability_router.route(
+                    task,
+                    self._build_available_workers_list(),
+                )
+                task.workers = routed
+            except NoCapableWorkersError as exc:
+                return self._finalize_task(
+                    task,
+                    worker_results=[],
+                    status="failed",
+                    error=str(exc),
+                    duration_seconds=perf_counter() - started,
+                )
 
         if task.type == TaskType.PIPELINE:
             try:
@@ -337,6 +357,7 @@ class SwarmEngine:
             aggregated_output=aggregated_output,
             error=worker_result.error if result_status != "success" else None,
             duration_seconds=perf_counter() - started,
+            metadata=dict(task.metadata) if task.metadata else None,
         )
 
     async def broadcast(self, task: SwarmTask) -> TaskResult:
@@ -542,3 +563,14 @@ class SwarmEngine:
         except (TypeError, ValueError):
             return configured_default
         return max(1, resolved)
+
+    def _build_available_workers_list(self) -> list[dict[str, Any]]:
+        """Build worker info dicts for the capability router."""
+        return [
+            {
+                "name": worker.name,
+                "role": worker.role,
+                "capabilities": worker.capabilities,
+            }
+            for worker in self._workers.values()
+        ]

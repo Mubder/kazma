@@ -19,6 +19,7 @@ from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
 from kazma_core.swarm.engine import SwarmEngine, get_swarm_engine, set_swarm_engine
 from kazma_core.swarm.manager import SwarmManager
+from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
 from kazma_core.swarm.task import (
     HandoffRecord,
     SwarmTask,
@@ -31,6 +32,8 @@ from kazma_core.swarm.task import (
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
 
 __all__ = [
+    "CapabilityRouter",
+    "NoCapableWorkersError",
     "SwarmConfig",
     "SwarmManager",
     "SwarmEngine",
