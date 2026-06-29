@@ -21,6 +21,7 @@ from kazma_core.swarm.config import SwarmConfig, WorkerConfig
 from kazma_core.swarm.engine import SwarmEngine, get_swarm_engine, set_swarm_engine
 from kazma_core.swarm.handoff import HandoffRequest, request_handoff
 from kazma_core.swarm.manager import SwarmManager
+from kazma_core.swarm.metrics import MetricsCollector, WorkerMetricSnapshot
 from kazma_core.swarm.reliability import (
     BoundedConcurrency,
     CircuitBreaker,
@@ -43,6 +44,7 @@ from kazma_core.swarm.task import (
     WorkerResult,
 )
 from kazma_core.swarm.task_store import TaskStore
+from kazma_core.swarm.tracing import InMemorySpanExporter, Span, TracingEmitter
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
 
 __all__ = [
@@ -55,17 +57,22 @@ __all__ = [
     "HITLCheckpoint",
     "HITLCheckpointHandler",
     "HandoffRequest",
+    "InMemorySpanExporter",
+    "MetricsCollector",
     "NoCapableWorkersError",
     "OutputValidator",
     "RetryPolicy",
+    "Span",
     "SwarmConfig",
     "SwarmManager",
     "request_handoff",
     "SwarmEngine",
     "ResultAggregator",
     "SwarmWorker",
+    "TracingEmitter",
     "WorkerConfig",
     "WorkerCapabilities",
+    "WorkerMetricSnapshot",
     "BlackboardStore",
     "SwarmDispatchContext",
     "SwarmTask",

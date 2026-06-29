@@ -17,6 +17,7 @@ from kazma_core.swarm.consultation import (
     execute_consult,
 )
 from kazma_core.swarm.handoff import HandoffRequest
+from kazma_core.swarm.metrics import MetricsCollector
 from kazma_core.swarm.patterns import (
     ConditionalConfigurationError,
     FanOutConfigurationError,
@@ -47,6 +48,7 @@ from kazma_core.swarm.task import (
     WorkerResult,
 )
 from kazma_core.swarm.task_store import TaskStore
+from kazma_core.swarm.tracing import TracingEmitter
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
 
 logger = logging.getLogger(__name__)
@@ -80,6 +82,8 @@ class SwarmEngine:
         result_aggregator: ResultAggregator | None = None,
         capability_router: CapabilityRouter | None = None,
         task_store: TaskStore | None = None,
+        metrics_collector: MetricsCollector | None = None,
+        tracing_emitter: TracingEmitter | None = None,
     ) -> None:
         self.config = config or SwarmConfig(enabled=True, workers=[])
         self._workers: dict[str, SwarmWorker] = {}
@@ -94,6 +98,8 @@ class SwarmEngine:
         self._output_validators: dict[str, OutputValidator] = {}
         self._checkpoint_handler = HITLCheckpointHandler()
         self._task_store = task_store
+        self._metrics_collector = metrics_collector or MetricsCollector(task_store=task_store)
+        self._tracing_emitter = tracing_emitter or TracingEmitter()
         self._build_workers()
 
     def _build_workers(self) -> None:
@@ -222,6 +228,13 @@ class SwarmEngine:
         task.started_at = task.started_at or _utc_now_iso()
         task.status = TaskStatus.RUNNING
 
+        # Start a root tracing span for this task.
+        task_span = self._tracing_emitter.start_task_span(
+            task_id=task.id,
+            task_type=task.type.value,
+            workers=list(task.workers),
+        )
+
         # Auto-routing: resolve workers=["auto"] via CapabilityRouter.
         if list(task.workers) == ["auto"]:
             try:
@@ -231,6 +244,8 @@ class SwarmEngine:
                 )
                 task.workers = routed
             except NoCapableWorkersError as exc:
+                self._tracing_emitter.record_exception(task_span, exc)
+                self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
                 return self._finalize_task(
                     task,
                     worker_results=[],
@@ -246,6 +261,8 @@ class SwarmEngine:
                     dispatch_worker_by_name=self._dispatch_worker_by_name,
                 )
             except PipelineConfigurationError as exc:
+                self._tracing_emitter.record_exception(task_span, exc)
+                self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
                 return self._finalize_task(
                     task,
                     worker_results=[],
@@ -256,12 +273,14 @@ class SwarmEngine:
 
             # HITL checkpoint: pipeline paused at a checkpoint step.
             if pattern_result.status == "paused":
+                self._tracing_emitter.end_span(task_span, status="ok")
                 return self._handle_pipeline_checkpoint(
                     task=task,
                     pattern_result=pattern_result,
                     started=started,
                 )
 
+            self._tracing_emitter.end_span(task_span, status="ok")
             return self._finalize_task(
                 task,
                 worker_results=pattern_result.worker_results,
@@ -281,6 +300,8 @@ class SwarmEngine:
                     max_concurrent=self._resolve_max_concurrent(task),
                 )
             except FanOutConfigurationError as exc:
+                self._tracing_emitter.record_exception(task_span, exc)
+                self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
                 return self._finalize_task(
                     task,
                     worker_results=[],
@@ -289,6 +310,8 @@ class SwarmEngine:
                     duration_seconds=perf_counter() - started,
                 )
             except ValueError as exc:
+                self._tracing_emitter.record_exception(task_span, exc)
+                self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
                 return self._finalize_task(
                     task,
                     worker_results=[],
@@ -297,6 +320,16 @@ class SwarmEngine:
                     duration_seconds=perf_counter() - started,
                 )
 
+            # Emit aggregate span if an aggregation strategy was used.
+            aggregation = task.aggregation or "collect"
+            if aggregation != "collect":
+                agg_span = self._tracing_emitter.start_aggregate_span(
+                    task_span.trace_id, aggregation
+                )
+                agg_span.set_attribute("swarm.aggregation.count", len(pattern_result.worker_results))
+                self._tracing_emitter.end_span(agg_span, status="ok")
+
+            self._tracing_emitter.end_span(task_span, status="ok")
             return self._finalize_task(
                 task,
                 worker_results=pattern_result.worker_results,
@@ -318,6 +351,8 @@ class SwarmEngine:
                     max_concurrent=self._resolve_max_concurrent(task),
                 )
             except ConsultationConfigurationError as exc:
+                self._tracing_emitter.record_exception(task_span, exc)
+                self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
                 return self._finalize_task(
                     task,
                     worker_results=[],
@@ -326,6 +361,18 @@ class SwarmEngine:
                     duration_seconds=perf_counter() - started,
                 )
 
+            # Emit synthesize span when synthesis was performed.
+            if consult_result.synthesized_output:
+                synth_span = self._tracing_emitter.start_synthesize_span(
+                    task_span.trace_id,
+                )
+                synth_span.set_attribute(
+                    "swarm.synthesize.opinion_count",
+                    len(consult_result.individual_opinions),
+                )
+                self._tracing_emitter.end_span(synth_span, status="ok")
+
+            self._tracing_emitter.end_span(task_span, status="ok")
             return self._finalize_task(
                 task,
                 worker_results=consult_result.worker_results,
@@ -345,6 +392,8 @@ class SwarmEngine:
                     dispatch_worker_by_name=self._dispatch_worker_by_name,
                 )
             except ConditionalConfigurationError as exc:
+                self._tracing_emitter.record_exception(task_span, exc)
+                self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
                 return self._finalize_task(
                     task,
                     worker_results=[],
@@ -353,6 +402,7 @@ class SwarmEngine:
                     duration_seconds=perf_counter() - started,
                 )
 
+            self._tracing_emitter.end_span(task_span, status="ok")
             return self._finalize_task(
                 task,
                 worker_results=pattern_result.worker_results,
@@ -364,6 +414,7 @@ class SwarmEngine:
             )
 
         if not task.workers:
+            self._tracing_emitter.end_span(task_span, status="error", status_msg="Dispatch requires at least one worker.")
             return self._finalize_task(
                 task,
                 worker_results=[],
@@ -375,11 +426,13 @@ class SwarmEngine:
         worker_name = task.workers[0]
         worker = self.get_worker(worker_name)
         if worker is None:
+            msg = f"Worker '{worker_name}' not found."
+            self._tracing_emitter.end_span(task_span, status="error", status_msg=msg)
             return self._finalize_task(
                 task,
                 worker_results=[],
                 status="failed",
-                error=f"Worker '{worker_name}' not found.",
+                error=msg,
                 duration_seconds=perf_counter() - started,
             )
 
@@ -390,6 +443,7 @@ class SwarmEngine:
             task.context,
             timeout=task.timeout,
             validation_schema=task.validation_schema,
+            trace_id=task_span.trace_id,
         )
         worker_result = all_worker_results[-1]
 
@@ -416,6 +470,9 @@ class SwarmEngine:
             result_status = self._overall_status(all_worker_results)
         aggregated_output = worker_result.output if worker_result.status == "success" else None
 
+        span_status = "ok" if result_status in ("success", "partial") else "error"
+        self._tracing_emitter.end_span(task_span, status=span_status)
+
         return self._finalize_task(
             task,
             worker_results=all_worker_results,
@@ -431,11 +488,20 @@ class SwarmEngine:
         started = perf_counter()
         task.started_at = task.started_at or _utc_now_iso()
         task.status = TaskStatus.RUNNING
+
+        # Start a root tracing span for this broadcast task.
+        task_span = self._tracing_emitter.start_task_span(
+            task_id=task.id,
+            task_type=task.type.value,
+            workers=list(task.workers),
+        )
+
         blackboard = BlackboardStore()
         dispatch_context = self._build_dispatch_context(task, blackboard=blackboard)
 
         target_names = list(task.workers) if task.workers else list(self._workers.keys())
         if not target_names:
+            self._tracing_emitter.end_span(task_span, status="ok")
             return self._finalize_task(
                 task,
                 worker_results=[],
@@ -472,6 +538,9 @@ class SwarmEngine:
             ]
             error = "; ".join(error_messages) if error_messages else None
 
+        span_status = "ok" if result_status in ("success", "partial") else "error"
+        self._tracing_emitter.end_span(task_span, status=span_status)
+
         return self._finalize_task(
             task,
             worker_results=worker_results,
@@ -504,6 +573,7 @@ class SwarmEngine:
         *,
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
+        trace_id: str | None = None,
     ) -> list[WorkerResult]:
         """Dispatch by name and return all results (including handoff chain)."""
         worker = self.get_worker(worker_name)
@@ -521,6 +591,7 @@ class SwarmEngine:
             context,
             timeout=timeout,
             validation_schema=validation_schema,
+            trace_id=trace_id,
         )
 
     async def _dispatch_worker_by_name(
@@ -532,6 +603,7 @@ class SwarmEngine:
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
         fallback_chain: list[str] | None = None,
+        trace_id: str | None = None,
     ) -> WorkerResult:
         worker = self.get_worker(worker_name)
         if worker is None:
@@ -548,6 +620,7 @@ class SwarmEngine:
             context,
             timeout=timeout,
             validation_schema=validation_schema,
+            trace_id=trace_id,
         )
         result = results[-1]
 
@@ -575,6 +648,7 @@ class SwarmEngine:
         context: str | SwarmDispatchContext,
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
+        trace_id: str | None = None,
     ) -> tuple[WorkerResult, list[WorkerResult]]:
         """Execute fallback workers sequentially after primary failure.
 
@@ -607,6 +681,7 @@ class SwarmEngine:
                 context,
                 timeout=timeout,
                 validation_schema=validation_schema,
+                trace_id=trace_id,
             )
             return results[-1]
 
@@ -624,6 +699,7 @@ class SwarmEngine:
         *,
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
+        trace_id: str | None = None,
     ) -> list[WorkerResult]:
         """Dispatch a worker and return all results (including handoff chain).
 
@@ -637,18 +713,30 @@ class SwarmEngine:
         timeout_guard = self.get_timeout_guard(worker.name)
         output_validator = self.get_output_validator(worker.name, validation_schema)
 
+        # Emit a dispatch span if tracing is active and a trace_id is available.
+        dispatch_span = None
+        if trace_id:
+            dispatch_span = self._tracing_emitter.start_dispatch_span(
+                trace_id, worker.name
+            )
+
         # Circuit breaker pre-check: reject immediately if open.
         try:
             breaker.check_or_raise(worker.name)
         except CircuitBreakerOpenError as exc:
             logger.warning("[SwarmEngine] %s", exc)
-            return [WorkerResult(
+            if dispatch_span:
+                self._tracing_emitter.record_exception(dispatch_span, exc)
+                self._tracing_emitter.end_span(dispatch_span, status="error", status_msg=str(exc))
+            result = WorkerResult(
                 worker=worker.name,
                 task_id="",
                 status="error",
                 output="",
                 error=str(exc),
-            )]
+            )
+            self._metrics_collector.record_worker_result(result)
+            return [result]
 
         # Execute with retry policy.
         started = perf_counter()
@@ -707,6 +795,9 @@ class SwarmEngine:
         # Handle handoff if one was captured during _attempt.
         if captured_handoff.get("request") is not None:
             handoff_req: HandoffRequest = captured_handoff["request"]
+            # End the dispatch span before handoff.
+            if dispatch_span:
+                self._tracing_emitter.end_span(dispatch_span, status="ok")
             return await self._handle_handoff(
                 handoff_req=handoff_req,
                 source_worker=worker,
@@ -716,11 +807,19 @@ class SwarmEngine:
                 validation_schema=validation_schema,
                 started=started,
                 breaker=breaker,
+                trace_id=trace_id,
             )
 
         worker_result = WorkerResult.from_dict(raw_result)
         if worker_result.duration_seconds <= 0:
             worker_result.duration_seconds = perf_counter() - started
+
+        # End the dispatch span.
+        if dispatch_span:
+            span_status = "ok" if worker_result.status == "success" else "error"
+            if worker_result.error:
+                dispatch_span.set_attribute("error.message", worker_result.error[:200])
+            self._tracing_emitter.end_span(dispatch_span, status=span_status)
 
         # Update circuit breaker based on outcome.
         if worker_result.status == "success":
@@ -742,6 +841,7 @@ class SwarmEngine:
         validation_schema: dict[str, Any] | None,
         started: float,
         breaker: CircuitBreaker,
+        trace_id: str | None = None,
     ) -> list[WorkerResult]:
         """Process a handoff request from a worker.
 
@@ -760,6 +860,16 @@ class SwarmEngine:
             source_worker.name,
             handoff_req.target_worker,
         )
+
+        # Emit a tracing span for the handoff.
+        if trace_id:
+            handoff_span = self._tracing_emitter.start_handoff_span(
+                trace_id,
+                from_worker=source_worker.name,
+                to_worker=handoff_req.target_worker,
+            )
+            handoff_span.set_attribute("swarm.handoff.task", handoff_req.task[:200])
+            self._tracing_emitter.end_span(handoff_span, status="ok")
 
         # Build accumulated context for the target worker.
         handoff_context = self._build_handoff_context(
@@ -862,6 +972,10 @@ class SwarmEngine:
             else TaskStatus.COMPLETED
         )
         task.completed_at = _utc_now_iso()
+
+        # Record per-worker metrics for any worker results not yet recorded.
+        for wr in worker_results:
+            self._metrics_collector.record_worker_result(wr)
 
         result = TaskResult(
             task_id=task.id,
@@ -1083,6 +1197,16 @@ class SwarmEngine:
     def task_store(self) -> TaskStore | None:
         """Return the configured task store, or ``None``."""
         return self._task_store
+
+    @property
+    def metrics_collector(self) -> MetricsCollector:
+        """Return the metrics collector."""
+        return self._metrics_collector
+
+    @property
+    def tracing_emitter(self) -> TracingEmitter:
+        """Return the tracing emitter."""
+        return self._tracing_emitter
 
     def restore_paused_tasks(self) -> list[SwarmTask]:
         """Load paused tasks from SQLite so they can be resumed.

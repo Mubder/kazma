@@ -288,6 +288,7 @@ def wire_engine_events(engine: Any, bus: SSEEventBus) -> None:
         *,
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
+        trace_id: str | None = None,
     ) -> Any:
         """Emit worker_started and worker_completed around worker dispatch."""
         task_id = getattr(engine, "_active_task_id", "") or ""
@@ -308,6 +309,7 @@ def wire_engine_events(engine: Any, bus: SSEEventBus) -> None:
             context,
             timeout=timeout,
             validation_schema=validation_schema,
+            trace_id=trace_id,
         )
 
         if results:
