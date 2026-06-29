@@ -12,7 +12,6 @@
 [![Package Manager][uv-shield]][uv-url]
 [![Status][status-shield]][status-url]
 [![swarm-orchestration](https://img.shields.io/badge/swarm-orchestration-blueviolet.svg)](https://your-link-here.com)
-<!-- TECHNOLOGY STACK BADGES -->
 ![FastAPI](https://img.shields.io/badge/FastAPI-05998b?style=flat&logo=fastapi&logoColor=white)
 ![ChromaDB](https://img.shields.io/badge/ChromaDB-6a5acd?style=flat&logo=chromadb&logoColor=white)
 ![SQLite](https://img.shields.io/badge/SQLite-07405e?style=flat&logo=sqlite&logoColor=white)
