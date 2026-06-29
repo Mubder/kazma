@@ -15,6 +15,7 @@ from kazma_core.swarm.consultation import (
     ConsultationConfigurationError,
     execute_consult,
 )
+from kazma_core.swarm.handoff import HandoffRequest
 from kazma_core.swarm.patterns import (
     ConditionalConfigurationError,
     FanOutConfigurationError,
@@ -34,6 +35,7 @@ from kazma_core.swarm.reliability import (
 )
 from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
 from kazma_core.swarm.task import (
+    HandoffRecord,
     SwarmTask,
     TaskResult,
     TaskStatus,
@@ -361,15 +363,15 @@ class SwarmEngine:
                 duration_seconds=perf_counter() - started,
             )
 
-        # Dispatch the primary worker.
-        worker_result = await self._dispatch_worker(
+        # Dispatch the primary worker (returns all results including handoffs).
+        all_worker_results = await self._dispatch_worker(
             worker,
             task.prompt,
             task.context,
             timeout=task.timeout,
             validation_schema=task.validation_schema,
         )
-        all_worker_results: list[WorkerResult] = [worker_result]
+        worker_result = all_worker_results[-1]
 
         # Execute fallback chain if the primary failed and a chain is configured.
         if worker_result.status != "success" and task.fallback_chain:
@@ -474,6 +476,33 @@ class SwarmEngine:
         """Return status for all registered workers."""
         return await asyncio.gather(*(worker.status() for worker in self._workers.values()))
 
+    async def _dispatch_worker_by_name_all(
+        self,
+        worker_name: str,
+        prompt: str,
+        context: str | SwarmDispatchContext,
+        *,
+        timeout: float | None = None,
+        validation_schema: dict[str, Any] | None = None,
+    ) -> list[WorkerResult]:
+        """Dispatch by name and return all results (including handoff chain)."""
+        worker = self.get_worker(worker_name)
+        if worker is None:
+            return [WorkerResult(
+                worker=worker_name,
+                task_id="",
+                status="error",
+                output="",
+                error=f"Worker '{worker_name}' not found.",
+            )]
+        return await self._dispatch_worker(
+            worker,
+            prompt,
+            context,
+            timeout=timeout,
+            validation_schema=validation_schema,
+        )
+
     async def _dispatch_worker_by_name(
         self,
         worker_name: str,
@@ -493,13 +522,14 @@ class SwarmEngine:
                 output="",
                 error=f"Worker '{worker_name}' not found.",
             )
-        result = await self._dispatch_worker(
+        results = await self._dispatch_worker(
             worker,
             prompt,
             context,
             timeout=timeout,
             validation_schema=validation_schema,
         )
+        result = results[-1]
 
         # If the primary worker succeeded or no fallback chain, return.
         if result.status == "success" or not fallback_chain:
@@ -551,13 +581,14 @@ class SwarmEngine:
                     output="",
                     error=f"Worker '{name}' not found.",
                 )
-            return await self._dispatch_worker(
+            results = await self._dispatch_worker(
                 fallback_worker,
                 prompt,
                 context,
                 timeout=timeout,
                 validation_schema=validation_schema,
             )
+            return results[-1]
 
         final_result = await chain.execute(
             primary_result, dispatch_worker=_dispatch_fallback
@@ -573,7 +604,14 @@ class SwarmEngine:
         *,
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
-    ) -> WorkerResult:
+    ) -> list[WorkerResult]:
+        """Dispatch a worker and return all results (including handoff chain).
+
+        Returns a list of :class:`WorkerResult` objects.  In the normal
+        case (no handoff) the list has a single element.  When a handoff
+        occurs the list contains the source worker's result followed by
+        every result from the target chain.
+        """
         breaker = self.get_circuit_breaker(worker.name)
         retry_policy = self.get_retry_policy(worker.name)
         timeout_guard = self.get_timeout_guard(worker.name)
@@ -584,16 +622,19 @@ class SwarmEngine:
             breaker.check_or_raise(worker.name)
         except CircuitBreakerOpenError as exc:
             logger.warning("[SwarmEngine] %s", exc)
-            return WorkerResult(
+            return [WorkerResult(
                 worker=worker.name,
                 task_id="",
                 status="error",
                 output="",
                 error=str(exc),
-            )
+            )]
 
         # Execute with retry policy.
         started = perf_counter()
+
+        # Mutable container for handoff state captured inside _attempt.
+        captured_handoff: dict[str, Any] = {}
 
         async def _attempt() -> dict[str, Any]:
             worker.mark_dispatched(prompt)
@@ -603,6 +644,17 @@ class SwarmEngine:
                     timeout=timeout,
                     worker_name=worker.name,
                 )
+            except HandoffRequest as handoff_req:
+                # Capture the handoff request for the outer handler.
+                captured_handoff["request"] = handoff_req
+                # Return success so the retry loop exits immediately.
+                return {
+                    "worker": worker.name,
+                    "task_id": "",
+                    "status": "success",
+                    "output": "",
+                    "error": None,
+                }
             except Exception as exc:
                 logger.exception(
                     "[SwarmEngine] dispatch failed for worker '%s'", worker.name
@@ -632,6 +684,20 @@ class SwarmEngine:
             _attempt, worker_name=worker.name
         )
 
+        # Handle handoff if one was captured during _attempt.
+        if captured_handoff.get("request") is not None:
+            handoff_req: HandoffRequest = captured_handoff["request"]
+            return await self._handle_handoff(
+                handoff_req=handoff_req,
+                source_worker=worker,
+                prompt=prompt,
+                context=context,
+                timeout=timeout,
+                validation_schema=validation_schema,
+                started=started,
+                breaker=breaker,
+            )
+
         worker_result = WorkerResult.from_dict(raw_result)
         if worker_result.duration_seconds <= 0:
             worker_result.duration_seconds = perf_counter() - started
@@ -643,7 +709,93 @@ class SwarmEngine:
             breaker.record_failure()
 
         worker.mark_completed(worker_result.status)
-        return worker_result
+        return [worker_result]
+
+    async def _handle_handoff(
+        self,
+        *,
+        handoff_req: HandoffRequest,
+        source_worker: SwarmWorker,
+        prompt: str,
+        context: str | SwarmDispatchContext,
+        timeout: float | None,
+        validation_schema: dict[str, Any] | None,
+        started: float,
+        breaker: CircuitBreaker,
+    ) -> list[WorkerResult]:
+        """Process a handoff request from a worker.
+
+        Dispatches to the target worker with accumulated context, records
+        a :class:`HandoffRecord`, and returns all results (source + target chain).
+        """
+        logger.info(
+            "[SwarmEngine] worker '%s' handoff to '%s'",
+            source_worker.name,
+            handoff_req.target_worker,
+        )
+
+        # Emit SSE handoff event (logged for observability).
+        logger.info(
+            "[SSE] swarm.handoff.%s->%s",
+            source_worker.name,
+            handoff_req.target_worker,
+        )
+
+        # Build accumulated context for the target worker.
+        handoff_context = self._build_handoff_context(
+            original_prompt=prompt,
+            original_context=context,
+            intermediate_results=handoff_req.context,
+            blackboard=(
+                context.blackboard
+                if isinstance(context, SwarmDispatchContext)
+                else None
+            ),
+        )
+
+        # Dispatch to the target worker (recursive, supports multi-hop chaining).
+        target_results = await self._dispatch_worker_by_name_all(
+            handoff_req.target_worker,
+            handoff_req.task,
+            handoff_context,
+            timeout=timeout,
+            validation_schema=validation_schema,
+        )
+        target_result = target_results[-1]
+
+        # Record the handoff.
+        handoff_record = HandoffRecord(
+            from_worker=source_worker.name,
+            to_worker=handoff_req.target_worker,
+            context_transferred=handoff_req.context,
+        )
+
+        # Build source worker result reflecting the handoff outcome.
+        duration = perf_counter() - started
+        if target_result.status == "success":
+            source_result = WorkerResult(
+                worker=source_worker.name,
+                task_id=target_result.task_id,
+                status="success",
+                output=target_result.output,
+                duration_seconds=duration,
+                handoffs=[handoff_record],
+            )
+            breaker.record_success()
+        else:
+            source_result = WorkerResult(
+                worker=source_worker.name,
+                task_id=target_result.task_id,
+                status="error",
+                output="",
+                error=target_result.error,
+                duration_seconds=duration,
+                handoffs=[handoff_record],
+            )
+            breaker.record_failure()
+
+        source_worker.mark_completed(source_result.status)
+        return [source_result] + target_results
 
     @staticmethod
     def _aggregate_outputs(worker_results: list[WorkerResult]) -> str | None:
@@ -707,6 +859,36 @@ class SwarmEngine:
         task.result = result
         self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
         return result
+
+    @staticmethod
+    def _build_handoff_context(
+        *,
+        original_prompt: str,
+        original_context: str | SwarmDispatchContext,
+        intermediate_results: str,
+        blackboard: BlackboardStore | None = None,
+    ) -> str | SwarmDispatchContext:
+        """Build the accumulated context for a handoff target worker.
+
+        Includes the original prompt, original context, intermediate results
+        from the source worker, and optionally a blackboard snapshot.
+        """
+        sections: list[str] = []
+        original_ctx_text = str(original_context).strip()
+        if original_ctx_text:
+            sections.append(f"Original context:\n{original_ctx_text}")
+        sections.append(f"Original prompt:\n{original_prompt}")
+        if intermediate_results:
+            sections.append(f"Intermediate results:\n{intermediate_results}")
+
+        context_text = "\n\n".join(sections)
+
+        if blackboard is not None:
+            return SwarmDispatchContext(
+                context_text,
+                blackboard=blackboard,
+            )
+        return context_text
 
     @staticmethod
     def _build_dispatch_context(
