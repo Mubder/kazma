@@ -174,6 +174,35 @@ class TestFriendlyErrors:
         msg = friendly_llm_error(TimeoutError("timed out"))
         assert "unavailable" in msg.lower()
 
+    def test_friendly_llm_error_unauthorized_401(self) -> None:
+        """401 errors map to credential guidance."""
+        import httpx
+
+        from kazma_core.retry import friendly_llm_error
+
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        response = httpx.Response(401, request=request, text="Unauthorized")
+        exc = httpx.HTTPStatusError("401 Unauthorized", request=request, response=response)
+
+        msg = friendly_llm_error(exc)
+        assert "api key" in msg.lower()
+        assert "settings" in msg.lower()
+        assert "models/providers" in msg.lower()
+
+    def test_friendly_llm_error_forbidden_403(self) -> None:
+        """403 errors also map to credential guidance."""
+        import httpx
+
+        from kazma_core.retry import friendly_llm_error
+
+        request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        response = httpx.Response(403, request=request, text="Forbidden")
+        exc = httpx.HTTPStatusError("403 Forbidden", request=request, response=response)
+
+        msg = friendly_llm_error(exc)
+        assert "api key" in msg.lower()
+        assert "settings" in msg.lower()
+
     def test_friendly_tool_error(self) -> None:
         """Tool errors get friendly mapping."""
         from kazma_core.retry import friendly_tool_error

@@ -15,6 +15,8 @@ Checks performed:
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,6 +25,64 @@ _UI_DIR = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
 _TEMPLATES_DIR = _UI_DIR / "templates"
 _STATIC_DIR = _UI_DIR / "static"
 _JS_DIR = _STATIC_DIR / "js"
+
+
+class TestStartupLlmHydration:
+    """Startup runtime LLM settings should seed active provider profile."""
+
+    def _make_agent(self, *, base_url: str, model: str, api_key: str) -> SimpleNamespace:
+        llm = MagicMock()
+        llm.config = SimpleNamespace(base_url=base_url, model=model, api_key=api_key)
+        llm.reconfigure = MagicMock()
+        return SimpleNamespace(llm=llm)
+
+    def test_runtime_settings_hydrate_profile(self) -> None:
+        from kazma_ui.app import _hydrate_startup_llm_profile
+
+        agent = self._make_agent(
+            base_url="https://api.openai.com/v1",
+            model="gpt-4o-mini",
+            api_key="yaml-key",
+        )
+        config_store = MagicMock()
+        config_store.get_all.return_value = {
+            "model": {
+                "llm.base_url": "https://api.deepseek.com/v1",
+                "llm.model": "deepseek-chat",
+                "llm.api_key": "test-api-key-placeholder",
+            }
+        }
+
+        profile, source = _hydrate_startup_llm_profile(agent, config_store)
+
+        agent.llm.reconfigure.assert_called_once_with(
+            base_url="https://api.deepseek.com/v1",
+            model="deepseek-chat",
+            api_key="test-api-key-placeholder",
+        )
+        assert source == "runtime store"
+        assert profile["base_url"] == "https://api.deepseek.com/v1"
+        assert profile["model"] == "deepseek-chat"
+        assert profile["provider"] == "deepseek"
+
+    def test_yaml_defaults_used_when_no_runtime_values(self) -> None:
+        from kazma_ui.app import _hydrate_startup_llm_profile
+
+        agent = self._make_agent(
+            base_url="https://api.openai.com/v1",
+            model="gpt-4o-mini",
+            api_key="yaml-key",
+        )
+        config_store = MagicMock()
+        config_store.get_all.return_value = {}
+
+        profile, source = _hydrate_startup_llm_profile(agent, config_store)
+
+        agent.llm.reconfigure.assert_not_called()
+        assert source == "yaml defaults"
+        assert profile["base_url"] == "https://api.openai.com/v1"
+        assert profile["model"] == "gpt-4o-mini"
+        assert profile["provider"] == "openai"
 
 
 # ══════════════════════════════════════════════════════════════════════════

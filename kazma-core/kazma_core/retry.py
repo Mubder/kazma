@@ -147,8 +147,38 @@ def retry_tool_call(fn: Any) -> Any:
 # ── Friendly error mapping ───────────────────────────────────────────
 
 
+def _extract_http_status_code(exc: Exception) -> int | None:
+    """Extract HTTP status code from an exception or its cause chain."""
+    current: BaseException | None = exc
+    visited: set[int] = set()
+
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+
+        response = getattr(current, "response", None)
+        status_code = getattr(response, "status_code", None)
+        if isinstance(status_code, int):
+            return status_code
+
+        message = str(current)
+        if "401" in message:
+            return 401
+        if "403" in message:
+            return 403
+
+        current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+
+    return None
+
+
 def friendly_llm_error(exc: Exception) -> str:
     """Map LLM call failures to user-friendly messages after retries exhausted."""
+    status_code = _extract_http_status_code(exc)
+    if status_code in (401, 403):
+        return (
+            "The model request was rejected due to an invalid or missing API key. "
+            "Go to Settings > Models/Providers and update your credentials."
+        )
     if isinstance(exc, (ConnectionError, TimeoutError, asyncio.TimeoutError)):
         return "The model service is unavailable. Please try again in a moment."
     exc_name = type(exc).__name__
