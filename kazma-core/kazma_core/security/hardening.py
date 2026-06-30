@@ -591,3 +591,51 @@ class SecurityHardeningRunner:
             message="No obvious privilege escalation vectors detected",
             recommendation="Continue reviewing code for unsafe dynamic execution patterns",
         )
+import ast as _ast
+import subprocess as _subprocess
+
+_DANGEROUS_CALLS = {
+    "os.system", "subprocess.run", "subprocess.call", "subprocess.Popen",
+    "subprocess.check_output", "subprocess.check_call",
+    "eval", "exec",
+}
+_DANGEROUS_ATTRS = {("os", "system"), ("subprocess", "run"), ("subprocess", "call"),
+    ("subprocess", "Popen"), ("subprocess", "check_output"), ("subprocess", "check_call")}
+
+
+def _scan_file_for_dangerous_calls(filepath):
+    """Scan a Python file for dangerous function calls using AST.
+    Returns list of (line, function_name) tuples for matches."""
+    try:
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+            source = f.read()
+        tree = _ast.parse(source)
+        violations = []
+        for node in _ast.walk(tree):
+            # Direct calls: os.system(...)
+            if isinstance(node, _ast.Call):
+                func = node
+                # Attribute access: subprocess.run
+                if isinstance(node.func, _ast.Attribute):
+                    for pair in _DANGEROUS_ATTRS:
+                        if (isinstance(node.func.value, _ast.Name) and
+                            node.func.value.id == pair[0] and
+                            node.func.attr == pair[1]):
+                            # Check for shell=True which is extra dangerous
+                            has_shell = any(
+                                kw.arg == "shell" and getattr(kw.value, "value", None) is True
+                                for kw in getattr(node, "keywords", [])
+                            )
+                            label = f"{pair[0]}.{pair[1]}"
+                            if has_shell:
+                                label += " (shell=True)"
+                            violations.append((node.lineno, label))
+                # Direct name: eval, exec
+                elif isinstance(node.func, _ast.Name):
+                    if node.func.id in ("eval", "exec"):
+                        violations.append((node.lineno, node.func.id))
+        return violations
+    except (SyntaxError, OSError, RecursionError):
+        return []
+
+

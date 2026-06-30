@@ -9,6 +9,7 @@ and revocation operations.
 from __future__ import annotations
 
 import sqlite3
+import subprocess
 import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -288,9 +289,19 @@ class KazmaCertification:
 
     @staticmethod
     async def _has_test_files(skill_path: Path) -> bool:
-        """Check for the presence of test files."""
+        """Run actual pytest on the skill directory to verify tests pass."""
         test_files = list(skill_path.rglob("test_*.py")) + list(skill_path.rglob("*_test.py"))
-        return len(test_files) > 0
+        if not test_files:
+            return False
+        try:
+            result = subprocess.run(
+                ["pytest", str(skill_path), "-q", "--tb=no"],
+                capture_output=True, text=True, timeout=60,
+                cwd=str(skill_path.parent),
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return False
 
     @staticmethod
     async def _has_coverage_evidence(skill_path: Path) -> bool:
