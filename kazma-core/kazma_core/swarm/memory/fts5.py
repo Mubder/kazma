@@ -59,7 +59,7 @@ class FTS5LexicalStore:
     def available(self) -> bool:
         """Whether FTS5 is available (sync check -- backend may lazy-init later)."""
         try:
-            from kazma_memory.search_backend import SQLiteMemoryBackend
+            from kazma_memory.search_backend import SQLiteMemoryBackend  # noqa: F401
             return True
         except ImportError:
             return False

@@ -3,7 +3,7 @@
 Adopts the exact color palette from kazma.ai:
   - Deep charcoal background with subtle grid
   - Cyan (#06b6d4) primary accent
-  - Purple (#a855f7) secondary accent  
+  - Purple (#a855f7) secondary accent
   - Dark panel cards (#0f172a) with subtle borders
   - Gradient cyan→purple for active elements
   - Sans-serif / monospace font pairing

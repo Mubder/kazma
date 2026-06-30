@@ -5,7 +5,7 @@ using RRF, de-duplicates by content, and returns a single ranked
 list of MemoryHit objects.
 
 Architecture:
-    query("fix auth bug") 
+    query("fix auth bug")
     → asyncio.gather(L1.query(), L2.query(), L3.query(), L4.query())
     → RRF blending (k=60)
     → dedup by content hash
