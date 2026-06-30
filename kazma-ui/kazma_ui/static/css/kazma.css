@@ -109,10 +109,7 @@ html { font-size: 14px; -webkit-font-smoothing: antialiased; }
   margin: 0 auto;
 }
 
-/* Font size persistence */
-html.font-sm { font-size: 13px; }
-html.font-md { font-size: 16px; }
-html.font-lg { font-size: 19px; }
+/* Font size persistence — controlled by Alpine settings.js applyFontSize() */
 
 body {
   font-family: var(--font-sans);
