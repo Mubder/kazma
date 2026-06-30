@@ -1,0 +1,53 @@
+[
+  {
+    "name": "core",
+    "expertise": [
+      "code",
+      "security",
+      "research",
+      "ops"
+    ],
+    "roles": [
+      "orchestrator"
+    ],
+    "model": "deepseek-v4-pro",
+    "provider": "deepseek",
+    "worker_type": "in_process",
+    "system_prompt": "You are the core engineer. Write code, review PRs, fix bugs, and make architectural decisions. You are the primary worker.",
+    "enabled": true,
+    "metadata": {}
+  },
+  {
+    "name": "bridge",
+    "expertise": [
+      "ops",
+      "docs",
+      "general"
+    ],
+    "roles": [
+      "leaf"
+    ],
+    "model": "deepseek-v4-pro",
+    "provider": "deepseek",
+    "worker_type": "in_process",
+    "system_prompt": "You are the bridge worker. Handle infrastructure, DevOps, and cross-cutting concerns.",
+    "enabled": true,
+    "metadata": {}
+  },
+  {
+    "name": "ux",
+    "expertise": [
+      "design",
+      "docs"
+    ],
+    "roles": [
+      "leaf"
+    ],
+    "model": "deepseek-v4-pro",
+    "provider": "deepseek",
+    "worker_type": "in_process",
+    "system_prompt": "You are the UX worker. Design interfaces, improve usability, and handle frontend tasks.",
+    "enabled": true,
+    "metadata": {}
+  }
+]

@@ -1456,6 +1456,116 @@ class SwarmEngine:
         self._output_validators[worker_name] = validator
 
     # ------------------------------------------------------------------
+    # Phonebook — Worker Registry integration
+    # ------------------------------------------------------------------
+
+    def summon(self, worker_name: str) -> SwarmWorker | None:
+        """Instantiate a worker from the WorkerRegistry by name.
+
+        Fetches the worker's Soul (system_prompt), applies the configured
+        model/provider, and returns a ready SwarmWorker instance.
+
+        This is the "phonebook" pattern: query the registry, get the
+        entry, build the worker.
+        """
+        from kazma_core.swarm.registry import WorkerRegistry
+
+        registry = WorkerRegistry()
+        entry = registry.get(worker_name)
+        if entry is None:
+            logger.warning("[SwarmEngine] summon failed — no worker named '%s'", worker_name)
+            return None
+        if not entry.enabled:
+            logger.warning("[SwarmEngine] summon skipped — worker '%s' is disabled", worker_name)
+            return None
+
+        if entry.worker_type == "telegram_bot":
+            # Telegram workers need profile + bot_token_env — use stored metadata
+            return TelegramWorker(
+                name=entry.name,
+                profile=entry.metadata.get("profile", entry.name),
+                bot_token_env=entry.metadata.get("bot_token_env", ""),
+                role=entry.roles[0] if entry.roles else "leaf",
+                model=entry.model,
+                provider=entry.provider,
+            )
+        return InProcessWorker(
+            name=entry.name,
+            role=entry.roles[0] if entry.roles else "leaf",
+            model=entry.model,
+            provider=entry.provider,
+        )
+
+    async def consult(self, expertise: str, task: str) -> dict[str, Any]:
+        """Consult workers matching an expertise tag.
+
+        Queries the WorkerRegistry for workers with the given expertise,
+        dispatches the task to each, and returns aggregated results.
+
+        Args:
+            expertise: Expertise tag (e.g. "code", "security", "design").
+            task: The task description to send to each matching worker.
+
+        Returns:
+            Dict with keys: expertise, workers_consulted, results, synthesis.
+        """
+        from kazma_core.swarm.registry import WorkerRegistry
+
+        registry = WorkerRegistry()
+        entries = registry.find_by_expertise(expertise)
+        if not entries:
+            return {
+                "expertise": expertise,
+                "workers_consulted": 0,
+                "results": [],
+                "synthesis": f"No workers found with expertise '{expertise}'.",
+            }
+
+        results: list[dict[str, Any]] = []
+        for entry in entries:
+            worker = self.summon(entry.name)
+            if worker is None:
+                continue
+            try:
+                worker.mark_dispatched(task)
+                started = perf_counter()
+                result = await worker.dispatch(task)
+                elapsed = (perf_counter() - started) * 1000
+                worker.mark_completed(result.get("status", "unknown"))
+                results.append({
+                    "worker": entry.name,
+                    "role": entry.roles[0] if entry.roles else "",
+                    "status": result.get("status", "error"),
+                    "output": str(result.get("output", ""))[:500],
+                    "duration_ms": elapsed,
+                })
+            except Exception as exc:
+                logger.exception("[SwarmEngine] consult worker %s failed", entry.name)
+                results.append({
+                    "worker": entry.name,
+                    "status": "error",
+                    "output": str(exc),
+                    "duration_ms": 0,
+                })
+
+        return {
+            "expertise": expertise,
+            "workers_consulted": len(results),
+            "results": results,
+            "synthesis": self._synthesize_consult(results),
+        }
+
+    def _synthesize_consult(self, results: list[dict[str, Any]]) -> str:
+        """Build a simple synthesis from consult results."""
+        if not results:
+            return "No results to synthesize."
+        parts: list[str] = []
+        for r in results:
+            status_icon = "✅" if r["status"] == "success" else "❌"
+            parts.append(f"{status_icon} *{r['worker']}*: {r['output'][:200]}")
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
     # Reliability layer — bounded concurrency management
     # ------------------------------------------------------------------
 
