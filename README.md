@@ -1,6 +1,9 @@
 # Kazma - كاظمة
+
 <img src="https://kazma.ai/KazmaLogocCOLOR.webp" alt="Kazma Logo" width="200"/>
+
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
+
 
 ![Tests](https://img.shields.io/badge/tests-3510_passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
