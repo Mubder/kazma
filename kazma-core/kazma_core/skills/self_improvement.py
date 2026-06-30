@@ -68,57 +68,121 @@ class SelfImprovementSkill:
     async def _analyze_success(
         self, worker_name: str, task: str, stages: list[Any], rate: float
     ) -> dict[str, Any]:
-        """Generate a reinforcement delta for successful execution."""
-        # Identify what the worker did well
-        strengths: list[str] = []
+        """Generate a reinforcement delta via LLM Meta-Refiner."""
+        # Collect stage details for context
+        stage_details = []
         for s in stages:
-            role = getattr(s, "role", "")
-            if role and getattr(s, "status", "") == "completed":
-                strengths.append(str(role))
+            role = getattr(s, "role", str(s))
+            output = getattr(s, "output", "") or ""
+            dur = getattr(s, "duration_ms", 0)
+            stage_details.append(f"- {role} ({dur:.0f}ms): {output[:200]}")
 
-        delta = (
-            f"\n\n[SelfImprovement] You recently succeeded at a task involving: "
-            f"{', '.join(strengths[:3]) if strengths else 'general execution'}. "
-            f"Apply this pattern to similar tasks.\n"
-            f"Task hint: '{task[:100]}' → completed successfully."
-        )
+        # Query memory adapter for past patterns
+        past_context = ""
+        try:
+            from kazma_core.swarm.memory.adapter import get_adapter
+            adapter = get_adapter()
+            if adapter is not None:
+                results = await adapter.search(f"{worker_name} pipeline {task[:100]}", limit=3)
+                if results:
+                    past_context = "\nPast memory:\n" + "\n".join(
+                        f"  [{layer}] {text[:200]}" for text, _, layer, _, _ in results[:3]
+                    )
+        except Exception:
+            pass
 
-        reason = f"All {len(stages)} stages passed ({rate:.0%} success rate)"
-        logger.info(
-            "[SelfImprovement] %s SUCCESS — %s", worker_name, reason,
-        )
-        return {"action": "mutate", "delta": delta, "reason": reason}
+        # Construct Meta-Refiner prompt
+        refiner_prompt = f"""You are a Meta-Refiner for the Kazma self-improvement engine.
+Worker '{worker_name}' completed a task successfully ({rate:.0%} rate).
+
+Task: {task[:200]}
+
+Stage results:
+{chr(10).join(stage_details)}{past_context}
+
+Generate a CONCISE (2-3 sentence) reinforcement delta for the worker's SOUL.md.
+Focus on what patterns to preserve and strengthen.
+Output ONLY the delta text, no preamble."""
+
+        try:
+            from kazma_core.model_registry import get_model_registry
+            provider = get_model_registry().get_client()
+            if provider is not None:
+                response = await provider.chat([
+                    {"role": "system", "content": "You are a concise meta-learning expert."},
+                    {"role": "user", "content": refiner_prompt},
+                ])
+                delta = f"\n\n[SelfImprovement] {response.content}\nTask context: '{task[:100]}'"
+                reason = f"LLM-generated reinforcement from {len(stages)} stages ({rate:.0%} rate)"
+                logger.info("[SelfImprovement] %s SUCCESS — %s", worker_name, reason)
+                return {"action": "mutate", "delta": delta, "reason": reason}
+        except Exception as exc:
+            logger.warning("[SelfImprovement] LLM delta failed: %s", exc)
+
+        # Fallback: minimal template
+        delta = f"\n\n[SelfImprovement] Task successfully completed ({rate:.0%} rate).\nTask hint: '{task[:100]}'."
+        return {"action": "mutate", "delta": delta, "reason": f"Template fallback — {len(stages)} stages"}
 
     # ── Failure analysis ────────────────────────────────────────────────
 
     async def _analyze_failure(
         self, worker_name: str, task: str, stages: list[Any], rate: float, failed_count: int
     ) -> dict[str, Any]:
-        """Generate a corrective delta for failed execution."""
-        # Identify what went wrong
-        failed_roles: list[str] = []
-        for s in stages:
-            if getattr(s, "status", "") == "failed":
-                role = getattr(s, "role", "")
-                error = getattr(s, "error", "")
-                failed_roles.append(f"{role}" + (f": {error[:80]}" if error else ""))
-
+        """Generate a corrective delta via LLM Meta-Refiner."""
         if failed_count == 0:
             return {"action": "skip", "delta": "", "reason": "No failed stages"}
 
-        delta = (
-            f"\n\n[SelfImprovement] You recently failed {failed_count} stage(s) in a "
-            f"pipeline task. Review the following before your next attempt:\n"
-            + "\n".join(f"- Check: {f}" for f in failed_roles[:3])
-            + f"\n\nTask context: '{task[:100]}'\n"
-            "Before responding, verify your approach against the task requirements."
-        )
+        # Collect failure details
+        failed_details = []
+        for s in stages:
+            if getattr(s, "status", "") == "failed":
+                role = getattr(s, "role", str(s))
+                error = getattr(s, "error", "")
+                failed_details.append(f"- {role}: {error[:200] if error else 'unknown error'}")
 
-        reason = f"{failed_count}/{len(stages)} stages failed"
-        logger.warning(
-            "[SelfImprovement] %s FAILURE — %s", worker_name, reason,
-        )
-        return {"action": "mutate", "delta": delta, "reason": reason}
+        # Query memory for past failure patterns
+        past_context = ""
+        try:
+            from kazma_core.swarm.memory.adapter import get_adapter
+            adapter = get_adapter()
+            if adapter is not None:
+                results = await adapter.search(f"{worker_name} failure {task[:100]}", limit=3)
+                if results:
+                    past_context = "\nPast failures:\n" + "\n".join(
+                        f"  [{layer}] {text[:200]}" for text, _, layer, _, _ in results[:3]
+                    )
+        except Exception:
+            pass
+
+        refiner_prompt = f"""You are a Meta-Refiner for the Kazma self-improvement engine.
+Worker '{worker_name}' FAILED {failed_count}/{len(stages)} stages (success rate {rate:.0%}).
+
+Task: {task[:200]}
+
+Failures:
+{chr(10).join(failed_details)}{past_context}
+
+Generate a CONCISE (2-3 sentence) corrective delta for the worker's SOUL.md.
+Focus on what to AVOID and how to improve next time.
+Output ONLY the delta text, no preamble."""
+
+        try:
+            from kazma_core.model_registry import get_model_registry
+            provider = get_model_registry().get_client()
+            if provider is not None:
+                response = await provider.chat([
+                    {"role": "system", "content": "You are a concise meta-learning expert."},
+                    {"role": "user", "content": refiner_prompt},
+                ])
+                delta = f"\n\n[SelfImprovement] {response.content}\nTask context: '{task[:100]}'"
+                reason = f"LLM-generated correction from {failed_count} failures"
+                logger.warning("[SelfImprovement] %s FAILURE — %s", worker_name, reason)
+                return {"action": "mutate", "delta": delta, "reason": reason}
+        except Exception as exc:
+            logger.warning("[SelfImprovement] LLM delta failed: %s", exc)
+
+        delta = f"\n\n[SelfImprovement] {failed_count}/{len(stages)} stages failed. Review: {task[:100]}"
+        return {"action": "mutate", "delta": delta, "reason": f"Template fallback — {failed_count} failures"}
 
     # ── Apply mutation ──────────────────────────────────────────────────
 
