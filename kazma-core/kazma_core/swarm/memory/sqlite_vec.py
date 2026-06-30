@@ -76,6 +76,7 @@ class SQLiteVectorStore:
         except Exception:
             try:
                 # Try loading the extension explicitly
+                conn.enable_load_extension(True)
                 conn.load_extension("vec0")
                 conn.execute("SELECT vec_version()")
                 self._vec_available = True
@@ -110,7 +111,7 @@ class SQLiteVectorStore:
             conn.execute(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS {table}
                 USING vec0(
-                    id TEXT PRIMARY KEY,
+                    id INTEGER PRIMARY KEY,
                     embedding FLOAT[384]
                 )
             """)
@@ -203,9 +204,10 @@ class SQLiteVectorStore:
         try:
             cursor = conn.execute(
                 f"""
-                SELECT id, vec_distance_cosine(embedding, ?) AS distance
+                SELECT id, distance
                 FROM {table}
-                ORDER BY distance ASC
+                WHERE embedding MATCH ?
+                ORDER BY distance
                 LIMIT ?
                 """,
                 (emb_bytes, limit),

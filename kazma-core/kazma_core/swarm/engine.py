@@ -163,7 +163,7 @@ class SwarmEngine:
         return self._workers.get(name)
 
     def get_task(self, task_id: str) -> SwarmTask | None:
-        """Return a completed task snapshot by identifier."""
+        """Return a task by id from the history."""
         return self._task_history.get(task_id)
 
     def list_tasks(self, task_type: TaskType | str | None = None) -> list[SwarmTask]:
@@ -1332,24 +1332,25 @@ class SwarmEngine:
         result = await self._checkpoint_handler.reject(task_id, reason=reason)
         if result is not None:
             # Update task history with the failed result.
-            task = self._task_history.get(task_id)
-            if task:
-                task.status = TaskStatus.FAILED
-                task.completed_at = _utc_now_iso()
-                task.result = result
-                self._task_history[task_id] = SwarmTask.from_dict(task.to_dict())
-                # Persist to SQLite.
-                if self._task_store is not None:
-                    try:
-                        self._task_store.persist_task(task)
-                    except Exception:
-                        logger.exception(
-                            "[SwarmEngine] failed to persist rejected task '%s'",
-                            task_id,
-                        )
-            else:
-                # If task not in history, store the result directly.
-                self._checkpoint_handler.complete_pipeline(task_id, result)
+            async with self._task_lock:
+                task = self._task_history.get(task_id)
+                if task is not None:
+                    task.status = TaskStatus.COMPLETED
+                    self._task_history[task_id] = SwarmTask.from_dict(task.to_dict())
+                    task.result = result
+                    self._task_history[task_id] = SwarmTask.from_dict(task.to_dict())
+                    # Persist to SQLite.
+                    if self._task_store is not None:
+                        try:
+                            self._task_store.persist_task(task)
+                        except Exception:
+                            logger.exception(
+                                "[SwarmEngine] failed to persist rejected task '%s'",
+                                task_id,
+                            )
+                else:
+                    # If task not in history, store the result directly.
+                    self._checkpoint_handler.complete_pipeline(task_id, result)
         return result
 
     # ------------------------------------------------------------------

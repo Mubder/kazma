@@ -343,6 +343,22 @@ class LocalToolRegistry:
             min_wait = 2
             max_wait = 10
 
+        # ── Safety check — gate danger-tier tools ──────────────────
+        try:
+            from kazma_core.swarm.safety import get_safety
+            safety = get_safety()
+            if not safety.check_sync(tool_name):
+                return {
+                    "content": f"Tool '{tool_name}' requires HITL approval — blocked by SafetyMiddleware.",
+                    "is_error": True,
+                }
+        except Exception:
+            pass  # If safety unavailable, fail closed — do not execute
+            return {
+                "content": f"Tool '{tool_name}' blocked — SafetyMiddleware unavailable.",
+                "is_error": True,
+            }
+
         start = time.monotonic()
         last_exc: Exception | None = None
 
@@ -641,18 +657,27 @@ class LocalToolRegistry:
             if not args:
                 return "Error: Empty command"
 
-            # Restricted PATH — only allow common safe binaries
+            # Restricted PATH — only allow read-only / build-safe binaries
+            # NO interpreters (python, node), NO network tools (curl, wget),
+            # NO container runtimes (docker), NO file modification (chmod, sed)
             _SAFE_BINARIES = {
+                # Read-only system
                 "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
                 "uniq", "echo", "printf", "date", "whoami", "pwd", "env",
                 "df", "du", "free", "uptime", "uname", "hostname",
-                "python", "python3", "pip", "pip3", "uv", "git",
-                "curl", "wget", "jq", "sed", "awk", "tr", "cut",
-                "mkdir", "cp", "mv", "touch", "chmod", "chown",
+                # Build tools
+                "git", "uv", "pytest", "ruff", "mypy",
+                # Archive
                 "tar", "gzip", "gunzip", "zip", "unzip",
-                "ps", "top", "kill", "pgrep", "sleep",
-                "pytest", "ruff", "mypy", "node", "npm", "npx",
-                "docker", "docker-compose",
+                # Process info (read-only)
+                "ps", "pgrep",
+                # Text processing (read-only)
+                "jq", "tr", "cut",
+                # File ops (read-only)
+                "mkdir", "cp", "mv", "touch",
+                # Process control (safe)
+                "sleep",
+                # Kazma internal
                 "hermes", "kazma",
             }
             binary = Path(args[0]).name  # resolve paths like /full/path/ls → ls
