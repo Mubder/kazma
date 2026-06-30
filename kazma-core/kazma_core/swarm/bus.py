@@ -194,15 +194,24 @@ class SwarmMessageBus:
         task_description: str,
         proposed_output: str,
         task_id: str = "",
+        timeout: float = 60.0,
     ) -> bool:
-        """Request HITL approval for a high-impact output. Returns True if approved."""
+        """Request HITL approval. Returns True if approved, False if rejected or timed out."""
+        import asyncio
         approval = ApprovalRequest(
             worker_name=worker_name,
             task_description=task_description,
             proposed_output=proposed_output[:300],
             task_id=task_id,
         )
-        return await self._adapter.request_approval(approval)
+        try:
+            return await asyncio.wait_for(
+                self._adapter.request_approval(approval),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("HITL approval timed out after %.1fs for %s", timeout, worker_name)
+            return False
 
 
 # Module-level singleton for the bus.

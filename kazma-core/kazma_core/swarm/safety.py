@@ -135,6 +135,7 @@ class SafetyMiddleware:
             task_description=f"Tool: {tool_name}" + (f" — {tool_args[:100]}" if tool_args else ""),
             proposed_output=f"Danger-tier tool '{tool_name}' requires approval before execution.",
             task_id=task_id,
+            timeout=self._approval_timeout,
         )
 
         if approved:
