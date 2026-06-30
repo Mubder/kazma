@@ -82,11 +82,13 @@ class DelegationOrchestrator:
         discovery: AgentDiscovery,
         tracer: Any = None,
         cost_breaker: Any = None,
+        max_orchestrations: int = 100,
     ) -> None:
         self.protocol = protocol
         self.discovery = discovery
         self.tracer = tracer
         self.cost_breaker = cost_breaker
+        self._max_orchestrations = max_orchestrations
         self._active_orchestrations: dict[str, OrchestrationResult] = {}
 
     async def decompose_and_delegate(
@@ -170,7 +172,15 @@ class DelegationOrchestrator:
             len(sub_tasks),
             result.total_cost,
         )
+        # Schedule cleanup of completed task after logging
+        asyncio.ensure_future(self._cleanup_after_delay(result.task_id, delay=60.0))
         return result
+
+    async def _cleanup_after_delay(self, task_id: str, delay: float = 60.0) -> None:
+        """Remove a completed orchestration from the cache after a delay."""
+        await asyncio.sleep(delay)
+        self._active_orchestrations.pop(task_id, None)
+        logger.debug("Orchestration %s removed from active cache", task_id)
 
     def _decompose_task(self, task: str, max_agents: int) -> list[SubTask]:
         """Decompose a task into sub-tasks using heuristic splitting.
