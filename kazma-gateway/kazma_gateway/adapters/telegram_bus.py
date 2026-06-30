@@ -264,6 +264,27 @@ class TelegramBusAdapter(BusAdapter):
         """Number of pending approval requests."""
         return len(self._pending_approvals)
 
+    # ── Emoji reactions + Rate limit feedback ──────────────────────
+
+    async def set_reaction(self, message_id: int, emoji: str) -> None:
+        """Set an emoji reaction on a message (e.g. 👍, ✅, ❌, ⏰)."""
+        try:
+            await self._post({
+                "chat_id": self._chat_id,
+                "message_id": message_id,
+                "reaction": [{"type": "emoji", "emoji": emoji}],
+            }, method="setMessageReaction")
+            logger.debug("[TelegramBus] Reaction set: %s on msg %d", emoji, message_id)
+        except Exception as exc:
+            logger.debug("[TelegramBus] setReaction failed: %s", exc)
+
+    async def send_rate_limit_feedback(self, retry_after: int) -> None:
+        """Notify the user that the bot is rate-limited."""
+        await self._post({
+            "chat_id": self._chat_id,
+            "text": f"⏳ Rate limited — retrying in {retry_after}s...",
+        })
+
     async def close(self) -> None:
         if self._http is not None:
             await self._http.aclose()
