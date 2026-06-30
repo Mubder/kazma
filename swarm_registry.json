@@ -83,13 +83,13 @@
   {
     "name": "dup-worker",
     "expertise": [
-      "a"
+      "leaf"
     ],
     "roles": [
       "leaf"
     ],
-    "model": "",
-    "provider": "",
+    "model": "gpt-4o",
+    "provider": "openai",
     "worker_type": "in_process",
     "system_prompt": "",
     "enabled": true,
@@ -188,7 +188,7 @@
   {
     "name": "gamma",
     "expertise": [
-      "backend"
+      "leaf"
     ],
     "roles": [
       "leaf"
@@ -428,7 +428,7 @@
   {
     "name": "worker-1",
     "expertise": [
-      "backend"
+      "leaf"
     ],
     "roles": [
       "leaf"
@@ -789,6 +789,21 @@
     "name": "task-log-worker",
     "expertise": [
       "leaf"
+    ],
+    "roles": [
+      "leaf"
+    ],
+    "model": "deepseek-chat",
+    "provider": "deepseek",
+    "worker_type": "in_process",
+    "system_prompt": "",
+    "enabled": true,
+    "metadata": {}
+  },
+  {
+    "name": "alpha",
+    "expertise": [
+      "backend"
     ],
     "roles": [
       "leaf"

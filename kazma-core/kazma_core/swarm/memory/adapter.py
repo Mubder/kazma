@@ -68,7 +68,7 @@ class UnifiedMemoryAdapter:
         return {
             "chromadb": self._l1 is not None and getattr(self._l1, "available", False),
             "graph": self._l2 is not None and getattr(self._l2, "available", False),
-            "fts5": self._l3 is not None,
+            "fts5": self._l3 is not None and getattr(self._l3, "available", False),
             "sqlite_vec": self._l4 is not None and getattr(self._l4, "available", False),
         }
 
@@ -185,12 +185,19 @@ class UnifiedMemoryAdapter:
             return []
 
     async def _query_l4(self, text: str, limit: int) -> list[tuple[str, float, str, str, dict]]:
-        """sqlite-vec local query.  Queries all known workers."""
+        """sqlite-vec local query.  Queries all known worker tables."""
         try:
             all_results: list[tuple[str, float, str, str, dict]] = []
-            # Query global/default worker
-            results = self._l4.query("default", text, limit=limit)
-            all_results.extend((r[0], r[1], "", "L4:sqlite_vec", {}) for r in results)
+            # Query default + enumerate registered workers
+            workers = ["default"]
+            try:
+                from kazma_core.swarm.registry import WorkerRegistry
+                workers.extend([w.name for w in WorkerRegistry().list_all()])
+            except Exception:
+                pass
+            for worker in workers:
+                results = self._l4.query(worker, text, limit=limit)
+                all_results.extend((r[0], r[1], "", "L4:sqlite_vec", {"worker": worker}) for r in results)
             return all_results[:limit]
         except Exception as exc:
             logger.warning("[Adapter] L4 query failed: %s", exc)

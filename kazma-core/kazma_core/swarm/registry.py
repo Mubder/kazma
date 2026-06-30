@@ -246,8 +246,8 @@ class WorkerRegistry:
                         [e.name for e in result],
                     )
                     return result
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("[WorkerRegistry] Semantic routing failed: %s", exc)
 
         # 2 — Keyword fallback
         logger.info("[WorkerRegistry] Semantic routing unavailable — using keyword fallback")

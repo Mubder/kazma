@@ -56,9 +56,13 @@ class FTS5LexicalStore:
             return None
 
     @property
-    async def available(self) -> bool:
-        backend = await self._ensure_backend()
-        return backend is not None
+    def available(self) -> bool:
+        """Whether FTS5 is available (sync check -- backend may lazy-init later)."""
+        try:
+            from kazma_memory.search_backend import SQLiteMemoryBackend
+            return True
+        except ImportError:
+            return False
 
     # ── Search ──────────────────────────────────────────────────────────
 
