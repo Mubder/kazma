@@ -726,6 +726,23 @@ def create_swarm_router(
         setattr(worker, "api_key", payload.get("api_key"))
         _sync_external_manager_add(swarm_manager, worker_config, engine)
 
+        # Sync to persistent WorkerRegistry
+        try:
+            from kazma_core.swarm.registry import WorkerRegistry, WorkerEntry
+            registry = WorkerRegistry()
+            registry.register(WorkerEntry(
+                name=name,
+                expertise=[payload.get("role", "leaf")],
+                roles=["leaf"],
+                model=worker.model,
+                provider=worker.provider,
+                worker_type=worker_config.type if hasattr(worker_config, "type") else "in_process",
+                system_prompt=payload.get("system_prompt", ""),
+            ))
+            logger.info("[Swarm] WorkerRegistry synced: %s", name)
+        except Exception as exc:
+            logger.warning("[Swarm] WorkerRegistry sync failed: %s", exc)
+
         logger.info("[Swarm] Worker added: %s (%s/%s)", name, worker.model, worker.provider)
         return JSONResponse({"status": "ok", "worker": _serialize_worker(worker)}, status_code=201)
 
@@ -741,6 +758,16 @@ def create_swarm_router(
 
         engine.remove_worker(name)
         _sync_external_manager_remove(swarm_manager, name, engine)
+
+        # Sync to persistent WorkerRegistry
+        try:
+            from kazma_core.swarm.registry import WorkerRegistry
+            registry = WorkerRegistry()
+            registry.delete(name)
+            logger.info("[Swarm] WorkerRegistry removed: %s", name)
+        except Exception as exc:
+            logger.warning("[Swarm] WorkerRegistry sync failed: %s", exc)
+
         logger.info("[Swarm] Worker removed: %s", name)
         return JSONResponse({"status": "ok", "message": f"Worker '{name}' removed"})
 
