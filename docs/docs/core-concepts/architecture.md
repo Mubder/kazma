@@ -9,62 +9,64 @@ Kazma is built as a modular Python framework with clear separation of concerns.
 ## Module structure
 
 ```
-kazma-core/         Core agent framework
-  agent.py        Agent loop and lifecycle
-  router.py       Dialect routing
-  compaction.py   Context compaction
-  checkpoint.py   State persistence
-  state.py        State management
-  hub/            Skill registry and management
-  delegation/     Multi-agent delegation
-  security/       Security auditing
+kazma-core/              Core agent framework
+  agent_runner.py        Agent loop and lifecycle
+  model_registry.py      Model/provider registry (singleton)
+  swarm/                 Swarm orchestration engine
+    engine.py            SwarmEngine — dispatch, consult, broadcast
+    registry.py          WorkerRegistry — persistent worker phonebook
+    topology.py          PipelineEngine — multi-stage DAG execution
+    safety.py            SafetyMiddleware — HITL danger-tool gating
+    bus.py               SwarmMessageBus — platform-agnostic streaming
+    router.py            CapabilityRouter — semantic + keyword routing
+    memory/              4-layer co-processing memory
+      vector.py          Layer 1 — ChromaDB global semantic search
+      graph.py           Layer 2 — NetworkX knowledge graph
+      fts5.py            Layer 3 — SQLite FTS5 lexical + BM25
+      sqlite_vec.py      Layer 4 — sqlite-vec local embeddings
+      adapter.py         RRF blending across all 4 layers
+      pipeline_logger.py SQLite-backed pipeline diagnostics
+  delegation/            Multi-agent delegation protocol
+  security/              Security auditing and hardening
+  hub/                   Skill registry and management
+  skills/                Self-improvement engine
 
-kazma-skills/       Built-in skills
-kazma-connectors/   External service connectors
-kazma-providers/    LLM provider integrations
-kazma-ui/           Arabic RTL dashboard
-kazma-tui/          English-only Textual TUI
-kazma-cli/          Command-line interface
-kazma-memory/       Persistent memory subsystem
+kazma-gateway/           Platform adapters
+  adapters/
+    telegram.py          Telegram bot adapter
+    telegram_bus.py      Telegram SwarmMessageBus adapter (rich cards + HITL)
+    discord.py           Discord adapter
+    slack.py             Slack adapter
+
+kazma-memory/            Persistent memory subsystem
+  search_backend.py      SQLite FTS5 + Arabic tokenizer
+  arabic_tokenizer.py    Arabic text normalizer with dialect support
+
+kazma-ui/                Web dashboard (FastAPI + Jinja2)
+kazma-tui/               Terminal dashboard (Textual + TextArea selection)
+kazma-cli/               Command-line interface (11 commands)
+kazma-skills/            Built-in skill manifests
 ```
 
-## Data flow
+## Key architectural principles
 
-```
-+--------------------------------------------------+
-|                    User Input                     |
-+------------------+-------------------------------+
-                   v
-+--------------------------------------------------+
-|              Agent Loop (agent.py)               |
-|  +---------+  +----------+  +---------------+   |
-|  | Token    |  | Dialect  |  | Checkpoint    |   |
-|  | Counter  |  | Router   |  | Manager       |   |
-|  +---------+  +----------+  +---------------+   |
-+------------------+-------------------------------+
-                   v
-+--------------------------------------------------+
-|           Tool / Skill Execution                 |
-|  +----------+  +-----------+  +-------------+   |
-|  | Sandbox  |  | Skill     |  | Delegation  |   |
-|  |          |  | Loader    |  | Protocol    |   |
-|  +----------+  +-----------+  +-------------+   |
-+------------------+-------------------------------+
-                   v
-+--------------------------------------------------+
-|            Context Compaction                    |
-|  Summarize long conversations to fit in window   |
-+------------------+-------------------------------+
-                   v
-+--------------------------------------------------+
-|               Response Output                    |
-+--------------------------------------------------+
-```
+### Singleton ModelRegistry
+All LLM interactions flow through `ModelRegistry` — a process-wide singleton. No component creates its own LLM client. Workers dispatch tasks via `registry.get_client().chat()`.
 
-## Key design principles
+### 4-Layer Co-Processing Memory
+Queries fan out to all 4 backends in parallel, then blend via Reciprocal Rank Fusion (RRF, k=60). See `docs/architecture/MEMORY.md` for the full query flow.
 
-1. **Modularity** — Each module is independent and testable
-2. **Async-first** — All I/O is async (aiosqlite, httpx, asyncio)
-3. **SQLite-backed** — State, checkpoints, and hub registry use SQLite
-4. **Security by default** — Sandboxing, permission checks, audit trails
-5. **Arabic RTL support** — First-class Arabic dialect detection and rendering
+### Smart-Fallback Routing
+If no specialist worker matches a task, the engine auto-delegates to any available generalist worker (no expertise tags or no Soul). Falls back to all enabled workers as last resort. Zero dispatch failures.
+
+### WorkerRegistry — Single Source of Truth
+Workers are persisted in `swarm_registry.json`. The REST API, CLI, and Web UI all read/write through the same CRUD interface. Workers survive reboots.
+
+### SwarmMessageBus
+Workers stream logs/outputs to the active platform adapter (Telegram/Discord/Slack) without knowing the specific platform. Formatted Swarm Report cards with inline HITL approval/reject buttons.
+
+### Pipeline Engine
+Multi-stage DAG execution: Researcher → Refiner → Builder → Validator. Each stage forwards context to the next. After completion, the Refiner synthesizes a Markdown report card. Every step is logged to `pipeline_logs.db` for Web UI diagnostics.
+
+### SafetyMiddleware
+Danger-tier tool calls (`shell_exec`, `file_write`, `python_exec`, `spawn_agent`) are gated behind operator approval via the SwarmMessageBus. Approval cards expire after 60s.

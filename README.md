@@ -284,7 +284,13 @@ kazma swarm metrics --worker researcher
 | ✅ | ReAct Supervisor | LangGraph-based agent with tool-calling loop and SQLite checkpointing |
 | ✅ | Durable Checkpoints | Agents resume mid-task after crash — SQLite-backed graph state |
 | ✅ | Sub-Agent Spawning | Delegate tasks to child graphs (in-process) or swarm workers (distributed) |
-| ✅ | Swarm Orchestration | Multi-worker panel with health monitoring, dispatch, and lifecycle control |
+| ✅ | Swarm Orchestration | Multi-worker panel with health monitoring, dispatch, consult, pipeline, and lifecycle control |
+| ✅ | WorkerRegistry | Persistent worker phonebook with CRUD — survives reboots, JSON-backed |
+| ✅ | Smart-Fallback Routing | Zero dispatch failures — auto-delegates to generalist workers |
+| ✅ | 4-Layer Memory | ChromaDB + NetworkX + SQLite FTS5 + sqlite-vec with RRF blending |
+| ✅ | Pipeline Engine | Researcher → Refiner → Builder → Validator DAG execution |
+| ✅ | Refiner Middleman | Synthesizes collective output into clean Markdown report cards |
+| ✅ | SQLite Pipeline Logger | Every step persisted for Web UI diagnostics |
 | ✅ | Cron Autonomy | Scheduled agent actions with SQLite persistence |
 | ✅ | Auto-Summarization | Context compaction when token window exceeds 4K threshold |
 | ✅ | Model Router | Multi-provider routing (DeepSeek, OpenRouter) with intelligent selection |

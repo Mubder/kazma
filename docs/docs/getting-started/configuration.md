@@ -160,7 +160,9 @@ HITL `approve`/`reject`, and `circuit-breaker`.
 | `KAZMA_HOME` | Kazma home directory | `~/.kazma` |
 | `KAZMA_HUB_DB` | Hub registry database path | `~/.kazma/hub/registry.db` |
 | `KAZMA_MODEL` | Default model override | `openai/gpt-4o` |
+| `KAZMA_SECRET` | Secret for binding `0.0.0.0` and auth endpoints | — |
 | `KAZMA_LOG_LEVEL` | Logging level | `INFO` |
+| `KAZMA_PORT` | Web UI port | `8000` |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token | — |
 | `DISCORD_BOT_TOKEN` | Discord bot token | — |
 | `SLACK_BOT_TOKEN` | Slack bot token | — |
