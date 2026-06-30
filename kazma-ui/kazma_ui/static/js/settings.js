@@ -144,7 +144,10 @@ function settingsApp() {
                     if (settings.connectors) Object.assign(this.connectors, settings.connectors);
                     if (settings.appearance) {
                         Object.assign(this.appearance, settings.appearance);
-                        if (settings.appearance.font_size) this.applyFontSize(settings.appearance.font_size);
+                        if (settings.appearance.font_size) {
+                            const root = document.querySelector('[x-data]').__x.$data;
+                            if (root) root.fontSize = settings.appearance.font_size;
+                        }
                     }
                     if (settings.safety) Object.assign(this.safety, settings.safety);
                     if (settings.context) Object.assign(this.context, settings.context);
@@ -1062,7 +1065,8 @@ function settingsApp() {
                     body: JSON.stringify(this.appearance),
                 });
                 // Apply theme immediately
-                this.applyFontSize(this.appearance.font_size);
+                const root = document.querySelector('[x-data]').__x.$data;
+                if (root) root.fontSize = this.appearance.font_size;
                 if (this.appearance.theme === 'light') {
                     document.documentElement.setAttribute('data-theme', 'light');
                 } else if (this.appearance.theme === 'dark') {
@@ -1080,8 +1084,9 @@ function settingsApp() {
         },
 
         applyFontSize(size) {
-            document.documentElement.style.fontSize = size + 'px';
             this.appearance.font_size = size;
+            const root = document.querySelector('[x-data]').__x.$data;
+            if (root) root.fontSize = size;
         },
 
         /* ══════════════════════════════════════════════════════════════════
@@ -1444,7 +1449,7 @@ function settingsApp() {
                 case 'connectors': break;
                 case 'mcp': await this.loadMcpServers(); break;
                 case 'skills': await this.loadSkills(); break;
-                case 'appearance': this.applyFontSize(this.appearance.font_size); break;
+                case 'appearance': break;
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;

@@ -114,8 +114,15 @@ function kazmaApp() {
         theme: 'dark',
         lang: 'ar',
         sidebarCollapsed: false,
+        fontSize: Alpine.$persist(14).as('kazma-font-size'),
 
         init() {
+            // Restore font size from backend (overrides localStorage default)
+            fetch('/api/settings/appearance')
+                .then(r => r.json())
+                .then(d => { if (d && d.font_size) this.fontSize = d.font_size; })
+                .catch(() => {});
+
             // Restore theme from localStorage
             const saved = localStorage.getItem('kazma-theme');
             if (saved) {
