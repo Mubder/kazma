@@ -222,21 +222,58 @@ class DelegationOrchestrator:
         sub_tasks: list[SubTask],
         max_agents: int,
     ) -> dict[str, AgentInfo]:
-        """Discover agents and assign to sub-tasks."""
+        """Discover agents and assign to sub-tasks.
+
+        Prefers WorkerRegistry lookup by expertise tag.  Falls back
+        to the legacy AgentDiscovery for agents not in the registry.
+        """
         assignments: dict[str, AgentInfo] = {}
         assigned_agents: set[str] = set()
 
         for sub_task in sub_tasks:
-            candidates = await self.discovery.discover(sub_task.required_capabilities, max_results=max_agents)
+            agent: AgentInfo | None = None
 
-            # Pick the best unassigned agent
-            for agent in candidates:
-                if agent.agent_id not in assigned_agents:
-                    assignments[sub_task.task_id] = agent
-                    sub_task.assigned_agent = agent.agent_id
-                    sub_task.status = SubTaskStatus.ASSIGNED
-                    assigned_agents.add(agent.agent_id)
-                    break
+            # 1 — Try WorkerRegistry by expertise tag
+            try:
+                from kazma_core.swarm.registry import WorkerRegistry
+
+                registry = WorkerRegistry()
+                for cap in sub_task.required_capabilities:
+                    entries = registry.find_by_expertise(cap)
+                    for entry in entries:
+                        if entry.name not in assigned_agents:
+                            agent = AgentInfo(
+                                agent_id=entry.name,
+                                capabilities=entry.expertise,
+                                metadata={
+                                    "model": entry.model,
+                                    "provider": entry.provider,
+                                    "system_prompt": entry.system_prompt,
+                                    "role": entry.roles[0] if entry.roles else "",
+                                },
+                            )
+                            break
+                    if agent:
+                        break
+            except Exception:
+                pass
+
+            # 2 — Fall back to legacy discovery
+            if agent is None:
+                candidates = await self.discovery.discover(
+                    sub_task.required_capabilities,
+                    max_results=max_agents,
+                )
+                for candidate in candidates:
+                    if candidate.agent_id not in assigned_agents:
+                        agent = candidate
+                        break
+
+            if agent is not None:
+                assignments[sub_task.task_id] = agent
+                sub_task.assigned_agent = agent.agent_id
+                sub_task.status = SubTaskStatus.ASSIGNED
+                assigned_agents.add(agent.agent_id)
 
         return assignments
 

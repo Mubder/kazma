@@ -44,6 +44,7 @@ from kazma_core.swarm.reliability import (
 )
 from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
 from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
+from kazma_core.swarm.safety import SafetyMiddleware, SafetyViolationError, get_safety
 from kazma_core.swarm.task import (
     HandoffRecord,
     SwarmTask,
