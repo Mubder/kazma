@@ -209,7 +209,7 @@ class SwarmMessageBus:
                 self._adapter.request_approval(approval),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("HITL approval timed out after %.1fs for %s", timeout, worker_name)
             return False
 

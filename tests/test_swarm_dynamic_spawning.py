@@ -13,23 +13,18 @@ VAL-SPAWN-006, and VAL-ORCH-052:
 
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock
 
+import pytest
 from fastapi.testclient import TestClient
-
 from kazma_core.swarm import (
     SwarmConfig,
     SwarmTask,
     TaskType,
-    WorkerConfig,
-    WorkerCapabilities,
 )
 from kazma_core.swarm.engine import SwarmEngine
-from kazma_core.swarm.router import CapabilityRouter
 from kazma_ui.app import create_app
 from kazma_ui.swarm_panel import _reset_swarm_state
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

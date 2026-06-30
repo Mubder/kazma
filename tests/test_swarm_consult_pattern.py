@@ -8,7 +8,6 @@ import pytest
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
-
 from kazma_core.swarm import SwarmConfig, SwarmTask, TaskType, WorkerCapabilities, WorkerConfig
 from kazma_core.swarm.blackboard import SwarmDispatchContext
 from kazma_core.swarm.engine import SwarmEngine, get_swarm_engine

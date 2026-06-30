@@ -7,18 +7,12 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
 from kazma_core.swarm import (
-    SwarmConfig,
-    SwarmEngine,
     SwarmTask,
     TaskResult,
     TaskStatus,
     TaskType,
-    WorkerConfig,
-    WorkerCapabilities,
     WorkerResult,
-    set_swarm_engine,
 )
 from kazma_core.swarm.task_store import TaskStore
 from kazma_ui.swarm_panel import _reset_swarm_state, create_swarm_router

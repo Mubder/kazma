@@ -336,7 +336,6 @@ class TestChatBehavioral:
     def test_chat_log_has_correct_id(self) -> None:
         """VAL-TUI-021: Chat output must have id 'chat-output'."""
         from kazma_tui.chat import ChatPanel
-        from textual.widgets import TextArea
 
         panel = ChatPanel()
         widgets = list(panel.compose())

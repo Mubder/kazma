@@ -205,8 +205,8 @@ Output ONLY the delta text, no preamble."""
     @classmethod
     def _stage_delta(cls, worker_name: str, delta: str) -> bool:
         """Write delta to the pending HITL approval queue."""
-        import json, os as _os_stage, time as _time_stage
-        from pathlib import Path
+        import json
+        import time as _time_stage
         try:
             queue_path = cls._pending_queue_path()
             queue_path.parent.mkdir(parents=True, exist_ok=True)

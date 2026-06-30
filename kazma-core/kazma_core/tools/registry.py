@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import subprocess
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -134,7 +133,7 @@ class ShellTool(BaseTool):
             return ToolResult(
                 tool_name=self.name,
                 success=False,
-                output=f"Blocked: unsafe command pattern detected",
+                output="Blocked: unsafe command pattern detected",
                 exit_code=-1,
                 permission=self.permission,
             )
@@ -160,7 +159,7 @@ class ShellTool(BaseTool):
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return ToolResult(
                 tool_name=self.name,
                 success=False,

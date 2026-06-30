@@ -9,11 +9,11 @@ Exports:
     get_encoder — shared sentence-transformers singleton
 """
 
-from kazma_core.swarm.memory.vector import VectorStore, get_encoder
-from kazma_core.swarm.memory.graph import KnowledgeGraph
-from kazma_core.swarm.memory.fts5 import FTS5LexicalStore
-from kazma_core.swarm.memory.sqlite_vec import SQLiteVectorStore
 from kazma_core.swarm.memory.adapter import MemoryHit, UnifiedMemoryAdapter
+from kazma_core.swarm.memory.fts5 import FTS5LexicalStore
+from kazma_core.swarm.memory.graph import KnowledgeGraph
+from kazma_core.swarm.memory.sqlite_vec import SQLiteVectorStore
+from kazma_core.swarm.memory.vector import VectorStore, get_encoder
 
 __all__ = [
     "VectorStore",

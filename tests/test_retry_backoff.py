@@ -177,7 +177,6 @@ class TestFriendlyErrors:
     def test_friendly_llm_error_unauthorized_401(self) -> None:
         """401 errors map to credential guidance."""
         import httpx
-
         from kazma_core.retry import friendly_llm_error
 
         request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
@@ -192,7 +191,6 @@ class TestFriendlyErrors:
     def test_friendly_llm_error_forbidden_403(self) -> None:
         """403 errors also map to credential guidance."""
         import httpx
-
         from kazma_core.retry import friendly_llm_error
 
         request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")

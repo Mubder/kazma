@@ -7,19 +7,14 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
-from typing import Any
 
 import pytest
-from pydantic import BaseModel
-
 from kazma_core.swarm.reliability import (
     BoundedConcurrency,
     OutputValidator,
     TimeoutGuard,
-    TimeoutGuardError,
 )
-
+from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
 # TimeoutGuard tests (VAL-REL-016 through VAL-REL-021)
@@ -682,8 +677,8 @@ class TestBoundedConcurrencyWithEngineIntegration:
 
     @pytest.mark.asyncio
     async def test_engine_resolves_concurrency_from_task_metadata(self):
-        from kazma_core.swarm.engine import SwarmEngine
         from kazma_core.swarm.config import SwarmConfig
+        from kazma_core.swarm.engine import SwarmEngine
 
         engine = SwarmEngine(SwarmConfig(enabled=True, workers=[]))
         from kazma_core.swarm.task import SwarmTask, TaskType
@@ -697,8 +692,8 @@ class TestBoundedConcurrencyWithEngineIntegration:
 
     @pytest.mark.asyncio
     async def test_engine_uses_default_concurrency(self):
-        from kazma_core.swarm.engine import SwarmEngine
         from kazma_core.swarm.config import SwarmConfig
+        from kazma_core.swarm.engine import SwarmEngine
 
         engine = SwarmEngine(SwarmConfig(enabled=True, workers=[]))
         from kazma_core.swarm.task import SwarmTask, TaskType

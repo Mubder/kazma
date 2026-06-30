@@ -457,7 +457,7 @@ class LocalToolRegistry:
                 return f"Error: Not a file: {path}"
             # Workspace scoping — block reads outside workspace unless allowed
             try:
-                from kazma_core.tools.file_write import _WORKSPACE_ROOT, _ALLOW_ABSOLUTE  # noqa: F811
+                from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _WORKSPACE_ROOT  # noqa: F811
                 if _WORKSPACE_ROOT and not _ALLOW_ABSOLUTE:
                     if not p.is_relative_to(_WORKSPACE_ROOT) and not p.is_relative_to(Path("/tmp")):
                         return f"Safety: reads outside workspace are not allowed. Path: {path}"
@@ -475,7 +475,7 @@ class LocalToolRegistry:
             p = Path(path).expanduser().resolve()
             # Workspace scoping — block writes outside workspace unless allowed
             try:
-                from kazma_core.tools.file_write import _WORKSPACE_ROOT, _ALLOW_ABSOLUTE  # noqa: F811
+                from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _WORKSPACE_ROOT  # noqa: F811
                 if _WORKSPACE_ROOT and not _ALLOW_ABSOLUTE:
                     if not p.is_relative_to(_WORKSPACE_ROOT) and not p.is_relative_to(Path("/tmp")):
                         return f"Safety: writes outside workspace are not allowed. Path: {path}"

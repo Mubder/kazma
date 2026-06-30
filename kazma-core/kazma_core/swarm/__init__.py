@@ -31,6 +31,7 @@ from kazma_core.swarm.engine import SwarmEngine, get_swarm_engine, set_swarm_eng
 from kazma_core.swarm.handoff import HandoffRequest, request_handoff
 from kazma_core.swarm.manager import SwarmManager
 from kazma_core.swarm.metrics import MetricsCollector, WorkerMetricSnapshot
+from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
 from kazma_core.swarm.reliability import (
     BoundedConcurrency,
     CircuitBreaker,
@@ -42,7 +43,6 @@ from kazma_core.swarm.reliability import (
     TimeoutGuard,
     TimeoutGuardError,
 )
-from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
 from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
 from kazma_core.swarm.safety import SafetyMiddleware, SafetyViolationError, get_safety
 from kazma_core.swarm.task import (
@@ -56,18 +56,21 @@ from kazma_core.swarm.task import (
 )
 from kazma_core.swarm.task_store import TaskStore
 from kazma_core.swarm.topology import (
+    STANDARD_PIPELINE,
     PipelineEngine,
     PipelineResult,
     PipelineStage,
     RefinerStage,
     StageRole,
-    STANDARD_PIPELINE,
 )
 from kazma_core.swarm.tracing import InMemorySpanExporter, Span, TracingEmitter
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
 
 __all__ = [
+    "ApprovalRequest",
     "BoundedConcurrency",
+    "BusAdapter",
+    "BusMessage",
     "CapabilityRouter",
     "CircuitBreaker",
     "CircuitBreakerOpenError",
@@ -75,36 +78,51 @@ __all__ = [
     "FallbackChain",
     "HITLCheckpoint",
     "HITLCheckpointHandler",
+    "HandoffRecord",
     "HandoffRequest",
     "InMemorySpanExporter",
+    "InProcessWorker",
     "MetricsCollector",
     "NoCapableWorkersError",
+    "NullBusAdapter",
     "OutputValidator",
-    "RetryPolicy",
-    "Span",
-    "SwarmConfig",
-    "SwarmManager",
-    "request_handoff",
-    "SwarmEngine",
+    "PipelineEngine",
+    "PipelineResult",
+    "PipelineStage",
+    "RefinerStage",
     "ResultAggregator",
-    "SwarmWorker",
-    "TracingEmitter",
-    "WorkerConfig",
-    "WorkerCapabilities",
-    "WorkerMetricSnapshot",
-    "BlackboardStore",
-    "SwarmDispatchContext",
+    "RetryPolicy",
+    "STANDARD_PIPELINE",
+    "SafetyMiddleware",
+    "SafetyViolationError",
+    "Span",
+    "StageRole",
+    "SwarmConfig",
+    "SwarmEngine",
+    "SwarmManager",
+    "SwarmMessageBus",
+    "SwarmReport",
     "SwarmTask",
+    "SwarmWorker",
     "TaskResult",
     "TaskStatus",
     "TaskStore",
     "TaskType",
-    "WorkerResult",
-    "HandoffRecord",
-    "InProcessWorker",
     "TelegramWorker",
     "TimeoutGuard",
     "TimeoutGuardError",
+    "TracingEmitter",
+    "WorkerCapabilities",
+    "WorkerConfig",
+    "WorkerEntry",
+    "WorkerMetricSnapshot",
+    "WorkerRegistry",
+    "WorkerResult",
+    "BlackboardStore",
+    "SwarmDispatchContext",
+    "get_message_bus",
+    "get_safety",
     "get_swarm_engine",
+    "request_handoff",
     "set_swarm_engine",
 ]

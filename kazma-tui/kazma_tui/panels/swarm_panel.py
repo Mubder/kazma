@@ -10,16 +10,12 @@ Read-only consumers of WorkerRegistry and SwarmMessageBus.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
-
-from textual import on
-from textual.app import ComposeResult
-from textual.containers import Horizontal
-from textual.reactive import reactive
-from textual.widgets import DataTable, Static
-from textual.widget import Widget
 
 from kazma_tui.widgets.log_stream import LogStream
+from textual.app import ComposeResult
+from textual.containers import Horizontal
+from textual.widget import Widget
+from textual.widgets import DataTable
 
 logger = logging.getLogger(__name__)
 

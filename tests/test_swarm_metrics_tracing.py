@@ -8,17 +8,13 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
-from dataclasses import dataclass, field
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from dataclasses import dataclass
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
 from kazma_core.swarm.metrics import MetricsCollector, WorkerMetricSnapshot
 from kazma_core.swarm.task import WorkerResult
 from kazma_core.swarm.tracing import InMemorySpanExporter, Span, TracingEmitter
-
 
 # ---------------------------------------------------------------------------
 # MetricsCollector tests
@@ -557,7 +553,6 @@ class TestSwarmEngineMetricsTracingIntegration:
         from kazma_core.swarm.config import SwarmConfig, WorkerConfig
         from kazma_core.swarm.engine import SwarmEngine
         from kazma_core.swarm.metrics import MetricsCollector
-        from kazma_core.swarm.task import SwarmTask, TaskType
         from kazma_core.swarm.tracing import InMemorySpanExporter, TracingEmitter
 
         exporter = InMemorySpanExporter()

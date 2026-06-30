@@ -5,7 +5,7 @@ using RRF, de-duplicates by content, and returns a single ranked
 list of MemoryHit objects.
 
 Architecture:
-    query("fix auth bug") 
+    query("fix auth bug")
     → asyncio.gather(L1.query(), L2.query(), L3.query(), L4.query())
     → RRF blending (k=60)
     → dedup by content hash
@@ -18,6 +18,7 @@ import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass, field
+from datetime import UTC
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -308,8 +309,8 @@ class UnifiedMemoryAdapter:
     ) -> None:
         """Persist a Soul Evolution log entry for semantic retrieval."""
         if not timestamp:
-            from datetime import datetime, timezone
-            timestamp = datetime.now(timezone.utc).isoformat()
+            from datetime import datetime
+            timestamp = datetime.now(UTC).isoformat()
         text = f"[SoulEvolution] worker={worker_name} task={task_id} summary={summary[:200]} delta={delta[:200]}"
         meta = {
             "worker": worker_name,
