@@ -24,12 +24,12 @@
   --text-muted: #475569;
   --text-inverse: #02040a;
 
-  /* Accent — electric cyan (kazma.ai primary) */
-  --accent: #06b6d4;
-  --accent-hover: #22d3ee;
-  --accent-light: #67e8f9;
-  --accent-subtle: rgba(6, 182, 212, 0.12);
-  --accent-glow: rgba(6, 182, 212, 0.25);
+  /* Accent — electric cyan (kazma.ai live) */
+  --accent: #00e5ff;
+  --accent-hover: #00f0ff;
+  --accent-light: #66f0ff;
+  --accent-subtle: rgba(0, 229, 255, 0.12);
+  --accent-glow: rgba(0, 229, 255, 0.25);
 
   /* Secondary — purple (kazma.ai secondary) */
   --secondary: #a855f7;
@@ -38,9 +38,9 @@
   --secondary-subtle: rgba(168, 85, 247, 0.12);
   --secondary-glow: rgba(168, 85, 247, 0.20);
 
-  /* Gradient accents */
-  --gradient-primary: linear-gradient(135deg, #06b6d4, #a855f7);
-  --gradient-header: linear-gradient(135deg, #06b6d4 0%, #a855f7 50%, #06b6d4 100%);
+  /* Gradient accents — matching kazma.ai heading gradient */
+  --gradient-primary: linear-gradient(135deg, #a855f7, #ec4899, #00e5ff);
+  --gradient-header: linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #00e5ff 100%);
 
   /* Status */
   --success: #10b981;
