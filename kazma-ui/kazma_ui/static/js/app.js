@@ -1,3 +1,14 @@
+
+// ── Font size persistence ─────────────────────────────────────────
+(function() {
+  var saved = localStorage.getItem('kazma-font-size') || 'md';
+  document.body.classList.add('font-' + saved);
+  window.setKazmaFont = function(size) {
+    document.body.classList.remove('font-sm', 'font-md', 'font-lg');
+    document.body.classList.add('font-' + size);
+    localStorage.setItem('kazma-font-size', size);
+  };
+})();
 /**
  * ═══════════════════════════════════════════════════════════════════
  * Kazma App.js — Core Alpine.js stores, utilities, and keyboard shortcuts

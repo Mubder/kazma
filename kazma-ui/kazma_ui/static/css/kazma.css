@@ -103,6 +103,17 @@
 /* ── 2. Reset ───────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 14px; -webkit-font-smoothing: antialiased; }
+/* MCP modal — constrain width */
+.modal-body form {
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* Font size persistence */
+body.font-sm { font-size: 14px; }
+body.font-md { font-size: 16px; }
+body.font-lg { font-size: 18px; }
+
 body {
   font-family: var(--font-sans);
   font-feature-settings: var(--font-features);

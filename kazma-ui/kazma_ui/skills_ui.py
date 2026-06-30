@@ -27,7 +27,31 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
     router = APIRouter(tags=["skills"])
 
     async def _get_installed_skills() -> list[dict[str, Any]]:
-        """Get list of installed skills from the hub registry."""
+        """Get list of installed skills from hub registry + local ToolRegistry."""
+        skills: list[dict[str, Any]] = []
+
+        # Local tools from ToolRegistry
+        try:
+            from kazma_core.tools.registry import get_tool_registry
+            reg = get_tool_registry()
+            tools = reg.list_tools()
+            for t in tools:
+                skills.append({
+                    "id": t["id"],
+                    "name": t["name"],
+                    "version": "0.1.0",
+                    "description": t.get("description", ""),
+                    "author": "kazma-core",
+                    "enabled": t.get("enabled", True),
+                    "security_score": t.get("security_score", 100),
+                    "certification_level": t.get("certification_level", "basic"),
+                    "capabilities": t.get("capabilities", []),
+                    "tags": t.get("tags", []),
+                })
+        except Exception:
+            pass
+
+        # Hub-registered skills
         try:
             from kazma_core.hub.registry import KazmaHub
 
