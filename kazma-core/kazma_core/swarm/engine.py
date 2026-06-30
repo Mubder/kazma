@@ -88,6 +88,7 @@ class SwarmEngine:
         self.config = config or SwarmConfig(enabled=True, workers=[])
         self._workers: dict[str, SwarmWorker] = {}
         self._task_history: dict[str, SwarmTask] = {}
+        self._task_lock = asyncio.Lock()  # protects _task_history mutations
         self._result_aggregator = result_aggregator or ResultAggregator()
         self._capability_router = capability_router or CapabilityRouter()
         self._circuit_breakers: dict[str, CircuitBreaker] = {}
