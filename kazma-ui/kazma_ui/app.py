@@ -79,6 +79,31 @@ def create_app(config_path: str | None = None) -> FastAPI:
     from kazma_ui.auth import create_auth_middleware
 
     app.middleware("http")(create_auth_middleware())
+    # ── Typing indicator signal (#3) ─────────────────────────────────
+    @app.get("/api/telemetry/typing")
+    async def _typing_signal():
+        """Lightweight signal that a worker is processing — used for UI typing indicators."""
+        return {"status": "processing", "timestamp": __import__("time").time()}
+
+    @app.post("/api/telemetry/typing/stream_start")
+    async def _stream_start(req: dict):
+        """Notify gateways that a streaming response has begun."""
+        worker_name = req.get("worker_name", "unknown")
+        task_id = req.get("task_id", "")
+        logger.info("[Stream] Typing started — worker=%s task=%s", worker_name, task_id)
+        return {"status": "stream_started", "worker_name": worker_name, "task_id": task_id}
+
+    # ── Global error boundary (#16) ──────────────────────────────────
+    from kazma_core.swarm.middleware import GracefulErrorFallback as _gef
+    @app.exception_handler(Exception)
+    async def _global_error_handler(request: Request, exc: Exception):
+        """Catch-all handler — never let a broken skill crash the pipeline."""
+        logger.error("[GlobalError] %s: %s", type(exc).__name__, exc)
+        return JSONResponse(
+            status_code=500,
+            content=_gef.to_json_error(exc),
+        )
+
     # ── Swarm Brain — Knowledge Graph (#18) ───────────────────────────
     import kazma_core.swarm.memory.graph as _kg_mod
     @app.get("/api/memory/graph")
