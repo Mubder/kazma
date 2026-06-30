@@ -1,36 +1,4 @@
 
-// ── Font size persistence (backend + localStorage) ────────────────
-(function() {
-  var saved = localStorage.getItem('kazma-font-size') || 'md';
-  document.documentElement.classList.add('font-' + saved);
-
-  // Sync from backend settings on load — apply exact font_size
-  try {
-    fetch('/api/settings/appearance')
-      .then(r => r.json())
-      .then(d => {
-        if (d && d.font_size) {
-          document.documentElement.style.fontSize = d.font_size + 'px';
-          localStorage.setItem('kazma-font-size-exact', d.font_size);
-        }
-      })
-      .catch(function(){});
-  } catch(e) {}
-
-  window.setKazmaFont = function(px) {
-    // px is the exact pixel value from the slider
-    document.documentElement.style.fontSize = px + 'px';
-    localStorage.setItem('kazma-font-size-exact', px);
-    // Persist to backend with exact value
-    try {
-      fetch('/api/settings/appearance', {
-        method: 'PUT',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({font_size: parseInt(px) || 14})
-      }).catch(function(){});
-    } catch(e) {}
-  };
-})();
 /**
  * ═══════════════════════════════════════════════════════════════════
  * Kazma App.js — Core Alpine.js stores, utilities, and keyboard shortcuts
