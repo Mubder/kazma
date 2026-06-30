@@ -347,7 +347,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         from kazma_core.agent.sub_agent import SubAgentManager, set_sub_agent_manager
 
         sub_agent_mgr = SubAgentManager(
-            graph_builder=lambda tools=None, hitl_config=None: agent.get_streaming_graph(),
+            graph_builder=lambda **kwargs: agent.get_streaming_graph(),
             max_concurrent=3,
         )
         set_sub_agent_manager(sub_agent_mgr)
