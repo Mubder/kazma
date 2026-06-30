@@ -145,7 +145,7 @@ function settingsApp() {
                     if (settings.appearance) {
                         Object.assign(this.appearance, settings.appearance);
                         if (settings.appearance.font_size) {
-                            const root = document.querySelector('[x-data]').__x.$data;
+                            const root = Alpine.$data(document.querySelector('[x-data]'));
                             if (root) root.fontSize = settings.appearance.font_size;
                         }
                     }
@@ -1065,7 +1065,7 @@ function settingsApp() {
                     body: JSON.stringify(this.appearance),
                 });
                 // Apply theme immediately
-                const root = document.querySelector('[x-data]').__x.$data;
+                const root = Alpine.$data(document.querySelector('[x-data]'));
                 if (root) root.fontSize = this.appearance.font_size;
                 if (this.appearance.theme === 'light') {
                     document.documentElement.setAttribute('data-theme', 'light');
@@ -1085,7 +1085,7 @@ function settingsApp() {
 
         applyFontSize(size) {
             this.appearance.font_size = size;
-            const root = document.querySelector('[x-data]').__x.$data;
+            const root = Alpine.$data(document.querySelector('[x-data]'));
             if (root) root.fontSize = size;
         },
 

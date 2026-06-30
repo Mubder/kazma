@@ -114,10 +114,18 @@ function kazmaApp() {
         theme: 'dark',
         lang: 'ar',
         sidebarCollapsed: false,
-        fontSize: Alpine.$persist(14).as('kazma-font-size'),
+        fontSize: 14,
 
         init() {
-            // Restore font size from backend (overrides localStorage default)
+            // Restore font size from localStorage (synchronous). The Alpine
+            // $persist plugin is not bundled, so persistence is handled here.
+            const storedSize = localStorage.getItem('kazma-font-size');
+            if (storedSize) this.fontSize = Number(storedSize);
+
+            // Persist font size to localStorage on every change.
+            this.$watch('fontSize', (v) => localStorage.setItem('kazma-font-size', v));
+
+            // Sync from backend (authoritative — overrides the local cache).
             fetch('/api/settings/appearance')
                 .then(r => r.json())
                 .then(d => { if (d && d.font_size) this.fontSize = d.font_size; })
@@ -249,9 +257,12 @@ function sidebarComponent() {
         toggleSidebar() {
             // Delegates to root app via Alpine
             const appEl = document.querySelector('[x-data*="kazmaApp"]');
-            if (appEl && appEl.__x) {
-                appEl.__x.$data.sidebarCollapsed = !appEl.__x.$data.sidebarCollapsed;
-                localStorage.setItem('kazma-sidebar-collapsed', appEl.__x.$data.sidebarCollapsed);
+            if (appEl && window.Alpine) {
+                const data = Alpine.$data(appEl);
+                if (data) {
+                    data.sidebarCollapsed = !data.sidebarCollapsed;
+                    localStorage.setItem('kazma-sidebar-collapsed', data.sidebarCollapsed);
+                }
             }
             // Fallback: dispatch event
             document.dispatchEvent(new CustomEvent('kazma:toggle-sidebar'));

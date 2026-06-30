@@ -174,7 +174,9 @@ button { cursor: pointer; font-family: inherit; }
 /* ── 4. Sidebar ─────────────────────────────────────────────────── */
 .sidebar {
   width: var(--sidebar-width);
-  background: var(--bg-panel);
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
@@ -206,10 +208,14 @@ button { cursor: pointer; font-family: inherit; }
 }
 .logo-text {
   font-size: 1.1rem;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: -0.03em;
   color: var(--text-primary);
   white-space: nowrap;
+  background: linear-gradient(110deg, var(--accent), var(--secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 .sidebar.collapsed .logo-text,
 .sidebar.collapsed .nav-label,
@@ -277,6 +283,8 @@ button { cursor: pointer; font-family: inherit; }
 .nav-link.active {
   background: var(--accent-subtle);
   color: var(--accent-light);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .nav-link.active::before {
   content: '';
@@ -393,7 +401,9 @@ button { cursor: pointer; font-family: inherit; }
   justify-content: space-between;
   padding: 0 var(--sp-6);
   border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-panel);
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   min-height: var(--header-height);
   flex-shrink: 0;
 }
@@ -405,9 +415,13 @@ button { cursor: pointer; font-family: inherit; }
 }
 .header-title {
   font-size: 1.1rem;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: -0.02em;
   white-space: nowrap;
+  background: linear-gradient(110deg, var(--text-primary), var(--accent-light));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 .breadcrumbs {
   display: flex;
@@ -533,14 +547,16 @@ button { cursor: pointer; font-family: inherit; }
 
 /* ── 6. Cards ───────────────────────────────────────────────────── */
 .card {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: var(--sp-5);
-  transition: border-color var(--transition-fast);
+  transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 .card:hover {
-  border-color: rgba(255, 255, 255, 0.12);
+  transform: translateY(-4px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-lg);
 }
 .card-title {
   font-size: 1rem;
@@ -554,9 +570,9 @@ button { cursor: pointer; font-family: inherit; }
   margin-bottom: var(--sp-4);
 }
 .settings-group {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   padding: var(--sp-5);
 }
 .settings-group h3 {
@@ -592,7 +608,7 @@ button { cursor: pointer; font-family: inherit; }
   justify-content: center;
   gap: 6px;
   padding: var(--sp-2) var(--sp-4);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   font-family: var(--font-sans);
   font-size: 0.875rem;
   font-weight: 500;
@@ -610,22 +626,26 @@ button { cursor: pointer; font-family: inherit; }
 
 .btn-primary {
   background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
+  color: #001016;
+  border-color: transparent;
+  font-weight: 700;
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  border-color: transparent;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px -8px var(--accent-glow);
 }
 
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-panel);
   color: var(--text-secondary);
   border-color: var(--border);
 }
 .btn-secondary:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text-primary);
+  border-color: var(--border-strong);
 }
 
 .btn-danger {
@@ -677,9 +697,9 @@ button { cursor: pointer; font-family: inherit; }
 .form-select,
 .form-textarea {
   padding: var(--sp-2) var(--sp-3);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-surface);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 0.9rem;
@@ -1021,9 +1041,9 @@ tbody tr:last-child td {
   line-height: 1.7;
   word-wrap: break-word;
 }
-.message-user .message-text { background: var(--accent); color: #fff; }
+.message-user .message-text { background: var(--accent); color: #001016; font-weight: 500; }
 .message-assistant .message-text {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
 }
 .message-meta { font-size: 0.75rem; color: var(--text-tertiary); margin-top: var(--sp-1); }
@@ -2309,6 +2329,154 @@ canvas { display: block; border-radius: 4px; }
 .btn-success:hover:not(:disabled) {
   background: var(--success);
   color: #fff;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   design-b-modern component polish — reusable utilities + scrollbars
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Gradient text (cyan → violet, matches kazma.ai headings) */
+.gradient-text {
+  background: linear-gradient(110deg, var(--accent), var(--secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Glassmorphism surface */
+.glass {
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-subtle);
+}
+
+/* Eyebrow / kicker pill — small accent label with a live dot */
+.eyebrow,
+.kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+}
+.eyebrow .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+}
+
+/* Icon chip — squared accent tile for card/section icons */
+.icon-chip {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.icon-chip svg { width: 20px; height: 20px; }
+.icon-chip.violet { background: color-mix(in srgb, var(--secondary) 14%, transparent); color: var(--secondary-light); }
+.icon-chip.green { background: var(--success-subtle); color: var(--success); }
+.icon-chip.amber { background: var(--warning-subtle); color: var(--warning); }
+
+/* Stat tiles lift on hover like bento cards */
+.stat-card,
+.metric-card,
+.provider-card {
+  transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.stat-card:hover,
+.metric-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Large gradient values for stat cards */
+.stat-value,
+.metric-value {
+  font-family: var(--font-mono);
+  font-weight: 800;
+  background: linear-gradient(110deg, var(--text-primary), var(--accent-light));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Page title gradient utility (used on dashboard/section headers) */
+.page-title {
+  background: linear-gradient(110deg, var(--text-primary), var(--accent-light));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Section heading kicker label */
+.section-heading {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: var(--sp-2);
+}
+
+/* Custom scrollbars — thin, themed */
+.page-body,
+.chat-messages,
+.nav-links,
+.settings-nav,
+.table-container,
+.modal-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.page-body::-webkit-scrollbar,
+.chat-messages::-webkit-scrollbar,
+.nav-links::-webkit-scrollbar,
+.settings-nav::-webkit-scrollbar,
+.table-container::-webkit-scrollbar,
+.modal-body::-webkit-scrollbar { width: 8px; height: 8px; }
+.page-body::-webkit-scrollbar-thumb,
+.chat-messages::-webkit-scrollbar-thumb,
+.nav-links::-webkit-scrollbar-thumb,
+.settings-nav::-webkit-scrollbar-thumb,
+.table-container::-webkit-scrollbar-thumb,
+.modal-body::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+}
+.page-body::-webkit-scrollbar-thumb:hover,
+.chat-messages::-webkit-scrollbar-thumb:hover,
+.nav-links::-webkit-scrollbar-thumb:hover,
+.settings-nav::-webkit-scrollbar-thumb:hover,
+.table-container::-webkit-scrollbar-thumb:hover,
+.modal-body::-webkit-scrollbar-thumb:hover { background: var(--accent-glow); }
+
+/* Hero glow accent — soft radial behind page heroes */
+.hero-glow {
+  position: absolute;
+  top: -180px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 760px;
+  height: 480px;
+  background: radial-gradient(ellipse at center, var(--accent-glow), transparent 65%);
+  pointer-events: none;
+  z-index: 0;
 }
 .hitl-approval-status {
   font-size: 0.75rem;
