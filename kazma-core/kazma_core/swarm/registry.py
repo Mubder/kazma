@@ -55,6 +55,15 @@ class WorkerEntry:
             metadata=dict(data.get("metadata", {})),
         )
 
+    @property
+    def is_generalist(self) -> bool:
+        """A worker is a generalist if it has no expertise tags or no Soul."""
+        return (
+            not self.expertise
+            or self.expertise == ["general"]
+            or not self.system_prompt
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
@@ -191,13 +200,19 @@ class WorkerRegistry:
             if e.enabled and r in (t.lower() for t in e.roles)
         ]
 
+    def find_generalists(self) -> list[WorkerEntry]:
+        """Return all enabled generalist workers (no expertise / no Soul)."""
+        return [e for e in self._entries.values() if e.enabled and e.is_generalist]
+
     def find_best(self, task_description: str) -> list[WorkerEntry]:
         """Route a task to the best workers by expertise match.
 
         1. Try semantic routing via sentence-transformers embeddings.
         2. Fall back to keyword matching if embeddings unavailable.
+        3. If no specialist found, fall back to any generalist worker.
+        4. If no generalist, return ALL enabled workers as last resort.
 
-        Used by SwarmEngine auto-routing when workers=["auto"].
+        This guarantees zero dispatch failures.
         """
         desc_lower = task_description.lower()
 
@@ -206,7 +221,6 @@ class WorkerRegistry:
             from kazma_core.swarm.semantic_router import get_semantic_router
 
             router = get_semantic_router()
-            # Build worker dicts for the router
             worker_dicts = [
                 {
                     "name": e.name,
@@ -250,7 +264,29 @@ class WorkerRegistry:
                         score += 2
             scored.append((score, entry))
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [e for _, e in scored]
+
+        # 3 — Only return workers with actual keyword hits (score > 0)
+        keyword_hits = [e for score, e in scored if score > 0]
+        if keyword_hits:
+            return keyword_hits
+
+        # 4 — Smart-fallback: no specialist matched → use generalists
+        generalists = self.find_generalists()
+        if generalists:
+            logger.info(
+                "[WorkerRegistry] No specialist for '%s' — falling back to generalists: %s",
+                task_description[:60],
+                [g.name for g in generalists],
+            )
+            return generalists
+
+        # 5 — Last resort: return ALL enabled workers
+        all_enabled = [e for e in self._entries.values() if e.enabled]
+        if all_enabled:
+            logger.info("[WorkerRegistry] No generalist — returning all %d workers", len(all_enabled))
+            return all_enabled
+
+        return []
 
     # ── Utility ──────────────────────────────────────────────────────────
 
