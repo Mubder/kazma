@@ -116,7 +116,7 @@ class TestMessageDisplay:
         widget_names = [type(w).__name__ for w in widgets]
         assert any(
             name in widget_names
-            for name in ["RichLog", "Static", "ScrollableContainer"]
+            for name in ["TextArea", "RichLog", "Static", "ScrollableContainer"]
         ), f"No message display widget found: {widget_names}"
 
     def test_add_user_message_method(self) -> None:
@@ -162,13 +162,13 @@ class TestMessageDisplay:
         The message display widget should support scrolling.
         """
         from kazma_tui.chat import ChatPanel
-        from textual.widgets import RichLog
+        from textual.widgets import TextArea, RichLog
 
         panel = ChatPanel()
         widgets = list(panel.compose())
-        # RichLog is scrollable by default
-        rich_logs = [w for w in widgets if isinstance(w, RichLog)]
-        # Either RichLog or a scrollable container must be present
+        # TextArea and RichLog are scrollable by default
+        rich_logs = [w for w in widgets if isinstance(w, (TextArea, RichLog))]
+        # Either TextArea/RichLog or a scrollable container must be present
         assert len(rich_logs) >= 1 or any(
             getattr(w, "can_scroll", False) for w in widgets
         ), "No scrollable message display found"

@@ -305,13 +305,13 @@ class TestChatBehavioral:
     """VAL-TUI-020/021/022: Chat behavioral tests."""
 
     def test_chat_compose_yields_rich_log(self) -> None:
-        """VAL-TUI-021: Chat must yield a RichLog for message display."""
+        """VAL-TUI-021: Chat must yield a TextArea for message display."""
         from kazma_tui.chat import ChatPanel
-        from textual.widgets import RichLog
+        from textual.widgets import TextArea
 
         panel = ChatPanel()
         widgets = list(panel.compose())
-        assert any(isinstance(w, RichLog) for w in widgets)
+        assert any(isinstance(w, TextArea) for w in widgets)
 
     def test_chat_compose_yields_input(self) -> None:
         """VAL-TUI-020: Chat must yield an Input for user text entry."""
@@ -334,15 +334,14 @@ class TestChatBehavioral:
         assert input_widgets[0].id == "chat-input"
 
     def test_chat_log_has_correct_id(self) -> None:
-        """VAL-TUI-021: Chat log must have id 'chat-log'."""
+        """VAL-TUI-021: Chat output must have id 'chat-output'."""
         from kazma_tui.chat import ChatPanel
-        from textual.widgets import RichLog
+        from textual.widgets import TextArea
 
         panel = ChatPanel()
         widgets = list(panel.compose())
-        rich_logs = [w for w in widgets if isinstance(w, RichLog)]
-        assert len(rich_logs) == 1
-        assert rich_logs[0].id == "chat-log"
+        ids = [getattr(w, "id", None) for w in widgets]
+        assert "chat-output" in ids
 
     def test_chat_help_command_shows_help_text(self) -> None:
         """VAL-TUI-022: /help must display help text mentioning all commands."""
@@ -360,14 +359,15 @@ class TestChatBehavioral:
             assert "/quit" in help_text
 
     def test_chat_clear_calls_clear_on_log(self) -> None:
-        """VAL-TUI-022: /clear clears the chat log."""
+        """VAL-TUI-022: /clear clears chat output text."""
         from kazma_tui.chat import ChatPanel
 
         panel = ChatPanel()
-        mock_log = MagicMock()
-        with patch.object(panel, "query_one", return_value=mock_log):
+        mock_output = MagicMock()
+        mock_output.text = "some old text"
+        with patch.object(panel, "query_one", return_value=mock_output):
             panel._handle_command("/clear")
-            mock_log.clear.assert_called_once()
+            assert mock_output.text == ""
 
     def test_chat_quit_calls_app_exit(self) -> None:
         """VAL-TUI-022: /quit must call app.exit()."""
@@ -408,13 +408,14 @@ class TestChatBehavioral:
         from kazma_tui.chat import ChatPanel
 
         panel = ChatPanel()
-        mock_log = MagicMock()
-        with patch.object(panel, "query_one", return_value=mock_log):
+        # Use a simple object with a mutable text attribute
+        class FakeOutput:
+            def __init__(self):
+                self.text = "before\n"
+        fake = FakeOutput()
+        with patch.object(panel, "query_one", return_value=fake):
             panel.add_message("You", "Hello world")
-            mock_log.write.assert_called_once()
-            written = mock_log.write.call_args[0][0]
-            assert "You" in written
-            assert "Hello world" in written
+            assert "You: Hello world" in fake.text
 
 
 # ---------------------------------------------------------------------------

@@ -1,18 +1,16 @@
 """Chat interface widget for the Kazma TUI.
 
-Uses RichLog with properly-escaped user text so ``[bold]`` and other
-tags display literally.  System/Assistant messages can use Rich markup.
-Includes Ctrl+Y to copy the last message to the clipboard.
+Uses TextArea for chat output (supports native mouse text selection)
+and Input for message entry.  Ctrl+C copies selected text to clipboard.
 """
 
 from __future__ import annotations
 
 import logging
-import subprocess
 
 from textual.app import ComposeResult
 from textual.widget import Widget
-from textual.widgets import Input, RichLog
+from textual.widgets import Input, TextArea, Static
 
 logger = logging.getLogger(__name__)
 
@@ -22,53 +20,89 @@ Available commands:
   /clear  — Clear the chat log
   /quit   — Exit the application
 
-Keyboard shortcuts:
-  Enter   — Send message
-  Ctrl+Y  — Copy last message to clipboard
-  Ctrl+Q  — Quit
-"""
+Text selection: drag mouse to select text, then Ctrl+C to copy."""
 
 
 class ChatPanel(Widget):
-    """Chat interface — RichLog with escaped user input."""
+    """Chat interface — TextArea output (selectable) + Input field."""
 
     DEFAULT_CSS = """
-    ChatPanel { height: 1fr; border: solid $primary; layout: vertical; }
-    ChatPanel > RichLog { height: 1fr; }
-    ChatPanel > Input { dock: bottom; height: 3; margin: 1; }
+    ChatPanel {
+        height: 1fr;
+        border: solid $primary;
+        border-title-align: center;
+        border-title-color: $primary;
+        border-title-background: $surface;
+        border-title-style: bold;
+        layout: vertical;
+    }
+    ChatPanel > TextArea {
+        height: 1fr;
+        background: transparent;
+        border: none;
+    }
+    ChatPanel > Input {
+        dock: bottom;
+        height: 3;
+        margin: 1;
+        background: $panel-alt;
+        border: solid $border;
+        color: $text;
+    }
+    ChatPanel > Input:focus {
+        border: solid $primary;
+    }
     """
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._last_raw: str = ""
+        self._chat_output: TextArea | None = None
+        self._system_shown = False
 
     def compose(self) -> ComposeResult:
-        yield RichLog(id="chat-log", wrap=True, highlight=True, markup=True)
+        self._chat_output = TextArea(
+            text="Chat ready. Type /help for commands.\n",
+            read_only=True,
+            language=None,
+            show_line_numbers=False,
+            id="chat-output",
+        )
+        yield self._chat_output
         yield Input(placeholder="Type a message...", id="chat-input")
 
     def on_mount(self) -> None:
         self._focus_input()
-        self.add_message("System", "[dim]Chat ready. Type /help for commands.[/dim]")
 
     # ── Copy to clipboard ────────────────────────────────────────────
 
-    def action_copy_last(self) -> None:
-        """Copy the last raw message to the system clipboard."""
-        if not self._last_raw:
-            return
+    def action_copy_selection(self) -> None:
+        """Copy selected text from the chat output to clipboard."""
         try:
-            proc = subprocess.run(
-                ["xclip", "-selection", "clipboard"],
-                input=self._last_raw, text=True, timeout=2,
-            )
-            if proc.returncode == 0:
-                self.add_message("System", "[dim]Copied to clipboard[/dim]")
+            output = self.query_one("#chat-output", TextArea)
+            selected = output.selected_text
+            if selected:
+                import subprocess
+                try:
+                    proc = subprocess.run(
+                        ["xclip", "-selection", "clipboard"],
+                        input=selected, text=True, timeout=2,
+                    )
+                    if proc.returncode == 0:
+                        self._add_system("Copied to clipboard")
+                    else:
+                        self._add_system(f"Copy failed (exit {proc.returncode})")
+                except FileNotFoundError:
+                    # Try pyperclip as fallback
+                    try:
+                        import pyperclip
+                        pyperclip.copy(selected)
+                        self._add_system("Copied to clipboard")
+                    except ImportError:
+                        self._add_system("xclip not installed. Run: sudo apt install xclip")
             else:
-                self.add_message("System", f"[red]Copy failed (exit {proc.returncode})[/red]")
-        except FileNotFoundError:
-            self.add_message("System", "[red]xclip not installed — run: sudo apt install xclip[/red]")
+                self._add_system("No text selected. Drag mouse to select first.")
         except Exception:
-            self.add_message("System", "[red]Copy failed[/red]")
+            pass
 
     # ── Message handling ─────────────────────────────────────────────
 
@@ -77,32 +111,28 @@ class ChatPanel(Widget):
         event.input.value = ""
         if not text:
             return
-        self._last_raw = text
         if text.startswith("/"):
             self._handle_command(text)
         else:
-            self.add_message("You", _escape_markup(text))
+            self.add_message("You", text)
             self.app.call_later(self._generate_response, text)
         self._focus_input()
 
     def _generate_response(self, prompt: str) -> None:
-        import inspect
         try:
-            from kazma_core.model_registry import get_model_registry
+            from kazma_core.model_registry import get_model_registry, initialize_model_registry
+            initialize_model_registry()
             registry = get_model_registry()
-            if registry is None:
-                self.add_message("System", "[dim]ModelRegistry not yet ready[/dim]")
-                return
             agent = registry.get_agent()
             if agent is None:
-                self.add_message("System", "[dim]No agent configured. Set up a model in kazma.yaml[/dim]")
+                self.add_message("System", "No agent configured. Set up a model in kazma.yaml.")
                 return
             response = agent.invoke(prompt)
             self.add_message("Assistant", response)
         except (RuntimeError, ImportError) as exc:
-            self.add_message("System", f"[dim]Agent: {exc}[/dim]")
+            self.add_message("System", f"Agent unavailable: {exc}")
         except Exception as exc:
-            self.add_message("System", f"[red]Error: {exc}[/red]")
+            self.add_message("System", f"Error: {exc}")
 
     def _handle_command(self, raw: str) -> None:
         cmd = raw.strip().lower()
@@ -110,7 +140,8 @@ class ChatPanel(Widget):
             self.add_message("System", _HELP_TEXT.strip())
         elif cmd == "/clear":
             try:
-                self.query_one("#chat-log", RichLog).clear()
+                output = self.query_one("#chat-output", TextArea)
+                output.text = ""
             except Exception:
                 pass
         elif cmd == "/quit":
@@ -119,21 +150,23 @@ class ChatPanel(Widget):
             self.add_message("System", f"Unknown command: {raw.strip()}")
 
     def add_message(self, role: str, text: str) -> None:
-        """Write a message.  Role is styled; text may contain Rich markup."""
+        """Append a message to the chat output (plain text, no markup)."""
         try:
-            log = self.query_one("#chat-log", RichLog)
-            log.write(f"[bold $primary]{role}:[/bold $primary] {text}")
+            output = self.query_one("#chat-output", TextArea)
+            output.text += f"{role}: {text}\n"
+            # Auto-scroll to bottom
+            from textual.widgets._text_area import TextArea
+            if hasattr(output, "move_cursor"):
+                output.move_cursor(output.document.line_count - 1)
         except Exception:
-            logger.debug("Chat log not yet mounted", exc_info=True)
+            logger.debug("Chat output not yet mounted", exc_info=True)
+
+    def _add_system(self, text: str) -> None:
+        """Quick system message without cluttering history."""
+        self.add_message("System", text)
 
     def _focus_input(self) -> None:
         try:
             self.query_one("#chat-input", Input).focus()
         except Exception:
             pass
-
-
-def _escape_markup(text: str) -> str:
-    """Escape Rich markup so user input displays literally."""
-    import re
-    return re.sub(r"(\[)", r"\\\1", text)

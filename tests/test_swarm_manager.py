@@ -267,15 +267,13 @@ class TestDispatchTelegram:
         )
         await worker.start()
 
-        # Mock the subprocess
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(b"Task done via telegram", b"")
-        )
-        mock_proc.returncode = 0
+        # Mock the agent
+        mock_agent = MagicMock()
+        mock_agent.invoke = MagicMock(return_value="Task done via telegram")
+        mock_registry = MagicMock()
+        mock_registry.get_agent = MagicMock(return_value=mock_agent)
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
-            mock_exec.return_value = mock_proc
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
             result = await worker.dispatch("Deploy to staging")
 
         assert result["worker"] == "core"
@@ -294,19 +292,16 @@ class TestDispatchTelegram:
         )
         await worker.start()
 
-        mock_proc = AsyncMock()
-        mock_proc.communicate = AsyncMock(
-            return_value=(b"", b"Error: bot token invalid")
-        )
-        mock_proc.returncode = 1
+        # Mock registry with no agent available
+        mock_registry = MagicMock()
+        mock_registry.get_agent = MagicMock(return_value=None)
 
-        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
-            mock_exec.return_value = mock_proc
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
             result = await worker.dispatch("task")
 
+        assert result["worker"] == "core"
         assert result["status"] == "error"
-        assert "bot token invalid" in result["error"]
-
+        assert "No agent available" in result["error"]
 
 # ===========================================================================
 # 6. test_broadcast

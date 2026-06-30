@@ -303,31 +303,36 @@ class TelegramWorker(SwarmWorker):
             prompt = f"{task}\n\nContext:\n{context_value}"
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "kazma", "-p", self.profile, prompt,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
-            output = stdout.decode("utf-8", errors="replace").strip()
-            err_text = stderr.decode("utf-8", errors="replace").strip()
+            # Use the ModelRegistry agent directly — no subprocess
+            from kazma_core.model_registry import get_model_registry
 
-            status = "success" if proc.returncode == 0 else "error"
+            registry = get_model_registry()
+            agent = registry.get_agent()
+            if agent is None:
+                return {
+                    "worker": self.name,
+                    "task_id": task_id,
+                    "status": "error",
+                    "output": "",
+                    "error": "No agent available — check model configuration",
+                }
+
+            output = agent.invoke(prompt)
             return {
                 "worker": self.name,
                 "task_id": task_id,
-                "status": status,
+                "status": "success",
                 "output": output,
-                "error": err_text if err_text else None,
+                "error": None,
             }
-        except TimeoutError:
-            logger.warning("[TelegramWorker:%s] dispatch timed out", self.name)
+        except (RuntimeError, ImportError) as exc:
+            logger.warning("[TelegramWorker:%s] agent unavailable: %s", self.name, exc)
             return {
                 "worker": self.name,
                 "task_id": task_id,
-                "status": "timeout",
+                "status": "error",
                 "output": "",
-                "error": "Dispatch timed out after 300s",
+                "error": f"Agent unavailable: {exc}",
             }
         except Exception as exc:
             logger.exception("[TelegramWorker:%s] dispatch failed", self.name)
