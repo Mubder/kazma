@@ -340,7 +340,7 @@ class PipelineEngine:
                     )
 
                     if engine:
-                        result = await engine.consult(str(stage.role.value), context)
+                        result = await engine.dispatch_by_name(stage.worker_name or str(stage.role.value), context)
                         stage.output = result.get("synthesis", "No output")
                     else:
                         stage.output = f"[Simulated {stage.name}: {context[:200]}]"

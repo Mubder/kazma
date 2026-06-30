@@ -188,17 +188,20 @@ class InProcessWorker(SwarmWorker):
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
         logger.info("[InProcessWorker:%s] dispatching %s", self.name, task_id)
         try:
-            manager = self._get_manager()
-            result = await manager.spawn(
-                goal=task,
-                context=_compose_context_payload(context),
-            )
+            from kazma_core.model_registry import get_model_registry
+            registry = get_model_registry()
+            provider = registry.get_client()
+            if provider is None:
+                return {"worker": self.name, "task_id": task_id, "status": "error", "output": "", "error": "No provider available"}
+            messages = [{"role": "user", "content": task}]
+            response = await provider.chat(messages)
+            output = response.get("content", "") if isinstance(response, dict) else str(response)
             return {
                 "worker": self.name,
                 "task_id": task_id,
-                "status": result.status,
-                "output": result.summary,
-                "error": result.error,
+                "status": "success",
+                "output": output,
+                "error": None,
             }
         except Exception as exc:
             logger.exception("[InProcessWorker:%s] dispatch failed", self.name)

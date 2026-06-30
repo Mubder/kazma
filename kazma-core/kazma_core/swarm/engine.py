@@ -1498,6 +1498,14 @@ class SwarmEngine:
             provider=entry.provider,
         )
 
+    async def dispatch_by_name(self, worker_name: str, task: str) -> dict[str, Any]:
+        """Summon a worker by name and dispatch a task."""
+        worker = self.summon(worker_name)
+        if worker is None:
+            return {"synthesis": f"Worker '{worker_name}' not found", "opinions": []}
+        result = await worker.dispatch(task)
+        return {"synthesis": result.get("output", ""), "opinions": [result]}
+
     async def consult(self, expertise: str, task: str) -> dict[str, Any]:
         """Consult workers matching an expertise tag.
 

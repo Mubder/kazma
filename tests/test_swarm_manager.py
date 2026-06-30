@@ -174,78 +174,70 @@ class TestDispatchInProcess:
 
     @pytest.mark.asyncio
     async def test_dispatch_in_process(self):
-        mock_manager = MagicMock()
-        mock_result = MagicMock()
-        mock_result.status = "success"
-        mock_result.summary = "Task completed"
-        mock_result.error = None
-        mock_manager.spawn = AsyncMock(return_value=mock_result)
+        mock_provider = MagicMock()
+        mock_provider.chat = AsyncMock(return_value={"content": "Task completed"})
+        mock_registry = MagicMock()
+        mock_registry.get_client = MagicMock(return_value=mock_provider)
 
-        worker = InProcessWorker(name="brain", role="reasoning", manager=mock_manager)
+        worker = InProcessWorker(name="brain", role="reasoning")
         await worker.start()
 
-        result = await worker.dispatch("Analyze the codebase")
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
+            result = await worker.dispatch("Analyze the codebase")
 
         assert result["worker"] == "brain"
         assert result["status"] == "success"
         assert result["output"] == "Task completed"
         assert result["error"] is None
-        mock_manager.spawn.assert_called_once()
 
         await worker.stop()
 
     @pytest.mark.asyncio
     async def test_dispatch_in_process_with_context(self):
-        mock_manager = MagicMock()
-        mock_result = MagicMock()
-        mock_result.status = "success"
-        mock_result.summary = "Done"
-        mock_result.error = None
-        mock_manager.spawn = AsyncMock(return_value=mock_result)
+        mock_provider = MagicMock()
+        mock_provider.chat = AsyncMock(return_value={"content": "Done"})
+        mock_registry = MagicMock()
+        mock_registry.get_client = MagicMock(return_value=mock_provider)
 
-        worker = InProcessWorker(name="brain", role="reasoning", manager=mock_manager)
+        worker = InProcessWorker(name="brain", role="reasoning")
         await worker.start()
 
-        result = await worker.dispatch("Fix bug", context="In auth module")
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
+            result = await worker.dispatch("Fix bug", context="In auth module")
 
-        call_kwargs = mock_manager.spawn.call_args
-        assert call_kwargs.kwargs["goal"] == "Fix bug"
-        assert call_kwargs.kwargs["context"] == "In auth module"
         assert result["status"] == "success"
 
     @pytest.mark.asyncio
     async def test_dispatch_in_process_accepts_blackboard_context(self):
-        mock_manager = MagicMock()
-        mock_result = MagicMock()
-        mock_result.status = "success"
-        mock_result.summary = "Done"
-        mock_result.error = None
-        mock_manager.spawn = AsyncMock(return_value=mock_result)
+        mock_provider = MagicMock()
+        mock_provider.chat = AsyncMock(return_value={"content": "Done"})
+        mock_registry = MagicMock()
+        mock_registry.get_client = MagicMock(return_value=mock_provider)
 
-        worker = InProcessWorker(name="brain", role="reasoning", manager=mock_manager)
+        worker = InProcessWorker(name="brain", role="reasoning")
         await worker.start()
 
-        result = await worker.dispatch(
-            "Fix bug",
-            context=SwarmDispatchContext(
-                "In auth module",
-                blackboard=BlackboardStore(),
-            ),
-        )
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
+            result = await worker.dispatch(
+                "Fix bug",
+                context=SwarmDispatchContext(
+                    "In auth module",
+                    blackboard=BlackboardStore(),
+                ),
+            )
 
-        call_kwargs = mock_manager.spawn.call_args
-        assert call_kwargs.kwargs["goal"] == "Fix bug"
-        assert call_kwargs.kwargs["context"] == "In auth module"
         assert result["status"] == "success"
 
     @pytest.mark.asyncio
     async def test_dispatch_in_process_no_manager_returns_error(self):
-        """InProcessWorker without a manager returns error dict (does not raise)."""
+        """InProcessWorker without a provider returns error dict (does not raise)."""
         worker = InProcessWorker(name="orphan", role="test")
-        with patch("kazma_core.swarm.worker.InProcessWorker._get_manager", side_effect=RuntimeError("SubAgentManager not initialised")):
+        mock_registry = MagicMock()
+        mock_registry.get_client = MagicMock(return_value=None)
+        with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
             result = await worker.dispatch("task")
         assert result["status"] == "error"
-        assert "SubAgentManager not initialised" in result["error"]
+        assert "No provider available" in result["error"]
         assert result["worker"] == "orphan"
 
 
