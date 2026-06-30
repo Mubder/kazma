@@ -192,11 +192,50 @@ class WorkerRegistry:
         ]
 
     def find_best(self, task_description: str) -> list[WorkerEntry]:
-        """Simple keyword-based match against expertise tags + task description.
+        """Route a task to the best workers by expertise match.
+
+        1. Try semantic routing via sentence-transformers embeddings.
+        2. Fall back to keyword matching if embeddings unavailable.
 
         Used by SwarmEngine auto-routing when workers=["auto"].
         """
         desc_lower = task_description.lower()
+
+        # 1 — Semantic routing (if available)
+        try:
+            from kazma_core.swarm.semantic_router import get_semantic_router
+
+            router = get_semantic_router()
+            # Build worker dicts for the router
+            worker_dicts = [
+                {
+                    "name": e.name,
+                    "expertise": e.expertise,
+                    "system_prompt": e.system_prompt,
+                    "roles": e.roles,
+                }
+                for e in self._entries.values()
+                if e.enabled
+            ]
+            if worker_dicts:
+                selected = router.route(task_description, worker_dicts, top_n=5)
+                result: list[WorkerEntry] = []
+                for name in selected:
+                    entry = self._entries.get(name)
+                    if entry and entry.enabled:
+                        result.append(entry)
+                if result:
+                    logger.info(
+                        "[WorkerRegistry] Semantic routing: %s → %s",
+                        task_description[:60],
+                        [e.name for e in result],
+                    )
+                    return result
+        except Exception:
+            pass
+
+        # 2 — Keyword fallback
+        logger.info("[WorkerRegistry] Semantic routing unavailable — using keyword fallback")
         scored: list[tuple[int, WorkerEntry]] = []
         for entry in self._entries.values():
             if not entry.enabled:
@@ -205,7 +244,6 @@ class WorkerRegistry:
             for tag in entry.expertise:
                 if tag.lower() in desc_lower:
                     score += 10
-            # Bonus for keyword overlap
             for kw in desc_lower.split():
                 for ex in entry.expertise:
                     if kw in ex.lower() or ex.lower() in kw:
