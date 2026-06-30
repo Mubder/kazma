@@ -5,7 +5,7 @@
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
 
-![Tests](https://img.shields.io/badge/tests-3510_passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3309_passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
 ![Version](https://img.shields.io/badge/version-0.1.0-blue)
