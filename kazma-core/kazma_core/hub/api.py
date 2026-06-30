@@ -26,9 +26,7 @@ def _require_auth(request: Request) -> None:
     """Require KAZMA_SECRET for write endpoints."""
     expected = _os_hub.environ.get("KAZMA_SECRET", "")
     if not expected:
-        return  # no secret configured → allow (backward compat)
-    provided = request.headers.get("x-kazma-secret", "")
-    if not _hmac_hub.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="KAZMA_SECRET not configured — auth required")
         raise HTTPException(status_code=401, detail="Unauthorized — provide X-Kazma-Secret header")
 
 
@@ -315,8 +313,9 @@ async def get_certification_status(skill_id: str):
 
 
 @app.get("/api/v1/skills/{skill_id:path}/download")
-async def download_skill(skill_id: str):
+async def download_skill(skill_id: str, request: Request):
     """Download a skill package as a tarball."""
+    _require_auth(request)
     api = _get_api()
 
     try:

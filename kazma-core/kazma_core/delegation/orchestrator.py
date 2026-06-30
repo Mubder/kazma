@@ -330,30 +330,26 @@ class DelegationOrchestrator:
         }
 
     async def handle_timeout(self, request_id: str) -> None:
-        """Handle delegation timeout.
-
-        Updates sub-task status and updates executor reputation.
-        """
+        """Handle delegation timeout for a specific request."""
         logger.warning("Delegation timeout: %s", request_id)
-        # Find the sub-task
-        for orch in self._active_orchestrations.values():
-            for st in orch.sub_tasks:
-                if st.assigned_agent and st.result is None:
-                    st.status = SubTaskStatus.TIMED_OUT
-                    # Penalize reputation
+        orch = self._active_orchestrations.get(request_id)
+        if orch is None:
+            return
+        for st in orch.sub_tasks:
+            if st.status == SubTaskStatus.PENDING and st.result is None:
+                st.status = SubTaskStatus.TIMED_OUT
+                if st.assigned_agent:
                     await self.discovery.update_reputation(st.assigned_agent, 0.5)
 
     async def handle_failure(self, request_id: str, error: str) -> None:
-        """Handle delegation failure.
-
-        Updates sub-task status and logs the failure.
-        """
+        """Handle delegation failure for a specific request."""
         logger.error("Delegation failure: %s — %s", request_id, error)
-        for orch in self._active_orchestrations.values():
-            for st in orch.sub_tasks:
-                if st.result and st.result.request_id == request_id:
-                    st.status = SubTaskStatus.FAILED
-                    break
+        orch = self._active_orchestrations.get(request_id)
+        if orch is None:
+            return
+        for st in orch.sub_tasks:
+            if st.result and st.result.request_id == request_id:
+                st.status = SubTaskStatus.FAILED
 
     def get_orchestration(self, task_id: str) -> OrchestrationResult | None:
         """Get an orchestration result by ID."""

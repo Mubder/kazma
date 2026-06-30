@@ -21,12 +21,13 @@ def _make_skill_row(name: str = "test-skill", author: str = "test-author", versi
 
 
 @pytest.fixture
-def client(tmp_path):
+def client(tmp_path, monkeypatch):
     """Return a FastAPI TestClient with a configured API."""
     from kazma_core.hub.api import configure_api
     from kazma_core.hub.badges import CertificationBadgeSystem
     from kazma_core.hub.registry import KazmaHub
 
+    monkeypatch.setenv("KAZMA_SECRET", "test-secret-for-hub-tests")
     db_path = str(tmp_path / "test_api.db")
     registry = KazmaHub(registry_path=db_path)
     certifier = CertificationBadgeSystem(db_path=db_path)

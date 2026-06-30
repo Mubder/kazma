@@ -188,7 +188,7 @@
   {
     "name": "gamma",
     "expertise": [
-      "leaf"
+      "backend"
     ],
     "roles": [
       "leaf"
@@ -428,7 +428,7 @@
   {
     "name": "worker-1",
     "expertise": [
-      "leaf"
+      "backend"
     ],
     "roles": [
       "leaf"
@@ -789,21 +789,6 @@
     "name": "task-log-worker",
     "expertise": [
       "leaf"
-    ],
-    "roles": [
-      "leaf"
-    ],
-    "model": "deepseek-chat",
-    "provider": "deepseek",
-    "worker_type": "in_process",
-    "system_prompt": "",
-    "enabled": true,
-    "metadata": {}
-  },
-  {
-    "name": "alpha",
-    "expertise": [
-      "backend"
     ],
     "roles": [
       "leaf"

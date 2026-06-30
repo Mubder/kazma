@@ -6,7 +6,11 @@ using in-memory registries and mock HTTP where needed.
 
 from __future__ import annotations
 
+import os
 import sqlite3
+
+# Set auth secret for hub tests
+os.environ["KAZMA_SECRET"] = "test-secret-for-hub-e2e-tests"
 
 import pytest
 from click.testing import CliRunner

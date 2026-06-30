@@ -88,7 +88,8 @@ class WorkerRegistry:
     this as a phonebook — query by expertise, fetch the Soul, apply
     model/provider, and instantiate.
 
-    Thread-safe: all mutations hold a re-entrant lock.
+    Thread-safe: all mutations hold a threading.Lock.  The registry is
+    a module-level singleton — all callers share the same instance.
 
     Usage::
 

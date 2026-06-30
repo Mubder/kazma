@@ -139,8 +139,12 @@ class SelfImprovementSkill:
                 logger.warning("[SelfImprovement] Worker '%s' not in registry", worker_name)
                 return False
 
-            # Append the delta (don't replace — let it accumulate)
-            new_prompt = entry.system_prompt + delta
+            # Cap deltas — keep only the last 5 improvements
+            existing = entry.system_prompt
+            # Strip old SelfImprovement blocks to prevent unbounded growth
+            import re as _re_si
+            cleaned = _re_si.sub(r'\\n\\n\\[SelfImprovement\\].*?(?=\\n\\n\\[SelfImprovement\\]|$)', '', existing, count=max(0, len(_re_si.findall(r'\\[SelfImprovement\\]', existing)) - 4))
+            new_prompt = cleaned + delta
             registry.update(worker_name, system_prompt=new_prompt)
 
             self._mutation_log.append({
