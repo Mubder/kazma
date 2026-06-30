@@ -48,9 +48,7 @@ async def _synthesize_refined_output(
                 {"role": "user", "content": user_prompt},
             ]
             response = await provider.chat(messages)
-            if isinstance(response, dict):
-                return response.get("content", user_prompt)
-            return str(response)
+            return response.content
     except Exception as exc:
         logger.warning("[Refiner] LLM call failed, using raw output: %s", exc)
 
@@ -348,7 +346,7 @@ class PipelineEngine:
                             if provider:
                                 messages = [{"role": "user", "content": str(context)}]
                                 resp = await provider.chat(messages)
-                                stage.output = resp.get("content", str(context)) if isinstance(resp, dict) else str(resp)
+                                stage.output = resp.content
                             else:
                                 stage.output = f"Error: No provider available — cannot process {stage.name}"
                         except Exception as exc:

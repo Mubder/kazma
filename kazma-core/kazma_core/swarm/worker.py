@@ -195,12 +195,11 @@ class InProcessWorker(SwarmWorker):
                 return {"worker": self.name, "task_id": task_id, "status": "error", "output": "", "error": "No provider available"}
             messages = [{"role": "user", "content": task}]
             response = await provider.chat(messages)
-            output = response.get("content", "") if isinstance(response, dict) else str(response)
             return {
                 "worker": self.name,
                 "task_id": task_id,
                 "status": "success",
-                "output": output,
+                "output": response.content,
                 "error": None,
             }
         except Exception as exc:
@@ -322,12 +321,11 @@ class TelegramWorker(SwarmWorker):
 
             messages = [{"role": "user", "content": prompt}]
             response = await provider.chat(messages)
-            output = response.get("content", "") if isinstance(response, dict) else str(response)
             return {
                 "worker": self.name,
                 "task_id": task_id,
                 "status": "success",
-                "output": output,
+                "output": response.content,
                 "error": None,
             }
         except (RuntimeError, ImportError) as exc:

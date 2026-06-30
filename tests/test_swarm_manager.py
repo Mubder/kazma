@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
+from kazma_core.llm_provider import LLMResponse
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.config import OrchestratorConfig, SwarmConfig, WorkerConfig
 from kazma_core.swarm.manager import SwarmManager
@@ -175,7 +176,8 @@ class TestDispatchInProcess:
     @pytest.mark.asyncio
     async def test_dispatch_in_process(self):
         mock_provider = MagicMock()
-        mock_provider.chat = AsyncMock(return_value={"content": "Task completed"})
+        from kazma_core.llm_provider import LLMResponse
+        mock_provider.chat = AsyncMock(return_value=LLMResponse(content="Task completed"))
         mock_registry = MagicMock()
         mock_registry.get_client = MagicMock(return_value=mock_provider)
 
@@ -195,7 +197,7 @@ class TestDispatchInProcess:
     @pytest.mark.asyncio
     async def test_dispatch_in_process_with_context(self):
         mock_provider = MagicMock()
-        mock_provider.chat = AsyncMock(return_value={"content": "Done"})
+        mock_provider.chat = AsyncMock(return_value=LLMResponse(content="Done"))
         mock_registry = MagicMock()
         mock_registry.get_client = MagicMock(return_value=mock_provider)
 
@@ -210,7 +212,7 @@ class TestDispatchInProcess:
     @pytest.mark.asyncio
     async def test_dispatch_in_process_accepts_blackboard_context(self):
         mock_provider = MagicMock()
-        mock_provider.chat = AsyncMock(return_value={"content": "Done"})
+        mock_provider.chat = AsyncMock(return_value=LLMResponse(content="Done"))
         mock_registry = MagicMock()
         mock_registry.get_client = MagicMock(return_value=mock_provider)
 
@@ -261,7 +263,8 @@ class TestDispatchTelegram:
 
         # Mock the provider
         mock_provider = MagicMock()
-        mock_provider.chat = AsyncMock(return_value={"content": "Task done via telegram"})
+        from kazma_core.llm_provider import LLMResponse
+        mock_provider.chat = AsyncMock(return_value=LLMResponse(content="Task done via telegram"))
         mock_registry = MagicMock()
         mock_registry.get_client = MagicMock(return_value=mock_provider)
 
