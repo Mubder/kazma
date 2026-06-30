@@ -303,21 +303,23 @@ class TelegramWorker(SwarmWorker):
             prompt = f"{task}\n\nContext:\n{context_value}"
 
         try:
-            # Use the ModelRegistry agent directly — no subprocess
+            # Use the ModelRegistry provider directly — no subprocess
             from kazma_core.model_registry import get_model_registry
 
             registry = get_model_registry()
-            agent = registry.get_agent()
-            if agent is None:
+            provider = registry.get_client()
+            if provider is None:
                 return {
                     "worker": self.name,
                     "task_id": task_id,
                     "status": "error",
                     "output": "",
-                    "error": "No agent available — check model configuration",
+                    "error": "No provider available — check model configuration",
                 }
 
-            output = agent.invoke(prompt)
+            messages = [{"role": "user", "content": prompt}]
+            response = await provider.chat(messages)
+            output = response.get("content", "") if isinstance(response, dict) else str(response)
             return {
                 "worker": self.name,
                 "task_id": task_id,

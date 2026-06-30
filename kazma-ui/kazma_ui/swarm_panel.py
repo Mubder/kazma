@@ -788,6 +788,49 @@ def create_swarm_router(
         logger.info("[Swarm] Worker removed: %s", name)
         return JSONResponse({"status": "ok", "message": f"Worker '{name}' removed"})
 
+    @router.put("/api/swarm/workers/{name}")
+    async def swarm_update_worker(name: str, payload: dict[str, Any]) -> JSONResponse:
+        """Update worker configuration (model, provider, expertise, etc.)."""
+        engine = _current_engine()
+        if engine is None or engine.get_worker(name) is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+
+        # Update in-engine worker
+        worker = engine.get_worker(name)
+        if "model" in payload:
+            worker.model = payload["model"]
+        if "provider" in payload:
+            worker.provider = payload["provider"]
+        if "role" in payload:
+            worker.role = payload["role"]
+
+        # Sync to persistent WorkerRegistry
+        try:
+            from kazma_core.swarm.registry import WorkerRegistry
+            registry = WorkerRegistry()
+            update_kwargs = {}
+            if "model" in payload:
+                update_kwargs["model"] = payload["model"]
+            if "provider" in payload:
+                update_kwargs["provider"] = payload["provider"]
+            if "role" in payload:
+                update_kwargs["roles"] = [payload["role"]]
+            if "system_prompt" in payload:
+                update_kwargs["system_prompt"] = payload["system_prompt"]
+            if "expertise" in payload:
+                update_kwargs["expertise"] = payload["expertise"]
+            if update_kwargs:
+                registry.update(name, **update_kwargs)
+                logger.info("[Swarm] WorkerRegistry updated: %s", name)
+        except Exception as exc:
+            logger.warning("[Swarm] WorkerRegistry sync failed: %s", exc)
+
+        logger.info("[Swarm] Worker updated: %s", name)
+        return JSONResponse({"status": "ok", "worker": _serialize_worker(worker)})
+
     @router.get("/api/swarm/workers/{name}/logs")
     async def swarm_worker_logs(name: str) -> JSONResponse:
         """Return log lines for a worker."""

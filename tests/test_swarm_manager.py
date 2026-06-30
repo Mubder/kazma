@@ -267,11 +267,11 @@ class TestDispatchTelegram:
         )
         await worker.start()
 
-        # Mock the agent
-        mock_agent = MagicMock()
-        mock_agent.invoke = MagicMock(return_value="Task done via telegram")
+        # Mock the provider
+        mock_provider = MagicMock()
+        mock_provider.chat = AsyncMock(return_value={"content": "Task done via telegram"})
         mock_registry = MagicMock()
-        mock_registry.get_agent = MagicMock(return_value=mock_agent)
+        mock_registry.get_client = MagicMock(return_value=mock_provider)
 
         with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
             result = await worker.dispatch("Deploy to staging")
@@ -292,16 +292,16 @@ class TestDispatchTelegram:
         )
         await worker.start()
 
-        # Mock registry with no agent available
+        # Mock registry with no provider available
         mock_registry = MagicMock()
-        mock_registry.get_agent = MagicMock(return_value=None)
+        mock_registry.get_client = MagicMock(return_value=None)
 
         with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
             result = await worker.dispatch("task")
 
         assert result["worker"] == "core"
         assert result["status"] == "error"
-        assert "No agent available" in result["error"]
+        assert "No provider available" in result["error"]
 
 # ===========================================================================
 # 6. test_broadcast
