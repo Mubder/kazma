@@ -55,6 +55,14 @@ from kazma_core.swarm.task import (
     WorkerResult,
 )
 from kazma_core.swarm.task_store import TaskStore
+from kazma_core.swarm.topology import (
+    PipelineEngine,
+    PipelineResult,
+    PipelineStage,
+    RefinerStage,
+    StageRole,
+    STANDARD_PIPELINE,
+)
 from kazma_core.swarm.tracing import InMemorySpanExporter, Span, TracingEmitter
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
 

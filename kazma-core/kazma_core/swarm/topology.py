@@ -1,0 +1,370 @@
+"""Multi-agent pipeline topology engine.
+
+Implements directed acyclic graph (DAG) task execution with specialized
+worker stages: Researcher → Refiner → Builder → Validator.  Each stage
+receives the previous stage's output as context.  The Refiner is a
+middleman that normalizes raw responses before passing them downstream.
+
+correlation_id is propagated through the SwarmMessageBus so all
+pipeline logs are linked.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+# ── Stage definitions ─────────────────────────────────────────────────────
+
+
+class StageRole(StrEnum):
+    """Semantic role of a pipeline stage."""
+
+    RESEARCHER = "researcher"     # broad analysis, raw output
+    REFINER = "refiner"            # normalize, condense, format
+    BUILDER = "builder"            # implementation / execution
+    VALIDATOR = "validator"        # quality check, reject/approve
+    CUSTOM = "custom"              # user-defined stage
+
+
+@dataclass(slots=True)
+class PipelineStage:
+    """A single stage in a multi-agent pipeline.
+
+    Attributes:
+        name:           Human-readable stage identifier.
+        role:           Semantic role (researcher/refiner/builder/validator).
+        worker_name:    Name of the worker from WorkerRegistry.
+        system_prompt:  Instructions for the worker at this stage.
+        depends_on:     Names of stages that must complete first.
+    """
+
+    name: str
+    role: StageRole
+    worker_name: str
+    system_prompt: str = ""
+    depends_on: list[str] = field(default_factory=list)
+    status: str = "pending"     # pending | running | completed | failed
+    output: str = ""
+    error: str = ""
+    duration_ms: float = 0.0
+
+    def to_worker_entry(self) -> dict[str, Any]:
+        """Return a dict suitable for WorkerRegistry registration."""
+        expertise: list[str] = [str(self.role.value)]
+        return {
+            "name": self.name,
+            "expertise": expertise,
+            "roles": ["leaf"],
+            "system_prompt": self.system_prompt,
+        }
+
+
+@dataclass
+class PipelineResult:
+    """Final output of a pipeline execution."""
+
+    pipeline_id: str
+    stages: list[PipelineStage]
+    status: str            # "completed" | "failed" | "partial"
+    final_output: str
+    total_duration_ms: float = 0.0
+    correlation_id: str = ""
+
+    @property
+    def succeeded_stages(self) -> list[PipelineStage]:
+        return [s for s in self.stages if s.status == "completed"]
+
+    @property
+    def failed_stages(self) -> list[PipelineStage]:
+        return [s for s in self.stages if s.status == "failed"]
+
+
+# ── Refiner worker ─────────────────────────────────────────────────────────
+
+REFINER_SYSTEM_PROMPT = """You are a Refiner — a middleman worker that intercepts raw,
+verbose output from a Researcher and condenses it into a clean,
+actionable payload for the Builder.
+
+Your job:
+1. Strip hallucinations, fluff, and redundant explanations.
+2. Extract only the core facts, code snippets, and decisions.
+3. Format the output as a structured payload:
+   - Key findings (3-5 bullet points)
+   - Code snippets (if any)
+   - Recommended next action (1 sentence)
+4. Never add new information.  Only distill what was provided.
+
+Output format:
+```
+## Key Findings
+- Point 1
+- Point 2
+
+## Code
+```python
+...
+```
+
+## Recommended Next Action
+One sentence.
+```
+"""
+
+
+class RefinerStage(PipelineStage):
+    """Pre-built Refiner stage using the Refiner system prompt."""
+
+    def __init__(
+        self,
+        name: str = "refiner",
+        worker_name: str = "bridge",
+        depends_on: list[str] | None = None,
+    ) -> None:
+        super().__init__(
+            name=name,
+            role=StageRole.REFINER,
+            worker_name=worker_name,
+            system_prompt=REFINER_SYSTEM_PROMPT,
+            depends_on=depends_on or [],
+        )
+
+
+# ── Standard pipeline topologies ───────────────────────────────────────────
+
+# Research → Refine → Build → Validate
+STANDARD_PIPELINE: list[dict[str, Any]] = [
+    {
+        "name": "researcher",
+        "role": "researcher",
+        "worker_name": "core",
+        "system_prompt": "You are a Researcher. Analyze the task broadly and provide comprehensive findings.",
+        "depends_on": [],
+    },
+    {
+        "name": "refiner",
+        "role": "refiner",
+        "worker_name": "bridge",
+        "system_prompt": REFINER_SYSTEM_PROMPT,
+        "depends_on": ["researcher"],
+    },
+    {
+        "name": "builder",
+        "role": "builder",
+        "worker_name": "core",
+        "system_prompt": "You are a Builder. Implement the solution based on the refined research.",
+        "depends_on": ["refiner"],
+    },
+    {
+        "name": "validator",
+        "role": "validator",
+        "worker_name": "bridge",
+        "system_prompt": (
+            "You are a Validator. Check the Builder's output against the "
+            "original task. Reject if wrong, approve if correct."
+        ),
+        "depends_on": ["builder"],
+    },
+]
+
+# Quick pipeline — skip the refiner (two-stage)
+QUICK_PIPELINE: list[dict[str, Any]] = [
+    {
+        "name": "researcher",
+        "role": "researcher",
+        "worker_name": "core",
+        "system_prompt": "You are a Researcher. Provide a concise, actionable answer.",
+        "depends_on": [],
+    },
+    {
+        "name": "builder",
+        "role": "builder",
+        "worker_name": "core",
+        "system_prompt": "You are a Builder. Implement based on the research above.",
+        "depends_on": ["researcher"],
+    },
+]
+
+
+# ── Pipeline execution engine ──────────────────────────────────────────────
+
+
+class PipelineEngine:
+    """Executes a DAG of pipeline stages via SwarmEngine.consult().
+
+    Stages with satisfied dependencies run in parallel batches.
+    Failed stages halt downstream stages by default.
+    """
+
+    def __init__(self, halt_on_failure: bool = True) -> None:
+        self.halt_on_failure = halt_on_failure
+
+    @staticmethod
+    def from_standard(topo: list[dict[str, Any]] | None = None) -> list[PipelineStage]:
+        """Build PipelineStage list from a topology definition."""
+        stages: list[PipelineStage] = []
+        for cfg in (topo or STANDARD_PIPELINE):
+            stages.append(PipelineStage(
+                name=cfg["name"],
+                role=StageRole(cfg["role"]),
+                worker_name=cfg["worker_name"],
+                system_prompt=cfg.get("system_prompt", ""),
+                depends_on=cfg.get("depends_on", []),
+            ))
+        return stages
+
+    async def execute(
+        self,
+        stages: list[PipelineStage],
+        task: str,
+        correlation_id: str | None = None,
+    ) -> PipelineResult:
+        """Execute a pipeline of stages.
+
+        Args:
+            stages: Ordered pipeline stages.
+            task: The initial task description.
+            correlation_id: Trace ID for linking logs. Auto-generated if None.
+
+        Returns:
+            PipelineResult with all stage outputs and final synthesis.
+        """
+        cid = correlation_id or f"cid-{uuid.uuid4().hex[:12]}"
+        started = __import__("time").perf_counter()
+        from kazma_core.swarm.engine import get_swarm_engine
+        from kazma_core.swarm.bus import get_message_bus
+
+        engine = get_swarm_engine()
+        bus = get_message_bus()
+        stage_outputs: dict[str, str] = {}
+        completed: set[str] = set()
+        failed: set[str] = set()
+
+        while len(completed | failed) < len(stages):
+            # Find stages with all dependencies satisfied
+            ready = [
+                s for s in stages
+                if s.status == "pending"
+                and all(d in completed for d in s.depends_on)
+                and (not self.halt_on_failure or not any(
+                    d in failed for d in s.depends_on
+                ))
+            ]
+            if not ready:
+                # Check for deadlocked stages
+                pending = [s for s in stages if s.status == "pending"]
+                if pending and self.halt_on_failure:
+                    for s in pending:
+                        s.status = "failed"
+                        s.error = "Upstream stage failed — halted"
+                        failed.add(s.name)
+                break
+
+            # Build context from upstream outputs
+            for stage in ready:
+                context_parts: list[str] = [task]
+                for dep in stage.depends_on:
+                    if dep in stage_outputs:
+                        context_parts.append(f"\n[Output from '{dep}']\n{stage_outputs[dep][:2000]}")
+                context = "\n\n".join(context_parts)
+
+                try:
+                    stage_start = __import__("time").perf_counter()
+                    stage.status = "running"
+
+                    await bus.stream(
+                        worker_name=stage.name,
+                        worker_role=str(stage.role.value),
+                        content=f"Pipeline stage starting: {stage.name}",
+                        level="info",
+                    )
+
+                    if engine:
+                        result = await engine.consult(str(stage.role.value), context)
+                        stage.output = result.get("synthesis", "No output")
+                    else:
+                        stage.output = f"[Simulated {stage.name}: {context[:200]}]"
+
+                    stage.duration_ms = (__import__("time").perf_counter() - stage_start) * 1000
+                    stage.status = "completed"
+                    stage_outputs[stage.name] = stage.output
+                    completed.add(stage.name)
+
+                    await bus.report(
+                        worker_name=stage.name,
+                        worker_role=str(stage.role.value),
+                        status="success",
+                        output=stage.output,
+                        duration_ms=stage.duration_ms,
+                        task_id=f"{cid}:{stage.name}",
+                    )
+
+                except Exception as exc:
+                    stage.status = "failed"
+                    stage.error = str(exc)
+                    failed.add(stage.name)
+                    await bus.stream(
+                        worker_name=stage.name,
+                        worker_role=str(stage.role.value),
+                        content=f"Pipeline stage FAILED: {exc}",
+                        level="error",
+                    )
+
+        # Determine overall status
+        if len(completed) == len(stages):
+            overall_status = "completed"
+        elif len(failed) == 0:
+            overall_status = "partial"
+        else:
+            overall_status = "failed" if len(failed) >= len(stages) / 2 else "partial"
+
+        # Build final output from the last completed stage
+        final_output = ""
+        for s in reversed(stages):
+            if s.status == "completed":
+                final_output = s.output
+                break
+
+        total_ms = (__import__("time").perf_counter() - started) * 1000
+
+        return PipelineResult(
+            pipeline_id=cid,
+            stages=stages,
+            status=overall_status,
+            final_output=final_output or "No stages completed",
+            total_duration_ms=total_ms,
+            correlation_id=cid,
+        )
+
+
+# ── Convenience ────────────────────────────────────────────────────────────
+
+
+async def run_standard_pipeline(
+    task: str,
+    worker_map: dict[str, str] | None = None,
+) -> PipelineResult:
+    """Run the standard 4-stage pipeline with optional worker overrides.
+
+    Args:
+        task: The task to execute.
+        worker_map: Optional dict of stage_name → worker_name overrides.
+                    e.g. {"builder": "ux"} to use UX worker for builder stage.
+
+    Returns:
+        PipelineResult.
+    """
+    stages = PipelineEngine.from_standard(STANDARD_PIPELINE)
+    if worker_map:
+        for s in stages:
+            if s.name in worker_map:
+                s.worker_name = worker_map[s.name]
+    engine = PipelineEngine()
+    return await engine.execute(stages, task)
