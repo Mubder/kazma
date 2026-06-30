@@ -651,34 +651,34 @@ class TestMetricCard:
     """MetricCard widget rendering and status colors."""
 
     def test_metric_card_render_normal(self) -> None:
-        """MetricCard with 'normal' status wraps value in green markup."""
+        """MetricCard with 'normal' status wraps value in primary (cyan) markup."""
         from kazma_tui.dashboard import MetricCard
 
         card = MetricCard(label="Test", value="42", status="normal")
         rendered = card._render_value()
-        assert "[bold green]" in rendered
+        assert "[bold $primary]" in rendered
         assert "42" in rendered
-        assert "[/bold green]" in rendered
+        assert "[/bold $primary]" in rendered
 
     def test_metric_card_render_warning(self) -> None:
-        """MetricCard with 'warning' status wraps value in yellow markup."""
+        """MetricCard with 'warning' status wraps value in secondary (purple) markup."""
         from kazma_tui.dashboard import MetricCard
 
         card = MetricCard(label="Test", value="slow", status="warning")
         rendered = card._render_value()
-        assert "[bold yellow]" in rendered
+        assert "[bold $secondary]" in rendered
         assert "slow" in rendered
-        assert "[/bold yellow]" in rendered
+        assert "[/bold $secondary]" in rendered
 
     def test_metric_card_render_critical(self) -> None:
-        """MetricCard with 'critical' status wraps value in red markup."""
+        """MetricCard with 'critical' status wraps value in error (red) markup."""
         from kazma_tui.dashboard import MetricCard
 
         card = MetricCard(label="Test", value="error", status="critical")
         rendered = card._render_value()
-        assert "[bold red]" in rendered
+        assert "[bold $error]" in rendered
         assert "error" in rendered
-        assert "[/bold red]" in rendered
+        assert "[/bold $error]" in rendered
 
     def test_metric_card_has_label(self) -> None:
         """MetricCard must store label."""

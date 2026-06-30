@@ -1,4 +1,8 @@
-"""Main Kazma TUI application — Textual-based professional dashboard."""
+"""Main Kazma TUI application — Textual-based professional dashboard.
+
+Adopts the kazma.ai design language: deep charcoal background,
+cyan primary accent, purple secondary, gradient borders.
+"""
 
 from __future__ import annotations
 
@@ -11,25 +15,34 @@ from kazma_tui.chat import ChatPanel
 from kazma_tui.dashboard import MetricsDashboard
 from kazma_tui.footer import FooterShortcuts
 from kazma_tui.header import HeaderProviderModel
+from kazma_tui.theme import KAZMA_CSS
 
 logger = logging.getLogger(__name__)
 
 
 class KazmaTUI(App[None]):
-    """Kazma TUI — Professional terminal dashboard.
+    """Kazma TUI — Production terminal dashboard.
 
     Features:
-    - Metrics dashboard with CPU/Memory/RPM/Latency
+    - Metrics dashboard with CPU/Memory/RPM/Latency (gauge-style)
     - Chat interface with command support
     - ModelRegistry integration
+    - Split-pane swarm panel (via Tab)
+    - kazma.ai dark theme
+
+    Keys:
+        Tab     — Switch focus between panels
+        Ctrl+Q  — Quit
+        Enter   — Send chat message
     """
 
     TITLE = "Kazma TUI"
-    CSS = """
-    Screen {
-        layout: vertical;
-    }
-    """
+    CSS = KAZMA_CSS
+
+    BINDINGS = [
+        ("tab", "focus_next", "Next panel"),
+        ("ctrl+q", "quit", "Quit"),
+    ]
 
     def compose(self) -> ComposeResult:
         """Create the application layout."""

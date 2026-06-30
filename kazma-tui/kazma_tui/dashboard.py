@@ -90,12 +90,12 @@ class MetricCard(Widget):
             logger.debug("MetricCard widgets not yet mounted", exc_info=True)
 
     def _render_value(self) -> str:
-        """Render value with Rich markup based on status."""
+        """Render value with kazma.ai color palette."""
         if self._status == "critical":
-            return f"[bold red]{self._value}[/bold red]"
+            return f"[bold $error]{self._value}[/bold $error]"
         if self._status == "warning":
-            return f"[bold yellow]{self._value}[/bold yellow]"
-        return f"[bold green]{self._value}[/bold green]"
+            return f"[bold $secondary]{self._value}[/bold $secondary]"
+        return f"[bold $primary]{self._value}[/bold $primary]"
 
 
 class MetricsDashboard(Widget):

@@ -1,14 +1,8 @@
 """Chat interface widget for the Kazma TUI.
 
 Provides ``ChatPanel``, a Textual widget that combines a scrollable
-message display with a text input field.  Supports built-in commands:
-
-- ``/help``  — displays available commands and shortcuts
-- ``/clear`` — clears the chat log
-- ``/quit``  — exits the TUI cleanly
-
-Commands are case-insensitive and are intercepted before being shown as
-user messages.
+message display with a text input field.  Supports built-in commands
+and AI response generation via ModelRegistry.
 """
 
 from __future__ import annotations
@@ -34,21 +28,7 @@ Keyboard shortcuts:
 
 
 class ChatPanel(Widget):
-    """Chat interface with message display and input field.
-
-    Layout::
-
-        ┌────────────────────────────┐
-        │  You: hello                │
-        │  Assistant: Hi there!      │
-        │                            │
-        │                            │
-        ├────────────────────────────┤
-        │ Type a message...          │
-        └────────────────────────────┘
-
-    The input field is focused automatically on mount.
-    """
+    """Chat interface with message display, input field, and AI responses."""
 
     DEFAULT_CSS = """
     ChatPanel {
@@ -67,8 +47,6 @@ class ChatPanel(Widget):
     }
     """
 
-    # ── Textual lifecycle ───────────────────────────────────────────
-
     def compose(self) -> ComposeResult:
         """Compose the chat layout: message log + input field."""
         yield RichLog(id="chat-log", wrap=True, highlight=True)
@@ -81,13 +59,8 @@ class ChatPanel(Widget):
     # ── Event handlers ──────────────────────────────────────────────
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle text submitted from the input field.
-
-        If the text starts with ``/`` it is treated as a command.
-        Otherwise the text is displayed as a user message.
-        """
+        """Handle text submitted from the input field."""
         text = event.value.strip()
-        # Clear the input regardless of content
         event.input.value = ""
 
         if not text:
@@ -97,18 +70,32 @@ class ChatPanel(Widget):
             self._handle_command(text)
         else:
             self.add_message("You", text)
+            # Generate AI response
+            self.app.call_later(self._generate_response, text)
 
-        # Re-focus the input for the next message
         self._focus_input()
+
+    # ── AI response generation ──────────────────────────────────────
+
+    def _generate_response(self, prompt: str) -> None:
+        """Generate an AI response via ModelRegistry and display it."""
+        try:
+            from kazma_core.model_registry import get_model_registry
+            registry = get_model_registry()
+            agent = registry.get_agent()
+            if agent is None:
+                self.add_message("System", "[$error]No agent configured — check your model settings[/$error]")
+                return
+            response = agent.invoke(prompt)
+            self.add_message("Assistant", response)
+        except (RuntimeError, ImportError) as exc:
+            self.add_message("System", f"[$secondary]Agent unavailable: {exc}[/$secondary]")
+        except Exception as exc:
+            self.add_message("System", f"[$error]Error: {exc}[/$error]")
 
     # ── Command handling ────────────────────────────────────────────
 
     def _handle_command(self, raw: str) -> None:
-        """Parse and execute a slash-command (case-insensitive).
-
-        Supported commands: /help, /clear, /quit.
-        Unknown commands display an error message.
-        """
         cmd = raw.strip().lower()
 
         if cmd == "/help":
@@ -128,18 +115,17 @@ class ChatPanel(Widget):
     def add_message(self, role: str, text: str) -> None:
         """Append a message to the chat log.
 
-        Args:
-            role: The label prefix (e.g. "You", "Assistant", "System").
-            text: The message body.
+        User text is escaped to prevent Rich markup from being interpreted
+        (e.g. '[bold]' in user input displays literally).
         """
         try:
             log = self.query_one("#chat-log", RichLog)
-            log.write(f"[bold]{role}:[/bold] {text}")
+            escaped = _escape(text) if role == "You" else text
+            log.write(f"[bold]{role}:[/bold] {escaped}")
         except Exception:
             logger.debug("Chat log widget not yet mounted", exc_info=True)
 
     def _clear_messages(self) -> None:
-        """Clear all messages from the chat log."""
         try:
             log = self.query_one("#chat-log", RichLog)
             log.clear()
@@ -147,9 +133,13 @@ class ChatPanel(Widget):
             logger.debug("Chat log widget not yet mounted", exc_info=True)
 
     def _focus_input(self) -> None:
-        """Focus the input field."""
         try:
             input_widget = self.query_one("#chat-input", Input)
             input_widget.focus()
         except Exception:
             logger.debug("Chat input widget not yet mounted", exc_info=True)
+
+
+def _escape(text: str) -> str:
+    """Escape Rich markup characters so they display literally."""
+    return text.replace("[", "\\[")

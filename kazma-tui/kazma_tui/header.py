@@ -1,12 +1,4 @@
-"""Custom header widget showing active provider and model from ModelRegistry.
-
-This module provides ``HeaderProviderModel``, a Textual widget that displays
-the application title along with the currently active provider and model name
-sourced from the ``ModelRegistry`` singleton.
-
-The widget is a read-only consumer — it never calls mutation methods on
-``ModelRegistry``.
-"""
+"""Custom header widget — kazma.ai styled ASCII logo + provider/model info."""
 
 from __future__ import annotations
 
@@ -22,56 +14,61 @@ logger = logging.getLogger(__name__)
 
 _FALLBACK_TEXT = "Not configured"
 
+KA_LOGO = r"""  [bold $primary]██╗  ██╗  █████╗  ███████╗ ███╗   ███╗  █████╗[/bold $primary]
+  [bold $secondary]██║ ██╔╝ ██╔══██╗ ╚══███╔╝ ████╗ ████║ ██╔══██╗[/bold $secondary]
+  [bold $primary]█████╔╝  ███████║   ███╔╝  ██╔████╔██║ ███████║[/bold $primary]
+  [bold $secondary]██╔═██╗  ██╔══██║  ███╔╝   ██║╚██╔╝██║ ██╔══██║[/bold $secondary]
+  [bold $primary]██║  ██╗ ██║  ██║ ███████╗ ██║ ╚═╝ ██║ ██║  ██║[/bold $primary]
+  [bold $secondary]╚═╝  ╚═╝ ╚═╝  ╚═╝ ╚══════╝ ╚═╝     ╚═╝ ╚═╝  ╚═╝[/bold $secondary]"""
+
+KA_TAGLINE = "Production-grade autonomous AI agent framework"
+
 
 class HeaderProviderModel(Widget):
-    """Header bar displaying app title and active provider/model info.
+    """Header bar with ASCII KA logo, tagline, and provider/model info.
 
-    Reads from ``ModelRegistry.get_active_profile()`` on mount and exposes
-    ``refresh_profile()`` for periodic or on-demand updates.
-
-    Layout::
-
-        Kazma TUI  |  openai / gpt-4o
+    Reads from ``ModelRegistry.get_active_profile()`` on mount.
     """
 
     DEFAULT_CSS = """
     HeaderProviderModel {
         dock: top;
         width: 100%;
-        height: 1;
-        background: $accent;
-        color: $text;
-        content-align: left middle;
-        padding: 0 1;
+        height: auto;
+        min-height: 8;
+        background: $surface;
+        padding: 0 2;
     }
 
-    HeaderProviderModel > #header-title {
-        width: auto;
-        text-style: bold;
+    HeaderProviderModel > #ka-logo {
+        width: 100%;
+        content-align: center middle;
+        margin: 1 0 0 0;
     }
 
-    HeaderProviderModel > #header-separator {
-        width: auto;
-        margin: 0 1;
+    HeaderProviderModel > #ka-tagline {
+        width: 100%;
+        content-align: center middle;
+        color: $text-muted;
+        text-style: italic;
+        margin: 0 0 1 0;
     }
 
     HeaderProviderModel > #header-profile {
-        width: auto;
+        width: 100%;
+        content-align: center middle;
+        color: $primary;
+        text-style: bold;
+        border-bottom: heavy $primary;
+        padding-bottom: 1;
     }
     """
 
     provider: reactive[str] = reactive(_FALLBACK_TEXT)
     model: reactive[str] = reactive(_FALLBACK_TEXT)
 
-    # ── Public helpers (used by tests) ──────────────────────────────
-
     def _build_header_text(self) -> str:
-        """Return the provider/model display string.
-
-        Calls ``get_active_profile()`` on the ``ModelRegistry`` singleton.
-        Returns a human-readable fallback when the registry is not initialised
-        or the profile is empty.
-        """
+        """Return the provider/model display string."""
         try:
             registry = get_model_registry()
             profile = registry.get_active_profile()
@@ -90,12 +87,10 @@ class HeaderProviderModel(Widget):
             return provider_name
         return f"{provider_name} / {model_name}"
 
-    # ── Textual lifecycle ───────────────────────────────────────────
-
     def compose(self) -> ComposeResult:
-        """Compose the header layout: title | separator | profile info."""
-        yield Static("Kazma TUI", id="header-title")
-        yield Static("|", id="header-separator")
+        """Compose the header with ASCII logo, tagline, and profile."""
+        yield Static(KA_LOGO, id="ka-logo")
+        yield Static(f"  {KA_TAGLINE}", id="ka-tagline")
         yield Static(_FALLBACK_TEXT, id="header-profile")
 
     def on_mount(self) -> None:
@@ -107,4 +102,4 @@ class HeaderProviderModel(Widget):
         text = self._build_header_text()
         self.provider = text
         profile_widget = self.query_one("#header-profile", Static)
-        profile_widget.update(text)
+        profile_widget.update(f"  {text}")
