@@ -79,6 +79,39 @@ def create_app(config_path: str | None = None) -> FastAPI:
     from kazma_ui.auth import create_auth_middleware
 
     app.middleware("http")(create_auth_middleware())
+    # ── Swarm Brain — Knowledge Graph (#18) ───────────────────────────
+    import kazma_core.swarm.memory.graph as _kg_mod
+    @app.get("/api/memory/graph")
+    async def _memory_graph():
+        kg = _kg_mod.KnowledgeGraph()
+        return kg.to_json()
+
+    @app.get("/api/memory/graph/stats")
+    async def _memory_graph_stats():
+        kg = _kg_mod.KnowledgeGraph()
+        return kg.stats()
+
+    # ── Time Travel — Session Replay (#19) ────────────────────────────
+    import kazma_core.time_travel as _tt_mod
+    @app.get("/api/session/history")
+    async def _session_history(thread_id: str = "", limit: int = 20):
+        store = _tt_mod.SnapshotStore()
+        if thread_id:
+            records = store.list_for_thread(thread_id)[:limit]
+        else:
+            records = []
+        return {"sessions": [r.to_dict() for r in records]}
+
+    @app.post("/api/session/replay")
+    async def _session_replay(req: dict):
+        thread_id = req.get("thread_id", "")
+        iteration = req.get("iteration", 0)
+        if not thread_id:
+            from fastapi import HTTPException as _httpx
+            raise _httpx(status_code=400, detail="thread_id required")
+        engine = _tt_mod.ReplayEngine()
+        return await engine.replay_from(thread_id, iteration)
+
     logger.info("[Auth] KAZMA_SECRET middleware registered")
 
     # ── CORS Middleware ──────────────────────────────────────────────────

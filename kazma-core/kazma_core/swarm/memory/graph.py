@@ -171,6 +171,27 @@ class KnowledgeGraph:
             "path": str(self._path),
         }
 
+    def to_json(self) -> dict[str, Any]:
+        """Export graph as vis.js-compatible JSON {nodes, edges}."""
+        if not self._ready:
+            return {"nodes": [], "edges": []}
+        nodes = []
+        for node_id, data in self._graph.nodes(data=True):
+            nodes.append({
+                "id": str(node_id),
+                "label": str(data.get("label", node_id))[:60],
+                "group": str(data.get("type", "unknown")),
+                "title": str(data.get("properties", {}))[:200],
+            })
+        edges = []
+        for u, v, data in self._graph.edges(data=True):
+            edges.append({
+                "from": str(u),
+                "to": str(v),
+                "label": str(data.get("label", data.get("relationship", "")))[:40],
+            })
+        return {"nodes": nodes, "edges": edges}
+
     def clear(self) -> None:
         """Reset the graph to empty."""
         self._graph = self._graph_class()()

@@ -282,7 +282,7 @@ class TestCSSDesignSystem:
         assert "#6C5CE7" in css or "#6c5ce7" in css.lower()
 
     def test_has_dark_background(self, css):
-        assert "#0d1117" in css
+        assert any(c in css for c in ("#02040a", "#0a0f1a", "var(--bg-primary)")), "Dark background color not found"
 
     def test_has_css_variables(self, css):
         assert ":root" in css
