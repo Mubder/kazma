@@ -201,6 +201,76 @@ class ToolRegistry:
 
     def _init_defaults(self) -> None:
         self._tools["shell"] = ShellTool()
+        self._register_builtin_tools()
+
+    def _register_builtin_tools(self) -> None:
+        """Register all pre-existing tools as registry entries."""
+        # Register directly — simpler than tuple mapping
+        self._register_builtin("web_search", "kazma_core.tools.web_search", "web_search",
+                               PermissionLevel.READ_ONLY, "DuckDuckGo web search")
+        self._register_builtin("file_read", "kazma_core.tools.file_read", "file_read",
+                               PermissionLevel.READ_ONLY, "Read local files")
+        self._register_builtin("file_write", "kazma_core.tools.file_write", "file_write",
+                               PermissionLevel.SYSTEM_EXEC, "Write files to disk")
+        self._register_builtin("read_url", "kazma_core.tools.read_url", "read_url",
+                               PermissionLevel.READ_ONLY, "Read web pages")
+        self._register_builtin("vision_analyze", "kazma_core.tools.vision_analyze", "analyze_image",
+                               PermissionLevel.READ_ONLY, "AI vision analysis")
+
+    def _register_builtin(self, tool_name: str, module_path: str, fn_name: str,
+                           perm: PermissionLevel, desc: str) -> None:
+        """Import and wrap a single built-in tool."""
+        try:
+            mod = __import__(module_path, fromlist=[fn_name])
+            fn = getattr(mod, fn_name)
+            wrapped = _make_tool_class(tool_name, fn, perm, desc)
+            self._tools[tool_name] = wrapped()
+        except ImportError:
+            logger.debug("[ToolRegistry] built-in '%s' not available", tool_name)
+
+    def list_tools(self) -> list[dict[str, Any]]:
+        """Return all registered tools as a JSON-safe list."""
+        return [
+            {
+                "name": t.name,
+                "permission": t.permission.value,
+                "id": f"kazma-tool://{t.name}",
+                "description": getattr(t, "description", ""),
+                "enabled": True,
+                "security_score": 100,
+                "certification_level": "basic",
+                "capabilities": [t.name],
+                "tags": [t.permission.value],
+            }
+            for t in self._tools.values()
+        ]
+
+
+def _make_tool_class(name: str, fn, perm: PermissionLevel, desc: str) -> type[BaseTool]:
+    """Create a lightweight BaseTool wrapper around an async function."""
+    from typing import Any as _Any
+
+    class _Wrapped(BaseTool):
+        async def execute(self, **kwargs: _Any) -> ToolResult:
+            try:
+                output = await fn(**kwargs)
+                return ToolResult(
+                    tool_name=self.name,
+                    success=True,
+                    output=str(output),
+                    permission=self.permission,
+                )
+            except Exception as exc:
+                return ToolResult(
+                    tool_name=self.name,
+                    success=False,
+                    output=str(exc),
+                    permission=self.permission,
+                )
+    _Wrapped.name = name
+    _Wrapped.permission = perm
+    _Wrapped.description = desc
+    return _Wrapped
 
     @property
     def shell(self) -> ShellTool:
