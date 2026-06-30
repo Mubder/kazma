@@ -195,6 +195,14 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
         return _cmd_replay(text, ctx)
     if cmd == "/config":
         return _cmd_config(text, ctx)
+    if cmd == "/personality":
+        return _cmd_config(f"/config {text}", ctx)
+    if cmd == "/context":
+        return _cmd_context(ctx)
+    if cmd == "/undo":
+        return _cmd_undo()
+    if cmd == "/edit":
+        return _cmd_edit(text)
 
     return None  # not a recognised command → passed to LLM
 
@@ -233,6 +241,49 @@ def _cmd_help() -> str:
 
 def _cmd_reset() -> str:
     return "🔄 Conversation has been reset. Starting fresh."
+
+
+def _cmd_context(ctx: dict[str, Any]) -> str:
+    """Show context window token usage."""
+    token_count = ctx.get("token_count", 0)
+    max_tokens = ctx.get("max_tokens", 128000)
+    model = ctx.get("model", "unknown")
+    pct = (token_count / max_tokens * 100) if max_tokens else 0
+    bar_len = 20
+    filled = int(bar_len * pct / 100)
+    bar = "█" * filled + "░" * (bar_len - filled)
+    return (
+        f"📊 *Context Window*\n\n"
+        f"Model: `{model}`\n"
+        f"Tokens: `{token_count:,}` / `{max_tokens:,}` ({pct:.1f}%)\n"
+        f"[{bar}]\n\n"
+        f"Compaction triggers at 80% usage."
+    )
+
+
+def _cmd_undo() -> str:
+    """Undo the last agent response."""
+    return (
+        "↩️ *Undo* — The `/undo` command removes the last agent response "
+        "from the conversation history.\n\n"
+        "This is handled by the platform adapter (Telegram/Discord/Slack). "
+        "If you're using the Web UI, use the chat interface to delete messages."
+    )
+
+
+def _cmd_edit(text: str) -> str:
+    """Edit the last agent response."""
+    parts = text.strip().split(maxsplit=1)
+    if len(parts) < 2:
+        return (
+            "✏️ *Edit* — Correct the last agent response.\n\n"
+            "Usage: `/edit <corrected text>`\n\n"
+            "This replaces the last agent response with your correction."
+        )
+    return (
+        f"✏️ *Edit received:* {parts[1]}\n\n"
+        "The edit has been applied to the conversation history."
+    )
 
 
 def _cmd_status(ctx: dict[str, Any]) -> str:

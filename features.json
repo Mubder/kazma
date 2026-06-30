@@ -16,7 +16,7 @@
         "No references to old TUI classes remain in codebase"
       ],
       "fulfills": ["VAL-TUI-040", "VAL-TUI-041"],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": "tui-foundation",
@@ -36,7 +36,7 @@
         "TUI launches without errors"
       ],
       "fulfills": ["VAL-TUI-001", "VAL-TUI-042"],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": "tui-header-footer",
@@ -54,7 +54,7 @@
         "No Arabic characters or RTL markers"
       ],
       "fulfills": ["VAL-TUI-002", "VAL-TUI-003", "VAL-TUI-004", "VAL-TUI-030", "VAL-TUI-031", "VAL-TUI-032"],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": "tui-dashboard",
@@ -75,7 +75,7 @@
         "Missing metrics show 'N/A'"
       ],
       "fulfills": ["VAL-TUI-010", "VAL-TUI-011", "VAL-TUI-012", "VAL-TUI-013", "VAL-TUI-014", "VAL-TUI-015"],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": "tui-chat",
@@ -94,7 +94,7 @@
         "/quit exits TUI cleanly"
       ],
       "fulfills": ["VAL-TUI-020", "VAL-TUI-021", "VAL-TUI-022"],
-      "status": "pending"
+      "status": "done"
     },
     {
       "id": "tui-tests",
@@ -113,7 +113,7 @@
         "All tests pass"
       ],
       "fulfills": ["VAL-TUI-050", "VAL-TUI-051"],
-      "status": "pending"
+      "status": "done"
     }
   ]
 }

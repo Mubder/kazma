@@ -672,17 +672,35 @@ class SettingsManager:
         }
 
     def change_password(self, old_password: str, new_password: str) -> dict[str, Any]:
-        """Validate and update password."""
+        """Validate and update password using PBKDF2-SHA256 with salt."""
         stored_hash = self._cs.get("account.password_hash", "")
         if stored_hash:
             import hashlib
-            old_hash = hashlib.sha256(old_password.encode()).hexdigest()
-            if old_hash != stored_hash:
-                return {"error": "Current password is incorrect"}
+            import hmac as _hmac
+            # Support both legacy SHA-256 and new PBKDF2 format
+            if stored_hash.startswith("pbkdf2:"):
+                # New format: pbkdf2:iterations:salt:hash
+                parts = stored_hash.split(":")
+                iterations = int(parts[1])
+                salt = bytes.fromhex(parts[2])
+                expected = bytes.fromhex(parts[3])
+                derived = hashlib.pbkdf2_hmac("sha256", old_password.encode(), salt, iterations)
+                if not _hmac.compare_digest(derived, expected):
+                    return {"error": "Current password is incorrect"}
+            else:
+                # Legacy SHA-256 — verify then migrate
+                import hashlib
+                old_hash = hashlib.sha256(old_password.encode()).hexdigest()
+                if not _hmac.compare_digest(old_hash, stored_hash):
+                    return {"error": "Current password is incorrect"}
         if len(new_password) < 8:
             return {"error": "Password must be at least 8 characters"}
+        # PBKDF2-SHA256 with random 16-byte salt, 600k iterations
         import hashlib
-        new_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        salt = secrets.token_bytes(16)
+        iterations = 600_000
+        derived = hashlib.pbkdf2_hmac("sha256", new_password.encode(), salt, iterations)
+        new_hash = f"pbkdf2:{iterations}:{salt.hex()}:{derived.hex()}"
         self._cs.set("account.password_hash", new_hash, category="account")
         return {"status": "ok"}
 
@@ -699,11 +717,13 @@ class SettingsManager:
     def create_api_token(self, name: str) -> dict[str, Any]:
         """Generate a new API token."""
         token = f"kazma_{secrets.token_hex(32)}"
+        import hashlib
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
         token_entry = {
             "id": secrets.token_hex(8),
             "name": name,
             "token_prefix": token[:16],
-            "token_hash": token,  # In production, store only the hash
+            "token_hash": token_hash,
             "created_at": datetime.now(UTC).isoformat(),
             "expires_days": 90,
         }

@@ -439,6 +439,14 @@ class LocalToolRegistry:
                 return f"Error: File not found: {path}"
             if not p.is_file():
                 return f"Error: Not a file: {path}"
+            # Workspace scoping — block reads outside workspace unless allowed
+            try:
+                from kazma_core.tools.file_write import _WORKSPACE_ROOT, _ALLOW_ABSOLUTE  # noqa: F811
+                if _WORKSPACE_ROOT and not _ALLOW_ABSOLUTE:
+                    if not p.is_relative_to(_WORKSPACE_ROOT) and not p.is_relative_to(Path("/tmp")):
+                        return f"Safety: reads outside workspace are not allowed. Path: {path}"
+            except (ImportError, OSError):
+                pass
             if p.stat().st_size > 1_000_000:  # 1MB cap
                 return f"Error: File too large ({p.stat().st_size} bytes). Max 1MB."
             return p.read_text(encoding=encoding)
@@ -449,6 +457,14 @@ class LocalToolRegistry:
         )
         async def file_write(path: str, content: str, encoding: str = "utf-8") -> str:
             p = Path(path).expanduser().resolve()
+            # Workspace scoping — block writes outside workspace unless allowed
+            try:
+                from kazma_core.tools.file_write import _WORKSPACE_ROOT, _ALLOW_ABSOLUTE  # noqa: F811
+                if _WORKSPACE_ROOT and not _ALLOW_ABSOLUTE:
+                    if not p.is_relative_to(_WORKSPACE_ROOT) and not p.is_relative_to(Path("/tmp")):
+                        return f"Safety: writes outside workspace are not allowed. Path: {path}"
+            except (ImportError, OSError):
+                pass
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding=encoding)
             return f"Wrote {len(content)} chars to {path}"
@@ -589,6 +605,12 @@ class LocalToolRegistry:
             category="system",
         )
         async def shell_exec(command: str, timeout: int = 30) -> str:
+            import shlex
+            # Log all shell_exec invocations — this is a dangerous tool
+            logger.warning(
+                "[SECURITY] shell_exec called: %s",
+                command[:200] if len(command) > 200 else command,
+            )
             proc = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,

@@ -229,6 +229,18 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # Dashboard WebSocket for real-time trace updates
     @app.websocket("/ws/dashboard")
     async def ws_dashboard(websocket: WebSocket) -> None:
+        # Authenticate WebSocket — check X-Kazma-Secret header or query param
+        import os as _os
+        expected = _os.environ.get("KAZMA_SECRET", "")
+        if expected:
+            provided = (
+                websocket.headers.get("x-kazma-secret", "")
+                or websocket.query_params.get("secret", "")
+            )
+            import hmac as _hmac
+            if not _hmac.compare_digest(provided, expected):
+                await websocket.close(code=4003, reason="Unauthorized")
+                return
         await websocket.accept()
         from kazma_core.shutdown import is_shutting_down
         from kazma_core.tracing import get_trace_store
@@ -262,6 +274,18 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # WebSocket endpoint for chat
     @app.websocket("/ws/chat")
     async def ws_chat(websocket: WebSocket) -> None:
+        # Authenticate WebSocket — check X-Kazma-Secret header or query param
+        import os as _os2
+        expected2 = _os2.environ.get("KAZMA_SECRET", "")
+        if expected2:
+            provided2 = (
+                websocket.headers.get("x-kazma-secret", "")
+                or websocket.query_params.get("secret", "")
+            )
+            import hmac as _hmac2
+            if not _hmac2.compare_digest(provided2, expected2):
+                await websocket.close(code=4003, reason="Unauthorized")
+                return
         await chat_websocket_handler(websocket, agent)
 
     # ── Root — Unified Master Workspace ──

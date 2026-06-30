@@ -433,7 +433,14 @@ class VulnerabilityDisclosure:
         payload = json.dumps(report, default=str, indent=2).encode("utf-8")
         # Use a per-installation secret derived from the report content
         # In production, this would use a proper key from config
-        secret = hashlib.sha256(b"kazma-disclosure-signing-key").digest()
+        # Use per-installation secret from environment or config
+        import os
+        _signing_key = os.environ.get("KAZMA_DISCLOSURE_KEY", "")
+        if not _signing_key:
+            # Derive from machine-specific data as fallback
+            import platform
+            _signing_key = f"kazma-{platform.node()}-{os.getuid()}"
+        secret = hashlib.sha256(_signing_key.encode()).digest()
         signature = hmac_mod.new(secret, payload, hashlib.sha256).hexdigest()
         # Append signature as a comment line (verifiable but separable)
         return payload + b"\n-- HMAC-SHA256: " + signature.encode()

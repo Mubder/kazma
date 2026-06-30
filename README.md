@@ -28,7 +28,7 @@
 [langgraph-url]: https://www.langchain.com/langgraph
 [uv-shield]: https://img.shields.io/badge/uv-managed-purple.svg
 [uv-url]: https://github.com/astral-sh/uv
-[tests-shield]: https://img.shields.io/badge/tests-3510_passing-success.svg
+[tests-shield]: https://img.shields.io/badge/tests-3309_passing-success.svg
 [tests-url]: https://github.com/Mubder/kazma
 [license-shield]: https://img.shields.io/github/license/Mubder/kazma.svg
 [license-url]: https://github.com/Mubder/kazma/blob/main/LICENSE
@@ -329,14 +329,14 @@ kazma swarm metrics --worker researcher
 | ✅ | Dark Mode | Theme toggle with accessible dropdown contrast (WCAG-compliant) |
 | ✅ | Model Selection | Chat-model selector with provider switch on save, SSE model passthrough, API key validation |
 | ✅ | Bilingual UI | EN/AR language toggle with cookie middleware and shared Jinja2Templates |
-| ✅ | i18n System | Complete internationalization layer with 150+ Arabic translations and 71 RTL CSS selectors |
+| ✅ | i18n System | Complete internationalization layer with 400+ Arabic translations and 70+ RTL CSS selectors |
 | ✅ | Arabic Typography | Cairo font for native Arabic rendering |
 | ✅ | HITL Approval UI | Inline approve/deny panel for tiered tool-safety gates |
 | ✅ | Session History | Load and browse prior conversations from any session |
 | ✅ | Agents Page | Dedicated page for agent inspection and control |
 | ✅ | Swarm Panel | Redesigned tabbed UI with Task Builder (orchestration pattern selector, worker multi-select with capability badges, advanced options), Active Tasks (SSE-connected live progress, HITL checkpoints, handoff chains), Results Dashboard (pipeline steps, fan-out cards, consult comparison, conditional routing), Worker Registry (cards with metrics, add/remove, dynamic spawn), Task History (searchable/filterable table with detail modal) |
 | ✅ | Telemetry | SSE telemetry with deduplicated route streaming and null-safe toast notifications |
-| ✅ | Service Facade | Zero private attribute access from UI — all access via the service layer |
+
 
 ### 🌍 Platform
 
@@ -344,7 +344,7 @@ kazma swarm metrics --worker researcher
 |:---:|:---|:---|
 | ✅ | Telegram Adapter | Full bot support with MarkdownV2, typing indicators, voice transcription |
 | ✅ | Discord Adapter | Native Markdown, rate-limited |
-| ✅ | Slack Adapter | Socket Mode with 429 retry and event parsing |
+| ✅ | Slack Adapter | Polling-based Web API adapter with 429 retry |
 | ✅ | Cross-Platform Gateway | Platform-agnostic backend registry, reply metadata envelope |
 | ✅ | Web UI | FastAPI + Jinja2 dashboard with 12-tab settings, SSE chat, provider management, Arabic RTL |
 | ✅ | Terminal UI | Textual TUI with English-only metrics/chat dashboard |
@@ -572,7 +572,7 @@ kazma-core/              Agent graph, ReAct supervisor, sub-agents, model router
 ├── kazma-memory/         SQLite FTS5 + Arabic tokenizer
 ├── kazma-skills/         YAML skill manifests + MCP server registry
 ├── kazma-providers/      LiteLLM router (multi-provider failover)
-├── tests/                3,510 tests (pytest + asyncio)
+├── tests/                3,309 tests (pytest + asyncio)
 ├── docs/                 Docusaurus documentation site
 ├── docker-compose.yml    Single-command deployment
 ├── setup.sh              POSIX bootstrap (Linux / macOS / WSL)
@@ -672,7 +672,7 @@ For overrides, copy to `kazma.local.yaml` (git-ignored). Env vars take precedenc
 
 ## 🧪 Tests
 
-3510 collected and passing across `tests/` and `kazma-tui/tests/` (a small number may be skipped due to missing optional deps; the `tests/` suite currently has 7 pre-existing platform-related failures).
+3,309 passing across `tests/` and `kazma-tui/tests/` (10 skipped due to missing optional deps; 5 pre-existing swarm cross-flow failures).
 
 ```bash
 # Full suite

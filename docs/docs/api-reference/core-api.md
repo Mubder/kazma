@@ -4,22 +4,24 @@ sidebar_position: 1
 
 # Core API Reference
 
-## Agent
+## KazmaAgent
 
 ```python
-from kazma_core.agent import Agent
+from kazma_core.agent_runner import KazmaAgent, AgentConfig, load_config
 
-agent = Agent(config=my_config)
-response = await agent.process(message="Hello")
+config = load_config()
+agent = KazmaAgent(config)
+response = await agent.run(message="Hello")
+await agent.shutdown()
 ```
 
 ### Methods
 
 | Method | Description |
 |---|---|
-| process(message) | Process a message and return a response |
-| reset() | Reset agent state |
-| get_state() | Get current agent state |
+| run(message) | Process a message and return a response string |
+| shutdown() | Clean shutdown — close LLM client, checkpointer, MCP |
+| connect_mcp_servers() | Connect configured MCP servers, returns tool count |
 
 ## Token Counter
 
@@ -40,23 +42,25 @@ result = detector.detect("مرحبا")
 # result.dialect, result.confidence, result.script
 ```
 
-## Checkpoint Manager
+## CheckpointManager
 
 ```python
-from kazma_core.checkpoint import CheckpointManager
+from kazma_gateway.stores.checkpoint import create_checkpoint_manager
 
-manager = CheckpointManager(db_path="checkpoints.db")
-await manager.save(state)
-state = await manager.load(agent_id="my-agent")
+manager = await create_checkpoint_manager(path="kazma-data/checkpoints.db")
+# Use with LangGraph: graph.compile(checkpointer=manager)
+# List checkpointed threads:
+threads = await manager.list_checkpoints(limit=50)
+await manager.close()
 ```
 
-## Context Compactor
+## CompactionEngine
 
 ```python
-from kazma_core.compaction import ContextCompactor
+from kazma_core.compaction import CompactionEngine
 
-compactor = ContextCompactor(max_tokens=4096)
-compacted = await compactor.compact(messages)
+engine = CompactionEngine(max_tokens=4096)
+compacted = await engine.compact(messages)
 ```
 
 ## Tool Sandbox

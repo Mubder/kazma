@@ -6,11 +6,11 @@ Generated: 2026-06-30
 
 | Metric | Value |
 |---|---|
-| Total Tests Passing | 3510 |
-| Total Lines of Code (excluding .venv, tests/) | 52333 |
+| Total Tests Passing | 3,309 |
+| Total Lines of Code (excluding .venv, tests/) | 57,481 |
 | Python Version | 3.11+ |
 | Project Version | 0.1.0 |
-| Status | production_ready |
+| Status | active_development |
 
 ## Namespace Audit
 
