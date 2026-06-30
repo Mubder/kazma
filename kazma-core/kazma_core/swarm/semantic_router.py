@@ -173,6 +173,10 @@ class SemanticRouter:
         if not workers:
             return
 
+        # Skip rebuild if worker count hasn't changed
+        if self._collection.count() == len(workers):
+            return
+
         # Build text profiles for embedding
         ids: list[str] = []
         documents: list[str] = []
