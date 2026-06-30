@@ -118,19 +118,21 @@ class ChatPanel(Widget):
             self.app.call_later(self._generate_response, text)
         self._focus_input()
 
-    def _generate_response(self, prompt: str) -> None:
+    async def _generate_response(self, prompt: str) -> None:
+        """Generate AI response via ModelRegistry provider."""
         try:
-            from kazma_core.model_registry import get_model_registry, initialize_model_registry
-            initialize_model_registry()
+            from kazma_core.model_registry import get_model_registry
             registry = get_model_registry()
-            agent = registry.get_agent()
-            if agent is None:
-                self.add_message("System", "No agent configured. Set up a model in kazma.yaml.")
+            provider = registry.get_client()
+            if provider is None:
+                self.add_message("System", "No provider configured. Set up a model in Settings.")
                 return
-            response = agent.invoke(prompt)
-            self.add_message("Assistant", response)
-        except (RuntimeError, ImportError) as exc:
-            self.add_message("System", f"Agent unavailable: {exc}")
+            messages = [{"role": "user", "content": prompt}]
+            response = await provider.chat(messages)
+            output = response.content if hasattr(response, "content") else str(response)
+            self.add_message("Assistant", output)
+        except ImportError as exc:
+            self.add_message("System", f"ModelRegistry not available: {exc}")
         except Exception as exc:
             self.add_message("System", f"Error: {exc}")
 
