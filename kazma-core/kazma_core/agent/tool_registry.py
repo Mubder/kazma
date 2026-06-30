@@ -535,8 +535,28 @@ class LocalToolRegistry:
             normalized = query.strip().upper()
             if not normalized.startswith("SELECT"):
                 raise ValueError("Only SELECT queries are allowed for safety.")
+            # Block multi-statement queries
+            if ";" in query.strip().rstrip(";"):
+                raise ValueError("Multi-statement queries are not allowed.")
 
             path = Path(db_path).expanduser().resolve()
+
+            # Security: restrict to known Kazma data directories
+            _ALLOWED_DB_ROOTS = [
+                Path("kazma-data").resolve(),
+                Path.home() / ".kazma",
+                Path("/tmp"),  # for tests
+            ]
+            allowed = any(
+                path.is_relative_to(root) or path == root
+                for root in _ALLOWED_DB_ROOTS
+            )
+            if not allowed:
+                return (
+                    f"Error: Access denied. Database path must be under "
+                    f"kazma-data/ or ~/.kazma/. Got: {db_path}"
+                )
+
             if not path.exists():
                 return f"Error: Database not found: {db_path}"
 
@@ -606,26 +626,65 @@ class LocalToolRegistry:
         )
         async def shell_exec(command: str, timeout: int = 30) -> str:
             import shlex
+            import subprocess
             # Log all shell_exec invocations — this is a dangerous tool
             logger.warning(
                 "[SECURITY] shell_exec called: %s",
                 command[:200] if len(command) > 200 else command,
             )
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            # Parse command into args — NO shell interpretation
             try:
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except TimeoutError:
-                proc.kill()
-                return f"Error: Command timed out after {timeout}s"
+                args = shlex.split(command)
+            except ValueError as exc:
+                return f"Error: Invalid command syntax: {exc}"
 
-            output = stdout.decode(errors="replace")
-            if stderr:
-                output += f"\n[stderr]\n{stderr.decode(errors='replace')}"
-            return output[:10_000]  # cap output
+            if not args:
+                return "Error: Empty command"
+
+            # Restricted PATH — only allow common safe binaries
+            _SAFE_BINARIES = {
+                "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
+                "uniq", "echo", "printf", "date", "whoami", "pwd", "env",
+                "df", "du", "free", "uptime", "uname", "hostname",
+                "python", "python3", "pip", "pip3", "uv", "git",
+                "curl", "wget", "jq", "sed", "awk", "tr", "cut",
+                "mkdir", "cp", "mv", "touch", "chmod", "chown",
+                "tar", "gzip", "gunzip", "zip", "unzip",
+                "ps", "top", "kill", "pgrep", "sleep",
+                "pytest", "ruff", "mypy", "node", "npm", "npx",
+                "docker", "docker-compose",
+                "hermes", "kazma",
+            }
+            binary = Path(args[0]).name  # resolve paths like /full/path/ls → ls
+            if binary not in _SAFE_BINARIES:
+                # Also check if it's an absolute path to a safe binary
+                if not any(args[0].endswith(f"/{b}") for b in _SAFE_BINARIES):
+                    return (
+                        f"Error: '{binary}' is not in the allowed binary list. "
+                        f"Allowed: {', '.join(sorted(_SAFE_BINARIES))}"
+                    )
+
+            try:
+                result = subprocess.run(
+                    args,
+                    capture_output=True,
+                    timeout=timeout,
+                    text=True,
+                    shell=False,
+                    env=None,  # inherit OS environment
+                )
+                output = result.stdout
+                if result.stderr:
+                    output += f"\n[stderr]\n{result.stderr}"
+                if result.returncode != 0:
+                    output += f"\n[exit code: {result.returncode}]"
+                return output[:10_000]  # cap output
+            except TimeoutError:
+                return f"Error: Command timed out after {timeout}s"
+            except FileNotFoundError:
+                return f"Error: Command not found: {args[0]}"
+            except Exception as exc:
+                return f"Error: {exc}"
 
         # ── Generic send_message tool ─────────────────────────────
         @self.register(

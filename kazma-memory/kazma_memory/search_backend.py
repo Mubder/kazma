@@ -72,34 +72,35 @@ class SQLiteMemoryBackend:
             )
         """)
 
-        # Create FTS5 table for Arabic full-text search
-        # Use the content rowid to link to the memories table
+        # Create FTS5 table for full-text search (self-contained)
+        # memory_id stores the memories.id for reliable joins.
+        # Triggers keep it in sync with the memories table.
         await conn.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-            USING fts5(content, content_arabic, content_rowid=rowid)
+            USING fts5(memory_id, content, content_arabic)
         """)
 
         # Create triggers to keep FTS5 in sync with memories table
         await conn.execute("""
             CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-                INSERT INTO memories_fts(rowid, content, content_arabic)
-                VALUES (new.rowid, new.content, new.content_arabic);
+                INSERT INTO memories_fts(memory_id, content, content_arabic)
+                VALUES (new.id, new.content, new.content_arabic);
             END
         """)
 
         await conn.execute("""
             CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-                INSERT INTO memories_fts(memories_fts, rowid, content, content_arabic)
-                VALUES ('delete', old.rowid, old.content, old.content_arabic);
+                INSERT INTO memories_fts(memories_fts, memory_id, content, content_arabic)
+                VALUES ('delete', old.id, old.content, old.content_arabic);
             END
         """)
 
         await conn.execute("""
             CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-                INSERT INTO memories_fts(memories_fts, rowid, content, content_arabic)
-                VALUES ('delete', old.rowid, old.content, old.content_arabic);
-                INSERT INTO memories_fts(rowid, content, content_arabic)
-                VALUES (new.rowid, new.content, new.content_arabic);
+                INSERT INTO memories_fts(memories_fts, memory_id, content, content_arabic)
+                VALUES ('delete', old.id, old.content, old.content_arabic);
+                INSERT INTO memories_fts(memory_id, content, content_arabic)
+                VALUES (new.id, new.content, new.content_arabic);
             END
         """)
 
@@ -175,7 +176,7 @@ class SQLiteMemoryBackend:
             # Search directly in FTS5 table with rowid, then join
             cursor = await conn.execute(
                 """
-                SELECT rowid, bm25(memories_fts) as bm25_score
+                SELECT memory_id, bm25(memories_fts) as bm25_score
                 FROM memories_fts
                 WHERE memories_fts MATCH ?
                 ORDER BY bm25_score ASC
@@ -186,23 +187,23 @@ class SQLiteMemoryBackend:
             fts_rows = await cursor.fetchall()
 
             if fts_rows:
-                rowids = [row[0] for row in fts_rows]
-                rowid_to_bm25 = {row[0]: row[1] for row in fts_rows}
+                memory_ids = [row[0] for row in fts_rows]
+                id_to_bm25 = {row[0]: row[1] for row in fts_rows}
 
-                # Fetch full memory records
-                placeholders = ",".join(["?"] * len(rowids))
+                # Fetch full memory records by id
+                placeholders = ",".join(["?"] * len(memory_ids))
                 cursor = await conn.execute(
                     f"""
-                    SELECT id, content, content_arabic, metadata, timestamp, source, relevance, rowid
+                    SELECT id, content, content_arabic, metadata, timestamp, source, relevance
                     FROM memories
-                    WHERE rowid IN ({placeholders})
+                    WHERE id IN ({placeholders})
                     """,
-                    rowids,
+                    memory_ids,
                 )
                 memory_rows = await cursor.fetchall()
 
                 for row in memory_rows:
-                    rowid = row[7]
+                    mid = row[0]
                     results.append(
                         {
                             "id": row[0],
@@ -212,7 +213,7 @@ class SQLiteMemoryBackend:
                             "timestamp": row[4],
                             "source": row[5],
                             "relevance": row[6],
-                            "bm25_score": rowid_to_bm25.get(rowid, 0),
+                            "bm25_score": id_to_bm25.get(mid, 0),
                             "search_type": "fts5",
                         }
                     )

@@ -571,8 +571,7 @@ kazma-core/              Agent graph, ReAct supervisor, sub-agents, model router
 ├── kazma-cli/            CLI entry point (status, serve, hub, docs, wizard, project)
 ├── kazma-memory/         SQLite FTS5 + Arabic tokenizer
 ├── kazma-skills/         YAML skill manifests + MCP server registry
-├── kazma-providers/      LiteLLM router (multi-provider failover)
-├── tests/                3,309 tests (pytest + asyncio)
+├── tests/
 ├── docs/                 Docusaurus documentation site
 ├── docker-compose.yml    Single-command deployment
 ├── setup.sh              POSIX bootstrap (Linux / macOS / WSL)
