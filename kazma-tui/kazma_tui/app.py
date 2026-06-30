@@ -40,8 +40,8 @@ class KazmaTUI(App[None]):
     CSS = KAZMA_CSS
 
     BINDINGS = [
-        ("tab", "focus_next", "Next panel"),
         ("ctrl+q", "quit", "Quit"),
+        ("ctrl+y", "copy_last", "Copy last"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -50,6 +50,14 @@ class KazmaTUI(App[None]):
         yield MetricsDashboard()
         yield ChatPanel()
         yield FooterShortcuts()
+
+    def action_copy_last(self) -> None:
+        """Copy the last chat message to clipboard."""
+        try:
+            chat = self.query_one(ChatPanel)
+            chat.action_copy_last()
+        except Exception:
+            pass
 
 
 def main() -> None:

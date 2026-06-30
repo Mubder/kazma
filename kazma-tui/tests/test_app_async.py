@@ -391,7 +391,6 @@ class TestFooterAsyncRendering:
                 assert len(statics) >= 1
                 text = statics[0].content
                 assert "ctrl+q" in text.lower() or "quit" in text.lower()
-                assert "tab" in text.lower()
                 assert "enter" in text.lower()
 
 

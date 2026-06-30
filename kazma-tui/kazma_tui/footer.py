@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # Ordered list of (key_label, description) pairs shown in the footer.
 SHORTCUTS: list[tuple[str, str]] = [
     ("Ctrl+Q", "Quit"),
-    ("Tab", "Switch"),
+    ("Ctrl+Y", "Copy"),
     ("Enter", "Send"),
 ]
 

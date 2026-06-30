@@ -191,12 +191,12 @@ class TestFooterShortcuts:
         assert "ctrl+q" in text.lower() or "ctrl-q" in text.lower() or "q" in text.lower()
 
     def test_footer_mentions_tab(self) -> None:
-        """Footer must reference Tab for switching panels."""
+        """Footer must reference Ctrl+Y for copy."""
         from kazma_tui.footer import FooterShortcuts
 
         widget = FooterShortcuts()
         text = widget._get_shortcuts_text()
-        assert "tab" in text.lower()
+        assert "y" in text.lower() or "copy" in text.lower()
 
     def test_footer_mentions_enter(self) -> None:
         """Footer must reference Enter for send."""

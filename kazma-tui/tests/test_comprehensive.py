@@ -360,13 +360,13 @@ class TestChatBehavioral:
             assert "/quit" in help_text
 
     def test_chat_clear_calls_clear_on_log(self) -> None:
-        """VAL-TUI-022: /clear must call clear() on the chat log widget."""
+        """VAL-TUI-022: /clear clears the chat log."""
         from kazma_tui.chat import ChatPanel
 
         panel = ChatPanel()
         mock_log = MagicMock()
         with patch.object(panel, "query_one", return_value=mock_log):
-            panel._clear_messages()
+            panel._handle_command("/clear")
             mock_log.clear.assert_called_once()
 
     def test_chat_quit_calls_app_exit(self) -> None:

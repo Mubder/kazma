@@ -1,13 +1,14 @@
 """Chat interface widget for the Kazma TUI.
 
-Provides ``ChatPanel``, a Textual widget that combines a scrollable
-message display with a text input field.  Supports built-in commands
-and AI response generation via ModelRegistry.
+Uses RichLog with properly-escaped user text so ``[bold]`` and other
+tags display literally.  System/Assistant messages can use Rich markup.
+Includes Ctrl+Y to copy the last message to the clipboard.
 """
 
 from __future__ import annotations
 
 import logging
+import subprocess
 
 from textual.app import ComposeResult
 from textual.widget import Widget
@@ -23,123 +24,116 @@ Available commands:
 
 Keyboard shortcuts:
   Enter   — Send message
+  Ctrl+Y  — Copy last message to clipboard
   Ctrl+Q  — Quit
 """
 
 
 class ChatPanel(Widget):
-    """Chat interface with message display, input field, and AI responses."""
+    """Chat interface — RichLog with escaped user input."""
 
     DEFAULT_CSS = """
-    ChatPanel {
-        height: 1fr;
-        border: solid $primary;
-        layout: vertical;
-    }
-
-    ChatPanel > #chat-log {
-        height: 1fr;
-    }
-
-    ChatPanel > #chat-input {
-        dock: bottom;
-        height: 3;
-    }
+    ChatPanel { height: 1fr; border: solid $primary; layout: vertical; }
+    ChatPanel > RichLog { height: 1fr; }
+    ChatPanel > Input { dock: bottom; height: 3; margin: 1; }
     """
 
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._last_raw: str = ""
+
     def compose(self) -> ComposeResult:
-        """Compose the chat layout: message log + input field."""
-        yield RichLog(id="chat-log", wrap=True, highlight=True)
+        yield RichLog(id="chat-log", wrap=True, highlight=True, markup=True)
         yield Input(placeholder="Type a message...", id="chat-input")
 
     def on_mount(self) -> None:
-        """Focus the input field when the widget mounts."""
         self._focus_input()
+        self.add_message("System", "[dim]Chat ready. Type /help for commands.[/dim]")
 
-    # ── Event handlers ──────────────────────────────────────────────
+    # ── Copy to clipboard ────────────────────────────────────────────
+
+    def action_copy_last(self) -> None:
+        """Copy the last raw message to the system clipboard."""
+        if not self._last_raw:
+            return
+        try:
+            proc = subprocess.run(
+                ["xclip", "-selection", "clipboard"],
+                input=self._last_raw, text=True, timeout=2,
+            )
+            if proc.returncode == 0:
+                self.add_message("System", "[dim]Copied to clipboard[/dim]")
+            else:
+                self.add_message("System", f"[red]Copy failed (exit {proc.returncode})[/red]")
+        except FileNotFoundError:
+            self.add_message("System", "[red]xclip not installed — run: sudo apt install xclip[/red]")
+        except Exception:
+            self.add_message("System", "[red]Copy failed[/red]")
+
+    # ── Message handling ─────────────────────────────────────────────
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle text submitted from the input field."""
         text = event.value.strip()
         event.input.value = ""
-
         if not text:
             return
-
+        self._last_raw = text
         if text.startswith("/"):
             self._handle_command(text)
         else:
-            self.add_message("You", text)
-            # Generate AI response
+            self.add_message("You", _escape_markup(text))
             self.app.call_later(self._generate_response, text)
-
         self._focus_input()
 
-    # ── AI response generation ──────────────────────────────────────
-
     def _generate_response(self, prompt: str) -> None:
-        """Generate an AI response via ModelRegistry and display it."""
+        import inspect
         try:
             from kazma_core.model_registry import get_model_registry
             registry = get_model_registry()
+            if registry is None:
+                self.add_message("System", "[dim]ModelRegistry not yet ready[/dim]")
+                return
             agent = registry.get_agent()
             if agent is None:
-                self.add_message("System", "[$error]No agent configured — check your model settings[/$error]")
+                self.add_message("System", "[dim]No agent configured. Set up a model in kazma.yaml[/dim]")
                 return
             response = agent.invoke(prompt)
             self.add_message("Assistant", response)
         except (RuntimeError, ImportError) as exc:
-            self.add_message("System", f"[$secondary]Agent unavailable: {exc}[/$secondary]")
+            self.add_message("System", f"[dim]Agent: {exc}[/dim]")
         except Exception as exc:
-            self.add_message("System", f"[$error]Error: {exc}[/$error]")
-
-    # ── Command handling ────────────────────────────────────────────
+            self.add_message("System", f"[red]Error: {exc}[/red]")
 
     def _handle_command(self, raw: str) -> None:
         cmd = raw.strip().lower()
-
         if cmd == "/help":
             self.add_message("System", _HELP_TEXT.strip())
-
         elif cmd == "/clear":
-            self._clear_messages()
-
+            try:
+                self.query_one("#chat-log", RichLog).clear()
+            except Exception:
+                pass
         elif cmd == "/quit":
             self.app.exit()
-
         else:
             self.add_message("System", f"Unknown command: {raw.strip()}")
 
-    # ── Message helpers ─────────────────────────────────────────────
-
     def add_message(self, role: str, text: str) -> None:
-        """Append a message to the chat log.
-
-        User text is escaped to prevent Rich markup from being interpreted
-        (e.g. '[bold]' in user input displays literally).
-        """
+        """Write a message.  Role is styled; text may contain Rich markup."""
         try:
             log = self.query_one("#chat-log", RichLog)
-            escaped = _escape(text) if role == "You" else text
-            log.write(f"[bold]{role}:[/bold] {escaped}")
+            log.write(f"[bold $primary]{role}:[/bold $primary] {text}")
         except Exception:
-            logger.debug("Chat log widget not yet mounted", exc_info=True)
-
-    def _clear_messages(self) -> None:
-        try:
-            log = self.query_one("#chat-log", RichLog)
-            log.clear()
-        except Exception:
-            logger.debug("Chat log widget not yet mounted", exc_info=True)
+            logger.debug("Chat log not yet mounted", exc_info=True)
 
     def _focus_input(self) -> None:
         try:
-            input_widget = self.query_one("#chat-input", Input)
-            input_widget.focus()
+            self.query_one("#chat-input", Input).focus()
         except Exception:
-            logger.debug("Chat input widget not yet mounted", exc_info=True)
+            pass
 
 
-def _escape(text: str) -> str:
-    """Escape Rich markup characters so they display literally."""
-    return text.replace("[", "\\[")
+def _escape_markup(text: str) -> str:
+    """Escape Rich markup so user input displays literally."""
+    import re
+    return re.sub(r"(\[)", r"\\\1", text)
