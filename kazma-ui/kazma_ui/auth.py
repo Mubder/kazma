@@ -48,6 +48,8 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/skills",
     "/api/models",
     "/api/ollama",
+    "/api/agents", "/api/providers", "/api/connectors",
+    "/api/chat", "/api/gateway",
 )
 
 #: Exact read-only paths that are always open regardless of secret config.
