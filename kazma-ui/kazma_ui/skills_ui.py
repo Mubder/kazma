@@ -58,8 +58,8 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             hub = KazmaHub()
             manifests = await hub.list_installed()
             await hub.close()
-            return [
-                {
+            for m in manifests:
+                skills.append({
                     "id": f"kazma-hub://{m.data.get('author', '')}/{m.data.get('name', '')}@{m.data.get('version', '')}",
                     "name": m.data.get("name", ""),
                     "version": m.data.get("version", ""),
@@ -70,12 +70,10 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                     "certification_level": "basic",
                     "capabilities": m.data.get("capabilities", []),
                     "tags": m.data.get("tags", []),
-                }
-                for m in manifests
-            ]
-        except Exception as e:
-            logger.warning("Failed to load installed skills: %s", e)
-            return []
+                })
+        except Exception:
+            pass
+        return skills
 
     async def _search_hub(query: str = "") -> list[dict[str, Any]]:
         """Search the Kazma Hub for skills."""

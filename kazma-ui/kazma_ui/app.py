@@ -79,6 +79,18 @@ def create_app(config_path: str | None = None) -> FastAPI:
     from kazma_ui.auth import create_auth_middleware
 
     app.middleware("http")(create_auth_middleware())
+    # ── MCP server management ───────────────────────────────────────
+    @app.delete("/api/mcp/servers/{server_name}")
+    async def _delete_mcp_server(server_name: str):
+        """Delete an MCP server configuration."""
+        try:
+            from kazma_core.mcp.manager import MCPManager
+            manager = MCPManager()
+            manager.remove_server(server_name)
+            return {"status": "ok", "message": f"Server '{server_name}' deleted"}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+
     # ── Typing indicator signal (#3) ─────────────────────────────────
     @app.get("/api/telemetry/typing")
     async def _typing_signal():
