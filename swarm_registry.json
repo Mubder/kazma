@@ -546,21 +546,6 @@
     "metadata": {}
   },
   {
-    "name": "alpha",
-    "expertise": [
-      "backend"
-    ],
-    "roles": [
-      "leaf"
-    ],
-    "model": "deepseek-chat",
-    "provider": "deepseek",
-    "worker_type": "in_process",
-    "system_prompt": "",
-    "enabled": true,
-    "metadata": {}
-  },
-  {
     "name": "worker-0",
     "expertise": [
       "leaf"
@@ -804,6 +789,21 @@
     "name": "task-log-worker",
     "expertise": [
       "leaf"
+    ],
+    "roles": [
+      "leaf"
+    ],
+    "model": "deepseek-chat",
+    "provider": "deepseek",
+    "worker_type": "in_process",
+    "system_prompt": "",
+    "enabled": true,
+    "metadata": {}
+  },
+  {
+    "name": "alpha",
+    "expertise": [
+      "backend"
     ],
     "roles": [
       "leaf"
