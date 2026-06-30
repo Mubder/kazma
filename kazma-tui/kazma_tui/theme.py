@@ -88,7 +88,9 @@ FooterShortcuts .shortcut-key {
    ═══════════════════════════════════════════════════════════════════════ */
 
 MetricsDashboard {
-    height: 10;
+    height: 11;
+    min-height: 11;
+    max-height: 11;
     background: $panel;
     border: solid $border;
     border-title-align: center;
@@ -96,8 +98,18 @@ MetricsDashboard {
     border-title-background: $surface;
     border-title-style: bold;
     margin: 1 1 0 1;
-    padding: 1 2;
+    padding: 0;
     overflow: hidden;
+}
+
+MetricsDashboard > Vertical {
+    height: 100%;
+    padding: 1;
+}
+
+MetricsDashboard .gauge-label {
+    color: $text-muted;
+    text-style: bold;
 }
 
 MetricsDashboard .gauge-label {
