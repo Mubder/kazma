@@ -1,35 +1,42 @@
 /* ═══════════════════════════════════════════════════════════════════
-   Kazma Design System v3 — kazma.ai Dark Theme
-   Background: #02040a | Accent: #06b6d4 (cyan) | Secondary: #a855f7 (purple)
-   Font: Inter + JetBrains Mono | Grid: 4px | Subtle grid texture
+   Kazma Design System v4 — design-b-modern
+   BG: #0a0f14 | Accent: #22d3ee (cyan) | Secondary: #a855f7 (purple)
+   Font: Inter, system-ui, sans-serif | Grid texture background
    ═══════════════════════════════════════════════════════════════════ */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&display=swap');
 
 /* ── 1. CSS Variables — kazma.ai palette ─────────────────────────── */
 :root {
+
+  /* Legacy aliases */
+  --bg-deep: var(--bg);
+  --bg-primary: var(--bg);
   /* Backgrounds — deep charcoal like kazma.ai */
-  --bg-deep: #02040a;
-  --bg-primary: #0a0f1a;
-  --bg-panel: #0e1420;
-  --bg-surface: #111827;
+  --bg: #0a0f14;
+  --bg-2: #0e141b;
+  --bg-panel: #11171f;
+  --bg-surface: #141c25;
   --bg-elevated: #1a2332;
-  --bg-hover: rgba(6, 182, 212, 0.06);
-  --bg-active: rgba(6, 182, 212, 0.10);
+  --bg-hover: rgba(34, 211, 238, 0.06);
+  --bg-active: rgba(34, 211, 238, 0.10);
+
+  /* Grid texture */
+  --grid: rgba(34, 211, 238, 0.03);
 
   /* Text — cool slate */
-  --text-primary: #e2e8f0;
-  --text-secondary: #94a3b8;
-  --text-tertiary: #64748b;
-  --text-muted: #475569;
-  --text-inverse: #02040a;
+  --text-primary: #e6edf3;
+  --text-secondary: #b1bac4;
+  --text-tertiary: #8b949e;
+  --text-muted: #6e7681;
+  --text-inverse: #0a0f14;
 
-  /* Accent — electric cyan (kazma.ai live) */
-  --accent: #00e5ff;
-  --accent-hover: #00f0ff;
-  --accent-light: #66f0ff;
-  --accent-subtle: rgba(0, 229, 255, 0.12);
-  --accent-glow: rgba(0, 229, 255, 0.25);
+  /* Accent — cyan (design-b) */
+  --accent: #22d3ee;
+  --accent-hover: #38dff2;
+  --accent-light: #67e8f9;
+  --accent-subtle: rgba(34, 211, 238, 0.12);
+  --accent-glow: rgba(34, 211, 238, 0.25);
 
   /* Secondary — purple (kazma.ai secondary) */
   --secondary: #a855f7;
@@ -112,9 +119,13 @@ html { font-size: 14px; -webkit-font-smoothing: antialiased; }
 /* Font size persistence — controlled by Alpine settings.js applyFontSize() */
 
 body {
-  font-family: var(--font-sans);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   font-feature-settings: var(--font-features);
-  background: var(--bg-primary);
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 32px 32px;
   color: var(--text-primary);
   line-height: 1.6;
   overflow: hidden;
@@ -1498,11 +1509,11 @@ tbody tr:last-child td {
   --text-muted: #b1bac4;
   --text-inverse: #ffffff;
 
-  --accent: #6C5CE7;
-  --accent-hover: #5b4bd6;
-  --accent-light: #6C5CE7;
-  --accent-subtle: rgba(108, 92, 231, 0.08);
-  --accent-glow: rgba(108, 92, 231, 0.15);
+  --accent: #22d3ee;
+  --accent-hover: #38dff2;
+  --accent-light: #22d3ee;
+  --accent-subtle: rgba(34, 211, 238, 0.08);
+  --accent-glow: rgba(34, 211, 238, 0.15);
 
   --border-subtle: rgba(0, 0, 0, 0.06);
   --border: rgba(0, 0, 0, 0.1);
