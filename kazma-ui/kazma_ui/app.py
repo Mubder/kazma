@@ -883,27 +883,19 @@ def create_app(config_path: str | None = None) -> FastAPI:
         "last_tick": time_module.time(),
     }
 
-    @app.get("/api/telemetry")
+    @app.get("/api/telemetry", deprecated=True)
     async def get_telemetry() -> dict:
-        """Return mock telemetry data: token usage and VRAM allocation.
+        """Return hardware telemetry data.
 
-        Simulates a local-edge inference setup (RTX 4090, 24GB VRAM).
-        Token counts vary to produce a realistic scrolling chart.
+        NOTE: This endpoint is deprecated.  Real metrics are available
+        at /api/telemetry/stream via SSE.  This endpoint returns empty
+        values for backward compatibility.
         """
-        now = time_module.time()
-        # Drift the base values smoothly every tick
-        if now - _telemetry_state["last_tick"] > 2.5:
-            _telemetry_state["tokens_base"] = max(200, _telemetry_state["tokens_base"] + random.randint(-150, 200))
-            _telemetry_state["vram_base"] = max(
-                512, min(20480, _telemetry_state["vram_base"] + random.randint(-128, 128))
-            )
-            _telemetry_state["last_tick"] = now
-
         return {
-            "tokens": _telemetry_state["tokens_base"],
-            "vram_mb": _telemetry_state["vram_base"],
-            "model": agent.get_llm_config().get("model", "local") if hasattr(agent, "get_llm_config") else "local",
-            "timestamp": now,
+            "tokens": 0,
+            "vram_mb": 0,
+            "model": "deprecated",
+            "timestamp": time_module.time(),
         }
 
     # NOTE: The duplicate mock /api/telemetry/stream route that was defined

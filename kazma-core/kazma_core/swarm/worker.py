@@ -302,11 +302,9 @@ class TelegramWorker(SwarmWorker):
         if context_value:
             prompt = f"{task}\n\nContext:\n{context_value}"
 
-        cmd = f"kazma -p {shlex.quote(self.profile)} {shlex.quote(prompt)}"
-
         try:
-            proc = await asyncio.create_subprocess_shell(
-                cmd,
+            proc = await asyncio.create_subprocess_exec(
+                "kazma", "-p", self.profile, prompt,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

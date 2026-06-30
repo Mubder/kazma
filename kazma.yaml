@@ -88,7 +88,7 @@ safety:
     auto_deny_on_timeout: true
 
 ui:
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 8000
   rtl: true
   title: Kazma Dashboard

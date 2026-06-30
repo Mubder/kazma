@@ -14,7 +14,7 @@ app_factory = "kazma_ui.app:create_app"
 try:
     # Start the server
     proc = subprocess.Popen(
-        [python_exe, "-m", "uvicorn", app_factory, "--factory", "--host", "0.0.0.0", "--port", "8000"],
+        [python_exe, "-m", "uvicorn", app_factory, "--factory", "--host", "127.0.0.1", "--port", "8000"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )

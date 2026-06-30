@@ -274,8 +274,8 @@ class TestDispatchTelegram:
         )
         mock_proc.returncode = 0
 
-        with patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell:
-            mock_shell.return_value = mock_proc
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = mock_proc
             result = await worker.dispatch("Deploy to staging")
 
         assert result["worker"] == "core"
@@ -300,8 +300,8 @@ class TestDispatchTelegram:
         )
         mock_proc.returncode = 1
 
-        with patch("asyncio.create_subprocess_shell", new_callable=AsyncMock) as mock_shell:
-            mock_shell.return_value = mock_proc
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+            mock_exec.return_value = mock_proc
             result = await worker.dispatch("task")
 
         assert result["status"] == "error"

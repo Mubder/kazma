@@ -20,4 +20,4 @@ RUN mkdir -p /app/kazma-data /root/.kazma/vector_memory
 EXPOSE 8000
 
 # --graceful-timeout 15 gives uvicorn time to drain on SIGTERM
-CMD ["python", "-m", "uvicorn", "kazma_ui.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "15"]
+CMD ["python", "-m", "uvicorn", "kazma_ui.app:create_app", "--factory", "--host", "127.0.0.1", "--port", "8000", "--timeout-graceful-shutdown", "15"]
