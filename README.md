@@ -204,6 +204,7 @@ a quick command list. Commands are grouped into **Core**, **Gateway**, **Swarm**
 | `kazma hub badge <name>` | Show a skill's certification badge |
 | `kazma hub certified` | List certified skills |
 | `kazma hub stats` | Show hub statistics |
+| `kazma hub check-certification <name>` | Check certification requirements |
 
 ### Project Commands
 

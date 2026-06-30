@@ -688,6 +688,23 @@ def create_swarm_router(
             "[Swarm] Worker spawned: %s (role=%s, model=%s/%s)",
             name, role, model, provider,
         )
+
+        # Sync to persistent WorkerRegistry
+        try:
+            from kazma_core.swarm.registry import WorkerRegistry, WorkerEntry
+            registry = WorkerRegistry()
+            registry.register(WorkerEntry(
+                name=name,
+                expertise=[role] if role else ["general"],
+                roles=["leaf"],
+                model=model,
+                provider=provider,
+                worker_type=worker_type,
+            ))
+            logger.info("[Swarm] WorkerRegistry synced (spawn): %s", name)
+        except Exception as exc:
+            logger.warning("[Swarm] WorkerRegistry sync failed (spawn): %s", exc)
+
         return JSONResponse(
             {"status": "ok", "worker": _serialize_worker(worker)},
             status_code=201,
