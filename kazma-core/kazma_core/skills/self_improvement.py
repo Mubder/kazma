@@ -13,6 +13,7 @@ Security boundary:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -187,40 +188,119 @@ Output ONLY the delta text, no preamble."""
     # ── Apply mutation ──────────────────────────────────────────────────
 
     async def apply_mutation(self, worker_name: str, delta: str) -> bool:
-        """Write the Soul delta to the worker's system prompt via WorkerRegistry.
+        """Stage the Soul delta into pending_evolution.json for HITL approval.
 
-        Returns True if the mutation was applied.
+        Returns True if the delta was staged.
+        Uses approve_delta() to actually apply after human approval.
         """
         if not delta or not self._enabled:
             return False
+        return self._stage_delta(worker_name, delta)
 
+    @staticmethod
+    def _pending_queue_path() -> Path:
+        from pathlib import Path
+        return Path.home() / ".kazma" / "pending_evolution.json"
+
+    @classmethod
+    def _stage_delta(cls, worker_name: str, delta: str) -> bool:
+        """Write delta to the pending HITL approval queue."""
+        import json, os as _os_stage, time as _time_stage
+        from pathlib import Path
         try:
-            from kazma_core.swarm.registry import WorkerRegistry
-
-            registry = WorkerRegistry()
-            entry = registry.get(worker_name)
-            if entry is None:
-                logger.warning("[SelfImprovement] Worker '%s' not in registry", worker_name)
-                return False
-
-            # Cap deltas — keep only the last 5 improvements
-            existing = entry.system_prompt
-            # Strip old SelfImprovement blocks to prevent unbounded growth
-            import re as _re_si
-            cleaned = _re_si.sub(r'\\n\\n\\[SelfImprovement\\].*?(?=\\n\\n\\[SelfImprovement\\]|$)', '', existing, count=max(0, len(_re_si.findall(r'\\[SelfImprovement\\]', existing)) - 4))
-            new_prompt = cleaned + delta
-            registry.update(worker_name, system_prompt=new_prompt)
-
-            self._mutation_log.append({
-                "worker": worker_name,
-                "delta": delta[:200],
-                "timestamp": __import__("time").strftime("%Y-%m-%d %H:%M:%S"),
-            })
-            logger.info("[SelfImprovement] Soul mutated for %s", worker_name)
+            queue_path = cls._pending_queue_path()
+            queue_path.parent.mkdir(parents=True, exist_ok=True)
+            pending: list[dict[str, Any]] = []
+            if queue_path.exists():
+                try:
+                    pending = json.loads(queue_path.read_text())
+                except json.JSONDecodeError:
+                    pending = []
+            entry = {
+                "id": f"ev_{int(_time_stage.time())}_{worker_name}",
+                "worker_name": worker_name,
+                "delta": delta,
+                "timestamp": _time_stage.strftime("%Y-%m-%dT%H:%M:%S"),
+                "status": "pending",
+            }
+            pending.append(entry)
+            queue_path.write_text(json.dumps(pending, indent=2, ensure_ascii=False))
+            logger.info("[SelfImprovement] Delta staged for HITL: %s → %s", worker_name, entry["id"])
             return True
         except Exception as exc:
-            logger.warning("[SelfImprovement] Mutation failed for %s: %s", worker_name, exc)
+            logger.warning("[SelfImprovement] Stage failed: %s", exc)
             return False
+
+    @classmethod
+    def get_pending_deltas(cls) -> list[dict[str, Any]]:
+        """Return all pending evolution deltas awaiting HITL approval."""
+        import json
+        try:
+            path = cls._pending_queue_path()
+            if not path.exists():
+                return []
+            return json.loads(path.read_text())
+        except Exception:
+            return []
+
+    @classmethod
+    def approve_delta(cls, delta_id: str) -> dict[str, Any]:
+        """Approve a pending delta — apply it to the worker's Soul."""
+        import json
+        try:
+            path = cls._pending_queue_path()
+            if not path.exists():
+                return {"success": False, "error": "No pending queue"}
+            pending = json.loads(path.read_text())
+            entry = None
+            remaining = []
+            for e in pending:
+                if e.get("id") == delta_id and e.get("status") == "pending":
+                    entry = e
+                else:
+                    remaining.append(e)
+            if entry is None:
+                return {"success": False, "error": f"Delta '{delta_id}' not found or not pending"}
+            # Apply to worker registry
+            from kazma_core.swarm.registry import WorkerRegistry
+            registry = WorkerRegistry()
+            worker_entry = registry.get(entry["worker_name"])
+            if worker_entry is not None:
+                new_prompt = worker_entry.system_prompt + "\n" + entry["delta"]
+                registry.update(entry["worker_name"], system_prompt=new_prompt)
+            entry["status"] = "approved"
+            remaining.append(entry)
+            path.write_text(json.dumps(remaining, indent=2, ensure_ascii=False))
+            logger.info("[SelfImprovement] Delta APPROVED and applied: %s", delta_id)
+            return {"success": True, "delta_id": delta_id, "worker_name": entry["worker_name"]}
+        except Exception as exc:
+            logger.warning("[SelfImprovement] Approve failed: %s", exc)
+            return {"success": False, "error": str(exc)}
+
+    @classmethod
+    def reject_delta(cls, delta_id: str) -> dict[str, Any]:
+        """Reject a pending delta — remove from queue without applying."""
+        import json
+        try:
+            path = cls._pending_queue_path()
+            if not path.exists():
+                return {"success": False, "error": "No pending queue"}
+            pending = json.loads(path.read_text())
+            remaining = []
+            found = False
+            for e in pending:
+                if e.get("id") == delta_id and e.get("status") == "pending":
+                    e["status"] = "rejected"
+                    found = True
+                remaining.append(e)
+            if not found:
+                return {"success": False, "error": f"Delta '{delta_id}' not found"}
+            path.write_text(json.dumps(remaining, indent=2, ensure_ascii=False))
+            logger.info("[SelfImprovement] Delta REJECTED: %s", delta_id)
+            return {"success": True, "delta_id": delta_id, "status": "rejected"}
+        except Exception as exc:
+            logger.warning("[SelfImprovement] Reject failed: %s", exc)
+            return {"success": False, "error": str(exc)}
 
     # ── Accessors ───────────────────────────────────────────────────────
 
