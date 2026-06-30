@@ -45,9 +45,9 @@ class ChatPanel(Widget):
         dock: bottom;
         height: 3;
         margin: 1;
-        background: $panel-alt;
-        border: solid $border;
-        color: $text;
+        background: #18181b;
+        border: solid #1e293b;
+        color: #e2e8f0;
     }
     ChatPanel > Input:focus {
         border: solid $primary;
