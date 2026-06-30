@@ -293,3 +293,104 @@ class UnifiedMemoryAdapter:
         uid = hashlib.sha256(text.encode()).hexdigest()[:16]
         worker = meta.get("worker", "default")
         self._l4.index(worker, uid, text)
+
+
+    # ── Soul Evolution logging ─────────────────────────────────────────
+
+    async def log_evolution(
+        self,
+        task_id: str,
+        worker_name: str,
+        timestamp: str = "",
+        original_prompt: str = "",
+        delta: str = "",
+        summary: str = "",
+    ) -> None:
+        """Persist a Soul Evolution log entry for semantic retrieval."""
+        if not timestamp:
+            from datetime import datetime, timezone
+            timestamp = datetime.now(timezone.utc).isoformat()
+        text = f"[SoulEvolution] worker={worker_name} task={task_id} summary={summary[:200]} delta={delta[:200]}"
+        meta = {
+            "worker": worker_name,
+            "task_id": task_id,
+            "timestamp": timestamp,
+            "original_prompt": original_prompt[:500],
+            "delta": delta[:500],
+            "summary": summary[:300],
+        }
+        await self.index(text, metadata=meta, tags=["soul_evolution", worker_name])
+
+    async def search(self, query_text: str, limit: int = 5) -> list[MemoryHit]:
+        """Semantic search alias for self-improvement queries."""
+        return await self.query(query_text, limit=limit)
+
+    # ── Self-improvement retrieval ────────────────────────────────────
+
+    async def get_evolution_history(
+        self,
+        worker_name: str,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Retrieve Soul Evolution log entries for a specific worker."""
+        hits = await self.query(
+            f"SoulEvolution {worker_name} improvement pattern",
+            tags=["soul_evolution", worker_name],
+            limit=limit,
+        )
+        return [
+            {
+                "score": h.score,
+                "summary": h.metadata.get("summary", ""),
+                "delta": h.metadata.get("delta", ""),
+                "task_id": h.metadata.get("task_id", ""),
+                "timestamp": h.metadata.get("timestamp", ""),
+            }
+            for h in hits
+        ]
+
+
+# ── Module-level singleton ──────────────────────────────────────────────
+
+_adapter: UnifiedMemoryAdapter | None = None
+
+
+def get_adapter() -> UnifiedMemoryAdapter | None:
+    """Return the shared adapter, initialized lazily with available backends."""
+    global _adapter
+    if _adapter is not None:
+        return _adapter
+    # Initialize with available backends
+    try:
+        from kazma_core.swarm.memory.vector import GlobalVectorStore
+        chroma = GlobalVectorStore()
+    except Exception:
+        chroma = None
+    try:
+        from kazma_core.swarm.memory.graph import KnowledgeGraph
+        graph = KnowledgeGraph()
+    except Exception:
+        graph = None
+    try:
+        from kazma_core.swarm.memory.fts5 import FTS5LexicalStore
+        fts5 = FTS5LexicalStore()
+    except Exception:
+        fts5 = None
+    try:
+        from kazma_core.swarm.memory.sqlite_vec import SQLiteVectorStore
+        sv = SQLiteVectorStore()
+    except Exception:
+        sv = None
+    _adapter = UnifiedMemoryAdapter(
+        vector_store=chroma,
+        graph=graph,
+        fts5_store=fts5,
+        sqlite_vec=sv,
+    )
+    return _adapter
+
+
+def set_adapter(adapter: UnifiedMemoryAdapter) -> None:
+    """Replace the shared adapter (for testing)."""
+    global _adapter
+    _adapter = adapter
