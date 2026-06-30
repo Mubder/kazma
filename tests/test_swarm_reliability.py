@@ -5,19 +5,15 @@ Covers validation contract assertions VAL-REL-001 through VAL-REL-015.
 
 from __future__ import annotations
 
-import asyncio
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from kazma_core.swarm.reliability import (
     CircuitBreaker,
     CircuitBreakerOpenError,
     CircuitState,
     RetryPolicy,
 )
-
 
 # ---------------------------------------------------------------------------
 # RetryPolicy tests (VAL-REL-001 through VAL-REL-007)

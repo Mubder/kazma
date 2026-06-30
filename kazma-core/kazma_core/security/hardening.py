@@ -592,7 +592,6 @@ class SecurityHardeningRunner:
             recommendation="Continue reviewing code for unsafe dynamic execution patterns",
         )
 import ast as _ast
-import subprocess as _subprocess
 
 _DANGEROUS_CALLS = {
     "os.system", "subprocess.run", "subprocess.call", "subprocess.Popen",
@@ -607,7 +606,7 @@ def _scan_file_for_dangerous_calls(filepath):
     """Scan a Python file for dangerous function calls using AST.
     Returns list of (line, function_name) tuples for matches."""
     try:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+        with open(filepath, encoding="utf-8", errors="ignore") as f:
             source = f.read()
         tree = _ast.parse(source)
         violations = []

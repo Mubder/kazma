@@ -16,8 +16,6 @@ import logging
 import re
 from typing import Any
 
-from kazma_core.swarm.task import SwarmTask, WorkerCapabilities
-
 logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────

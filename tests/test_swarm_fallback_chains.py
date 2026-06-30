@@ -7,10 +7,9 @@ Covers validation contract assertions:
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
-
 from kazma_core.swarm import (
     SwarmConfig,
     SwarmTask,
@@ -19,13 +18,11 @@ from kazma_core.swarm import (
 )
 from kazma_core.swarm.engine import SwarmEngine
 from kazma_core.swarm.reliability import (
-    CircuitBreaker,
     CircuitState,
     FallbackChain,
     RetryPolicy,
 )
-from kazma_core.swarm.task import HandoffRecord, WorkerResult
-
+from kazma_core.swarm.task import WorkerResult
 
 # ---------------------------------------------------------------------------
 # Helpers

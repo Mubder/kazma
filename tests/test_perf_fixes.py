@@ -31,7 +31,6 @@ class TestWebSearchNonBlocking:
     @staticmethod
     def _get_ws_module():
         """Get the actual web_search module (not the re-exported function)."""
-        import sys
         import importlib
 
         return importlib.import_module("kazma_core.tools.web_search")
@@ -255,7 +254,6 @@ class TestAgentHandlerDictsLRU:
     async def test_sessions_eviction(self) -> None:
         """The _sessions dict in agent_handler should evict old entries."""
         from kazma_gateway.agent_handler import _MAX_DICT_ENTRIES, create_graph_handler
-        from kazma_gateway.gateway import IncomingMessage
 
         graph = MagicMock()
         graph.ainvoke = MagicMock(return_value={"messages": []})
@@ -325,7 +323,6 @@ class TestAgentHandlerDictsLRU:
 def _make_error_test_app() -> FastAPI:
     """Build a minimal FastAPI app that mirrors app.py's error handlers."""
     import logging
-
     from pathlib import Path
 
     logger = logging.getLogger("test_error_app")

@@ -10,7 +10,7 @@ import logging
 
 from textual.app import ComposeResult
 from textual.widget import Widget
-from textual.widgets import Input, TextArea, Static
+from textual.widgets import Input, TextArea
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,6 @@ class ChatPanel(Widget):
             output = self.query_one("#chat-output", TextArea)
             output.text += f"{role}: {text}\n"
             # Auto-scroll to bottom
-            from textual.widgets._text_area import TextArea
             if hasattr(output, "move_cursor"):
                 output.move_cursor(output.document.line_count - 1)
         except Exception:

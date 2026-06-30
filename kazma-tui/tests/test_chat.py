@@ -162,7 +162,7 @@ class TestMessageDisplay:
         The message display widget should support scrolling.
         """
         from kazma_tui.chat import ChatPanel
-        from textual.widgets import TextArea, RichLog
+        from textual.widgets import RichLog, TextArea
 
         panel = ChatPanel()
         widgets = list(panel.compose())

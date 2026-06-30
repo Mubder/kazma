@@ -691,7 +691,7 @@ def create_swarm_router(
 
         # Sync to persistent WorkerRegistry
         try:
-            from kazma_core.swarm.registry import WorkerRegistry, WorkerEntry
+            from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
             registry = WorkerRegistry()
             registry.register(WorkerEntry(
                 name=name,
@@ -745,7 +745,7 @@ def create_swarm_router(
 
         # Sync to persistent WorkerRegistry
         try:
-            from kazma_core.swarm.registry import WorkerRegistry, WorkerEntry
+            from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
             registry = WorkerRegistry()
             registry.register(WorkerEntry(
                 name=name,

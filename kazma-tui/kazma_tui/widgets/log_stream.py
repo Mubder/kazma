@@ -7,9 +7,8 @@ SwarmMessageBus and displays worker log lines as they arrive.
 from __future__ import annotations
 
 import logging
+
 from textual.widgets import RichLog
-from textual.widget import Widget
-from textual.app import ComposeResult
 
 logger = logging.getLogger(__name__)
 

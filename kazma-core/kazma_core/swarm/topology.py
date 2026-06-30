@@ -66,9 +66,7 @@ async def _synthesize_refined_output(
 
 # ── Pipeline Dataclasses ──────────────────────────────────────────────────
 
-import asyncio
 from enum import StrEnum
-
 
 # ── Stage definitions ─────────────────────────────────────────────────────
 
@@ -287,8 +285,8 @@ class PipelineEngine:
         """
         cid = correlation_id or f"cid-{uuid.uuid4().hex[:12]}"
         started = __import__("time").perf_counter()
-        from kazma_core.swarm.engine import get_swarm_engine
         from kazma_core.swarm.bus import get_message_bus
+        from kazma_core.swarm.engine import get_swarm_engine
 
         engine = get_swarm_engine()
         bus = get_message_bus()

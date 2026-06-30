@@ -31,6 +31,7 @@ from kazma_core.swarm.engine import SwarmEngine, get_swarm_engine, set_swarm_eng
 from kazma_core.swarm.handoff import HandoffRequest, request_handoff
 from kazma_core.swarm.manager import SwarmManager
 from kazma_core.swarm.metrics import MetricsCollector, WorkerMetricSnapshot
+from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
 from kazma_core.swarm.reliability import (
     BoundedConcurrency,
     CircuitBreaker,
@@ -42,7 +43,6 @@ from kazma_core.swarm.reliability import (
     TimeoutGuard,
     TimeoutGuardError,
 )
-from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
 from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
 from kazma_core.swarm.safety import SafetyMiddleware, SafetyViolationError, get_safety
 from kazma_core.swarm.task import (
@@ -56,12 +56,12 @@ from kazma_core.swarm.task import (
 )
 from kazma_core.swarm.task_store import TaskStore
 from kazma_core.swarm.topology import (
+    STANDARD_PIPELINE,
     PipelineEngine,
     PipelineResult,
     PipelineStage,
     RefinerStage,
     StageRole,
-    STANDARD_PIPELINE,
 )
 from kazma_core.swarm.tracing import InMemorySpanExporter, Span, TracingEmitter
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker

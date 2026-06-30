@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import os as _os_hub
 import uuid
 from typing import Any
 
@@ -19,8 +20,6 @@ from kazma_core.hub.badges import CertificationBadgeSystem
 from kazma_core.hub.manifest_schema import SkillManifest
 from kazma_core.hub.registry import KazmaHub
 
-import os as _os_hub
-import hmac as _hmac_hub
 
 def _require_auth(request: Request) -> None:
     """Require KAZMA_SECRET for write endpoints."""

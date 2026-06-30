@@ -874,7 +874,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
         _init_errors.append({"subsystem": "gateway", "error": str(e)})
 
     # ── /api/telemetry — Mock telemetry data for Chart.js dashboard ──
-    import random
     import time as time_module
 
     _telemetry_state = {
@@ -1039,8 +1038,9 @@ def main() -> None:
     parser.add_argument("--port", "-p", type=int, default=8000, help="Port to bind (default: 8000)")
     args, _ = parser.parse_known_args()
 
-    import uvicorn
     import os as _os3
+
+    import uvicorn
 
     # Security: default to localhost.  Only bind 0.0.0.0 when
     # KAZMA_SECRET is explicitly set, otherwise log a warning.

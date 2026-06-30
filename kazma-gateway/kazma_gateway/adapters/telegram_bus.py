@@ -16,10 +16,10 @@ import logging
 from typing import Any
 
 from kazma_core.swarm.bus import (
+    ApprovalRequest,
     BusAdapter,
     BusMessage,
     SwarmReport,
-    ApprovalRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -113,7 +113,7 @@ class TelegramBusAdapter(BusAdapter):
         }.get(report.status, "📍")
 
         lines = [
-            f"🐝 *SWARM REPORT*",
+            "🐝 *SWARM REPORT*",
             "━━━━━━━━━━━━━━━━━━━━━",
             f"*Worker:* {_escape_md(report.worker_name)}",
             f"*Role:* {_escape_md(report.worker_role)}",
@@ -208,7 +208,7 @@ class TelegramBusAdapter(BusAdapter):
         try:
             await asyncio.wait_for(event.wait(), timeout=_APPROVAL_TIMEOUT)
             approved = self._pending_results.get(approval.task_id, False)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning("[TelegramBus] Approval timed out for task %s", approval.task_id)
             approved = False
         finally:

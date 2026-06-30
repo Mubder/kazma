@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import pytest
-
 from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
-from kazma_core.swarm.task import SwarmTask, TaskType, WorkerCapabilities
-
+from kazma_core.swarm.task import SwarmTask, WorkerCapabilities
 
 # ---------------------------------------------------------------------------
 # Fixtures
