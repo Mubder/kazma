@@ -237,14 +237,52 @@
       data.sessions.forEach(function(s) {
         const tr = document.createElement('tr');
         tr.style.cssText = 'border-bottom:1px solid var(--border-subtle);transition:background 0.15s;';
-        tr.innerHTML =
-          '<td style="padding:10px 16px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + s.thread_id + '">' + (s.thread_id||'unknown') + '</td>' +
-          '<td style="padding:10px 16px;"><span class="badge badge-basic" style="font-size:0.7rem;">' + (s.platform||'unknown') + '</span></td>' +
-          '<td style="padding:10px 16px;font-weight:500;">' + (s.display_name||'anonymous') + '</td>' +
-          '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + (s.message_count||0) + '</td>' +
-          '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + (s.context_tokens||0) + '</td>' +
-          '<td style="padding:10px 16px;font-size:0.75rem;color:var(--text-muted);">' + (s.created_at?new Date(s.created_at).toLocaleString():I18N.na) + '</td>' +
-          '<td style="padding:10px 16px;text-align:center;"><button onclick="window._deleteSession(\'' + s.thread_id + '\')" class="btn btn-sm btn-danger" style="padding:4px 8px;font-size:0.7rem;">' + I18N.delete + '</button></td>';
+
+        function makeTd(inner, style) {
+          const td = document.createElement('td');
+          td.style.cssText = style;
+          td.textContent = inner;
+          return td;
+        }
+
+        // thread_id — safe text
+        const tidTd = makeTd(s.thread_id||'unknown', 'padding:10px 16px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
+        tidTd.title = s.thread_id||'';
+        tr.appendChild(tidTd);
+
+        // platform — safe text inside badge
+        const platTd = document.createElement('td');
+        platTd.style.cssText = 'padding:10px 16px;';
+        const badge = document.createElement('span');
+        badge.className = 'badge badge-basic';
+        badge.style.cssText = 'font-size:0.7rem;';
+        badge.textContent = s.platform||'unknown';
+        platTd.appendChild(badge);
+        tr.appendChild(platTd);
+
+        // display_name — safe text (was XSS vector)
+        tr.appendChild(makeTd(s.display_name||'anonymous', 'padding:10px 16px;font-weight:500;'));
+
+        // message_count — safe number
+        tr.appendChild(makeTd(String(s.message_count||0), 'padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
+
+        // context_tokens — safe number
+        tr.appendChild(makeTd(String(s.context_tokens||0), 'padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
+
+        // created_at — safe date
+        tr.appendChild(makeTd(s.created_at?new Date(s.created_at).toLocaleString():I18N.na, 'padding:10px 16px;font-size:0.75rem;color:var(--text-muted);'));
+
+        // delete button
+        const delTd = document.createElement('td');
+        delTd.style.cssText = 'padding:10px 16px;text-align:center;';
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-danger';
+        btn.style.cssText = 'padding:4px 8px;font-size:0.7rem;';
+        btn.textContent = I18N.delete;
+        btn.onclick = function() { window._deleteSession(s.thread_id); };
+        delTd.appendChild(btn);
+        tr.appendChild(delTd);
+
         tbody.appendChild(tr);
       });
     } catch(e) {

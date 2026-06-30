@@ -11,13 +11,26 @@ import json
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 
 from kazma_core.hub.badges import CertificationBadgeSystem
 from kazma_core.hub.manifest_schema import SkillManifest
 from kazma_core.hub.registry import KazmaHub
+
+import os as _os_hub
+import hmac as _hmac_hub
+
+def _require_auth(request: Request) -> None:
+    """Require KAZMA_SECRET for write endpoints."""
+    expected = _os_hub.environ.get("KAZMA_SECRET", "")
+    if not expected:
+        return  # no secret configured → allow (backward compat)
+    provided = request.headers.get("x-kazma-secret", "")
+    if not _hmac_hub.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized — provide X-Kazma-Secret header")
+
 
 # ---------------------------------------------------------------------------
 # FastAPI app
@@ -256,8 +269,10 @@ async def search_skills(
 
 
 @app.post("/api/v1/skills/submit", response_model=SubmissionResponse)
-async def submit_skill(payload: SubmissionRequest):
-    """Submit a skill for certification review."""
+async def submit_skill(payload: SubmissionRequest, request: Request):
+    """Submit a skill for certification review (auth required)."""
+    # Auth: require KAZMA_SECRET header for write operations
+    _require_auth(request)
     api = _get_api()
 
     manifest = payload.manifest

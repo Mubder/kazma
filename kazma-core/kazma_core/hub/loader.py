@@ -186,11 +186,36 @@ class SkillLoader:
         """Load a Python module from a file path using importlib.util.
 
         This avoids collisions with common module names like 'main' and
-        allows proper hot-reloading.
+        allows proper hot-reloading.  Checksum verification is performed
+        before execution to prevent loading tampered skills.
+
+        Raises:
+            SkillLoadError: If the module cannot be created, its checksum
+                does not match the stored manifest, or execution fails.
         """
         # Remove any cached version
         if unique_name in sys.modules:
             del sys.modules[unique_name]
+
+        # ── Checksum verification ──────────────────────────────────
+        manifest_path = file_path.parent / "skill_manifest.yaml"
+        if manifest_path.exists():
+            import hashlib
+            try:
+                actual_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+                import yaml
+                manifest = yaml.safe_load(manifest_path.read_text())
+                stored_hash = manifest.get("checksum", "") if isinstance(manifest, dict) else ""
+                if stored_hash and stored_hash != actual_hash:
+                    raise SkillLoadError(
+                        f"Checksum mismatch for {file_path.name} in skill {skill_name}. "
+                        f"Expected {stored_hash[:16]}..., got {actual_hash[:16]}... "
+                        f"The skill file may have been tampered with."
+                    )
+            except SkillLoadError:
+                raise
+            except Exception:
+                pass  # skip checksum if manifest can't be read (backward compat)
 
         spec = importlib.util.spec_from_file_location(unique_name, str(file_path))
         if spec is None or spec.loader is None:

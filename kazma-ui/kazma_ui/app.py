@@ -347,7 +347,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         from kazma_core.agent.sub_agent import SubAgentManager, set_sub_agent_manager
 
         sub_agent_mgr = SubAgentManager(
-            graph_builder=lambda tools=None, hitl_config=None: agent.get_streaming_graph(),
+            graph_builder=lambda tools=None, hitl_config=None: agent.get_streaming_graph(tool_whitelist=tools, hitl_config=hitl_config),
             max_concurrent=3,
         )
         set_sub_agent_manager(sub_agent_mgr)
@@ -1048,9 +1048,21 @@ def main() -> None:
     args, _ = parser.parse_known_args()
 
     import uvicorn
+    import os as _os3
+
+    # Security: default to localhost.  Only bind 0.0.0.0 when
+    # KAZMA_SECRET is explicitly set, otherwise log a warning.
+    host = "127.0.0.1"
+    if _os3.environ.get("KAZMA_SECRET"):
+        host = "0.0.0.0"
+    else:
+        logger.warning(
+            "[app] KAZMA_SECRET not set — binding to 127.0.0.1 only. "
+            "Set KAZMA_SECRET to bind on all interfaces."
+        )
 
     app = create_app()
-    uvicorn.run(app, host="0.0.0.0", port=args.port, log_level="info")
+    uvicorn.run(app, host=host, port=args.port, log_level="info")
 
 
 if __name__ == "__main__":

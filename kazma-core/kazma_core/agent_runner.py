@@ -618,6 +618,10 @@ async def run_agent(
     """
     agent = KazmaAgent(config)
 
+    # Wire thread_id for durable resume
+    if thread_id:
+        agent._thread_id = thread_id
+
     # Connect MCP servers
     tool_count = await agent.connect_mcp_servers()
     if tool_count > 0:

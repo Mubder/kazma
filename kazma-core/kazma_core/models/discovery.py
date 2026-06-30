@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 _OLLAMA_BASE = "http://127.0.0.1:11434"
 _OLLAMA_TAGS_URL = f"{_OLLAMA_BASE}/api/tags"
-_LM_STUDIO_DEFAULT_URL = "http://192.168.50.28:1234/v1"
+_LM_STUDIO_DEFAULT_URL = "http://127.0.0.1:1234/v1"
 _TIMEOUT = 3.0
 
 

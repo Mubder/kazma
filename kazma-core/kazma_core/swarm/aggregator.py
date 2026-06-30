@@ -188,7 +188,8 @@ class ResultAggregator:
             return self._fallback_synthesis(task, successful_results)
         finally:
             if provider is not None:
-                await provider.close()
+                # Do NOT close the shared provider client — the main agent may still need it
+                pass  # await provider.close() was closing the process-wide httpx pool
 
     @staticmethod
     def _fallback_synthesis(
