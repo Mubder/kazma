@@ -54,7 +54,7 @@ Kazma is an open-source framework for building reliable, culturally-aware AI age
 | **Cultural Moat** | Native Arabic support (MSA/Gulf dialects) with "Majlis Mode" protocol |
 | **Docker Deployable** | Single `docker compose up` — 2 volumes, graceful shutdown |
 
----
+
 
 ## 📦 Quick Start
 
