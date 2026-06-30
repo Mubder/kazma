@@ -81,22 +81,22 @@ class TestHeaderEdgeCases:
         assert hasattr(widget, "model")
 
     def test_header_title_static(self) -> None:
-        """Header must include a title static showing 'Kazma TUI'."""
+        """Header must include a logo static showing the KA ASCII art."""
         from kazma_tui.header import HeaderProviderModel
 
         widget = HeaderProviderModel()
         widgets = list(widget.compose())
         ids = [getattr(w, "id", None) for w in widgets]
-        assert "header-title" in ids
+        assert "ka-logo" in ids
 
     def test_header_separator_static(self) -> None:
-        """Header must include a separator between title and profile."""
+        """Header must include a tagline static."""
         from kazma_tui.header import HeaderProviderModel
 
         widget = HeaderProviderModel()
         widgets = list(widget.compose())
         ids = [getattr(w, "id", None) for w in widgets]
-        assert "header-separator" in ids
+        assert "ka-tagline" in ids
 
     def test_header_profile_static(self) -> None:
         """Header must include a profile static for provider/model display."""
