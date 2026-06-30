@@ -2,7 +2,7 @@
 // ── Font size persistence (backend + localStorage) ────────────────
 (function() {
   var saved = localStorage.getItem('kazma-font-size') || 'md';
-  document.body.classList.add('font-' + saved);
+  document.documentElement.classList.add('font-' + saved);
 
   // Sync from backend settings on load
   try {
@@ -13,8 +13,8 @@
           var size = 'md';
           if (d.font_size <= 13) size = 'sm';
           else if (d.font_size >= 17) size = 'lg';
-          document.body.classList.remove('font-sm', 'font-md', 'font-lg');
-          document.body.classList.add('font-' + size);
+          document.documentElement.classList.remove('font-sm', 'font-md', 'font-lg');
+          document.documentElement.classList.add('font-' + size);
           localStorage.setItem('kazma-font-size', size);
         }
       })
@@ -22,8 +22,8 @@
   } catch(e) {}
 
   window.setKazmaFont = function(size) {
-    document.body.classList.remove('font-sm', 'font-md', 'font-lg');
-    document.body.classList.add('font-' + size);
+    document.documentElement.classList.remove('font-sm', 'font-md', 'font-lg');
+    document.documentElement.classList.add('font-' + size);
     localStorage.setItem('kazma-font-size', size);
     // Persist to backend
     var fontSizeMap = {sm: 13, md: 16, lg: 19};
