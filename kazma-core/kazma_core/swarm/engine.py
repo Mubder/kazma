@@ -1499,11 +1499,25 @@ class SwarmEngine:
         )
 
     async def dispatch_by_name(self, worker_name: str, task: str) -> dict[str, Any]:
-        """Summon a worker by name and dispatch a task."""
+        """Summon a worker by name and dispatch a task with episodic memory context."""
         worker = self.summon(worker_name)
         if worker is None:
             return {"synthesis": f"Worker '{worker_name}' not found", "opinions": []}
-        result = await worker.dispatch(task)
+        # Inject episodic memory context before dispatch
+        enriched = task
+        try:
+            from kazma_core.swarm.memory.adapter import get_adapter
+            adapter = get_adapter()
+            if adapter is not None:
+                hits = await adapter.search(task, limit=3)
+                if hits:
+                    strategies = [h.content or h.metadata.get("summary", "") for h in hits]
+                    episodic = " | ".join(s for s in strategies if s)
+                    if episodic:
+                        enriched = f"PREVIOUS_SUCCESSFUL_STRATEGIES: {episodic[:1500]}\n\n{task}"
+        except Exception:
+            pass
+        result = await worker.dispatch(enriched)
         return {"synthesis": result.get("output", ""), "opinions": [result]}
 
     async def consult(self, expertise: str, task: str) -> dict[str, Any]:
