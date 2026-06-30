@@ -78,7 +78,7 @@ class KuwaitiPipeline(BasePipeline):
         request: AgentRequest,
         token_result: TokenResult,
     ) -> AgentResponse:
-        """Execute Kuwaiti pipeline."""
+        """Execute Kuwaiti pipeline — processes with dialect-aware LLM call."""
         dialect_tokens = token_result.dialect_tokens
         code_switch = token_result.code_switch_tokens
 
@@ -90,8 +90,25 @@ class KuwaitiPipeline(BasePipeline):
             "dialect_meanings": {t.text: t.dialect_meaning for t in dialect_tokens if t.dialect_meaning},
         }
 
+        # Real LLM call with dialect-specific system prompt
+        try:
+            from kazma_core.model_registry import get_model_registry
+            provider = get_model_registry().get_client()
+            if provider is not None:
+                messages = [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": request.text},
+                ]
+                response = await provider.chat(messages)
+                text = response.content
+            else:
+                text = request.text
+        except Exception as exc:
+            logger.warning("[KuwaitiPipeline] LLM call failed: %s", exc)
+            text = request.text
+
         return AgentResponse(
-            text=request.text,
+            text=text,
             dialect=token_result.dialect.dialect,
             confidence=token_result.dialect.confidence,
             pipeline_used=self.name,
@@ -118,15 +135,32 @@ class MSAPipeline(BasePipeline):
         request: AgentRequest,
         token_result: TokenResult,
     ) -> AgentResponse:
-        """Execute MSA pipeline."""
+        """Execute MSA pipeline — processes with LLM call."""
         metadata: dict[str, Any] = {
             "pipeline": self.name,
             "total_tokens": len(token_result.tokens),
             "normalized_words": sum(1 for t in token_result.tokens if t.dialect_meaning is not None),
         }
 
+        # Real LLM call with MSA-specific system prompt
+        try:
+            from kazma_core.model_registry import get_model_registry
+            provider = get_model_registry().get_client()
+            if provider is not None:
+                messages = [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": request.text},
+                ]
+                response = await provider.chat(messages)
+                text = response.content
+            else:
+                text = request.text
+        except Exception as exc:
+            logger.warning("[MSAPipeline] LLM call failed: %s", exc)
+            text = request.text
+
         return AgentResponse(
-            text=request.text,
+            text=text,
             dialect=token_result.dialect.dialect,
             confidence=token_result.dialect.confidence,
             pipeline_used=self.name,
