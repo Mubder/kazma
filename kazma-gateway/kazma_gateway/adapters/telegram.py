@@ -224,6 +224,22 @@ class TelegramAdapter(BaseAdapter):
                     if await self.jitter_sleep(shutdown_event):
                         break
                     continue
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 409:
+                        # 409 Conflict — another process is polling this bot.
+                        # Log once, then back off for 30 seconds.
+                        logger.error(
+                            "[telegram] 409 Conflict — another process is polling bot %s. "
+                            "Stopping adapter. Stop the other process or use a different bot token.",
+                            self._token[:10] if self._token else "???",
+                        )
+                        # Stop the adapter — retrying will just spam the log.
+                        self._running = False
+                        break
+                    logger.exception("[telegram] HTTP %d polling error", exc.response.status_code)
+                    if await self.jitter_sleep(shutdown_event):
+                        break
+                    continue
                 except Exception:
                     logger.exception("[telegram] Poll error")
                     if await self.jitter_sleep(shutdown_event):

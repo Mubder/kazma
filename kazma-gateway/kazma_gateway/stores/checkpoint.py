@@ -137,6 +137,85 @@ class CheckpointManager(BaseCheckpointSaver):
         if hasattr(self._saver, "conn") and self._saver.conn:
             await self._saver.conn.close()
 
+    async def list_checkpoints(self, limit: int = 50) -> list[dict[str, Any]]:
+        """List checkpointed threads with their latest checkpoint metadata.
+
+        Queries the underlying checkpoint store for distinct thread_ids
+        and returns summary info for each.
+
+        Args:
+            limit: Maximum number of threads to return.
+
+        Returns:
+            List of dicts with keys: thread_id, checkpoint_id, created_at,
+            message_count, context_tokens.
+        """
+        conn = self.conn
+        if conn is None:
+            return []
+        try:
+            # Each checkpoint row stores metadata as JSON in the
+            # ``checkpoint`` column.  We pick the latest checkpoint per
+            # thread (highest checkpoint_id) so the dashboard shows the
+            # most recent state.
+            cursor = await conn.execute(
+                """
+                SELECT
+                    thread_id,
+                    checkpoint_id,
+                    COALESCE(type, '') AS type
+                FROM (
+                    SELECT
+                        thread_id,
+                        checkpoint_id,
+                        type,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY thread_id
+                            ORDER BY checkpoint_id DESC
+                        ) AS rn
+                    FROM checkpoints
+                )
+                WHERE rn = 1
+                ORDER BY checkpoint_id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = await cursor.fetchall()
+            results: list[dict[str, Any]] = []
+            for row in rows:
+                thread_id = row[0]
+                checkpoint_id = row[1]
+                # Try to extract message count from the checkpoint blob
+                msg_count = 0
+                try:
+                    blob_cursor = await conn.execute(
+                        "SELECT checkpoint FROM checkpoints "
+                        "WHERE thread_id = ? AND checkpoint_id = ? LIMIT 1",
+                        (thread_id, checkpoint_id),
+                    )
+                    blob_row = await blob_cursor.fetchone()
+                    if blob_row and blob_row[0]:
+                        import json as _json
+
+                        cp_data = _json.loads(blob_row[0])
+                        msgs = cp_data.get("channel_values", {}).get("messages", [])
+                        if isinstance(msgs, list):
+                            msg_count = len(msgs)
+                except Exception:
+                    pass
+                results.append({
+                    "thread_id": thread_id,
+                    "checkpoint_id": str(checkpoint_id),
+                    "created_at": "",
+                    "message_count": msg_count,
+                    "context_tokens": 0,
+                })
+            return results
+        except Exception:
+            logger.debug("[Checkpoint] list_checkpoints query failed", exc_info=True)
+            return []
+
     @property
     def active_locks(self) -> int:
         """Number of thread locks currently held."""
