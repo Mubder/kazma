@@ -54,3 +54,7 @@ kazma-core/kazma-data/
 # Local config overrides
 kazma.local.yaml
 kazma.local.yml
+swarm_registry.json
+models/*.pt
+models/*.onnx
+kazma-data/

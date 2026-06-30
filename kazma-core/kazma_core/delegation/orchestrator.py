@@ -158,6 +158,10 @@ class DelegationOrchestrator:
         if self.cost_breaker is not None:
             self.cost_breaker.record_cost(result.total_cost)
 
+        # Evict oldest if over limit
+        if len(self._active_orchestrations) >= self._max_orchestrations:
+            oldest = next(iter(self._active_orchestrations))
+            del self._active_orchestrations[oldest]
         self._active_orchestrations[result.task_id] = result
         logger.info(
             "Orchestration %s complete: %d/%d sub-tasks, cost=$%.4f",

@@ -196,12 +196,7 @@ class CheckpointManager(BaseCheckpointSaver):
                     )
                     blob_row = await blob_cursor.fetchone()
                     if blob_row and blob_row[0]:
-                        import json as _json
-
-                        cp_data = _json.loads(blob_row[0])
-                        msgs = cp_data.get("channel_values", {}).get("messages", [])
-                        if isinstance(msgs, list):
-                            msg_count = len(msgs)
+                        msg_count = self._try_decode_message_count(blob_row[0])
                 except Exception:
                     pass
                 results.append({
@@ -215,6 +210,25 @@ class CheckpointManager(BaseCheckpointSaver):
         except Exception:
             logger.debug("[Checkpoint] list_checkpoints query failed", exc_info=True)
             return []
+
+    @staticmethod
+    def _try_decode_message_count(blob: bytes) -> int:
+        """Decode message count from LangGraph checkpoint blob.
+
+        Tries msgpack first (LangGraph's serde), then JSON as fallback.
+        Returns 0 on any decode failure.
+        """
+        try:
+            import msgpack
+            cp_data = msgpack.unpackb(blob, raw=False)
+        except Exception:
+            try:
+                import json
+                cp_data = json.loads(blob if isinstance(blob, str) else blob.decode("utf-8", errors="replace"))
+            except Exception:
+                return 0
+        msgs = cp_data.get("channel_values", {}).get("messages", [])
+        return len(msgs) if isinstance(msgs, list) else 0
 
     @property
     def active_locks(self) -> int:
