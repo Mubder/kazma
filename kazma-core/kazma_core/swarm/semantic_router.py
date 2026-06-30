@@ -89,23 +89,23 @@ class SemanticRouter:
     # ── Lazy initialization ────────────────────────────────────────────
 
     def _ensure_model(self) -> bool:
-        """Lazy-load the sentence-transformers model.  Returns True on success."""
+        """Lazy-load the sentence-transformers model via shared singleton.
+
+        Uses ``get_encoder()`` from ``swarm.memory.vector`` so the model
+        is never double-loaded across the system.
+        """
         if self._model is not None:
             return True
         try:
-            from sentence_transformers import SentenceTransformer
+            from kazma_core.swarm.memory.vector import get_encoder
 
-            self._model = SentenceTransformer(self._model_name)
-            logger.info("[SemanticRouter] Loaded model: %s", self._model_name)
-            return True
-        except ImportError:
-            logger.warning(
-                "[SemanticRouter] sentence-transformers not installed — "
-                "keyword fallback active"
-            )
+            self._model = get_encoder(self._model_name)
+            if self._model is not None:
+                logger.info("[SemanticRouter] Using shared encoder: %s", self._model_name)
+                return True
             return False
         except Exception as exc:
-            logger.warning("[SemanticRouter] Model load failed: %s", exc)
+            logger.warning("[SemanticRouter] Shared encoder unavailable: %s", exc)
             return False
 
     def _ensure_collection(self) -> bool:
