@@ -38,6 +38,7 @@ class ArabicTokenizer:
             "من",
             "على",
             "إلى",
+            "الي",  # normalized (without hamza — BUG-023 fix)
             "عن",
             "مع",
             "هذا",
@@ -45,6 +46,7 @@ class ArabicTokenizer:
             "التي",
             "الذي",
             "أن",
+            "ان",  # normalized (BUG-023 fix)
             "كان",
             "هو",
             "هي",
@@ -57,6 +59,7 @@ class ArabicTokenizer:
             "كلما",
             # Pronouns (with and without hamza for normalization compatibility)
             "أنا",
+            "انا",
             "انت",
             "انتما",
             "هم",
@@ -79,6 +82,7 @@ class ArabicTokenizer:
             # Common connectors
             "و",
             "أو",
+            "او",  # normalized (BUG-023 fix)
             "ثم",
             "حتى",
             "عندما",

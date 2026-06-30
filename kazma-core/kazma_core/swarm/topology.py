@@ -334,7 +334,8 @@ class PipelineEngine:
 
         total_ms = (__import__("time").perf_counter() - started) * 1000
 
-        return PipelineResult(
+        # ── Self-improvement hook ───────────────────────────────────
+        result = PipelineResult(
             pipeline_id=cid,
             stages=stages,
             status=overall_status,
@@ -342,6 +343,26 @@ class PipelineEngine:
             total_duration_ms=total_ms,
             correlation_id=cid,
         )
+
+        # After pipeline completes, trigger Soul evolution for each worker
+        try:
+            from kazma_core.skills.self_improvement import get_self_improvement
+
+            si = get_self_improvement()
+            for stage in stages:
+                if stage.worker_name:
+                    analysis = await si.analyze(
+                        worker_name=stage.worker_name,
+                        task=task,
+                        stages=stages,
+                        status=overall_status,
+                    )
+                    if analysis.get("action") == "mutate":
+                        await si.apply_mutation(stage.worker_name, analysis["delta"])
+        except Exception as exc:
+            logger.debug("[PipelineEngine] Self-improvement hook failed: %s", exc)
+
+        return result
 
 
 # ── Convenience ────────────────────────────────────────────────────────────
