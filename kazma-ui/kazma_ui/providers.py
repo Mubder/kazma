@@ -177,6 +177,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             headers: dict[str, str] = {"Content-Type": "application/json"}
             if api_key:
                 headers["Authorization"] = f"Bearer {api_key}"
+            from kazma_core.security.ssrf import validate_url
+            validate_url(base_url)
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(f"{base_url}/models", headers=headers)
                 latency = int((time.monotonic() - start) * 1000)
