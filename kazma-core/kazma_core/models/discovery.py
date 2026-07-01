@@ -456,7 +456,7 @@ async def get_model_base_url(model_name: str) -> str | None:
         if prefix == "ollama":
             return f"{_OLLAMA_BASE}/v1"
         if prefix == "openai":
-            return normalize_provider_url(_LM_STUDIO_DEFAULT_URL)
+            return "https://api.openai.com/v1"
 
     # Probe all
     discovered = await get_active_local_models()

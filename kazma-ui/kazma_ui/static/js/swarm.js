@@ -1400,7 +1400,9 @@
     if (!chatId) {
       payload = { clear: true };
     } else {
-      payload = { platform: 'telegram', chat_id: Number(chatId), enabled: enabled };
+      // Send chat_id as a string to avoid Number precision loss on large
+      // Telegram supergroup IDs (>2^53). The server parses it via int().
+      payload = { platform: 'telegram', chat_id: chatId, enabled: enabled };
     }
     fetch('/api/swarm/output-target', {
       method: 'PUT',

@@ -661,6 +661,10 @@ def create_swarm_router(
         target.setdefault("platform", "telegram")
         target.setdefault("chat_id", None)
         target.setdefault("enabled", False)
+        # Serialize chat_id as a string so large Telegram supergroup IDs
+        # (>2^53) survive JSON.parse on the client without precision loss.
+        if target["chat_id"] is not None:
+            target = {**target, "chat_id": str(target["chat_id"])}
         return JSONResponse({"output_target": target})
 
     @router.put("/api/swarm/output-target")

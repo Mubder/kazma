@@ -72,13 +72,49 @@ class ConfigStore:
 
     # ── Public API ────────────────────────────────────────────────────
 
+    def _collect_prefixed(self, conn: sqlite3.Connection, prefix: str) -> dict[str, Any]:
+        """Collect DB rows whose key starts with ``prefix.`` and de-dot them.
+
+        Returns a nested dict. For example rows ``swarm.output_target.platform``
+        and ``swarm.output_target.chat_id`` with prefix ``swarm.output_target``
+        return ``{"platform": ..., "chat_id": ...}``.
+        """
+        like = prefix + ".%"
+        rows = conn.execute(
+            "SELECT key, value FROM settings WHERE key LIKE ?", (like,)
+        ).fetchall()
+        if not rows:
+            return {}
+        result: dict[str, Any] = {}
+        for row in rows:
+            sub_key = row["key"][len(prefix) + 1:]  # strip "prefix."
+            parts = sub_key.split(".")
+            target = result
+            for part in parts[:-1]:
+                if part not in target or not isinstance(target[part], dict):
+                    target[part] = {}
+                target = target[part]
+            target[parts[-1]] = json.loads(row["value"])
+        return result
+
     def get(self, key: str, default: Any = None) -> Any:
-        """Get a setting. DB overrides YAML."""
+        """Get a setting. DB overrides YAML.
+
+        Resolution order:
+            1. Exact DB key match.
+            2. DB child keys (``key.*``) merged into a dict — so a value
+               flattened by ``import_yaml`` is reassembled transparently.
+            3. YAML dotted-key lookup.
+        """
         with self._lock:
             conn = self._get_conn()
             row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
             if row is not None:
                 return json.loads(row["value"])
+            # Re-merge flattened children (e.g. from import_yaml round-trip).
+            merged = self._collect_prefixed(conn, key)
+            if merged:
+                return merged
 
         # Fall back to YAML (supports dotted keys like "llm.model")
         yaml_data = self._load_yaml()
@@ -154,7 +190,12 @@ class ConfigStore:
         return yaml.dump(base, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     def import_yaml(self, yaml_str: str) -> int:
-        """Import settings from YAML string. Returns number of settings imported."""
+        """Import settings from YAML string. Returns number of settings imported.
+
+        Nested YAML mappings are flattened to dotted keys. Dict/list values
+        are preserved through ``get()`` which re-merges flattened children
+        transparently (so export→import round-trips are lossless).
+        """
         import yaml
 
         data = yaml.safe_load(yaml_str)

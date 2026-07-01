@@ -438,6 +438,8 @@ class TaskStore:
             task.dependencies = _safe_json("dependencies", [])
         if "fallback_chain" in row.keys():
             task.fallback_chain = _safe_json("fallback_chain", [])
+        if "validation_schema" in row.keys():
+            task.validation_schema = _safe_json("validation_schema", None)
         if "aggregation" in row.keys():
             task.aggregation = row["aggregation"] or ""
         if "timeout" in row.keys() and row["timeout"] is not None:
