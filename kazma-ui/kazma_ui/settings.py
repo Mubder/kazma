@@ -254,21 +254,6 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         """Compare models with the same prompt."""
         return await _get_sm().compare_models(req.prompt, req.models, req.temperature, req.max_tokens)
 
-    # ── Active model (global chat model sync) ───────────────────────
-
-    @router.put("/api/settings/active_model")
-    async def api_set_active_model(req: dict) -> dict[str, str]:
-        """Save the globally selected active chat model to ConfigStore.
-
-        Persists under ``registry.active_chat_model`` so gateways (Telegram,
-        Discord, etc.) can read it via ``get_active_chat_model()``.
-        """
-        model = req.get("model", "").strip()
-        if model:
-            _get_sm()._cs.set("registry.active_chat_model", model, category="registry")
-            return {"status": "ok", "model": model}
-        return {"status": "error", "message": "model is required"}
-
     # ── Agent ────────────────────────────────────────────────────────
 
     @router.put("/api/settings/agent")
@@ -382,13 +367,13 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
     async def api_set_active_model(req: Request) -> dict[str, Any]:
         """Set the active chat model and persist it.
 
-        Body: ``{"active_model": "deepseek-v4-pro"}``
+        Body: ``{"active_model": "deepseek-v4-pro"}`` or ``{"model": "..."}``
         """
         try:
             body = await req.json()
         except Exception:
             body = {}
-        model = (body.get("active_model") or "").strip()
+        model = (body.get("active_model") or body.get("model") or "").strip()
         if not model:
             return {"error": "active_model is required", "status": "error"}
         try:
@@ -396,9 +381,11 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
 
             registry = get_model_registry()
             registry.set_active_model(model)
+            # Also persist for gateways that read registry.active_chat_model
+            _get_sm()._cs.set("registry.active_chat_model", model, category="registry")
         except Exception as exc:
             logger.warning("[Settings] set_active_model failed: %s", exc)
-        return {"active_model": model, "status": "ok"}
+        return {"active_model": model, "model": model, "status": "ok"}
 
     # ── Shortcuts ────────────────────────────────────────────────────
 
