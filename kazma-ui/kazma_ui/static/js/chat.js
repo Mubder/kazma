@@ -166,43 +166,62 @@
       })
       .then(function(r) { return r.ok ? r.json() : {}; })
       .then(function(active) {
-        var models = [];
-        if (active && active.model) {
-          models.push(active.model);
-          if (!selectedModel) selectedModel = active.model;
+        if (active && active.model && !selectedModel) {
+          selectedModel = active.model;
         }
 
-        // Also try /api/models for a richer list
-        fetch('/api/models')
-          .then(function(r) { return r.ok ? r.json() : null; })
-          .then(function(data) {
-            if (data && Array.isArray(data.models)) {
-              data.models.forEach(function(m) {
-                var name = typeof m === 'string' ? m : (m.name || m.id || m.model);
-                if (name && models.indexOf(name) === -1) models.push(name);
+        // Fetch all providers so we can group models by provider
+        fetch('/api/providers')
+          .then(function(r) { return r.ok ? r.json() : []; })
+          .then(function(providers) {
+            // Build provider groups: [{ name, label, models: [] }]
+            var providerGroups = [];
+            if (Array.isArray(providers)) {
+              providers.forEach(function(p) {
+                var models = [];
+                var disc = p.discovered_models || [];
+                var manual = p.models || [];
+                if (Array.isArray(disc)) {
+                  disc.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+                }
+                if (Array.isArray(manual)) {
+                  manual.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+                }
+                if (models.length > 0) {
+                  providerGroups.push({
+                    name: p.name || 'unknown',
+                    label: p.display_name || p.name || 'Unknown',
+                    models: models
+                  });
+                }
               });
             }
-            populateModelSelector(models, savedModels);
+            populateModelSelector(providerGroups, savedModels);
           })
-          .catch(function() { populateModelSelector(models, savedModels); });
+          .catch(function() { populateModelSelector([], savedModels); });
       })
       .catch(function() {
         // If both fetches fail, at least show the persisted model
-        var models = selectedModel ? [selectedModel] : [];
-        populateModelSelector(models, savedModels);
+        var fallback = [];
+        if (selectedModel) {
+          fallback.push({ name: 'active', label: 'Active', models: [selectedModel] });
+        }
+        populateModelSelector(fallback, savedModels);
       });
   }
 
-  function populateModelSelector(models, savedProfiles) {
+  function populateModelSelector(providerGroups, savedProfiles) {
     if (!modelSelectorEl) return;
     savedProfiles = savedProfiles || [];
-    var allEmpty = (!models || models.length === 0) && savedProfiles.length === 0;
+    providerGroups = providerGroups || [];
+    var hasProviders = providerGroups.some(function(g) { return g.models && g.models.length > 0; });
+    var allEmpty = !hasProviders && savedProfiles.length === 0;
     if (allEmpty) {
       modelSelectorEl.innerHTML = '<option value="">— default —</option>';
       return;
     }
     var html = '';
-    // Saved profiles first (group label via optgroup)
+    // Saved profiles first
     if (savedProfiles.length > 0) {
       html += '<optgroup label="Saved Profiles">';
       savedProfiles.forEach(function(p) {
@@ -211,28 +230,20 @@
       });
       html += '</optgroup>';
     }
-    // Discovered models
-    if (models && models.length > 0) {
-      if (savedProfiles.length > 0) html += '<optgroup label="Discovered">';
-      models.forEach(function(m) {
+    // Models grouped by provider
+    providerGroups.forEach(function(g) {
+      if (!g.models || g.models.length === 0) return;
+      html += '<optgroup label="' + escapeHtml(g.label) + '">';
+      g.models.forEach(function(m) {
         var sel = (m === selectedModel) ? ' selected' : '';
         html += '<option value="' + escapeHtml(m) + '"' + sel + '>' + escapeHtml(m) + '</option>';
       });
-      if (savedProfiles.length > 0) html += '</optgroup>';
-    }
+      html += '</optgroup>';
+    });
     modelSelectorEl.innerHTML = html;
     // Ensure dropdown reflects persisted value
     if (selectedModel) {
-      if (models && models.indexOf(selectedModel) !== -1) {
-        modelSelectorEl.value = selectedModel;
-      } else {
-        for (var i = 0; i < savedProfiles.length; i++) {
-          if (savedProfiles[i].value === selectedModel) {
-            modelSelectorEl.value = selectedModel;
-            break;
-          }
-        }
-      }
+      modelSelectorEl.value = selectedModel;
     }
   }
 

@@ -247,6 +247,24 @@ class ModelRegistry:
         # Fallback: use active profile with overridden model
         return self.get_client(model=clean_id)
 
+    def find_provider_for_model(self, model_id: str) -> dict[str, Any] | None:
+        """Return the provider entry that owns *model_id*.
+
+        Searches both manually-configured ``models`` and cached
+        ``_discovered_models`` so that discovered models route correctly.
+        Returns ``None`` if no provider claims the model.
+        """
+        clean_id = (model_id or "").strip()
+        if not clean_id:
+            return None
+        for provider in self.list_providers():
+            name = provider.get("name", "")
+            manual = set(self._normalize_models(provider.get("models", [])))
+            discovered = set(self._discovered_models.get(name, []))
+            if clean_id in manual or clean_id in discovered:
+                return dict(provider)
+        return None
+
     # ── Model discovery ────────────────────────────────────────────
 
     async def discover_models(self, provider_name: str) -> list[str]:

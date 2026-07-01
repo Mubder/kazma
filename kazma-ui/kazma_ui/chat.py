@@ -215,12 +215,20 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                         chat_model = f"openai/{chat_model}"
                     chat_api_key = None  # No auth for local/custom endpoints
 
-                # Fallback to LM Studio if base_url is empty but model is local
-                if not chat_base_url or chat_base_url == llm_cfg["base_url"]:
-                    if active_model and not active_model.startswith("openai/"):
-                        chat_base_url = "http://127.0.0.1:1234/v1"
-                        chat_model = f"openai/{active_model}"
-                        chat_api_key = None  # No auth for LM Studio
+                # If no custom endpoint was resolved, try the registry to
+                # find which provider owns the requested model. This replaces
+                # the old hardcoded LM Studio fallback with proper routing.
+                if chat_base_url == llm_cfg["base_url"] and active_model:
+                    try:
+                        from kazma_core.model_registry import get_model_registry
+                        _reg = get_model_registry()
+                        _owner = _reg.find_provider_for_model(active_model)
+                        if _owner:
+                            chat_base_url = str(_owner.get("base_url", ""))
+                            chat_api_key = str(_owner.get("api_key", ""))
+                            chat_model = active_model
+                    except Exception:
+                        pass  # fall through to defaults below
 
                 async for event in stream_chat(
                     client=_registry_client or await agent.get_llm_client(),

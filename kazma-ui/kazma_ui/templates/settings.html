@@ -185,20 +185,11 @@
         <!-- Provider Add/Edit Modal -->
         <div x-show="hubProviderModal" class="modal-overlay" @click.self="hubProviderModal = false">
             <div class="modal">
-                <h2 x-text="hubEditingProvider.name ? '{{ t('settings.edit_provider') }}' : '{{ t('settings.add_provider') }}'"></h2>
-                <div class="form-group">
-                    <label>{{ t('settings.preset') }}</label>
-                    <select class="form-select" @change="applyHubProviderPreset($event.target.value)" :disabled="hubEditingProvider.name">
-                        <option value="">{{ t('settings.custom') }}</option>
-                        <template x-for="p in providerPresets" :key="p.key">
-                            <option :value="p.key" x-text="p.name"></option>
-                        </template>
-                    </select>
-                </div>
+                <h2 x-text="hubEditingProvider._existing ? '{{ t('settings.edit_provider') }}' : '{{ t('settings.add_provider') }}'"></h2>
                 <div class="form-row">
                     <div class="form-group">
                         <label>{{ t('settings.name_id') }}</label>
-                        <input type="text" class="form-input" x-model="hubEditingProvider.name" placeholder="openai" :disabled="hubEditingProvider.name && hubEditingProvider._existing">
+                        <input type="text" class="form-input" x-model="hubEditingProvider.name" placeholder="openai" :disabled="hubEditingProvider._existing">
                     </div>
                     <div class="form-group">
                         <label>{{ t('settings.display_name') }}</label>

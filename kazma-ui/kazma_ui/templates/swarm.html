@@ -251,7 +251,7 @@
                   {% if w.get('role') %}<span class="badge badge-accent">{{ w.role }}</span>{% endif %}
                 </div>
                 <div style="display:flex;gap:16px;font-size:0.8rem;color:var(--text-tertiary);">
-                  <span>{{ t('swarm.model') }}: <span style="color:var(--text-secondary);font-family:var(--font-mono);">{{ w.get('model', '?') }}</span></span>
+                  <span data-model="{{ w.get('model', '?') }}">{{ t('swarm.model') }}: <span style="color:var(--text-secondary);font-family:var(--font-mono);">{{ w.get('model', '?') }}</span></span>
                   <span>{{ t('swarm.provider') }}: <span style="color:var(--text-secondary);">{{ w.get('provider', '?') }}</span></span>
                   <span>{{ t('swarm.type_label') }}: <span style="color:var(--text-secondary);">{{ w.get('type', '?') }}</span></span>
                 </div>
@@ -270,6 +270,7 @@
                 </div>
               </div>
               <div style="display:flex;gap:4px;">
+                <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="edit" title="Edit worker">✏️</button>
                 <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="logs" title="{{ t('swarm.view_logs') }}">📋</button>
                 <button class="btn btn-sm btn-danger" data-worker="{{ w.name }}" data-action="remove" title="{{ t('swarm.remove_worker') }}">✕</button>
               </div>
@@ -310,25 +311,6 @@
                 </select>
               </div>
               <div class="form-group">
-                <label class="form-label">{{ t('swarm.model') }}</label>
-                <input type="text" id="add-model" class="form-input" list="swarm-models-datalist">
-                <datalist id="swarm-models-datalist"></datalist>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('settings.saved_profiles') }}</label>
-              <select id="add-profile" class="form-select">
-                <option value="">{{ t('swarm.custom') }} / {{ t('swarm.none') }}</option>
-              </select>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">{{ t('swarm.provider') }}</label>
-                <select id="add-provider" class="form-select">
-                  <option value="">Loading...</option>
-                </select>
-              </div>
-              <div class="form-group">
                 <label class="form-label">{{ t('swarm.type_label') }}</label>
                 <select id="add-type" class="form-select">
                   <option value="in-process">In-Process</option>
@@ -337,8 +319,8 @@
               </div>
             </div>
             <div class="form-group">
-              <label class="form-label">{{ t('swarm.api_key_optional') }} <span style="font-size:0.7rem;color:var(--text-muted);">({{ t('swarm.api_key_hint') }})</span></label>
-              <input type="password" id="add-apikey" class="form-input" placeholder="sk-...">
+              <label class="form-label">{{ t('swarm.model') }}</label>
+              <select id="add-model-select" class="form-select"></select>
             </div>
             <div class="form-actions">
               <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.addWorker()">{{ t('swarm.add_worker') }}</button>
@@ -360,26 +342,6 @@
                 <input type="text" id="spawn-role" class="form-input" placeholder="{{ t('swarm.role_hint') }}">
               </div>
               <div class="form-group">
-                <label class="form-label">{{ t('swarm.model') }}</label>
-                <input type="text" id="spawn-model" class="form-input" list="swarm-models-datalist">
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('settings.saved_profiles') }}</label>
-              <select id="spawn-profile" class="form-select">
-                <option value="">{{ t('swarm.custom') }} / {{ t('swarm.none') }}</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('swarm.expertise_tags') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.expertise_hint') }}</span></label>
-              <input type="text" id="spawn-expertise" class="form-input" placeholder="{{ t('swarm.expertise_placeholder') }}">
-            </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('swarm.tools_label') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.tools_hint') }}</span></label>
-              <input type="text" id="spawn-tools" class="form-input" placeholder="{{ t('swarm.tools_placeholder') }}">
-            </div>
-            <div class="form-row">
-              <div class="form-group">
                 <label class="form-label">{{ t('swarm.model_specialty') }}</label>
                 <select id="spawn-specialty" class="form-select">
                   <option value="">{{ t('swarm.none') }}</option>
@@ -389,12 +351,18 @@
                   <option value="fast">{{ t('swarm.fast') }}</option>
                 </select>
               </div>
-              <div class="form-group">
-                <label class="form-label">{{ t('swarm.provider') }}</label>
-                <select id="spawn-provider" class="form-select">
-                  <option value="">Loading...</option>
-                </select>
-              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('swarm.model') }}</label>
+              <select id="spawn-model-select" class="form-select"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('swarm.expertise_tags') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.expertise_hint') }}</span></label>
+              <input type="text" id="spawn-expertise" class="form-input" placeholder="{{ t('swarm.expertise_placeholder') }}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">{{ t('swarm.tools_label') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.tools_hint') }}</span></label>
+              <input type="text" id="spawn-tools" class="form-input" placeholder="{{ t('swarm.tools_placeholder') }}">
             </div>
             <div class="form-actions">
               <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.spawnWorker()">🧬 {{ t('swarm.spawn_worker') }}</button>
@@ -503,6 +471,34 @@
     </div>
     <div id="logs-content" class="modal-body" style="max-height:60vh;overflow-y:auto;font-family:var(--font-mono);font-size:0.8rem;">
       Loading logs…
+    </div>
+  </div>
+</div>
+
+<!-- ── Edit Worker Modal ── -->
+<div id="edit-worker-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)KazmaSwarm.closeEditWorker()">
+  <div class="modal">
+    <h2>✏️ Edit Worker</h2>
+    <input type="hidden" id="edit-worker-name">
+    <div class="form-group">
+      <label class="form-label">{{ t('swarm.role') }}</label>
+      <select id="edit-worker-role" class="form-select">
+        <option value="">{{ t('swarm.custom') }}</option>
+        <option value="orchestrator">{{ t('swarm.orchestrator') }}</option>
+        <option value="observer">{{ t('swarm.observer') }}</option>
+        <option value="backend">{{ t('swarm.backend') }}</option>
+        <option value="frontend">{{ t('swarm.frontend') }}</option>
+        <option value="researcher">{{ t('swarm.researcher') }}</option>
+        <option value="reviewer">{{ t('swarm.reviewer') }}</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">{{ t('swarm.model') }}</label>
+      <select id="edit-worker-model" class="form-select"></select>
+    </div>
+    <div class="modal-actions" style="flex-wrap:wrap;gap:8px">
+      <button class="btn btn-secondary" onclick="KazmaSwarm.closeEditWorker()">{{ t('settings.cancel') }}</button>
+      <button class="btn btn-primary" onclick="KazmaSwarm.saveEditWorker()">{{ t('settings.save') }}</button>
     </div>
   </div>
 </div>

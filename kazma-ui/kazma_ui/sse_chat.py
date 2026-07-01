@@ -357,9 +357,30 @@ def create_sse_chat_router(
         if requested_model:
             if registry is not None:
                 registry.set_active_model(requested_model)
+            # Re-resolve the provider that owns this model so the
+            # LLM client points at the correct base_url + api_key.
+            _resolved_url = None
+            _resolved_key = None
+            if registry is not None:
+                _owner = registry.find_provider_for_model(requested_model)
+                if _owner:
+                    _resolved_url = str(_owner.get("base_url", ""))
+                    _resolved_key = str(_owner.get("api_key", ""))
+                    registry.set_active_provider(_owner.get("name", ""))
+                    logger.info(
+                        "SSE chat: model %s routed to provider %s (%s)",
+                        requested_model,
+                        _owner.get("name", "?"),
+                        _resolved_url,
+                    )
             if llm_provider is not None:
-                llm_provider.reconfigure(model=requested_model)
-            logger.info("SSE chat: model applied from body: %s", requested_model)
+                llm_provider.reconfigure(
+                    base_url=_resolved_url,
+                    model=requested_model,
+                    api_key=_resolved_key,
+                )
+            elif _resolved_url or _resolved_key:
+                logger.warning("SSE chat: llm_provider is None, cannot reconfigure to %s", _resolved_url)
 
         # ── Pre-stream API key validation (Bug 4 fix) ───────────────
         # If the provider is a real cloud API but the API key is the

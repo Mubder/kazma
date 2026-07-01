@@ -79,6 +79,7 @@
       if (!btn) return;
       var workerName = btn.dataset.worker;
       if (btn.dataset.action === 'remove') removeWorker(workerName);
+      else if (btn.dataset.action === 'edit') editWorker(workerName);
       else if (btn.dataset.action === 'logs') viewLogs(workerName);
       else if (btn.dataset.action === 'approve') approveCheckpoint(btn.dataset.taskId);
       else if (btn.dataset.action === 'reject') rejectCheckpoint(btn.dataset.taskId);
@@ -119,21 +120,70 @@
         modelOptions.providerEntries = Array.isArray(data.provider_entries) ? data.provider_entries : [];
         modelOptions.profiles = Array.isArray(data.profiles) ? data.profiles : [];
         modelOptions.defaults = data.defaults && typeof data.defaults === 'object' ? data.defaults : {};
-
-        populateModelDatalist();
-        populateProfileSelect('add-profile');
-        populateProfileSelect('spawn-profile');
-        populateProviderSelect('add-provider');
-        populateProviderSelect('spawn-provider');
-        applyModelProviderDefaults();
+        populateSwarmModelSelects();
       })
       .catch(function() {
-        populateProfileSelect('add-profile');
-        populateProfileSelect('spawn-profile');
-        populateProviderSelect('add-provider');
-        populateProviderSelect('spawn-provider');
-        applyModelProviderDefaults();
+        populateSwarmModelSelects();
       });
+  }
+
+  // Provider -> models map fetched from /api/providers (authoritative)
+  var providerModelMap = []; // [{ name, label, models: [] }]
+
+  function populateSwarmModelSelects() {
+    // Fetch the authoritative provider list with discovered models
+    fetch('/api/providers')
+      .then(function(r) { return r.ok ? r.json() : []; })
+      .then(function(providers) {
+        providerModelMap = [];
+        if (Array.isArray(providers)) {
+          providers.forEach(function(p) {
+            var models = [];
+            var disc = p.discovered_models || [];
+            var manual = p.models || [];
+            if (Array.isArray(disc)) disc.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+            if (Array.isArray(manual)) manual.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+            if (models.length > 0) {
+              providerModelMap.push({ name: p.name, label: p.display_name || p.name, models: models });
+            }
+          });
+        }
+        renderSwarmModelSelect('add-model-select', defaultModelOption());
+        renderSwarmModelSelect('spawn-model-select', defaultModelOption());
+        renderSwarmModelSelect('edit-worker-model', '');
+      })
+      .catch(function() {
+        renderSwarmModelSelect('add-model-select', defaultModelOption());
+        renderSwarmModelSelect('spawn-model-select', defaultModelOption());
+      });
+  }
+
+  function renderSwarmModelSelect(selectId, currentValue) {
+    var sel = $(selectId);
+    if (!sel) return;
+    if (providerModelMap.length === 0) {
+      sel.innerHTML = '<option value="">— no models available —</option>';
+      return;
+    }
+    var html = '';
+    providerModelMap.forEach(function(g) {
+      html += '<optgroup label="' + esc(g.label) + '">';
+      g.models.forEach(function(m) {
+        var selAttr = (m === currentValue) ? ' selected' : '';
+        html += '<option value="' + esc(m) + '"' + selAttr + '>' + esc(m) + '</option>';
+      });
+      html += '</optgroup>';
+    });
+    sel.innerHTML = html;
+    if (currentValue) sel.value = currentValue;
+  }
+
+  function providerForModel(modelId) {
+    if (!modelId) return '';
+    for (var i = 0; i < providerModelMap.length; i++) {
+      if (providerModelMap[i].models.indexOf(modelId) !== -1) return providerModelMap[i].name;
+    }
+    return '';
   }
 
   function defaultModelOption() {
@@ -846,16 +896,16 @@
 
   function addWorker() {
     var name = ($('add-name') || {}).value || '';
-    var model = ($('add-model') || {}).value || defaultModelOption();
-    var provider = ($('add-provider') || {}).value || defaultProviderOption();
+    var modelSel = $('add-model-select');
+    var model = modelSel ? modelSel.value : '';
     var type = ($('add-type') || {}).value || 'in-process';
     var role = ($('add-role') || {}).value || '';
-    var apikey = ($('add-apikey') || {}).value || '';
 
     if (!name.trim()) { showError('Worker name is required'); return; }
+    if (!model) { showError('Please select a model'); return; }
 
+    var provider = providerForModel(model);
     var payload = { name: name.trim(), model: model, provider: provider, type: type, role: role };
-    if (apikey) payload.api_key = apikey;
 
     fetch('/api/swarm/workers', {
       method: 'POST',
@@ -879,15 +929,17 @@
   function spawnWorker() {
     var name = ($('spawn-name') || {}).value || '';
     var role = ($('spawn-role') || {}).value || '';
-    var model = ($('spawn-model') || {}).value || defaultModelOption();
+    var modelSel = $('spawn-model-select');
+    var model = modelSel ? modelSel.value : '';
     var expertiseStr = ($('spawn-expertise') || {}).value || '';
     var toolsStr = ($('spawn-tools') || {}).value || '';
     var specialty = ($('spawn-specialty') || {}).value || '';
-    var provider = ($('spawn-provider') || {}).value || defaultProviderOption();
 
     if (!name.trim()) { showError('Worker name is required'); return; }
     if (!role.trim()) { showError('Role is required for spawning'); return; }
+    if (!model) { showError('Please select a model'); return; }
 
+    var provider = providerForModel(model);
     var expertise = expertiseStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
     var tools = toolsStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
 
@@ -936,6 +988,63 @@
         var card = $('worker-card-' + name);
         if (card) card.remove();
         refreshStatus();
+      })
+      .catch(function(err) { showError(err.message); });
+  }
+
+  function editWorker(name) {
+    // Find the worker card to read current values
+    var card = $('worker-card-' + name);
+    if (!card) return;
+    // Extract current model and role from the card's data attributes / text
+    var modelEl = card.querySelector('[data-model]');
+    var roleBadge = card.querySelector('.badge.badge-accent');
+    var currentModel = modelEl ? modelEl.getAttribute('data-model') : '';
+    var currentRole = roleBadge ? roleBadge.textContent.trim() : '';
+
+    // Populate the edit modal
+    var nameInput = $('edit-worker-name');
+    if (nameInput) nameInput.value = name;
+    var roleSelect = $('edit-worker-role');
+    if (roleSelect) roleSelect.value = currentRole;
+    // Render the model dropdown with the current model pre-selected
+    renderSwarmModelSelect('edit-worker-model', currentModel);
+
+    // Show the modal
+    var modal = $('edit-worker-modal');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  function closeEditWorker() {
+    var modal = $('edit-worker-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  function saveEditWorker() {
+    var name = ($('edit-worker-name') || {}).value || '';
+    var role = ($('edit-worker-role') || {}).value || '';
+    var modelSel = $('edit-worker-model');
+    var model = modelSel ? modelSel.value : '';
+    if (!name) { showError('Worker name is missing'); return; }
+    if (!model) { showError('Please select a model'); return; }
+    var provider = providerForModel(model);
+
+    var payload = { model: model, provider: provider };
+    if (role) payload.role = role;
+
+    fetch('/api/swarm/workers/' + encodeURIComponent(name), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(function(r) {
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Failed'); });
+        return r.json();
+      })
+      .then(function() {
+        showToast('Worker "' + name + '" updated', true);
+        closeEditWorker();
+        location.reload();
       })
       .catch(function(err) { showError(err.message); });
   }
@@ -1263,6 +1372,9 @@
     addWorker: addWorker,
     spawnWorker: spawnWorker,
     removeWorker: removeWorker,
+    editWorker: editWorker,
+    closeEditWorker: closeEditWorker,
+    saveEditWorker: saveEditWorker,
     dispatch: dispatchTask,
     start: function() { swarmAction('start'); },
     stop: function() { swarmAction('stop'); },
