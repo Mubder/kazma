@@ -462,19 +462,17 @@
     var dispatchBtn = $('btn-dispatch');
     if (dispatchBtn) { dispatchBtn.disabled = true; dispatchBtn.textContent = 'Dispatching...'; }
 
-    // Create an active task card immediately so the user sees the task
-    // before the network round-trip completes. Fast tasks may finish
-    // before the response; the card stays visible and the SSE stream
-    // (or subsequent dashboard refresh) will update it.
+    // Show a pending card immediately (without SSE) so the user sees activity.
     var pendingTaskId = 'pending-' + Date.now();
     var pendingData = {
       task: task,
       pattern: pattern,
       workers: workerList,
     };
-    connectSSE(pendingTaskId, pendingData);
-
-    // Switch to active tasks tab (VAL-UI-005)
+    // Create the card without connecting SSE yet — we'll connect after
+    // the POST returns the real task_id.
+    appendPendingResult(workerList, task, pattern);
+    var pendingCard = createActiveTaskCard(pendingTaskId, pendingData);
     switchTab('active-tasks');
 
     fetch('/api/swarm/dispatch', {
@@ -488,11 +486,9 @@
           var dispatchedCount = (data.dispatched || []).length;
           showToast('Task dispatched to ' + dispatchedCount + ' worker(s)', true);
 
-          // Upgrade the pending active card to the real task id.
-          upgradePendingTaskCard(pendingTaskId, data.task_id || pendingTaskId, data);
-
           // Connect SSE for live updates using the real task id.
           if (data.task_id) {
+            upgradePendingTaskCard(pendingTaskId, data.task_id, data);
             connectSSE(data.task_id, data);
           }
 
@@ -566,14 +562,16 @@
   // SSE STREAMING (Active Tasks)
   // ══════════════════════════════════════════════════════
 
-  function connectSSE(taskId, initialData) {
-    // Create active task card
+  function createActiveTaskCard(taskId, initialData) {
     var emptyEl = $('active-tasks-empty');
     if (emptyEl) emptyEl.style.display = 'none';
     var listEl = $('active-tasks-list');
-    if (!listEl) return;
+    if (!listEl) return null;
 
     var cardId = 'active-task-' + taskId;
+    // Don't create duplicate cards
+    if ($(cardId)) return $(cardId);
+
     var card = document.createElement('div');
     card.className = 'card';
     card.id = cardId;
@@ -594,6 +592,13 @@
       '<div id="handoff-' + taskId + '" style="display:none;margin-top:8px;font-size:0.8rem;"></div>';
 
     listEl.insertBefore(card, listEl.firstChild);
+    return card;
+  }
+
+  function connectSSE(taskId, initialData) {
+    // Create or reuse active task card
+    var card = createActiveTaskCard(taskId, initialData);
+    if (!card) return;
 
     // Start timer
     var startTime = Date.now();
@@ -960,10 +965,14 @@
       })
       .then(function() {
         showToast('Worker "' + name + '" added', true);
-        var nameEl = $('add-name'); if (nameEl) nameEl.value = '';
+        // Clear form fields
+        ['add-name', 'add-expertise', 'add-tools'].forEach(function(id) {
+          var el = $(id); if (el) el.value = '';
+        });
+        var roleEl = $('add-role'); if (roleEl) roleEl.value = '';
+        var specEl = $('add-specialty'); if (specEl) specEl.value = '';
+        // Refresh worker list without page reload
         refreshStatus();
-        // Reload the page to update worker lists
-        location.reload();
       })
       .catch(function(err) { showError(err.message); });
   }
@@ -1036,7 +1045,7 @@
       .then(function() {
         showToast('Worker "' + name + '" updated', true);
         closeEditWorker();
-        location.reload();
+        refreshStatus();
       })
       .catch(function(err) { showError(err.message); });
   }

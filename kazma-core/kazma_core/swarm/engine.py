@@ -101,7 +101,19 @@ class SwarmEngine:
         self._task_store = task_store
         self._metrics_collector = metrics_collector or MetricsCollector(task_store=task_store)
         self._tracing_emitter = tracing_emitter or TracingEmitter()
+        self._autoscaler = None  # lazily initialized
         self._build_workers()
+
+    def get_autoscaler(self):
+        """Return the AutoScaler, lazily initializing it."""
+        if self._autoscaler is None:
+            try:
+                from kazma_core.swarm.autoscaler import AutoScaler
+                self._autoscaler = AutoScaler(self)
+                self._autoscaler.load_templates()
+            except Exception as exc:
+                logger.warning("[SwarmEngine] AutoScaler initialization failed: %s", exc)
+        return self._autoscaler
 
     def _build_workers(self) -> None:
         """Instantiate workers from the configured topology."""
@@ -245,15 +257,25 @@ class SwarmEngine:
                 )
                 task.workers = routed
             except NoCapableWorkersError as exc:
-                self._tracing_emitter.record_exception(task_span, exc)
-                self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
-                return self._finalize_task(
-                    task,
-                    worker_results=[],
-                    status="failed",
-                    error=str(exc),
-                    duration_seconds=perf_counter() - started,
-                )
+                # Try auto-scaling before giving up
+                scaler = self.get_autoscaler()
+                spawned = None
+                if scaler is not None:
+                    spawned = scaler.maybe_scale(task.prompt)
+                if spawned is not None:
+                    task.workers = [spawned.name]
+                    logger.info("[SwarmEngine] Auto-scaled worker '%s' for task", spawned.name)
+                    # Fall through to normal dispatch with the new worker
+                else:
+                    self._tracing_emitter.record_exception(task_span, exc)
+                    self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
+                    return self._finalize_task(
+                        task,
+                        worker_results=[],
+                        status="failed",
+                        error=str(exc),
+                        duration_seconds=perf_counter() - started,
+                    )
 
         if task.type == TaskType.PIPELINE:
             try:
@@ -747,6 +769,9 @@ class SwarmEngine:
 
         async def _attempt() -> dict[str, Any]:
             worker.mark_dispatched(prompt)
+            # Record activity for auto-scaler reaping
+            if self._autoscaler is not None:
+                self._autoscaler.record_activity(worker.name)
             try:
                 raw_result = await timeout_guard.execute(
                     lambda: worker.dispatch(prompt, context=context),

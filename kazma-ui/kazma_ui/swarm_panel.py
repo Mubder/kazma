@@ -1072,6 +1072,64 @@ def create_swarm_router(
             "metadata": result.metadata,
         })
 
+    # ── Auto-Scaler templates ────────────────────────────────────────
+
+    @router.get("/api/swarm/templates")
+    async def list_templates() -> JSONResponse:
+        """List all worker templates for auto-scaling."""
+        engine = _current_engine()
+        if engine is None:
+            return JSONResponse({"templates": [], "instances": []})
+        scaler = engine.get_autoscaler()
+        if scaler is None:
+            return JSONResponse({"templates": [], "instances": []})
+        return JSONResponse({
+            "templates": [t.to_dict() for t in scaler.list_templates()],
+            "instances": scaler.get_instance_info(),
+        })
+
+    @router.post("/api/swarm/templates")
+    async def add_template(payload: dict[str, Any]) -> JSONResponse:
+        """Register a new worker template."""
+        engine = _current_engine()
+        if engine is None:
+            return JSONResponse({"status": "error", "message": "Swarm not available"}, status_code=503)
+        scaler = engine.get_autoscaler()
+        if scaler is None:
+            return JSONResponse({"status": "error", "message": "AutoScaler not available"}, status_code=503)
+        from kazma_core.swarm.autoscaler import WorkerTemplate
+        template = WorkerTemplate.from_dict(payload)
+        if not template.name:
+            return JSONResponse({"status": "error", "message": "Template name required"}, status_code=400)
+        scaler.register_template(template)
+        scaler.save_templates()
+        return JSONResponse({"status": "ok", "template": template.to_dict()})
+
+    @router.delete("/api/swarm/templates/{name}")
+    async def delete_template(name: str) -> JSONResponse:
+        """Remove a template and reap its instances."""
+        engine = _current_engine()
+        if engine is None:
+            return JSONResponse({"status": "error", "message": "Swarm not available"}, status_code=503)
+        scaler = engine.get_autoscaler()
+        if scaler is None:
+            return JSONResponse({"status": "error", "message": "AutoScaler not available"}, status_code=503)
+        scaler.unregister_template(name)
+        scaler.save_templates()
+        return JSONResponse({"status": "ok"})
+
+    @router.post("/api/swarm/autoscaler/reap")
+    async def reap_idle_workers() -> JSONResponse:
+        """Trigger idle worker reaping."""
+        engine = _current_engine()
+        if engine is None:
+            return JSONResponse({"status": "error", "message": "Swarm not available"}, status_code=503)
+        scaler = engine.get_autoscaler()
+        if scaler is None:
+            return JSONResponse({"status": "error", "message": "AutoScaler not available"}, status_code=503)
+        reaped = scaler.reap_idle()
+        return JSONResponse({"status": "ok", "reaped": reaped})
+
     return router
 
 
