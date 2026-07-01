@@ -20,6 +20,8 @@
   --bg-elevated: #1a2332;
   --bg-hover: rgba(34, 211, 238, 0.06);
   --bg-active: rgba(34, 211, 238, 0.10);
+  --tint: rgba(255, 255, 255, 0.025);
+  --tint-strong: rgba(255, 255, 255, 0.05);
 
   /* Grid texture */
   --grid: rgba(34, 211, 238, 0.03);
@@ -374,7 +376,7 @@ button { cursor: pointer; font-family: inherit; }
   align-items: center;
   gap: 6px;
   padding: 3px 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--tint);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
   font-size: 0.75rem;
@@ -599,7 +601,7 @@ button { cursor: pointer; font-family: inherit; }
 .settings-tab:hover { color: var(--text-primary); }
 .settings-tab.active { color: var(--accent-light); border-bottom-color: var(--accent); }
 .provider-card { transition: border-color 0.15s; }
-.provider-card:hover { border-color: rgba(255, 255, 255, 0.12) !important; }
+.provider-card:hover { border-color: var(--border-strong) !important; }
 
 /* ── 7. Buttons ─────────────────────────────────────────────────── */
 .btn {
@@ -798,7 +800,7 @@ tbody tr:last-child td {
 
 .tab-btn {
   padding: var(--sp-2) var(--sp-4);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
@@ -1051,7 +1053,7 @@ tbody tr:last-child td {
 .tool-call-box {
   margin-top: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--warning);
   font-size: 0.875rem;
@@ -1060,7 +1062,7 @@ tbody tr:last-child td {
 .tool-result-box {
   margin-top: var(--sp-1);
   padding: var(--sp-2) var(--sp-3);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--success);
   font-size: 0.875rem;
@@ -1086,7 +1088,7 @@ tbody tr:last-child td {
   display: flex;
   gap: var(--sp-2);
   align-items: flex-end;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--sp-2) var(--sp-3);
@@ -1133,7 +1135,7 @@ tbody tr:last-child td {
 .cost-badge,
 .token-badge {
   padding: 2px 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--tint);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-pill);
   color: var(--text-tertiary);
@@ -1166,14 +1168,14 @@ tbody tr:last-child td {
 }
 .skill-card,
 .mcp-card {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--sp-4);
   transition: border-color var(--transition-fast);
 }
 .skill-card:hover,
-.mcp-card:hover { border-color: rgba(255, 255, 255, 0.12); }
+.mcp-card:hover { border-color: var(--border-strong); }
 .skill-header,
 .mcp-card-header {
   display: flex;
@@ -1242,7 +1244,7 @@ tbody tr:last-child td {
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--tint-strong);
   border-radius: 20px;
   transition: 0.2s;
   border: 1px solid var(--border);
@@ -1283,7 +1285,7 @@ tbody tr:last-child td {
 .validation-result {
   margin-top: var(--sp-4);
   padding: var(--sp-4);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
@@ -1296,7 +1298,7 @@ tbody tr:last-child td {
   margin-bottom: var(--sp-5);
 }
 .metric-card {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--sp-4);
@@ -1453,7 +1455,7 @@ tbody tr:last-child td {
   align-items: center;
   justify-content: space-between;
   padding: var(--sp-3);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   margin-bottom: var(--sp-2);
@@ -1515,34 +1517,54 @@ tbody tr:last-child td {
 
 /* ── 23. Light Theme ────────────────────────────────────────────── */
 [data-theme="light"] {
-  --bg-deep: #f7f8f8;
+  --bg: #f7f9fb;
+  --bg-2: #eef2f6;
+  --bg-deep: #f7f9fb;
   --bg-primary: #ffffff;
   --bg-panel: #f6f8fa;
   --bg-surface: #ffffff;
   --bg-elevated: #e6e8eb;
-  --bg-hover: rgba(0, 0, 0, 0.04);
-  --bg-active: rgba(0, 0, 0, 0.06);
+  --bg-hover: rgba(8, 145, 178, 0.06);
+  --bg-active: rgba(8, 145, 178, 0.10);
+  --grid: rgba(15, 23, 42, 0.04);
+  --tint: rgba(15, 23, 42, 0.025);
+  --tint-strong: rgba(15, 23, 42, 0.05);
 
-  --text-primary: #1f2328;
-  --text-secondary: #59636e;
-  --text-tertiary: #8b949e;
-  --text-muted: #b1bac4;
+  --text-primary: #0f1c2e;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --text-muted: #94a3b8;
   --text-inverse: #ffffff;
 
-  --accent: #22d3ee;
-  --accent-hover: #38dff2;
-  --accent-light: #22d3ee;
-  --accent-subtle: rgba(34, 211, 238, 0.08);
-  --accent-glow: rgba(34, 211, 238, 0.15);
+  --accent: #0891b2;
+  --accent-hover: #0e7490;
+  --accent-light: #0891b2;
+  --accent-subtle: rgba(8, 145, 178, 0.10);
+  --accent-glow: rgba(8, 145, 178, 0.22);
 
-  --border-subtle: rgba(0, 0, 0, 0.06);
-  --border: rgba(0, 0, 0, 0.1);
-  --border-strong: rgba(0, 0, 0, 0.15);
+  --secondary: #7c3aed;
+  --secondary-hover: #6d28d9;
+  --secondary-light: #7c3aed;
+  --secondary-subtle: rgba(124, 58, 237, 0.10);
+  --secondary-glow: rgba(124, 58, 237, 0.18);
 
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
-  --shadow: 0 4px 12px rgba(0,0,0,0.08);
-  --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
-  --shadow-xl: 0 16px 48px rgba(0,0,0,0.16);
+  --success: #059669;
+  --success-subtle: rgba(5, 150, 105, 0.12);
+  --warning: #d97706;
+  --warning-subtle: rgba(217, 119, 6, 0.12);
+  --danger: #dc2626;
+  --danger-subtle: rgba(220, 38, 38, 0.10);
+  --info: #0284c7;
+  --info-subtle: rgba(2, 132, 199, 0.10);
+
+  --border-subtle: rgba(15, 23, 42, 0.07);
+  --border: rgba(15, 23, 42, 0.10);
+  --border-strong: rgba(15, 23, 42, 0.16);
+
+  --shadow-sm: 0 1px 2px rgba(15,23,42,0.06);
+  --shadow: 0 4px 12px rgba(15,23,42,0.08);
+  --shadow-lg: 0 8px 24px rgba(15,23,42,0.12);
+  --shadow-xl: 0 16px 48px rgba(15,23,42,0.16);
 }
 
 [data-theme="light"] .card,
@@ -1870,14 +1892,14 @@ tbody tr:last-child td {
   margin-bottom: 1.5rem;
 }
 .metric-card {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
   text-align: center;
   transition: border-color 0.15s;
 }
-.metric-card:hover { border-color: rgba(255, 255, 255, 0.12); }
+.metric-card:hover { border-color: var(--border-strong); }
 .metric-icon { font-size: 1.25rem; margin-bottom: 4px; }
 .metric-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
 .metric-value { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.03em; margin-bottom: 2px; }
@@ -1894,7 +1916,7 @@ tbody tr:last-child td {
   margin-bottom: 1.5rem;
 }
 .chart-card {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
@@ -1912,7 +1934,7 @@ canvas { display: block; border-radius: 4px; }
 .progress-bar {
   width: 100%;
   height: 6px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--tint-strong);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -1927,7 +1949,7 @@ canvas { display: block; border-radius: 4px; }
 .range-selector {
   display: flex;
   gap: 2px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 2px;
@@ -1948,7 +1970,7 @@ canvas { display: block; border-radius: 4px; }
 
 /* Skeleton Loading */
 .skeleton {
-  background: linear-gradient(90deg, rgba(255,255,255,0.02) 25%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.02) 75%);
+  background: linear-gradient(90deg, var(--tint) 25%, var(--tint-strong) 50%, var(--tint) 75%);
   background-size: 200% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;
   border-radius: 4px;
@@ -1968,7 +1990,7 @@ canvas { display: block; border-radius: 4px; }
 }
 .hint-chip {
   padding: 8px 14px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
   color: var(--text-secondary);
@@ -2041,7 +2063,7 @@ canvas { display: block; border-radius: 4px; }
 }
 .message:hover .message-actions { opacity: 1; }
 .msg-action {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tint);
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
   color: var(--text-muted);
@@ -2082,7 +2104,7 @@ canvas { display: block; border-radius: 4px; }
   position: absolute;
   top: 4px;
   right: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--tint-strong);
   border: 1px solid var(--border-subtle);
   color: var(--text-muted);
   cursor: pointer;
@@ -2095,7 +2117,7 @@ canvas { display: block; border-radius: 4px; }
 .copy-btn.copied { color: var(--success); border-color: rgba(16,185,129,0.3); }
 .inline-code {
   padding: 1px 4px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--tint-strong);
   border: 1px solid var(--border-subtle);
   border-radius: 3px;
   font-family: var(--font-mono);
@@ -2275,7 +2297,7 @@ canvas { display: block; border-radius: 4px; }
   transition: border-color 0.15s;
 }
 .hitl-approval-card:last-child { margin-bottom: 0; }
-.hitl-approval-card:hover { border-color: rgba(255, 255, 255, 0.12); }
+.hitl-approval-card:hover { border-color: var(--border-strong); }
 .hitl-approval-header {
   display: flex;
   align-items: center;
