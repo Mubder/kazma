@@ -383,3 +383,35 @@ const KazmaUtils = {
         });
     },
 };
+
+// ── 11. Sidebar Model Selector Component ───────────────────────────
+function sidebarModel() {
+    return {
+        selectedModel: '',
+        providers: [],
+        async init() {
+            try {
+                const resp = await fetch('/api/providers');
+                const data = await resp.json();
+                this.providers = Array.isArray(data) ? data : (data.providers || []);
+            } catch(e) { console.error('Failed to load providers', e); }
+            // Load saved model
+            try {
+                const r = await fetch('/api/settings');
+                const s = await r.json();
+                if (s && s.model && s.model.default) this.selectedModel = s.model.default;
+            } catch(e) {}
+        },
+        async saveModel() {
+            if (!this.selectedModel) return;
+            try {
+                await fetch('/api/settings/active_model', {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ model: this.selectedModel })
+                });
+                window.dispatchEvent(new CustomEvent('model-changed', { detail: { model: this.selectedModel } }));
+            } catch(e) { console.error('Failed to save model', e); }
+        }
+    };
+}

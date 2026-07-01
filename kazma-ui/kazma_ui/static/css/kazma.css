@@ -371,6 +371,15 @@ button { cursor: pointer; font-family: inherit; }
   font-size: 0.7rem;
   color: var(--text-muted);
 }
+.sidebar-model-select {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+.sidebar-collapsed .sidebar-model-select { display: none; }
+.model-select-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 .model-badge {
   display: inline-flex;
   align-items: center;

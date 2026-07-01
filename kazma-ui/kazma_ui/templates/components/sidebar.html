@@ -133,6 +133,20 @@
 
     {# Footer #}
     <div class="sidebar-footer">
+        <div class="sidebar-model-select sidebar-collapsed-hide" x-data="sidebarModel()" x-init="init()">
+            <select x-model="selectedModel" @change="saveModel()"
+                    class="model-select-input"
+                    style="width:100%;background:var(--bg-panel);color:var(--text-primary);border:1px solid var(--border-subtle);border-radius:6px;padding:6px 8px;font-size:0.8rem;">
+                <option value="">Select Model...</option>
+                <template x-for="p in providers" :key="p.name">
+                    <optgroup :label="p.display_name || p.name">
+                        <template x-for="m in (p.all_models || p.discovered_models || p.models || [])" :key="p.name + '_' + m">
+                            <option :value="m" x-text="m"></option>
+                        </template>
+                    </optgroup>
+                </template>
+            </select>
+        </div>
         <div class="sidebar-user" x-data="{ open: false }" @click.outside="open = false">
             <img src="/static/img/kazma-icon.png" alt="Kazma" class="user-avatar-img">
             <div class="sidebar-footer-info">
