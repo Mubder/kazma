@@ -79,6 +79,25 @@ def create_app(config_path: str | None = None) -> FastAPI:
     from kazma_ui.auth import create_auth_middleware
 
     app.middleware("http")(create_auth_middleware())
+    # ── Debug: dump full ModelRegistry state ────────────────────────
+    @app.get("/api/system/debug/registry")
+    async def _debug_registry():
+        """Dump the exact model/provider state the backend sees."""
+        import kazma_core.model_registry as _mr
+        reg = _mr._registry
+        if reg is None:
+            return {"status": "not_initialized", "hint": "ModelRegistry not initialized. Start the app normally."}
+        return {
+            "status": "initialized",
+            "active_provider": reg._active_provider or "none",
+            "active_profile": reg.get_active_profile(),
+            "providers": reg._list_all_providers() if hasattr(reg, '_list_all_providers') else [],
+            "saved_profiles": reg.list_model_profiles(mask_api_key=True),
+            "registered_models": reg._registered_models if hasattr(reg, '_registered_models') else {},
+            "discovered_models": reg.get_discovered_models(),
+            "unified_options": reg.list_unified_options(),
+        }
+
     # ── System: flush caches + show config paths ──────────────────
     import os as _os_sys, glob as _glob_sys
     @app.get("/api/system/flush")
