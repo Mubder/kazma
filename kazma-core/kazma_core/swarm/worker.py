@@ -195,9 +195,17 @@ class InProcessWorker(SwarmWorker):
             from kazma_core.model_registry import get_model_registry
             registry = get_model_registry()
 
-            # Resolve the correct provider for this worker's model
+            # Resolve the correct provider for this worker's model.
+            # Priority: (1) worker's self.provider, (2) model search
+            # across all providers, (3) active/default provider.
             provider = None
-            if self.model:
+            if self.provider:
+                # The worker is pinned to a specific provider — build a
+                # client directly for that provider + model combination.
+                provider = registry.get_client_by_provider(
+                    self.provider, model=self.model or None
+                )
+            if provider is None and self.model:
                 try:
                     provider = registry.get_model(self.model)
                 except Exception:
@@ -206,7 +214,7 @@ class InProcessWorker(SwarmWorker):
                         self.name, self.model, exc_info=True,
                     )
                     provider = registry.get_client(model=self.model)
-            else:
+            if provider is None:
                 provider = registry.get_client()
 
             if provider is None:

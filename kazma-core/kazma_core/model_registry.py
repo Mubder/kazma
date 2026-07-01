@@ -285,6 +285,30 @@ class ModelRegistry:
         # Fallback: use active profile with overridden model
         return self.get_client(model=clean_id)
 
+    def get_client_by_provider(
+        self, provider_name: str, model: str | None = None
+    ) -> LLMProvider | None:
+        """Return an ``LLMProvider`` client for a SPECIFIC provider.
+
+        Unlike :meth:`get_client` (which uses the globally-active
+        provider), this pins to *provider_name* regardless of the
+        active setting.  Returns ``None`` if the named provider is not
+        found or misconfigured.
+        """
+        entry = self.get_provider(provider_name)
+        if not entry:
+            return None
+        effective_model = model or str(entry.get("model", "") or "")
+        if not effective_model:
+            # Try the active model as a fallback
+            effective_model = self._active_model or "gpt-4o-mini"
+        config = LLMConfig.from_dict({
+            "base_url": str(entry.get("base_url", "")),
+            "api_key": str(entry.get("api_key", "")),
+            "model": effective_model,
+        })
+        return LLMProvider(config)
+
     def find_provider_for_model(self, model_id: str) -> dict[str, Any] | None:
         """Return the provider entry that owns *model_id*.
 
