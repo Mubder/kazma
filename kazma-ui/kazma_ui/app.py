@@ -79,6 +79,53 @@ def create_app(config_path: str | None = None) -> FastAPI:
     from kazma_ui.auth import create_auth_middleware
 
     app.middleware("http")(create_auth_middleware())
+    # ── System: flush caches + show config paths ──────────────────
+    import os as _os_sys, glob as _glob_sys
+    @app.get("/api/system/flush")
+    async def _system_flush():
+        """Flush in-memory caches and return config file paths."""
+        paths = {
+            "kazma_home": str(_os_sys.path.expanduser("~/.kazma")),
+            "config_db": str(_os_sys.path.expanduser("~/.kazma/config.db")),
+            "config_yaml": next(iter(_glob_sys.glob(_os_sys.path.expanduser("~/.kazma/*.yaml"))), ""),
+            "pending_evolution": str(_os_sys.path.expanduser("~/.kazma/pending_evolution.json")),
+            "knowledge_graph": str(_os_sys.path.expanduser("kazma-data/knowledge_graph.json")),
+        }
+        # Flush model registry cache
+        try:
+            from kazma_core.model_registry import _registry
+            import kazma_core.model_registry as _mr
+            _mr._registry = None
+        except Exception:
+            pass
+        # Flush WorkerRegistry cache
+        try:
+            from kazma_core.swarm.registry import WorkerRegistry
+            WorkerRegistry._instance = None
+        except Exception:
+            pass
+        # Flush tool registry
+        try:
+            from kazma_core.tools.registry import ToolRegistry
+            ToolRegistry._instance = None
+        except Exception:
+            pass
+        return {"status": "flushed", "config_paths": paths}
+
+    @app.get("/api/system/config-paths")
+    async def _system_config_paths():
+        """Return the file paths of all active configuration sources."""
+        import os as _osp, glob as _g
+        home = _osp.path.expanduser("~/.kazma")
+        return {
+            "kazma_home": home,
+            "config_db": _osp.path.join(home, "config.db") if _osp.path.exists(_osp.path.join(home, "config.db")) else "NOT FOUND",
+            "swarm_registry": _osp.path.expanduser("swarm_registry.json") if _osp.path.exists(_osp.path.expanduser("swarm_registry.json")) else "NOT FOUND",
+            "pending_evolution": _osp.path.join(home, "pending_evolution.json") if _osp.path.exists(_osp.path.join(home, "pending_evolution.json")) else "NOT FOUND",
+            "knowledge_graph": _osp.path.expanduser("kazma-data/knowledge_graph.json") if _osp.path.exists(_osp.path.expanduser("kazma-data/knowledge_graph.json")) else "NOT FOUND",
+            "snapshots_db": _osp.path.expanduser("kazma-data/snapshots.db") if _osp.path.exists(_osp.path.expanduser("kazma-data/snapshots.db")) else "NOT FOUND",
+        }
+
     # ── MCP server management ───────────────────────────────────────
     @app.delete("/api/mcp/servers/{server_name}")
     async def _delete_mcp_server(server_name: str):
