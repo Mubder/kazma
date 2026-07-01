@@ -121,9 +121,21 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
 
     @router.get("/api/providers")
     async def list_providers() -> list[dict[str, Any]]:
-        """List all LLM providers with masked API keys."""
+        """List all LLM providers with masked API keys and discovered models."""
         registry = get_model_registry()
-        return [_mask_provider_entry(p) for p in registry.list_providers()]
+        providers = []
+        for p in registry.list_providers():
+            entry = _mask_provider_entry(p)
+            discovered = registry.get_discovered_models(p.get("name", ""))
+            if discovered:
+                manual = set(entry.get("models", []))
+                entry["discovered_models"] = discovered
+                entry["all_models"] = sorted(manual | set(discovered))
+            else:
+                entry["discovered_models"] = []
+                entry["all_models"] = entry.get("models", [])
+            providers.append(entry)
+        return providers
 
     @router.post("/api/providers")
     async def upsert_provider(req: ProviderUpdateRequest) -> dict[str, Any]:
@@ -201,9 +213,10 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
 
     @router.post("/api/providers/{name}/discover")
     async def discover_provider_models(name: str) -> dict[str, Any]:
-        """Discover models available for a provider."""
+        """Discover models available for a provider and persist them."""
         registry = get_model_registry()
         models = await registry.discover_models(name)
+        registry.serialize()  # persist discovered models to ConfigStore
         return {"name": name, "models": models, "count": len(models)}
 
     # ── Saved Model Profiles ────────────────────────────────────────────

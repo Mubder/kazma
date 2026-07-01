@@ -65,6 +65,14 @@
                             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="p.models && p.models.length">
                                 {{ t('settings.models_label') }} <span x-text="(p.models || []).join(', ')"></span>
                             </div>
+                            <div x-show="p.discovered_models && p.discovered_models.length" style="margin-top:6px">
+                                <div style="font-size:0.7rem;font-weight:600;color:var(--accent);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.06em">Discovered (<span x-text="p.discovered_models.length"></span>)</div>
+                                <div style="display:flex;flex-wrap:wrap;gap:4px;max-height:120px;overflow-y:auto">
+                                    <template x-for="m in p.discovered_models" :key="m">
+                                        <span class="badge badge-basic" style="font-size:0.7rem;font-family:var(--font-mono);cursor:default" x-text="m"></span>
+                                    </template>
+                                </div>
+                            </div>
                         </div>
                         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
                             <label class="toggle" :title="p.enabled ? 'Disable' : 'Enable'">
