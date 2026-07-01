@@ -201,6 +201,10 @@ class InProcessWorker(SwarmWorker):
                 try:
                     provider = registry.get_model(self.model)
                 except Exception:
+                    logger.debug(
+                        "[InProcessWorker:%s] get_model(%s) failed, falling back to get_client",
+                        self.name, self.model, exc_info=True,
+                    )
                     provider = registry.get_client(model=self.model)
             else:
                 provider = registry.get_client()
