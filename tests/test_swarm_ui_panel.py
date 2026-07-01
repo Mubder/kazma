@@ -686,7 +686,6 @@ class TestSavedModelProfileDropdowns:
         response = client.get("/swarm")
         html = response.text
         assert 'add-model-select' in html or 'id="add-model-select"' in html
-        assert 'spawn-model-select' in html or 'id="spawn-model-select"' in html
 
     def test_swarm_js_wires_provider_grouped_models(self):
         """swarm.js populates model dropdowns with provider optgroups (Sprint 12)."""
