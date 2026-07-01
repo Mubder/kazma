@@ -292,11 +292,10 @@ class ModelRegistry:
         preset = PROVIDER_PRESETS.get(clean_name, {})
         models_path = preset.get("models_endpoint", "/models")
 
-        # Build the full URL — strip /v1 if present, then append models path
-        url = base_url.rstrip("/")
-        if url.endswith("/v1"):
-            url = url[: -len("/v1")]
-        url = f"{url}{models_path}"
+        # Build the full URL — base_url + models_path.
+        # Most OpenAI-compatible APIs expect {base_url}/models where base_url
+        # already includes the /v1 suffix (e.g. https://api.openai.com/v1/models).
+        url = f"{base_url.rstrip('/')}{models_path}"
 
         # Build auth header
         auth_header_type = preset.get("auth_header", "Bearer")
@@ -470,6 +469,52 @@ class ModelRegistry:
                 provider["health"] = status
                 self._save_providers(providers)
                 return
+
+    # ── Selected models (user-curated subset of discovered) ─────────
+
+    def get_selected_models(self, provider_name: str) -> list[str]:
+        """Return the user-selected models for a provider.
+
+        Stored under ``providers.{name}.selected_models`` in ConfigStore.
+        Returns an empty list when nothing has been explicitly selected.
+        """
+        clean = (provider_name or "").strip()
+        if not clean:
+            return []
+        raw = self._cs.get(f"providers.{clean}.selected_models", [])
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                raw = []
+        if isinstance(raw, list):
+            return [str(m) for m in raw]
+        return []
+
+    def set_selected_models(self, provider_name: str, models: list[str]) -> None:
+        """Set the user-selected models for a provider."""
+        clean = (provider_name or "").strip()
+        if not clean:
+            return
+        self._cs.set(
+            f"providers.{clean}.selected_models",
+            [str(m) for m in models],
+            category="providers",
+        )
+
+    def get_visible_models(self, provider_name: str) -> list[str]:
+        """Return models that should appear in dropdowns.
+
+        If the user has explicitly selected models, returns only those.
+        Otherwise returns all discovered + manual models (backward-compatible).
+        """
+        selected = self.get_selected_models(provider_name)
+        if selected:
+            return selected
+        discovered = self.get_discovered_models(provider_name)
+        provider = self.get_provider(provider_name)
+        manual = self._normalize_models(provider.get("models", [])) if provider else []
+        return sorted(set(discovered) | set(manual))
 
     # ── Saved model profiles ───────────────────────────────────────
 

@@ -126,7 +126,9 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         providers = []
         for p in registry.list_providers():
             entry = _mask_provider_entry(p)
-            discovered = registry.get_discovered_models(p.get("name", ""))
+            name = p.get("name", "")
+            discovered = registry.get_discovered_models(name)
+            selected = registry.get_selected_models(name)
             if discovered:
                 manual = set(entry.get("models", []))
                 entry["discovered_models"] = discovered
@@ -134,6 +136,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             else:
                 entry["discovered_models"] = []
                 entry["all_models"] = entry.get("models", [])
+            entry["selected_models"] = selected
+            entry["visible_models"] = registry.get_visible_models(name)
             providers.append(entry)
         return providers
 
@@ -218,6 +222,19 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         models = await registry.discover_models(name)
         registry.serialize()  # persist discovered models to ConfigStore
         return {"name": name, "models": models, "count": len(models)}
+
+    @router.post("/api/providers/{name}/select-models")
+    async def set_selected_models(name: str, req: dict[str, Any]) -> dict[str, Any]:
+        """Set which discovered models should appear in dropdowns.
+
+        Body: ``{"models": ["model-a", "model-b"]}``
+        """
+        registry = get_model_registry()
+        models = req.get("models", []) if isinstance(req, dict) else []
+        if not isinstance(models, list):
+            models = []
+        registry.set_selected_models(name, [str(m) for m in models])
+        return {"status": "ok", "selected_models": registry.get_selected_models(name)}
 
     # ── Saved Model Profiles ────────────────────────────────────────────
 

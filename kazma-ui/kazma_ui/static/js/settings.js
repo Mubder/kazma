@@ -739,6 +739,42 @@ function settingsApp() {
             this.hubDiscoveringProvider = null;
         },
 
+        async toggleModelSelection(providerName, model, checked) {
+            const p = this.hubProviders.find(x => x.name === providerName);
+            if (!p) return;
+            if (!p.selected_models) p.selected_models = [];
+            if (checked) {
+                if (!p.selected_models.includes(model)) p.selected_models.push(model);
+            } else {
+                p.selected_models = p.selected_models.filter(m => m !== model);
+            }
+            try {
+                await fetch(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ models: p.selected_models }),
+                });
+            } catch (e) {
+                showToast('Failed to save model selection', 'error');
+            }
+        },
+
+        async toggleAllModels(providerName) {
+            const p = this.hubProviders.find(x => x.name === providerName);
+            if (!p || !p.discovered_models) return;
+            const allSelected = (p.selected_models || []).length === p.discovered_models.length;
+            p.selected_models = allSelected ? [] : [...p.discovered_models];
+            try {
+                await fetch(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ models: p.selected_models }),
+                });
+            } catch (e) {
+                showToast('Failed to save model selection', 'error');
+            }
+        },
+
         openHubConnectorModal(name) {
             this.hubConnectorTested = false;
             this.hubShowConnectorToken = false;

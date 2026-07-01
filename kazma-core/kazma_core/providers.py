@@ -57,6 +57,13 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
         "auth_header": "",
         "docs": "",
     },
+    "nvidia": {
+        "name": "NVIDIA NIM",
+        "base_url": "https://integrate.api.nvidia.com/v1",
+        "models_endpoint": "/models",
+        "auth_header": "Bearer",
+        "docs": "https://build.nvidia.com",
+    },
     "custom": {
         "name": "Custom Endpoint",
         "base_url": "",

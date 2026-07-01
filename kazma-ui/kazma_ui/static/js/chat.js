@@ -179,13 +179,18 @@
             if (Array.isArray(providers)) {
               providers.forEach(function(p) {
                 var models = [];
+                var visible = p.visible_models || [];
                 var disc = p.discovered_models || [];
                 var manual = p.models || [];
-                if (Array.isArray(disc)) {
-                  disc.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
-                }
-                if (Array.isArray(manual)) {
-                  manual.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+                if (Array.isArray(visible) && visible.length) {
+                  visible.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+                } else {
+                  if (Array.isArray(disc)) {
+                    disc.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+                  }
+                  if (Array.isArray(manual)) {
+                    manual.forEach(function(m) { if (m && models.indexOf(m) === -1) models.push(m); });
+                  }
                 }
                 if (models.length > 0) {
                   providerGroups.push({
