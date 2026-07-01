@@ -639,10 +639,20 @@ def _parse_output_target_suffix(task: str) -> tuple[str, dict[str, Any] | None]:
         try:
             chat_id = int(chat_id_str)
         except ValueError:
+            logger.info(
+                "[agent-handler] Ignoring malformed output-target suffix %r "
+                "(chat_id not an integer); task left untouched", raw,
+            )
             return task, None  # malformed — leave prompt untouched
         return clean, {"platform": platform, "chat_id": chat_id, "enabled": True}
 
-    # Unrecognized suffix format — leave prompt untouched
+    # Unrecognized suffix format (e.g. "@GroupName") — log so the user
+    # knows the override was seen but not applied, then leave prompt untouched.
+    logger.info(
+        "[agent-handler] Unrecognized output-target suffix %r "
+        "(expected platform:chat_id, e.g. telegram:-100123); task left untouched",
+        raw,
+    )
     return task, None
 
 
@@ -718,9 +728,6 @@ async def _dispatch_swarm_from_chat(
         "source_thread_id": thread_id,
         "source_user": ctx.get("username", ""),
     }
-    # Stash the resolved override (if any) so downstream can read it.
-    if target_override:
-        metadata["output_target"] = target_override
 
     swarm_task = SwarmTask(
         prompt=task,
@@ -760,8 +767,10 @@ async def _dispatch_swarm_from_chat(
 
     except Exception as exc:
         logger.exception("[agent-handler] Swarm dispatch failed for thread %s", thread_id)
-        await _send_swarm_reply(msg, store, manager, thread_id,
-            f"⚠️ Swarm dispatch failed: {exc}")
+        error_reply = f"⚠️ Swarm dispatch failed: {exc}"
+        await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
+        # Mirror the failure to the group too, consistent with the success path.
+        await _maybe_send_to_output_target(manager, error_reply, target_override)
 
     return True
 
