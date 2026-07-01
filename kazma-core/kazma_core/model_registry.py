@@ -233,16 +233,15 @@ class ModelRegistry:
         if not clean_id:
             raise ValueError("model_id is required")
 
-        # Search providers for one that lists this model
-        for provider in self.list_providers():
-            models = self._normalize_models(provider.get("models", []))
-            if clean_id in models:
-                config = LLMConfig.from_dict({
-                    "base_url": str(provider.get("base_url", "")),
-                    "api_key": str(provider.get("api_key", "")),
-                    "model": clean_id,
-                })
-                return LLMProvider(config)
+        # Search providers for one that lists this model (manual + discovered)
+        owner = self.find_provider_for_model(clean_id)
+        if owner:
+            config = LLMConfig.from_dict({
+                "base_url": str(owner.get("base_url", "")),
+                "api_key": str(owner.get("api_key", "")),
+                "model": clean_id,
+            })
+            return LLMProvider(config)
 
         # Fallback: use active profile with overridden model
         return self.get_client(model=clean_id)

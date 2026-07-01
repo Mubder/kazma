@@ -185,11 +185,26 @@ class InProcessWorker(SwarmWorker):
         context: str | SwarmDispatchContext = "",
     ) -> dict[str, Any]:
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
-        logger.info("[InProcessWorker:%s] dispatching %s", self.name, task_id)
+        logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")
         try:
             from kazma_core.model_registry import get_model_registry
             registry = get_model_registry()
-            provider = registry.get_client()
+
+            # Resolve the correct provider for this worker's model
+            provider = None
+            if self.model:
+                # First, try to find which provider owns this model
+                owner = registry.find_provider_for_model(self.model)
+                if owner:
+                    # Get a client pointed at the owner's endpoint
+                    provider = registry.get_model(self.model)
+                else:
+                    # Model not found in any provider — fall back to active
+                    # client but override the model name
+                    provider = registry.get_client(model=self.model)
+            else:
+                provider = registry.get_client()
+
             if provider is None:
                 return {"worker": self.name, "task_id": task_id, "status": "error", "output": "", "error": "No provider available"}
             messages = [{"role": "user", "content": task}]
