@@ -134,7 +134,7 @@
     {# Footer #}
     <div class="sidebar-footer">
         <div class="sidebar-user" x-data="{ open: false }" @click.outside="open = false">
-            <div class="user-avatar">K</div>
+            <img src="/static/img/kazma-icon.png" alt="Kazma" class="user-avatar-img">
             <div class="sidebar-footer-info">
                 <div class="user-name">Kazma Agent</div>
                 <div class="user-role sidebar-collapsed-hide">
@@ -142,10 +142,6 @@
                     <span x-text="activeModel || '{{ config.default_model if config and config.default_model else 'gpt-4o-mini' }}'">{{ config.default_model if config and config.default_model else 'gpt-4o-mini' }}</span>
                 </div>
             </div>
-        </div>
-        <div class="model-badge sidebar-collapsed-hide">
-            <span class="status-dot status-ok"></span>
-            <span x-text="activeModel || '{{ config.default_model if config and config.default_model else 'gpt-4o-mini' }}'">{{ config.default_model if config and config.default_model else 'gpt-4o-mini' }}</span>
         </div>
     </div>
 </aside>

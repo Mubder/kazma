@@ -2508,3 +2508,20 @@ canvas { display: block; border-radius: 4px; }
 .hitl-status-denied { color: var(--text-tertiary); }
 .hitl-status-error { color: var(--danger); }
 
+/* ── Brand icons — chat welcome + sidebar avatar ───────────────── */
+.welcome-icon img.welcome-logo {
+  width: 72px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  border-radius: var(--radius);
+}
+.user-avatar-img {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border-subtle);
+}
+
