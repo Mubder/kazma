@@ -285,6 +285,17 @@ function sidebarComponent() {
                 const sel = this.$el.querySelector('.sidebar-model-dropdown');
                 if (sel && this.activeModel) sel.value = this.activeModel;
             });
+            // Listen for model changes from chat or other components
+            document.addEventListener('model-changed', (e) => {
+                const model = e.detail || (e.target && e.target.value);
+                if (model) {
+                    this.activeModel = model;
+                    this.$nextTick(() => {
+                        const sel = this.$el.querySelector('.sidebar-model-dropdown');
+                        if (sel) sel.value = model;
+                    });
+                }
+            });
         },
 
         async _fetchActiveModel() {

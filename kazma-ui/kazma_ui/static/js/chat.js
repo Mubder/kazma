@@ -256,6 +256,24 @@
     if (!modelSelectorEl) return;
     selectedModel = modelSelectorEl.value || '';
     try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
+    // Sync to backend so the sidebar dropdown stays in sync
+    if (selectedModel) {
+      fetch('/api/settings/active_model', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active_model: selectedModel }),
+      }).then(function(r) { return r.ok ? r.json() : {}; })
+        .then(function(data) {
+          // Update sidebar component if it exists on this page
+          var sidebarEl = document.querySelector('[x-data*="sidebarComponent"]');
+          if (sidebarEl && window.Alpine) {
+            var sd = Alpine.$data(sidebarEl);
+            if (sd) sd.activeModel = selectedModel;
+          }
+          // Dispatch global event so other components can react
+          document.dispatchEvent(new CustomEvent('model-changed', { detail: selectedModel }));
+        }).catch(function() {});
+    }
   }
 
   // ── Send message via SSE ──────────────────────────────
