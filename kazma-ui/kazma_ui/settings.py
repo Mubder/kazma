@@ -254,6 +254,21 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         """Compare models with the same prompt."""
         return await _get_sm().compare_models(req.prompt, req.models, req.temperature, req.max_tokens)
 
+    # ── Active model (global chat model sync) ───────────────────────
+
+    @router.put("/api/settings/active_model")
+    async def api_set_active_model(req: dict) -> dict[str, str]:
+        """Save the globally selected active chat model to ConfigStore.
+
+        Persists under ``registry.active_chat_model`` so gateways (Telegram,
+        Discord, etc.) can read it via ``get_active_chat_model()``.
+        """
+        model = req.get("model", "").strip()
+        if model:
+            _get_sm()._cs.set("registry.active_chat_model", model, category="registry")
+            return {"status": "ok", "model": model}
+        return {"status": "error", "message": "model is required"}
+
     # ── Agent ────────────────────────────────────────────────────────
 
     @router.put("/api/settings/agent")
