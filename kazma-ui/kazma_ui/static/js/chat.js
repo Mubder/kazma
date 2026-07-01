@@ -51,6 +51,16 @@
       modelSelectorEl.addEventListener('change', onModelChange);
     }
 
+    // Listen for model changes from sidebar or other components
+    document.addEventListener('model-changed', function(e) {
+      var model = e.detail || (e.target && e.target.value) || '';
+      if (model && model !== selectedModel) {
+        selectedModel = model;
+        if (modelSelectorEl) modelSelectorEl.value = model;
+        try { localStorage.setItem(MODEL_LS_KEY, model); } catch(err) {}
+      }
+    });
+
     // New session button
     var newBtn = $('new-session-btn');
     if (newBtn) newBtn.addEventListener('click', newSession);
@@ -166,8 +176,10 @@
       })
       .then(function(r) { return r.ok ? r.json() : {}; })
       .then(function(active) {
-        if (active && active.model && !selectedModel) {
+        // Backend is authoritative — always prefer it over cached localStorage
+        if (active && active.model) {
           selectedModel = active.model;
+          try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
         }
 
         // Fetch all providers so we can group models by provider
@@ -256,23 +268,15 @@
     if (!modelSelectorEl) return;
     selectedModel = modelSelectorEl.value || '';
     try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch(e) {}
+    // Notify other components immediately
+    document.dispatchEvent(new CustomEvent('model-changed', { detail: selectedModel }));
     // Sync to backend so the sidebar dropdown stays in sync
     if (selectedModel) {
       fetch('/api/settings/active_model', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ active_model: selectedModel }),
-      }).then(function(r) { return r.ok ? r.json() : {}; })
-        .then(function(data) {
-          // Update sidebar component if it exists on this page
-          var sidebarEl = document.querySelector('[x-data*="sidebarComponent"]');
-          if (sidebarEl && window.Alpine) {
-            var sd = Alpine.$data(sidebarEl);
-            if (sd) sd.activeModel = selectedModel;
-          }
-          // Dispatch global event so other components can react
-          document.dispatchEvent(new CustomEvent('model-changed', { detail: selectedModel }));
-        }).catch(function() {});
+      }).then(function() {}).catch(function() {});
     }
   }
 

@@ -338,10 +338,13 @@ function sidebarComponent() {
         },
 
         async onModelChange(event) {
-            const model = event.target.value;
+            const model = event.target ? event.target.value : (event.detail || '');
+            if (!model) return;
             this.activeModel = model;
             const store = Alpine.store('settings');
             if (store) store.appearance.active_chat_model = model;
+            // Notify other components immediately (before the async PUT)
+            document.dispatchEvent(new CustomEvent('model-changed', { detail: model }));
             try {
                 const res = await fetch('/api/settings/active_model', {
                     method: 'PUT',
@@ -351,7 +354,6 @@ function sidebarComponent() {
                 const data = await res.json();
                 if (data && data.active_model) {
                     this.activeModel = data.active_model;
-                    this.$dispatch('model-changed', data.active_model);
                 }
             } catch (e) {
                 console.warn('[sidebar] Failed to sync model:', e);
