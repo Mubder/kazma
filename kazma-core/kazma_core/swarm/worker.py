@@ -1,18 +1,14 @@
 """Worker abstractions for the SwarmManager.
 
-Two concrete implementations:
+One concrete implementation:
 
-* **InProcessWorker** — wraps ``kazma_core.agent.sub_agent.SubAgentManager.spawn``
-  for fast, in-process delegation (same model, shared memory).
-* **TelegramWorker** — launches a separate Kazma profile via subprocess
-  (``kazma -p <profile>``), targeting a Telegram group chat.
+* **InProcessWorker** — calls the LLM directly via ModelRegistry for fast,
+  in-process dispatch (shared model registry, token/cost tracking).
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import os
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -263,143 +259,3 @@ class InProcessWorker(SwarmWorker):
                 "cost": 0.0,
                 "duration_seconds": time.monotonic() - dispatch_started,
             }
-
-
-# ---------------------------------------------------------------------------
-# Telegram bot (subprocess kazma -p)
-# ---------------------------------------------------------------------------
-
-class TelegramWorker(SwarmWorker):
-    """Runs a dedicated Kazma profile as a subprocess.
-
-    The worker shells out to ``kazma -p <profile>`` and pipes the task as
-    a one-shot prompt.  The bot token is read from the environment variable
-    named by ``bot_token_env``.
-
-    .. note::
-
-        **External dependency:** This worker requires the ``kazma`` CLI to be
-        installed and available on ``PATH``.  ``kazma`` is a separate Telegram
-        bot runner (not bundled with Kazma).  If it is not installed, dispatch
-        will return an ``error`` result.  Install it separately or use
-        :class:`InProcessWorker` instead.
-
-    Args:
-        name:          Worker identifier.
-        profile:       Kazma profile name (e.g. ``core``).
-        bot_token_env: Env var holding the Telegram bot token.
-        group_chat_id: Telegram group chat ID to target (read from
-                       ``SWARM_CHAT_ID`` env var by the config loader).
-        role:          Semantic role.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        profile: str,
-        bot_token_env: str,
-        group_chat_id: int = 0,
-        role: str = "",
-        model: str = "",
-        provider: str = "",
-        capabilities: WorkerCapabilities | None = None,
-    ) -> None:
-        super().__init__(
-            name=name,
-            role=role,
-            model=model,
-            provider=provider,
-            capabilities=capabilities or WorkerCapabilities(role=role),
-        )
-        self.profile = profile
-        self.bot_token_env = bot_token_env
-        self.group_chat_id = group_chat_id
-        self._process: asyncio.subprocess.Process | None = None
-
-    async def start(self) -> None:
-        """Verify the bot token is available (no subprocess yet)."""
-        token = os.environ.get(self.bot_token_env, "")
-        if not token:
-            logger.warning(
-                "[TelegramWorker:%s] env var %s not set — bot will fail on dispatch",
-                self.name,
-                self.bot_token_env,
-            )
-        self._running = True
-        logger.info("[TelegramWorker:%s] registered (profile=%s)", self.name, self.profile)
-
-    async def stop(self) -> None:
-        if self._process and self._process.returncode is None:
-            self._process.terminate()
-            try:
-                await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except TimeoutError:
-                self._process.kill()
-            logger.info("[TelegramWorker:%s] process terminated", self.name)
-        self._process = None
-        self._running = False
-
-    async def dispatch(
-        self,
-        task: str,
-        context: str | SwarmDispatchContext = "",
-    ) -> dict[str, Any]:
-        """Send *task* to the Kazma profile via ``kazma -p <profile>`` CLI.
-
-        This is a one-shot invocation — kazma processes the prompt and exits.
-        """
-        task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
-        logger.info("[TelegramWorker:%s] dispatching %s", self.name, task_id)
-
-        prompt = task
-        context_value = _compose_context_payload(context)
-        if context_value:
-            prompt = f"{task}\n\nContext:\n{context_value}"
-
-        try:
-            # Use the ModelRegistry provider directly — no subprocess
-            from kazma_core.model_registry import get_model_registry
-
-            registry = get_model_registry()
-            provider = registry.get_client()
-            if provider is None:
-                return {
-                    "worker": self.name,
-                    "task_id": task_id,
-                    "status": "error",
-                    "output": "",
-                    "error": "No provider available — check model configuration",
-                }
-
-            messages = [{"role": "user", "content": prompt}]
-            response = await provider.chat(messages)
-            return {
-                "worker": self.name,
-                "task_id": task_id,
-                "status": "success",
-                "output": response.content,
-                "error": None,
-            }
-        except (RuntimeError, ImportError) as exc:
-            logger.warning("[TelegramWorker:%s] agent unavailable: %s", self.name, exc)
-            return {
-                "worker": self.name,
-                "task_id": task_id,
-                "status": "error",
-                "output": "",
-                "error": f"Agent unavailable: {exc}",
-            }
-        except Exception as exc:
-            logger.exception("[TelegramWorker:%s] dispatch failed", self.name)
-            return {
-                "worker": self.name,
-                "task_id": task_id,
-                "status": "error",
-                "output": "",
-                "error": str(exc)[:500],
-            }
-
-    @property
-    def worker_type(self) -> str:
-        """Return the UI-facing worker type label."""
-        return "telegram"

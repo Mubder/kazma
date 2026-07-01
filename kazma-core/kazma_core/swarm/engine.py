@@ -49,7 +49,7 @@ from kazma_core.swarm.task import (
 )
 from kazma_core.swarm.task_store import TaskStore
 from kazma_core.swarm.tracing import TracingEmitter
-from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
+from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +122,14 @@ class SwarmEngine:
             self.add_worker(worker_config)
 
     def _create_worker(self, worker_config: WorkerConfig) -> SwarmWorker:
-        """Instantiate a concrete worker from its config."""
-        if worker_config.type == "in_process":
+        """Instantiate a concrete worker from its config.
+
+        ``telegram_bot`` is accepted for backward compatibility with
+        persisted configs but now resolves to an :class:`InProcessWorker`
+        (the legacy ``TelegramWorker`` subprocess path was vestigial and is
+        removed).
+        """
+        if worker_config.type in ("in_process", "telegram_bot"):
             return InProcessWorker(
                 name=worker_config.name,
                 role=worker_config.role,
@@ -131,17 +137,6 @@ class SwarmEngine:
                 provider=worker_config.provider,
                 capabilities=worker_config.capabilities,
                 system_prompt=getattr(worker_config, "system_prompt", ""),
-            )
-        if worker_config.type == "telegram_bot":
-            return TelegramWorker(
-                name=worker_config.name,
-                profile=worker_config.profile,
-                bot_token_env=worker_config.bot_token_env,
-                group_chat_id=self.config.group_chat_id,
-                role=worker_config.role,
-                model=worker_config.model,
-                provider=worker_config.provider,
-                capabilities=worker_config.capabilities,
             )
         raise ValueError(f"Unknown worker type: '{worker_config.type}'")
 
@@ -1599,16 +1594,8 @@ class SwarmEngine:
             logger.warning("[SwarmEngine] summon skipped — worker '%s' is disabled", worker_name)
             return None
 
-        if entry.worker_type == "telegram_bot":
-            # Telegram workers need profile + bot_token_env — use stored metadata
-            return TelegramWorker(
-                name=entry.name,
-                profile=entry.metadata.get("profile", entry.name),
-                bot_token_env=entry.metadata.get("bot_token_env", ""),
-                role=entry.roles[0] if entry.roles else "leaf",
-                model=entry.model,
-                provider=entry.provider,
-            )
+        # All worker types now resolve to InProcessWorker (the legacy
+        # TelegramWorker subprocess path was vestigial and is removed).
         return InProcessWorker(
             name=entry.name,
             role=entry.roles[0] if entry.roles else "leaf",

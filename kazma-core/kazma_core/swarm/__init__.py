@@ -63,7 +63,7 @@ from kazma_core.swarm.topology import (
     StageRole,
 )
 from kazma_core.swarm.tracing import InMemorySpanExporter, Span, TracingEmitter
-from kazma_core.swarm.worker import InProcessWorker, SwarmWorker, TelegramWorker
+from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
 
 __all__ = [
     "ApprovalRequest",
@@ -107,7 +107,6 @@ __all__ = [
     "TaskStatus",
     "TaskStore",
     "TaskType",
-    "TelegramWorker",
     "TimeoutGuard",
     "TracingEmitter",
     "WorkerCapabilities",

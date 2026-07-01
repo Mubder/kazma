@@ -14,7 +14,7 @@ from kazma_core.llm_provider import LLMResponse
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.config import OrchestratorConfig, SwarmConfig, WorkerConfig
 from kazma_core.swarm.manager import SwarmManager
-from kazma_core.swarm.worker import InProcessWorker, TelegramWorker
+from kazma_core.swarm.worker import InProcessWorker
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -140,12 +140,13 @@ class TestAddWorker:
         assert "test" in mgr.worker_names
 
     def test_add_telegram_worker(self, worker_config_telegram):
+        """telegram_bot type resolves to InProcessWorker (backward compat)."""
         config = SwarmConfig(enabled=True, workers=[])
         mgr = SwarmManager(config)
         mgr.add_worker(worker_config_telegram)
         worker = mgr.get_worker("core")
-        assert isinstance(worker, TelegramWorker)
-        assert worker.profile == "core"
+        assert isinstance(worker, InProcessWorker)
+        assert worker.name == "core"
 
 
 # ===========================================================================
@@ -244,52 +245,51 @@ class TestDispatchInProcess:
 
 
 # ===========================================================================
-# 5. test_dispatch_telegram
+# 5. test_dispatch_telegram_bot_type
 # ===========================================================================
 
-class TestDispatchTelegram:
-    """TelegramWorker dispatches via subprocess."""
+class TestDispatchTelegramBotType:
+    """telegram_bot worker type now dispatches via InProcessWorker (backward compat).
+
+    The legacy TelegramWorker subprocess class was vestigial and removed.
+    Workers persisted with type='telegram_bot' resolve to InProcessWorker.
+    """
 
     @pytest.mark.asyncio
-    async def test_dispatch_telegram(self, tmp_path):
-        worker = TelegramWorker(
-            name="core",
-            profile="core",
-            bot_token_env="KAZMA_CORE_BOT_TOKEN",
-            group_chat_id=-5553328924,
-            role="backend_core",
-        )
+    async def test_telegram_bot_type_dispatches(self, worker_config_telegram):
+        """A telegram_bot WorkerConfig creates an InProcessWorker that dispatches."""
+        config = SwarmConfig(enabled=True, workers=[worker_config_telegram])
+        mgr = SwarmManager(config)
+        worker = mgr.get_worker("core")
+        assert isinstance(worker, InProcessWorker)
         await worker.start()
 
-        # Mock the provider
         mock_provider = MagicMock()
-        from kazma_core.llm_provider import LLMResponse
-        mock_provider.chat = AsyncMock(return_value=LLMResponse(content="Task done via telegram"))
+        mock_provider.chat = AsyncMock(return_value=LLMResponse(content="Task done"))
         mock_registry = MagicMock()
         mock_registry.get_client = MagicMock(return_value=mock_provider)
+        # get_model raises so dispatch falls through to get_client()
+        mock_registry.get_model = MagicMock(side_effect=RuntimeError("not found"))
 
         with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
             result = await worker.dispatch("Deploy to staging")
 
         assert result["worker"] == "core"
         assert result["status"] == "success"
-        assert "Task done via telegram" in result["output"]
-        assert result["error"] is None
-
+        assert "Task done" in result["output"]
         await worker.stop()
 
     @pytest.mark.asyncio
-    async def test_dispatch_telegram_failure(self):
-        worker = TelegramWorker(
-            name="core",
-            profile="core",
-            bot_token_env="KAZMA_CORE_BOT_TOKEN",
-        )
+    async def test_telegram_bot_type_no_provider(self, worker_config_telegram):
+        """telegram_bot worker returns clean error when no provider available."""
+        config = SwarmConfig(enabled=True, workers=[worker_config_telegram])
+        mgr = SwarmManager(config)
+        worker = mgr.get_worker("core")
         await worker.start()
 
-        # Mock registry with no provider available
         mock_registry = MagicMock()
         mock_registry.get_client = MagicMock(return_value=None)
+        mock_registry.get_model = MagicMock(side_effect=RuntimeError("no model"))
 
         with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
             result = await worker.dispatch("task")
@@ -461,30 +461,3 @@ class TestStartStopLifecycle:
         await manager.stop_all()
         for w in manager._workers.values():
             assert w._running is False
-
-    @pytest.mark.asyncio
-    async def test_telegram_worker_start_checks_env(self):
-        """TelegramWorker.start warns if bot token env var is missing."""
-        worker = TelegramWorker(
-            name="t", profile="p", bot_token_env="MISSING_VAR_XYZ"
-        )
-        # Should not raise, just warn
-        await worker.start()
-        assert worker._running is True
-        await worker.stop()
-
-    @pytest.mark.asyncio
-    async def test_telegram_worker_stop_terminates_process(self):
-        worker = TelegramWorker(
-            name="t", profile="p", bot_token_env="X"
-        )
-        mock_proc = AsyncMock()
-        mock_proc.returncode = None
-        mock_proc.wait = AsyncMock(return_value=0)
-        worker._process = mock_proc
-        worker._running = True
-
-        await worker.stop()
-        mock_proc.terminate.assert_called_once()
-        assert worker._running is False
-        assert worker._process is None

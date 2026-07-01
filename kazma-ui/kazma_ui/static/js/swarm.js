@@ -61,10 +61,6 @@
     if (addProfile) {
       addProfile.addEventListener('change', function(e) { applySavedProfile('add', e.target.value); });
     }
-    var spawnProfile = $('spawn-profile');
-    if (spawnProfile) {
-      spawnProfile.addEventListener('change', function(e) { applySavedProfile('spawn', e.target.value); });
-    }
 
     // Start/Stop buttons
     var startBtn = $('swarm-start');
@@ -200,25 +196,6 @@
     return 'deepseek';
   }
 
-  function populateModelDatalist() {
-    var datalist = $('swarm-models-datalist');
-    if (!datalist) return;
-
-    var merged = {};
-    (modelOptions.models || []).forEach(function(modelName) {
-      if (modelName) merged[modelName] = true;
-    });
-    (modelOptions.profiles || []).forEach(function(profile) {
-      var modelName = (profile && profile.model) ? String(profile.model) : '';
-      if (modelName) merged[modelName] = true;
-    });
-
-    var items = Object.keys(merged).sort();
-    datalist.innerHTML = items.map(function(modelName) {
-      return '<option value="' + esc(modelName) + '">';
-    }).join('');
-  }
-
   function profileOptionLabel(profile) {
     if (!profile || typeof profile !== 'object') return '';
     var name = String(profile.name || '').trim();
@@ -239,32 +216,6 @@
       if (String(profile.name || '').trim() === target) return profile;
     }
     return null;
-  }
-
-  function populateProfileSelect(selectId) {
-    var select = $(selectId);
-    if (!select) return;
-
-    var previousValue = select.value || '';
-    var defaultLabel = 'Custom / none';
-    var existingDefaultOption = select.querySelector('option[value=""]');
-    if (existingDefaultOption && existingDefaultOption.textContent) {
-      defaultLabel = existingDefaultOption.textContent;
-    }
-
-    var options = ['<option value="">' + esc(defaultLabel) + '</option>'];
-    (modelOptions.profiles || []).forEach(function(profile) {
-      var name = String((profile || {}).name || '').trim();
-      var label = profileOptionLabel(profile);
-      if (!name || !label) return;
-      options.push('<option value="' + esc(name) + '">' + esc(label) + '</option>');
-    });
-    select.innerHTML = options.join('');
-
-    if (previousValue) {
-      select.value = previousValue;
-      if (select.value !== previousValue) select.value = '';
-    }
   }
 
   function providerDisplayName(providerName) {
@@ -305,20 +256,6 @@
       var label = providerDisplayName(providerName);
       return '<option value="' + esc(providerName) + '">' + esc(label) + '</option>';
     }).join('');
-  }
-
-  function applyModelProviderDefaults() {
-    var addModel = $('add-model');
-    var spawnModel = $('spawn-model');
-    var addProvider = $('add-provider');
-    var spawnProvider = $('spawn-provider');
-    var modelValue = defaultModelOption();
-    var providerValue = defaultProviderOption();
-
-    if (addModel && !addModel.value) addModel.value = modelValue;
-    if (spawnModel && !spawnModel.value) spawnModel.value = modelValue;
-    if (addProvider && !addProvider.value) addProvider.value = providerValue;
-    if (spawnProvider && !spawnProvider.value) spawnProvider.value = providerValue;
   }
 
   function refreshStatus() {
