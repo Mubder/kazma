@@ -595,11 +595,11 @@ def create_swarm_router(
         tasks = [task.to_dict() for task in engine.list_tasks(task_type)]
         return JSONResponse({"tasks": tasks, "count": len(tasks)})
 
-    @router.get("/api/swarm/tasks/export")
+    @router.get("/api/swarm/tasks/export", response_model=None)
     async def swarm_tasks_export(
         format: str = Query(default="json"),
         status: str | None = Query(default=None),
-    ) -> JSONResponse | Response:
+    ):
         """Export task history as JSON or CSV."""
         engine = _current_engine()
         if not _has_swarm_core() or engine is None:

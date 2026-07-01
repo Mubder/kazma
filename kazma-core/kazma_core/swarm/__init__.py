@@ -41,7 +41,6 @@ from kazma_core.swarm.reliability import (
     OutputValidator,
     RetryPolicy,
     TimeoutGuard,
-    TimeoutGuardError,
 )
 from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
 from kazma_core.swarm.safety import SafetyMiddleware, SafetyViolationError, get_safety
@@ -110,7 +109,6 @@ __all__ = [
     "TaskType",
     "TelegramWorker",
     "TimeoutGuard",
-    "TimeoutGuardError",
     "TracingEmitter",
     "WorkerCapabilities",
     "WorkerConfig",
