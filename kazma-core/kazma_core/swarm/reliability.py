@@ -41,6 +41,27 @@ logger = logging.getLogger(__name__)
 # RetryPolicy
 # ---------------------------------------------------------------------------
 
+# Error message fragments that indicate non-retryable failures.
+_NON_RETRYABLE_PATTERNS = (
+    "401", "403", "authentication", "unauthorized", "forbidden",
+    "api key", "invalid key", "permission denied",
+    "not found", "does not exist",
+    "rate limit", "quota exceeded", "billing",
+)
+
+
+def _is_retryable_exception(exc: Exception) -> bool:
+    """Return True if the exception is worth retrying (transient/network).
+
+    Non-retryable: auth errors, config errors, validation errors,
+    rate limits, quota/billing errors.
+    """
+    msg = str(exc).lower()
+    for pattern in _NON_RETRYABLE_PATTERNS:
+        if pattern in msg:
+            return False
+    return True
+
 
 @dataclass
 class RetryPolicy:
@@ -115,6 +136,20 @@ class RetryPolicy:
             except Exception as exc:
                 last_error = str(exc)[:500]
                 last_result = None
+                # Don't retry non-retryable errors (auth, config, validation)
+                if not _is_retryable_exception(exc):
+                    logger.debug(
+                        "[RetryPolicy] worker=%s non-retryable error: %s",
+                        worker_name,
+                        last_error,
+                    )
+                    return {
+                        "worker": worker_name,
+                        "task_id": "",
+                        "status": "error",
+                        "output": "",
+                        "error": last_error,
+                    }
                 logger.debug(
                     "[RetryPolicy] worker=%s attempt=%d/%d raised %s",
                     worker_name,
@@ -216,6 +251,7 @@ class CircuitBreaker:
     _state: CircuitState = field(default=CircuitState.CLOSED, init=False, repr=False)
     consecutive_failures: int = field(default=0, init=False)
     _opened_at: float | None = field(default=None, init=False, repr=False)
+    _probe_in_flight: bool = field(default=False, init=False, repr=False)
 
     # ------------------------------------------------------------------
     # State access
@@ -243,13 +279,17 @@ class CircuitBreaker:
         """Return ``True`` if a dispatch is allowed.
 
         * ``closed`` -- always allowed
-        * ``half-open`` -- allowed (single probe)
+        * ``half-open`` -- allowed only if no probe is already in flight
         * ``open`` -- rejected
         """
         current = self.state
         if current == CircuitState.CLOSED:
             return True
         if current == CircuitState.HALF_OPEN:
+            # Only allow a single probe in half-open state
+            if self._probe_in_flight:
+                return False
+            self._probe_in_flight = True
             return True
         return False
 
@@ -271,6 +311,7 @@ class CircuitBreaker:
         # Use the property accessor to trigger open -> half-open auto-transition.
         current = self.state
         self.consecutive_failures = 0
+        self._probe_in_flight = False
         if current == CircuitState.HALF_OPEN:
             logger.info("[CircuitBreaker] half-open probe succeeded, closing breaker")
             self._state = CircuitState.CLOSED
@@ -284,6 +325,7 @@ class CircuitBreaker:
         """
         # Use the property accessor to trigger open -> half-open auto-transition.
         current = self.state
+        self._probe_in_flight = False
         if current == CircuitState.HALF_OPEN:
             logger.warning("[CircuitBreaker] half-open probe failed, re-opening breaker")
             self._state = CircuitState.OPEN
@@ -331,10 +373,6 @@ class CircuitBreaker:
 # ---------------------------------------------------------------------------
 # TimeoutGuard
 # ---------------------------------------------------------------------------
-
-
-class TimeoutGuardError(Exception):
-    """Raised when a worker exceeds its configured timeout."""
 
 
 @dataclass

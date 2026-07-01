@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS swarm_tasks (
     status TEXT NOT NULL,
     workers TEXT NOT NULL DEFAULT '[]',
     result TEXT,
+    context TEXT DEFAULT '',
+    dependencies TEXT DEFAULT '[]',
+    fallback_chain TEXT DEFAULT '[]',
+    validation_schema TEXT DEFAULT '',
+    aggregation TEXT DEFAULT '',
+    timeout REAL,
     created_at TEXT NOT NULL,
     started_at TEXT,
     completed_at TEXT,
@@ -46,6 +52,7 @@ CREATE TABLE IF NOT EXISTS swarm_tasks (
 CREATE INDEX IF NOT EXISTS idx_swarm_tasks_status ON swarm_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_swarm_tasks_type ON swarm_tasks(type);
 CREATE INDEX IF NOT EXISTS idx_swarm_tasks_completed_at ON swarm_tasks(completed_at);
+CREATE INDEX IF NOT EXISTS idx_swarm_tasks_created_at ON swarm_tasks(created_at);
 
 CREATE TABLE IF NOT EXISTS swarm_worker_metrics (
     worker TEXT NOT NULL,
@@ -89,6 +96,12 @@ class TaskStore:
         if self._conn is None:
             self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
+            # Enable WAL mode for better concurrent read/write performance
+            try:
+                self._conn.execute("PRAGMA journal_mode=WAL")
+                self._conn.execute("PRAGMA busy_timeout=5000")
+            except Exception:
+                pass  # Not critical if WAL isn't supported
         return self._conn
 
     def _init_db(self) -> None:
@@ -96,6 +109,22 @@ class TaskStore:
         with self._lock:
             conn = self._get_conn()
             conn.executescript(_SCHEMA)
+            # Migrate: add columns if they don't exist (for existing DBs)
+            existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(swarm_tasks)").fetchall()}
+            migrations = [
+                ("context", "TEXT DEFAULT ''"),
+                ("dependencies", "TEXT DEFAULT '[]'"),
+                ("fallback_chain", "TEXT DEFAULT '[]'"),
+                ("validation_schema", "TEXT DEFAULT ''"),
+                ("aggregation", "TEXT DEFAULT ''"),
+                ("timeout", "REAL"),
+            ]
+            for col_name, col_def in migrations:
+                if col_name not in existing_cols:
+                    try:
+                        conn.execute(f"ALTER TABLE swarm_tasks ADD COLUMN {col_name} {col_def}")
+                    except Exception:
+                        pass  # Column might already exist
             conn.commit()
 
     def close(self) -> None:
@@ -137,8 +166,10 @@ class TaskStore:
             conn.execute(
                 """INSERT OR REPLACE INTO swarm_tasks
                    (id, type, prompt, status, workers, result,
+                    context, dependencies, fallback_chain,
+                    validation_schema, aggregation, timeout,
                     created_at, started_at, completed_at, cost, tokens, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     task.id,
                     task.type.value if isinstance(task.type, TaskType) else str(task.type),
@@ -146,6 +177,12 @@ class TaskStore:
                     task.status.value if isinstance(task.status, TaskStatus) else str(task.status),
                     json.dumps(task.workers, ensure_ascii=False),
                     result_json,
+                    task.context or "",
+                    json.dumps(getattr(task, "dependencies", []), ensure_ascii=False),
+                    json.dumps(getattr(task, "fallback_chain", []), ensure_ascii=False),
+                    json.dumps(getattr(task, "validation_schema", None), ensure_ascii=False) if getattr(task, "validation_schema", None) else "",
+                    getattr(task, "aggregation", "") or "",
+                    getattr(task, "timeout", None),
                     task.created_at,
                     task.started_at,
                     task.completed_at,
@@ -208,9 +245,11 @@ class TaskStore:
             conditions.append("type = ?")
             params.append(task_type)
         if worker:
-            # Workers stored as JSON array — use LIKE for simple matching.
-            conditions.append("workers LIKE ?")
-            params.append(f'%"{worker}"%')
+            # Workers stored as JSON array — use json_each for exact match
+            conditions.append(
+                "EXISTS (SELECT 1 FROM json_each(workers) WHERE value = ?)"
+            )
+            params.append(worker)
 
         where_clause = ""
         if conditions:
@@ -231,7 +270,7 @@ class TaskStore:
             # Paginated results.
             rows = conn.execute(
                 f"""SELECT * FROM swarm_tasks {where_clause}
-                    ORDER BY completed_at DESC
+                    ORDER BY COALESCE(completed_at, created_at) DESC
                     LIMIT ? OFFSET ?""",
                 params + [page_size, offset],
             ).fetchall()
@@ -247,7 +286,7 @@ class TaskStore:
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
-                "SELECT * FROM swarm_tasks WHERE status = ? ORDER BY completed_at DESC",
+                "SELECT * FROM swarm_tasks WHERE status = ? ORDER BY created_at DESC",
                 ("paused",),
             ).fetchall()
         return [self._row_to_task(row) for row in rows]
@@ -372,7 +411,15 @@ class TaskStore:
         metadata = json.loads(row["metadata"]) if row["metadata"] else {}
         workers = json.loads(row["workers"]) if row["workers"] else []
 
-        return SwarmTask(
+        # Restore fields that were lost in the original schema
+        def _safe_json(key: str, default: Any) -> Any:
+            try:
+                val = row[key] if key in row.keys() else None
+                return json.loads(val) if val else default
+            except (json.JSONDecodeError, TypeError, KeyError, IndexError):
+                return default
+
+        task = SwarmTask(
             id=row["id"],
             type=row["type"],
             prompt=row["prompt"],
@@ -385,3 +432,14 @@ class TaskStore:
             cost_estimate=float(row["cost"] or 0),
             metadata=metadata,
         )
+        # Restore fields added in migration
+        task.context = _safe_json("context", "") if isinstance(_safe_json("context", ""), str) else ""
+        if "dependencies" in row.keys():
+            task.dependencies = _safe_json("dependencies", [])
+        if "fallback_chain" in row.keys():
+            task.fallback_chain = _safe_json("fallback_chain", [])
+        if "aggregation" in row.keys():
+            task.aggregation = row["aggregation"] or ""
+        if "timeout" in row.keys() and row["timeout"] is not None:
+            task.timeout = float(row["timeout"])
+        return task

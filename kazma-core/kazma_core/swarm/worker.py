@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -54,6 +55,7 @@ class SwarmWorker(ABC):
     role: str = ""
     model: str = ""
     provider: str = ""
+    system_prompt: str = ""
     capabilities: WorkerCapabilities = field(default_factory=WorkerCapabilities)
     added_at: str = field(default_factory=_utc_now_iso, init=False)
     busy: bool = field(default=False, init=False)
@@ -113,12 +115,16 @@ class SwarmWorker(ABC):
         self.last_task = task
         self.last_heartbeat = _utc_now_iso()
         self.logs.append(f"[{self.last_heartbeat}] Task dispatched: {task[:80]}")
+        if len(self.logs) > 100:
+            del self.logs[:len(self.logs) - 100]
 
     def mark_completed(self, status: str) -> None:
         """Record completion metadata for status and logs."""
         self.busy = False
         self.last_heartbeat = _utc_now_iso()
         self.logs.append(f"[{self.last_heartbeat}] Task completed with status={status}")
+        if len(self.logs) > 100:
+            del self.logs[:len(self.logs) - 100]
 
 
 # ---------------------------------------------------------------------------
@@ -143,12 +149,14 @@ class InProcessWorker(SwarmWorker):
         provider: str = "",
         capabilities: WorkerCapabilities | None = None,
         manager: Any = None,
+        system_prompt: str = "",
     ) -> None:
         super().__init__(
             name=name,
             role=role,
             model=model,
             provider=provider,
+            system_prompt=system_prompt,
             capabilities=capabilities or WorkerCapabilities(role=role),
         )
         self._manager = manager
@@ -186,6 +194,7 @@ class InProcessWorker(SwarmWorker):
     ) -> dict[str, Any]:
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
         logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")
+        dispatch_started = time.monotonic()
         try:
             from kazma_core.model_registry import get_model_registry
             registry = get_model_registry()
@@ -193,10 +202,9 @@ class InProcessWorker(SwarmWorker):
             # Resolve the correct provider for this worker's model
             provider = None
             if self.model:
-                owner = registry.find_provider_for_model(self.model)
-                if owner:
+                try:
                     provider = registry.get_model(self.model)
-                else:
+                except Exception:
                     provider = registry.get_client(model=self.model)
             else:
                 provider = registry.get_client()
@@ -214,6 +222,10 @@ class InProcessWorker(SwarmWorker):
             elif context:
                 context_text = str(context)
 
+            # If no system_prompt from context, use the worker's own (from config/registry)
+            if not system_prompt and self.system_prompt:
+                system_prompt = self.system_prompt
+
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
 
@@ -223,12 +235,21 @@ class InProcessWorker(SwarmWorker):
             messages.append({"role": "user", "content": user_content})
 
             response = await provider.chat(messages)
+
+            # Extract token/cost data from response
+            usage = getattr(response, "usage", {}) or {}
+            cost_usd = getattr(response, "cost_usd", 0.0)
+            tokens_used = sum(usage.values()) if usage else 0
+
             return {
                 "worker": self.name,
                 "task_id": task_id,
                 "status": "success",
                 "output": response.content,
                 "error": None,
+                "tokens_used": tokens_used,
+                "cost": cost_usd,
+                "duration_seconds": time.monotonic() - dispatch_started,
             }
         except Exception as exc:
             logger.exception("[InProcessWorker:%s] dispatch failed", self.name)
@@ -238,6 +259,9 @@ class InProcessWorker(SwarmWorker):
                 "status": "error",
                 "output": "",
                 "error": str(exc)[:500],
+                "tokens_used": 0,
+                "cost": 0.0,
+                "duration_seconds": time.monotonic() - dispatch_started,
             }
 
 

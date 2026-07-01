@@ -49,6 +49,7 @@ class WorkerConfig:
     profile: str = ""
     bot_token_env: str = ""  # env var name holding the Telegram bot token
     role: str = ""  # e.g. "backend_core", "frontend_ux"
+    system_prompt: str = ""  # worker's "Soul" — personality/instructions
     capabilities: WorkerCapabilities = field(default_factory=WorkerCapabilities)
 
     def validate(self) -> list[str]:

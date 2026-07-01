@@ -334,7 +334,19 @@ class PipelineEngine:
                     )
 
                     if engine:
-                        result = await engine.dispatch_by_name(stage.worker_name or str(stage.role.value), context)
+                        # Pass the stage's system_prompt through context
+                        if stage.system_prompt:
+                            from kazma_core.swarm.task import SwarmDispatchContext
+                            dispatch_context = SwarmDispatchContext(
+                                text=context,
+                                system_prompt=stage.system_prompt,
+                            )
+                        else:
+                            dispatch_context = context
+                        result = await engine.dispatch_by_name(
+                            stage.worker_name or str(stage.role.value),
+                            dispatch_context,
+                        )
                         stage.output = result.get("synthesis", "No output")
                     else:
                         # No engine available — try direct LLM call

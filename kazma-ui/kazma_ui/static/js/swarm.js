@@ -932,6 +932,7 @@
     var specialty = ($('add-specialty') || {}).value || '';
     var expertiseStr = ($('add-expertise') || {}).value || '';
     var toolsStr = ($('add-tools') || {}).value || '';
+    var systemPrompt = ($('add-system-prompt') || {}).value || '';
 
     if (!name.trim()) { showError('Worker name is required'); return; }
     if (!model) { showError('Please select a model'); return; }
@@ -946,6 +947,7 @@
       provider: provider,
       type: type,
       role: role,
+      system_prompt: systemPrompt,
       capabilities: {
         role: role,
         expertise: expertise,
@@ -966,7 +968,7 @@
       .then(function() {
         showToast('Worker "' + name + '" added', true);
         // Clear form fields
-        ['add-name', 'add-expertise', 'add-tools'].forEach(function(id) {
+        ['add-name', 'add-expertise', 'add-tools', 'add-system-prompt'].forEach(function(id) {
           var el = $(id); if (el) el.value = '';
         });
         var roleEl = $('add-role'); if (roleEl) roleEl.value = '';

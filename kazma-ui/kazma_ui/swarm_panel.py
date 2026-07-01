@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,6 @@ except ImportError:  # pragma: no cover
     set_swarm_engine = None  # type: ignore[assignment]
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
-
-_SUPPORTED_MODELS: list[str] = []
-_SUPPORTED_PROVIDERS: list[str] = []
 
 
 def _has_swarm_core() -> bool:
@@ -249,6 +246,7 @@ def _build_worker_config(payload: dict[str, Any]) -> Any:
         model=payload.get("model", "deepseek-chat"),
         provider=payload.get("provider", "deepseek"),
         role=payload.get("role", ""),
+        system_prompt=payload.get("system_prompt", ""),
         capabilities=capabilities,
     )
 
@@ -551,15 +549,17 @@ def create_swarm_router(
         task_type: str | None = Query(default=None, alias="type"),
         status: str | None = Query(default=None),
         worker: str | None = Query(default=None),
+        q: str | None = Query(default=None),
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
     ) -> JSONResponse:
-        """Return completed swarm tasks with pagination and filtering.
+        """Return completed swarm tasks with pagination, filtering, and search.
 
         Query parameters:
             type: Filter by task type (dispatch, consult, etc.)
             status: Filter by task status (completed, failed, etc.)
             worker: Filter to tasks involving this worker name
+            q: Server-side full-text search on prompt text
             page: 1-based page number (default: 1)
             pageSize: Items per page (default: 20, max: 100)
         """
@@ -568,7 +568,7 @@ def create_swarm_router(
             return JSONResponse({"tasks": [], "count": 0})
 
         # Use TaskStore for paginated queries when available.
-        store = getattr(engine, "task_store", None)
+        store = getattr(engine, "task_store", None) or getattr(engine, "_task_store", None)
         if store is not None:
             tasks, total = store.list_tasks(
                 page=page,
@@ -578,6 +578,11 @@ def create_swarm_router(
                 worker=worker,
                 include_count=True,
             )
+            # Server-side search on prompt text
+            if q:
+                q_lower = q.lower()
+                tasks = [t for t in tasks if q_lower in (t.prompt or "").lower()]
+                total = len(tasks)
             return JSONResponse({
                 "tasks": [_flatten_swarm_task(task) for task in tasks],
                 "count": len(tasks),
@@ -589,6 +594,41 @@ def create_swarm_router(
         # Fallback to in-memory history.
         tasks = [task.to_dict() for task in engine.list_tasks(task_type)]
         return JSONResponse({"tasks": tasks, "count": len(tasks)})
+
+    @router.get("/api/swarm/tasks/export")
+    async def swarm_tasks_export(
+        format: str = Query(default="json"),
+        status: str | None = Query(default=None),
+    ) -> JSONResponse | Response:
+        """Export task history as JSON or CSV."""
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse({"tasks": []})
+
+        store = getattr(engine, "task_store", None) or getattr(engine, "_task_store", None)
+        if store is not None:
+            tasks, _ = store.list_tasks(page=1, page_size=1000, status=status, include_count=True)
+        else:
+            tasks = []
+
+        flat = [_flatten_swarm_task(task) for task in tasks]
+
+        if format.lower() == "csv":
+            import csv
+            import io
+
+            output = io.StringIO()
+            if flat:
+                writer = csv.DictWriter(output, fieldnames=flat[0].keys())
+                writer.writeheader()
+                writer.writerows(flat)
+            return Response(
+                content=output.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=swarm_tasks.csv"},
+            )
+
+        return JSONResponse({"tasks": flat, "count": len(flat)})
 
     @router.get("/api/swarm/tasks/{task_id}")
     async def swarm_task_detail(task_id: str) -> JSONResponse:
@@ -756,11 +796,12 @@ def create_swarm_router(
 
         # Sync to persistent WorkerRegistry
         try:
-            from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
-            registry = WorkerRegistry()
+            from kazma_core.swarm.registry import WorkerEntry, get_worker_registry
+            reg_caps = payload.get("capabilities") or {}
+            registry = get_worker_registry()
             registry.register(WorkerEntry(
                 name=name,
-                expertise=(caps_data.get("expertise") if caps_data else None) or [payload.get("role", "leaf")],
+                expertise=(reg_caps.get("expertise") if reg_caps else None) or [payload.get("role", "leaf")],
                 roles=[payload.get("role", "leaf")] if payload.get("role") else ["leaf"],
                 model=worker.model,
                 provider=worker.provider,

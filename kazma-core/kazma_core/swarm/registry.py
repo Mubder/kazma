@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,10 @@ logger = logging.getLogger(__name__)
 
 # Default registry file lives at the project root.
 _DEFAULT_PATH = Path("swarm_registry.json")
+
+# Module-level singleton cache
+_REGISTRY_SINGLETON: WorkerRegistry | None = None
+_REGISTRY_SINGLETON_LOCK = threading.Lock()
 
 
 # ── Data model ────────────────────────────────────────────────────────────
@@ -106,34 +111,41 @@ class WorkerRegistry:
     def __init__(self, path: str | Path = _DEFAULT_PATH) -> None:
         self._path = Path(path)
         self._entries: dict[str, WorkerEntry] = {}
+        self._lock = threading.Lock()
         self._load()
 
     # ── Persistence ─────────────────────────────────────────────────────
 
     def _load(self) -> None:
         """Load workers from the JSON file."""
-        self._entries.clear()
-        if not self._path.exists():
-            logger.info("[WorkerRegistry] No registry file at %s — starting empty", self._path)
-            self._save()  # create empty file
-            return
-        try:
-            raw = json.loads(self._path.read_text(encoding="utf-8"))
-            if not isinstance(raw, list):
-                logger.warning("[WorkerRegistry] Invalid format — expected JSON array")
+        with self._lock:
+            self._entries.clear()
+            if not self._path.exists():
+                logger.info("[WorkerRegistry] No registry file at %s — starting empty", self._path)
+                self._save_unlocked()
                 return
-            for item in raw:
-                entry = WorkerEntry.from_dict(item)
-                self._entries[entry.name] = entry
-            logger.info("[WorkerRegistry] Loaded %d workers from %s", len(self._entries), self._path)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.warning("[WorkerRegistry] Failed to load: %s — starting empty", exc)
+            try:
+                raw = json.loads(self._path.read_text(encoding="utf-8"))
+                if not isinstance(raw, list):
+                    logger.warning("[WorkerRegistry] Invalid format — expected JSON array")
+                    return
+                for item in raw:
+                    entry = WorkerEntry.from_dict(item)
+                    self._entries[entry.name] = entry
+                logger.info("[WorkerRegistry] Loaded %d workers from %s", len(self._entries), self._path)
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("[WorkerRegistry] Failed to load: %s — starting empty", exc)
 
-    def _save(self) -> None:
-        """Persist all workers to the JSON file."""
+    def _save_unlocked(self) -> None:
+        """Persist workers (caller must hold lock)."""
         data = [e.to_dict() for e in self._entries.values()]
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    def _save(self) -> None:
+        """Persist all workers to the JSON file."""
+        with self._lock:
+            self._save_unlocked()
 
     # ── CRUD ────────────────────────────────────────────────────────────
 
@@ -310,3 +322,16 @@ class WorkerRegistry:
 
     def __contains__(self, name: str) -> bool:
         return name in self._entries
+
+
+def get_worker_registry(path: str | Path | None = None) -> WorkerRegistry:
+    """Return the shared WorkerRegistry singleton.
+
+    All callers in the same process share one registry instance,
+    avoiding repeated file I/O and ensuring consistency.
+    """
+    global _REGISTRY_SINGLETON
+    with _REGISTRY_SINGLETON_LOCK:
+        if _REGISTRY_SINGLETON is None:
+            _REGISTRY_SINGLETON = WorkerRegistry(path or _DEFAULT_PATH)
+        return _REGISTRY_SINGLETON

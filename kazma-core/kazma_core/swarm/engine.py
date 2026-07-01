@@ -89,6 +89,7 @@ class SwarmEngine:
         self._workers: dict[str, SwarmWorker] = {}
         self._task_history: dict[str, SwarmTask] = {}
         self._task_lock = asyncio.Lock()  # protects _task_history mutations
+        self._max_history = 500  # LRU cap to prevent unbounded memory growth
         self._result_aggregator = result_aggregator or ResultAggregator()
         self._capability_router = capability_router or CapabilityRouter()
         self._circuit_breakers: dict[str, CircuitBreaker] = {}
@@ -129,6 +130,7 @@ class SwarmEngine:
                 model=worker_config.model,
                 provider=worker_config.provider,
                 capabilities=worker_config.capabilities,
+                system_prompt=getattr(worker_config, "system_prompt", ""),
             )
         if worker_config.type == "telegram_bot":
             return TelegramWorker(
@@ -247,6 +249,25 @@ class SwarmEngine:
             task_type=task.type.value,
             workers=list(task.workers),
         )
+
+        try:
+            return await self._dispatch_inner(task, started, task_span)
+        except Exception as exc:
+            # Catch-all: any unhandled exception finalizes the task as
+            # failed and closes the tracing span so neither leaks.
+            logger.exception("[SwarmEngine] Unhandled error in dispatch for task '%s'", task.id)
+            self._tracing_emitter.record_exception(task_span, exc)
+            self._tracing_emitter.end_span(task_span, status="error", status_msg=str(exc))
+            return self._finalize_task(
+                task,
+                worker_results=[],
+                status="failed",
+                error=str(exc),
+                duration_seconds=perf_counter() - started,
+            )
+
+    async def _dispatch_inner(self, task: SwarmTask, started: float, task_span: Any) -> TaskResult:
+        """Inner dispatch logic, wrapped by dispatch() for catch-all safety."""
 
         # Auto-routing: resolve workers=["auto"] via CapabilityRouter.
         if list(task.workers) == ["auto"]:
@@ -576,13 +597,27 @@ class SwarmEngine:
 
     async def start_all(self) -> None:
         """Start all registered workers."""
-        await asyncio.gather(*(worker.start() for worker in self._workers.values()))
-        logger.info("[SwarmEngine] all %d workers started", len(self._workers))
+        results = await asyncio.gather(
+            *(worker.start() for worker in self._workers.values()),
+            return_exceptions=True,
+        )
+        failed = sum(1 for r in results if isinstance(r, Exception))
+        if failed:
+            logger.warning("[SwarmEngine] %d/%d workers failed to start", failed, len(results))
+        else:
+            logger.info("[SwarmEngine] all %d workers started", len(self._workers))
 
     async def stop_all(self) -> None:
         """Stop all registered workers."""
-        await asyncio.gather(*(worker.stop() for worker in self._workers.values()))
-        logger.info("[SwarmEngine] all workers stopped")
+        results = await asyncio.gather(
+            *(worker.stop() for worker in self._workers.values()),
+            return_exceptions=True,
+        )
+        failed = sum(1 for r in results if isinstance(r, Exception))
+        if failed:
+            logger.warning("[SwarmEngine] %d/%d workers failed to stop cleanly", failed, len(results))
+        else:
+            logger.info("[SwarmEngine] all workers stopped")
 
     async def status(self) -> list[dict[str, Any]]:
         """Return status for all registered workers."""
@@ -597,6 +632,8 @@ class SwarmEngine:
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
         trace_id: str | None = None,
+        _visited: set[str] | None = None,
+        _depth: int = 0,
     ) -> list[WorkerResult]:
         """Dispatch by name and return all results (including handoff chain)."""
         worker = self.get_worker(worker_name)
@@ -615,6 +652,8 @@ class SwarmEngine:
             timeout=timeout,
             validation_schema=validation_schema,
             trace_id=trace_id,
+            _visited=_visited,
+            _depth=_depth,
         )
 
     async def _dispatch_worker_by_name(
@@ -723,6 +762,8 @@ class SwarmEngine:
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
         trace_id: str | None = None,
+        _visited: set[str] | None = None,
+        _depth: int = 0,
     ) -> list[WorkerResult]:
         """Dispatch a worker and return all results (including handoff chain).
 
@@ -834,6 +875,8 @@ class SwarmEngine:
                 started=started,
                 breaker=breaker,
                 trace_id=trace_id,
+                _visited=_visited,
+                _depth=_depth + 1,
             )
 
         worker_result = WorkerResult.from_dict(raw_result)
@@ -868,12 +911,53 @@ class SwarmEngine:
         started: float,
         breaker: CircuitBreaker,
         trace_id: str | None = None,
+        _visited: set[str] | None = None,
+        _depth: int = 0,
     ) -> list[WorkerResult]:
         """Process a handoff request from a worker.
 
         Dispatches to the target worker with accumulated context, records
         a :class:`HandoffRecord`, and returns all results (source + target chain).
+
+        Includes cycle detection: if the target worker was already visited
+        in the chain, the handoff is aborted to prevent infinite recursion.
         """
+        # ── Cycle detection ──────────────────────────────────────
+        _MAX_HANDOFF_DEPTH = 5
+        if _visited is None:
+            _visited = set()
+        _visited.add(source_worker.name)
+
+        if _depth >= _MAX_HANDOFF_DEPTH:
+            logger.error(
+                "[SwarmEngine] Handoff chain too deep (%d) — aborting to prevent infinite recursion",
+                _depth,
+            )
+            return [WorkerResult(
+                worker=source_worker.name,
+                task_id="",
+                status="error",
+                output="",
+                error=f"Handoff chain exceeded max depth ({_MAX_HANDOFF_DEPTH}). Possible cycle.",
+                duration_seconds=perf_counter() - started,
+            )]
+
+        if handoff_req.target_worker in _visited:
+            logger.error(
+                "[SwarmEngine] Handoff cycle detected: %s -> %s (already visited: %s)",
+                source_worker.name,
+                handoff_req.target_worker,
+                _visited,
+            )
+            return [WorkerResult(
+                worker=source_worker.name,
+                task_id="",
+                status="error",
+                output="",
+                error=f"Handoff cycle detected: {source_worker.name} -> {handoff_req.target_worker}",
+                duration_seconds=perf_counter() - started,
+            )]
+
         logger.info(
             "[SwarmEngine] worker '%s' handoff to '%s'",
             source_worker.name,
@@ -916,6 +1000,8 @@ class SwarmEngine:
             handoff_context,
             timeout=timeout,
             validation_schema=validation_schema,
+            _visited=_visited,
+            _depth=_depth,
         )
         target_result = target_results[-1]
 
@@ -1018,6 +1104,10 @@ class SwarmEngine:
         )
         task.result = result
         self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
+        if len(self._task_history) > self._max_history:
+            excess = len(self._task_history) - self._max_history
+            for old_key in list(self._task_history.keys())[:excess]:
+                self._task_history.pop(old_key, None)
 
         # Persist to SQLite when a task store is configured.
         if self._task_store is not None:
@@ -1177,6 +1267,10 @@ class SwarmEngine:
         )
         task.result = result
         self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
+        if len(self._task_history) > self._max_history:
+            excess = len(self._task_history) - self._max_history
+            for old_key in list(self._task_history.keys())[:excess]:
+                self._task_history.pop(old_key, None)
 
         # Persist paused state to SQLite so it survives restart.
         if self._task_store is not None:
@@ -1361,7 +1455,6 @@ class SwarmEngine:
                 task = self._task_history.get(task_id)
                 if task is not None:
                     task.status = TaskStatus.FAILED
-                    self._task_history[task_id] = SwarmTask.from_dict(task.to_dict())
                     task.result = result
                     self._task_history[task_id] = SwarmTask.from_dict(task.to_dict())
                     # Persist to SQLite.
