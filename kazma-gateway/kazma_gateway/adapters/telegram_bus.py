@@ -285,6 +285,15 @@ class TelegramBusAdapter(BusAdapter):
             "text": f"⏳ Rate limited — retrying in {retry_after}s...",
         })
 
+    @staticmethod
+    def model_list_text() -> str:
+        """Return formatted model list for Telegram /model command."""
+        try:
+            from kazma_core.settings.model_registry import get_model_list_text
+            return get_model_list_text("telegram")
+        except Exception:
+            return "Model registry unavailable."
+
     async def close(self) -> None:
         if self._http is not None:
             await self._http.aclose()

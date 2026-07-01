@@ -148,6 +148,8 @@ class ChatPanel(Widget):
                 pass
         elif cmd == "/quit":
             self.app.exit()
+        elif cmd == "/model" or cmd == "/models":
+            self._show_models()
         else:
             self.add_message("System", f"Unknown command: {raw.strip()}")
 
@@ -171,3 +173,12 @@ class ChatPanel(Widget):
             self.query_one("#chat-input", Input).focus()
         except Exception:
             pass
+
+    def _show_models(self) -> None:
+        """Display available models from the Universal Model Registry."""
+        try:
+            from kazma_core.settings.model_registry import get_model_list_text
+            text = get_model_list_text("tui")
+            self.add_message("System", text)
+        except Exception as exc:
+            self.add_message("System", f"Failed to load models: {exc}")
