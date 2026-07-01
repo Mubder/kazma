@@ -361,6 +361,30 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         _get_sm().save_appearance(data)
         return {"status": "ok"}
 
+    # ── Active Model ─────────────────────────────────────────────────
+
+    @router.put("/api/settings/active_model")
+    async def api_set_active_model(req: Request) -> dict[str, Any]:
+        """Set the active chat model and persist it.
+
+        Body: ``{"active_model": "deepseek-v4-pro"}``
+        """
+        try:
+            body = await req.json()
+        except Exception:
+            body = {}
+        model = (body.get("active_model") or "").strip()
+        if not model:
+            return {"error": "active_model is required", "status": "error"}
+        try:
+            from kazma_core.model_registry import get_model_registry
+
+            registry = get_model_registry()
+            registry.set_active_model(model)
+        except Exception as exc:
+            logger.warning("[Settings] set_active_model failed: %s", exc)
+        return {"active_model": model, "status": "ok"}
+
     # ── Shortcuts ────────────────────────────────────────────────────
 
     @router.get("/api/settings/shortcuts")

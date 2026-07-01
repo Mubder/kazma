@@ -133,13 +133,29 @@
 
     {# Footer #}
     <div class="sidebar-footer">
+        {# Model Selector Dropdown #}
+        <div class="sidebar-model-selector sidebar-collapsed-hide" x-show="!sidebarCollapsed">
+            <select
+                x-model="activeModel"
+                @change="onModelChange($event)"
+                class="sidebar-model-dropdown">
+                <template x-for="group in modelOptions" :key="group.label">
+                    <optgroup :label="group.label">
+                        <template x-for="m in group.models" :key="m">
+                            <option :value="m" x-text="m"></option>
+                        </template>
+                    </optgroup>
+                </template>
+            </select>
+        </div>
+
         <div class="sidebar-user" x-data="{ open: false }" @click.outside="open = false">
             <img src="/static/img/kazma-icon.png" alt="Kazma" class="user-avatar-img">
             <div class="sidebar-footer-info">
                 <div class="user-name">Kazma Agent</div>
                 <div class="user-role sidebar-collapsed-hide">
                     <span class="status-dot status-ok" style="display:inline-block;width:6px;height:6px;vertical-align:middle;margin-right:4px"></span>
-                    <span x-text="activeModel || '{{ config.default_model if config and config.default_model else 'gpt-4o-mini' }}'">{{ config.default_model if config and config.default_model else 'gpt-4o-mini' }}</span>
+                    <span x-text="activeModel || 'No model selected'"></span>
                 </div>
             </div>
         </div>

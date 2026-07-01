@@ -330,6 +330,38 @@ button { cursor: pointer; font-family: inherit; }
   padding: var(--sp-3);
   border-top: 1px solid var(--border-subtle);
 }
+
+/* Sidebar model selector dropdown */
+.sidebar-model-selector {
+  margin-bottom: var(--sp-2);
+}
+.sidebar-model-dropdown {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+.sidebar-model-dropdown:hover {
+  border-color: var(--accent);
+}
+.sidebar-model-dropdown:focus {
+  border-color: var(--accent);
+}
+.sidebar-model-dropdown optgroup {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.sidebar-model-dropdown option {
+  font-weight: 400;
+  color: var(--text-primary);
+}
 .sidebar-user {
   display: flex;
   align-items: center;

@@ -106,6 +106,49 @@ document.addEventListener('alpine:init', () => {
         count: 0,
         items: [],
     });
+
+    // ── 5. Settings Store ──────────────────────────────────────────
+    Alpine.store('settings', {
+        appearance: {
+            active_chat_model: '',
+        },
+        _modelOptions: [],  // [{ label, models: [] }] provider groups
+
+        init() {
+            // Hydrate active model from backend
+            this._hydrateActiveModel();
+            this._loadModelOptions();
+        },
+
+        async _hydrateActiveModel() {
+            try {
+                const res = await fetch('/api/provider/active', {
+                    headers: { 'Accept': 'application/json' },
+                    credentials: 'same-origin',
+                });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data && data.model) {
+                    this.appearance.active_chat_model = data.model;
+                }
+            } catch (e) { /* keep default */ }
+        },
+
+        async _loadModelOptions() {
+            try {
+                const res = await fetch('/api/providers');
+                if (!res.ok) return;
+                const providers = await res.json();
+                if (!Array.isArray(providers)) return;
+                this._modelOptions = providers.map(p => {
+                    const disc = p.discovered_models || [];
+                    const manual = p.models || [];
+                    const models = [...new Set([...disc, ...manual])].filter(Boolean);
+                    return { label: p.display_name || p.name, models };
+                }).filter(g => g.models.length > 0);
+            } catch (e) { /* keep empty */ }
+        },
+    });
 });
 
 // ── 5. Root App Component ──────────────────────────────────────────
@@ -228,16 +271,23 @@ function kazmaApp() {
 // ── 6. Sidebar Component ───────────────────────────────────────────
 function sidebarComponent() {
     return {
-        // Active model name, fetched from /api/provider/active on init.
-        // Falls back to the server-rendered (config.default_model) value
-        // or 'gpt-4o-mini' when the fetch fails or returns an empty model.
         activeModel: '',
+        modelOptions: [],
 
-        init() {
-            this.fetchActiveModel();
+        async init() {
+            // Fetch options first so the <select> has the <option>s
+            // before we set activeModel, then fetch+set the active model.
+            await this._fetchModelOptions();
+            await this._fetchActiveModel();
+            // Force Alpine to re-sync the <select> value now that
+            // both options and activeModel are populated.
+            this.$nextTick(() => {
+                const sel = this.$el.querySelector('.sidebar-model-dropdown');
+                if (sel && this.activeModel) sel.value = this.activeModel;
+            });
         },
 
-        async fetchActiveModel() {
+        async _fetchActiveModel() {
             try {
                 const res = await fetch('/api/provider/active', {
                     headers: { 'Accept': 'application/json' },
@@ -247,15 +297,49 @@ function sidebarComponent() {
                 const data = await res.json();
                 if (data && data.model) {
                     this.activeModel = data.model;
+                    const store = Alpine.store('settings');
+                    if (store) store.appearance.active_chat_model = data.model;
                 }
-            } catch (err) {
-                // Network or parse error — keep the fallback display
-                console.warn('[sidebar] Could not fetch active model:', err);
+            } catch (e) { /* keep default */ }
+        },
+
+        async _fetchModelOptions() {
+            try {
+                const res = await fetch('/api/providers');
+                if (!res.ok) return;
+                const providers = await res.json();
+                if (!Array.isArray(providers)) return;
+                this.modelOptions = providers.map(p => {
+                    const disc = p.discovered_models || [];
+                    const manual = p.models || [];
+                    const models = [...new Set([...disc, ...manual])].filter(Boolean);
+                    return { label: p.display_name || p.name, models };
+                }).filter(g => g.models.length > 0);
+            } catch (e) { /* keep empty */ }
+        },
+
+        async onModelChange(event) {
+            const model = event.target.value;
+            this.activeModel = model;
+            const store = Alpine.store('settings');
+            if (store) store.appearance.active_chat_model = model;
+            try {
+                const res = await fetch('/api/settings/active_model', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ active_model: model }),
+                });
+                const data = await res.json();
+                if (data && data.active_model) {
+                    this.activeModel = data.active_model;
+                    this.$dispatch('model-changed', data.active_model);
+                }
+            } catch (e) {
+                console.warn('[sidebar] Failed to sync model:', e);
             }
         },
 
         toggleSidebar() {
-            // Delegates to root app via Alpine
             const appEl = document.querySelector('[x-data*="kazmaApp"]');
             if (appEl && window.Alpine) {
                 const data = Alpine.$data(appEl);
@@ -264,7 +348,6 @@ function sidebarComponent() {
                     localStorage.setItem('kazma-sidebar-collapsed', data.sidebarCollapsed);
                 }
             }
-            // Fallback: dispatch event
             document.dispatchEvent(new CustomEvent('kazma:toggle-sidebar'));
         },
     };
