@@ -28,6 +28,18 @@ _APPROVAL_TIMEOUT = 60.0  # seconds
 _TELEGRAM_API = "https://api.telegram.org"
 
 
+def _get_config_store() -> Any:
+    """Return the shared ``ConfigStore`` (SQLite-backed settings store).
+
+    Lazily imported to avoid a hard telegram_bus -> core import at module load.
+    Tests may monkeypatch this attribute (``telegram_bus._get_config_store``)
+    to inject an isolated store.
+    """
+    from kazma_core.config_store import ConfigStore
+
+    return ConfigStore()
+
+
 # ── Escape helpers ──────────────────────────────────────────────────────
 
 
@@ -293,6 +305,33 @@ class TelegramBusAdapter(BusAdapter):
             return get_model_list_text("telegram")
         except Exception:
             return "Model registry unavailable."
+
+    @staticmethod
+    def get_active_chat_model() -> str | None:
+        """Read the globally active chat model from ConfigStore.
+
+        Resolution order:
+          1. ``registry.active_chat_model`` (UI-selected active model)
+          2. ``registry.active_model`` (ModelRegistry-managed fallback)
+          3. ``None`` — no hardcoded fallback.
+
+        Returns the model name string, or None if neither key is set.
+        """
+        try:
+            store = _get_config_store()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[TelegramBus] ConfigStore unavailable: %s", exc)
+            return None
+
+        model = str(store.get("registry.active_chat_model", "") or "").strip()
+        if model:
+            return model
+
+        model = str(store.get("registry.active_model", "") or "").strip()
+        if model:
+            return model
+
+        return None
 
     async def close(self) -> None:
         if self._http is not None:

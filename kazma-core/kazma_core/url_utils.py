@@ -61,6 +61,10 @@ def normalize_provider_url(
     parsed = urlparse(url)
     path = parsed.path.rstrip("/")
 
+    # Step 2b: Deduplicate repeated /v1 suffixes (e.g. /v1/v1 -> /v1, /v1/v1/v1 -> /v1).
+    # Some code paths append /v1 to a base_url that already includes it.
+    path = re.sub(r"(/v1)+$", "/v1", path)
+
     # Step 3: Determine port
     port = parsed.port
     hostname = parsed.hostname or ""
