@@ -927,7 +927,7 @@
     var name = ($('add-name') || {}).value || '';
     var modelSel = $('add-model-select');
     var model = modelSel ? modelSel.value : '';
-    var type = ($('add-type') || {}).value || 'in-process';
+    var type = 'in-process';
     var role = ($('add-role') || {}).value || '';
     var specialty = ($('add-specialty') || {}).value || '';
     var expertiseStr = ($('add-expertise') || {}).value || '';

@@ -182,11 +182,11 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
     if cmd == "/help":
         return _cmd_help()
     if cmd == "/reset":
-        return _cmd_reset()
+        return None  # Handled by agent_handler directly (clears state)
     if cmd == "/status":
         return _cmd_status(ctx)
-    if cmd == "/model":
-        return _cmd_model(ctx)
+    if cmd in ("/model", "/models"):
+        return None  # Handled by agent_handler directly (interactive selector)
     if cmd == "/memory":
         return _cmd_memory(ctx)
     if cmd == "/cost":

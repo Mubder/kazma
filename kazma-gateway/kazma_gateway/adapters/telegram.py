@@ -765,6 +765,12 @@ class TelegramAdapter(BaseAdapter):
         elif data.startswith("personality:"):
             name = data.split(":", 1)[1]
             text = f"/personality {name}"
+        elif data.startswith("model_provider:"):
+            provider_name = data.split(":", 1)[1]
+            text = f"/_models_provider {provider_name}"
+        elif data.startswith("model_select:"):
+            model_id = data.split(":", 1)[1]
+            text = f"/_models_select {model_id}"
 
         if not text:
             logger.debug("[telegram] Unknown callback_data: %s", data)
@@ -852,6 +858,54 @@ class TelegramAdapter(BaseAdapter):
                 for name in personalities[:3]
             ]
         }
+
+    @staticmethod
+    def build_provider_keyboard(providers: list[dict[str, Any]]) -> dict[str, Any]:
+        """Build inline keyboard for model provider selection.
+
+        Args:
+            providers: List of provider dicts with 'name' and 'display_name'.
+
+        Returns:
+            Telegram InlineKeyboardMarkup dict (2 buttons per row).
+        """
+        buttons: list[list[dict[str, str]]] = []
+        row: list[dict[str, str]] = []
+        for p in providers:
+            name = p.get("name", p.get("display_name", "?"))
+            display = p.get("display_name", name)
+            row.append({"text": display, "callback_data": f"model_provider:{name}"})
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+        return {"inline_keyboard": buttons}
+
+    @staticmethod
+    def build_model_keyboard(
+        provider_name: str,
+        models: list[str],
+    ) -> dict[str, Any]:
+        """Build inline keyboard for model selection within a provider.
+
+        Args:
+            provider_name: The provider name (for callback identification).
+            models: List of model IDs.
+
+        Returns:
+            Telegram InlineKeyboardMarkup dict (1 button per row).
+        """
+        buttons: list[list[dict[str, str]]] = []
+        for model_id in models:
+            # Shorten display name for the button text
+            display = model_id
+            if "/" in display:
+                display = display.split("/")[-1]
+            buttons.append([
+                {"text": display, "callback_data": f"model_select:{model_id}"}
+            ])
+        return {"inline_keyboard": buttons}
 
     async def send(self, outbound: OutboundMessage) -> bool:
         """Send a message back to Telegram with 429 retry.

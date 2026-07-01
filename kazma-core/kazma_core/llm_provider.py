@@ -231,14 +231,44 @@ class LLMProvider:
                 detail = e.response.text
             except Exception:
                 pass
+            status_code = e.response.status_code if e.response is not None else 0
+
             logger.error(
                 "LLM call failed: %s | status=%s | response_body=%s | model=%s | tools=%d",
                 e,
-                e.response.status_code if e.response is not None else "?",
+                status_code,
                 detail[:500],
                 payload.get("model"),
                 len(tools) if tools else 0,
             )
+
+            # ── NVIDIA NIM / some providers reject tool-calling with a
+            # 404 "Function not found for account" for models that don't
+            # support function calling. Retry without tools so the user
+            # still gets a text response.
+            if status_code == 404 and "function" in detail.lower() and tools:
+                logger.warning(
+                    "Provider returned 404 for function calling — retrying "
+                    "without tools (model may not support tool use)."
+                )
+                payload.pop("tools", None)
+                payload.pop("tool_choice", None)
+                try:
+                    resp = await client.post("/chat/completions", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                except httpx.HTTPStatusError as retry_err:
+                    retry_detail = ""
+                    try:
+                        retry_detail = retry_err.response.text
+                    except Exception:
+                        pass
+                    raise LLMError(
+                        f"LLM call failed (HTTP {retry_err.response.status_code}): {retry_detail[:300]}"
+                    ) from retry_err
+                duration_ms = (time.monotonic() - start) * 1000
+                return self._parse_response(data, duration_ms)
+
             # Try fallback model if configured
             if self.config.fallback_model and self.config.router == "litellm":
                 logger.info("Retrying with fallback model: %s", self.config.fallback_model)
@@ -254,7 +284,7 @@ class LLMProvider:
                     ) from e
             else:
                 raise LLMError(
-                    f"LLM call failed (HTTP {e.response.status_code if e.response is not None else '?'}): {detail[:300]}"
+                    f"LLM call failed (HTTP {status_code}): {detail[:300]}"
                 ) from e
         except (httpx.ConnectError, httpx.TimeoutException, Exception) as e:
             logger.error("LLM call failed: %s", e)

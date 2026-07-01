@@ -433,8 +433,243 @@ async def _send_swarm_reply(
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Handler factory
+# Interactive model selector (/models with inline keyboards)
 # ══════════════════════════════════════════════════════════════════════════
+
+
+def _get_visible_providers() -> list[dict[str, Any]]:
+    """Return providers that have selected (visible) models."""
+    try:
+        from kazma_core.model_registry import get_model_registry
+        reg = get_model_registry()
+        result: list[dict[str, Any]] = []
+        for p in reg.list_providers():
+            name = p.get("name", "")
+            display = p.get("display_name", name)
+            enabled = p.get("enabled", True)
+            if not enabled or not name:
+                continue
+            models = reg.get_visible_models(name)
+            if models:
+                result.append({"name": name, "display_name": display, "models": models})
+        return result
+    except Exception as exc:
+        logger.warning("[agent-handler] Failed to get providers: %s", exc)
+        return []
+
+
+async def _try_model_command(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+) -> bool:
+    """Handle /models, /_models_provider, /_models_select commands.
+
+    Flow:
+        /models                → show provider buttons
+        /_models_provider <p>  → show model buttons for provider
+        /_models_select <m>    → switch active model, confirm
+
+    Returns True if handled.
+    """
+    text = (msg.text or "").strip()
+    if not text.startswith("/"):
+        return False
+
+    cmd = text.split(None, 1)[0].lower()
+
+    if cmd not in ("/models", "/model", "/_models_provider", "/_models_select"):
+        return False
+
+    ctx = await store.get(thread_id)
+    if not ctx:
+        ctx = msg.context_metadata
+
+    # ── /models: Show provider keyboard ───────────────────────────
+    if cmd in ("/models", "/model"):
+        providers = _get_visible_providers()
+        if not providers:
+            await _send_model_reply(msg, store, manager, thread_id,
+                "No providers with models configured. "
+                "Use the Web UI Settings to add providers and select models.")
+            return True
+
+        # Build inline keyboard for Telegram
+        if msg.platform == "telegram":
+            try:
+                from kazma_gateway.adapters.telegram import TelegramAdapter
+                keyboard = TelegramAdapter.build_provider_keyboard(providers)
+                reply_ctx = dict(ctx)
+                reply_ctx["reply_markup"] = keyboard
+                model_lines = "\n".join(
+                    f"  • {p['display_name']} ({len(p['models'])} models)"
+                    for p in providers
+                )
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=f"Select a provider:\n\n{model_lines}",
+                    context_metadata=reply_ctx,
+                ))
+                return True
+            except Exception:
+                pass  # fall through to text
+
+        # Text fallback (non-Telegram or keyboard build failed)
+        lines = ["Available providers:\n"]
+        for p in providers:
+            lines.append(f"  {p['display_name']} — {len(p['models'])} models")
+            for m in p["models"][:5]:
+                active = " *(active)*" if _is_active_model(m) else ""
+                lines.append(f"    {m}{active}")
+        lines.append(f"\nUse `/config model <model_name>` to switch.")
+        await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
+        return True
+
+    # ── /_models_provider: Show model buttons ─────────────────────
+    if cmd == "/_models_provider":
+        provider_name = text.split(None, 1)[1].strip() if len(text.split(None, 1)) > 1 else ""
+        if not provider_name:
+            return True
+
+        models = _get_provider_models(provider_name)
+        if not models:
+            await _send_model_reply(msg, store, manager, thread_id,
+                f"No models found for provider '{provider_name}'.")
+            return True
+
+        if msg.platform == "telegram":
+            try:
+                from kazma_gateway.adapters.telegram import TelegramAdapter
+                keyboard = TelegramAdapter.build_model_keyboard(provider_name, models)
+                reply_ctx = dict(ctx)
+                reply_ctx["reply_markup"] = keyboard
+                model_lines = "\n".join(f"  • {m}" for m in models)
+                await manager.send(OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=f"Select a model from {provider_name}:\n\n{model_lines}",
+                    context_metadata=reply_ctx,
+                ))
+                return True
+            except Exception:
+                pass
+
+        lines = [f"Models for {provider_name}:\n"]
+        for m in models:
+            active = " *(active)*" if _is_active_model(m) else ""
+            lines.append(f"  {m}{active}")
+        await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
+        return True
+
+    # ── /_models_select: Switch active model ──────────────────────
+    if cmd == "/_models_select":
+        model_id = text.split(None, 1)[1].strip() if len(text.split(None, 1)) > 1 else ""
+        if not model_id:
+            return True
+
+        try:
+            from kazma_core.model_registry import get_model_registry
+            reg = get_model_registry()
+            reg.set_active_model(model_id)
+            await _send_model_reply(msg, store, manager, thread_id,
+                f"✅ Switched to **{model_id}** (provider: {reg._active_provider})")
+        except Exception as exc:
+            await _send_model_reply(msg, store, manager, thread_id,
+                f"⚠️ Failed to switch model: {exc}")
+        return True
+
+    return False
+
+
+def _get_provider_models(provider_name: str) -> list[str]:
+    """Return visible models for a provider."""
+    try:
+        from kazma_core.model_registry import get_model_registry
+        reg = get_model_registry()
+        return reg.get_visible_models(provider_name)
+    except Exception:
+        return []
+
+
+def _is_active_model(model_id: str) -> bool:
+    """Check if a model is the active model."""
+    try:
+        from kazma_core.model_registry import get_model_registry
+        reg = get_model_registry()
+        return reg._active_model == model_id
+    except Exception:
+        return False
+
+
+async def _send_model_reply(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+    text: str,
+) -> None:
+    """Send a model command reply through the gateway."""
+    ctx = await store.get(thread_id)
+    if not ctx:
+        ctx = msg.context_metadata
+    await manager.send(OutboundMessage(
+        target_id=_build_target_id(msg.platform, ctx),
+        text=text,
+        context_metadata=ctx,
+    ))
+
+
+async def _build_slash_ctx(
+    thread_id: str,
+    msg: IncomingMessage,
+    state: dict[str, Any],
+    store: SessionStore,
+) -> dict[str, Any]:
+    """Build rich context for slash commands with real data."""
+    ctx: dict[str, Any] = {
+        "thread_id": thread_id,
+        "platform": msg.platform,
+    }
+
+    # Active model
+    try:
+        from kazma_core.model_registry import get_model_registry
+        reg = get_model_registry()
+        ctx["model"] = reg._active_model or "default"
+    except Exception:
+        ctx["model"] = "default"
+
+    # Token / cost data from checkpoint state
+    try:
+        messages = state.get("messages", [])
+        ctx["token_count"] = sum(
+            len(str(m.get("content", ""))) // 4
+            for m in messages
+            if isinstance(m, dict)
+        )
+    except Exception:
+        ctx["token_count"] = 0
+
+    # Memory count
+    try:
+        from kazma_core.agent_runner import get_agent
+        agent = get_agent()
+        if agent and agent.memory:
+            ctx["memory_count"] = len(agent.memory)
+    except Exception:
+        pass
+
+    # Cost data from cost breaker
+    ctx["total_tokens"] = 0
+    ctx["total_cost"] = 0.0
+
+    # Gateway status
+    ctx["started"] = True
+    ctx["adapters"] = msg.platform
+    ctx["queue_depth"] = 0
+    ctx["active_threads"] = 1
+
+    return ctx
 
 
 def create_graph_handler(
@@ -543,6 +778,57 @@ def create_graph_handler(
         state = await _build_initial_state(msg, _store)
 
         config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+
+        # ── Interactive model selector (/models, /_models_provider, /_models_select) ──
+        model_handled = await _try_model_command(msg, _store, manager, thread_id)
+        if model_handled:
+            return
+
+        # ── /reset: Clear conversation for this thread ──────────────
+        # Send confirmation and skip graph so the next message starts fresh.
+        if msg.text and msg.text.strip().lower() == "/reset":
+            ctx_reset = await _store.get(thread_id)
+            if not ctx_reset:
+                ctx_reset = msg.context_metadata
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx_reset),
+                text="🔄 Conversation cleared. Starting fresh.",
+                context_metadata=ctx_reset,
+            ))
+            logger.info("[agent-handler] /reset for thread=%s", thread_id)
+            return
+
+        # ── Slash-command intercept (/model, /help, /reset, etc.) ──
+        # Resolve common commands without an LLM call. This keeps
+        # responses instant and saves tokens.
+        try:
+            from kazma_gateway.slash_commands import is_slash_command, resolve_slash_command
+
+            if is_slash_command(msg.text):
+                # Build context for the command resolver with real data
+                slash_ctx = await _build_slash_ctx(thread_id, msg, state, _store)
+
+                reply = resolve_slash_command(msg.text, context=slash_ctx)
+                if reply is not None:
+                    # Command was recognised — send the response and skip graph
+                    ctx = await _store.get(thread_id)
+                    if not ctx:
+                        ctx = msg.context_metadata
+                    await manager.send(
+                        OutboundMessage(
+                            target_id=_build_target_id(msg.platform, ctx),
+                            text=reply,
+                            context_metadata=ctx,
+                        )
+                    )
+                    logger.info(
+                        "[agent-handler] Slash command resolved (cmd=%s, thread=%s)",
+                        msg.text.strip().split()[0] if msg.text else "?",
+                        thread_id,
+                    )
+                    return
+        except ImportError:
+            pass  # slash_commands module not available
 
         # ── Swarm slash-command intercept ──────────────────────────
         # If the message starts with /swarm, dispatch to the swarm engine
