@@ -237,8 +237,12 @@ async def _try_swarm_command(
                 "/swarm broadcast `<task>` — all workers\n"
                 "/swarm `<task>` — auto-route to best workers\n"
                 "/swarm status — show swarm status\n"
-                "/swarm list — list workers\n\n"
-                "Or just say: *use the swarm to <task>*"
+                "/swarm list — list workers\n"
+                "/swarm config — show output routing config\n"
+                "/swarm config group `<chat_id>` — route output to a Telegram group\n"
+                "/swarm config clear — disable output routing\n\n"
+                "Or just say: *use the swarm to <task>*\n\n"
+                "Append `-> telegram:<chat_id>` to any task for one-off routing."
             )
             return True
         sub = parts[1].lower()
@@ -282,6 +286,12 @@ async def _try_swarm_command(
             except Exception as exc:
                 await _send_swarm_reply(msg, store, manager, thread_id, f"⚠️ List error: {exc}")
             return True
+
+        # /swarm config [group <chat_id> | clear]
+        if sub == "config":
+            return await _handle_swarm_config_command(
+                msg, store, manager, thread_id, task_body,
+            )
 
         # /swarm broadcast <prompt>
         if sub == "broadcast":
@@ -389,6 +399,101 @@ def _extract_swarm_task(text: str) -> str:
     return ""
 
 
+async def _handle_swarm_config_command(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+    body: str,
+) -> bool:
+    """Handle ``/swarm config`` subcommands for output routing.
+
+    Forms:
+        /swarm config                       — show current config
+        /swarm config group <chat_id>       — set Telegram group chat_id (enables routing)
+        /swarm config disable               — disable routing (keep chat_id)
+        /swarm config clear                 — clear output target entirely
+    """
+    parts = body.split(None, 1)
+    action = parts[0].lower() if parts else ""
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    try:
+        from kazma_core.config_store import ConfigStore
+        cs = ConfigStore()
+    except ImportError:
+        await _send_swarm_reply(msg, store, manager, thread_id,
+            "⚠️ Config store unavailable.")
+        return True
+
+    key = "swarm.output_target"
+
+    # ── /swarm config group <chat_id> ─────────────────────────────
+    if action == "group":
+        if not arg:
+            await _send_swarm_reply(msg, store, manager, thread_id,
+                "⚠️ Usage: /swarm config group <chat_id>\n\n"
+                "Tip: group chat IDs are negative, e.g. -1001234567890")
+            return True
+        try:
+            chat_id = int(arg)
+        except ValueError:
+            await _send_swarm_reply(msg, store, manager, thread_id,
+                f"⚠️ Invalid chat_id: `{arg}`. It must be an integer "
+                "(group IDs are negative, e.g. -1001234567890).")
+            return True
+        cs.set(key, {
+            "platform": "telegram",
+            "chat_id": chat_id,
+            "enabled": True,
+        }, category="swarm")
+        await _send_swarm_reply(msg, store, manager, thread_id,
+            f"✅ Output routing enabled.\n"
+            f"Swarm results will also be sent to Telegram group `{chat_id}`.\n\n"
+            "Make sure the bot is a member of that group.")
+        return True
+
+    # ── /swarm config disable ─────────────────────────────────────
+    if action == "disable":
+        existing = cs.get(key, None)
+        if isinstance(existing, dict):
+            existing["enabled"] = False
+            cs.set(key, existing, category="swarm")
+        await _send_swarm_reply(msg, store, manager, thread_id,
+            "✅ Output routing disabled (config retained).")
+        return True
+
+    # ── /swarm config clear ───────────────────────────────────────
+    if action == "clear":
+        cs.delete(key)
+        await _send_swarm_reply(msg, store, manager, thread_id,
+            "✅ Output routing cleared.")
+        return True
+
+    # ── /swarm config (show current) ──────────────────────────────
+    current = cs.get(key, None)
+    if not isinstance(current, dict) or not current.get("chat_id"):
+        await _send_swarm_reply(msg, store, manager, thread_id,
+            "🐝 **Output Routing**\n\n"
+            "Status: *not configured*\n\n"
+            "To route swarm output to a Telegram group:\n"
+            "  /swarm config group -1001234567890\n\n"
+            "The bot must be added to the group first.")
+        return True
+
+    status = "✅ enabled" if current.get("enabled") else "⏸ disabled"
+    await _send_swarm_reply(msg, store, manager, thread_id,
+        f"🐝 **Output Routing**\n\n"
+        f"Status: {status}\n"
+        f"Platform: `{current.get('platform', 'telegram')}`\n"
+        f"Group chat_id: `{current.get('chat_id')}`\n\n"
+        "Commands:\n"
+        "  /swarm config group <chat_id> — change target\n"
+        "  /swarm config disable — turn off\n"
+        "  /swarm config clear — remove config")
+    return True
+
+
 async def _dispatch_auto_route(
     msg: IncomingMessage,
     store: SessionStore,
@@ -484,6 +589,101 @@ def _find_worker_prompt_split(text: str) -> int | None:
         return None
 
 
+def _get_output_target_config() -> dict[str, Any] | None:
+    """Read the configured swarm output target from ConfigStore.
+
+    Returns a dict like ``{"platform": "telegram", "chat_id": -100…,
+    "enabled": true}`` or ``None`` if not configured / not enabled.
+    """
+    try:
+        from kazma_core.config_store import ConfigStore
+    except ImportError:
+        return None
+    try:
+        cs = ConfigStore()
+        target = cs.get("swarm.output_target", None)
+        if not isinstance(target, dict):
+            return None
+        if not target.get("enabled", False):
+            return None
+        if not target.get("chat_id"):
+            return None
+        target.setdefault("platform", "telegram")
+        return target
+    except Exception:
+        logger.debug("[agent-handler] Failed reading swarm.output_target", exc_info=True)
+        return None
+
+
+def _parse_output_target_suffix(task: str) -> tuple[str, dict[str, Any] | None]:
+    """Detect a trailing ``-> telegram:<chat_id>`` routing suffix.
+
+    Supports one inline override form:
+        "<task> -> telegram:-1001234567890" — explicit platform:chat_id
+
+    Returns ``(clean_task, override_target_or_None)``. ``override_target`` is a
+    dict shaped like the ConfigStore entry when the suffix is a concrete
+    ``platform:chat_id``, or ``None`` when no override was present.
+    """
+    import re
+
+    match = re.search(r"\s*->\s*(\S+)\s*$", task)
+    if not match:
+        return task, None
+
+    raw = match.group(1).strip()
+    clean = task[: match.start()].rstrip()
+
+    if ":" in raw:
+        platform, _, chat_id_str = raw.partition(":")
+        try:
+            chat_id = int(chat_id_str)
+        except ValueError:
+            return task, None  # malformed — leave prompt untouched
+        return clean, {"platform": platform, "chat_id": chat_id, "enabled": True}
+
+    # Unrecognized suffix format — leave prompt untouched
+    return task, None
+
+
+async def _maybe_send_to_output_target(
+    manager: Any,
+    text: str,
+    override: dict[str, Any] | None = None,
+) -> bool:
+    """Send ``text`` to the configured output target (e.g. a Telegram group).
+
+    Resolution order: per-dispatch ``override`` dict → ConfigStore entry.
+    Sends the *same* output that went to the originating chat. Errors are
+    logged but never raised — group routing is best-effort.
+
+    Returns True if a message was sent (or attempted), False if no target.
+    """
+    target = override if isinstance(override, dict) and override.get("chat_id") else _get_output_target_config()
+    if not target:
+        return False
+
+    platform = target.get("platform", "telegram")
+    chat_id = target.get("chat_id")
+    try:
+        await manager.send(OutboundMessage(
+            target_id=f"{platform}:{chat_id}",
+            text=text,
+            context_metadata={"chat_id": chat_id},
+        ))
+        logger.info(
+            "[agent-handler] Swarm output routed to %s:%s",
+            platform, chat_id,
+        )
+        return True
+    except Exception:
+        logger.warning(
+            "[agent-handler] Failed routing swarm output to %s:%s",
+            platform, chat_id, exc_info=True,
+        )
+        return False
+
+
 async def _dispatch_swarm_from_chat(
     msg: IncomingMessage,
     store: SessionStore,
@@ -507,6 +707,9 @@ async def _dispatch_swarm_from_chat(
     }
     task_type = type_map.get(pattern, TaskType.DISPATCH)
 
+    # ── Phase 5: parse inline "-> @group" / "-> telegram:<id>" suffix ──
+    task, target_override = _parse_output_target_suffix(task)
+
     # Tag with source platform metadata
     ctx = msg.context_metadata
     metadata = {
@@ -515,6 +718,9 @@ async def _dispatch_swarm_from_chat(
         "source_thread_id": thread_id,
         "source_user": ctx.get("username", ""),
     }
+    # Stash the resolved override (if any) so downstream can read it.
+    if target_override:
+        metadata["output_target"] = target_override
 
     swarm_task = SwarmTask(
         prompt=task,
@@ -547,7 +753,10 @@ async def _dispatch_swarm_from_chat(
         else:
             reply = "⚠️ No result returned from swarm."
 
+        # Send to the originating chat…
         await _send_swarm_reply(msg, store, manager, thread_id, reply)
+        # …and mirror the same output to the configured Telegram group.
+        await _maybe_send_to_output_target(manager, reply, target_override)
 
     except Exception as exc:
         logger.exception("[agent-handler] Swarm dispatch failed for thread %s", thread_id)

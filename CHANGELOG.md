@@ -5,6 +5,74 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## Sprint 12 — Swarm Pro-Grade Overhaul (July 2026)
+
+### Swarm Engine — Critical Bug Fixes (Phase 1)
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Handoff Cycle Detection | `_handle_handoff()` now tracks visited workers and depth (max 5); aborts with clear error on cycles (A→B→A) | `engine.py` |
+| ✅ | Dispatch Catch-All | `dispatch()` wraps `_dispatch_inner()` in try/except; unexpected exceptions finalize as failed and close tracing spans | `engine.py` |
+| ✅ | LRU History Cap | `_task_history` capped at 500 entries with automatic eviction | `engine.py` |
+| ✅ | Half-Open Probe Fix | Circuit breaker half-open state allows only ONE probe via `_probe_in_flight` flag | `reliability.py` |
+| ✅ | Retryable Predicate | RetryPolicy skips non-retryable errors (auth, config, rate limit) via `_is_retryable_exception()` | `reliability.py` |
+| ✅ | TaskStore Schema Migration | Added columns (context, dependencies, fallback_chain, validation_schema, aggregation, timeout); auto-migrates existing DBs | `task_store.py` |
+| ✅ | TaskStore WAL + Fixes | WAL mode + busy_timeout; `json_each()` worker filter; `COALESCE` ordering for NULL safety | `task_store.py` |
+| ✅ | Registry Thread Safety | `WorkerRegistry` now has `threading.Lock`; true singleton via `get_worker_registry()` | `registry.py` |
+| ✅ | Pipeline System Prompt | Stage `system_prompt` now passed to dispatch via `SwarmDispatchContext` | `topology.py` |
+
+### Swarm Engine — Pro Features (Phase 2)
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Token/Cost Tracking | `InProcessWorker.dispatch()` captures `tokens_used`, `cost`, `duration_seconds` from provider response | `worker.py` |
+| ✅ | Worker System Prompts | Workers use `system_prompt` from config/registry when no context prompt; `WorkerConfig` has `system_prompt` field; Add Worker UI has textarea | `worker.py`, `config.py`, `swarm.html` |
+| ✅ | Worker Logs Cap | `SwarmWorker.logs` capped to 100 entries (ring buffer) | `worker.py` |
+
+### Swarm Engine — UI/API (Phase 3)
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Server-Side Task Search | `GET /api/swarm/tasks?q=<query>` filters on prompt text | `swarm_panel.py` |
+| ✅ | Task Export | `GET /api/swarm/tasks/export?format=csv\|json` | `swarm_panel.py` |
+| ✅ | Registry Sync Fix | Fixed `caps_data` NameError in WorkerRegistry sync on worker add | `swarm_panel.py` |
+
+### Swarm Engine — Dead Code Cleanup (Phase 4)
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Removed TimeoutGuardError | Dead class never raised; removed from `reliability.py` and `__init__.py` | `reliability.py` |
+| ✅ | Removed Type Dropdown | Hardcoded to `in_process`; removed vestigial Telegram worker option from UI | `swarm.html`, `swarm.js` |
+| ✅ | Removed Dead Constants | `_SUPPORTED_MODELS` / `_SUPPORTED_PROVIDERS` removed | `swarm_panel.py` |
+
+### Output Routing to Telegram Group (Phase 5)
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Output Mirroring | Swarm results mirrored to both originating chat and configured Telegram group | `agent_handler.py` |
+| ✅ | Persistent Config | `/swarm config group <chat_id>`, `/swarm config disable`, `/swarm config clear` | `agent_handler.py` |
+| ✅ | Per-Dispatch Override | Inline syntax: `/swarm <task> -> telegram:-1001234567890` | `agent_handler.py` |
+| ✅ | Output Routing API | `GET/PUT /api/swarm/output-target` | `swarm_panel.py` |
+| ✅ | Output Routing UI | Card with enable toggle, chat ID input, save/clear, live status | `swarm.html`, `swarm.js` |
+
+### Cross-Platform Swarm Dispatch
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Natural Language Dispatch | Both `/swarm <task>` and bare "use the swarm to..." trigger auto-routing via CapabilityRouter | `agent_handler.py` |
+| ✅ | Interactive /models | Telegram inline keyboards: provider → model → select | `telegram.py`, `agent_handler.py` |
+| ✅ | Slash Commands Wired | `resolve_slash_command()` connected to handler; `/reset`, `/help`, `/model`, `/status`, `/cost`, etc. | `agent_handler.py` |
+
+### Provider/Model Fixes
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | Provider Auto-Correction | `set_active_model()` auto-switches provider; `get_client()` reconciles mismatches | `model_registry.py` |
+| ✅ | LLM Error Detail | HTTP response body captured and logged on API errors | `llm_provider.py` |
+| ✅ | NVIDIA NIM Tool Fallback | Retries without tools on 404 "Function not found" (models without tool support) | `llm_provider.py` |
+
+---
+
 ## Sprint 11 — CLI Control Plane (June 2026)
 
 ### CLI

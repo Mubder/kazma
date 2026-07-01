@@ -344,6 +344,35 @@
             </div>
           </form>
         </div>
+
+        <!-- Phase 5: Output Routing -->
+        <div class="card" id="output-routing-card">
+          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">📤 Output Routing</h3>
+          <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px;">
+            Mirror swarm results to a Telegram group (in addition to the originating chat).
+            Add the bot to the group first and grant it permission to send messages.
+          </p>
+          <form id="output-routing-form" onsubmit="return false;">
+            <div class="form-group">
+              <label class="form-label">
+                <input type="checkbox" id="output-routing-enabled" style="margin-right:6px;vertical-align:middle;">
+                Enable output routing
+              </label>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Telegram Group Chat ID</label>
+              <input type="text" id="output-routing-chat-id" class="form-input" placeholder="-1001234567890" style="font-family:var(--font-mono);">
+              <span style="font-size:0.7rem;color:var(--text-tertiary);display:block;margin-top:4px;">
+                Group/supergroup IDs are negative. Use a forwarding bot or the getUpdates API to find yours.
+              </span>
+            </div>
+            <div class="form-actions" style="display:flex;gap:8px;">
+              <button type="button" class="btn btn-primary" onclick="KazmaSwarm.saveOutputTarget()">Save</button>
+              <button type="button" class="btn btn-secondary" onclick="KazmaSwarm.clearOutputTarget()">Clear</button>
+              <span id="output-routing-status" style="font-size:0.8rem;color:var(--text-muted);align-self:center;margin-left:auto;"></span>
+            </div>
+          </form>
+        </div>
       </div>
     </div>
   </div>

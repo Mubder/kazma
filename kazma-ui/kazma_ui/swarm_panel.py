@@ -630,6 +630,87 @@ def create_swarm_router(
 
         return JSONResponse({"tasks": flat, "count": len(flat)})
 
+    # ── Phase 5: Output Routing config ───────────────────────────────
+    def _config_store() -> Any:
+        """Return the injected ConfigStore, or instantiate a fresh one."""
+        if config_store is not None:
+            return config_store
+        try:
+            from kazma_core.config_store import ConfigStore
+            return ConfigStore()
+        except Exception:
+            logger.debug("[Swarm] ConfigStore unavailable", exc_info=True)
+            return None
+
+    @router.get("/api/swarm/output-target")
+    async def get_output_target() -> JSONResponse:
+        """Return the current swarm output-routing target.
+
+        Shape: ``{"platform": "telegram", "chat_id": -100…, "enabled": bool}``
+        or an empty config when unset.
+        """
+        cs = _config_store()
+        if cs is None:
+            return JSONResponse(
+                {"status": "error", "message": "Config store unavailable"},
+                status_code=503,
+            )
+        target = cs.get("swarm.output_target", None)
+        if not isinstance(target, dict):
+            target = {"platform": "telegram", "chat_id": None, "enabled": False}
+        target.setdefault("platform", "telegram")
+        target.setdefault("chat_id", None)
+        target.setdefault("enabled", False)
+        return JSONResponse({"output_target": target})
+
+    @router.put("/api/swarm/output-target")
+    async def set_output_target(payload: dict[str, Any]) -> JSONResponse:
+        """Set or clear the swarm output-routing target.
+
+        Expected body:
+            {"platform": "telegram", "chat_id": -1001234567890, "enabled": true}
+            {"clear": true}  — remove the target entirely
+        """
+        cs = _config_store()
+        if cs is None:
+            return JSONResponse(
+                {"status": "error", "message": "Config store unavailable"},
+                status_code=503,
+            )
+
+        # Clear branch
+        if payload.get("clear"):
+            cs.delete("swarm.output_target")
+            return JSONResponse({
+                "status": "ok",
+                "output_target": {
+                    "platform": "telegram", "chat_id": None, "enabled": False,
+                },
+            })
+
+        chat_id = payload.get("chat_id")
+        if chat_id in (None, ""):
+            return JSONResponse(
+                {"status": "error", "message": "chat_id is required"},
+                status_code=400,
+            )
+        try:
+            chat_id = int(chat_id)
+        except (TypeError, ValueError):
+            return JSONResponse(
+                {"status": "error", "message": "chat_id must be an integer"},
+                status_code=400,
+            )
+
+        target = {
+            "platform": str(payload.get("platform") or "telegram"),
+            "chat_id": chat_id,
+            "enabled": bool(payload.get("enabled", True)),
+        }
+        cs.set("swarm.output_target", target, category="swarm")
+        logger.info("[Swarm] Output target set: %s", target)
+        return JSONResponse({"status": "ok", "output_target": target})
+
     @router.get("/api/swarm/tasks/{task_id}")
     async def swarm_task_detail(task_id: str) -> JSONResponse:
         """Return full detail for a single swarm task."""

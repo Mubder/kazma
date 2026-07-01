@@ -50,6 +50,7 @@
     fetchModels();
     refreshStatus();
     pollInterval = setInterval(refreshStatus, 5000);
+    loadOutputTarget();
 
     // Form submissions
     var dispatchForm = $('dispatch-form');
@@ -1356,6 +1357,88 @@
   }
 
   // ══════════════════════════════════════════════════════
+  // OUTPUT ROUTING (Phase 5)
+  // ══════════════════════════════════════════════════════
+
+  function loadOutputTarget() {
+    fetch('/api/swarm/output-target')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data || !data.output_target) return;
+        var t = data.output_target;
+        var cb = $('output-routing-enabled');
+        var id = $('output-routing-chat-id');
+        var st = $('output-routing-status');
+        if (cb) cb.checked = !!t.enabled;
+        if (id) id.value = t.chat_id != null ? String(t.chat_id) : '';
+        if (st) {
+          if (t.chat_id != null && t.enabled) {
+            st.textContent = '● Active → ' + t.chat_id;
+            st.style.color = 'var(--success)';
+          } else if (t.chat_id != null) {
+            st.textContent = '● Disabled';
+            st.style.color = 'var(--text-muted)';
+          } else {
+            st.textContent = '';
+          }
+        }
+      })
+      .catch(function() { /* card may not be present */ });
+  }
+
+  function saveOutputTarget() {
+    var cb = $('output-routing-enabled');
+    var id = $('output-routing-chat-id');
+    var st = $('output-routing-status');
+    var enabled = cb ? cb.checked : false;
+    var chatId = id ? id.value.trim() : '';
+    if (enabled && !chatId) {
+      showError('Enter a Telegram group chat ID to enable routing.');
+      return;
+    }
+    var payload;
+    if (!chatId) {
+      payload = { clear: true };
+    } else {
+      payload = { platform: 'telegram', chat_id: Number(chatId), enabled: enabled };
+    }
+    fetch('/api/swarm/output-target', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') {
+          showToast('Output routing saved.', true);
+          loadOutputTarget();
+        } else {
+          showError(data.message || 'Failed to save output routing.');
+        }
+      })
+      .catch(function() { showError('Network error saving output routing.'); });
+  }
+
+  function clearOutputTarget() {
+    var cb = $('output-routing-enabled');
+    var id = $('output-routing-chat-id');
+    var st = $('output-routing-status');
+    fetch('/api/swarm/output-target', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clear: true }),
+    })
+      .then(function(r) { return r.json(); })
+      .then(function() {
+        if (cb) cb.checked = false;
+        if (id) id.value = '';
+        if (st) st.textContent = '';
+        showToast('Output routing cleared.', true);
+      })
+      .catch(function() { showError('Network error clearing output routing.'); });
+  }
+
+  // ══════════════════════════════════════════════════════
   // BOOT
   // ══════════════════════════════════════════════════════
 
@@ -1394,5 +1477,7 @@
     filterResults: filterResults,
     applyRole: applyRole,
     applySavedProfile: applySavedProfile,
+    saveOutputTarget: saveOutputTarget,
+    clearOutputTarget: clearOutputTarget,
   };
 })();
