@@ -56,8 +56,6 @@
     if (dispatchForm) dispatchForm.addEventListener('submit', function(e) { e.preventDefault(); dispatchTask(); });
     var addForm = $('add-worker-form');
     if (addForm) addForm.addEventListener('submit', function(e) { e.preventDefault(); addWorker(); });
-    var spawnForm = $('spawn-worker-form');
-    if (spawnForm) spawnForm.addEventListener('submit', function(e) { e.preventDefault(); spawnWorker(); });
     var addProfile = $('add-profile');
     if (addProfile) {
       addProfile.addEventListener('change', function(e) { applySavedProfile('add', e.target.value); });
@@ -154,12 +152,10 @@
           });
         }
         renderSwarmModelSelect('add-model-select', defaultModelOption());
-        renderSwarmModelSelect('spawn-model-select', defaultModelOption());
         renderSwarmModelSelect('edit-worker-model', '');
       })
       .catch(function() {
         renderSwarmModelSelect('add-model-select', defaultModelOption());
-        renderSwarmModelSelect('spawn-model-select', defaultModelOption());
       });
   }
 
@@ -364,6 +360,21 @@
     if (sc) sc.style.color = data.started ? 'var(--success)' : 'var(--text-muted)';
     var busy = workers.filter(function(w) { return w.status === 'busy'; }).length;
     setText('metric-busy', String(busy));
+    // Fetch aggregated metrics for tasks-today and total-cost
+    fetch('/api/swarm/workers/metrics/all')
+      .then(function(r) { return r.ok ? r.json() : {}; })
+      .then(function(metricsData) {
+        var metrics = metricsData.metrics || [];
+        var tasksToday = 0;
+        var totalCost = 0;
+        metrics.forEach(function(m) {
+          tasksToday += (m.tasks_completed || 0) + (m.tasks_failed || 0);
+          totalCost += parseFloat(m.total_cost || 0);
+        });
+        setText('metric-tasks-today', String(tasksToday));
+        setText('metric-total-cost', '$' + totalCost.toFixed(2));
+      })
+      .catch(function() {});
   }
 
   // ══════════════════════════════════════════════════════
@@ -447,6 +458,10 @@
     // Show pending state in the builder results preview
     appendPendingResult(workerList, task, pattern);
 
+    // Disable dispatch button to prevent double-submit
+    var dispatchBtn = $('btn-dispatch');
+    if (dispatchBtn) { dispatchBtn.disabled = true; dispatchBtn.textContent = 'Dispatching...'; }
+
     // Create an active task card immediately so the user sees the task
     // before the network round-trip completes. Fast tasks may finish
     // before the response; the card stays visible and the SSE stream
@@ -499,6 +514,10 @@
       .catch(function(err) {
         removeActiveTaskCard(pendingTaskId);
         showError(err.message);
+      })
+      .finally(function() {
+        var btn = $('btn-dispatch');
+        if (btn) { btn.disabled = false; btn.textContent = '⚡ Dispatch Task'; }
       });
   }
 
@@ -905,12 +924,30 @@
     var model = modelSel ? modelSel.value : '';
     var type = ($('add-type') || {}).value || 'in-process';
     var role = ($('add-role') || {}).value || '';
+    var specialty = ($('add-specialty') || {}).value || '';
+    var expertiseStr = ($('add-expertise') || {}).value || '';
+    var toolsStr = ($('add-tools') || {}).value || '';
 
     if (!name.trim()) { showError('Worker name is required'); return; }
     if (!model) { showError('Please select a model'); return; }
 
     var provider = providerForModel(model);
-    var payload = { name: name.trim(), model: model, provider: provider, type: type, role: role };
+    var expertise = expertiseStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    var tools = toolsStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+
+    var payload = {
+      name: name.trim(),
+      model: model,
+      provider: provider,
+      type: type,
+      role: role,
+      capabilities: {
+        role: role,
+        expertise: expertise,
+        tools: tools,
+        model_specialty: specialty,
+      },
+    };
 
     fetch('/api/swarm/workers', {
       method: 'POST',
@@ -926,56 +963,6 @@
         var nameEl = $('add-name'); if (nameEl) nameEl.value = '';
         refreshStatus();
         // Reload the page to update worker lists
-        location.reload();
-      })
-      .catch(function(err) { showError(err.message); });
-  }
-
-  function spawnWorker() {
-    var name = ($('spawn-name') || {}).value || '';
-    var role = ($('spawn-role') || {}).value || '';
-    var modelSel = $('spawn-model-select');
-    var model = modelSel ? modelSel.value : '';
-    var expertiseStr = ($('spawn-expertise') || {}).value || '';
-    var toolsStr = ($('spawn-tools') || {}).value || '';
-    var specialty = ($('spawn-specialty') || {}).value || '';
-
-    if (!name.trim()) { showError('Worker name is required'); return; }
-    if (!role.trim()) { showError('Role is required for spawning'); return; }
-    if (!model) { showError('Please select a model'); return; }
-
-    var provider = providerForModel(model);
-    var expertise = expertiseStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-    var tools = toolsStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-
-    var payload = {
-      name: name.trim(),
-      role: role.trim(),
-      model: model,
-      provider: provider,
-      capabilities: {
-        role: role.trim(),
-        expertise: expertise,
-        tools: tools,
-        model_specialty: specialty,
-      },
-    };
-
-    fetch('/api/swarm/workers/spawn', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-      .then(function(r) {
-        if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Failed'); });
-        return r.json();
-      })
-      .then(function() {
-        showToast('Worker "' + name + '" spawned', true);
-        // Clear form
-        ['spawn-name', 'spawn-role', 'spawn-expertise', 'spawn-tools'].forEach(function(id) {
-          var el = $(id); if (el) el.value = '';
-        });
         location.reload();
       })
       .catch(function(err) { showError(err.message); });
@@ -1375,7 +1362,6 @@
     switchTab: switchTab,
     refresh: refreshStatus,
     addWorker: addWorker,
-    spawnWorker: spawnWorker,
     removeWorker: removeWorker,
     editWorker: editWorker,
     closeEditWorker: closeEditWorker,

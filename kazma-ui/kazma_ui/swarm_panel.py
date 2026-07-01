@@ -233,12 +233,23 @@ def _build_worker_config(payload: dict[str, Any]) -> Any:
         payload.get("type", "in-process"),
         "in_process",
     )
+    # Build capabilities from the payload so workers are routable
+    caps_data = payload.get("capabilities") or {}
+    capabilities = None
+    if caps_data:
+        try:
+            from kazma_core.swarm.config import WorkerCapabilities
+            capabilities = WorkerCapabilities.from_dict(caps_data)
+        except Exception:
+            capabilities = None
+
     return WorkerConfig(
         name=(payload.get("name") or "").strip(),
         type=worker_type,
         model=payload.get("model", "deepseek-chat"),
         provider=payload.get("provider", "deepseek"),
         role=payload.get("role", ""),
+        capabilities=capabilities,
     )
 
 
@@ -749,8 +760,8 @@ def create_swarm_router(
             registry = WorkerRegistry()
             registry.register(WorkerEntry(
                 name=name,
-                expertise=[payload.get("role", "leaf")],
-                roles=["leaf"],
+                expertise=(caps_data.get("expertise") if caps_data else None) or [payload.get("role", "leaf")],
+                roles=[payload.get("role", "leaf")] if payload.get("role") else ["leaf"],
                 model=worker.model,
                 provider=worker.provider,
                 worker_type=worker_config.type if hasattr(worker_config, "type") else "in_process",

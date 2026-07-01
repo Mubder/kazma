@@ -166,6 +166,273 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# Swarm slash-command interceptor
+# ══════════════════════════════════════════════════════════════════════════
+
+
+async def _try_swarm_command(
+    msg: IncomingMessage,
+    state: dict[str, Any],
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+) -> bool:
+    """Check if the message is a swarm slash-command and handle it.
+
+    Supported commands:
+        /swarm <worker> <prompt>           — dispatch to one worker
+        /swarm pipeline <w1,w2,...> <p>    — pipeline pattern
+        /swarm consult <w1,w2,...> <p>     — consult pattern
+        /swarm fanout <w1,w2,...> <p>      — fan-out pattern
+        /swarm broadcast <prompt>          — broadcast to all workers
+        /swarm status                      — show swarm status
+        /swarm list                        — list registered workers
+
+    Returns ``True`` if the message was handled (swarm command detected),
+    ``False`` to continue with normal graph processing.
+    """
+    text = (msg.text or "").strip()
+    if not text.lower().startswith("/swarm"):
+        return False
+
+    # Lazy import — skip if swarm engine isn't available
+    try:
+        from kazma_core.swarm.engine import get_swarm_engine
+        engine = get_swarm_engine()
+    except Exception:
+        return False  # swarm not initialized, fall through to graph
+
+    parts = text.split(None, 2)  # ["/swarm", subcommand, rest]
+    if len(parts) < 2:
+        await _send_swarm_reply(msg, store, manager, thread_id,
+            "🐝 **Swarm Commands**\n\n"
+            "/swarm `<worker>` `<task>` — dispatch to one worker\n"
+            "/swarm pipeline `<w1,w2,...>` `<task>` — sequential pipeline\n"
+            "/swarm consult `<w1,w2,...>` `<task>` — parallel consult\n"
+            "/swarm fanout `<w1,w2,...>` `<task>` — parallel fan-out\n"
+            "/swarm broadcast `<task>` — all workers\n"
+            "/swarm status — show swarm status\n"
+            "/swarm list — list workers"
+        )
+        return True
+
+    sub = parts[1].lower()
+
+    # ── /swarm status ──────────────────────────────────────────
+    if sub == "status":
+        try:
+            worker_names = engine.worker_names
+            status_lines = [f"🐝 Swarm Status\n", f"Workers: {len(worker_names)}"]
+            for name in worker_names:
+                w = engine.get_worker(name)
+                busy = " (busy)" if w and getattr(w, "busy", False) else ""
+                model = f" [{getattr(w, 'model', '?')}]" if w and getattr(w, "model", "") else ""
+                status_lines.append(f"  • {name}{busy}{model}")
+            await _send_swarm_reply(msg, store, manager, thread_id, "\n".join(status_lines))
+        except Exception as exc:
+            await _send_swarm_reply(msg, store, manager, thread_id, f"⚠️ Status error: {exc}")
+        return True
+
+    # ── /swarm list ────────────────────────────────────────────
+    if sub == "list":
+        try:
+            names = engine.worker_names
+            if not names:
+                await _send_swarm_reply(msg, store, manager, thread_id, "No workers registered.")
+            else:
+                lines = [f"🐝 Workers ({len(names)}):"]
+                for name in names:
+                    w = engine.get_worker(name)
+                    role = getattr(w, "role", "") or ""
+                    model = getattr(w, "model", "") or ""
+                    lines.append(f"  • {name}" + (f" ({role})" if role else "") + (f" [{model}]" if model else ""))
+                await _send_swarm_reply(msg, store, manager, thread_id, "\n".join(lines))
+        except Exception as exc:
+            await _send_swarm_reply(msg, store, manager, thread_id, f"⚠️ List error: {exc}")
+        return True
+
+    # ── /swarm broadcast <prompt> ──────────────────────────────
+    if sub == "broadcast":
+        prompt = parts[2] if len(parts) > 2 else ""
+        if not prompt:
+            await _send_swarm_reply(msg, store, manager, thread_id, "⚠️ Usage: /swarm broadcast <prompt>")
+            return True
+        return await _dispatch_swarm_from_chat(
+            msg, store, manager, thread_id, engine,
+            workers=[], task=prompt, pattern="broadcast",
+        )
+
+    # ── Pattern commands: /swarm pipeline|consult|fanout <workers> <prompt> ──
+    if sub in ("pipeline", "consult", "fanout", "dispatch"):
+        if len(parts) < 3:
+            await _send_swarm_reply(msg, store, manager, thread_id,
+                f"⚠️ Usage: /swarm {sub} <workers> <prompt>")
+            return True
+
+        # For "dispatch", workers is the worker name and the rest is the prompt
+        if sub == "dispatch":
+            worker_parts = parts[2].split(None, 1)
+            if len(worker_parts) < 2:
+                await _send_swarm_reply(msg, store, manager, thread_id,
+                    "⚠️ Usage: /swarm dispatch <worker> <prompt>")
+                return True
+            worker_name = worker_parts[0]
+            prompt = worker_parts[1]
+            return await _dispatch_swarm_from_chat(
+                msg, store, manager, thread_id, engine,
+                workers=[worker_name], task=prompt, pattern="dispatch",
+            )
+
+        # pipeline/consult/fanout: <w1,w2,...> <prompt>
+        rest = parts[2]
+        split_idx = _find_worker_prompt_split(rest)
+        if split_idx is None:
+            await _send_swarm_reply(msg, store, manager, thread_id,
+                f"⚠️ Usage: /swarm {sub} <worker1,worker2,...> <prompt>")
+            return True
+
+        workers_str = rest[:split_idx].strip()
+        prompt = rest[split_idx:].strip()
+        workers = [w.strip() for w in workers_str.split(",") if w.strip()]
+
+        if not workers or not prompt:
+            await _send_swarm_reply(msg, store, manager, thread_id,
+                f"⚠️ Usage: /swarm {sub} <worker1,worker2,...> <prompt>")
+            return True
+
+        return await _dispatch_swarm_from_chat(
+            msg, store, manager, thread_id, engine,
+            workers=workers, task=prompt, pattern=sub,
+        )
+
+    # Unknown subcommand
+    await _send_swarm_reply(msg, store, manager, thread_id,
+        f"⚠️ Unknown swarm command: '{sub}'. Try /swarm for help."
+    )
+    return True
+
+
+def _find_worker_prompt_split(text: str) -> int | None:
+    """Find the split point between comma-separated worker names and the prompt.
+
+    Worker names may contain forward slashes (e.g. "meta/llama-3.1-8b-instruct")
+    but not spaces. The first space after the last comma or the first space
+    if no comma exists marks the start of the prompt.
+
+    Returns the character index of the prompt start, or None if ambiguous.
+    """
+    if "," in text:
+        last_comma = text.rfind(",")
+        rest_after_comma = text[last_comma + 1:].lstrip()
+        if rest_after_comma:
+            # Find first space in the segment after the last comma
+            space_in_segment = rest_after_comma.find(" ")
+            if space_in_segment != -1:
+                actual_idx = last_comma + 1 + (len(text[last_comma + 1:]) - len(rest_after_comma)) + space_in_segment
+                return actual_idx + 1
+        return None
+    else:
+        # No comma — first space splits worker name from prompt
+        space = text.find(" ")
+        if space != -1:
+            return space + 1
+        return None
+
+
+async def _dispatch_swarm_from_chat(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+    engine: Any,
+    workers: list[str],
+    task: str,
+    pattern: str,
+) -> bool:
+    """Dispatch a swarm task from a chat message and send the result back."""
+    from kazma_core.swarm.task import SwarmTask, TaskType
+
+    # Map pattern names to TaskType
+    type_map = {
+        "dispatch": TaskType.DISPATCH,
+        "pipeline": TaskType.PIPELINE,
+        "consult": TaskType.CONSULT,
+        "fanout": TaskType.FAN_OUT,
+        "broadcast": TaskType.BROADCAST,
+    }
+    task_type = type_map.get(pattern, TaskType.DISPATCH)
+
+    # Tag with source platform metadata
+    ctx = msg.context_metadata
+    metadata = {
+        "source_platform": msg.platform,
+        "source_chat_id": ctx.get("chat_id", ""),
+        "source_thread_id": thread_id,
+        "source_user": ctx.get("username", ""),
+    }
+
+    swarm_task = SwarmTask(
+        prompt=task,
+        workers=workers,
+        type=task_type,
+        metadata=metadata,
+    )
+
+    # Send "dispatching" notification
+    worker_label = ", ".join(workers) if workers else "all workers"
+    await _send_swarm_reply(msg, store, manager, thread_id,
+        f"🐝 Dispatching to {worker_label} ({pattern})...")
+
+    # Dispatch synchronously (the engine handles concurrency internally)
+    try:
+        result = await engine.dispatch(swarm_task)
+
+        # Format result for chat
+        if result and result.aggregated_output:
+            reply = result.aggregated_output
+        elif result and result.worker_results:
+            lines = []
+            for wr in result.worker_results:
+                status_icon = "✅" if wr.status == "success" else "❌"
+                output = (wr.output or "")[:500] if wr.output else wr.error or "no output"
+                lines.append(f"{status_icon} **{wr.worker}**: {output}")
+            reply = "\n\n".join(lines)
+        elif result and result.error:
+            reply = f"⚠️ Task failed: {result.error}"
+        else:
+            reply = "⚠️ No result returned from swarm."
+
+        await _send_swarm_reply(msg, store, manager, thread_id, reply)
+
+    except Exception as exc:
+        logger.exception("[agent-handler] Swarm dispatch failed for thread %s", thread_id)
+        await _send_swarm_reply(msg, store, manager, thread_id,
+            f"⚠️ Swarm dispatch failed: {exc}")
+
+    return True
+
+
+async def _send_swarm_reply(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+    text: str,
+) -> None:
+    """Send a reply through the gateway manager (platform-agnostic)."""
+    ctx = await store.get(thread_id)
+    if not ctx:
+        ctx = msg.context_metadata
+    await manager.send(
+        OutboundMessage(
+            target_id=_build_target_id(msg.platform, ctx),
+            text=text,
+            context_metadata=ctx,
+        )
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # Handler factory
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -276,6 +543,15 @@ def create_graph_handler(
         state = await _build_initial_state(msg, _store)
 
         config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+
+        # ── Swarm slash-command intercept ──────────────────────────
+        # If the message starts with /swarm, dispatch to the swarm engine
+        # instead of the single-agent graph.
+        swarm_handled = await _try_swarm_command(
+            msg, state, _store, manager, thread_id,
+        )
+        if swarm_handled:
+            return  # swarm dispatched, skip graph
 
         # ── Serialize per thread_id ────────────────────────────────
         # Two concurrent messages for the same thread_id must NOT interleave

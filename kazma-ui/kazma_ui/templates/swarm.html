@@ -246,7 +246,7 @@
             <div style="display:flex;align-items:flex-start;justify-content:space-between;">
               <div>
                 <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                  <span style="display:inline-block;width:10px;height:10px;border-radius:50;background:{% if w.get('status') == 'online' %}var(--success){% elif w.get('status') == 'busy' %}var(--warning){% else %}var(--danger){% endif %};"></span>
+                  <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{% if w.get('status') == 'online' %}var(--success){% elif w.get('status') == 'busy' %}var(--warning){% else %}var(--danger){% endif %};"></span>
                   <span style="font-weight:600;font-size:0.95rem;">{{ w.name }}</span>
                   {% if w.get('role') %}<span class="badge badge-accent">{{ w.role }}</span>{% endif %}
                 </div>
@@ -289,7 +289,7 @@
 
       <!-- Right: Add Worker + Dynamic Spawn Form -->
       <div style="display:flex;flex-direction:column;gap:16px;">
-        <!-- Add Worker Form -->
+        <!-- Unified Add Worker Form -->
         <div class="card">
           <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">➕ {{ t('swarm.add_worker') }}</h3>
           <form id="add-worker-form" onsubmit="return false;">
@@ -311,39 +311,8 @@
                 </select>
               </div>
               <div class="form-group">
-                <label class="form-label">{{ t('swarm.type_label') }}</label>
-                <select id="add-type" class="form-select">
-                  <option value="in-process">In-Process</option>
-                  <option value="telegram">Telegram</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('swarm.model') }}</label>
-              <select id="add-model-select" class="form-select"></select>
-            </div>
-            <div class="form-actions">
-              <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.addWorker()">{{ t('swarm.add_worker') }}</button>
-            </div>
-          </form>
-        </div>
-
-        <!-- Dynamic Spawn Form (VAL-UI-009) -->
-        <div class="card">
-          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">🧬 {{ t('swarm.dynamic_spawn') }}</h3>
-          <form id="spawn-worker-form" onsubmit="return false;">
-            <div class="form-group">
-              <label class="form-label">{{ t('swarm.worker_name') }} *</label>
-              <input type="text" id="spawn-name" class="form-input" placeholder="{{ t('swarm.spawn_name_hint') }}" required>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">{{ t('swarm.role') }} *</label>
-                <input type="text" id="spawn-role" class="form-input" placeholder="{{ t('swarm.role_hint') }}">
-              </div>
-              <div class="form-group">
                 <label class="form-label">{{ t('swarm.model_specialty') }}</label>
-                <select id="spawn-specialty" class="form-select">
+                <select id="add-specialty" class="form-select">
                   <option value="">{{ t('swarm.none') }}</option>
                   <option value="reasoning">{{ t('swarm.reasoning') }}</option>
                   <option value="coding">{{ t('swarm.coding') }}</option>
@@ -352,20 +321,29 @@
                 </select>
               </div>
             </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('swarm.model') }}</label>
-              <select id="spawn-model-select" class="form-select"></select>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">{{ t('swarm.type_label') }}</label>
+                <select id="add-type" class="form-select">
+                  <option value="in-process">In-Process</option>
+                  <option value="telegram">Telegram</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">{{ t('swarm.model') }}</label>
+                <select id="add-model-select" class="form-select"></select>
+              </div>
             </div>
             <div class="form-group">
               <label class="form-label">{{ t('swarm.expertise_tags') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.expertise_hint') }}</span></label>
-              <input type="text" id="spawn-expertise" class="form-input" placeholder="{{ t('swarm.expertise_placeholder') }}">
+              <input type="text" id="add-expertise" class="form-input" placeholder="{{ t('swarm.expertise_placeholder') }}">
             </div>
             <div class="form-group">
               <label class="form-label">{{ t('swarm.tools_label') }} <span style="font-size:0.7rem;color:var(--text-muted);">— {{ t('swarm.tools_hint') }}</span></label>
-              <input type="text" id="spawn-tools" class="form-input" placeholder="{{ t('swarm.tools_placeholder') }}">
+              <input type="text" id="add-tools" class="form-input" placeholder="{{ t('swarm.tools_placeholder') }}">
             </div>
             <div class="form-actions">
-              <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.spawnWorker()">🧬 {{ t('swarm.spawn_worker') }}</button>
+              <button type="button" class="btn btn-primary btn-full" onclick="KazmaSwarm.addWorker()">{{ t('swarm.add_worker') }}</button>
             </div>
           </form>
         </div>

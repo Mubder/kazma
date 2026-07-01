@@ -156,28 +156,6 @@ class TaskStore:
             )
             conn.commit()
 
-        # Record per-worker metrics for terminal tasks.
-        if task.result is not None and task.result.status in ("success", "partial"):
-            for wr in task.result.worker_results:
-                self.record_worker_metric(
-                    worker=wr.worker,
-                    tasks_completed=1 if wr.status == "success" else 0,
-                    tasks_failed=1 if wr.status in ("error", "timeout") else 0,
-                    latency=wr.duration_seconds,
-                    tokens=wr.tokens_used,
-                    cost=wr.cost,
-                )
-        elif task.result is not None and task.result.status in ("failed",):
-            for wr in task.result.worker_results:
-                self.record_worker_metric(
-                    worker=wr.worker,
-                    tasks_completed=0,
-                    tasks_failed=1,
-                    latency=wr.duration_seconds,
-                    tokens=wr.tokens_used,
-                    cost=wr.cost,
-                )
-
     def get_task(self, task_id: str) -> SwarmTask | None:
         """Retrieve a persisted task by its id, or ``None``."""
         with self._lock:

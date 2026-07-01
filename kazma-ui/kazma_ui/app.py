@@ -911,6 +911,35 @@ def create_app(config_path: str | None = None) -> FastAPI:
             logger.warning("[Cron] Scheduler not available: %s", e)
             _cron_store_ref = None
 
+        # ── Wire SwarmMessageBus (swarm → platform outbound) ────────
+        # Connect the swarm engine's message bus to the active platform
+        # adapter so worker results, HITL checkpoints, and progress events
+        # are visible in Telegram/Discord/Slack.
+        if _swarm_mgr is not None:
+            try:
+                from kazma_core.swarm.bus import get_message_bus
+
+                bus = get_message_bus()
+                # Wire TelegramBusAdapter if Telegram is connected
+                if tg_adapter is not None and telegram_token:
+                    try:
+                        from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
+
+                        tg_bus = TelegramBusAdapter(
+                            bot_token=telegram_token,
+                            chat_id=config_store.get("connectors.telegram.swarm_chat_id", ""),
+                        )
+                        bus.set_adapter(tg_bus)
+                        logger.info("[SwarmBus] TelegramBusAdapter wired — swarm events will appear in Telegram")
+                    except ImportError:
+                        logger.debug("[SwarmBus] TelegramBusAdapter not available")
+                    except Exception as e:
+                        logger.warning("[SwarmBus] Failed to wire TelegramBusAdapter: %s", e)
+                else:
+                    logger.info("[SwarmBus] No Telegram adapter — swarm events stay internal (NullBusAdapter)")
+            except Exception as e:
+                logger.warning("[SwarmBus] Failed to initialize message bus: %s", e)
+
         _gateway = gateway
         _sse_graph_ref = locals().get("sse_graph")
 

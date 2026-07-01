@@ -193,21 +193,35 @@ class InProcessWorker(SwarmWorker):
             # Resolve the correct provider for this worker's model
             provider = None
             if self.model:
-                # First, try to find which provider owns this model
                 owner = registry.find_provider_for_model(self.model)
                 if owner:
-                    # Get a client pointed at the owner's endpoint
                     provider = registry.get_model(self.model)
                 else:
-                    # Model not found in any provider — fall back to active
-                    # client but override the model name
                     provider = registry.get_client(model=self.model)
             else:
                 provider = registry.get_client()
 
             if provider is None:
                 return {"worker": self.name, "task_id": task_id, "status": "error", "output": "", "error": "No provider available"}
-            messages = [{"role": "user", "content": task}]
+
+            # Build messages with system prompt and context from SwarmDispatchContext
+            messages: list[dict[str, str]] = []
+            system_prompt = None
+            context_text = ""
+            if isinstance(context, SwarmDispatchContext):
+                system_prompt = context.system_prompt
+                context_text = context.text
+            elif context:
+                context_text = str(context)
+
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+
+            user_content = task
+            if context_text:
+                user_content = f"{task}\n\n--- Context ---\n{context_text}"
+            messages.append({"role": "user", "content": user_content})
+
             response = await provider.chat(messages)
             return {
                 "worker": self.name,

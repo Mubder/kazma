@@ -1335,7 +1335,7 @@ class SwarmEngine:
             async with self._task_lock:
                 task = self._task_history.get(task_id)
                 if task is not None:
-                    task.status = TaskStatus.COMPLETED
+                    task.status = TaskStatus.FAILED
                     self._task_history[task_id] = SwarmTask.from_dict(task.to_dict())
                     task.result = result
                     self._task_history[task_id] = SwarmTask.from_dict(task.to_dict())
