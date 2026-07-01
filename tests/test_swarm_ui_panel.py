@@ -680,24 +680,23 @@ class TestModelsEndpoint:
 class TestSavedModelProfileDropdowns:
     """Test saved profile dropdowns and JS wiring."""
 
-    def test_page_has_saved_profile_dropdowns(self):
-        """Swarm page renders explicit saved-profile selects."""
+    def test_page_has_model_select_dropdowns(self):
+        """Swarm page renders provider-grouped model dropdowns (Sprint 12)."""
         client = _build_client()
         response = client.get("/swarm")
         html = response.text
-        assert 'id="add-profile"' in html
-        assert 'id="spawn-profile"' in html
+        assert 'add-model-select' in html or 'id="add-model-select"' in html
+        assert 'spawn-model-select' in html or 'id="spawn-model-select"' in html
 
-    def test_swarm_js_wires_saved_profile_autofill(self):
-        """swarm.js populates profile selects and applies model/provider autofill."""
+    def test_swarm_js_wires_provider_grouped_models(self):
+        """swarm.js populates model dropdowns with provider optgroups (Sprint 12)."""
         from pathlib import Path
 
         js_path = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "static" / "js" / "swarm.js"
         source = js_path.read_text(encoding="utf-8")
-        assert "populateProfileSelect('add-profile')" in source
-        assert "populateProfileSelect('spawn-profile')" in source
-        assert "applySavedProfile('add'" in source
-        assert "applySavedProfile('spawn'" in source
+        assert "populateSwarmModelSelects" in source
+        assert "providerModelMap" in source or "providerForModel" in source
+        assert "optgroup" in source
 
 
 # ---------------------------------------------------------------------------

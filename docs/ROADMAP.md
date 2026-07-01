@@ -10,10 +10,12 @@
 - Tool registry with permission gating
 - SSRF + AST-based security validation
 - Web UI, TUI, and Telegram interfaces
+- **Universal Model Registry** — global model routing, durable discovery, cross-UI sync
+- **design-b-modern** branding — grid background, cyan accent, reactive font persistence
 
 ---
 
-## v2.0 — Global Localization Architecture *(planned)*
+## v2.0 — Global Localization Architecture *(planned — UP NEXT)*
 
 ### Framework-Wide Persona Toggle
 

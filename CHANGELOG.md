@@ -307,3 +307,40 @@ Features are listed with their implementation PR/commit where available.
 | ✅ | Graph Fallback | Auto-fallback to agent.run() when graph is None | `d664be9` |
 | ✅ | URL Sanitization | Force `/v1` suffix on all LLM config paths | `4431e5f` |
 | ✅ | LiteLLM Routing | Centralized model config via Alpine.store | `97142cc` |
+
+
+---
+
+## Sprint 12 — Universal Model Registry & Routing Fixes (July 2026)
+
+### Model Registry
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Universal Model Registry** | Global model registry servicing Web UI, TUI, and Telegram — `get_universal_models()`, `find_provider_for_model()`, cross-interface sync | `d013b6f` |
+| ✅ | **Split-Brain Routing Fix** | Removed hardcoded `LM_STUDIO` fallback (`localhost:1234`) in `chat.py` and `sse_chat.py`. All model dispatch now goes through the centralized `ModelRegistry` with `find_provider_for_model()`. | `d5e2895` |
+| ✅ | **Durable Discovery** | Discovered models serialized to SQLite `ConfigStore` via `serialize()`, surviving server restarts. | `ab2b7d5` |
+| ✅ | **Backend Resolution** | `sse_chat.py` and `model_registry.py` dynamically resolve provider credentials (`base_url`, `api_key`) based on the requested model ID. | `d5e2895` |
+
+### UI
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Unified Model Dropdown** | Chat dropdown, Add Worker, Dynamic Spawn, and Edit Worker all use unified `<optgroup>` grouped by provider, fetching from `/api/providers`. | `d5e2895` |
+| ✅ | **Provider Discovery UI** | Provider cards show "Discovered (N)" chips with scrollable model list. Preset dropdown removed. Name field editable. | `ab2b7d5` |
+| ✅ | **Worker Edit Modal** | Swarm workers now have an ✏️ Edit button with role select, model dropdown, and Save/Cancel. | `d5e2895` |
+
+### Design System
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **design-b-modern Branding** | Grid background texture, `#22d3ee` cyan accent, `#0a0f14` background, Inter font stack. | `cdbbc82` |
+| ✅ | **Alpine $persist Font** | Font size persists via `Alpine.$persist` + reactive `:style` binding on `<html>`, synced to backend. | `c81ba6b` |
+| ✅ | **Kazma Icon** | Custom icon in sidebar and chat header. | `1111d13` |
+
+### Documentation
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **ROADMAP.md** | v2.0 Global Localization Architecture — Cultural Switching blueprint with 7 milestones. | `72566fb` |
+| ✅ | **CHANGELOG.md** | Updated with Sprint 12 entries. | `72566fb` |
