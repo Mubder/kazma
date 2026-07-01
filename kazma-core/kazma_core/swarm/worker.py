@@ -236,10 +236,15 @@ class InProcessWorker(SwarmWorker):
 
             response = await provider.chat(messages)
 
-            # Extract token/cost data from response
+            # Extract token/cost data from response.
+            # usage may contain nested dicts from modern APIs
+            # (e.g. completion_tokens_details) — filter to scalars only.
             usage = getattr(response, "usage", {}) or {}
             cost_usd = getattr(response, "cost_usd", 0.0)
-            tokens_used = sum(usage.values()) if usage else 0
+            tokens_used = sum(
+                v for v in (usage.values() if usage else ())
+                if isinstance(v, (int, float))
+            )
 
             return {
                 "worker": self.name,
