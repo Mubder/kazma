@@ -223,8 +223,22 @@ class LLMProvider:
             resp = await client.post("/chat/completions", json=payload)
             resp.raise_for_status()
             data = resp.json()
-        except (httpx.HTTPStatusError, httpx.ConnectError, Exception) as e:
-            logger.error("LLM call failed: %s", e)
+        except httpx.HTTPStatusError as e:
+            # Capture the response body so the user can see WHY the API
+            # rejected the request (e.g. invalid model, bad tool schema).
+            detail = ""
+            try:
+                detail = e.response.text
+            except Exception:
+                pass
+            logger.error(
+                "LLM call failed: %s | status=%s | response_body=%s | model=%s | tools=%d",
+                e,
+                e.response.status_code if e.response is not None else "?",
+                detail[:500],
+                payload.get("model"),
+                len(tools) if tools else 0,
+            )
             # Try fallback model if configured
             if self.config.fallback_model and self.config.router == "litellm":
                 logger.info("Retrying with fallback model: %s", self.config.fallback_model)
@@ -235,9 +249,16 @@ class LLMProvider:
                     data = resp.json()
                 except Exception as fallback_error:
                     logger.error("Fallback model also failed: %s", fallback_error)
-                    raise LLMError(f"Primary and fallback models failed: {e} / {fallback_error}") from e
+                    raise LLMError(
+                        f"Primary and fallback models failed: {e} / {fallback_error}"
+                    ) from e
             else:
-                raise LLMError(f"LLM call failed: {e}") from e
+                raise LLMError(
+                    f"LLM call failed (HTTP {e.response.status_code if e.response is not None else '?'}): {detail[:300]}"
+                ) from e
+        except (httpx.ConnectError, httpx.TimeoutException, Exception) as e:
+            logger.error("LLM call failed: %s", e)
+            raise LLMError(f"LLM call failed: {e}") from e
 
         duration_ms = (time.monotonic() - start) * 1000
 

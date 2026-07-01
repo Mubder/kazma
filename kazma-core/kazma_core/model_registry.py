@@ -175,12 +175,32 @@ class ModelRegistry:
         return self.get_active_profile()
 
     def set_active_model(self, model: str) -> None:
-        """Change just the model within the active provider."""
-        self._active_model = (model or "").strip()
+        """Change the active model, auto-switching provider if needed.
+
+        If the model belongs to a different provider than the currently
+        active one, the active provider is updated so the LLM client
+        points to the correct API endpoint.
+        """
+        clean_model = (model or "").strip()
+        self._active_model = clean_model
         self._cs.set("registry.active_model", self._active_model, category="registry")
-        # Invalidate cached client so it picks up the new model
-        if self._active_provider:
-            self._clients.pop(self._active_provider, None)
+
+        # Auto-switch provider if this model belongs to a different one
+        owner = self.find_provider_for_model(clean_model)
+        if owner:
+            owner_name = owner.get("name", "")
+            if owner_name and owner_name != self._active_provider:
+                logger.info(
+                    "Auto-switching active provider '%s' -> '%s' (model=%s)",
+                    self._active_provider,
+                    owner_name,
+                    clean_model,
+                )
+                self._active_provider = owner_name
+                self._cs.set("registry.active_provider", owner_name, category="registry")
+
+        # Invalidate ALL cached clients so they rebuild with correct URL+model
+        self._clients.clear()
 
     # ── LLM client management ──────────────────────────────────────
 
@@ -192,6 +212,25 @@ class ModelRegistry:
         """
         provider_name = self._active_provider or "custom"
         effective_model = model or self._active_model
+
+        # Safety: if the active model belongs to a DIFFERENT provider,
+        # auto-correct the provider so we don't send NVIDIA model names
+        # to DeepSeek's API (or vice-versa).
+        if effective_model and not model:
+            owner = self.find_provider_for_model(effective_model)
+            if owner:
+                owner_name = owner.get("name", "")
+                if owner_name and owner_name != provider_name:
+                    logger.warning(
+                        "Model '%s' belongs to provider '%s' but active provider is '%s'. "
+                        "Auto-correcting.",
+                        effective_model,
+                        owner_name,
+                        provider_name,
+                    )
+                    provider_name = owner_name
+                    self._active_provider = owner_name
+                    self._cs.set("registry.active_provider", owner_name, category="registry")
 
         if model is None and provider_name in self._clients:
             return self._clients[provider_name]
