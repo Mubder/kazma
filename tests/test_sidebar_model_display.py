@@ -95,20 +95,23 @@ class TestSidebarSourceHasDynamicModel:
         )
 
     def test_sidebar_html_model_badge_not_bare_hardcoded(self) -> None:
-        """The model-badge span must not contain a bare hardcoded model string.
+        """The model display must not contain a bare hardcoded model string.
 
         The model text must be wrapped in an x-text binding so Alpine.js
-        replaces it with the fetched value. We verify the model-badge
-        div contains x-text (not just a Jinja expression alone).
+        replaces it with the fetched value. We verify the model display
+        section contains x-text (not just a Jinja expression alone).
         """
         sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text()
-        # Find the model-badge section
-        badge_idx = sidebar.find("model-badge")
-        assert badge_idx != -1, "model-badge section not found in sidebar.html"
+        # The template uses sidebar-model-selector for the model display.
+        badge_idx = sidebar.find("sidebar-model-selector")
+        assert badge_idx != -1, "sidebar-model-selector section not found in sidebar.html"
         badge_section = sidebar[badge_idx:]
-        # The badge section should contain x-text with activeModel
+        # The section should contain x-text with activeModel.
         assert "x-text" in badge_section, (
-            "model-badge must use x-text for reactive model display"
+            "model display must use x-text for reactive model display"
+        )
+        assert "activeModel" in badge_section, (
+            "model display must reference activeModel"
         )
 
     def test_app_js_sidebar_component_has_fetch(self) -> None:
