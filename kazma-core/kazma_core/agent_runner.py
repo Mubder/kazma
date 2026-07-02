@@ -480,6 +480,13 @@ class KazmaAgent:
             return self._streaming_graph
 
         from kazma_core.agent.graph_builder import build_supervisor_graph
+        from kazma_core.safety.hitl import get_hitl_config
+
+        # Thread the same HITL config as the run path so danger tools
+        # interrupt() on the SSE/streaming graph too (VAL-ARCH-002).
+        streaming_hitl = get_hitl_config(self.config.raw)
+        if not streaming_hitl.get("enabled", True):
+            streaming_hitl = None
 
         self._streaming_graph = build_supervisor_graph(
             llm=self.llm,
@@ -489,6 +496,7 @@ class KazmaAgent:
             cost_breaker=self.cost_breaker,
             authority=self.authority,
             tracer=self.tracer,
+            hitl_config=streaming_hitl,
         )
         return self._streaming_graph
 

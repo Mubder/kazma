@@ -379,6 +379,61 @@
         loadSessions(); // refresh session list
       },
 
+      onApprovalRequired: function(data) {
+        // HITL: graph paused at an interrupt() for a danger tool.
+        // Render an Approve/Deny card; the user's choice POSTs to
+        // /api/approve/{thread_id}, which resumes the graph.
+        KS.hideTyping(typingEl);
+        if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+        var content = currentMsgEl.querySelector('.message-content');
+
+        var card = document.createElement('div');
+        card.className = 'hitl-approval-card';
+        card.innerHTML =
+          '<div class="hitl-approval-header">\u26A0 Approval Required</div>' +
+          '<div class="hitl-approval-body">' +
+            '<p><strong>Tool:</strong> <code>' + escapeHtml(data.tool || '') + '</code></p>' +
+            '<p><strong>Args:</strong> <code>' + escapeHtml(truncateStr(JSON.stringify(data.args || {}), 300)) + '</code></p>' +
+            '<p class="hitl-message">' + escapeHtml(data.message || '') + '</p>' +
+          '</div>' +
+          '<div class="hitl-approval-actions">' +
+            '<button class="btn btn-sm btn-success hitl-approve">Approve</button>' +
+            '<button class="btn btn-sm btn-danger hitl-deny">Deny</button>' +
+          '</div>';
+        content.appendChild(card);
+        scrollToBottom();
+
+        function setCardState(state, label) {
+          card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+          card.className = 'hitl-approval-card hitl-' + state;
+          var actions = card.querySelector('.hitl-approval-actions');
+          if (actions) actions.innerHTML = '<span class="hitl-status hitl-' + state + '">' + label + '</span>';
+        }
+
+        function submitApproval(action) {
+          setCardState('pending', 'Sending\u2026');
+          fetch('/api/approve/' + encodeURIComponent(data.thread_id), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: action }),
+          }).then(function(res) {
+            if (res.status === 202) {
+              setCardState(action === 'approve' ? 'approved' : 'denied',
+                           action === 'approve' ? 'Approved \u2713' : 'Denied \u2717');
+            } else {
+              return res.text().then(function(t) {
+                setCardState('error', 'Error: ' + truncateStr(t, 100));
+              });
+            }
+          }).catch(function(err) {
+            setCardState('error', 'Error: ' + err.message);
+          });
+        }
+
+        card.querySelector('.hitl-approve').addEventListener('click', function() { submitApproval('approve'); });
+        card.querySelector('.hitl-deny').addEventListener('click', function() { submitApproval('deny'); });
+      },
+
       onError: function(msg) {
         KS.hideTyping(typingEl);
         if (!currentMsgEl) currentMsgEl = createAssistantMessage();

@@ -1111,6 +1111,41 @@ tbody tr:last-child td {
   overflow-y: auto;
 }
 
+/* ── HITL approval card (in-chat danger-tool gate) ─────────────── */
+.hitl-approval-card {
+  margin-top: var(--sp-2);
+  padding: var(--sp-3);
+  background: var(--tint);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--warning);
+  font-size: 0.875rem;
+}
+.hitl-approval-header {
+  font-weight: 700;
+  color: var(--warning);
+  margin-bottom: var(--sp-2);
+}
+.hitl-approval-body p { margin: var(--sp-1) 0; word-break: break-word; }
+.hitl-approval-body code {
+  background: var(--bg-elevated, rgba(0,0,0,0.05));
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.8rem;
+}
+.hitl-approval-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  align-items: center;
+}
+.hitl-approval-card.hitl-approved { border-color: var(--success); }
+.hitl-approval-card.hitl-denied { border-color: var(--danger); }
+.hitl-approval-card.hitl-error { border-color: var(--danger); }
+.hitl-status { font-size: 0.8rem; font-weight: 600; }
+.hitl-status.hitl-approved { color: var(--success); }
+.hitl-status.hitl-denied { color: var(--danger); }
+.hitl-status.hitl-error { color: var(--danger); }
+
 .chat-model-bar {
   display: flex;
   align-items: center;

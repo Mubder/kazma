@@ -84,6 +84,8 @@ safety:
       - file_write
       - file_delete
       - shell_exec
+      - code_exec
+      - python_exec
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 

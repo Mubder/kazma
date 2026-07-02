@@ -71,6 +71,9 @@ var KazmaStream = (function() {
           case 'done':
             if (callbacks.onDone) callbacks.onDone(data);
             break;
+          case 'approval_required':
+            if (callbacks.onApprovalRequired) callbacks.onApprovalRequired(data);
+            break;
           case 'error':
             if (callbacks.onError) callbacks.onError(data ? data.content : 'Unknown error');
             break;

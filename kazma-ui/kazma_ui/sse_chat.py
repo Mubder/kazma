@@ -192,14 +192,52 @@ async def _stream_langgraph_events(
                                         {"content": msg_content},
                                     )
 
+        # ── HITL: detect interrupt() pause ─────────────────────────
+        # When tool_worker_node calls interrupt() for a danger tool, the
+        # graph checkpoint pauses and astream_events ends WITHOUT the
+        # terminal on_chain_end. Check the graph state for pending
+        # interrupts and surface them so the frontend can prompt for
+        # approval (POST /api/approve/{thread_id}).
+        thread_id = (config.get("configurable") or {}).get("thread_id", "")
+        interrupted = False
+        try:
+            snapshot = await graph.aget_state(config)
+            if snapshot and getattr(snapshot, "next", None):
+                # Graph still has work to do — check for interrupt tasks.
+                for task in getattr(snapshot, "tasks", []) or []:
+                    interrupts = getattr(task, "interrupts", []) or []
+                    for intr in interrupts:
+                        payload = getattr(intr, "value", None)
+                        if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
+                            interrupted = True
+                            yield _sse_frame(
+                                "approval_required",
+                                {
+                                    "thread_id": thread_id,
+                                    "tool": payload.get("tool", ""),
+                                    "args": payload.get("args", {}),
+                                    "message": payload.get("message", ""),
+                                },
+                            )
+                            logger.info(
+                                "[SSE] HITL interrupt: thread=%s tool=%s — awaiting approval",
+                                thread_id,
+                                payload.get("tool"),
+                            )
+        except Exception as exc:
+            # aget_state may be unavailable (no checkpointer). Don't fail
+            # the whole turn over interrupt detection — just log.
+            logger.debug("[SSE] Could not check interrupt state: %s", exc)
+
         # ── Turn complete ──────────────────────────────────────────
         duration_ms = (time.monotonic() - turn_start) * 1000
         logger.info(
-            "SSE turn complete: tokens=%d cost=$%.4f duration=%.0fms content_len=%d",
+            "SSE turn complete: tokens=%d cost=$%.4f duration=%.0fms content_len=%d interrupted=%s",
             total_tokens,
             total_cost,
             duration_ms,
             len(content_acc),
+            interrupted,
         )
         yield _sse_frame(
             "done",

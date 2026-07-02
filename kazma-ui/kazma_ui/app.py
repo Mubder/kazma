@@ -962,6 +962,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
                 if _sse_graph_ref is not None:
                     from kazma_core.agent.graph_builder import build_supervisor_graph
+                    from kazma_core.safety.hitl import get_hitl_config
+
+                    # Pass hitl_config so danger tools interrupt() on the
+                    # checkpointed SSE/gateway graph too. Without this the
+                    # HITL gate compiled into tool_worker_node stays dormant.
+                    recompile_hitl = get_hitl_config(config.raw)
+                    if not recompile_hitl.get("enabled", True):
+                        recompile_hitl = None
 
                     _sse_graph_ref = build_supervisor_graph(
                         llm=agent.llm,
@@ -972,6 +980,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                         authority=agent.authority,
                         tracer=agent.tracer,
                         checkpointer=checkpointer,
+                        hitl_config=recompile_hitl,
                     )
                     logger.info("[Checkpoint] Graph recompiled with checkpointer")
 
