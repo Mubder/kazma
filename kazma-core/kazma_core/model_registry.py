@@ -209,28 +209,52 @@ class ModelRegistry:
 
         Clients are cached by provider name.  Pass *model* to override the
         model within the active provider (does not change the cached entry).
+
+        Safety: if the model belongs to a DIFFERENT provider than the
+        active one, the provider is auto-corrected so that (for example)
+        NVIDIA model names are never sent to DeepSeek's API — or
+        ``mimo-v2.5-pro`` to DeepSeek.  This guard fires both when
+        *model* is None (using the active model) and when it is passed
+        as an override.
         """
         provider_name = self._active_provider or "custom"
         effective_model = model or self._active_model
 
-        # Safety: if the active model belongs to a DIFFERENT provider,
-        # auto-correct the provider so we don't send NVIDIA model names
-        # to DeepSeek's API (or vice-versa).
-        if effective_model and not model:
+        # Safety: if the model belongs to a DIFFERENT provider,
+        # auto-correct the provider so we don't send cross-provider
+        # model names (e.g. NVIDIA model to DeepSeek's API).
+        # This runs regardless of whether *model* was passed — the
+        # previous `not model` guard defeated this safety net exactly
+        # when the swarm path (which always passes model=) needed it.
+        if effective_model:
             owner = self.find_provider_for_model(effective_model)
             if owner:
                 owner_name = owner.get("name", "")
-                if owner_name and owner_name != provider_name:
+                if owner_name and owner_name.lower() != provider_name.lower():
                     logger.warning(
                         "Model '%s' belongs to provider '%s' but active provider is '%s'. "
-                        "Auto-correcting.",
+                        "Auto-correcting to the owning provider.",
                         effective_model,
                         owner_name,
                         provider_name,
                     )
                     provider_name = owner_name
-                    self._active_provider = owner_name
-                    self._cs.set("registry.active_provider", owner_name, category="registry")
+                    # Only persist the active-provider change when the
+                    # caller did not explicitly pass a model override —
+                    # otherwise we'd hijack the global active provider
+                    # for every per-call model request.
+                    if model is None:
+                        self._active_provider = owner_name
+                        self._cs.set("registry.active_provider", owner_name, category="registry")
+            else:
+                # Model not found in any provider — warn so misconfigs
+                # are visible instead of silently routing to a random
+                # active provider's endpoint.
+                logger.warning(
+                    "Model '%s' not found in any configured provider. "
+                    "Falling back to active provider '%s'.",
+                    effective_model, provider_name,
+                )
 
         if model is None and provider_name in self._clients:
             return self._clients[provider_name]
@@ -458,12 +482,35 @@ class ModelRegistry:
         return self._default_provider_entries()
 
     def get_provider(self, name: str) -> dict[str, Any] | None:
-        """Return provider entry by name."""
-        clean_name = (name or "").strip()
+        """Return provider entry by name (fuzzy, case-insensitive matching).
+
+        Resolution order:
+            1. Exact case-insensitive match on ``name``
+            2. Exact case-insensitive match on ``display_name``
+            3. Substring match: ``name`` contains the query (e.g.
+               ``"Xiaomi MiMo"`` matches query ``"xiaomi"``)
+
+        This tolerates mismatches like a YAML worker declaring
+        ``provider: xiaomi`` while the DB stores the provider as
+        ``"Xiaomi MiMo"``.
+        """
+        clean_name = (name or "").strip().lower()
         if not clean_name:
             return None
+        # Pass 1: exact case-insensitive match on name
         for provider in self.list_providers():
-            if provider.get("name") == clean_name:
+            p_name = str(provider.get("name", "")).strip().lower()
+            if p_name == clean_name:
+                return dict(provider)
+        # Pass 2: exact match on display_name
+        for provider in self.list_providers():
+            p_display = str(provider.get("display_name", "")).strip().lower()
+            if p_display == clean_name:
+                return dict(provider)
+        # Pass 3: substring match (query is contained in provider name)
+        for provider in self.list_providers():
+            p_name = str(provider.get("name", "")).strip().lower()
+            if clean_name in p_name:
                 return dict(provider)
         return None
 
@@ -685,18 +732,37 @@ class ModelRegistry:
     # ── Internal helpers ───────────────────────────────────────────
 
     def _load_providers(self) -> list[dict[str, Any]]:
+        """Load the provider list from ConfigStore.
+
+        Handles both the current format (a list stored directly) and a
+        legacy double-encoded JSON string (from the previous _save_providers
+        that pre-encoded with json.dumps).  If a double-encoded string is
+        detected, it is transparently migrated to the correct format.
+        """
         raw = self._cs.get("providers.list", [])
+        # Legacy: ConfigStore.get returns a JSON-parsed value, but the
+        # old _save_providers stored json.dumps(list) — so after one
+        # json.loads inside ConfigStore.get we may still have a string.
         if isinstance(raw, str):
             try:
                 raw = json.loads(raw)
             except (json.JSONDecodeError, TypeError):
                 raw = []
+            # Migrate: re-save in the correct format so future loads
+            # skip this branch entirely.
+            if isinstance(raw, list):
+                logger.debug("[ModelRegistry] Migrating providers.list from legacy double-encoded format")
+                self._save_providers(raw)
         if not isinstance(raw, list):
             return []
         return [self._normalize_provider_entry(item) for item in raw if isinstance(item, dict)]
 
     def _save_providers(self, providers: list[dict[str, Any]]) -> None:
-        self._cs.set("providers.list", json.dumps(providers), category="providers")
+        # ConfigStore.set() already JSON-serializes the value — do not
+        # pre-encode, or the stored string gets double-JSON-encoded
+        # (str of a str).  The previous json.dumps here caused every
+        # read to need two json.loads calls to recover the list.
+        self._cs.set("providers.list", providers, category="providers")
 
     def _default_provider_entries(self) -> list[dict[str, Any]]:
         providers: list[dict[str, Any]] = []

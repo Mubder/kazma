@@ -836,6 +836,7 @@ def create_swarm_router(
                 model=model,
                 provider=provider,
                 worker_type=worker_type,
+                system_prompt=payload.get("system_prompt", ""),
             ))
             logger.info("[Swarm] WorkerRegistry synced (spawn): %s", name)
         except Exception as exc:

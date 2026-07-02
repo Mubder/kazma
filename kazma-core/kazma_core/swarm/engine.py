@@ -475,11 +475,19 @@ class SwarmEngine:
                 duration_seconds=perf_counter() - started,
             )
 
+        # Build a blackboard-wrapped dispatch context so that single-dispatch
+        # tasks get the same SwarmDispatchContext treatment (system prompt,
+        # blackboard, metadata) as broadcast/fanout/pipeline.
+        dispatch_blackboard = BlackboardStore()
+        dispatch_context = self._build_dispatch_context(
+            task, blackboard=dispatch_blackboard
+        )
+
         # Dispatch the primary worker (returns all results including handoffs).
         all_worker_results = await self._dispatch_worker(
             worker,
             task.prompt,
-            task.context,
+            dispatch_context,
             timeout=task.timeout,
             validation_schema=task.validation_schema,
             trace_id=task_span.trace_id,
@@ -492,7 +500,7 @@ class SwarmEngine:
                 worker_result,
                 task.fallback_chain,
                 prompt=task.prompt,
-                context=task.context,
+                context=dispatch_context,
                 timeout=task.timeout,
                 validation_schema=task.validation_schema,
             )
@@ -1150,7 +1158,20 @@ class SwarmEngine:
         task: SwarmTask,
         *,
         blackboard: BlackboardStore | None = None,
+        system_prompt: str = "",
     ) -> str | SwarmDispatchContext:
+        """Build the context passed to worker.dispatch().
+
+        When a *blackboard* is provided (broadcast/fanout/pipeline), a
+        :class:`SwarmDispatchContext` wrapping the blackboard is returned.
+        The *system_prompt* (if any) is propagated so workers receive
+        task-level or stage-level guidance in addition to their own
+        configured system prompt.
+
+        When no blackboard is provided, the raw context string is returned
+        (single-dispatch path).  Workers fall back to their own
+        ``self.system_prompt`` in that case.
+        """
         if blackboard is None:
             return task.context
         return SwarmDispatchContext(
@@ -1159,6 +1180,7 @@ class SwarmEngine:
             metadata=task.metadata,
             task_id=task.id,
             task_type=task.type.value,
+            system_prompt=system_prompt,
         )
 
     @staticmethod

@@ -27,18 +27,6 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _compose_context_payload(context: str | SwarmDispatchContext) -> str:
-    """Render dispatch context text, including consult system guidance."""
-    plain_context = context_text(context).strip()
-    if not isinstance(context, SwarmDispatchContext) or not context.system_prompt:
-        return plain_context
-
-    sections = [f"System prompt:\n{context.system_prompt.strip()}"]
-    if plain_context:
-        sections.append(f"Additional context:\n{plain_context}")
-    return "\n\n".join(sections)
-
-
 # ---------------------------------------------------------------------------
 # Base
 # ---------------------------------------------------------------------------
@@ -230,6 +218,7 @@ class InProcessWorker(SwarmWorker):
 
             # ── Tool definitions ──────────────────────────────────────
             tool_defs: list[dict[str, Any]] = []
+            tool_registry = None
             try:
                 from kazma_core.agent.tool_registry import get_tool_registry
                 tool_registry = get_tool_registry()
@@ -274,6 +263,9 @@ class InProcessWorker(SwarmWorker):
             total_tokens = 0
             total_cost = 0.0
             final_output = ""
+            # Track the last non-empty content so partial progress is
+            # preserved if provider.chat() raises on a later iteration.
+            last_content = ""
 
             for iteration in range(1, MAX_ITERATIONS + 1):
                 response = await provider.chat(
@@ -282,18 +274,23 @@ class InProcessWorker(SwarmWorker):
                     model=self.model or None,
                 )
 
-                # Accumulate token/cost across all iterations
+                # Accumulate token/cost across all iterations.
+                # Sum ONLY prompt_tokens + completion_tokens — NOT
+                # total_tokens (which equals their sum, causing ~2x
+                # over-counting if summed alongside them).
                 usage = getattr(response, "usage", {}) or {}
-                total_tokens += sum(
-                    v for v in (usage.values() if usage else ())
-                    if isinstance(v, (int, float))
-                )
+                total_tokens += int(usage.get("prompt_tokens", 0)) + int(usage.get("completion_tokens", 0))
                 total_cost += getattr(response, "cost_usd", 0.0) or 0.0
 
                 # No tool calls → final response
                 if not response.tool_calls:
-                    final_output = response.content or ""
+                    final_output = response.content or last_content
                     break
+
+                # Track any content the model produced alongside tool calls
+                # so partial progress isn't lost on a later-iteration failure.
+                if response.content:
+                    last_content = response.content
 
                 logger.info(
                     "[InProcessWorker:%s] iteration %d — %d tool call(s): %s",
@@ -302,12 +299,11 @@ class InProcessWorker(SwarmWorker):
                 )
 
                 # Append the assistant message (with tool_calls block).
+                # tool_calls is guaranteed truthy here (we checked above).
                 assistant_msg: dict[str, Any] = {
                     "role": "assistant",
                     "content": response.content or None,
-                }
-                if response.tool_calls:
-                    assistant_msg["tool_calls"] = [
+                    "tool_calls": [
                         {
                             "id": tc.id,
                             "type": "function",
@@ -317,22 +313,29 @@ class InProcessWorker(SwarmWorker):
                             },
                         }
                         for tc in response.tool_calls
-                    ]
+                    ],
+                }
                 messages.append(assistant_msg)
 
                 # Execute each tool call and append the result.
                 for tc in response.tool_calls:
-                    try:
-                        result = await tool_registry.execute(tc.name, tc.arguments)
-                    except Exception:
-                        logger.exception(
-                            "[InProcessWorker:%s] tool %s execution failed",
-                            self.name, tc.name,
-                        )
+                    if tool_registry is None:
                         result = {
-                            "content": f"Tool execution error: {tc.name}",
+                            "content": f"Tool execution unavailable: registry not loaded.",
                             "is_error": True,
                         }
+                    else:
+                        try:
+                            result = await tool_registry.execute(tc.name, tc.arguments)
+                        except Exception:
+                            logger.exception(
+                                "[InProcessWorker:%s] tool %s execution failed",
+                                self.name, tc.name,
+                            )
+                            result = {
+                                "content": f"Tool execution error: {tc.name}",
+                                "is_error": True,
+                            }
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -359,13 +362,17 @@ class InProcessWorker(SwarmWorker):
             }
         except Exception as exc:
             logger.exception("[InProcessWorker:%s] dispatch failed", self.name)
+            # Preserve partial progress: if the ReAct loop accumulated
+            # any content before the exception, return it rather than
+            # discarding everything.  The accumulated tokens/cost are
+            # also retained for accurate accounting.
             return {
                 "worker": self.name,
                 "task_id": task_id,
                 "status": "error",
-                "output": "",
+                "output": last_content if last_content else "",
                 "error": str(exc)[:500],
-                "tokens_used": 0,
-                "cost": 0.0,
+                "tokens_used": total_tokens,
+                "cost": total_cost,
                 "duration_seconds": time.monotonic() - dispatch_started,
             }

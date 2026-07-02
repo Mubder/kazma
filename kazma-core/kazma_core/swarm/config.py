@@ -133,6 +133,7 @@ class SwarmConfig:
                     bot_token_env=w.get("bot_token_env", ""),
                     role=w.get("role", ""),
                     capabilities=capabilities,
+                    system_prompt=w.get("system_prompt", ""),
                 )
             )
 

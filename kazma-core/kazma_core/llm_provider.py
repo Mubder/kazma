@@ -286,7 +286,14 @@ class LLMProvider:
                 raise LLMError(
                     f"LLM call failed (HTTP {status_code}): {detail[:300]}"
                 ) from e
-        except (httpx.ConnectError, httpx.TimeoutException, Exception) as e:
+        except LLMError:
+            # Already a structured LLM error — re-raise without wrapping
+            # to avoid nested "LLM call failed: LLM call failed: ..." messages.
+            raise
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            logger.error("LLM call failed (network): %s", e)
+            raise LLMError(f"LLM call failed (network): {e}") from e
+        except Exception as e:
             logger.error("LLM call failed: %s", e)
             raise LLMError(f"LLM call failed: {e}") from e
 

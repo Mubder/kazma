@@ -5,6 +5,43 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## Sprint 13 — Swarm Framework Deep Audit & Fixes (July 2026)
+
+### Provider/Model Resolution — Critical Fixes
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Fuzzy Provider Matching** | `get_provider()` now resolves case-insensitively with display_name + substring fallback. Fixes `provider: xiaomi` in YAML not matching DB entry `"Xiaomi MiMo"` — the root cause of the HTTP 400 "model not supported" errors | `model_registry.py` |
+| ✅ | **Auto-Correct Guard Fix** | `get_client()` auto-correct guard (prevents cross-provider model routing) now fires for ALL calls, not just when `model=None`. Previously the swarm path always passed `model=`, defeating the safety net | `model_registry.py` |
+| ✅ | **Double JSON Encoding Fix** | `_save_providers()` no longer pre-encodes with `json.dumps` (ConfigStore already serializes). `_load_providers()` transparently migrates legacy double-encoded entries on read | `model_registry.py` |
+| ✅ | **Unknown Model Warning** | `get_client()` now logs a warning when a model is not found in any provider, instead of silently routing to the active provider's endpoint | `model_registry.py` |
+
+### Swarm Worker — System Prompt & Token Tracking
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **YAML System Prompt Restore** | `SwarmConfig.from_dict()` now reads `system_prompt` from YAML worker definitions. Previously every YAML worker ran with an empty system prompt | `config.py` |
+| ✅ | **Token Counting Fix** | InProcessWorker ReAct loop now sums only `prompt_tokens + completion_tokens`, not `total_tokens` (which double-counts). Fixes ~2x inflated token/cost metrics | `worker.py` |
+| ✅ | **tool_registry Guard** | `tool_registry` initialized to `None` before the try block; tool execution checks for `None` before calling `execute()`, preventing `NameError` if registry import fails | `worker.py` |
+| ✅ | **Partial Progress Preservation** | Exception handler in ReAct loop now returns `last_content` (any accumulated output) instead of empty string, so mid-iteration failures don't discard all work | `worker.py` |
+| ✅ | **Dead Code Removal** | Removed `_compose_context_payload` (never called) and redundant `if response.tool_calls:` guard in the ReAct loop | `worker.py` |
+
+### Engine — Dispatch Context & System Prompt Propagation
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Single-Dispatch Blackboard** | Single-dispatch path (`TaskType.DISPATCH`) now builds a `SwarmDispatchContext` with a blackboard, matching the broadcast/fanout/pipeline paths. Previously single-dispatch passed a plain string, preventing blackboard sharing | `engine.py` |
+| ✅ | **System Prompt in Context** | `_build_dispatch_context()` now accepts and propagates a `system_prompt` parameter into `SwarmDispatchContext`, enabling task-level and stage-level prompt overrides | `engine.py` |
+
+### Error Handling & Minor Fixes
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **LLM Error Nesting Fix** | `LLMProvider.chat()` no longer wraps `LLMError` in another `LLMError`, preventing nested "LLM call failed: LLM call failed: ..." messages. Network vs generic errors are now distinct | `llm_provider.py` |
+| ✅ | **Spawn system_prompt Sync** | Worker spawn endpoint (`POST /api/swarm/workers/spawn`) now passes `system_prompt` to the persistent WorkerRegistry | `swarm_panel.py` |
+
+---
+
 ## Sprint 12 — Swarm Pro-Grade Overhaul (July 2026)
 
 ### Swarm Engine — Critical Bug Fixes (Phase 1)

@@ -400,7 +400,11 @@ class TestCumulativeTokensAndCost:
 
     @pytest.mark.asyncio
     async def test_cumulative_tracking(self):
-        """Two LLM calls → (10+5) + (10+10) = 35 tokens, 0.001 + 0.002 = 0.003 cost."""
+        """Two LLM calls → (10+5) + (10+10) = 35 tokens, 0.001 + 0.002 = 0.003 cost.
+
+        Token counting sums ONLY prompt_tokens + completion_tokens (not
+        total_tokens which would double-count).
+        """
         from kazma_core.swarm.worker import InProcessWorker
 
         worker = InProcessWorker(name="test", role="tester")
@@ -413,12 +417,12 @@ class TestCumulativeTokensAndCost:
                         _make_tool_call("c1", "tool_a", {"x": 1})
                     ],
                     finish_reason="tool_calls",
-                    usage={"prompt_tokens": 10, "completion_tokens": 5},
+                    usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
                     cost_usd=0.001,
                 ),
                 _make_response(
                     content="Done",
-                    usage={"prompt_tokens": 10, "completion_tokens": 10},
+                    usage={"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
                     cost_usd=0.002,
                 ),
             ]
@@ -451,7 +455,10 @@ class TestCumulativeTokensAndCost:
 
                 result = await worker.dispatch("do thing")
 
-        # (10+5) + (10+10) = 35 tokens across both iterations
+        # (10+5) + (10+10) = 35 tokens — NOT 65 (which would be the
+        # case if total_tokens were also summed: 15+15+20+20=70... wait).
+        # Correct: prompt_tokens + completion_tokens per iteration,
+        # accumulated: (10+5) + (10+10) = 35.
         assert result["tokens_used"] == 35
         assert result["cost"] == pytest.approx(0.003, abs=0.001)
 
