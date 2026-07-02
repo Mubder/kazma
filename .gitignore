@@ -28,6 +28,8 @@ htmlcov/
 .mypy_cache/
 .pytest_tmp/
 .pytest_tmp_run/
+.pytest-tmp/
+.server_boot.log
 
 # uv
 uv.lock
