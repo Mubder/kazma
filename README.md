@@ -47,9 +47,9 @@ Kazma is an open-source framework for building reliable, culturally-aware AI age
 | **Headless Gateway** | Telegram + Discord + Slack adapters with rate limiting, session isolation, and platform-agnostic backend registry |
 | **Durable Execution** | LangGraph + SQLite checkpointing — agents resume mid-task after SIGKILL |
 | **RAG Memory** | VectorMemory (ChromaDB + sentence-transformers) + FTS5 full-text search — store/retrieve facts with provenance |
-| **Human-in-the-Loop** | Approval gate for dangerous tools + shared-secret authenticated endpoint |
+| **Human-in-the-Loop** | 3-tier approval gates (graph interrupt + swarm bus + MCP classification) for danger tools, fail-closed by default, wired across all platforms |
 | **Sub-Agent Spawning** | Delegate tasks to child graphs: in-process (SubAgentManager) or distributed (Swarm Panel) |
-| **Swarm Orchestration** | Multi-worker panel — health monitoring, dispatch, lifecycle control |
+| **Swarm Orchestration** | Multi-worker panel — health monitoring, dispatch, per-worker start/stop, circuit breaker badges, lifecycle control |
 | **Cron Autonomy** | Scheduled agent actions with SQLite-backed persistence |
 | **Cultural Moat** | Native Arabic support (MSA/Gulf dialects) with "Majlis Mode" protocol |
 | **Docker Deployable** | Single `docker compose up` — 2 volumes, graceful shutdown |
@@ -311,7 +311,7 @@ kazma swarm metrics --worker researcher
 | ✅ | Voice Transcription | Telegram voice message transcription via STT |
 | ✅ | File I/O | Read, write, list, and search files through the agent (with HITL gates) |
 | ✅ | Export Session | Save conversation history to file |
-| ✅ | MCP Bridge | UnifiedToolExecutor — unified local + MCP tool routing across all registries |
+| ✅ | MCP Bridge | UnifiedToolExecutor — unified local + MCP tool routing with HITL gates and per-server auth/trust |
 
 ### 🎭 Experience
 
@@ -338,10 +338,10 @@ kazma swarm metrics --worker researcher
 | ✅ | Bilingual UI | EN/AR language toggle with cookie middleware and shared Jinja2Templates |
 | ✅ | i18n System | Complete internationalization layer with 400+ Arabic translations and 70+ RTL CSS selectors |
 | ✅ | Arabic Typography | Cairo font for native Arabic rendering |
-| ✅ | HITL Approval UI | Inline approve/deny panel for tiered tool-safety gates |
+| ✅ | HITL Approval UI | Inline approve/deny panel for tiered tool-safety gates — fully wired across Web, Telegram, Discord, and Slack |
 | ✅ | Session History | Load and browse prior conversations from any session |
 | ✅ | Agents Page | Dedicated page for agent inspection and control |
-| ✅ | Swarm Panel | Redesigned tabbed UI with Task Builder (orchestration pattern selector, worker multi-select with capability badges, advanced options), Active Tasks (SSE-connected live progress, HITL checkpoints, handoff chains), Results Dashboard (pipeline steps, fan-out cards, consult comparison, conditional routing), Worker Registry (cards with metrics, add/remove, dynamic spawn), Task History (searchable/filterable table with detail modal) |
+| ✅ | Swarm Panel | Redesigned tabbed UI with Task Builder (orchestration pattern selector, worker multi-select with capability badges, advanced options), Active Tasks (SSE-connected live progress, HITL checkpoints, handoff chains), Results Dashboard (pipeline steps, fan-out cards, consult comparison, conditional routing), Worker Registry (cards with metrics, circuit breaker badges, per-worker start/stop, add/remove, dynamic spawn), Task History (searchable/filterable table with detail modal) |
 | ✅ | Telemetry | SSE telemetry with deduplicated route streaming and null-safe toast notifications |
 
 
@@ -360,8 +360,9 @@ kazma swarm metrics --worker researcher
 
 | ✅ | Feature | Description |
 |:---:|:---|:---|
-| ✅ | HITL Approval Gates | Tiered tool approval: safe/warning/danger, inline keyboard approve/deny |
-| ✅ | Cost Circuit Breaker | Budget-aware — halts agent when limit reached |
+| ✅ | HITL Approval Gates | 3-tier approval system (graph interrupt + swarm bus + MCP classification). Danger tools (file_write, shell_exec, code_exec) require human approval on all platforms. Fail-closed by default. |
+| ✅ | MCP Tool Security | Per-server auth (bearer/header tokens) + trust levels + HITL gate for danger-tier MCP tools |
+| ✅ | Cost Circuit Breaker | Budget-aware — halts agent when limit reached. Per-worker breaker state with UI badges |
 | ✅ | RBAC Permissions | Role-based access control for tools and commands |
 | ✅ | Security Linter | Static analysis for security anti-patterns |
 | ✅ | Dependency Scanner | Vulnerability scanning for Python dependencies |
