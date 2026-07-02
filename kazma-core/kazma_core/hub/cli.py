@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -694,6 +695,79 @@ def check_certification(path: str, output_json: bool = False) -> None:
         click.echo("  [YES] standard badge")
     else:
         click.echo("  [NO]  standard badge")
+
+
+# ─── sign ─────────────────────────────────────────────────────────────────
+
+
+@hub.command()
+@click.argument("path", type=click.Path(exists=True))
+@click.option(
+    "--secret", default=None,
+    help="HMAC signing secret (default: KAZMA_SECRET env var).",
+)
+def sign(path: str, secret: str | None) -> None:
+    """Sign a skill's Python files with a checksum + HMAC signature.
+
+    Computes SHA256 checksums for each .py file referenced by the skill's
+    entry_point and writes them (plus an HMAC-SHA256 signature) into
+    skill_manifest.yaml. Requires KAZMA_SECRET to be set (or pass --secret).
+
+    After signing, the skill loader will fail-closed if any file is
+    tampered with or the signature doesn't match.
+    """
+    import hashlib
+    import hmac as _hmac
+
+    skill_dir = Path(path)
+    manifest_path = skill_dir / "skill_manifest.yaml"
+    if not manifest_path.exists():
+        click.echo(f"Error: skill_manifest.yaml not found in {skill_dir}", err=True)
+        sys.exit(1)
+
+    signing_secret = secret or os.environ.get("KAZMA_SECRET", "").strip()
+    if not signing_secret:
+        click.echo(
+            "Error: KAZMA_SECRET not set. Set it or pass --secret.", err=True
+        )
+        sys.exit(1)
+
+    # Load manifest
+    try:
+        manifest = yaml.safe_load(manifest_path.read_text())
+        if not isinstance(manifest, dict):
+            click.echo("Error: invalid manifest format", err=True)
+            sys.exit(1)
+    except Exception as exc:
+        click.echo(f"Error reading manifest: {exc}", err=True)
+        sys.exit(1)
+
+    # Resolve the entry point file
+    entry_point = manifest.get("entry_point", "")
+    if not entry_point or ":" not in entry_point:
+        click.echo("Error: manifest has no entry_point (expected 'module:ClassName')", err=True)
+        sys.exit(1)
+
+    module_name = entry_point.split(":")[0]
+    py_file = skill_dir / f"{module_name}.py"
+    if not py_file.exists():
+        click.echo(f"Error: entry point file not found: {py_file}", err=True)
+        sys.exit(1)
+
+    # Compute checksum + signature
+    actual_hash = hashlib.sha256(py_file.read_bytes()).hexdigest()
+    signature = _hmac.new(
+        signing_secret.encode(), actual_hash.encode(), hashlib.sha256
+    ).hexdigest()
+
+    # Write into manifest
+    manifest["checksum"] = actual_hash
+    manifest["signature"] = signature
+    manifest_path.write_text(yaml.dump(manifest, default_flow_style=False, allow_unicode=True, sort_keys=False))
+
+    click.echo(f"Signed {py_file.name} for skill '{manifest.get('name', '?')}'")
+    click.echo(f"  checksum:  {actual_hash[:32]}...")
+    click.echo(f"  signature: {signature[:32]}...")
 
 
 # ─── Entry points ─────────────────────────────────────────────────────────

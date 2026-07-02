@@ -63,9 +63,10 @@
 - **Resolution:** Fixed in commit `d191a24`.
 
 ### P1-3: Enforce skill checksums unconditionally
-- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** Open
+- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** ✅ Done (Sprint 16)
 - **What:** Require manifest+checksum before exec_module; fail-closed on exception; add HMAC signatures
 - **Why:** Current verification is advisory — exceptions swallowed, execution proceeds
+- **Resolution:** Checksum verification is now fail-closed (no more `except: pass`). Tampered files, invalid signatures, and verification errors all raise SkillLoadError. Added HMAC-SHA256 signature verification against KAZMA_SECRET. New `kazma hub sign <dir>` CLI command writes checksum + signature. Unsigned skills still load (backward compat, with warning). 9 new tests.
 
 ### P1-4: Add MCP server auth + HITL
 - **Effort:** M | **Dependencies:** P0-2 | **Quick win:** No | **Status:** ✅ Done (Sprint 15)

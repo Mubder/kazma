@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 # ─── Custom Exceptions ────────────────────────────────────────────────────
 
@@ -197,25 +201,67 @@ class SkillLoader:
         if unique_name in sys.modules:
             del sys.modules[unique_name]
 
-        # ── Checksum verification ──────────────────────────────────
+        # ── Checksum + HMAC signature verification (fail-closed) ───
+        # If a checksum or signature is present in the manifest, verification
+        # is mandatory — a mismatch or verification error is FATAL. Skills
+        # without a checksum are allowed but log a warning (backward compat
+        # for unsigned skills). Use `kazma hub sign <dir>` to sign skills.
         manifest_path = file_path.parent / "skill_manifest.yaml"
         if manifest_path.exists():
             import hashlib
+            import hmac as _hmac
+
             try:
                 actual_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
                 import yaml
                 manifest = yaml.safe_load(manifest_path.read_text())
-                stored_hash = manifest.get("checksum", "") if isinstance(manifest, dict) else ""
-                if stored_hash and stored_hash != actual_hash:
-                    raise SkillLoadError(
-                        f"Checksum mismatch for {file_path.name} in skill {skill_name}. "
-                        f"Expected {stored_hash[:16]}..., got {actual_hash[:16]}... "
-                        f"The skill file may have been tampered with."
+                if not isinstance(manifest, dict):
+                    manifest = {}
+                stored_hash = manifest.get("checksum", "")
+                stored_sig = manifest.get("signature", "")
+
+                if stored_hash:
+                    # ── Checksum: fail-closed on mismatch ──────────
+                    if not _hmac.compare_digest(stored_hash, actual_hash):
+                        raise SkillLoadError(
+                            f"Checksum mismatch for {file_path.name} in skill {skill_name}. "
+                            f"Expected {stored_hash[:16]}..., got {actual_hash[:16]}... "
+                            f"The skill file may have been tampered with."
+                        )
+
+                    # ── HMAC signature: verify if present ───────────
+                    if stored_sig:
+                        secret = os.environ.get("KAZMA_SECRET", "").strip()
+                        if not secret:
+                            raise SkillLoadError(
+                                f"Skill {skill_name} has a signature but KAZMA_SECRET "
+                                f"is not set. Cannot verify signature."
+                            )
+                        expected_sig = _hmac.new(
+                            secret.encode(), actual_hash.encode(), hashlib.sha256
+                        ).hexdigest()
+                        if not _hmac.compare_digest(stored_sig, expected_sig):
+                            raise SkillLoadError(
+                                f"Signature verification failed for {file_path.name} in "
+                                f"skill {skill_name}. The checksum or signature may be "
+                                f"tampered or KAZMA_SECRET does not match."
+                            )
+                else:
+                    # No checksum — backward compat, but warn.
+                    logger.warning(
+                        "[SkillLoader] Skill '%s' has no checksum in manifest — "
+                        "loading unsigned. Run 'kazma hub sign <dir>' to sign it.",
+                        skill_name,
                     )
+
             except SkillLoadError:
                 raise
-            except Exception:
-                pass  # skip checksum if manifest can't be read (backward compat)
+            except Exception as exc:
+                # Fail-closed: verification errors are fatal, not swallowed.
+                raise SkillLoadError(
+                    f"Checksum/signature verification failed for {file_path.name} "
+                    f"in skill {skill_name}: {exc}"
+                ) from exc
 
         spec = importlib.util.spec_from_file_location(unique_name, str(file_path))
         if spec is None or spec.loader is None:
