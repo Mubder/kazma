@@ -88,6 +88,7 @@ class SwarmEngine:
         self.config = config or SwarmConfig(enabled=True, workers=[])
         self._workers: dict[str, SwarmWorker] = {}
         self._task_history: dict[str, SwarmTask] = {}
+        self._active_tasks: dict[str, SwarmTask] = {}  # in-flight tasks
         self._task_lock = asyncio.Lock()  # protects _task_history mutations
         self._max_history = 500  # LRU cap to prevent unbounded memory growth
         self._result_aggregator = result_aggregator or ResultAggregator()
@@ -175,6 +176,10 @@ class SwarmEngine:
         """Return a task by id from the history."""
         return self._task_history.get(task_id)
 
+    def list_active_tasks(self) -> list[SwarmTask]:
+        """Return all in-flight (running or paused) tasks."""
+        return list(self._active_tasks.values())
+
     def list_tasks(self, task_type: TaskType | str | None = None) -> list[SwarmTask]:
         """Return completed task snapshots, optionally filtered by task type."""
         normalized_type = (
@@ -237,6 +242,7 @@ class SwarmEngine:
         started = perf_counter()
         task.started_at = task.started_at or _utc_now_iso()
         task.status = TaskStatus.RUNNING
+        self._active_tasks[task.id] = task  # track in-flight
 
         # Start a root tracing span for this task.
         task_span = self._tracing_emitter.start_task_span(
@@ -535,6 +541,7 @@ class SwarmEngine:
         started = perf_counter()
         task.started_at = task.started_at or _utc_now_iso()
         task.status = TaskStatus.RUNNING
+        self._active_tasks[task.id] = task  # track in-flight
 
         # Start a root tracing span for this broadcast task.
         task_span = self._tracing_emitter.start_task_span(
@@ -1089,6 +1096,11 @@ class SwarmEngine:
             else TaskStatus.COMPLETED
         )
         task.completed_at = _utc_now_iso()
+
+        # Remove from in-flight tracking (unless paused — paused tasks
+        # stay visible until resumed or rejected).
+        if task.status != TaskStatus.PAUSED:
+            self._active_tasks.pop(task.id, None)
 
         # Record per-worker metrics for any worker results not yet recorded.
         for wr in worker_results:

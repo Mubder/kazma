@@ -384,12 +384,23 @@ def create_swarm_router(
 
     @router.post("/api/swarm/dispatch")
     async def swarm_dispatch(payload: dict[str, Any]) -> JSONResponse:
-        """Dispatch a task to one or more workers."""
+        """Dispatch a task to one or more workers.
+
+        When ``background`` is True in the payload, the task is dispatched
+        asynchronously and the response returns immediately with just the
+        ``task_id``. The client should subscribe to SSE or poll
+        ``GET /api/swarm/tasks/active`` for live status. This enables the
+        Active Tasks tab to show running tasks.
+
+        When ``background`` is False (default, backward-compatible), the
+        endpoint blocks until the task completes and returns full results.
+        """
         worker_names = payload.get("workers", [])
         task = str(payload.get("task", "")).strip()
         context = payload.get("context", "")
         task_type = _coerce_task_type(payload, worker_names)
         timeout = _coerce_timeout(payload)
+        background = bool(payload.get("background", False))
 
         if task_type == getattr(TaskType, "PIPELINE", None) and not worker_names:
             return JSONResponse(
@@ -505,8 +516,28 @@ def create_swarm_router(
                 metadata=task_metadata,
             )
             if task_type == TaskType.BROADCAST:
+                if background:
+                    import asyncio as _asyncio
+                    _asyncio.create_task(engine.broadcast(swarm_task))
+                    return JSONResponse({
+                        "status": "ok",
+                        "message": f"Task dispatched (background) to {len(dispatched)} worker(s)",
+                        "task_id": swarm_task.id,
+                        "result_status": "running",
+                        "dispatched": dispatched,
+                    })
                 task_result = await engine.broadcast(swarm_task)
             else:
+                if background:
+                    import asyncio as _asyncio
+                    _asyncio.create_task(engine.dispatch(swarm_task))
+                    return JSONResponse({
+                        "status": "ok",
+                        "message": f"Task dispatched (background) to {len(dispatched)} worker(s)",
+                        "task_id": swarm_task.id,
+                        "result_status": "running",
+                        "dispatched": dispatched,
+                    })
                 task_result = await engine.dispatch(swarm_task)
             results = [item.to_dict() for item in task_result.worker_results]
 
@@ -543,6 +574,22 @@ def create_swarm_router(
                 "checkpoint": checkpoint_info,
             }
         )
+
+    @router.get("/api/swarm/tasks/active")
+    async def swarm_active_tasks() -> JSONResponse:
+        """Return all in-flight (running or paused) tasks.
+
+        This endpoint powers the Active Tasks tab. Tasks are tracked in
+        the engine's ``_active_tasks`` dict from dispatch start until
+        finalization (completion, failure, or timeout). Paused tasks
+        (HITL checkpoints) remain visible until approved or rejected.
+        """
+        engine = _current_engine()
+        if not _has_swarm_core() or engine is None:
+            return JSONResponse({"tasks": [], "count": 0})
+        active = engine.list_active_tasks()
+        flat = [_flatten_swarm_task(t) for t in active]
+        return JSONResponse({"tasks": flat, "count": len(flat)})
 
     @router.get("/api/swarm/tasks")
     async def swarm_tasks(

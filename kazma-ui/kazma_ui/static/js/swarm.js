@@ -51,6 +51,7 @@
     refreshStatus();
     pollInterval = setInterval(refreshStatus, 5000);
     loadOutputTarget();
+    loadActiveTasks();
 
     // Form submissions
     var dispatchForm = $('dispatch-form');
@@ -99,6 +100,14 @@
     if (tabId === 'task-history') loadTaskHistory();
     if (tabId === 'results-dashboard') loadResultsDashboard();
     if (tabId === 'worker-registry') loadWorkerMetrics();
+    if (tabId === 'active-tasks') {
+      loadActiveTasks();
+      // Poll for updates while the tab is visible
+      if (window._activeTasksPoll) clearInterval(window._activeTasksPoll);
+      window._activeTasksPoll = setInterval(loadActiveTasks, 2000);
+    } else {
+      if (window._activeTasksPoll) { clearInterval(window._activeTasksPoll); window._activeTasksPoll = null; }
+    }
   }
 
   // ══════════════════════════════════════════════════════
@@ -406,6 +415,7 @@
       task: task,
       pattern: pattern,
       workers: workerList,
+      background: true,
     };
     // Create the card without connecting SSE yet — we'll connect after
     // the POST returns the real task_id.
@@ -1291,6 +1301,64 @@
       ensureProviderOption(providerSelect, profileProvider);
       providerSelect.value = profileProvider;
     }
+  }
+
+  // ══════════════════════════════════════════════════════
+  // ACTIVE TASKS (live in-flight task tracking)
+  // ══════════════════════════════════════════════════════
+
+  function loadActiveTasks() {
+    fetch('/api/swarm/tasks/active')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data) return;
+        var container = $('active-tasks-list');
+        var emptyEl = $('active-tasks-empty');
+        if (!container) return;
+        var tasks = data.tasks || [];
+        if (emptyEl) emptyEl.style.display = tasks.length ? 'none' : 'block';
+        // Remove cards for tasks no longer active
+        var activeIds = tasks.map(function(t) { return t.id; });
+        container.querySelectorAll('[id^="active-task-"]').forEach(function(el) {
+          var tid = el.id.replace('active-task-', '');
+          if (activeIds.indexOf(tid) === -1) el.remove();
+        });
+        // Add/update cards for active tasks
+        tasks.forEach(function(t) {
+          var cardId = 'active-task-' + t.id;
+          var existing = $(cardId);
+          if (existing) {
+            // Update status text
+            var statusEl = existing.querySelector('.active-task-status');
+            if (statusEl) {
+              statusEl.textContent = t.status || 'running';
+              statusEl.className = 'active-task-status status-' + (t.status || 'running');
+            }
+          } else {
+            var card = document.createElement('div');
+            card.className = 'card';
+            card.id = cardId;
+            card.style.cssText = 'margin-bottom:12px;padding:12px;border-left:3px solid var(--warning);';
+            var workers = (t.workers || []).join(', ') || 'all';
+            var statusColor = t.status === 'paused' ? 'var(--info)' : 'var(--warning)';
+            card.innerHTML =
+              '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+                '<div>' +
+                  '<strong>' + esc(t.prompt || t.id).substring(0, 60) + '</strong>' +
+                  '<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">' +
+                    'Workers: ' + esc(workers) + ' · Type: ' + esc(t.type || 'dispatch') +
+                  '</div>' +
+                '</div>' +
+                '<span class="active-task-status status-' + esc(t.status || 'running') + '" ' +
+                  'style="padding:2px 8px;border-radius:4px;background:' + statusColor + ';color:#fff;font-size:0.75rem;">' +
+                  esc(t.status || 'running') +
+                '</span>' +
+              '</div>';
+            container.appendChild(card);
+          }
+        });
+      })
+      .catch(function() { /* tab may not be visible */ });
   }
 
   // ══════════════════════════════════════════════════════
