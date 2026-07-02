@@ -19,5 +19,8 @@ RUN mkdir -p /app/kazma-data /root/.kazma/vector_memory
 
 EXPOSE 8000
 
-# --graceful-timeout 15 gives uvicorn time to drain on SIGTERM
-CMD ["python", "-m", "uvicorn", "kazma_ui.app:create_app", "--factory", "--host", "127.0.0.1", "--port", "8000", "--timeout-graceful-shutdown", "15"]
+# --host 0.0.0.0 is required inside Docker so the port mapping
+# (ports: 8000:8000) actually reaches the service. Docker's network
+# isolation provides the security boundary; 127.0.0.1 inside a
+# container means only the container itself can reach the port.
+CMD ["python", "-m", "uvicorn", "kazma_ui.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "15"]

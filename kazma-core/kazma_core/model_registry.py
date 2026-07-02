@@ -383,6 +383,17 @@ class ModelRegistry:
         # already includes the /v1 suffix (e.g. https://api.openai.com/v1/models).
         url = f"{base_url.rstrip('/')}{models_path}"
 
+        # SSRF guard: prevent the server from fetching internal/private URLs
+        # (e.g. cloud metadata 169.254.169.254, localhost services).
+        try:
+            from kazma_core.security.ssrf import SSRFError, validate_url
+            validate_url(url, block_unresolved=True)
+        except SSRFError as exc:
+            logger.warning("discover_models: SSRF blocked %r for %r: %s", url, clean_name, exc)
+            return []
+        except Exception:
+            logger.debug("discover_models: SSRF validation skipped (module unavailable)")
+
         # Build auth header
         auth_header_type = preset.get("auth_header", "Bearer")
         headers: dict[str, str] = {}

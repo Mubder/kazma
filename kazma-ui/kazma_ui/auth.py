@@ -50,6 +50,10 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/ollama",
     "/api/agents", "/api/providers", "/api/connectors",
     "/api/chat", "/api/gateway",
+    # Destructive / privileged routes that must be gated even when
+    # other endpoints are open (sessions, HITL approval, system ops).
+    "/api/sessions", "/api/session",
+    "/api/approve", "/api/system",
 )
 
 #: Exact read-only paths that are always open regardless of secret config.

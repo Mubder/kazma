@@ -22,11 +22,27 @@ from kazma_core.hub.registry import KazmaHub
 
 
 def _require_auth(request: Request) -> None:
-    """Require KAZMA_SECRET for write endpoints."""
-    expected = _os_hub.environ.get("KAZMA_SECRET", "")
+    """Require a valid ``X-Kazma-Secret`` header for write endpoints.
+
+    When ``KAZMA_SECRET`` is not configured, all requests are rejected
+    (these are privileged operations that need explicit auth).  When it
+    IS configured, the request's ``X-Kazma-Secret`` header must match
+    via timing-safe comparison.
+    """
+    import hmac
+
+    expected = _os_hub.environ.get("KAZMA_SECRET", "").strip()
     if not expected:
-        raise HTTPException(status_code=401, detail="KAZMA_SECRET not configured — auth required")
-        raise HTTPException(status_code=401, detail="Unauthorized — provide X-Kazma-Secret header")
+        raise HTTPException(
+            status_code=401,
+            detail="KAZMA_SECRET not configured — auth required for hub write operations",
+        )
+    provided = request.headers.get("X-Kazma-Secret", "").strip()
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized — provide a valid X-Kazma-Secret header",
+        )
 
 
 # ---------------------------------------------------------------------------
