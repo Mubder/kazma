@@ -46,6 +46,7 @@ Kazma is an open-source framework for building reliable, culturally-aware AI age
 |:---|:---|
 | **Headless Gateway** | Telegram + Discord + Slack adapters with rate limiting, session isolation, and platform-agnostic backend registry |
 | **Durable Execution** | LangGraph + SQLite checkpointing — agents resume mid-task after SIGKILL |
+| **Atomic ConfigStore** | SQLite-backed runtime settings with WAL journaling, process-wide singleton, and batch transactions — concurrent writes never corrupt |
 | **RAG Memory** | VectorMemory (ChromaDB + sentence-transformers) + FTS5 full-text search — store/retrieve facts with provenance |
 | **Human-in-the-Loop** | 3-tier approval gates (graph interrupt + swarm bus + MCP classification) for danger tools, fail-closed by default, wired across all platforms |
 | **Sub-Agent Spawning** | Delegate tasks to child graphs: in-process (SubAgentManager) or distributed (Swarm Panel) |
@@ -283,6 +284,7 @@ kazma swarm metrics --worker researcher
 |:---:|:---|:---|
 | ✅ | ReAct Supervisor | LangGraph-based agent with tool-calling loop and SQLite checkpointing |
 | ✅ | Durable Checkpoints | Agents resume mid-task after crash — SQLite-backed graph state |
+| ✅ | Atomic ConfigStore | SQLite runtime settings — WAL, singleton connection, batch transactions, crash-safe multi-key writes |
 | ✅ | Sub-Agent Spawning | Delegate tasks to child graphs (in-process) or swarm workers (distributed) |
 | ✅ | Swarm Orchestration | Multi-worker panel with health monitoring, dispatch, consult, pipeline, and lifecycle control |
 | ✅ | WorkerRegistry | Persistent worker phonebook with CRUD — survives reboots, JSON-backed |
@@ -490,6 +492,7 @@ bounded concurrency. All components are configurable per-worker or per-task.
 │                  REST API (/api/swarm/*)              │
 │  GET /status  POST /dispatch  POST /workers          │
 │  DELETE /workers/{name}  POST /start  POST /stop     │
+│  POST /workers/{name}/start  POST /workers/{name}/stop │
 ├──────────────────────────────────────────────────────┤
 │              Backend (kazma_core.swarm)               │
 │  ┌─────────┐  ┌─────────┐  ┌─────────┐              │
