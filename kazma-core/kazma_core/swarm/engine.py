@@ -629,6 +629,40 @@ class SwarmEngine:
         else:
             logger.info("[SwarmEngine] all workers stopped")
 
+    async def start_worker(self, name: str) -> bool:
+        """Start a single worker by name.
+
+        Returns True if the worker was started (or already running).
+        Returns False if the worker is not found.
+        """
+        worker = self._workers.get(name)
+        if worker is None:
+            logger.warning("[SwarmEngine] start_worker: '%s' not found", name)
+            return False
+        if getattr(worker, "_running", False):
+            logger.debug("[SwarmEngine] worker '%s' already running", name)
+            return True
+        await worker.start()
+        logger.info("[SwarmEngine] worker '%s' started", name)
+        return True
+
+    async def stop_worker(self, name: str) -> bool:
+        """Stop a single worker by name.
+
+        Returns True if the worker was stopped (or already stopped).
+        Returns False if the worker is not found.
+        """
+        worker = self._workers.get(name)
+        if worker is None:
+            logger.warning("[SwarmEngine] stop_worker: '%s' not found", name)
+            return False
+        if not getattr(worker, "_running", True):
+            logger.debug("[SwarmEngine] worker '%s' already stopped", name)
+            return True
+        await worker.stop()
+        logger.info("[SwarmEngine] worker '%s' stopped", name)
+        return True
+
     async def status(self) -> list[dict[str, Any]]:
         """Return status for all registered workers."""
         return await asyncio.gather(*(worker.status() for worker in self._workers.values()))

@@ -249,6 +249,12 @@
                   <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:{% if w.get('status') == 'online' %}var(--success){% elif w.get('status') == 'busy' %}var(--warning){% else %}var(--danger){% endif %};"></span>
                   <span style="font-weight:600;font-size:0.95rem;">{{ w.name }}</span>
                   {% if w.get('role') %}<span class="badge badge-accent">{{ w.role }}</span>{% endif %}
+                  {% set cb = w.get('circuit_breaker') %}
+                  {% if cb and cb.get('state') != 'closed' %}
+                  <span class="badge {% if cb.state == 'open' %}badge-danger{% else %}badge-warning{% endif %}" style="font-size:0.65rem;" id="cb-badge-{{ w.name }}" title="Failures: {{ cb.get('consecutive_failures', 0) }}/{{ cb.get('failure_threshold', 5) }}">⚡ {{ cb.state }}</span>
+                  {% else %}
+                  <span class="badge badge-success" style="font-size:0.65rem;display:none;" id="cb-badge-{{ w.name }}">⚡ closed</span>
+                  {% endif %}
                 </div>
                 <div style="display:flex;gap:16px;font-size:0.8rem;color:var(--text-tertiary);">
                   <span data-model="{{ w.get('model', '?') }}">{{ t('swarm.model') }}: <span style="color:var(--text-secondary);font-family:var(--font-mono);">{{ w.get('model', '?') }}</span></span>
@@ -270,6 +276,8 @@
                 </div>
               </div>
               <div style="display:flex;gap:4px;">
+                <button class="btn btn-sm btn-success" data-worker="{{ w.name }}" data-action="start" title="Start worker" {% if w.get('status') == 'online' or w.get('status') == 'busy' %}disabled{% endif %}>▶</button>
+                <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="stop" title="Stop worker" {% if w.get('status') == 'offline' %}disabled{% endif %}>⏹</button>
                 <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="edit" title="Edit worker">✏️</button>
                 <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="logs" title="{{ t('swarm.view_logs') }}">📋</button>
                 <button class="btn btn-sm btn-danger" data-worker="{{ w.name }}" data-action="remove" title="{{ t('swarm.remove_worker') }}">✕</button>

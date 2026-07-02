@@ -416,7 +416,7 @@ Headless gateway and adapters.
 - **`kazma_gateway/gateway.py`**: `GatewayManager`, `BaseAdapter`, `IncomingMessage`, `OutboundMessage`, `RateLimiter`, `MessageMetrics`, `SessionStore`.
 - **`kazma_gateway/adapters/telegram.py`**: `TelegramAdapter` (polling + optional webhook ingress, voice transcription, emoji reactions, inline keyboard callbacks).
 - **`kazma_gateway/adapters/discord.py`**: `DiscordAdapter`.
-- **`kazma_gateway/adapters/slack.py`**: `SlackAdapter` (Socket Mode).
+- **`kazma_gateway/adapters/slack.py`**: `SlackAdapter` (polling-based Web API — no Socket Mode).
 - **`kazma_gateway/stores/checkpoint.py`**: `CheckpointManager`, `create_checkpoint_manager()`, `create_checkpointer()`.
 - **`kazma_gateway/stores/sqlite.py`**: `SQLiteSessionStore`.
 - **`kazma_gateway/agent_handler.py`**: `create_graph_handler()`, `_build_initial_state()`. Bridges `IncomingMessage` to the LangGraph brain and routes replies back through the gateway.

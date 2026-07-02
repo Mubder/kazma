@@ -392,13 +392,13 @@ Clicking **Test Connection** on a connector card returns `No token configured`, 
 **Root Cause:**
 - The connector token/key has not been saved.
 - The token is revoked or invalid.
-- Slack requires both a **Bot Token** (`xoxb-...`) and an **App Token** (`xapp-...`) for Socket Mode.
+- Slack requires a **Bot Token** (`xoxb-...`) for the polling-based Web API adapter (no Socket Mode or App Token needed).
 - Discord expects the token to be sent as `Bot <TOKEN>`.
 
 **Solution:**
 
 1. Open **Settings > Providers & Connectors** and select the **Platform Connectors** sub-tab.
-2. Click **Edit** on the connector, enter the token, and fill in any extra fields (Slack app token, Discord guild ID, etc.).
+2. Click **Edit** on the connector, enter the token, and fill in any extra fields (Discord guild ID, etc.).
 3. Click **Test Connection**. The backend performs a non-destructive health check:
    - Telegram: `GET https://api.telegram.org/bot<TOKEN>/getMe`
    - Discord: `GET https://discord.com/api/v10/users/@me` with `Authorization: Bot <TOKEN>`

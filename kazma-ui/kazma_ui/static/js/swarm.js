@@ -77,6 +77,8 @@
       if (btn.dataset.action === 'remove') removeWorker(workerName);
       else if (btn.dataset.action === 'edit') editWorker(workerName);
       else if (btn.dataset.action === 'logs') viewLogs(workerName);
+      else if (btn.dataset.action === 'start') startWorker(workerName);
+      else if (btn.dataset.action === 'stop') stopWorker(workerName);
       else if (btn.dataset.action === 'approve') approveCheckpoint(btn.dataset.taskId);
       else if (btn.dataset.action === 'reject') rejectCheckpoint(btn.dataset.taskId);
       else if (btn.dataset.action === 'view-task') viewTaskDetail(btn.dataset.taskId);
@@ -274,6 +276,7 @@
         workers = data.workers || [];
         updateSwarmControls(data.started, data.count);
         updateMetrics(data);
+        updateBreakerBadges(workers);
         var banner = $('setup-banner');
         if (banner && data.setup_instructions) {
           banner.style.display = 'block';
@@ -322,6 +325,25 @@
         setText('metric-total-cost', '$' + totalCost.toFixed(2));
       })
       .catch(function() {});
+  }
+
+  function updateBreakerBadge(worker) {
+    var cb = worker.circuit_breaker;
+    var badge = $('cb-badge-' + worker.name);
+    if (!badge) return;
+    if (!cb || cb.state === 'closed') {
+      badge.style.display = 'none';
+      return;
+    }
+    badge.style.display = '';
+    badge.className = 'badge ' + (cb.state === 'open' ? 'badge-danger' : 'badge-warning');
+    badge.style.fontSize = '0.65rem';
+    badge.textContent = '⚡ ' + cb.state;
+    badge.title = 'Failures: ' + (cb.consecutive_failures || 0) + '/' + (cb.failure_threshold || 5);
+  }
+
+  function updateBreakerBadges(workerList) {
+    (workerList || []).forEach(updateBreakerBadge);
   }
 
   // ══════════════════════════════════════════════════════
@@ -943,6 +965,26 @@
       .catch(function(err) { showError(err.message); });
   }
 
+  function startWorker(name) {
+    fetch('/api/swarm/workers/' + encodeURIComponent(name) + '/start', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.status === 'ok') { showToast('Worker "' + name + '" started', true); refreshStatus(); }
+        else showError(d.message || 'Failed to start worker');
+      })
+      .catch(function() { showError('Failed to start worker'); });
+  }
+
+  function stopWorker(name) {
+    fetch('/api/swarm/workers/' + encodeURIComponent(name) + '/stop', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.status === 'ok') { showToast('Worker "' + name + '" stopped', true); refreshStatus(); }
+        else showError(d.message || 'Failed to stop worker');
+      })
+      .catch(function() { showError('Failed to stop worker'); });
+  }
+
   function editWorker(name) {
     // Find the worker card to read current values
     var card = $('worker-card-' + name);
@@ -1472,6 +1514,8 @@
     refresh: refreshStatus,
     addWorker: addWorker,
     removeWorker: removeWorker,
+    startWorker: startWorker,
+    stopWorker: stopWorker,
     editWorker: editWorker,
     closeEditWorker: closeEditWorker,
     saveEditWorker: saveEditWorker,

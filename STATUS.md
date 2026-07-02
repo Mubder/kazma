@@ -40,4 +40,4 @@ All project references use the current `kazma` namespace (`kazma`, `Kazma`, `.ka
 ## Notes
 
 - The TUI is intentionally English-only and does not support Arabic/RTL.
-- TelegramWorker shells out to `kazma -p <profile>` (legacy CLI namespace purged).
+- TelegramWorker was removed (commit 94205bb); swarm dispatch uses InProcessWorker.

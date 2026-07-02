@@ -1,8 +1,8 @@
 # 🇰🇼 Kazma Feature Roadmap
 
-> **Last updated:** June 28, 2026  
+> **Last updated:** July 3, 2026  
 > **Status:** All originally planned features shipped ✅ + two remediation rounds complete ✅  
-> **Tests:** 2,382+ passing
+> **Tests:** 3,409+ passing
 
 ---
 

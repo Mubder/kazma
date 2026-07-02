@@ -191,15 +191,18 @@ def _flatten_swarm_task(task: Any) -> dict[str, Any]:
     }
 
 
-def _serialize_worker(worker: Any) -> dict[str, Any]:
-    """Convert a worker object into a response-friendly dict."""
+def _serialize_worker(worker: Any, engine: Any = None) -> dict[str, Any]:
+    """Convert a worker object into a response-friendly dict.
+
+    If ``engine`` is provided, the circuit breaker status is included.
+    """
     capabilities = None
     if hasattr(worker, "capabilities") and worker.capabilities is not None:
         if hasattr(worker.capabilities, "to_dict"):
             capabilities = worker.capabilities.to_dict()
         else:
             capabilities = {"role": getattr(worker.capabilities, "role", "")}
-    return {
+    result = {
         "name": worker.name,
         "model": worker.model or "?",
         "provider": worker.provider or "?",
@@ -213,13 +216,20 @@ def _serialize_worker(worker: Any) -> dict[str, Any]:
         "logs": list(worker.logs),
         "capabilities": capabilities,
     }
+    # Attach circuit breaker state when the engine is available.
+    if engine is not None and hasattr(engine, "get_circuit_breaker_status"):
+        try:
+            result["circuit_breaker"] = engine.get_circuit_breaker_status(worker.name)
+        except Exception:
+            result["circuit_breaker"] = {"state": "closed", "consecutive_failures": 0}
+    return result
 
 
 def _worker_views(engine: Any) -> list[dict[str, Any]]:
     """Return serialized worker views for templates and APIs."""
     if engine is None:
         return []
-    return [_serialize_worker(worker) for worker in engine._workers.values()]
+    return [_serialize_worker(worker, engine) for worker in engine._workers.values()]
 
 
 def _build_worker_config(payload: dict[str, Any]) -> Any:
@@ -1087,6 +1097,40 @@ def create_swarm_router(
                 "message": f"Swarm stopped — {len(workers)} worker(s) offline",
                 "worker_count": len(workers),
             }
+        )
+
+    @router.post("/api/swarm/workers/{name}/start")
+    async def worker_start(name: str) -> JSONResponse:
+        """Start a single worker by name."""
+        engine = _current_engine()
+        if engine is None or name not in engine._workers:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+        ok = await engine.start_worker(name)
+        if ok:
+            return JSONResponse({"status": "ok", "message": f"Worker '{name}' started"})
+        return JSONResponse(
+            {"status": "error", "message": f"Failed to start worker '{name}'"},
+            status_code=500,
+        )
+
+    @router.post("/api/swarm/workers/{name}/stop")
+    async def worker_stop(name: str) -> JSONResponse:
+        """Stop a single worker by name."""
+        engine = _current_engine()
+        if engine is None or name not in engine._workers:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+        ok = await engine.stop_worker(name)
+        if ok:
+            return JSONResponse({"status": "ok", "message": f"Worker '{name}' stopped"})
+        return JSONResponse(
+            {"status": "error", "message": f"Failed to stop worker '{name}'"},
+            status_code=500,
         )
 
     @router.get("/api/swarm/models")
