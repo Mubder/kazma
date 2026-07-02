@@ -47,9 +47,9 @@ async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) ->
     # Default context window (matches kazma.yaml default)
     context_window = 16_000
     try:
-        from kazma_core.config_store import ConfigStore
+        from kazma_core.config_store import get_config_store
 
-        store = ConfigStore()
+        store = get_config_store()
         context_window = store.get("memory.max_context_tokens", 16_000)
     except Exception:
         pass

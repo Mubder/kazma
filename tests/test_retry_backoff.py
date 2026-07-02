@@ -137,7 +137,7 @@ class TestToolRetry:
     @pytest.mark.asyncio
     async def test_retry_config_from_yaml(self, tmp_path: Path) -> None:
         """Retry config is loaded from kazma.yaml via ConfigStore."""
-        with patch("kazma_core.config_store.ConfigStore") as mock_store_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_get_store:
             mock_store = MagicMock()
             mock_store.get = MagicMock(
                 side_effect=lambda key, default=None: {
@@ -146,7 +146,7 @@ class TestToolRetry:
                     "retry.max_wait": 30,
                 }.get(key, default)
             )
-            mock_store_cls.return_value = mock_store
+            mock_get_store.return_value = mock_store
 
             from kazma_core.retry import load_retry_config
 

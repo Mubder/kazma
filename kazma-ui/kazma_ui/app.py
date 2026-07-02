@@ -43,6 +43,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # because KazmaAgent.__init__ calls get_model_registry().
     config = load_config(config_path)
     config_store = ConfigStore()
+    # Register as the process-wide singleton so gateway/core modules
+    # share this connection + lock via get_config_store().
+    from kazma_core.config_store import set_config_store
+    set_config_store(config_store)
     registry = initialize_model_registry(config_store)
     agent = KazmaAgent(config)
     startup_provider_profile = registry.get_active_profile()

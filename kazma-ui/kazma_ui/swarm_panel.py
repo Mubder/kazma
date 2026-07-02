@@ -683,8 +683,8 @@ def create_swarm_router(
         if config_store is not None:
             return config_store
         try:
-            from kazma_core.config_store import ConfigStore
-            return ConfigStore()
+            from kazma_core.config_store import get_config_store
+            return get_config_store()
         except Exception:
             logger.debug("[Swarm] ConfigStore unavailable", exc_info=True)
             return None

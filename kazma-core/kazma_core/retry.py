@@ -69,9 +69,9 @@ def _get_retryable() -> tuple[type[Exception], ...]:
 def load_retry_config() -> dict[str, Any]:
     """Load retry configuration from kazma.yaml if available."""
     try:
-        from kazma_core.config_store import ConfigStore
+        from kazma_core.config_store import get_config_store
 
-        store = ConfigStore()
+        store = get_config_store()
         return {
             "max_attempts": store.get("retry.max_attempts", MAX_ATTEMPTS),
             "min_wait": store.get("retry.min_wait", MIN_WAIT),

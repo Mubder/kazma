@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -68,24 +69,28 @@ class TestSaveConfigRoutesThroughConfigStore:
         )
 
     def test_save_config_calls_configstore_set(self, tmp_path, monkeypatch):
-        """_save_config must call ConfigStore.set() for each leaf key."""
+        """_save_config must persist each leaf key atomically via batch_set."""
         store = _isolated_store(tmp_path)
         monkeypatch.setattr(slash_commands, "_get_config_store", lambda: store, raising=False)
 
-        set_calls: list[tuple[str, object]] = []
-        real_set = store.set
+        batch_calls: list[list[tuple[str, Any, str]]] = []
+        real_batch_set = store.batch_set
 
-        def spy_set(key, value, category="general"):
-            set_calls.append((key, value))
-            return real_set(key, value, category=category)
+        def spy_batch_set(items):
+            batch_calls.append(items)
+            return real_batch_set(items)
 
         try:
-            with patch.object(store, "set", side_effect=spy_set):
+            with patch.object(store, "batch_set", side_effect=spy_batch_set):
                 slash_commands._save_config({"llm": {"model": "claude-sonnet-4"}})
         finally:
             store.close()
 
-        assert ("llm.model", "claude-sonnet-4") in set_calls
+        # batch_set should have been called once with all items
+        assert len(batch_calls) == 1, f"Expected 1 batch_set call, got {len(batch_calls)}"
+        items = batch_calls[0]
+        keys = [(key, value) for key, value, _ in items]
+        assert ("llm.model", "claude-sonnet-4") in keys
 
     def test_save_config_persists_via_configstore_get(self, tmp_path, monkeypatch):
         """After _save_config, the value is readable via ConfigStore.get()."""
@@ -192,3 +197,151 @@ class TestSlashConfigStillFunctions:
         result = resolve_slash_command("/config show", {"model": "gpt-4o-mini"})
         assert result is not None
         assert "Current Configuration" in result
+
+
+# ══════════════════════════════════════════════════════════════════════
+# P1-4: Atomicity + WAL + Singleton tests
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestBatchSetAtomicity:
+    """batch_set() must write all keys or none (atomic)."""
+
+    def test_batch_set_writes_all_keys(self, tmp_path):
+        store = _isolated_store(tmp_path)
+        try:
+            count = store.batch_set([
+                ("a.key1", "val1", "a"),
+                ("a.key2", "val2", "a"),
+                ("b.key1", 42, "b"),
+            ])
+            assert count == 3
+            assert store.get("a.key1") == "val1"
+            assert store.get("a.key2") == "val2"
+            assert store.get("b.key1") == 42
+        finally:
+            store.close()
+
+    def test_batch_set_rolls_back_on_error(self, tmp_path):
+        """If an item fails, the whole batch rolls back — no partial writes."""
+        store = _isolated_store(tmp_path)
+        try:
+            # First write a baseline value
+            store.set("existing.key", "original")
+
+            # Now attempt a batch that will fail (json.dumps on a set raises)
+            with pytest.raises(TypeError):
+                store.batch_set([
+                    ("new.key1", "should_not_persist", "general"),
+                    ("new.key2", {"unjsonable": {1, 2, 3}}, "general"),  # set() fails json.dumps
+                ])
+
+            # Neither new key should exist
+            assert store.get("new.key1") is None
+            assert store.get("new.key2") is None
+            # Existing key unchanged
+            assert store.get("existing.key") == "original"
+        finally:
+            store.close()
+
+    def test_batch_set_empty_list(self, tmp_path):
+        store = _isolated_store(tmp_path)
+        try:
+            assert store.batch_set([]) == 0
+        finally:
+            store.close()
+
+
+class TestTransactionContextManager:
+    """transaction() context manager provides atomic grouping."""
+
+    def test_transaction_commits_on_success(self, tmp_path):
+        store = _isolated_store(tmp_path)
+        try:
+            with store.transaction() as conn:
+                conn.execute(
+                    "INSERT OR REPLACE INTO settings (key, value, category, updated_at) VALUES (?, ?, ?, ?)",
+                    ("tx.key", '"value"', "general", "2026-01-01T00:00:00Z"),
+                )
+            assert store.get("tx.key") == "value"
+        finally:
+            store.close()
+
+    def test_transaction_rolls_back_on_exception(self, tmp_path):
+        store = _isolated_store(tmp_path)
+        try:
+            with pytest.raises(RuntimeError):
+                with store.transaction() as conn:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO settings (key, value, category, updated_at) VALUES (?, ?, ?, ?)",
+                        ("tx.rollback", '"nope"', "general", "2026-01-01T00:00:00Z"),
+                    )
+                    raise RuntimeError("simulated failure")
+            # The write should have rolled back
+            assert store.get("tx.rollback") is None
+        finally:
+            store.close()
+
+
+class TestSingleton:
+    """get_config_store() returns the shared singleton."""
+
+    def test_singleton_returns_same_instance(self):
+        from kazma_core.config_store import get_config_store, reset_config_store
+
+        reset_config_store()
+        s1 = get_config_store()
+        s2 = get_config_store()
+        assert s1 is s2
+        reset_config_store()
+
+    def test_set_config_store_replaces_singleton(self, tmp_path):
+        from kazma_core.config_store import get_config_store, set_config_store, reset_config_store
+
+        custom = _isolated_store(tmp_path)
+        set_config_store(custom)
+        assert get_config_store() is custom
+        reset_config_store()
+        custom.close()
+
+
+class TestConcurrentCrossInstanceWrites:
+    """Multiple ConfigStore instances on the same DB file coordinate via WAL."""
+
+    def test_cross_instance_concurrent_writes(self, tmp_path):
+        """Two separate instances writing to the same DB file should not corrupt."""
+        import random
+
+        db_path = str(tmp_path / "shared.db")
+        yaml_path = tmp_path / "kazma.yaml"
+        yaml_path.write_text("llm:\n  model: test\n", encoding="utf-8")
+
+        store_a = ConfigStore(db_path=db_path, yaml_path=str(yaml_path))
+        store_b = ConfigStore(db_path=db_path, yaml_path=str(yaml_path))
+        errors = []
+
+        def writer(store, prefix, n):
+            try:
+                for i in range(n):
+                    store.set(f"{prefix}.key{i}", i)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=writer, args=(store_a, "a", 50)),
+            threading.Thread(target=writer, args=(store_b, "b", 50)),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0, f"Concurrent writes failed: {errors[:3]}"
+
+        # All keys should be readable from either instance
+        for i in range(50):
+            assert store_a.get(f"a.key{i}") == i
+            assert store_b.get(f"b.key{i}") == i
+
+        store_a.close()
+        store_b.close()

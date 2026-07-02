@@ -419,8 +419,8 @@ async def _handle_swarm_config_command(
     arg = parts[1].strip() if len(parts) > 1 else ""
 
     try:
-        from kazma_core.config_store import ConfigStore
-        cs = ConfigStore()
+        from kazma_core.config_store import get_config_store
+        cs = get_config_store()
     except ImportError:
         await _send_swarm_reply(msg, store, manager, thread_id,
             "⚠️ Config store unavailable.")
@@ -596,11 +596,11 @@ def _get_output_target_config() -> dict[str, Any] | None:
     "enabled": true}`` or ``None`` if not configured / not enabled.
     """
     try:
-        from kazma_core.config_store import ConfigStore
+        from kazma_core.config_store import get_config_store
     except ImportError:
         return None
     try:
-        cs = ConfigStore()
+        cs = get_config_store()
         target = cs.get("swarm.output_target", None)
         if not isinstance(target, dict):
             return None

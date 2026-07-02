@@ -2,6 +2,14 @@
 
 Provides persistent, hot-reloadable configuration that overrides kazma.yaml
 at runtime. All WebUI settings changes are stored here.
+
+Concurrency model:
+    WAL journaling + ``busy_timeout=5000`` allow concurrent readers and a
+    single writer without "database is locked" errors. A process-wide
+    singleton (``get_config_store()``) ensures all components share one
+    connection and one ``threading.Lock``, so cross-component writes
+    coordinate correctly. Multi-key writes should use ``batch_set()`` or
+    the ``transaction()`` context manager for atomicity.
 """
 
 from __future__ import annotations
@@ -10,6 +18,8 @@ import json
 import logging
 import sqlite3
 import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -45,6 +55,12 @@ class ConfigStore:
         if self._conn is None:
             self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
+            # WAL + busy_timeout — matches every other SQLite store in Kazma
+            # (task_store, checkpoint, time_travel). WAL allows concurrent
+            # readers alongside a writer; busy_timeout makes writers wait
+            # up to 5s for a lock instead of raising immediately.
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
         return self._conn
 
     def _init_db(self) -> None:
@@ -141,6 +157,62 @@ class ConfigStore:
             conn.commit()
         logger.info("Setting updated: %s = %s (category=%s)", key, value, category)
 
+    def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
+        """Atomically set multiple keys in a single transaction.
+
+        All writes succeed or all roll back — a crash or exception mid-batch
+        leaves the DB unchanged. Use this instead of looping ``set()`` when
+        writing multiple related keys (e.g. config import, settings save).
+
+        Args:
+            items: List of ``(key, value, category)`` tuples.
+
+        Returns:
+            Number of keys written.
+        """
+        if not items:
+            return 0
+        now = datetime.now(UTC).isoformat()
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute("BEGIN")
+                for key, value, category in items:
+                    conn.execute(
+                        """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
+                           VALUES (?, ?, ?, ?)""",
+                        (key, json.dumps(value), category, now),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+        logger.info("Batch set: %d keys updated atomically", len(items))
+        return len(items)
+
+    @contextmanager
+    def transaction(self) -> Generator[sqlite3.Connection, None, None]:
+        """Context manager for an atomic multi-operation transaction.
+
+        All DB operations inside the ``with`` block run in a single
+        transaction. If any exception occurs, the transaction rolls back.
+
+        Example::
+
+            with store.transaction() as conn:
+                conn.execute("INSERT ...", ...)
+                conn.execute("UPDATE ...", ...)
+        """
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute("BEGIN")
+            try:
+                yield conn
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
     def get_category(self, category: str) -> dict[str, Any]:
         """Get all settings in a category from DB."""
         with self._lock:
@@ -195,6 +267,9 @@ class ConfigStore:
         Nested YAML mappings are flattened to dotted keys. Dict/list values
         are preserved through ``get()`` which re-merges flattened children
         transparently (so export→import round-trips are lossless).
+
+        The import is **atomic** — all keys are written in a single
+        transaction via ``batch_set()``. A crash mid-import rolls back.
         """
         import yaml
 
@@ -202,21 +277,19 @@ class ConfigStore:
         if not isinstance(data, dict):
             return 0
 
-        count = 0
+        items: list[tuple[str, Any, str]] = []
 
         def _flatten(d: dict, prefix: str = "") -> None:
-            nonlocal count
             for k, v in d.items():
                 full_key = f"{prefix}.{k}" if prefix else k
                 if isinstance(v, dict):
                     _flatten(v, full_key)
                 else:
                     cat = prefix.split(".")[0] if prefix else "general"
-                    self.set(full_key, v, category=cat)
-                    count += 1
+                    items.append((full_key, v, cat))
 
         _flatten(data)
-        return count
+        return self.batch_set(items)
 
     def reset_all(self) -> int:
         """Delete all DB settings (reverts to YAML defaults). Returns count deleted."""
@@ -231,3 +304,38 @@ class ConfigStore:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Process-wide singleton — ensures all components share one connection + lock
+# ══════════════════════════════════════════════════════════════════════════
+
+_config_store: ConfigStore | None = None
+
+
+def get_config_store() -> ConfigStore:
+    """Return the shared ConfigStore singleton.
+
+    Lazily creates a default instance on first call. All components should
+    use this instead of constructing ``ConfigStore()`` directly, so they
+    share one SQLite connection and one ``threading.Lock`` for write
+    coordination.
+    """
+    global _config_store
+    if _config_store is None:
+        _config_store = ConfigStore()
+    return _config_store
+
+
+def set_config_store(store: ConfigStore) -> None:
+    """Replace the shared singleton (used by tests and explicit init)."""
+    global _config_store
+    _config_store = store
+
+
+def reset_config_store() -> None:
+    """Drop the singleton reference (used by test teardown)."""
+    global _config_store
+    if _config_store is not None:
+        _config_store.close()
+    _config_store = None

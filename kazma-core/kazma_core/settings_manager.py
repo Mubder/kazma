@@ -933,21 +933,19 @@ class SettingsManager:
                     filtered[section] = parsed[section]
             parsed = filtered
 
-        count = 0
+        items: list[tuple[str, Any, str]] = []
 
         def _flatten(d: dict, prefix: str = "") -> None:
-            nonlocal count
             for k, v in d.items():
                 full_key = f"{prefix}.{k}" if prefix else k
                 if isinstance(v, dict):
                     _flatten(v, full_key)
                 else:
                     cat = prefix.split(".")[0] if prefix else "general"
-                    self._cs.set(full_key, v, category=cat)
-                    count += 1
+                    items.append((full_key, v, cat))
 
         _flatten(parsed)
-        return count
+        return self._cs.batch_set(items)
 
     def get_config_diff(self, old_config: dict[str, Any], new_config: dict[str, Any]) -> dict[str, Any]:
         """Compare two config dicts and return differences."""

@@ -136,10 +136,10 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
 
     @router.put("/api/settings")
     async def api_update_settings(updates: list[SettingsUpdate]) -> dict[str, str]:
-        """Update multiple settings at once."""
-        for update in updates:
-            config_store.set(update.key, update.value, category=update.category)
-        return {"status": "ok", "updated": str(len(updates))}
+        """Update multiple settings at once (atomic batch)."""
+        items = [(u.key, u.value, u.category) for u in updates]
+        count = config_store.batch_set(items)
+        return {"status": "ok", "updated": str(count)}
 
     @router.put("/api/settings/single")
     async def api_update_single(setting: SettingsUpdate) -> dict[str, str]:

@@ -35,9 +35,9 @@ def _get_config_store() -> Any:
     Tests may monkeypatch this attribute (``telegram_bus._get_config_store``)
     to inject an isolated store.
     """
-    from kazma_core.config_store import ConfigStore
+    from kazma_core.config_store import get_config_store
 
-    return ConfigStore()
+    return get_config_store()
 
 
 # ── Escape helpers ──────────────────────────────────────────────────────

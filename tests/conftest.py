@@ -58,6 +58,27 @@ def _reset_workspace_singleton():
     configure_workspace(workspace=None, allow_absolute=False)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config_store(tmp_path):
+    """Reset the ConfigStore singleton to an isolated temp DB per test.
+
+    Gateway/core code now uses ``get_config_store()`` (the singleton).
+    Without this fixture, tests that don't explicitly set the singleton
+    would lazily create one pointing at the real ``kazma-data/settings.db``,
+    leaking state across tests and potentially corrupting the dev DB.
+    """
+    from kazma_core.config_store import ConfigStore, reset_config_store, set_config_store
+
+    isolated = ConfigStore(
+        db_path=str(tmp_path / "test_settings.db"),
+        yaml_path=str(tmp_path / "kazma.yaml"),
+    )
+    set_config_store(isolated)
+    yield
+    isolated.close()
+    reset_config_store()
+
+
 @pytest.fixture
 def agent_config() -> AgentConfig:
     """Return a default agent config for testing."""

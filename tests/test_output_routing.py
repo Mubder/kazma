@@ -86,7 +86,7 @@ class TestGetOutputTargetConfig:
         """No stored config → None."""
         from kazma_gateway.agent_handler import _get_output_target_config
 
-        with patch("kazma_core.config_store.ConfigStore") as mock_cs_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_cs_cls:
             cs = MagicMock()
             cs.get.return_value = None
             mock_cs_cls.return_value = cs
@@ -96,7 +96,7 @@ class TestGetOutputTargetConfig:
         """Config exists but enabled=False → None."""
         from kazma_gateway.agent_handler import _get_output_target_config
 
-        with patch("kazma_core.config_store.ConfigStore") as mock_cs_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_cs_cls:
             cs = MagicMock()
             cs.get.return_value = {
                 "platform": "telegram",
@@ -110,7 +110,7 @@ class TestGetOutputTargetConfig:
         """Valid enabled config → returned with platform default."""
         from kazma_gateway.agent_handler import _get_output_target_config
 
-        with patch("kazma_core.config_store.ConfigStore") as mock_cs_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_cs_cls:
             cs = MagicMock()
             cs.get.return_value = {
                 "platform": "telegram",
@@ -127,7 +127,7 @@ class TestGetOutputTargetConfig:
         """Config exists and enabled but chat_id missing → None."""
         from kazma_gateway.agent_handler import _get_output_target_config
 
-        with patch("kazma_core.config_store.ConfigStore") as mock_cs_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_cs_cls:
             cs = MagicMock()
             cs.get.return_value = {"platform": "telegram", "enabled": True}
             mock_cs_cls.return_value = cs
@@ -234,7 +234,7 @@ class TestOutputTargetAPI:
         app.include_router(create_swarm_router(templates=None))
         client = TestClient(app)
 
-        with patch("kazma_core.config_store.ConfigStore") as mock_cs_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_cs_cls:
             cs = MagicMock()
             cs.get.return_value = None
             mock_cs_cls.return_value = cs
@@ -258,7 +258,7 @@ class TestOutputTargetAPI:
         app.include_router(create_swarm_router(templates=None))
         client = TestClient(app)
 
-        with patch("kazma_core.config_store.ConfigStore") as mock_cs_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_cs_cls:
             cs = MagicMock()
             mock_cs_cls.return_value = cs
 
@@ -290,7 +290,7 @@ class TestOutputTargetAPI:
         app.include_router(create_swarm_router(templates=None))
         client = TestClient(app)
 
-        with patch("kazma_core.config_store.ConfigStore") as mock_cs_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_cs_cls:
             cs = MagicMock()
             mock_cs_cls.return_value = cs
 
@@ -313,7 +313,7 @@ class TestOutputTargetAPI:
         app.include_router(create_swarm_router(templates=None))
         client = TestClient(app)
 
-        with patch("kazma_core.config_store.ConfigStore") as mock_cs_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_cs_cls:
             cs = MagicMock()
             mock_cs_cls.return_value = cs
 
@@ -336,7 +336,7 @@ class TestOutputTargetAPI:
         app.include_router(create_swarm_router(templates=None))
         client = TestClient(app)
 
-        with patch("kazma_core.config_store.ConfigStore") as mock_cs_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_cs_cls:
             cs = MagicMock()
             mock_cs_cls.return_value = cs
 
@@ -361,7 +361,7 @@ class TestOutputTargetAPI:
         client = TestClient(app)
 
         big_id = -1009876543210987  # exceeds Number.MAX_SAFE_INTEGER
-        with patch("kazma_core.config_store.ConfigStore") as mock_cs_cls:
+        with patch("kazma_core.config_store.get_config_store") as mock_cs_cls:
             cs = MagicMock()
             cs.get.return_value = {
                 "platform": "telegram",

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 if TYPE_CHECKING:
-    from kazma_core.config_store import ConfigStore
+    from kazma_core.config_store import get_config_store
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +65,9 @@ def _get_config_store() -> ConfigStore:
     Tests may monkeypatch this attribute (``slash_commands._get_config_store``)
     to inject an isolated store.
     """
-    from kazma_core.config_store import ConfigStore
+    from kazma_core.config_store import get_config_store
 
-    return ConfigStore()
+    return get_config_store()
 
 
 def _read_bootstrap_yaml() -> dict[str, Any]:
@@ -117,25 +117,24 @@ def _load_config() -> dict[str, Any]:
 def _save_config(config: dict[str, Any]) -> None:
     """Persist ``config`` through the locked ``ConfigStore``.
 
-    Walks the (possibly nested) dict and writes each leaf scalar to the
-    SQLite override DB via ``ConfigStore.set(key, value, category=...)``
-    which serializes writes with a ``threading.Lock``.  kazma.yaml is never
-    opened for writing at runtime.
+    Walks the (possibly nested) dict and writes all leaf scalars to the
+    SQLite override DB **atomically** via ``batch_set()``. kazma.yaml is
+    never opened for writing at runtime.
     """
-
     store = _get_config_store()
-    _flatten_and_set(store, config)
+    items: list[tuple[str, Any, str]] = []
 
+    def _flatten(data: dict[str, Any], prefix: str = "") -> None:
+        for key, value in data.items():
+            full_key = f"{prefix}.{key}" if prefix else str(key)
+            if isinstance(value, dict):
+                _flatten(value, full_key)
+            else:
+                category = prefix.split(".")[0] if prefix else "general"
+                items.append((full_key, value, category))
 
-def _flatten_and_set(store: ConfigStore, data: dict[str, Any], prefix: str = "") -> None:
-    """Walk ``data`` and write each leaf scalar to ``store.set(dotted_key, value)``."""
-    for key, value in data.items():
-        full_key = f"{prefix}.{key}" if prefix else str(key)
-        if isinstance(value, dict):
-            _flatten_and_set(store, value, full_key)
-        else:
-            category = prefix.split(".")[0] if prefix else "general"
-            store.set(full_key, value, category=category)
+    _flatten(config)
+    store.batch_set(items)
 
 # Lazy-loaded ReplayEngine — may not be available yet
 _ReplayEngine = None
