@@ -50,6 +50,37 @@ All packages are in scope. The four main packages:
 - Schema auto-migrates on init (ALTER TABLE for new columns on existing DBs)
 - Worker filter uses `json_each()` not `LIKE` for exact matching
 
+### 7. HITL Approval Gates (3 mechanisms — all must stay wired)
+There are **three independent** HITL mechanisms. Breaking any one creates an
+unattended-danger-tool security gap:
+
+**A. Graph interrupt() — single-agent chat (Web/Telegram/Discord/Slack)**
+- `graph_builder.py:tool_worker_node` calls LangGraph `interrupt()` for danger tools
+- Gate is active ONLY when `hitl_config` is passed to `build_supervisor_graph()`
+- Two build sites must pass it: `agent_runner.get_streaming_graph()` AND
+  `app.py` startup recompile (~line 966). Omitting either = dormant gate.
+- Resume: `graph.ainvoke(Command(resume={"approved": bool}), config)` via
+  `POST /api/approve/{thread_id}` (web) or `/hitl approve|deny {thread_id}` (gateway)
+- State persists in the checkpointer — paused turns survive restarts
+- Double-gating prevention: `_hitl_approved=True` flag in tool args skips the
+  bus check when the graph already approved via interrupt
+
+**B. Swarm bus — `/swarm` dispatch path**
+- `tool_registry.py:execute()` calls `safety.check()` (async) for danger tools
+- `check_sync()` is **fail-closed** (default): blocks danger tools when no real
+  bus adapter is present. `allow_headless_danger=True` is the test/dev escape hatch
+- Bus adapters: `TelegramBusAdapter`, `DiscordBusAdapter`, `SlackBusAdapter`
+- Only ONE adapter active at a time (bus singleton); priority Telegram > Discord > Slack
+- Approval buttons resolve via `handle_callback()` — called from each adapter's
+  inbound callback/interaction handler
+
+**C. Pipeline checkpoints — swarm PIPELINE tasks** (separate from A and B)
+- `engine.py:_handle_pipeline_checkpoint` + `approve_checkpoint`
+
+**Danger tool lists differ by mechanism:**
+- Graph path: `kazma.yaml` `safety.hitl.require_approval_for` (file_write, file_delete, shell_exec, code_exec, python_exec)
+- Swarm bus: `safety.py:_EXTENDED_DANGER` (adds spawn_agent, spawn_agents, schedule_task, cancel_scheduled)
+
 ## Coding Conventions
 
 - Follow existing Kazma code style (type hints, docstrings, logging)
