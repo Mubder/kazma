@@ -206,6 +206,9 @@ class TelegramAdapter(BaseAdapter):
                 self._running = False
                 return
 
+            # ── Register bot commands with Telegram (menu button) ──────
+            await self._register_bot_commands()
+
             logger.info("[telegram] Starting getUpdates polling loop")
 
             while not shutdown_event.is_set():
@@ -1069,3 +1072,66 @@ class TelegramAdapter(BaseAdapter):
                 self._set_reaction(chat_id, original_msg_id, "❌")
             )
         return False
+
+    async def _register_bot_commands(self) -> None:
+        """Register slash commands with Telegram's setMyCommands API.
+
+        Called once at startup after getMe validation. Registers all
+        slash commands across 3 scopes so the command menu button
+        appears next to the chat input field.
+
+        Uses the shared ``self._http`` client (already initialized
+        in ``listen()`` before this method is called).
+        """
+        commands = [
+            {"command": "help", "description": "Show available commands"},
+            {"command": "reset", "description": "Clear conversation history"},
+            {"command": "status", "description": "Gateway health overview"},
+            {"command": "model", "description": "Show active model"},
+            {"command": "memory", "description": "Report memory usage"},
+            {"command": "cost", "description": "Token spend this session"},
+            {"command": "replay", "description": "Time travel snapshots"},
+            {"command": "config", "description": "Configuration wizard"},
+            {"command": "personality", "description": "Agent personality"},
+            {"command": "context", "description": "Context window usage"},
+            {"command": "undo", "description": "Undo last response"},
+            {"command": "edit", "description": "Edit last response"},
+            {"command": "swarm", "description": "Swarm orchestration"},
+        ]
+
+        scopes: list[tuple[str, str]] = [
+            ("default", "default"),
+            ("all_private_chats", "all_private_chats"),
+            ("all_group_chats", "all_group_chats"),
+        ]
+
+        assert self._http is not None, "HTTP client not initialized"
+
+        for scope_label, scope_type in scopes:
+            try:
+                payload: dict[str, Any] = {
+                    "commands": commands,
+                    "scope": {"type": scope_type},
+                }
+                resp = await self._http.post(
+                    "/setMyCommands",
+                    json=payload,
+                )
+                if resp.status_code == 200 and resp.json().get("ok"):
+                    logger.info(
+                        "[telegram] setMyCommands OK for scope %s (%d cmds)",
+                        scope_label,
+                        len(commands),
+                    )
+                else:
+                    logger.warning(
+                        "[telegram] setMyCommands failed for scope %s: %s",
+                        scope_label,
+                        resp.text[:200],
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[telegram] setMyCommands error for scope %s (non-fatal): %s",
+                    scope_label,
+                    exc,
+                )

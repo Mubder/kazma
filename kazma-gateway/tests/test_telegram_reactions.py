@@ -132,16 +132,17 @@ class TestTelegramRelativePaths:
 
     @pytest.mark.asyncio
     async def test_listen_startup_uses_relative_delete_webhook_and_get_me(self, adapter):
-        """listen() should call /deleteWebhook and /getMe (without /bot token prefix)."""
+        """listen() should call /deleteWebhook, /getMe, and /setMyCommands (3 scopes)."""
         mock_http = AsyncMock()
-        delete_webhook_resp = MagicMock()
-        delete_webhook_resp.status_code = 200
+        ok_resp = MagicMock()
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"ok": True}
         get_me_resp = MagicMock()
         get_me_resp.status_code = 200
         get_me_resp.json.return_value = {
             "result": {"username": "test_bot", "first_name": "Test"},
         }
-        mock_http.post = AsyncMock(return_value=delete_webhook_resp)
+        mock_http.post = AsyncMock(return_value=ok_resp)
         mock_http.get = AsyncMock(return_value=get_me_resp)
         mock_http.aclose = AsyncMock()
 
@@ -151,10 +152,26 @@ class TestTelegramRelativePaths:
             shutdown_event.set()  # run startup section then exit loop
             await adapter.listen(queue, shutdown_event)
 
-        mock_http.post.assert_awaited_once_with(
+        # Verify 4 POST calls: 1 deleteWebhook + 3 setMyCommands (default, private, group)
+        assert mock_http.post.await_count == 4
+        # Check deleteWebhook was called
+        mock_http.post.assert_any_await(
             "/deleteWebhook",
             json={"drop_pending_updates": False},
         )
+        # Check setMyCommands was called for each scope
+        scopes = ["default", "all_private_chats", "all_group_chats"]
+        set_my_commands_calls = [
+            call for call in mock_http.post.await_args_list
+            if call.args[0] == "/setMyCommands"
+        ]
+        assert len(set_my_commands_calls) == 3
+        called_scopes = [
+            call.kwargs["json"]["scope"]["type"]
+            for call in set_my_commands_calls
+        ]
+        for scope_type in scopes:
+            assert scope_type in called_scopes, f"Missing scope: {scope_type}"
         mock_http.get.assert_awaited_once_with("/getMe")
 
     @pytest.mark.asyncio
