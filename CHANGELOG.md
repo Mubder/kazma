@@ -5,6 +5,35 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## Sprint 16 — P2 Quick Wins: UI Badges + Worker Lifecycle + Docs (July 2026)
+
+### P2-8: Circuit Breaker UI Badges
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Breaker data in API** | `_serialize_worker` now includes circuit breaker state from `engine.get_circuit_breaker_status()` | `swarm_panel.py` |
+| ✅ | **Badge in worker cards** | ⚡ badge (red=open, yellow=half-open, hidden when closed) in worker card header | `swarm.html` |
+| ✅ | **Live updates** | `updateBreakerBadges()` patches badges during the 5s status poll | `swarm.js` |
+
+### P2-6: Per-Worker Start/Stop
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Engine methods** | `start_worker(name)` / `stop_worker(name)` — single-worker lifecycle control | `engine.py` |
+| ✅ | **API routes** | `POST /api/swarm/workers/{name}/start` and `/stop` | `swarm_panel.py` |
+| ✅ | **UI buttons** | ▶/⏹ start/stop buttons in worker card action group | `swarm.html`, `swarm.js` |
+
+### P2-12: Docs Accuracy
+
+| Status | Fix | Detail |
+|:---:|:---|:---|
+| ✅ | **Test count** | README badges + description: 3299 → 3409; added `kazma-gateway/tests/` |
+| ✅ | **Slack description** | TROUBLESHOOTING.md + HANDOVER.md: "Socket Mode" → "polling-based Web API" |
+| ✅ | **TelegramWorker ref** | STATUS.md: removed reference to deleted class |
+| ✅ | **ROADMAP** | Test count + date updated |
+
+---
+
 ## Sprint 15 — ConfigStore Atomicity + MCP Auth/HITL (July 2026)
 
 ### P1-4: ConfigStore Atomicity

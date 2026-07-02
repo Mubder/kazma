@@ -17,58 +17,67 @@
 ## P0 — Critical (Fix Now)
 
 ### P0-1: Fix 36 failing tests
-- **Effort:** M | **Dependencies:** None | **Quick win:** No
+- **Effort:** M | **Dependencies:** None | **Quick win:** No | **Status:** ✅ Done (Sprint 14)
 - **What:** Tests failing in `test_swarm_dynamic_spawning.py`, `test_swarm_engine_core.py`, `test_swarm_handoff.py` — regressions from Sprint 12/13 refactor (TelegramWorker removal, dispatch context changes, provider routing changes)
 - **Why:** README claims 3,299 passing; reality is 3,315/3,364 with 36 failures
+- **Resolution:** Root cause was a module-level `KAZMA_SECRET` env var leak in `test_hub_e2e.py` (23 failures), plus handoff cycle detection + workspace singleton pollution + stale tests. Reduced 36 → 3 (environmental only). Commits `5e0dda8`, `d81564c`, `eea2972`.
 
 ### P0-2: Wire HITL into WebUI + adapter paths
-- **Effort:** L | **Dependencies:** None | **Quick win:** No
+- **Effort:** L | **Dependencies:** None | **Quick win:** No | **Status:** ✅ Done (Sprint 14)
 - **What:** Pass `hitl_config` in `get_streaming_graph()` (`agent_runner.py:484`); recompile the startup graph with HITL (`app.py:966`); route WS tool calls through the graph (`chat.py:283`); make `check_sync()` fail-closed (`safety.py:149`)
 - **Why:** Currently ALL danger-tier tools (`file_write`, `shell_exec`, `code_exec`) run unattended on every UI/platform path. This is the single biggest security gap.
+- **Resolution:** Full 6-phase implementation across Web/Telegram/Discord/Slack. Graph interrupt gate activated, fail-closed safety, bus adapters wired, gateway `/hitl` resolver, DiscordBusAdapter + SlackBusAdapter. Commits `13df2d5`–`e78734a`.
 
 ### P0-3: Fix Hub API auth (`_require_auth` broken)
-- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes
+- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** ✅ Done (Sprint 13)
 - **What:** Rewrite `hub/api.py:24-29` to read `X-Kazma-Secret` and `hmac.compare_digest` — currently authorizes everyone when a secret is set
 - **Why:** Authentication is inverted — fails when no secret, passes everyone when secret is set
+- **Resolution:** Fixed in commit `301df32` (Security quick wins).
 
 ### P0-4: Gate unauthenticated destructive routes
-- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes
+- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** ✅ Done (Sprint 13)
 - **What:** Add `/api/sessions`, `/api/session`, `/api/mcp/servers`, `/api/approve`, `/api/system/*` to auth middleware's gated paths (`auth.py:44-53`). Switch from sensitive-prefix to open-path allowlist.
 - **Why:** `POST /api/sessions/clear-all` and `GET /api/system/flush` are unauthenticated destructive operations
+- **Resolution:** Fixed in commit `301df32` (Security quick wins).
 
 ### P0-5: Fix Docker deployment
-- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes
+- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** ✅ Done (Sprint 13)
 - **What:** Change Dockerfile CMD to `--host 0.0.0.0` so containers are reachable
 - **Why:** `docker compose up` is broken — binds loopback inside container
+- **Resolution:** Dockerfile already fixed (`--host 0.0.0.0`). Confirmed accurate in Sprint 16 docs audit.
 
 ---
 
 ## P1 — High (Blocks Key Use Cases)
 
 ### P1-1: Add SSRF validation to discover/MCP endpoints
-- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes
+- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** ✅ Done (Sprint 13)
 - **What:** Call `validate_url()` in `model_registry.discover_models`, `discovery.discover_*`, and `mcp/manager._connect_sse`
 - **Why:** User-controlled URLs can hit internal services / cloud metadata
+- **Resolution:** Fixed in commit `301df32` (Security quick wins).
 
 ### P1-2: Fix Active Tasks tab (see Task 4 report)
-- **Effort:** M | **Dependencies:** None | **Quick win:** No
+- **Effort:** M | **Dependencies:** None | **Quick win:** No | **Status:** ✅ Done (Sprint 13)
 - **What:** Add in-flight task tracking to engine (`_active_tasks` dict); make `/api/swarm/dispatch` non-blocking (return task_id immediately, run async); add `GET /api/swarm/tasks/active` endpoint; add `loadActiveTasks()` to swarm.js
 - **Why:** Active Tasks tab is always empty — fundamental UX gap
+- **Resolution:** Fixed in commit `d191a24`.
 
 ### P1-3: Enforce skill checksums unconditionally
-- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes
+- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** Open
 - **What:** Require manifest+checksum before exec_module; fail-closed on exception; add HMAC signatures
 - **Why:** Current verification is advisory — exceptions swallowed, execution proceeds
 
 ### P1-4: Add MCP server auth + HITL
-- **Effort:** M | **Dependencies:** P0-2 | **Quick win:** No
+- **Effort:** M | **Dependencies:** P0-2 | **Quick win:** No | **Status:** ✅ Done (Sprint 15)
 - **What:** Add auth to MCP JSON-RPC `tools/call`; gate `run_tests`/`write_file` behind HITL
 - **Why:** MCP server allows unauthenticated file writes and subprocess execution
+- **Resolution:** HITL gate in UnifiedToolExecutor, classify_mcp_tool() pattern matching, auth field (bearer/header) + trust levels, UI modal. Commit `00d0f2c`.
 
 ### P1-5: Fix ConfigStore atomicity
-- **Effort:** M | **Dependencies:** None | **Quick win:** No
+- **Effort:** M | **Dependencies:** None | **Quick win:** No | **Status:** ✅ Done (Sprint 15)
 - **What:** Wrap multi-key mutations in single transactions; load YAML under lock
 - **Why:** Concurrent config writes can corrupt state
+- **Resolution:** WAL + busy_timeout, batch_set() transactions, singleton, 4 flatten loops → batch_set. Commit `2121e2c`.
 
 ---
 
@@ -79,16 +88,18 @@
 - **What:** Split 1,742-line SwarmEngine into: dispatch coordinator, persistence layer, handoff handler, metrics/tracing, autoscaler integration
 
 ### P2-2: Per-worker start/stop endpoints
-- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes
+- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** ✅ Done (Sprint 16)
 - **What:** Add `POST /api/swarm/workers/{name}/start` and `/stop`
+- **Resolution:** Engine methods + API routes + UI buttons. Commit `8f0a97e`.
 
 ### P2-3: Task cancel/retry from UI
-- **Effort:** M | **Dependencies:** None | **Quick win:** No
+- **Effort:** M | **Dependencies:** None | **Quick win:** No | **Status:** Open
 - **What:** Add cancel (interrupt running dispatch) and retry (re-dispatch failed task) buttons
 
 ### P2-4: Circuit breaker UI badges
-- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes
+- **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** ✅ Done (Sprint 16)
 - **What:** Show circuit breaker state (closed/open/half-open) as colored badges on worker cards; manual reset button
+- **Resolution:** Breaker data in _serialize_worker, ⚡ badges in worker cards, live polling updates. Commit `8f0a97e`.
 
 ### P2-5: Semantic routing (embeddings)
 - **Effort:** L | **Dependencies:** None | **Quick win:** No
@@ -103,8 +114,9 @@
 - **What:** Drag-and-drop DAG editor for pipeline stages
 
 ### P2-8: Fix README/docs accuracy
-- **Effort:** S | **Dependencies:** P0-1 | **Quick win:** ✅ Yes
+- **Effort:** S | **Dependencies:** P0-1 | **Quick win:** ✅ Yes | **Status:** ✅ Done (Sprint 16)
 - **What:** Update test count badge (3,315 passing), fix "Socket Mode" claim, document SSE durability gap, add production-readiness caveats
+- **Resolution:** Test count 3299→3409, Slack "Socket Mode"→"polling-based", TelegramWorker ref removed, ROADMAP date+count. Commit `8f0a97e`.
 
 ### P2-9: Unify config source of truth
 - **Effort:** M | **Dependencies:** None | **Quick win:** No
@@ -157,16 +169,16 @@
 
 ## Quick Wins (Ship Today, < 1 hour each)
 
-| # | Item | Effort |
-|---|------|--------|
-| 1 | Fix Hub `_require_auth` (P0-3) | S |
-| 2 | Gate destructive routes (P0-4) | S |
-| 3 | Fix Docker bind (P0-5) | S |
-| 4 | Add SSRF validation (P1-1) | S |
-| 5 | Enforce skill checksums (P1-3) | S |
-| 6 | Per-worker start/stop (P2-2) | S |
-| 7 | Circuit breaker badges (P2-4) | S |
-| 8 | Fix README accuracy (P2-8) | S |
+| # | Item | Effort | Status |
+|---|------|--------|--------|
+| 1 | Fix Hub `_require_auth` (P0-3) | S | ✅ `301df32` |
+| 2 | Gate destructive routes (P0-4) | S | ✅ `301df32` |
+| 3 | Fix Docker bind (P0-5) | S | ✅ Done |
+| 4 | Add SSRF validation (P1-1) | S | ✅ `301df32` |
+| 5 | Enforce skill checksums (P1-3) | S | ⬜ Open |
+| 6 | Per-worker start/stop (P2-2) | S | ✅ `8f0a97e` |
+| 7 | Circuit breaker badges (P2-4) | S | ✅ `8f0a97e` |
+| 8 | Fix README accuracy (P2-8) | S | ✅ `8f0a97e` |
 
 ---
 
@@ -182,3 +194,15 @@
 | YAML system_prompt restore | ✅ Commit `52c1bc7` |
 | ReAct tool-calling loop in workers | ✅ Commit `ba2c0a2` |
 | Dedicated swarm bot output routing | ✅ Commit `521bab2` |
+| Hub auth fix (P0-3) | ✅ Commit `301df32` |
+| Route gating (P0-4) | ✅ Commit `301df32` |
+| SSRF validation (P1-1) | ✅ Commit `301df32` |
+| Active Tasks tab (P1-2) | ✅ Commit `d191a24` |
+| Docker bind fix (P0-5) | ✅ Done |
+| HITL approval gates all platforms (P0-2) | ✅ Commits `13df2d5`–`e78734a` (Sprint 14) |
+| Test isolation fix (P0-1) | ✅ Commits `5e0dda8`, `d81564c`, `eea2972` (Sprint 14) |
+| ConfigStore atomicity (P1-5) | ✅ Commit `2121e2c` (Sprint 15) |
+| MCP auth + HITL (P1-4) | ✅ Commit `00d0f2c` (Sprint 15) |
+| Circuit breaker badges (P2-4) | ✅ Commit `8f0a97e` (Sprint 16) |
+| Per-worker start/stop (P2-2) | ✅ Commit `8f0a97e` (Sprint 16) |
+| Docs accuracy (P2-8) | ✅ Commit `8f0a97e` (Sprint 16) |

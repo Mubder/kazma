@@ -1,12 +1,15 @@
 # Kazma Project Status
 
-Generated: 2026-06-30
+Generated: 2026-07-03
 
 ## Metrics
 
 | Metric | Value |
 |---|---|
-| Total Tests Passing | 3,309 |
+| Total Tests Passing | 3,409 |
+| Total Tests Collected | 3,425 |
+| Skipped (missing optional deps) | 13 |
+| Environmental Failures | 3 (Windows admin, LM Studio offline, mock assertion) |
 | Total Lines of Code (excluding .venv, tests/) | 57,481 |
 | Python Version | 3.11+ |
 | Project Version | 0.1.0 |

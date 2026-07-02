@@ -80,6 +80,13 @@ unattended-danger-tool security gap:
 **Danger tool lists differ by mechanism:**
 - Graph path: `kazma.yaml` `safety.hitl.require_approval_for` (file_write, file_delete, shell_exec, code_exec, python_exec)
 - Swarm bus: `safety.py:_EXTENDED_DANGER` (adds spawn_agent, spawn_agents, schedule_task, cancel_scheduled)
+- MCP tools: `classify_mcp_tool()` in `mcp/manager.py` — name-pattern matching (write/exec/delete → danger, read/list/get → safe, unknown → danger). Gate is in `UnifiedToolExecutor.execute()`.
+
+### 8. ConfigStore Singleton + Atomicity (`kazma-core/kazma_core/config_store.py`)
+- Uses WAL + `busy_timeout=5000` (like all other SQLite stores)
+- Process-wide singleton: `get_config_store()` — all components MUST use this, not `ConfigStore()` directly
+- Multi-key writes MUST use `batch_set()` or `transaction()` for atomicity
+- Never construct `ConfigStore()` in gateway/core code — use `get_config_store()`
 
 ## Coding Conventions
 
