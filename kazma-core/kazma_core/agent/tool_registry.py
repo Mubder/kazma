@@ -928,6 +928,24 @@ class LocalToolRegistry:
 # Module-level registry for quick standalone use
 _default_registry = LocalToolRegistry(include_builtins=False)
 
+# Singleton with built-in tools for runtime consumers (swarm workers, etc.)
+_builtin_registry: LocalToolRegistry | None = None
+
+
+def get_tool_registry() -> LocalToolRegistry:
+    """Return a module-level :class:`LocalToolRegistry` with built-in tools.
+
+    Built-in tools (web_search, file_read, file_write, shell_exec, etc.)
+    are included so that callers — especially swarm workers — can resolve
+    and execute tools without constructing their own registry.
+
+    The instance is cached; subsequent calls return the same object.
+    """
+    global _builtin_registry
+    if _builtin_registry is None:
+        _builtin_registry = LocalToolRegistry(include_builtins=True)
+    return _builtin_registry
+
 
 def tool(
     description: str = "",

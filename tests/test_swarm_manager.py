@@ -267,6 +267,7 @@ class TestDispatchTelegramBotType:
         mock_provider = MagicMock()
         mock_provider.chat = AsyncMock(return_value=LLMResponse(content="Task done"))
         mock_registry = MagicMock()
+        mock_registry.get_client_by_provider = MagicMock(return_value=None)
         mock_registry.get_client = MagicMock(return_value=mock_provider)
         # get_model raises so dispatch falls through to get_client()
         mock_registry.get_model = MagicMock(side_effect=RuntimeError("not found"))
@@ -288,6 +289,7 @@ class TestDispatchTelegramBotType:
         await worker.start()
 
         mock_registry = MagicMock()
+        mock_registry.get_client_by_provider = MagicMock(return_value=None)
         mock_registry.get_client = MagicMock(return_value=None)
         mock_registry.get_model = MagicMock(side_effect=RuntimeError("no model"))
 

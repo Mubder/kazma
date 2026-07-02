@@ -1601,6 +1601,12 @@ class SwarmEngine:
             role=entry.roles[0] if entry.roles else "leaf",
             model=entry.model,
             provider=entry.provider,
+            system_prompt=entry.system_prompt,
+            capabilities=WorkerCapabilities(
+                role=entry.roles[0] if entry.roles else "leaf",
+                expertise=entry.expertise,
+                tools=[],  # all tools available unless restricted
+            ),
         )
 
     async def dispatch_by_name(self, worker_name: str, task: str) -> dict[str, Any]:

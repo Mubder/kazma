@@ -188,6 +188,16 @@ class InProcessWorker(SwarmWorker):
         task: str,
         context: str | SwarmDispatchContext = "",
     ) -> dict[str, Any]:
+        """Dispatch a task to the LLM with tool-calling support.
+
+        The worker runs a lightweight ReAct loop: it calls the LLM with
+        available tools, executes any tool calls returned, feeds the results
+        back into the conversation, and repeats until the model produces a
+        final text response (or the iteration limit is reached).
+        """
+        import json as _json
+
+        MAX_ITERATIONS = 15
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
         logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")
         dispatch_started = time.monotonic()
@@ -200,8 +210,6 @@ class InProcessWorker(SwarmWorker):
             # across all providers, (3) active/default provider.
             provider = None
             if self.provider:
-                # The worker is pinned to a specific provider — build a
-                # client directly for that provider + model combination.
                 provider = registry.get_client_by_provider(
                     self.provider, model=self.model or None
                 )
@@ -220,8 +228,29 @@ class InProcessWorker(SwarmWorker):
             if provider is None:
                 return {"worker": self.name, "task_id": task_id, "status": "error", "output": "", "error": "No provider available"}
 
-            # Build messages with system prompt and context from SwarmDispatchContext
-            messages: list[dict[str, str]] = []
+            # ── Tool definitions ──────────────────────────────────────
+            tool_defs: list[dict[str, Any]] = []
+            try:
+                from kazma_core.agent.tool_registry import get_tool_registry
+                tool_registry = get_tool_registry()
+                all_defs = tool_registry.get_tool_definitions()
+                allowed = getattr(self.capabilities, "tools", None) or []
+                if allowed:
+                    allowed_set = set(allowed)
+                    tool_defs = [
+                        td for td in all_defs
+                        if td["function"]["name"] in allowed_set
+                    ]
+                else:
+                    tool_defs = all_defs
+            except Exception:
+                logger.debug(
+                    "[InProcessWorker:%s] tool registry unavailable, proceeding without tools",
+                    self.name, exc_info=True,
+                )
+
+            # ── Build initial messages ─────────────────────────────────
+            messages: list[dict[str, Any]] = []
             system_prompt = None
             context_text = ""
             if isinstance(context, SwarmDispatchContext):
@@ -230,7 +259,6 @@ class InProcessWorker(SwarmWorker):
             elif context:
                 context_text = str(context)
 
-            # If no system_prompt from context, use the worker's own (from config/registry)
             if not system_prompt and self.system_prompt:
                 system_prompt = self.system_prompt
 
@@ -242,26 +270,91 @@ class InProcessWorker(SwarmWorker):
                 user_content = f"{task}\n\n--- Context ---\n{context_text}"
             messages.append({"role": "user", "content": user_content})
 
-            response = await provider.chat(messages)
+            # ── ReAct loop ────────────────────────────────────────────
+            total_tokens = 0
+            total_cost = 0.0
+            final_output = ""
 
-            # Extract token/cost data from response.
-            # usage may contain nested dicts from modern APIs
-            # (e.g. completion_tokens_details) — filter to scalars only.
-            usage = getattr(response, "usage", {}) or {}
-            cost_usd = getattr(response, "cost_usd", 0.0)
-            tokens_used = sum(
-                v for v in (usage.values() if usage else ())
-                if isinstance(v, (int, float))
-            )
+            for iteration in range(1, MAX_ITERATIONS + 1):
+                response = await provider.chat(
+                    messages,
+                    tools=tool_defs if tool_defs else None,
+                    model=self.model or None,
+                )
+
+                # Accumulate token/cost across all iterations
+                usage = getattr(response, "usage", {}) or {}
+                total_tokens += sum(
+                    v for v in (usage.values() if usage else ())
+                    if isinstance(v, (int, float))
+                )
+                total_cost += getattr(response, "cost_usd", 0.0) or 0.0
+
+                # No tool calls → final response
+                if not response.tool_calls:
+                    final_output = response.content or ""
+                    break
+
+                logger.info(
+                    "[InProcessWorker:%s] iteration %d — %d tool call(s): %s",
+                    self.name, iteration, len(response.tool_calls),
+                    [tc.name for tc in response.tool_calls],
+                )
+
+                # Append the assistant message (with tool_calls block).
+                assistant_msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": response.content or None,
+                }
+                if response.tool_calls:
+                    assistant_msg["tool_calls"] = [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": _json.dumps(tc.arguments),
+                            },
+                        }
+                        for tc in response.tool_calls
+                    ]
+                messages.append(assistant_msg)
+
+                # Execute each tool call and append the result.
+                for tc in response.tool_calls:
+                    try:
+                        result = await tool_registry.execute(tc.name, tc.arguments)
+                    except Exception:
+                        logger.exception(
+                            "[InProcessWorker:%s] tool %s execution failed",
+                            self.name, tc.name,
+                        )
+                        result = {
+                            "content": f"Tool execution error: {tc.name}",
+                            "is_error": True,
+                        }
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result.get("content", ""),
+                    })
+
+            else:
+                # Iteration limit exhausted — return the last response we got.
+                final_output = (
+                    response.content
+                    if hasattr(response, "content") and response.content
+                    else "Max tool-use iterations reached without a final answer."
+                )
 
             return {
                 "worker": self.name,
                 "task_id": task_id,
                 "status": "success",
-                "output": response.content,
+                "output": final_output,
                 "error": None,
-                "tokens_used": tokens_used,
-                "cost": cost_usd,
+                "tokens_used": total_tokens,
+                "cost": total_cost,
                 "duration_seconds": time.monotonic() - dispatch_started,
             }
         except Exception as exc:
