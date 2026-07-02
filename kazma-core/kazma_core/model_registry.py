@@ -526,10 +526,27 @@ class ModelRegistry:
         return None
 
     def upsert_provider(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Insert or update a provider entry."""
+        """Insert or update a provider entry.
+
+        If the incoming ``api_key`` is a masked placeholder (e.g.
+        ``****1234``), the existing key is preserved. If there is no
+        existing key, the placeholder is rejected (the caller must
+        provide a real key).
+        """
         name = str(data.get("name", "")).strip()
         if not name:
             return {"error": "Provider name is required"}
+
+        # Defense-in-depth: if the API key looks masked, try to preserve
+        # the existing one. If there's no existing key, reject the masked
+        # value rather than storing garbage.
+        incoming_key = str(data.get("api_key", "") or "")
+        if incoming_key and ("****" in incoming_key or incoming_key == "***"):
+            existing_provider = self.get_provider(name)
+            if existing_provider and existing_provider.get("api_key"):
+                data["api_key"] = existing_provider["api_key"]
+            else:
+                data["api_key"] = ""  # Clear the masked placeholder
 
         providers = self.list_providers()
         for provider in providers:

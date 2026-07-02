@@ -113,25 +113,7 @@ swarm:
   orchestrator:
     name: Kazma Orchestrator
     profile: default
-  workers:
-    - name: core
-      type: telegram_bot
-      model: mimo-v2.5-pro
-      provider: xiaomi
-      profile: core
-      bot_token_env: KAZMA_CORE_BOT_TOKEN
-      role: backend_core
-    - name: bridge
-      type: telegram_bot
-      model: mimo-v2.5-pro
-      provider: xiaomi
-      profile: bridge
-      bot_token_env: KAZMA_BRIDGE_BOT_TOKEN
-      role: backend_systems
-    - name: ux
-      type: telegram_bot
-      model: deepseek-v4-pro
-      provider: deepseek
-      profile: ux
-      bot_token_env: KAZMA_UX_BOT_TOKEN
-      role: frontend_ux
+  # Workers are created at runtime via the Web UI Swarm panel or the
+  # /api/swarm/workers API. No preset workers here — users add their own
+  # with the correct provider, model, and system prompt.
+  workers: []
