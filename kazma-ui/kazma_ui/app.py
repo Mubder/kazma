@@ -47,6 +47,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # share this connection + lock via get_config_store().
     from kazma_core.config_store import set_config_store
     set_config_store(config_store)
+    # Seed ConfigStore with any kazma.yaml keys not yet in the DB.
+    # This makes ConfigStore the authoritative source: YAML values are
+    # copied once, then all reads/writes go through SQLite. Existing DB
+    # keys are never overwritten — user changes always win.
+    config_store.reconcile_from_yaml()
     registry = initialize_model_registry(config_store)
     agent = KazmaAgent(config)
     startup_provider_profile = registry.get_active_profile()

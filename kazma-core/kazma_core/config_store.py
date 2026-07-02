@@ -291,6 +291,62 @@ class ConfigStore:
         _flatten(data)
         return self.batch_set(items)
 
+    def reconcile_from_yaml(self) -> int:
+        """Seed DB with kazma.yaml values for keys not already in the DB.
+
+        This is the startup reconciliation step that makes ConfigStore the
+        authoritative source: on first run (or when new YAML keys appear),
+        YAML values are copied into SQLite so all components read from one
+        place. Existing DB keys are **never overwritten** — user-made
+        settings changes always win.
+
+        Returns the number of new keys seeded.
+        """
+        import yaml
+
+        if not self._yaml_path.exists():
+            return 0
+
+        yaml_text = self._yaml_path.read_text()
+        data = yaml.safe_load(yaml_text)
+        if not isinstance(data, dict):
+            return 0
+
+        # Collect all YAML leaf values as (key, value, category).
+        yaml_items: list[tuple[str, Any, str]] = []
+
+        def _flatten(d: dict, prefix: str = "") -> None:
+            for k, v in d.items():
+                full_key = f"{prefix}.{k}" if prefix else k
+                if isinstance(v, dict):
+                    _flatten(v, full_key)
+                else:
+                    cat = prefix.split(".")[0] if prefix else "general"
+                    yaml_items.append((full_key, v, cat))
+
+        _flatten(data)
+
+        # Find which keys are NOT already in the DB.
+        with self._lock:
+            conn = self._get_conn()
+            existing_rows = conn.execute("SELECT key FROM settings").fetchall()
+            existing_keys = {row["key"] for row in existing_rows}
+
+        new_items = [
+            (key, value, cat)
+            for key, value, cat in yaml_items
+            if key not in existing_keys
+        ]
+
+        if not new_items:
+            return 0
+
+        logger.info(
+            "[ConfigStore] Reconciling %d new keys from kazma.yaml into SQLite",
+            len(new_items),
+        )
+        return self.batch_set(new_items)
+
     def reset_all(self) -> int:
         """Delete all DB settings (reverts to YAML defaults). Returns count deleted."""
         with self._lock:

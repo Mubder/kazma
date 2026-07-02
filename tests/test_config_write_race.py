@@ -345,3 +345,102 @@ class TestConcurrentCrossInstanceWrites:
 
         store_a.close()
         store_b.close()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# P2-9: Config reconciliation (YAML → SQLite non-clobbering seed)
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestReconcileFromYaml:
+    """reconcile_from_yaml() seeds DB with YAML keys not already present."""
+
+    def test_seeds_new_keys_from_yaml(self, tmp_path):
+        """First run: all YAML keys are seeded into the empty DB."""
+        yaml_path = tmp_path / "kazma.yaml"
+        yaml_path.write_text(
+            "llm:\n  model: gpt-4o\n  temperature: 0.7\n"
+            "safety:\n  hitl:\n    enabled: true\n",
+            encoding="utf-8",
+        )
+        store = ConfigStore(
+            db_path=str(tmp_path / "settings.db"),
+            yaml_path=str(yaml_path),
+        )
+        try:
+            count = store.reconcile_from_yaml()
+            assert count == 3  # llm.model, llm.temperature, safety.hitl.enabled
+            assert store.get("llm.model") == "gpt-4o"
+            assert store.get("llm.temperature") == 0.7
+            assert store.get("safety.hitl.enabled") is True
+        finally:
+            store.close()
+
+    def test_does_not_clobber_existing_db_keys(self, tmp_path):
+        """User-changed DB keys must NOT be overwritten by YAML values."""
+        yaml_path = tmp_path / "kazma.yaml"
+        yaml_path.write_text("llm:\n  model: gpt-4o\n", encoding="utf-8")
+        store = ConfigStore(
+            db_path=str(tmp_path / "settings.db"),
+            yaml_path=str(yaml_path),
+        )
+        try:
+            # User changes the model via Settings UI
+            store.set("llm.model", "claude-sonnet-4")
+
+            # Reconcile — should NOT overwrite the user's choice
+            count = store.reconcile_from_yaml()
+            assert count == 0  # llm.model already in DB
+            assert store.get("llm.model") == "claude-sonnet-4"
+        finally:
+            store.close()
+
+    def test_seeds_only_missing_keys(self, tmp_path):
+        """Partial DB: only keys absent from DB are seeded."""
+        yaml_path = tmp_path / "kazma.yaml"
+        yaml_path.write_text(
+            "llm:\n  model: gpt-4o\n  temperature: 0.7\n  base_url: http://x\n",
+            encoding="utf-8",
+        )
+        store = ConfigStore(
+            db_path=str(tmp_path / "settings.db"),
+            yaml_path=str(yaml_path),
+        )
+        try:
+            # Pre-set one key
+            store.set("llm.model", "user-choice")
+
+            count = store.reconcile_from_yaml()
+            assert count == 2  # only temperature + base_url (model already in DB)
+            assert store.get("llm.model") == "user-choice"  # not clobbered
+            assert store.get("llm.temperature") == 0.7  # seeded
+            assert store.get("llm.base_url") == "http://x"  # seeded
+        finally:
+            store.close()
+
+    def test_no_yaml_file_returns_zero(self, tmp_path):
+        """No kazma.yaml → nothing to reconcile."""
+        store = ConfigStore(
+            db_path=str(tmp_path / "settings.db"),
+            yaml_path=str(tmp_path / "nonexistent.yaml"),
+        )
+        try:
+            assert store.reconcile_from_yaml() == 0
+        finally:
+            store.close()
+
+    def test_idempotent(self, tmp_path):
+        """Calling reconcile twice doesn't double-seed."""
+        yaml_path = tmp_path / "kazma.yaml"
+        yaml_path.write_text("llm:\n  model: gpt-4o\n", encoding="utf-8")
+        store = ConfigStore(
+            db_path=str(tmp_path / "settings.db"),
+            yaml_path=str(yaml_path),
+        )
+        try:
+            first = store.reconcile_from_yaml()
+            second = store.reconcile_from_yaml()
+            assert first == 1
+            assert second == 0  # already seeded
+        finally:
+            store.close()

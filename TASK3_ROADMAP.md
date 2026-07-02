@@ -120,8 +120,9 @@
 - **Resolution:** Test count 3299→3409, Slack "Socket Mode"→"polling-based", TelegramWorker ref removed, ROADMAP date+count. Commit `8f0a97e`.
 
 ### P2-9: Unify config source of truth
-- **Effort:** M | **Dependencies:** None | **Quick win:** No
+- **Effort:** M | **Dependencies:** None | **Quick win:** No | **Status:** ✅ Done (Sprint 16)
 - **What:** Document that ConfigStore SQLite is authoritative; auto-reconcile kazma.yaml on startup
+- **Resolution:** ConfigStore.reconcile_from_yaml() seeds DB with YAML keys on startup (non-clobbering — user changes always win). Called in create_app() right after singleton init. MCP servers now merged from both YAML + ConfigStore by agent_runner. 5 new tests.
 
 ---
 

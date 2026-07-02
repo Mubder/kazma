@@ -230,10 +230,14 @@ class KazmaAgent:
     async def connect_mcp_servers(self) -> int:
         """Connect to all configured MCP servers.
 
+        Reads from both kazma.yaml (config.raw) AND ConfigStore (SQLite),
+        merging the two sources by server name. This ensures servers added
+        via the Settings UI (DB) are connected alongside YAML-defined ones.
+
         Returns:
             Total number of tools registered.
         """
-        servers = self.config.raw.get("mcp", {}).get("servers", [])
+        servers = self.get_mcp_servers_config()
         total = 0
         for server_cfg in servers:
             count = await self.tools.connect_server(server_cfg)
@@ -289,19 +293,43 @@ class KazmaAgent:
     # ── MCP server config management ───────────────────────────────
 
     def get_mcp_servers_config(self) -> list[dict[str, Any]]:
-        """Return the MCP server configurations from the agent config.
+        """Return the MCP server configurations from both YAML and ConfigStore.
 
-        This is the public replacement for ``agent.config.raw["mcp"]["servers"]``.
+        Merges servers from kazma.yaml (config.raw) and ConfigStore (SQLite)
+        by server name. YAML servers are checked first, then DB servers that
+        aren't already in the YAML list are appended. This ensures both
+        config sources contribute to the live server set.
         """
-        return list(self.config.raw.get("mcp", {}).get("servers", []))
+        # YAML servers
+        yaml_servers = list(self.config.raw.get("mcp", {}).get("servers", []))
+        yaml_names = {s.get("name") for s in yaml_servers}
+
+        # ConfigStore servers (added via Settings UI / mcp_ui)
+        try:
+            from kazma_core.config_store import get_config_store
+
+            cs = get_config_store()
+            db_servers = cs.get("mcp.servers", [])
+            if isinstance(db_servers, str):
+                import json
+                db_servers = json.loads(db_servers)
+            if isinstance(db_servers, list):
+                for s in db_servers:
+                    if isinstance(s, dict) and s.get("name") not in yaml_names:
+                        yaml_servers.append(s)
+        except Exception:
+            pass  # ConfigStore not available — YAML-only is fine
+
+        return yaml_servers
 
     def get_mcp_servers(self) -> list[dict[str, Any]]:
         """Return enriched MCP server info (config + connection status + tools).
 
         This is the public replacement for iterating ``agent.config.raw``
         and calling ``agent.tools.is_server_connected()`` in UI code.
+        Reads from the merged YAML + ConfigStore config.
         """
-        servers = self.config.raw.get("mcp", {}).get("servers", [])
+        servers = self.get_mcp_servers_config()
         result: list[dict[str, Any]] = []
         for s in servers:
             name = s.get("name", "unknown")
