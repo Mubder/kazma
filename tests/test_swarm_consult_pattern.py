@@ -100,14 +100,15 @@ async def test_engine_consult_builds_role_aware_independent_prompts() -> None:
     engine.get_worker("architect").dispatch = architect_dispatch  # type: ignore[assignment,union-attr]
     engine.get_worker("reviewer").dispatch = reviewer_dispatch  # type: ignore[assignment,union-attr]
 
-    result = await engine.dispatch(
-        SwarmTask(
-            prompt="How should we orchestrate consult mode?",
-            context="Optimize for reliability and clear worker specialization.",
-            workers=["architect", "reviewer"],
-            type=TaskType.CONSULT,
+    with patch("kazma_core.swarm.aggregator._get_llm_provider", return_value=None):
+        result = await engine.dispatch(
+            SwarmTask(
+                prompt="How should we orchestrate consult mode?",
+                context="Optimize for reliability and clear worker specialization.",
+                workers=["architect", "reviewer"],
+                type=TaskType.CONSULT,
+            )
         )
-    )
 
     assert result.status == "success"
     assert [opinion.worker for opinion in result.individual_opinions] == [
@@ -135,28 +136,41 @@ async def test_engine_consult_builds_role_aware_independent_prompts() -> None:
 
 @pytest.mark.asyncio
 async def test_in_process_worker_dispatch_includes_system_prompt_in_spawn_context() -> None:
-    mock_manager = MagicMock()
-    mock_result = MagicMock()
-    mock_result.status = "success"
-    mock_result.summary = "Done"
-    mock_result.error = None
-    mock_manager.spawn = AsyncMock(return_value=mock_result)
+    """Worker dispatch includes system_prompt in the LLM messages."""
+    from kazma_core.llm_provider import LLMResponse
+    from unittest.mock import AsyncMock, MagicMock, patch
 
-    worker = InProcessWorker(name="architect", role="backend_architect", manager=mock_manager)
+    worker = InProcessWorker(name="architect", role="backend_architect")
     await worker.start()
 
-    await worker.dispatch(
-        "Explain the consult tradeoffs",
-        context=SwarmDispatchContext(
-            "Use the current swarm engine primitives.",
-            system_prompt="You are the backend architect for consult mode.",
-        ),
-    )
+    # Mock the provider to capture messages
+    mock_provider = MagicMock()
+    mock_provider.chat = AsyncMock(return_value=LLMResponse(content="Done"))
+    mock_registry = MagicMock()
+    mock_registry.get_client_by_provider = MagicMock(return_value=None)
+    mock_registry.get_client = MagicMock(return_value=mock_provider)
+    mock_registry.get_model = MagicMock(side_effect=RuntimeError("not found"))
 
-    call_kwargs = mock_manager.spawn.call_args.kwargs
-    assert call_kwargs["goal"] == "Explain the consult tradeoffs"
-    assert "You are the backend architect for consult mode." in call_kwargs["context"]
-    assert "Use the current swarm engine primitives." in call_kwargs["context"]
+    with patch("kazma_core.model_registry.get_model_registry", return_value=mock_registry):
+        with patch("kazma_core.agent.tool_registry.get_tool_registry") as mock_get_tr:
+            mock_tr = MagicMock()
+            mock_tr.get_tool_definitions.return_value = []
+            mock_get_tr.return_value = mock_tr
+
+            await worker.dispatch(
+                "Explain the consult tradeoffs",
+                context=SwarmDispatchContext(
+                    "Use the current swarm engine primitives.",
+                    system_prompt="You are the backend architect for consult mode.",
+                ),
+            )
+
+    # Verify the system prompt was included in the messages
+    call_args = mock_provider.chat.call_args
+    messages = call_args.args[0]
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    assert len(system_msgs) == 1
+    assert "backend architect for consult mode" in system_msgs[0]["content"]
 
 
 @pytest.mark.asyncio
@@ -199,13 +213,14 @@ async def test_engine_consult_single_worker_returns_passthrough_synthesis() -> N
         return_value=_worker_result("solo", output="Keep the implementation simple.")
     )
 
-    result = await engine.dispatch(
-        SwarmTask(
-            prompt="Handle the consult alone",
-            workers=["solo"],
-            type=TaskType.CONSULT,
+    with patch("kazma_core.swarm.aggregator._get_llm_provider", return_value=None):
+        result = await engine.dispatch(
+            SwarmTask(
+                prompt="Handle the consult alone",
+                workers=["solo"],
+                type=TaskType.CONSULT,
+            )
         )
-    )
 
     assert result.status == "success"
     assert [opinion.worker for opinion in result.individual_opinions] == ["solo"]
@@ -261,13 +276,14 @@ async def test_engine_consult_all_fail_returns_no_synthesis() -> None:
         return_value=_worker_result("beta", status="timeout", error="beta timed out")
     )
 
-    result = await engine.dispatch(
-        SwarmTask(
-            prompt="Handle complete failure",
-            workers=["alpha", "beta"],
-            type=TaskType.CONSULT,
+    with patch("kazma_core.swarm.aggregator._get_llm_provider", return_value=None):
+        result = await engine.dispatch(
+            SwarmTask(
+                prompt="Handle complete failure",
+                workers=["alpha", "beta"],
+                type=TaskType.CONSULT,
+            )
         )
-    )
 
     assert result.status == "failed"
     assert result.individual_opinions == []
@@ -321,7 +337,7 @@ def test_api_consult_requires_workers_and_returns_consult_history() -> None:
     history_payload = history_response.json()
     assert history_payload["count"] == 1
     assert history_payload["tasks"][0]["type"] == "consult"
-    assert len(history_payload["tasks"][0]["result"]["individual_opinions"]) == 2
-    assert history_payload["tasks"][0]["result"]["synthesized_output"] == dispatch_payload[
+    assert len(history_payload["tasks"][0]["individual_opinions"]) == 2
+    assert history_payload["tasks"][0]["synthesized_output"] == dispatch_payload[
         "synthesized_output"
     ]

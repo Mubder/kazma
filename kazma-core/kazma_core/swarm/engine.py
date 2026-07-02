@@ -1084,6 +1084,8 @@ class SwarmEngine:
             if status == "timeout"
             else TaskStatus.FAILED
             if status == "failed"
+            else TaskStatus.PAUSED
+            if status == "paused"
             else TaskStatus.COMPLETED
         )
         task.completed_at = _utc_now_iso()

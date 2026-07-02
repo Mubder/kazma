@@ -117,7 +117,10 @@ class TestIsSensitivePath:
     def test_unrelated_api_is_not_sensitive(self):
         assert is_sensitive_path("/api/workspace/files") is False
         assert is_sensitive_path("/api/telemetry") is False
-        assert is_sensitive_path("/api/chat/stream") is False
+
+    def test_chat_stream_is_sensitive(self):
+        """/api/chat/* is a sensitive prefix (chat can invoke tools/models)."""
+        assert is_sensitive_path("/api/chat/stream") is True
 
     def test_partial_match_not_sensitive(self):
         """A path like /api/mod should NOT match /api/models prefix."""

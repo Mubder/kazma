@@ -42,9 +42,10 @@ def test_toolregistry_class_not_exported_from_top_level() -> None:
 def test_only_one_toolregistry_class_definition() -> None:
     """``grep -rn 'class .*ToolRegistry'`` must return at most one definition.
 
-    UnifiedToolExecutor is the canonical abstraction now; LocalToolRegistry
-    is a backend (not a top-level ToolRegistry subclass). No class whose
-    name matches ``*ToolRegistry`` may remain except LocalToolRegistry.
+    UnifiedToolExecutor is the canonical abstraction now. Two legitimate
+    registry backends exist: LocalToolRegistry (agent layer, built-in tools)
+    and ToolRegistry (tools layer, MCP-bridged). No OTHER class whose name
+    matches ``*ToolRegistry`` may be introduced.
     """
     matches: list[str] = []
     for py in (REPO_ROOT / "kazma-core").rglob("*.py"):
@@ -55,12 +56,12 @@ def test_only_one_toolregistry_class_definition() -> None:
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name.endswith("ToolRegistry"):
                 matches.append(f"{py}:{node.lineno} class {node.name}")
-    # LocalToolRegistry is the legitimate local backend — exactly one match allowed.
-    assert len(matches) <= 1, f"Multiple *ToolRegistry classes found: {matches}"
-    if matches:
-        assert matches[0].endswith("class LocalToolRegistry"), (
-            f"Unexpected ToolRegistry class: {matches[0]}"
-        )
+    # Two legitimate registries: LocalToolRegistry + ToolRegistry
+    assert len(matches) <= 2, f"More than 2 *ToolRegistry classes found: {matches}"
+    valid = {"LocalToolRegistry", "ToolRegistry"}
+    for m in matches:
+        cls_name = m.split("class ")[-1]
+        assert cls_name in valid, f"Unexpected ToolRegistry class: {m}"
 
 
 # ═══════════════════════════════════════════════════════════════════

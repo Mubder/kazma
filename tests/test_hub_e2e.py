@@ -56,13 +56,17 @@ class TestHubEndToEnd:
     """End-to-end test for hub submission flow via API."""
 
     @pytest.fixture
-    def client(self, tmp_path):
+    def client(self, tmp_path, monkeypatch):
         """FastAPI TestClient with real in-memory registry."""
+        monkeypatch.setenv("KAZMA_SECRET", "test-secret")
         db_path = str(tmp_path / "e2e.db")
         registry = KazmaHub(registry_path=db_path)
         certifier = CertificationBadgeSystem(db_path=db_path)
         configure_api(registry, certifier)
-        return TestClient(app)
+        import os; os.environ["KAZMA_SECRET"] = "test-secret"
+        tc = TestClient(app)
+        tc.headers.update({"X-Kazma-Secret": "test-secret"})
+        return tc
 
     def test_submit_and_get_status(self, client):
         """Submit a skill and check its status."""
@@ -155,12 +159,15 @@ class TestBadgeIssuanceFlow:
     """End-to-end badge flow via API."""
 
     @pytest.fixture
-    def client(self, tmp_path):
+    def client(self, tmp_path, monkeypatch):
         db_path = str(tmp_path / "badge_e2e.db")
         registry = KazmaHub(registry_path=db_path)
         certifier = CertificationBadgeSystem(db_path=db_path)
         configure_api(registry, certifier)
-        return TestClient(app)
+        import os; os.environ["KAZMA_SECRET"] = "test-secret"
+        tc = TestClient(app)
+        tc.headers.update({"X-Kazma-Secret": "test-secret"})
+        return tc
 
     @pytest.fixture
     def badge_system(self, tmp_path):
@@ -270,12 +277,15 @@ class TestSearchAndDownload:
     """Test searching for skills and downloading packages."""
 
     @pytest.fixture
-    def client(self, tmp_path):
+    def client(self, tmp_path, monkeypatch):
         db_path = str(tmp_path / "dl_e2e.db")
         registry = KazmaHub(registry_path=db_path)
         certifier = CertificationBadgeSystem(db_path=db_path)
         configure_api(registry, certifier)
-        return TestClient(app)
+        import os; os.environ["KAZMA_SECRET"] = "test-secret"
+        tc = TestClient(app)
+        tc.headers.update({"X-Kazma-Secret": "test-secret"})
+        return tc
 
     def test_search_then_download(self, client):
         """Register skill, search, then download."""
@@ -316,12 +326,15 @@ class TestStatsFlow:
     """Test hub statistics."""
 
     @pytest.fixture
-    def client(self, tmp_path):
+    def client(self, tmp_path, monkeypatch):
         db_path = str(tmp_path / "stats_e2e.db")
         registry = KazmaHub(registry_path=db_path)
         certifier = CertificationBadgeSystem(db_path=db_path)
         configure_api(registry, certifier)
-        return TestClient(app)
+        import os; os.environ["KAZMA_SECRET"] = "test-secret"
+        tc = TestClient(app)
+        tc.headers.update({"X-Kazma-Secret": "test-secret"})
+        return tc
 
     def test_stats_after_submissions(self, client):
         """Stats should reflect submitted skills."""
@@ -356,12 +369,15 @@ class TestHealthCheck:
         assert "version" in data
 
     @pytest.fixture
-    def client(self, tmp_path):
+    def client(self, tmp_path, monkeypatch):
         db_path = str(tmp_path / "health_e2e.db")
         registry = KazmaHub(registry_path=db_path)
         certifier = CertificationBadgeSystem(db_path=db_path)
         configure_api(registry, certifier)
-        return TestClient(app)
+        import os; os.environ["KAZMA_SECRET"] = "test-secret"
+        tc = TestClient(app)
+        tc.headers.update({"X-Kazma-Secret": "test-secret"})
+        return tc
 
 
 # ---------------------------------------------------------------------------

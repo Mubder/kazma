@@ -437,9 +437,15 @@ class VulnerabilityDisclosure:
         import os
         _signing_key = os.environ.get("KAZMA_DISCLOSURE_KEY", "")
         if not _signing_key:
-            # Derive from machine-specific data as fallback
+            # Derive from machine-specific data as fallback.
+            # os.getuid() doesn't exist on Windows — use os.getpid() + username.
+            import getpass
             import platform
-            _signing_key = f"kazma-{platform.node()}-{os.getuid()}"
+            try:
+                uid = os.getuid()
+            except AttributeError:
+                uid = os.getpid()
+            _signing_key = f"kazma-{platform.node()}-{uid}-{getpass.getuser()}"
         secret = hashlib.sha256(_signing_key.encode()).digest()
         signature = hmac_mod.new(secret, payload, hashlib.sha256).hexdigest()
         # Append signature as a comment line (verifiable but separable)
