@@ -276,3 +276,92 @@ class TestToolRegistryHitlFlag:
             assert "chars" in result["content"]
         finally:
             Path(path).unlink(missing_ok=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Phase 1: SSE approval_required frame emission
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class _MockInterrupt:
+    """Mock LangGraph interrupt object."""
+    def __init__(self, value):
+        self.value = value
+
+
+class _MockTask:
+    """Mock LangGraph PregelTask."""
+    def __init__(self, interrupts):
+        self.interrupts = interrupts
+
+
+class _MockSnapshot:
+    """Mock StateSnapshot."""
+    def __init__(self, next_nodes, tasks):
+        self.next = next_nodes
+        self.tasks = tasks
+
+
+class _MockGraph:
+    """Mock graph that pauses at an interrupt (astream_events yields nothing)."""
+
+    def __init__(self, snapshot):
+        self._snapshot = snapshot
+
+    async def astream_events(self, input_state, config=None, version="v2"):
+        # Simulate the graph pausing immediately at interrupt() — no events.
+        return
+        yield  # make it an async generator
+
+    async def aget_state(self, config=None):
+        return self._snapshot
+
+
+class TestSseApprovalFrame:
+    """Verify _stream_langgraph_events emits approval_required on interrupt."""
+
+    @pytest.mark.asyncio
+    async def test_emits_approval_required_frame(self):
+        """When the graph is interrupted, an approval_required SSE frame is yielded."""
+        from kazma_ui.sse_chat import _stream_langgraph_events
+
+        snapshot = _MockSnapshot(
+            next_nodes=("worker",),
+            tasks=[_MockTask([_MockInterrupt({
+                "type": "hitl_approval",
+                "tool": "shell_exec",
+                "args": {"command": "rm -rf /tmp"},
+                "message": "Agent wants to run: shell_exec",
+            })])],
+        )
+        graph = _MockGraph(snapshot)
+        config = {"configurable": {"thread_id": "sse-test-1"}}
+
+        frames = []
+        async for frame in _stream_langgraph_events(graph, {"messages": []}, config):
+            frames.append(frame)
+
+        # Should have an approval_required frame AND a done frame.
+        approval_frames = [f for f in frames if "approval_required" in f]
+        assert len(approval_frames) == 1, f"Expected 1 approval frame, got {len(approval_frames)}"
+        # Verify the frame contains the thread_id and tool name.
+        frame = approval_frames[0]
+        assert "sse-test-1" in frame
+        assert "shell_exec" in frame
+
+    @pytest.mark.asyncio
+    async def test_no_frame_when_graph_completes(self):
+        """When the graph completes normally, no approval_required frame."""
+        from kazma_ui.sse_chat import _stream_langgraph_events
+
+        # snapshot.next is empty → graph completed normally
+        snapshot = _MockSnapshot(next_nodes=(), tasks=[])
+        graph = _MockGraph(snapshot)
+        config = {"configurable": {"thread_id": "sse-test-2"}}
+
+        frames = []
+        async for frame in _stream_langgraph_events(graph, {"messages": []}, config):
+            frames.append(frame)
+
+        approval_frames = [f for f in frames if "approval_required" in f]
+        assert len(approval_frames) == 0, "No approval frame on normal completion"
