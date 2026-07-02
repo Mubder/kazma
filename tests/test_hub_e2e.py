@@ -9,9 +9,6 @@ from __future__ import annotations
 import os
 import sqlite3
 
-# Set auth secret for hub tests
-os.environ["KAZMA_SECRET"] = "test-secret-for-hub-e2e-tests"
-
 import pytest
 from click.testing import CliRunner
 from fastapi.testclient import TestClient
@@ -22,6 +19,20 @@ from kazma_core.hub.badges import (
 )
 from kazma_core.hub.cli import hub
 from kazma_core.hub.registry import KazmaHub
+
+
+@pytest.fixture(autouse=True)
+def _hub_e2e_secret():
+    """Set KAZMA_SECRET for hub tests, then clean up afterwards.
+
+    Previously this was a module-level ``os.environ[...] =`` assignment
+    that leaked the secret into every subsequent test in the suite,
+    causing 401 failures in tests that create an app without the secret
+    header. This fixture scopes the secret to this module only.
+    """
+    os.environ["KAZMA_SECRET"] = "test-secret-for-hub-e2e-tests"
+    yield
+    os.environ.pop("KAZMA_SECRET", None)
 
 # ---------------------------------------------------------------------------
 # Helpers
