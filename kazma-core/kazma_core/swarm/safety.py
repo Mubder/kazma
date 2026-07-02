@@ -66,8 +66,13 @@ class SafetyMiddleware:
             # rejected — abort
     """
 
-    def __init__(self, enabled: bool = True) -> None:
+    def __init__(self, enabled: bool = True, allow_headless_danger: bool = False) -> None:
         self.enabled = enabled
+        # When True, danger tools are allowed even with no bus adapter
+        # (NullBusAdapter). Defaults to False (fail-closed) so unattended
+        # deployments cannot run danger tools without an approval path.
+        # Tests/dev set this to True to avoid wiring a bus everywhere.
+        self.allow_headless_danger = allow_headless_danger
         self._danger_tools: set[str] = set(_EXTENDED_DANGER)
         self._sensitive_reads: set[str] = set(_SENSITIVE_READS)
         self._approval_timeout: float = _DEFAULT_APPROVAL_TIMEOUT
@@ -147,31 +152,50 @@ class SafetyMiddleware:
         return approved
 
     def check_sync(self, tool_name: str) -> bool:
-        """Synchronous check — blocks danger tools only when bus is active.
+        """Synchronous check — fail-closed gate for danger tools.
 
         Returns True (allow) if:
           - SafetyMiddleware is disabled
           - Tool is not danger-tier
-          - No active bus adapter (test/headless mode — allow to not break tests)
         Returns False (block) if:
-          - Tool is danger-tier AND a bus adapter is available for HITL
+          - Tool is danger-tier AND either:
+            - a real bus adapter is available (use async check() to approve), OR
+            - no bus adapter exists and allow_headless_danger is False (default)
+        Returns True only when allow_headless_danger is True and no real
+        bus adapter is present (test/dev escape hatch).
         """
         if not self.enabled:
             return True
         if not self.is_danger_tool(tool_name):
             return True
-        # Only block if we have an active bus for approvals
+        # Danger tool — check bus adapter state.
         try:
             from kazma_core.swarm.bus import NullBusAdapter, get_message_bus
             bus = get_message_bus()
             if isinstance(bus._adapter, NullBusAdapter):
-                # No real adapter — headless/test mode, allow
+                # No real adapter — fail-closed unless explicitly relaxed.
+                if self.allow_headless_danger:
+                    return True
+                self._rejected_count += 1
+                logger.warning(
+                    "[Safety] Danger tool '%s' BLOCKED (no approval bus; "
+                    "allow_headless_danger=False)", tool_name,
+                )
+                return False
+            # A real adapter exists — the sync path cannot wait for
+            # approval, so block; callers must use the async check().
+            self._rejected_count += 1
+            return False
+        except Exception as exc:
+            # Bus unavailable — fail-closed unless explicitly relaxed.
+            if self.allow_headless_danger:
                 return True
-        except Exception:
-            # Bus unavailable — headless/test mode, allow
-            return True
-        self._rejected_count += 1
-        return False
+            self._rejected_count += 1
+            logger.warning(
+                "[Safety] Danger tool '%s' BLOCKED (bus error; "
+                "allow_headless_danger=False): %s", tool_name, exc,
+            )
+            return False
 
     # ── Statistics ──────────────────────────────────────────────────────
 

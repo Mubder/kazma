@@ -305,11 +305,16 @@ class LocalToolRegistry:
 
         Args:
             tool_name: The tool name as registered.
-            arguments: Tool arguments dict.
+            arguments: Tool arguments dict. May contain a private
+                ``_hitl_approved`` key (bool) set by the graph's
+                interrupt() gate to skip the redundant bus check.
 
         Returns:
             Dict with ``content`` (str) and ``is_error`` (bool).
         """
+        # Pop the private HITL flag before tool execution — it is not a
+        # real argument and must not leak into the tool call.
+        _hitl_already_approved = bool(arguments.pop("_hitl_approved", False))
         tool = self._tools.get(tool_name)
         if tool is None:
             return {
@@ -343,21 +348,38 @@ class LocalToolRegistry:
             min_wait = 2
             max_wait = 10
 
-        # ── Safety check — gate danger-tier tools ──────────────────
-        try:
-            from kazma_core.swarm.safety import get_safety
-            safety = get_safety()
-            if not safety.check_sync(tool_name):
+        # ── Safety check — gate danger-tier tools (HITL) ───────────
+        # Use the async check() so a real bus adapter can post an approval
+        # request and await the operator's response. check_sync() only
+        # blocks; it can never approve. Skip when the graph's interrupt()
+        # gate already approved this call.
+        if not _hitl_already_approved:
+            try:
+                from kazma_core.swarm.safety import get_safety
+                import json as _json
+
+                safety = get_safety()
+                # Pre-filter: non-danger tools skip the bus entirely.
+                if safety.enabled and safety.is_danger_tool(tool_name):
+                    task_id = str(arguments.get("task_id", "")) if isinstance(arguments, dict) else ""
+                    worker_name = str(arguments.get("worker_name", "")) if isinstance(arguments, dict) else ""
+                    approved = await safety.check(
+                        tool_name=tool_name,
+                        tool_args=_json.dumps(arguments, default=str)[:200],
+                        task_id=task_id,
+                        worker_name=worker_name,
+                    )
+                    if not approved:
+                        return {
+                            "content": f"Tool '{tool_name}' denied by HITL approval gate.",
+                            "is_error": True,
+                        }
+            except Exception:
+                # Safety unavailable — fail closed (do not execute danger tools).
                 return {
-                    "content": f"Tool '{tool_name}' requires HITL approval — blocked by SafetyMiddleware.",
+                    "content": f"Tool '{tool_name}' blocked — SafetyMiddleware unavailable.",
                     "is_error": True,
                 }
-        except Exception:
-            pass  # If safety unavailable, fail closed — do not execute
-            return {
-                "content": f"Tool '{tool_name}' blocked — SafetyMiddleware unavailable.",
-                "is_error": True,
-            }
 
         start = time.monotonic()
         last_exc: Exception | None = None

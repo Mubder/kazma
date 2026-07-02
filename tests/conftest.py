@@ -22,6 +22,25 @@ def _init_model_registry(tmp_path):
     reset_model_registry()
 
 
+@pytest.fixture(autouse=True)
+def _safety_headless_danger():
+    """Allow danger tools in test/headless mode.
+
+    SafetyMiddleware.check_sync() is fail-closed by default (blocks
+    danger tools when no real bus adapter is wired). Tests that exercise
+    file_write/shell_exec/etc. through the tool registry need this escape
+    hatch enabled. This autouse fixture sets it for the whole suite and
+    restores the prior instance afterwards.
+    """
+    from kazma_core.swarm.safety import SafetyMiddleware, get_safety, set_safety
+
+    prev = get_safety()
+    test_safety = SafetyMiddleware(enabled=True, allow_headless_danger=True)
+    set_safety(test_safety)
+    yield
+    set_safety(prev)
+
+
 @pytest.fixture
 def agent_config() -> AgentConfig:
     """Return a default agent config for testing."""
