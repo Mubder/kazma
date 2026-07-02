@@ -152,11 +152,14 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # ── MCP server management ───────────────────────────────────────
     @app.delete("/api/mcp/servers/{server_name}")
     async def _delete_mcp_server(server_name: str):
-        """Delete an MCP server configuration."""
+        """Delete an MCP server configuration.
+
+        Delegates to the agent's KazmaAgent.remove_mcp_server() which handles
+        both the config update and disconnection. The working delete route is
+        in mcp_ui.py; this is a fallback for direct API calls.
+        """
         try:
-            from kazma_core.mcp.manager import MCPManager
-            manager = MCPManager()
-            manager.remove_server(server_name)
+            agent.remove_mcp_server(server_name)
             return {"status": "ok", "message": f"Server '{server_name}' deleted"}
         except Exception as exc:
             return {"status": "error", "message": str(exc)}

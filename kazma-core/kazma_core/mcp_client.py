@@ -78,6 +78,13 @@ class MCPServerConfig:
     url: str = ""
     headers: dict[str, str] = field(default_factory=dict)
     timeout: float = 30.0
+    # auth: first-class auth config for SSE servers.
+    # {"type": "bearer", "token": "..."} → Authorization: Bearer {token}
+    # {"type": "header", "name": "X-API-Key", "value": "..."} → custom header
+    auth: dict[str, str] = field(default_factory=dict)
+    # trust level: "trusted" (no HITL), "approval_required" (HITL for danger tools),
+    # "sandboxed" (future — restricted). Defaults to "approval_required".
+    trust: str = "approval_required"
 
 
 # ---------------------------------------------------------------------------

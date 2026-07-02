@@ -9,7 +9,9 @@ function mcpApp() {
             commandStr: '',
             url: '',
             working_dir: '',
-            env: {}
+            env: {},
+            authToken: '',
+            trust: 'approval_required'
         },
 
         async addServer() {
@@ -21,8 +23,13 @@ function mcpApp() {
                     : [],
                 url: this.newServer.transport === 'sse' ? this.newServer.url : '',
                 working_dir: this.newServer.working_dir || null,
-                env: this.newServer.env
+                env: this.newServer.env,
+                trust: this.newServer.trust || 'approval_required'
             };
+            // Inject bearer token as auth config for SSE servers
+            if (this.newServer.transport === 'sse' && this.newServer.authToken) {
+                server.auth = { type: 'bearer', token: this.newServer.authToken };
+            }
 
             try {
                 var resp = await fetch('/api/mcp/servers', {

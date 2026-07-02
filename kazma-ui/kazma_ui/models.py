@@ -95,6 +95,10 @@ class MCPServerAddRequest(BaseModel):
     url: str = ""
     env: dict[str, str] = Field(default_factory=dict)
     working_dir: str | None = None
+    # Auth: {"type": "bearer", "token": "..."} or {"type": "header", "name": "...", "value": "..."}
+    auth: dict[str, str] = Field(default_factory=dict)
+    # Trust level: "trusted" | "approval_required" | "sandboxed"
+    trust: str = "approval_required"
 
 
 class MCPServerToggleRequest(BaseModel):

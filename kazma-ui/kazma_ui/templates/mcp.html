@@ -96,11 +96,24 @@
                 </div>
             </template>
             <template x-if="newServer.transport === 'sse'">
-                <div class="form-group">
-                    <label>SSE URL</label>
-                    <input type="text" x-model="newServer.url" class="form-input" placeholder="http://localhost:8080/sse">
+                <div>
+                    <div class="form-group">
+                        <label>SSE URL</label>
+                        <input type="text" x-model="newServer.url" class="form-input" placeholder="http://localhost:8080/sse">
+                    </div>
+                    <div class="form-group">
+                        <label>Auth Token (Bearer)</label>
+                        <input type="password" x-model="newServer.authToken" class="form-input" placeholder="optional bearer token">
+                    </div>
                 </div>
             </template>
+            <div class="form-group">
+                <label>Trust Level</label>
+                <select x-model="newServer.trust" class="form-select">
+                    <option value="approval_required">Approval Required (HITL for danger tools)</option>
+                    <option value="trusted">Trusted (no HITL)</option>
+                </select>
+            </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" @click="showAddModal = false">Cancel</button>
                 <button class="btn btn-primary" @click="addServer()">Add Server</button>

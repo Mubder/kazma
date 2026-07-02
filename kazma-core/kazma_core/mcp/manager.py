@@ -48,6 +48,45 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# ══════════════════════════════════════════════════════════════════════════
+# MCP tool classification — danger-tier detection by name pattern
+# ══════════════════════════════════════════════════════════════════════════
+
+# Keywords that indicate an MCP tool is danger-tier (requires HITL approval).
+# MCP tool names are runtime-discovered and cannot be in a static set like
+# local tools, so we classify by name pattern instead.
+_DANGER_KEYWORDS = (
+    "write", "delete", "remove", "exec", "run", "shell", "bash",
+    "command", "kill", "terminate", "install", "deploy", "upload",
+    "download", "fetch", "request", "post", "put", "patch",
+)
+
+# Keywords that indicate a safe read-only tool (never requires approval).
+_SAFE_KEYWORDS = (
+    "read", "list", "search", "get", "info", "status", "check",
+    "describe", "query", "count", "exists", "help",
+)
+
+
+def classify_mcp_tool(tool_name: str) -> str:
+    """Classify an MCP tool by name pattern.
+
+    Returns:
+        "danger" — tool name contains a danger keyword (write/exec/delete/etc.)
+        "safe"   — tool name contains only safe keywords (read/list/get/etc.)
+        "unknown" — neither pattern matches (treat as danger by default for safety)
+    """
+    name_lower = tool_name.lower()
+    # Check safe first — "read_file" contains "read" (safe) even though
+    # "file" could theoretically match. But "write_file" has "write" (danger).
+    has_safe = any(kw in name_lower for kw in _SAFE_KEYWORDS)
+    has_danger = any(kw in name_lower for kw in _DANGER_KEYWORDS)
+    if has_danger:
+        return "danger"
+    if has_safe:
+        return "safe"
+    return "unknown"
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # JSON-RPC helpers
@@ -416,8 +455,15 @@ class AsyncMCPManager:
         if not url:
             raise MCPBridgeError(f"SSE server '{name}' requires a 'url'")
 
-        headers = cfg.get("headers", {})
+        headers = dict(cfg.get("headers", {}))
         timeout = cfg.get("timeout", 30.0)
+
+        # ── Inject auth headers from the first-class auth field ──────
+        auth = cfg.get("auth", {})
+        if auth.get("type") == "bearer" and auth.get("token"):
+            headers["Authorization"] = f"Bearer {auth['token']}"
+        elif auth.get("type") == "header" and auth.get("name") and auth.get("value"):
+            headers[auth["name"]] = auth["value"]
 
         http = httpx.AsyncClient(
             base_url=url,
@@ -641,6 +687,38 @@ class UnifiedToolExecutor:
         if self._mcp is not None and self._mcp.is_mcp_tool(tool_name):
             server_name = self._mcp.get_server_for_tool(tool_name)
             if server_name:
+                # ── HITL gate for MCP tools ──────────────────────────
+                # MCP tools are runtime-discovered and bypass the graph's
+                # static interrupt() gate. Classify by name pattern and
+                # route danger-tier tools through the swarm bus for approval.
+                # Skip if the graph already approved (double-gating prevention).
+                _hitl_already_approved = bool(arguments.pop("_hitl_approved", False))
+                if not _hitl_already_approved:
+                    tier = classify_mcp_tool(tool_name)
+                    if tier in ("danger", "unknown"):
+                        try:
+                            from kazma_core.swarm.safety import get_safety
+                            import json as _json
+
+                            safety = get_safety()
+                            if safety.enabled:
+                                approved = await safety.check(
+                                    tool_name=tool_name,
+                                    tool_args=_json.dumps(arguments, default=str)[:200],
+                                    task_id=str(arguments.get("task_id", "")),
+                                    worker_name=f"mcp:{server_name}",
+                                )
+                                if not approved:
+                                    return {
+                                        "content": f"MCP tool '{tool_name}' denied by HITL approval gate.",
+                                        "is_error": True,
+                                    }
+                        except Exception:
+                            return {
+                                "content": f"MCP tool '{tool_name}' blocked — SafetyMiddleware unavailable.",
+                                "is_error": True,
+                            }
+
                 logger.debug("[Unified] Routing '%s' → MCP server '%s'", tool_name, server_name)
                 return await self._mcp.execute_mcp_tool(server_name, tool_name, arguments)
 
