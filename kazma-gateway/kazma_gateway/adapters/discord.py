@@ -202,6 +202,12 @@ class DiscordAdapter(BaseAdapter):
                             except asyncio.QueueFull:
                                 logger.warning("[discord] Queue full — dropping message")
 
+                    elif op == 0 and t == "INTERACTION_CREATE":
+                        # HITL approval button press — route to the active
+                        # DiscordBusAdapter so it resolves the asyncio.Event
+                        # the paused swarm worker is awaiting.
+                        await self._handle_interaction(d)
+
                     elif op == 7:  # Reconnect
                         logger.info("[discord] Gateway requested reconnect")
                         return
@@ -233,6 +239,51 @@ class DiscordAdapter(BaseAdapter):
             pass
         except Exception:
             logger.exception("[discord] Heartbeat error")
+
+    async def _handle_interaction(self, data: dict[str, Any]) -> None:
+        """Route a Discord component interaction (button press) to the bus.
+
+        When a HITL approval button is clicked, resolve the pending
+        asyncio.Event on the active DiscordBusAdapter and acknowledge
+        the interaction so Discord doesn't show "interaction failed".
+        """
+        interaction_id = data.get("id", "")
+        interaction_token = data.get("token", "")
+        component_data = data.get("data", {})
+        custom_id = component_data.get("custom_id", "")
+
+        if not custom_id.startswith(("swarm_approve_", "swarm_reject_")):
+            return  # not a swarm approval button
+
+        task_id = None
+        try:
+            from kazma_core.swarm.bus import get_message_bus
+            from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
+
+            adapter = get_message_bus().adapter
+            if isinstance(adapter, DiscordBusAdapter):
+                task_id = adapter.handle_callback(custom_id)
+        except Exception as exc:
+            logger.warning("[discord] Swarm approval interaction failed: %s", exc)
+
+        if task_id is not None:
+            logger.info("[discord] Swarm approval resolved: %s", task_id)
+
+        # Acknowledge the interaction (type 6 = deferred update) so
+        # Discord doesn't mark it as failed. Best-effort — ignore errors.
+        try:
+            if not self._http:
+                self._http = httpx.AsyncClient(
+                    base_url=_DISCORD_API,
+                    timeout=15.0,
+                    headers={"Authorization": f"Bot {self._token}"},
+                )
+            await self._http.post(
+                f"/interactions/{interaction_id}/{interaction_token}/callback",
+                json={"type": 6},
+            )
+        except Exception as exc:
+            logger.debug("[discord] Interaction ack failed: %s", exc)
 
     def _parse_message(self, data: dict[str, Any] | None) -> IncomingMessage | None:
         """Parse a Discord MESSAGE_CREATE event into an IncomingMessage.

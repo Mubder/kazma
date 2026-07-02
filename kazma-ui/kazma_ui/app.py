@@ -920,7 +920,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 from kazma_core.swarm.bus import get_message_bus
 
                 bus = get_message_bus()
-                # Wire TelegramBusAdapter if Telegram is connected
+                # Wire a platform BusAdapter. Only one adapter is active at
+                # a time (bus singleton) — priority: Telegram > Discord > Slack.
+                _bus_wired = False
+
+                # TelegramBusAdapter
                 if tg_adapter is not None and telegram_token:
                     try:
                         from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
@@ -930,13 +934,47 @@ def create_app(config_path: str | None = None) -> FastAPI:
                             chat_id=config_store.get("connectors.telegram.swarm_chat_id", ""),
                         )
                         bus.set_adapter(tg_bus)
+                        _bus_wired = True
                         logger.info("[SwarmBus] TelegramBusAdapter wired — swarm events will appear in Telegram")
                     except ImportError:
                         logger.debug("[SwarmBus] TelegramBusAdapter not available")
                     except Exception as e:
                         logger.warning("[SwarmBus] Failed to wire TelegramBusAdapter: %s", e)
-                else:
-                    logger.info("[SwarmBus] No Telegram adapter — swarm events stay internal (NullBusAdapter)")
+
+                # DiscordBusAdapter (fallback if Telegram not wired)
+                if not _bus_wired:
+                    _discord_tok = config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
+                    _discord_chan = config_store.get("connectors.discord.swarm_channel_id", "")
+                    if _discord_tok and _discord_chan:
+                        try:
+                            from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
+
+                            bus.set_adapter(DiscordBusAdapter(bot_token=_discord_tok, channel_id=_discord_chan))
+                            _bus_wired = True
+                            logger.info("[SwarmBus] DiscordBusAdapter wired — swarm events will appear in Discord")
+                        except ImportError:
+                            logger.debug("[SwarmBus] DiscordBusAdapter not available")
+                        except Exception as e:
+                            logger.warning("[SwarmBus] Failed to wire DiscordBusAdapter: %s", e)
+
+                # SlackBusAdapter (fallback if neither Telegram nor Discord wired)
+                if not _bus_wired:
+                    _slack_tok = config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
+                    _slack_chan = config_store.get("connectors.slack.swarm_channel_id", "")
+                    if _slack_tok and _slack_chan:
+                        try:
+                            from kazma_gateway.adapters.slack_bus import SlackBusAdapter
+
+                            bus.set_adapter(SlackBusAdapter(bot_token=_slack_tok, channel_id=_slack_chan))
+                            _bus_wired = True
+                            logger.info("[SwarmBus] SlackBusAdapter wired — swarm events will appear in Slack")
+                        except ImportError:
+                            logger.debug("[SwarmBus] SlackBusAdapter not available")
+                        except Exception as e:
+                            logger.warning("[SwarmBus] Failed to wire SlackBusAdapter: %s", e)
+
+                if not _bus_wired:
+                    logger.info("[SwarmBus] No platform adapter — swarm events stay internal (NullBusAdapter)")
             except Exception as e:
                 logger.warning("[SwarmBus] Failed to initialize message bus: %s", e)
 
