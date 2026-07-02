@@ -765,6 +765,26 @@ class TelegramAdapter(BaseAdapter):
             if len(parts) == 3:
                 action, request_id = parts[1], parts[2]
                 text = f"/hitl {action} {request_id}"
+        elif data.startswith(("swarm_approve_", "swarm_reject_")):
+            # Swarm HITL approval button — route to the TelegramBusAdapter
+            # so it resolves the pending asyncio.Event and the paused
+            # worker can proceed (or be denied). This is the seam that was
+            # previously missing: the adapter's handle_callback() existed
+            # but was never called from the inbound polling path.
+            task_id = None
+            try:
+                from kazma_core.swarm.bus import get_message_bus
+                from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
+
+                adapter = get_message_bus().adapter
+                if isinstance(adapter, TelegramBusAdapter):
+                    task_id = adapter.handle_callback(data)
+            except Exception as exc:
+                logger.warning("[telegram] Swarm approval callback failed: %s", exc)
+            if task_id is not None:
+                logger.info("[telegram] Swarm approval resolved: %s", task_id)
+            # These are resolved in-process; no synthetic message needed.
+            return
         elif data.startswith("personality:"):
             name = data.split(":", 1)[1]
             text = f"/personality {name}"
