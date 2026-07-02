@@ -657,10 +657,11 @@ def create_swarm_router(
             )
         target = cs.get("swarm.output_target", None)
         if not isinstance(target, dict):
-            target = {"platform": "telegram", "chat_id": None, "enabled": False}
+            target = {"platform": "telegram", "chat_id": None, "enabled": False, "bot_token": ""}
         target.setdefault("platform", "telegram")
         target.setdefault("chat_id", None)
         target.setdefault("enabled", False)
+        target.setdefault("bot_token", "")
         # Serialize chat_id as a string so large Telegram supergroup IDs
         # (>2^53) survive JSON.parse on the client without precision loss.
         if target["chat_id"] is not None:
@@ -672,7 +673,9 @@ def create_swarm_router(
         """Set or clear the swarm output-routing target.
 
         Expected body:
-            {"platform": "telegram", "chat_id": -1001234567890, "enabled": true}
+            {"platform": "telegram", "chat_id": 1804015016, "enabled": true,
+             "bot_token": "8668...:AAF..."}   — dedicated swarm bot mode
+            {"platform": "telegram", "chat_id": -100123, "enabled": true}  — gateway mode
             {"clear": true}  — remove the target entirely
         """
         cs = _config_store()
@@ -688,7 +691,8 @@ def create_swarm_router(
             return JSONResponse({
                 "status": "ok",
                 "output_target": {
-                    "platform": "telegram", "chat_id": None, "enabled": False,
+                    "platform": "telegram", "chat_id": None,
+                    "enabled": False, "bot_token": "",
                 },
             })
 
@@ -706,13 +710,16 @@ def create_swarm_router(
                 status_code=400,
             )
 
+        bot_token = str(payload.get("bot_token", "") or "").strip()
+
         target = {
             "platform": str(payload.get("platform") or "telegram"),
             "chat_id": chat_id,
             "enabled": bool(payload.get("enabled", True)),
+            "bot_token": bot_token,
         }
         cs.set("swarm.output_target", target, category="swarm")
-        logger.info("[Swarm] Output target set: %s", target)
+        logger.info("[Swarm] Output target set: chat_id=%s, bot_token=%s", chat_id, "set" if bot_token else "none")
         return JSONResponse({"status": "ok", "output_target": target})
 
     @router.get("/api/swarm/tasks/{task_id}")

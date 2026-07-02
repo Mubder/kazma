@@ -664,6 +664,16 @@ async def _maybe_send_to_output_target(
     """Send ``text`` to the configured output target (e.g. a Telegram group).
 
     Resolution order: per-dispatch ``override`` dict → ConfigStore entry.
+
+    Two delivery modes:
+        1. **Dedicated bot**: if ``bot_token`` is set in the config, sends
+           directly via the Telegram Bot API using that token. This is the
+           "separate swarm bot" mode — output goes to a DM with a different
+           bot, avoiding group-membership requirements.
+        2. **Gateway adapter**: falls back to ``manager.send()`` which routes
+           through the gateway's primary adapter (e.g. @KazmaAIBot). This is
+           the original group-routing mode.
+
     Sends the *same* output that went to the originating chat. Errors are
     logged but never raised — group routing is best-effort.
 
@@ -675,6 +685,41 @@ async def _maybe_send_to_output_target(
 
     platform = target.get("platform", "telegram")
     chat_id = target.get("chat_id")
+    bot_token = target.get("bot_token", "")
+
+    # ── Mode 1: Dedicated swarm bot (direct Telegram API) ──────────
+    if bot_token and platform == "telegram":
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, connect=10.0)
+            ) as client:
+                # Telegram messages are limited to 4096 chars.
+                for i in range(0, len(text), 4096):
+                    chunk = text[i:i + 4096]
+                    resp = await client.post(
+                        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                        json={"chat_id": chat_id, "text": chunk},
+                    )
+                    if not resp.json().get("ok"):
+                        logger.warning(
+                            "[agent-handler] Swarm bot send failed: %s",
+                            resp.json().get("description", "unknown"),
+                        )
+            logger.info(
+                "[agent-handler] Swarm output routed via dedicated bot to %s",
+                chat_id,
+            )
+            return True
+        except Exception:
+            logger.warning(
+                "[agent-handler] Failed routing swarm output via dedicated bot to %s",
+                chat_id, exc_info=True,
+            )
+            return False
+
+    # ── Mode 2: Gateway adapter (original group routing) ───────────
     try:
         await manager.send(OutboundMessage(
             target_id=f"{platform}:{chat_id}",

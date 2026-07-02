@@ -349,8 +349,8 @@
         <div class="card" id="output-routing-card">
           <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">📤 Output Routing</h3>
           <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px;">
-            Mirror swarm results to a Telegram group (in addition to the originating chat).
-            Add the bot to the group first and grant it permission to send messages.
+            Mirror swarm results to a Telegram chat (in addition to the originating chat).
+            Use a dedicated swarm bot for DM routing, or the main bot for group routing.
           </p>
           <form id="output-routing-form" onsubmit="return false;">
             <div class="form-group">
@@ -360,10 +360,18 @@
               </label>
             </div>
             <div class="form-group">
-              <label class="form-label">Telegram Group Chat ID</label>
-              <input type="text" id="output-routing-chat-id" class="form-input" placeholder="-1001234567890" style="font-family:var(--font-mono);">
+              <label class="form-label">Dedicated Swarm Bot Token <span style="font-size:0.7rem;color:var(--text-muted);">(optional — for separate bot DM)</span></label>
+              <input type="password" id="output-routing-bot-token" class="form-input" placeholder="8668...:AAF..." style="font-family:var(--font-mono);">
               <span style="font-size:0.7rem;color:var(--text-tertiary);display:block;margin-top:4px;">
-                Group/supergroup IDs are negative. Use a forwarding bot or the getUpdates API to find yours.
+                Create a separate bot via @BotFather, send it /start, then paste the token here.
+                Output will be sent via this bot directly (bypasses group membership issues).
+              </span>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Target Chat ID</label>
+              <input type="text" id="output-routing-chat-id" class="form-input" placeholder="1804015016 or -1001234567890" style="font-family:var(--font-mono);">
+              <span style="font-size:0.7rem;color:var(--text-tertiary);display:block;margin-top:4px;">
+                Your DM chat_id (positive number from the dedicated bot) or a group chat_id (negative).
               </span>
             </div>
             <div class="form-actions" style="display:flex;gap:8px;">

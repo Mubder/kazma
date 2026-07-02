@@ -1308,9 +1308,12 @@
         var st = $('output-routing-status');
         if (cb) cb.checked = !!t.enabled;
         if (id) id.value = t.chat_id != null ? String(t.chat_id) : '';
+        var bt = $('output-routing-bot-token');
+        if (bt) bt.value = t.bot_token || '';
         if (st) {
           if (t.chat_id != null && t.enabled) {
-            st.textContent = '● Active → ' + t.chat_id;
+            var mode = t.bot_token ? ' (swarm bot)' : ' (gateway)';
+            st.textContent = '● Active → ' + t.chat_id + mode;
             st.style.color = 'var(--success)';
           } else if (t.chat_id != null) {
             st.textContent = '● Disabled';
@@ -1326,11 +1329,13 @@
   function saveOutputTarget() {
     var cb = $('output-routing-enabled');
     var id = $('output-routing-chat-id');
+    var bt = $('output-routing-bot-token');
     var st = $('output-routing-status');
     var enabled = cb ? cb.checked : false;
     var chatId = id ? id.value.trim() : '';
+    var botToken = bt ? bt.value.trim() : '';
     if (enabled && !chatId) {
-      showError('Enter a Telegram group chat ID to enable routing.');
+      showError('Enter a chat ID to enable routing.');
       return;
     }
     var payload;
@@ -1340,6 +1345,7 @@
       // Send chat_id as a string to avoid Number precision loss on large
       // Telegram supergroup IDs (>2^53). The server parses it via int().
       payload = { platform: 'telegram', chat_id: chatId, enabled: enabled };
+      if (botToken) payload.bot_token = botToken;
     }
     fetch('/api/swarm/output-target', {
       method: 'PUT',
@@ -1361,6 +1367,7 @@
   function clearOutputTarget() {
     var cb = $('output-routing-enabled');
     var id = $('output-routing-chat-id');
+    var bt = $('output-routing-bot-token');
     var st = $('output-routing-status');
     fetch('/api/swarm/output-target', {
       method: 'PUT',
@@ -1371,6 +1378,7 @@
       .then(function() {
         if (cb) cb.checked = false;
         if (id) id.value = '';
+        if (bt) bt.value = '';
         if (st) st.textContent = '';
         showToast('Output routing cleared.', true);
       })
