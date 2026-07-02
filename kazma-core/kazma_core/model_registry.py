@@ -736,8 +736,12 @@ class ModelRegistry:
 
         Handles both the current format (a list stored directly) and a
         legacy double-encoded JSON string (from the previous _save_providers
-        that pre-encoded with json.dumps).  If a double-encoded string is
-        detected, it is transparently migrated to the correct format.
+        that pre-encoded with json.dumps).
+
+        **This is a pure read operation — it NEVER writes.** The previous
+        version had a migration step that called ``_save_providers()``
+        during load; if parsing failed, it wrote an empty list over the
+        real data, destroying it permanently. That will never happen again.
         """
         raw = self._cs.get("providers.list", [])
         # Legacy: ConfigStore.get returns a JSON-parsed value, but the
@@ -747,12 +751,20 @@ class ModelRegistry:
             try:
                 raw = json.loads(raw)
             except (json.JSONDecodeError, TypeError):
-                raw = []
-            # Migrate: re-save in the correct format so future loads
-            # skip this branch entirely.
-            if isinstance(raw, list):
-                logger.debug("[ModelRegistry] Migrating providers.list from legacy double-encoded format")
-                self._save_providers(raw)
+                logger.warning(
+                    "[ModelRegistry] providers.list is a string but could "
+                    "not be parsed — returning empty list (data NOT overwritten)"
+                )
+                return []
+            if not isinstance(raw, list):
+                return []
+            # NOTE: We do NOT migrate (write) here. The data is parsed
+            # correctly in-memory on every load. Migration happens only
+            # on the next explicit _save_providers() call (upsert, etc.).
+            logger.debug(
+                "[ModelRegistry] Loaded providers from legacy double-encoded "
+                "format (in-memory only; will migrate on next save)"
+            )
         if not isinstance(raw, list):
             return []
         return [self._normalize_provider_entry(item) for item in raw if isinstance(item, dict)]
