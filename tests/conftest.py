@@ -41,6 +41,23 @@ def _safety_headless_danger():
     set_safety(prev)
 
 
+@pytest.fixture(autouse=True)
+def _reset_workspace_singleton():
+    """Reset the file_write workspace singleton before each test.
+
+    The workspace guard (``_WORKSPACE_ROOT`` / ``_ALLOW_ABSOLUTE`` in
+    ``file_write.py``) is a module-level global. Tests that call
+    ``configure_workspace()`` leave it set, polluting later tests that
+    write to temp files outside the workspace. This resets it to a
+    permissive default so temp-file writes always work in the suite.
+    """
+    from kazma_core.tools.file_write import configure_workspace
+
+    configure_workspace(workspace=None, allow_absolute=True)
+    yield
+    configure_workspace(workspace=None, allow_absolute=False)
+
+
 @pytest.fixture
 def agent_config() -> AgentConfig:
     """Return a default agent config for testing."""

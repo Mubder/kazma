@@ -642,7 +642,7 @@ class SwarmEngine:
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
         trace_id: str | None = None,
-        _visited: set[str] | None = None,
+        _visited: dict[str, int] | None = None,
         _depth: int = 0,
     ) -> list[WorkerResult]:
         """Dispatch by name and return all results (including handoff chain)."""
@@ -772,7 +772,7 @@ class SwarmEngine:
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
         trace_id: str | None = None,
-        _visited: set[str] | None = None,
+        _visited: dict[str, int] | None = None,
         _depth: int = 0,
     ) -> list[WorkerResult]:
         """Dispatch a worker and return all results (including handoff chain).
@@ -921,7 +921,7 @@ class SwarmEngine:
         started: float,
         breaker: CircuitBreaker,
         trace_id: str | None = None,
-        _visited: set[str] | None = None,
+        _visited: dict[str, int] | None = None,
         _depth: int = 0,
     ) -> list[WorkerResult]:
         """Process a handoff request from a worker.
@@ -929,14 +929,17 @@ class SwarmEngine:
         Dispatches to the target worker with accumulated context, records
         a :class:`HandoffRecord`, and returns all results (source + target chain).
 
-        Includes cycle detection: if the target worker was already visited
-        in the chain, the handoff is aborted to prevent infinite recursion.
+        Includes cycle detection: tracks visit counts per worker. A worker
+        may be revisited up to ``_MAX_VISITS`` times (allowing return
+        handoffs A->B->A) before the handoff is aborted. The depth limit
+        is the hard backstop against infinite recursion.
         """
         # ── Cycle detection ──────────────────────────────────────
         _MAX_HANDOFF_DEPTH = 5
+        _MAX_VISITS = 2  # allows A->B->A return handoff, blocks ping-pong
         if _visited is None:
-            _visited = set()
-        _visited.add(source_worker.name)
+            _visited = {}
+        _visited[source_worker.name] = _visited.get(source_worker.name, 0) + 1
 
         if _depth >= _MAX_HANDOFF_DEPTH:
             logger.error(
@@ -952,12 +955,14 @@ class SwarmEngine:
                 duration_seconds=perf_counter() - started,
             )]
 
-        if handoff_req.target_worker in _visited:
+        target_visits = _visited.get(handoff_req.target_worker, 0)
+        if target_visits >= _MAX_VISITS:
             logger.error(
-                "[SwarmEngine] Handoff cycle detected: %s -> %s (already visited: %s)",
+                "[SwarmEngine] Handoff cycle detected: %s -> %s (visited %dx, max %d)",
                 source_worker.name,
                 handoff_req.target_worker,
-                _visited,
+                target_visits,
+                _MAX_VISITS,
             )
             return [WorkerResult(
                 worker=source_worker.name,
