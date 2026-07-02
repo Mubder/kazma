@@ -81,6 +81,8 @@
       else if (btn.dataset.action === 'stop') stopWorker(workerName);
       else if (btn.dataset.action === 'approve') approveCheckpoint(btn.dataset.taskId);
       else if (btn.dataset.action === 'reject') rejectCheckpoint(btn.dataset.taskId);
+      else if (btn.dataset.action === 'cancel') cancelTask(btn.dataset.taskId);
+      else if (btn.dataset.action === 'retry') retryTask(btn.dataset.taskId);
       else if (btn.dataset.action === 'view-task') viewTaskDetail(btn.dataset.taskId);
     });
   }
@@ -707,6 +709,36 @@
       .catch(function(err) { showError('Reject failed: ' + err.message); });
   }
 
+  function cancelTask(taskId) {
+    fetch('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/cancel', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') {
+          showToast('Task cancelled', true);
+          closeTaskDetail();
+          loadActiveTasks();
+        } else {
+          showError(data.message || 'Failed to cancel task');
+        }
+      })
+      .catch(function(err) { showError('Cancel failed: ' + err.message); });
+  }
+
+  function retryTask(taskId) {
+    fetch('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/retry', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') {
+          showToast('Task retried as ' + data.new_task_id, true);
+          closeTaskDetail();
+          loadActiveTasks();
+        } else {
+          showError(data.message || 'Failed to retry task');
+        }
+      })
+      .catch(function(err) { showError('Retry failed: ' + err.message); });
+  }
+
   // ══════════════════════════════════════════════════════
   // TASK RESULTS RENDERING
   // ══════════════════════════════════════════════════════
@@ -1147,7 +1179,7 @@
     var patternIcons = {dispatch:'🎯',broadcast:'📢',pipeline:'🔗',fan_out:'🌀',consult:'💬',conditional:'🔀'};
     tbody.innerHTML = tasks.map(function(t) {
       var icon = patternIcons[t.type] || '📋';
-      var statusColor = t.status === 'completed' ? 'var(--success)' : t.status === 'failed' ? 'var(--danger)' : 'var(--warning)';
+      var statusColor = t.status === 'completed' ? 'var(--success)' : (t.status === 'failed' || t.status === 'cancelled') ? 'var(--danger)' : 'var(--warning)';
       var prompt = (t.prompt || '').slice(0, 80);
       var workers = (t.workers || []).join(', ');
       var dur = t.duration_seconds ? t.duration_seconds.toFixed(1) + 's' : '—';
@@ -1263,6 +1295,16 @@
       html += '<h4 style="margin-top:16px;margin-bottom:8px;">📋 Metadata</h4>';
       html += '<pre style="font-family:var(--font-mono);font-size:0.75rem;padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;overflow-x:auto;">' + esc(JSON.stringify(task.metadata, null, 2)) + '</pre>';
     }
+
+    // Action buttons (cancel for running, retry for failed/timeout/cancelled)
+    html += '<div style="display:flex;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border-subtle);">';
+    if (task.status === 'running' || task.status === 'pending' || task.status === 'paused') {
+      html += '<button class="btn btn-danger" data-action="cancel" data-task-id="' + esc(task.id || task.task_id || '') + '" onclick="event.stopPropagation()">🚫 Cancel Task</button>';
+    }
+    if (task.status === 'failed' || task.status === 'timeout' || task.status === 'cancelled' || task.status === 'error') {
+      html += '<button class="btn btn-primary" data-action="retry" data-task-id="' + esc(task.id || task.task_id || '') + '" onclick="event.stopPropagation()">🔄 Retry Task</button>';
+    }
+    html += '</div>';
 
     return html;
   }
@@ -1525,6 +1567,8 @@
     onPatternChange: onPatternChange,
     approveCheckpoint: approveCheckpoint,
     rejectCheckpoint: rejectCheckpoint,
+    cancelTask: cancelTask,
+    retryTask: retryTask,
     viewLogs: viewLogs,
     closeLogs: closeLogs,
     viewTaskDetail: viewTaskDetail,

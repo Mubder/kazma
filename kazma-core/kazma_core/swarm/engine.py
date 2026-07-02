@@ -89,6 +89,7 @@ class SwarmEngine:
         self._workers: dict[str, SwarmWorker] = {}
         self._task_history: dict[str, SwarmTask] = {}
         self._active_tasks: dict[str, SwarmTask] = {}  # in-flight tasks
+        self._task_handles: dict[str, asyncio.Task] = {}  # asyncio handles for cancel
         self._task_lock = asyncio.Lock()  # protects _task_history mutations
         self._max_history = 500  # LRU cap to prevent unbounded memory growth
         self._result_aggregator = result_aggregator or ResultAggregator()
@@ -253,6 +254,16 @@ class SwarmEngine:
 
         try:
             return await self._dispatch_inner(task, started, task_span)
+        except asyncio.CancelledError:
+            # Task was cancelled via cancel_task() — finalize as cancelled.
+            self._tracing_emitter.end_span(task_span, status="cancelled")
+            return await self._finalize_task(
+                task,
+                worker_results=[],
+                status="cancelled",
+                error="Cancelled by user",
+                duration_seconds=perf_counter() - started,
+            )
         except Exception as exc:
             # Catch-all: any unhandled exception finalizes the task as
             # failed and closes the tracing span so neither leaks.
@@ -662,6 +673,75 @@ class SwarmEngine:
         await worker.stop()
         logger.info("[SwarmEngine] worker '%s' stopped", name)
         return True
+
+    async def cancel_task(self, task_id: str) -> bool:
+        """Cancel a running task by task_id.
+
+        Cancels the asyncio task handle if one is stored, then finalizes
+        the SwarmTask with CANCELLED status.
+
+        Returns True if the task was found and cancelled, False if not
+        found or already terminal.
+        """
+        # Check if the task is active
+        if task_id not in self._active_tasks:
+            logger.warning("[SwarmEngine] cancel_task: '%s' not in active tasks", task_id)
+            return False
+
+        task = self._active_tasks[task_id]
+
+        # Cancel the asyncio handle if we have one
+        handle = self._task_handles.get(task_id)
+        if handle is not None and not handle.done():
+            handle.cancel()
+            logger.info("[SwarmEngine] cancelled asyncio handle for task '%s'", task_id)
+
+        # Finalize with cancelled status
+        await self._finalize_task(
+            task=task,
+            status="cancelled",
+            worker_results=[],
+            error="Cancelled by user",
+        )
+        logger.info("[SwarmEngine] task '%s' cancelled", task_id)
+        return True
+
+    async def retry_task(self, task_id: str) -> SwarmTask | None:
+        """Retry a failed/timeout/cancelled task by creating a fresh dispatch.
+
+        Builds a new SwarmTask with a new ID, copying the prompt/type/
+        workers/context from the original. The original task's ID is
+        recorded in metadata['retry_of'] for lineage.
+
+        Returns the new SwarmTask, or None if the original was not found.
+        """
+        # Find the original task — check history first, then active
+        original = self._task_history.get(task_id)
+        if original is None:
+            original = self._active_tasks.get(task_id)
+        if original is None:
+            # Check the TaskStore
+            if self._task_store is not None:
+                original = self._task_store.get_task(task_id)
+        if original is None:
+            logger.warning("[SwarmEngine] retry_task: '%s' not found", task_id)
+            return None
+
+        # Build a fresh task from the original's core fields
+        new_metadata = dict(original.metadata or {})
+        new_metadata["retry_of"] = task_id
+
+        new_task = SwarmTask(
+            prompt=original.prompt,
+            type=original.type,
+            context=original.context,
+            workers=list(original.workers),
+            timeout=original.timeout,
+            fallback_chain=list(original.fallback_chain) if original.fallback_chain else None,
+            metadata=new_metadata,
+        )
+        logger.info("[SwarmEngine] retrying task '%s' as '%s'", task_id, new_task.id)
+        return new_task
 
     async def status(self) -> list[dict[str, Any]]:
         """Return status for all registered workers."""
@@ -1132,6 +1212,8 @@ class SwarmEngine:
             if status == "failed"
             else TaskStatus.PAUSED
             if status == "paused"
+            else TaskStatus.CANCELLED
+            if status == "cancelled"
             else TaskStatus.COMPLETED
         )
         task.completed_at = _utc_now_iso()
@@ -1140,6 +1222,7 @@ class SwarmEngine:
         # stay visible until resumed or rejected).
         if task.status != TaskStatus.PAUSED:
             self._active_tasks.pop(task.id, None)
+            self._task_handles.pop(task.id, None)
 
         # Record per-worker metrics for any worker results not yet recorded.
         for wr in worker_results:

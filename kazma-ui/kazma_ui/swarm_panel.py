@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, cast
@@ -527,8 +528,8 @@ def create_swarm_router(
             )
             if task_type == TaskType.BROADCAST:
                 if background:
-                    import asyncio as _asyncio
-                    _asyncio.create_task(engine.broadcast(swarm_task))
+                    _handle = asyncio.create_task(engine.broadcast(swarm_task))
+                    engine._task_handles[swarm_task.id] = _handle
                     return JSONResponse({
                         "status": "ok",
                         "message": f"Task dispatched (background) to {len(dispatched)} worker(s)",
@@ -539,8 +540,8 @@ def create_swarm_router(
                 task_result = await engine.broadcast(swarm_task)
             else:
                 if background:
-                    import asyncio as _asyncio
-                    _asyncio.create_task(engine.dispatch(swarm_task))
+                    _handle = asyncio.create_task(engine.dispatch(swarm_task))
+                    engine._task_handles[swarm_task.id] = _handle
                     return JSONResponse({
                         "status": "ok",
                         "message": f"Task dispatched (background) to {len(dispatched)} worker(s)",
@@ -1296,6 +1297,60 @@ def create_swarm_router(
             "error": result.error,
             "metadata": result.metadata,
         })
+
+    # ── Task cancel/retry ─────────────────────────────────────────────
+
+    @router.post("/api/swarm/tasks/{task_id}/cancel")
+    async def swarm_cancel_task(task_id: str) -> JSONResponse:
+        """Cancel a running task."""
+        engine = _current_engine()
+        if engine is None:
+            return JSONResponse(
+                {"status": "error", "message": "Swarm engine not available"},
+                status_code=503,
+            )
+        # Check the task is active
+        if task_id not in engine._active_tasks:
+            return JSONResponse(
+                {"status": "error", "message": f"Task '{task_id}' is not active (already completed or not found)"},
+                status_code=404,
+            )
+        cancelled = await engine.cancel_task(task_id)
+        if cancelled:
+            return JSONResponse(
+                {"status": "ok", "message": f"Task '{task_id}' cancelled", "task_id": task_id}
+            )
+        return JSONResponse(
+            {"status": "error", "message": f"Failed to cancel task '{task_id}'"},
+            status_code=500,
+        )
+
+    @router.post("/api/swarm/tasks/{task_id}/retry")
+    async def swarm_retry_task(task_id: str) -> JSONResponse:
+        """Retry a failed/timeout/cancelled task by re-dispatching."""
+        engine = _current_engine()
+        if engine is None:
+            return JSONResponse(
+                {"status": "error", "message": "Swarm engine not available"},
+                status_code=503,
+            )
+        new_task = await engine.retry_task(task_id)
+        if new_task is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Task '{task_id}' not found"},
+                status_code=404,
+            )
+        # Dispatch in the background (non-blocking)
+        handle = asyncio.create_task(engine.dispatch(new_task))
+        engine._task_handles[new_task.id] = handle
+        return JSONResponse(
+            {
+                "status": "ok",
+                "message": f"Retrying task '{task_id}' as '{new_task.id}'",
+                "old_task_id": task_id,
+                "new_task_id": new_task.id,
+            }
+        )
 
     # ── Auto-Scaler templates ────────────────────────────────────────
 
