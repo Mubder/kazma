@@ -5,6 +5,30 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## Sprint 15 — ConfigStore Atomicity + MCP Auth/HITL (July 2026)
+
+### P1-4: ConfigStore Atomicity
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **WAL + busy_timeout** | ConfigStore now uses WAL journaling + 5s busy_timeout, matching every other SQLite store — eliminates "database is locked" errors on concurrent writes | `config_store.py` |
+| ✅ | **batch_set()** | Atomic multi-key writes in a single BEGIN/COMMIT transaction — all-or-nothing, crash-safe | `config_store.py` |
+| ✅ | **transaction()** | Context manager for grouped atomic operations | `config_store.py` |
+| ✅ | **Singleton** | `get_config_store()` / `set_config_store()` — all components share one connection + one threading.Lock | `config_store.py`, 7 call sites updated |
+| ✅ | **Flatten loops → batch_set** | 4 non-atomic per-leaf commit loops replaced with single atomic batch | `slash_commands.py`, `settings_manager.py`, `settings.py`, `config_store.py` |
+
+### P1-3: MCP Server Auth + HITL
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **MCP HITL gate** | `UnifiedToolExecutor.execute()` now gates danger-tier MCP tools through `safety.check()` before dispatch. Closes the MCP security gap | `mcp/manager.py` |
+| ✅ | **Tool classification** | `classify_mcp_tool()` classifies MCP tools by name pattern (write/exec/delete → danger; read/list/get → safe; unknown → danger) | `mcp/manager.py` |
+| ✅ | **MCP auth** | First-class `auth` field on MCPServerConfig (bearer token / custom header) + trust level (trusted/approval_required). Injected into SSE connection headers | `mcp_client.py`, `mcp/manager.py` |
+| ✅ | **MCP UI** | Auth token + trust-level fields in the Add-Server modal | `mcp.html`, `mcp.js`, `models.py` |
+| ✅ | **Dead import fix** | `app.py` delete route imported non-existent `MCPManager` — fixed to use `agent.remove_mcp_server()` | `app.py` |
+
+---
+
 ## Sprint 14 — HITL Approval Gates + Test Isolation (July 2026)
 
 ### P0-1: Human-in-the-Loop Approval Wiring (all platforms)
