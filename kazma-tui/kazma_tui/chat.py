@@ -42,7 +42,7 @@ class ChatPanel(Vertical):
         dock: bottom;
         height: 3;
         margin: 1 2;
-        background: $panel-alt;
+        background: $panel;
         border: solid $border;
         color: $text;
     }

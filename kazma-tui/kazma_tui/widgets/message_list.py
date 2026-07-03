@@ -48,7 +48,7 @@ class MessageEntry(RichLog):
     MessageEntry.msg-tool { border-left: heavy $warning; }
     MessageEntry.msg-system { border-left: heavy $text-muted; }
     MessageEntry.msg-error { border-left: heavy $error; }
-    MessageEntry.msg-thinking { border-left: heavy $accent; background: $panel-alt; }
+    MessageEntry.msg-thinking { border-left: heavy $accent; background: $panel; }
     """
 
     def __init__(self, role: str, content: str) -> None:
