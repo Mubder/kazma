@@ -51,63 +51,63 @@ class TestModelRegistryIntegrationFlow:
 
     def test_header_calls_get_active_profile(self) -> None:
         """Step 2: Header must call get_active_profile() on mount."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_reg = _make_mock_registry("openai", "gpt-4o")
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             widget._build_header_text()
             mock_reg.get_active_profile.assert_called_once()
 
     def test_header_displays_provider_from_registry(self) -> None:
         """Step 3: Header text must contain the provider name from registry."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_reg = _make_mock_registry("anthropic", "claude-3-opus")
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert "anthropic" in text.lower()
 
     def test_header_displays_model_from_registry(self) -> None:
         """Step 3: Header text must contain the model name from registry."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_reg = _make_mock_registry("anthropic", "claude-3-opus")
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert "claude-3-opus" in text
 
     def test_header_handles_runtime_error(self) -> None:
         """Step 4: Header must handle RuntimeError gracefully."""
-        from kazma_tui.header import _FALLBACK_TEXT, HeaderProviderModel
+        from kazma_tui.header import _FALLBACK_TEXT, KazmaHeader
 
         with patch(
             "kazma_tui.header.get_model_registry",
             side_effect=RuntimeError("Registry not initialized"),
         ):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             # Must not crash; must return fallback text
             assert text == _FALLBACK_TEXT or "not configured" in text.lower()
 
     def test_header_handles_generic_exception(self) -> None:
         """Step 4: Header must handle any exception from ModelRegistry."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         with patch(
             "kazma_tui.header.get_model_registry",
             side_effect=ConnectionError("Network error"),
         ):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert isinstance(text, str)
             assert len(text) > 0
 
     def test_header_provider_only(self) -> None:
         """Header must display provider when model is empty."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_reg = MagicMock()
         mock_reg.get_active_profile.return_value = {
@@ -117,7 +117,7 @@ class TestModelRegistryIntegrationFlow:
             "api_key": "",
         }
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert "openai" in text
             # Should not contain separator
@@ -125,7 +125,7 @@ class TestModelRegistryIntegrationFlow:
 
     def test_header_model_only(self) -> None:
         """Header must display model when provider is empty."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_reg = MagicMock()
         mock_reg.get_active_profile.return_value = {
@@ -135,29 +135,29 @@ class TestModelRegistryIntegrationFlow:
             "api_key": "",
         }
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert "gpt-4o" in text
 
     def test_header_format_provider_model_separator(self) -> None:
         """Header must use ' / ' separator between provider and model."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_reg = _make_mock_registry("openai", "gpt-4o")
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert " / " in text
 
     def test_header_updates_on_refresh(self) -> None:
         """Header must update display when refresh_profile() is called."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         reg1 = _make_mock_registry("openai", "gpt-4o")
         reg2 = _make_mock_registry("anthropic", "claude-3-opus")
 
         with patch("kazma_tui.header.get_model_registry", return_value=reg1):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text1 = widget._build_header_text()
             assert "openai" in text1
 

@@ -31,7 +31,7 @@ class TestHeaderEdgeCases:
 
     def test_header_with_whitespace_provider(self) -> None:
         """Header must strip whitespace from provider name."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_reg = MagicMock()
         mock_reg.get_active_profile.return_value = {
@@ -39,7 +39,7 @@ class TestHeaderEdgeCases:
             "model": "  gpt-4o  ",
         }
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert "openai" in text
             assert "gpt-4o" in text
@@ -49,7 +49,7 @@ class TestHeaderEdgeCases:
 
     def test_header_with_none_values(self) -> None:
         """Header must handle None provider/model gracefully."""
-        from kazma_tui.header import _FALLBACK_TEXT, HeaderProviderModel
+        from kazma_tui.header import _FALLBACK_TEXT, KazmaHeader
 
         mock_reg = MagicMock()
         mock_reg.get_active_profile.return_value = {
@@ -57,52 +57,52 @@ class TestHeaderEdgeCases:
             "model": None,
         }
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert text == _FALLBACK_TEXT
 
     def test_header_with_missing_keys(self) -> None:
         """Header must handle missing provider/model keys gracefully."""
-        from kazma_tui.header import _FALLBACK_TEXT, HeaderProviderModel
+        from kazma_tui.header import _FALLBACK_TEXT, KazmaHeader
 
         mock_reg = MagicMock()
         mock_reg.get_active_profile.return_value = {}
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert text == _FALLBACK_TEXT
 
     def test_header_reactive_attributes(self) -> None:
         """Header must have reactive provider and model attributes."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
-        widget = HeaderProviderModel()
+        widget = KazmaHeader()
         assert hasattr(widget, "provider")
         assert hasattr(widget, "model")
 
     def test_header_title_static(self) -> None:
         """Header must include a logo static showing the KA ASCII art."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
-        widget = HeaderProviderModel()
+        widget = KazmaHeader()
         widgets = list(widget.compose())
         ids = [getattr(w, "id", None) for w in widgets]
         assert "ka-logo" in ids
 
     def test_header_separator_static(self) -> None:
         """Header must include a tagline static."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
-        widget = HeaderProviderModel()
+        widget = KazmaHeader()
         widgets = list(widget.compose())
         ids = [getattr(w, "id", None) for w in widgets]
         assert "ka-tagline" in ids
 
     def test_header_profile_static(self) -> None:
         """Header must include a profile static for provider/model display."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
-        widget = HeaderProviderModel()
+        widget = KazmaHeader()
         widgets = list(widget.compose())
         ids = [getattr(w, "id", None) for w in widgets]
         assert "header-profile" in ids
@@ -132,28 +132,28 @@ class TestFooterEdgeCases:
 
     def test_footer_text_contains_all_shortcuts(self) -> None:
         """Footer text must mention all defined shortcuts."""
-        from kazma_tui.footer import CHAT_SHORTCUTS, FooterShortcuts
+        from kazma_tui.footer import CHAT_SHORTCUTS, Footer
 
-        widget = FooterShortcuts()
+        widget = Footer()
         text = widget._get_shortcuts_text().lower()
         for key, desc in CHAT_SHORTCUTS:
             assert key.lower() in text, f"Footer text missing shortcut: {key}"
 
     def test_footer_text_uses_pipe_separator(self) -> None:
         """Footer text must use pipe separator between shortcuts."""
-        from kazma_tui.footer import CHAT_SHORTCUTS, FooterShortcuts
+        from kazma_tui.footer import CHAT_SHORTCUTS, Footer
 
-        widget = FooterShortcuts()
+        widget = Footer()
         text = widget._get_shortcuts_text()
         if len(CHAT_SHORTCUTS) > 1:
             assert "|" in text
 
     def test_footer_compose_yields_static(self) -> None:
         """Footer compose must yield a Static widget."""
-        from kazma_tui.footer import FooterShortcuts
+        from kazma_tui.footer import Footer
         from textual.widgets import Static
 
-        widget = FooterShortcuts()
+        widget = Footer()
         widgets = list(widget.compose())
         assert any(isinstance(w, Static) for w in widgets)
 
@@ -305,13 +305,13 @@ class TestChatBehavioral:
     """VAL-TUI-020/021/022: Chat behavioral tests."""
 
     def test_chat_compose_yields_rich_log(self) -> None:
-        """VAL-TUI-021: Chat must yield a TextArea for message display."""
+        """VAL-TUI-021: Chat must yield a RichLog for message display."""
         from kazma_tui.chat import ChatPanel
-        from textual.widgets import TextArea
+        from textual.widgets import RichLog
 
         panel = ChatPanel()
         widgets = list(panel.compose())
-        assert any(isinstance(w, TextArea) for w in widgets)
+        assert any(isinstance(w, RichLog) for w in widgets)
 
     def test_chat_compose_yields_input(self) -> None:
         """VAL-TUI-020: Chat must yield an Input for user text entry."""
@@ -430,16 +430,16 @@ class TestAppStructure:
         from kazma_tui.app import KazmaTUI
         from kazma_tui.chat import ChatPanel
         from kazma_tui.dashboard import MetricsDashboard
-        from kazma_tui.footer import FooterShortcuts
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.footer import Footer
+        from kazma_tui.header import KazmaHeader
 
         app = KazmaTUI()
         widgets = []  # SKIP: needs run_test() async context
         types = [type(w) for w in widgets]
-        assert types[0] is HeaderProviderModel
+        assert types[0] is KazmaHeader
         assert types[1] is MetricsDashboard
         assert types[2] is ChatPanel
-        assert types[3] is FooterShortcuts
+        assert types[3] is Footer
 
     def test_app_css_layout(self) -> None:
         """App must define a CSS layout."""

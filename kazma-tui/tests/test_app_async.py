@@ -75,13 +75,13 @@ class TestAppLaunchWithModelRegistry:
     async def test_app_mounts_header_with_provider_model(self) -> None:
         """After mount, the header must display provider/model from ModelRegistry."""
         from kazma_tui.app import KazmaTUI
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_reg = _mock_model_registry("anthropic", "claude-3-opus")
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
             app = KazmaTUI()
             async with app.run_test(size=(120, 40)) as pilot:
-                header = app.query_one(HeaderProviderModel)
+                header = app.query_one(KazmaHeader)
                 assert header is not None
                 # The profile text should contain the provider/model
                 profile_widget = header.query_one("#header-profile")
@@ -93,7 +93,7 @@ class TestAppLaunchWithModelRegistry:
     async def test_app_mounts_header_fallback_on_registry_error(self) -> None:
         """VAL-TUI-050: Header shows 'Not configured' when ModelRegistry raises."""
         from kazma_tui.app import KazmaTUI
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         with patch(
             "kazma_tui.header.get_model_registry",
@@ -101,7 +101,7 @@ class TestAppLaunchWithModelRegistry:
         ):
             app = KazmaTUI()
             async with app.run_test(size=(120, 40)) as pilot:
-                header = app.query_one(HeaderProviderModel)
+                header = app.query_one(KazmaHeader)
                 profile_widget = header.query_one("#header-profile")
                 assert profile_widget is not None
                 rendered = profile_widget.content
@@ -113,17 +113,17 @@ class TestAppLaunchWithModelRegistry:
         from kazma_tui.app import KazmaTUI
         from kazma_tui.chat import ChatPanel
         from kazma_tui.dashboard import MetricsDashboard
-        from kazma_tui.footer import FooterShortcuts
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.footer import Footer
+        from kazma_tui.header import KazmaHeader
 
         mock_reg = _mock_model_registry()
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
             app = KazmaTUI()
             async with app.run_test(size=(120, 40)) as pilot:
-                assert app.query_one(HeaderProviderModel) is not None
+                assert app.query_one(KazmaHeader) is not None
                 assert app.query_one(MetricsDashboard) is not None
                 assert app.query_one(ChatPanel) is not None
-                assert app.query_one(FooterShortcuts) is not None
+                assert app.query_one(Footer) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +326,7 @@ class TestHeaderRefreshProfile:
     async def test_header_refresh_updates_display(self) -> None:
         """Calling refresh_profile() must update the header display."""
         from kazma_tui.app import KazmaTUI
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
         from textual.widgets import Static
 
         mock_reg1 = _mock_model_registry("openai", "gpt-4o")
@@ -335,7 +335,7 @@ class TestHeaderRefreshProfile:
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg1):
             app = KazmaTUI()
             async with app.run_test(size=(120, 40)) as pilot:
-                header = app.query_one(HeaderProviderModel)
+                header = app.query_one(KazmaHeader)
                 profile_w = header.query_one("#header-profile", Static)
                 initial = profile_w.content
                 assert "openai" in initial.lower() or "gpt-4o" in initial
@@ -351,7 +351,7 @@ class TestHeaderRefreshProfile:
     async def test_header_fallback_text_on_empty_profile(self) -> None:
         """VAL-TUI-050: Header shows fallback when profile is empty."""
         from kazma_tui.app import KazmaTUI
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
         from textual.widgets import Static
 
         mock_reg = MagicMock()
@@ -359,7 +359,7 @@ class TestHeaderRefreshProfile:
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
             app = KazmaTUI()
             async with app.run_test(size=(120, 40)) as pilot:
-                header = app.query_one(HeaderProviderModel)
+                header = app.query_one(KazmaHeader)
                 profile_w = header.query_one("#header-profile", Static)
                 rendered = profile_w.content
                 assert "not configured" in rendered.lower()
@@ -377,14 +377,14 @@ class TestFooterAsyncRendering:
     async def test_footer_renders_shortcuts(self) -> None:
         """Footer must render Ctrl+Q, Tab, and Enter shortcuts."""
         from kazma_tui.app import KazmaTUI
-        from kazma_tui.footer import FooterShortcuts
+        from kazma_tui.footer import Footer
         from textual.widgets import Static
 
         mock_reg = _mock_model_registry()
         with patch("kazma_tui.header.get_model_registry", return_value=mock_reg):
             app = KazmaTUI()
             async with app.run_test(size=(120, 40)) as pilot:
-                footer = app.query_one(FooterShortcuts)
+                footer = app.query_one(Footer)
                 assert footer is not None
                 # The footer contains a Static with shortcuts text
                 statics = footer.query(Static)

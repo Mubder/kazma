@@ -1,4 +1,4 @@
-"""Files tab — DirectoryTree browser for project files."""
+"""Files tab — DirectoryTree browser with Markdown preview."""
 
 from __future__ import annotations
 
@@ -6,25 +6,17 @@ from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import DirectoryTree, RichLog, Static
+from textual.widgets import DirectoryTree, Markdown, RichLog, Static
 
 
 class FilesPanel(VerticalScroll):
-    """File browser: DirectoryTree on left, file preview on right."""
+    """File browser: DirectoryTree left, Markdown/RichLog preview right."""
 
     DEFAULT_CSS = """
     FilesPanel { height: 1fr; background: $surface; }
     FilesPanel Horizontal { height: 1fr; }
-    FilesPanel DirectoryTree {
-        width: 35%;
-        border: solid $border;
-        background: $panel;
-    }
-    FilesPanel RichLog {
-        width: 1fr;
-        border: solid $border;
-        background: $panel;
-    }
+    FilesPanel DirectoryTree { width: 35%; border: solid $border; background: $panel; }
+    FilesPanel .preview { width: 1fr; border: solid $border; background: $panel; }
     """
 
     def compose(self) -> ComposeResult:
@@ -32,17 +24,25 @@ class FilesPanel(VerticalScroll):
         yield Static(f"[bold $primary]Files[/]  ·  [dim]{cwd}[/]", classes="section-label")
         with Horizontal():
             yield DirectoryTree(cwd, id="file-tree")
-            yield RichLog(id="file-preview", highlight=True, markup=True)
+            yield Static("Select a file to preview", id="file-preview", classes="preview")
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         path = event.path
-        preview = self.query_one("#file-preview", RichLog)
-        preview.clear()
-        preview.write(f"[bold #22d3ee]{path.name}[/]\n")
+        self._show_preview(path)
+
+    def _show_preview(self, path: Path) -> None:
+        container = self.query_one("#file-preview", Static)
+        container.remove_children()
         try:
-            text = path.read_text()[:5000]
-            preview.write(text)
+            content = path.read_text()
+            if path.suffix in (".md", ".markdown", ".MD"):
+                container.mount(Markdown(content))
+            else:
+                container.mount(RichLog(highlight=True, markup=True))
+                log = container.query_one(RichLog)
+                log.write(f"[bold #22d3ee]{path.name}[/]\n")
+                log.write(content[:10000])
         except UnicodeDecodeError:
-            preview.write("[dim](binary file)[/]")
+            container.mount(Static("[dim](binary file)[/]"))
         except Exception as e:
-            preview.write(f"[#ef4444]Error: {e}[/]")
+            container.mount(Static(f"[#ef4444]Error: {e}[/]"))

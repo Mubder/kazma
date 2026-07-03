@@ -50,24 +50,24 @@ class TestHeaderImports:
         import kazma_tui.header  # noqa: F401
 
     def test_header_has_provider_model_widget(self) -> None:
-        """header.py must expose a HeaderProviderModel widget class."""
-        from kazma_tui.header import HeaderProviderModel
+        """header.py must expose a KazmaHeader widget class."""
+        from kazma_tui.header import KazmaHeader
 
-        assert HeaderProviderModel is not None
+        assert KazmaHeader is not None
 
 
-class TestHeaderProviderModel:
+class TestKazmaHeader:
     """VAL-TUI-003, VAL-TUI-030, VAL-TUI-031: Header shows provider/model from ModelRegistry."""
 
     def test_header_displays_provider_and_model(self) -> None:
         """Header text must contain both provider and model names."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_registry = _make_mock_registry("openai", "gpt-4o")
         with patch(
             "kazma_tui.header.get_model_registry", return_value=mock_registry
         ):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             # The widget should have a way to get the display text
             text = widget._build_header_text()
             assert "openai" in text.lower() or "openai" in text
@@ -75,38 +75,38 @@ class TestHeaderProviderModel:
 
     def test_header_reads_from_model_registry(self) -> None:
         """Header must call get_active_profile() to get provider/model."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_registry = _make_mock_registry("anthropic", "claude-3-opus")
         with patch(
             "kazma_tui.header.get_model_registry", return_value=mock_registry
         ):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             widget._build_header_text()
             mock_registry.get_active_profile.assert_called()
 
     def test_header_no_hardcoded_provider(self) -> None:
         """Header must not hardcode provider names; it reads from registry."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_registry = _make_mock_registry("custom-provider", "my-model")
         with patch(
             "kazma_tui.header.get_model_registry", return_value=mock_registry
         ):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert "custom-provider" in text
             assert "my-model" in text
 
     def test_header_handles_registry_not_initialized(self) -> None:
         """Header must show fallback when ModelRegistry raises RuntimeError."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         with patch(
             "kazma_tui.header.get_model_registry",
             side_effect=RuntimeError("Not initialized"),
         ):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             # Must not crash, should show a fallback
             assert isinstance(text, str)
@@ -114,7 +114,7 @@ class TestHeaderProviderModel:
 
     def test_header_handles_empty_profile(self) -> None:
         """Header must handle empty provider/model gracefully."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         mock_registry = MagicMock()
         mock_registry.get_active_profile.return_value = {
@@ -126,7 +126,7 @@ class TestHeaderProviderModel:
         with patch(
             "kazma_tui.header.get_model_registry", return_value=mock_registry
         ):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             assert isinstance(text, str)
 
@@ -148,13 +148,13 @@ class TestHeaderEnglishOnly:
 
     def test_header_english_fallback_text(self) -> None:
         """Fallback text in header must be English."""
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         with patch(
             "kazma_tui.header.get_model_registry",
             side_effect=RuntimeError("Not initialized"),
         ):
-            widget = HeaderProviderModel()
+            widget = KazmaHeader()
             text = widget._build_header_text()
             # Ensure no Arabic characters in fallback text
             assert not _ARABIC_RANGES.search(text), (
@@ -173,36 +173,36 @@ class TestFooterImports:
         import kazma_tui.footer  # noqa: F401
 
     def test_footer_has_shortcuts_widget(self) -> None:
-        """footer.py must expose a FooterShortcuts widget class."""
-        from kazma_tui.footer import FooterShortcuts
+        """footer.py must expose a Footer widget class."""
+        from kazma_tui.footer import Footer
 
-        assert FooterShortcuts is not None
+        assert Footer is not None
 
 
-class TestFooterShortcuts:
+class TestFooter:
     """VAL-TUI-004: Footer displays keyboard shortcuts."""
 
     def test_footer_mentions_ctrl_q(self) -> None:
         """Footer must reference Ctrl+Q for quit."""
-        from kazma_tui.footer import FooterShortcuts
+        from kazma_tui.footer import Footer
 
-        widget = FooterShortcuts()
+        widget = Footer()
         text = widget._get_shortcuts_text()
         assert "ctrl+q" in text.lower() or "ctrl-q" in text.lower() or "q" in text.lower()
 
     def test_footer_mentions_tab(self) -> None:
         """Footer must reference Ctrl+Y for copy."""
-        from kazma_tui.footer import FooterShortcuts
+        from kazma_tui.footer import Footer
 
-        widget = FooterShortcuts()
+        widget = Footer()
         text = widget._get_shortcuts_text()
         assert "y" in text.lower() or "copy" in text.lower()
 
     def test_footer_mentions_enter(self) -> None:
         """Footer must reference Enter for send."""
-        from kazma_tui.footer import FooterShortcuts
+        from kazma_tui.footer import Footer
 
-        widget = FooterShortcuts()
+        widget = Footer()
         text = widget._get_shortcuts_text()
         assert "enter" in text.lower() or "return" in text.lower()
 
@@ -226,28 +226,28 @@ class TestAppIntegration:
     """Verify header and footer are integrated into the main app."""
 
     def test_app_uses_custom_header(self) -> None:
-        """KazmaTUI.compose() must yield HeaderProviderModel, not default Header."""
+        """KazmaTUI.compose() must yield KazmaHeader, not default Header."""
         from kazma_tui.app import KazmaTUI
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.header import KazmaHeader
 
         app = KazmaTUI()
         widgets = []  # SKIP: needs run_test() async context
         widget_classes = [type(w) for w in widgets]
-        assert HeaderProviderModel in widget_classes, (
-            f"HeaderProviderModel not found in compose output: "
+        assert KazmaHeader in widget_classes, (
+            f"KazmaHeader not found in compose output: "
             f"{[c.__name__ for c in widget_classes]}"
         )
 
     def test_app_uses_custom_footer(self) -> None:
-        """KazmaTUI.compose() must yield FooterShortcuts, not default Footer."""
+        """KazmaTUI.compose() must yield Footer, not default Footer."""
         from kazma_tui.app import KazmaTUI
-        from kazma_tui.footer import FooterShortcuts
+        from kazma_tui.footer import Footer
 
         app = KazmaTUI()
         widgets = []  # SKIP: needs run_test() async context
         widget_classes = [type(w) for w in widgets]
-        assert FooterShortcuts in widget_classes, (
-            f"FooterShortcuts not found in compose output: "
+        assert Footer in widget_classes, (
+            f"Footer not found in compose output: "
             f"{[c.__name__ for c in widget_classes]}"
         )
 

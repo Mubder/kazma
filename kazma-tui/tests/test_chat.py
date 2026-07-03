@@ -116,7 +116,7 @@ class TestMessageDisplay:
         widget_names = [type(w).__name__ for w in widgets]
         assert any(
             name in widget_names
-            for name in ["TextArea", "RichLog", "Static", "ScrollableContainer"]
+            for name in ["RichLog", "RichLog", "Static", "ScrollableContainer"]
         ), f"No message display widget found: {widget_names}"
 
     def test_add_user_message_method(self) -> None:
@@ -162,13 +162,13 @@ class TestMessageDisplay:
         The message display widget should support scrolling.
         """
         from kazma_tui.chat import ChatPanel
-        from textual.widgets import RichLog, TextArea
+        from textual.widgets import RichLog, RichLog
 
         panel = ChatPanel()
         widgets = list(panel.compose())
-        # TextArea and RichLog are scrollable by default
-        rich_logs = [w for w in widgets if isinstance(w, (TextArea, RichLog))]
-        # Either TextArea/RichLog or a scrollable container must be present
+        # RichLog and RichLog are scrollable by default
+        rich_logs = [w for w in widgets if isinstance(w, (RichLog, RichLog))]
+        # Either RichLog/RichLog or a scrollable container must be present
         assert len(rich_logs) >= 1 or any(
             getattr(w, "can_scroll", False) for w in widgets
         ), "No scrollable message display found"
@@ -298,17 +298,17 @@ class TestAppIntegration:
         from kazma_tui.app import KazmaTUI
         from kazma_tui.chat import ChatPanel
         from kazma_tui.dashboard import MetricsDashboard
-        from kazma_tui.footer import FooterShortcuts
-        from kazma_tui.header import HeaderProviderModel
+        from kazma_tui.footer import Footer
+        from kazma_tui.header import KazmaHeader
 
         app = KazmaTUI()
         widgets = []  # SKIP: needs run_test() async context
         widget_classes = [type(w) for w in widgets]
 
-        assert HeaderProviderModel in widget_classes
+        assert KazmaHeader in widget_classes
         assert MetricsDashboard in widget_classes
         assert ChatPanel in widget_classes
-        assert FooterShortcuts in widget_classes
+        assert Footer in widget_classes
 
 
 # ---------------------------------------------------------------------------
