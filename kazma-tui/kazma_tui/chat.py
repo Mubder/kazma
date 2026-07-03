@@ -1,7 +1,7 @@
 """Chat interface widget for the Kazma TUI.
 
-Uses TextArea for chat output (supports native mouse text selection)
-and Input for message entry.  Ctrl+C copies selected text to clipboard.
+Uses MessageList (RichLog-based, markdown-capable) for output
+and Input for message entry. Color-coded accent bars per role.
 """
 
 from __future__ import annotations
@@ -10,7 +10,9 @@ import logging
 
 from textual.app import ComposeResult
 from textual.widget import Widget
-from textual.widgets import Input, TextArea
+from textual.widgets import Input
+
+from kazma_tui.widgets.message_list import MessageList
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +26,7 @@ Text selection: drag mouse to select text, then Ctrl+C to copy."""
 
 
 class ChatPanel(Widget):
-    """Chat interface — TextArea output (selectable) + Input field."""
+    """Chat interface — MessageList output (color-coded, markdown) + Input field."""
 
     DEFAULT_CSS = """
     ChatPanel {
@@ -35,11 +37,10 @@ class ChatPanel(Widget):
         border-title-background: $surface;
         border-title-style: bold;
         layout: vertical;
+        background: $surface;
     }
-    ChatPanel > TextArea {
+    ChatPanel > MessageList {
         height: 1fr;
-        background: transparent;
-        border: none;
     }
     ChatPanel > Input {
         dock: bottom;
@@ -54,131 +55,72 @@ class ChatPanel(Widget):
     }
     """
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._chat_output: TextArea | None = None
-        self._system_shown = False
-
     def compose(self) -> ComposeResult:
-        self._chat_output = TextArea(
-            text="Chat ready. Type /help for commands.\n",
-            read_only=True,
-            language=None,
-            show_line_numbers=False,
-            id="chat-output",
-        )
-        yield self._chat_output
+        yield MessageList(id="message-list")
         yield Input(placeholder="Type a message...", id="chat-input")
 
-    def on_mount(self) -> None:
-        self._focus_input()
-
-    # ── Copy to clipboard ────────────────────────────────────────────
-
-    def action_copy_selection(self) -> None:
-        """Copy selected text from the chat output to clipboard."""
-        try:
-            output = self.query_one("#chat-output", TextArea)
-            selected = output.selected_text
-            if selected:
-                import subprocess
-                try:
-                    proc = subprocess.run(
-                        ["xclip", "-selection", "clipboard"],
-                        input=selected, text=True, timeout=2,
-                    )
-                    if proc.returncode == 0:
-                        self._add_system("Copied to clipboard")
-                    else:
-                        self._add_system(f"Copy failed (exit {proc.returncode})")
-                except FileNotFoundError:
-                    # Try pyperclip as fallback
-                    try:
-                        import pyperclip
-                        pyperclip.copy(selected)
-                        self._add_system("Copied to clipboard")
-                    except ImportError:
-                        self._add_system("xclip not installed. Run: sudo apt install xclip")
-            else:
-                self._add_system("No text selected. Drag mouse to select first.")
-        except Exception:
-            pass
-
-    # ── Message handling ─────────────────────────────────────────────
-
     def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle Enter in the input field."""
         text = event.value.strip()
-        event.input.value = ""
         if not text:
             return
+
+        event.input.clear()
+
         if text.startswith("/"):
             self._handle_command(text)
         else:
-            self.add_message("You", text)
+            self.add_message("user", text)
             self.app.call_later(self._generate_response, text)
-        self._focus_input()
+
+    def add_message(self, role: str, content: str) -> None:
+        """Append a color-coded message to the list."""
+        msg_list = self.query_one(MessageList)
+        msg_list.add_message(role, content)
+
+    def _handle_command(self, text: str) -> None:
+        """Route a slash command."""
+        cmd = text.lower().split()[0]
+        if cmd == "/help":
+            self.add_message("system", _HELP_TEXT)
+        elif cmd == "/clear":
+            self.query_one(MessageList).clear()
+        elif cmd == "/quit":
+            self.app.exit()
+        elif cmd in ("/model", "/models"):
+            try:
+                from kazma_core.settings.model_registry import get_model_list_text
+                self.add_message("system", get_model_list_text("tui"))
+            except Exception as exc:
+                self.add_message("error", f"Model registry unavailable: {exc}")
+        else:
+            self.add_message("system", f"Unknown command: {cmd}. Try /help.")
 
     async def _generate_response(self, prompt: str) -> None:
-        """Generate AI response via ModelRegistry provider."""
+        """Generate an AI response via ModelRegistry."""
         try:
             from kazma_core.model_registry import get_model_registry
             registry = get_model_registry()
             provider = registry.get_client()
-            if provider is None:
-                self.add_message("System", "No provider configured. Set up a model in Settings.")
-                return
             messages = [{"role": "user", "content": prompt}]
+            self.add_message("thinking", "Thinking...")
             response = await provider.chat(messages)
-            output = response.content if hasattr(response, "content") else str(response)
-            self.add_message("Assistant", output)
-        except ImportError as exc:
-            self.add_message("System", f"ModelRegistry not available: {exc}")
+            content = response.content if hasattr(response, "content") else str(response)
+            # Remove thinking indicator
+            msg_list = self.query_one(MessageList)
+            for entry in list(msg_list.query("MessageEntry.msg-thinking")):
+                entry.remove()
+            self.add_message("assistant", content)
         except Exception as exc:
-            self.add_message("System", f"Error: {exc}")
+            self.add_message("error", f"Error: {exc}")
 
-    def _handle_command(self, raw: str) -> None:
-        cmd = raw.strip().lower()
-        if cmd == "/help":
-            self.add_message("System", _HELP_TEXT.strip())
-        elif cmd == "/clear":
-            try:
-                output = self.query_one("#chat-output", TextArea)
-                output.text = ""
-            except Exception:
-                pass
-        elif cmd == "/quit":
-            self.app.exit()
-        elif cmd == "/model" or cmd == "/models":
-            self._show_models()
-        else:
-            self.add_message("System", f"Unknown command: {raw.strip()}")
-
-    def add_message(self, role: str, text: str) -> None:
-        """Append a message to the chat output (plain text, no markup)."""
+    def action_copy_last(self) -> None:
+        """Copy the last assistant message to clipboard."""
         try:
-            output = self.query_one("#chat-output", TextArea)
-            output.text += f"{role}: {text}\n"
-            # Auto-scroll to bottom
-            if hasattr(output, "move_cursor"):
-                output.move_cursor(output.document.line_count - 1)
-        except Exception:
-            logger.debug("Chat output not yet mounted", exc_info=True)
-
-    def _add_system(self, text: str) -> None:
-        """Quick system message without cluttering history."""
-        self.add_message("System", text)
-
-    def _focus_input(self) -> None:
-        try:
-            self.query_one("#chat-input", Input).focus()
+            import pyperclip
+            msg_list = self.query_one(MessageList)
+            entries = list(msg_list.query("MessageEntry.msg-assistant"))
+            if entries:
+                pyperclip.copy(entries[-1].content)
         except Exception:
             pass
-
-    def _show_models(self) -> None:
-        """Display available models from the Universal Model Registry."""
-        try:
-            from kazma_core.settings.model_registry import get_model_list_text
-            text = get_model_list_text("tui")
-            self.add_message("System", text)
-        except Exception as exc:
-            self.add_message("System", f"Failed to load models: {exc}")
