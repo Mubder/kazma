@@ -37,6 +37,7 @@ from kazma_core.swarm.reliability import (
     RetryPolicy,
     TimeoutGuard,
 )
+from kazma_core.swarm.reliability_registry import ReliabilityRegistry
 from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
 from kazma_core.swarm.task import (
     HandoffRecord,
@@ -94,12 +95,10 @@ class SwarmEngine:
         self._max_history = 500  # LRU cap to prevent unbounded memory growth
         self._result_aggregator = result_aggregator or ResultAggregator()
         self._capability_router = capability_router or CapabilityRouter()
-        self._circuit_breakers: dict[str, CircuitBreaker] = {}
-        self._retry_policies: dict[str, RetryPolicy] = {}
-        self._default_retry_policy = RetryPolicy(max_retries=0)
-        self._timeout_guards: dict[str, TimeoutGuard] = {}
-        self._default_timeout_guard = TimeoutGuard()
-        self._output_validators: dict[str, OutputValidator] = {}
+        # Reliability config delegated to ReliabilityRegistry (P2-1 refactor).
+        self._reliability = ReliabilityRegistry(
+            worker_names=lambda: list(self._workers.keys()),
+        )
         self._checkpoint_handler = HITLCheckpointHandler()
         self._task_store = task_store
         self._metrics_collector = metrics_collector or MetricsCollector(task_store=task_store)
@@ -162,10 +161,7 @@ class SwarmEngine:
             raise KeyError(f"Worker '{name}' not found.")
         worker = self._workers.pop(name)
         # Clean up reliability-layer state to prevent memory leaks.
-        self._circuit_breakers.pop(name, None)
-        self._retry_policies.pop(name, None)
-        self._timeout_guards.pop(name, None)
-        self._output_validators.pop(name, None)
+        self._reliability.cleanup_worker(name)
         logger.info("[SwarmEngine] removed worker '%s'", name)
         return worker
 
@@ -1625,108 +1621,65 @@ class SwarmEngine:
         return result
 
     # ------------------------------------------------------------------
-    # Reliability layer — circuit breaker & retry policy management
+    # Reliability layer — delegated to ReliabilityRegistry (P2-1 refactor)
     # ------------------------------------------------------------------
 
     def get_circuit_breaker(self, worker_name: str) -> CircuitBreaker:
         """Return (or create) the circuit breaker for a worker."""
-        if worker_name not in self._circuit_breakers:
-            self._circuit_breakers[worker_name] = CircuitBreaker()
-        return self._circuit_breakers[worker_name]
+        return self._reliability.get_circuit_breaker(worker_name)
 
     def reset_circuit_breaker(self, worker_name: str) -> CircuitBreaker:
         """Manually reset a worker's circuit breaker to closed state."""
-        breaker = self.get_circuit_breaker(worker_name)
-        breaker.reset()
-        logger.info("[SwarmEngine] circuit breaker reset for worker '%s'", worker_name)
-        return breaker
+        return self._reliability.reset_circuit_breaker(worker_name)
 
     def get_retry_policy(self, worker_name: str) -> RetryPolicy:
         """Return the retry policy for a worker (or the default)."""
-        return self._retry_policies.get(worker_name, self._default_retry_policy)
+        return self._reliability.get_retry_policy(worker_name)
 
-    def set_retry_policy(
-        self,
-        worker_name: str,
-        policy: RetryPolicy,
-    ) -> None:
+    def set_retry_policy(self, worker_name: str, policy: RetryPolicy) -> None:
         """Set a per-worker retry policy."""
-        self._retry_policies[worker_name] = policy
+        self._reliability.set_retry_policy(worker_name, policy)
 
     def set_circuit_breaker_config(
-        self,
-        worker_name: str,
-        *,
-        failure_threshold: int = 5,
-        cooldown_seconds: float = 60.0,
+        self, worker_name: str, *,
+        failure_threshold: int = 5, cooldown_seconds: float = 60.0,
     ) -> CircuitBreaker:
         """Create or reconfigure a per-worker circuit breaker."""
-        self._circuit_breakers[worker_name] = CircuitBreaker(
-            failure_threshold=failure_threshold,
-            cooldown_seconds=cooldown_seconds,
+        return self._reliability.set_circuit_breaker_config(
+            worker_name, failure_threshold=failure_threshold, cooldown_seconds=cooldown_seconds,
         )
-        return self._circuit_breakers[worker_name]
 
     def get_circuit_breaker_status(self, worker_name: str) -> dict[str, Any]:
         """Return a JSON-serializable snapshot of a worker's circuit breaker."""
-        breaker = self.get_circuit_breaker(worker_name)
-        return breaker.to_dict()
+        return self._reliability.get_circuit_breaker_status(worker_name)
 
     def get_all_circuit_breaker_status(self) -> dict[str, dict[str, Any]]:
         """Return circuit breaker status for all registered workers."""
-        return {
-            name: self.get_circuit_breaker(name).to_dict()
-            for name in self._workers
-        }
-
-    # ------------------------------------------------------------------
-    # Reliability layer — timeout guard management
-    # ------------------------------------------------------------------
+        return self._reliability.get_all_circuit_breaker_status()
 
     def get_timeout_guard(
-        self,
-        worker_name: str,
-        task_timeout: float | None = None,
+        self, worker_name: str, task_timeout: float | None = None,
     ) -> TimeoutGuard:
         """Return (or create) the timeout guard for a worker."""
-        if task_timeout is not None and task_timeout > 0:
-            return TimeoutGuard(default_timeout=task_timeout)
-        if worker_name not in self._timeout_guards:
-            self._timeout_guards[worker_name] = self._default_timeout_guard
-        return self._timeout_guards[worker_name]
+        return self._reliability.get_timeout_guard(worker_name, task_timeout)
 
-    def set_timeout_guard(
-        self,
-        worker_name: str,
-        guard: TimeoutGuard,
-    ) -> None:
+    def set_timeout_guard(self, worker_name: str, guard: TimeoutGuard) -> None:
         """Set a per-worker timeout guard."""
-        self._timeout_guards[worker_name] = guard
-
-    # ------------------------------------------------------------------
-    # Reliability layer — output validator management
-    # ------------------------------------------------------------------
+        self._reliability.set_timeout_guard(worker_name, guard)
 
     def get_output_validator(
-        self,
-        worker_name: str,
-        task_schema: dict[str, Any] | None = None,
+        self, worker_name: str, task_schema: dict[str, Any] | None = None,
     ) -> OutputValidator | None:
-        """Return the output validator for a worker or task schema.
+        """Return the output validator for a worker or task schema."""
+        return self._reliability.get_output_validator(worker_name, task_schema)
 
-        Returns ``None`` when no schema is configured (validation skipped).
-        """
-        if task_schema is not None:
-            return OutputValidator(schema=task_schema)
-        return self._output_validators.get(worker_name)
-
-    def set_output_validator(
-        self,
-        worker_name: str,
-        validator: OutputValidator,
-    ) -> None:
+    def set_output_validator(self, worker_name: str, validator: OutputValidator) -> None:
         """Set a per-worker output validator."""
-        self._output_validators[worker_name] = validator
+        self._reliability.set_output_validator(worker_name, validator)
+
+    def get_bounded_concurrency(self, task_max_concurrent: int | None = None) -> BoundedConcurrency:
+        """Return a BoundedConcurrency instance for the given concurrency limit."""
+        return self._reliability.get_bounded_concurrency(task_max_concurrent)
 
     # ------------------------------------------------------------------
     # Phonebook — Worker Registry integration
@@ -1857,22 +1810,3 @@ class SwarmEngine:
             status_icon = "✅" if r["status"] == "success" else "❌"
             parts.append(f"{status_icon} *{r['worker']}*: {r['output'][:200]}")
         return "\n".join(parts)
-
-    # ------------------------------------------------------------------
-    # Reliability layer — bounded concurrency management
-    # ------------------------------------------------------------------
-
-    def get_bounded_concurrency(
-        self,
-        task_max_concurrent: int | None = None,
-    ) -> BoundedConcurrency:
-        """Return a BoundedConcurrency instance for the given concurrency limit.
-
-        Task-level override takes precedence over the engine default.
-        """
-        limit = task_max_concurrent or self._resolve_max_concurrent_from_config()
-        return BoundedConcurrency(max_concurrent=limit)
-
-    def _resolve_max_concurrent_from_config(self) -> int:
-        """Resolve the default concurrency limit from engine config."""
-        return max(1, int(getattr(self.config, "max_concurrent", 5) or 5))

@@ -292,7 +292,7 @@ class TestEngineRemoveSpawnedWorker:
         )
         # Touch the circuit breaker
         engine.get_circuit_breaker("cb-worker")
-        assert "cb-worker" in engine._circuit_breakers
+        assert "cb-worker" in engine._reliability._circuit_breakers
 
         engine.remove_worker("cb-worker")
         # After removal, re-spawning with same name should work
