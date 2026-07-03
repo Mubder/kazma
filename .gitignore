@@ -74,5 +74,5 @@ htmlcov/
 /.pytest_tmp_run
 
 # Runtime data (generated per-installation, never commit)
-/kazma-data/
-/swarm_registry.json
+kazma-data/
+swarm_registry.json
