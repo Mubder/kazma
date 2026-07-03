@@ -144,11 +144,14 @@ class TutorialScreen(ModalScreen[bool]):
     TutorialScreen Horizontal {
         align: center middle;
         margin-top: 1;
-        height: auto;
+        height: 3;
     }
     TutorialScreen Button {
         min-width: 15;
         margin: 0 1;
+    }
+    TutorialScreen Button.hidden {
+        display: none;
     }
     TutorialScreen ProgressBar {
         margin-top: 1;
@@ -175,8 +178,12 @@ class TutorialScreen(ModalScreen[bool]):
             )
             with Vertical(classes="tutorial-content"):
                 yield Label("", id="tutorial-message")
+            # Always create all buttons, but hide/show as needed
             with Horizontal(id="button-container"):
-                yield from self._create_buttons()
+                yield Button("← Back", variant="default", id="btn-back")
+                yield Button("Skip Tutorial", variant="warning", id="btn-skip")
+                yield Button("Next →", variant="primary", id="btn-next")
+                yield Button("Get Started! 🚀", variant="success", id="btn-finish")
 
     def _create_buttons(self):
         """Create buttons for current step."""
@@ -196,13 +203,22 @@ class TutorialScreen(ModalScreen[bool]):
 
     def on_mount(self) -> None:
         """Initialize tutorial state."""
-        self._update_step()
+        step = self.STEPS[self.current_step]
+        try:
+            self.query_one("#tutorial-message", Label).update(f"[bold]$primary]{step['title']}[/]\n\n{step['message']}")
+            # Set initial button visibility - hide back/finish, show skip/next
+            self.query_one("#btn-back", Button).set_class(True, "hidden")
+            self.query_one("#btn-skip", Button).set_class(False, "hidden")
+            self.query_one("#btn-next", Button).set_class(False, "hidden")
+            self.query_one("#btn-finish", Button).set_class(True, "hidden")
+            self.query_one("#btn-next", Button).focus()
+        except Exception:
+            pass
 
     def _update_step(self) -> None:
         """Update UI for current step."""
         step = self.STEPS[self.current_step]
 
-        # Update header
         try:
             self.query_one("#step-indicator", Static).update(f"Step {self.current_step + 1} of {len(self.STEPS)}")
             self.query_one("#tutorial-progress", ProgressBar).update(progress=self.current_step + 1)
@@ -211,19 +227,24 @@ class TutorialScreen(ModalScreen[bool]):
             content = f"[bold]$primary]{step['title']}[/]\n\n{step['message']}"
             self.query_one("#tutorial-message", Label).update(content)
 
-            # Update buttons
-            button_container = self.query_one("#button-container", Horizontal)
-            button_container.remove_children()
-            for btn in self._create_buttons():
-                button_container.mount(btn)
+            # Update button visibility
+            buttons = step["buttons"]
+            self.query_one("#btn-back", Button).set_class("back" not in buttons, "hidden")
+            self.query_one("#btn-skip", Button).set_class("skip" not in buttons, "hidden")
+            self.query_one("#btn-next", Button).set_class("next" not in buttons, "hidden")
+            self.query_one("#btn-finish", Button).set_class("finish" not in buttons, "hidden")
 
-            # Focus first button
-            first_btn = self.query(Button).first()
-            if first_btn:
-                first_btn.focus()
+            # Focus first visible button
+            for btn_id in ["btn-back", "btn-skip", "btn-next", "btn-finish"]:
+                btn = self.query_one(f"#{btn_id}", Button)
+                if btn and not btn.has_class("hidden"):
+                    btn.focus()
+                    break
 
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+
+            logging.debug(f"Tutorial step update error: {e}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -241,16 +262,20 @@ class TutorialScreen(ModalScreen[bool]):
 
         elif btn_id == "btn-skip":
             self.completed = True
-            self.set_timer(0, lambda: self.dismiss(True))
+            self.call_later(self._do_dismiss, True)
 
         elif btn_id == "btn-finish":
             self.completed = True
-            self.set_timer(0, lambda: self.dismiss(True))
+            self.call_later(self._do_dismiss, True)
+
+    def _do_dismiss(self, result: bool | None) -> None:
+        """Actually dismiss the screen (called via call_later)."""
+        self.dismiss(result)
 
     def key_escape(self) -> None:
         """Allow escape to skip."""
         self.completed = True
-        self.set_timer(0, lambda: self.dismiss(False))
+        self.call_later(self._do_dismiss, None)
 
     def key_enter(self) -> None:
         """Enter advances to next step or completes."""
@@ -259,7 +284,7 @@ class TutorialScreen(ModalScreen[bool]):
             self._update_step()
         else:
             self.completed = True
-            self.set_timer(0, lambda: self.dismiss(True))
+            self.call_later(self._do_dismiss, True)
 
     def key_n(self) -> None:
         """'n' for next."""
