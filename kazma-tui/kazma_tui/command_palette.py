@@ -79,7 +79,7 @@ class CommandPalette(ModalScreen[str | None]):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.item is None:
             return
-        text = str(event.item.query_one(Static).renderable).strip()
+        text = str(event.item.query_one(Static)._renderable).strip()
         cmd = text.split("    ")[0].strip()
         if cmd == "/quit":
             self.app.exit()
