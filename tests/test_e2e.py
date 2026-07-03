@@ -12,7 +12,7 @@ class TestAgentE2E:
         config = load_config()
         assert config is not None
         assert config.name == "kazma"
-        assert config.version == "0.1.0"
+        assert config.version == "0.2.0"
         assert config.language == "ar"
         assert config.default_model in ("gpt-4o-mini", "gpt-4o", "default")
 
