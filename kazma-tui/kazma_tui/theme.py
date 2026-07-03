@@ -305,24 +305,4 @@ MessageEntry.msg-thinking {
     border-left: heavy $accent;
     background: $panel-alt;
 }
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Light Theme
-   ═══════════════════════════════════════════════════════════════════════ */
-
-@media (prefers-color-scheme: light) {
-    $primary: #0891b2;
-    $secondary: #7c3aed;
-    $accent: #06b6d4;
-    $error: #dc2626;
-    $success: #16a34a;
-    $surface: #f7f9fb;
-    $panel: #ffffff;
-    $panel-alt: #f4f7fa;
-    $border: rgba(15, 23, 42, 0.08);
-    $text: #0f1c2e;
-    $text-muted: #64748b;
-    $text-dim: #94a3b8;
-}
-
 """
