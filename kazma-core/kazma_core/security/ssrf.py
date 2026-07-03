@@ -92,7 +92,7 @@ def _resolve_host_ips(host: str) -> list[str]:
     return ips
 
 
-def validate_url(url: str, *, block_unresolved: bool = False) -> None:
+def validate_url(url: str, *, block_unresolved: bool = False, allow_private: bool = False) -> None:
     """Validate that *url* points at a public, externally reachable host.
 
     Args:
@@ -101,6 +101,9 @@ def validate_url(url: str, *, block_unresolved: bool = False) -> None:
             rejected. When *False* (default) an unresolvable host is allowed
             so the eventual HTTP request can surface a normal connection
             error instead of an SSRF block.
+        allow_private: When *True*, private/loopback/local addresses are
+            permitted (e.g. for LM Studio, Ollama, or other local providers
+            the user explicitly configured). Defaults to *False*.
 
     Raises:
         SSRFError: If the URL scheme is not http/https, the hostname is a
@@ -123,6 +126,10 @@ def validate_url(url: str, *, block_unresolved: bool = False) -> None:
         raise ValueError(f"URL has no hostname: {url}")
 
     host_lower = host.lower()
+
+    # When private addresses are explicitly permitted, skip the checks.
+    if allow_private:
+        return
 
     # Fast textual rejects for common internal hostnames.
     if host_lower in ("localhost", "0.0.0.0", "::1"):

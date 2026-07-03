@@ -133,10 +133,10 @@ async def discover_lm_studio_models(
     # Build the models endpoint: /v1/models
     models_url = f"{url}/models"
 
-    # SSRF guard
+    # SSRF guard — allow private addresses for user-configured local providers
     try:
         from kazma_core.security.ssrf import SSRFError, validate_url
-        validate_url(models_url, block_unresolved=True)
+        validate_url(models_url, block_unresolved=True, allow_private=True)
     except SSRFError as exc:
         logger.warning("discover_lm_studio_models: SSRF blocked %r: %s", models_url, exc)
         return info
@@ -189,10 +189,10 @@ async def discover_custom_models(base_url: str) -> ProviderInfo:
 
     models_url = f"{url}/models"
 
-    # SSRF guard
+    # SSRF guard — allow private addresses for user-configured providers
     try:
         from kazma_core.security.ssrf import SSRFError, validate_url
-        validate_url(models_url, block_unresolved=True)
+        validate_url(models_url, block_unresolved=True, allow_private=True)
     except SSRFError as exc:
         logger.warning("discover_custom_models: SSRF blocked %r: %s", models_url, exc)
         return info
