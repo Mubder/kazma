@@ -102,7 +102,7 @@ class TestDiscoverLMStudio:
         mock_resp.json.return_value = {"data": [{"id": "local-model"}, {"id": "gpt-4o-mini"}]}
         mock_resp.raise_for_status = MagicMock()
 
-        with patch("httpx.AsyncClient") as MockClient:
+        with patch("kazma_core.security.ssrf.validate_url"), patch("httpx.AsyncClient") as MockClient:
             instance = AsyncMock()
             instance.get = AsyncMock(return_value=mock_resp)
             instance.__aenter__ = AsyncMock(return_value=instance)
