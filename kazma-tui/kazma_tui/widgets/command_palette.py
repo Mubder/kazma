@@ -6,7 +6,7 @@ import re
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, ListItem, ListView, Static, Label
+from textual.widgets import Input, ListItem, ListView, Static, Label, TabbedContent, RichLog
 from textual.binding import Binding
 
 
@@ -311,12 +311,19 @@ class CommandPalette(ModalScreen[str | None]):
         
         # Navigation commands
         if cmd_id == "next-tab":
-            self.app.post_message(self.app.Message("next_tab"))
+            self._switch_tab("chat")  # will cycle via app.action_next_tab
+            try:
+                self.app.action_next_tab()
+            except Exception:
+                pass
             self.dismiss(cmd_id)
             return
         
         if cmd_id == "prev-tab":
-            self.app.post_message(self.app.Message("prev_tab"))
+            try:
+                self.app.action_prev_tab()
+            except Exception:
+                pass
             self.dismiss(cmd_id)
             return
         
@@ -403,9 +410,10 @@ class CommandPalette(ModalScreen[str | None]):
         """Select highlighted item."""
         try:
             lst = self.query_one(ListView)
-            if lst.highlighted:
+            child = lst.highlighted_child
+            if child is not None:
                 self.on_list_view_selected(
-                    ListView.Selected(lst, lst.highlighted)
+                    ListView.Selected(lst, child, lst.index)
                 )
         except Exception:
             pass

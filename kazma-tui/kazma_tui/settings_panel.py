@@ -130,9 +130,9 @@ class SettingsPanel(VerticalScroll):
                 self.query_one("#current-theme-label", Static).update(
                     f"Current: [bold $primary]{theme_name}[/]"
                 )
-                self.notify(f"Theme changed to {theme_name}", level="success")
+                self.notify(f"Theme changed to {theme_name}", severity="information")
             except Exception as e:
-                self.notify(f"Failed to change theme: {e}", level="error")
+                self.notify(f"Failed to change theme: {e}", severity="error")
 
     def _update_theme_buttons(self) -> None:
         """Update button variants to reflect current theme."""
@@ -151,10 +151,10 @@ class SettingsPanel(VerticalScroll):
             cs = get_config_store()
             for label, key, _default in self.SETTINGS:
                 cs.set(key, key in sel.selected)
-            self.notify("Settings saved", level="success")
+            self.notify("Settings saved", severity="information")
         except Exception as e:
-            self.notify(f"Failed to save settings: {e}", level="error")
+            self.notify(f"Failed to save settings: {e}", severity="error")
 
     def action_refresh_settings(self) -> None:
         """Refresh settings display."""
-        self.notify("Settings refreshed", level="info")
+        self.notify("Settings refreshed", severity="information")
