@@ -58,10 +58,14 @@ class CommandPalette(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Input(placeholder="Search commands...", id="palette-search")
-            yield ListView(
-                *[ListItem(Static(f"  {name}    {desc}")) for name, desc, _ in self.COMMANDS if name != "-"],
-                id="palette-list",
-            )
+            items: list[ListItem] = []
+            for name, desc, _ in self.COMMANDS:
+                if name == "-":
+                    continue
+                item = ListItem(Static(f"  {name}    {desc}"))
+                item._cmd_name = name
+                items.append(item)
+            yield ListView(*items, id="palette-list")
 
     def on_mount(self) -> None:
         self.query_one(Input).focus()
@@ -74,13 +78,16 @@ class CommandPalette(ModalScreen[str | None]):
             if name == "-":
                 continue
             if q in name.lower() or q in desc.lower():
-                lst.append(ListItem(Static(f"  {name}    {desc}")))
+                item = ListItem(Static(f"  {name}    {desc}"))
+                item._cmd_name = name
+                lst.append(item)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.item is None:
             return
-        text = str(event.item.query_one(Static)._renderable).strip()
-        cmd = text.split("    ")[0].strip()
+        cmd = getattr(event.item, "_cmd_name", "")
+        if not cmd:
+            return
         if cmd == "/quit":
             self.app.exit()
         elif cmd in ("/clear", "/help", "/model"):
