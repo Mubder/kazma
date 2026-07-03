@@ -24,30 +24,29 @@ class SettingsPanel(VerticalScroll):
     ]
 
     def compose(self) -> ComposeResult:
-        yield Static("[bold $primary]Settings[/]  ·  [dim]Toggle features on/off[/]", classes="section-label")
-        sel = SelectionList[int]()
+        yield Static("[bold $primary]Settings[/]  ·  [dim]Toggle features[/]", classes="section-label")
+        sel: SelectionList = SelectionList()
         for label, key, default in self.SETTINGS:
-            # Try to read the config value, fall back to default
             try:
                 from kazma_core.config_store import get_config_store
-                cs = get_config_store()
-                val = cs.get(key)
+                val = get_config_store().get(key)
                 if val is None:
                     val = default
             except Exception:
                 val = default
-            sel.add_option((key, label), bool(val))
+            # SelectionList.add_option() takes (label, id)
+            sel.add_option((label, key))
+            if val:
+                sel.select(key)
         sel.border_title = "Feature Toggles"
         yield sel
 
-    def on_selection_list_selected_changed(self, event: SelectionList.SelectedChanged[int]) -> None:
-        """Persist the toggle change to ConfigStore."""
+    def on_selection_list_selected_changed(self, event: SelectionList.SelectedChanged) -> None:
         sel = event.selection_list
-        for option in sel.options:
-            key = option.id
-            checked = key in sel.selected
-            try:
-                from kazma_core.config_store import get_config_store
-                get_config_store().set(key, checked)
-            except Exception:
-                pass
+        try:
+            from kazma_core.config_store import get_config_store
+            cs = get_config_store()
+            for label, key, _default in self.SETTINGS:
+                cs.set(key, key in sel.selected)
+        except Exception:
+            pass
