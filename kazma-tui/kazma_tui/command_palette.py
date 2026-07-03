@@ -95,10 +95,20 @@ class CommandPalette(ModalScreen[str | None]):
             self.dismiss(None)
 
     def _route_command(self, cmd: str) -> None:
+        """Send command to chat panel directly."""
         try:
-            inp = self.app.query_one("#chat-input")
-            inp.value = cmd
-            inp.action_submit()
+            from kazma_tui.chat import ChatPanel
+            chat = self.app.query_one(ChatPanel)
+            if cmd == "/help":
+                chat.write("system", "/help, /clear, /model, /quit — Ctrl+P for palette")
+            elif cmd == "/clear":
+                self.app.query_one("RichLog#chat-log").clear()
+            elif cmd == "/model":
+                try:
+                    from kazma_core.settings.model_registry import get_model_list_text
+                    chat.write("system", get_model_list_text("tui"))
+                except Exception:
+                    chat.write("error", "Model registry unavailable")
         except Exception:
             pass
         self.dismiss(None)
