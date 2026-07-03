@@ -1,4 +1,4 @@
-"""Real-time log stream widget for the TUI.
+"""Real-time log stream widget for the Kazma TUI.
 
 Renders a scrollable, color-coded log view that subscribes to the
 SwarmMessageBus and displays worker log lines as they arrive.
@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 
-from textual.widgets import RichLog
+from textual.app import ComposeResult
+from textual.widgets import RichLog, Static
 
 logger = logging.getLogger(__name__)
 
@@ -79,3 +80,53 @@ class LogStream(RichLog):
                 level="success" if data.get("status") == "success" else "warn",
                 timestamp="",
             )
+
+
+class LoadingSpinner(Static):
+    """Animated loading spinner for async operations.
+    
+    Displays a rotating spinner animation during loading states.
+    Uses Unicode braille characters for smooth animation.
+    """
+
+    SPINNER_CHARS = "⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏"
+    
+    DEFAULT_CSS = """
+    LoadingSpinner {
+        width: auto;
+        height: 1;
+        color: $primary;
+        text-style: bold;
+    }
+    """
+    
+    def __init__(
+        self,
+        message: str = "Loading...",
+        *,
+        id: str | None = None,
+    ) -> None:
+        super().__init__(id=id)
+        self.message = message
+        self._spinner_index = 0
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._render_spinner())
+
+    def on_mount(self) -> None:
+        self._animate_timer = self.set_interval(0.1, self._advance_spinner)
+
+    def _advance_spinner(self) -> None:
+        self._spinner_index = (self._spinner_index + 1) % len(self.SPINNER_CHARS.split())
+        spinner_char = self.SPINNER_CHARS.split()[self._spinner_index]
+        self.update(f"{spinner_char}  {self.message}")
+
+    def _render_spinner(self) -> str:
+        spinner_char = self.SPINNER_CHARS.split()[self._spinner_index]
+        return f"{spinner_char}  {self.message}"
+
+    def stop(self) -> None:
+        """Stop the animation and hide the spinner."""
+        if hasattr(self, "_animate_timer"):
+            self._animate_timer.stop()
+        self.display = False

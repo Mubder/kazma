@@ -1,62 +1,45 @@
+```
 # Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-dist/
-build/
-*.egg
-.eggs/
-
-# Virtual environments
-.venv/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
 venv/
-ENV/
+.venv/
+.ENV
+.python-version
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
-# IDE
+# Build artifacts
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Editors
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
-
-# Testing / Coverage
-.coverage
-htmlcov/
-.pytest_cache/
-.mypy_cache/
-.pytest_tmp/
-.pytest_tmp_run/
-.pytest-tmp/
-.server_boot.log
-
-# uv
-uv.lock
+*.tmp
 
 # OS
 .DS_Store
 Thumbs.db
 
-# SQLite databases
-*.db
-*.db-journal
-*.db-wal
-kazma-data/
-kazma-core/kazma-data/
-
-# Kazma Agent
-.kazma-agent/
-
-# Environment / Secrets
-.env
-.env.local
-.env.*.local
-
-# Local config overrides
-kazma.local.yaml
-kazma.local.yml
-swarm_registry.json
-models/*.pt
-models/*.onnx
-kazma-data/
+# Coverage
+coverage/
+```
