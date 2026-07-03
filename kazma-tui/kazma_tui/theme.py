@@ -29,6 +29,15 @@ $text: #e2e8f0;           /* near-white body */
 $text-muted: #94a3b8;     /* kazma.ai body text */
 $text-dim: #64748b;       /* very dim */
 
+/* Semantic message role colors (Grok-style accent bars) */
+$accent-user: #22d3ee;         /* cyan — user messages */
+$accent-assistant: #a855f7;    /* purple — assistant */
+$accent-tool: #fbbf24;         /* amber — tool calls */
+$accent-system: #64748b;       /* dim — system messages */
+$accent-error: #ef4444;        /* red — errors */
+$accent-thinking: #22d3ee;     /* cyan — thinking blocks */
+$code-bg: #1e293b;             /* code block background */
+
 /* ═══════════════════════════════════════════════════════════════════════
    Screen
    ═══════════════════════════════════════════════════════════════════════ */
@@ -287,4 +296,38 @@ Scrollbar {
 .metric-label {
     color: $text-muted;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Animations
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@keyframes pulse {
+    0%   { border-left-color: alpha($accent-thinking, 0.4); }
+    50%  { border-left-color: alpha($accent-thinking, 1.0); }
+    100% { border-left-color: alpha($accent-thinking, 0.4); }
+}
+
+MessageEntry.msg-thinking {
+    animation: pulse 1.5s infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Light Theme
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@media (prefers-color-scheme: light) {
+    $primary: #0891b2;
+    $secondary: #7c3aed;
+    $accent: #06b6d4;
+    $error: #dc2626;
+    $success: #16a34a;
+    $surface: #f7f9fb;
+    $panel: #ffffff;
+    $panel-alt: #f4f7fa;
+    $border: rgba(15, 23, 42, 0.08);
+    $text: #0f1c2e;
+    $text-muted: #64748b;
+    $text-dim: #94a3b8;
+}
+
 """

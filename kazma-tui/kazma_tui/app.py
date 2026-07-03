@@ -46,6 +46,7 @@ class KazmaTUI(App[None]):
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+y", "copy_last", "Copy last"),
+        ("ctrl+p", "command_palette", "Commands"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -64,6 +65,11 @@ class KazmaTUI(App[None]):
             chat.action_copy_last()
         except Exception:
             pass
+
+    def action_command_palette(self) -> None:
+        """Open the fuzzy-searchable command palette."""
+        from kazma_tui.screens.command_palette import CommandPalette
+        self.push_screen(CommandPalette())
 
 
 def main() -> None:
