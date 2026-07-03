@@ -35,6 +35,10 @@ $text:       #e6edf3;      /* text-primary */
 $text-muted: #b1bac4;      /* text-secondary */
 $text-disabled: #8b949e;   /* text-tertiary */
 
+/* Selection */
+$screen-selection-background: rgba(34,211,238,0.35);
+$screen-selection-foreground: #e6edf3;
+
 /* ═══════════════════════════════════════════════════════════════════════
    Global
    ═══════════════════════════════════════════════════════════════════════ */

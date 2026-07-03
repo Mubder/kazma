@@ -35,6 +35,10 @@ class ChatPanel(Vertical):
     ChatPanel > Input:focus { border: solid $primary; }
     """
 
+    BINDINGS = [
+        ("ctrl+a", "select_all", "Select All"),
+    ]
+
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True)
         yield ProgressBar(id="chat-progress", total=100, show_eta=False)
@@ -130,9 +134,22 @@ class ChatPanel(Vertical):
 
     # ── Copy ───────────────────────────────────────────────────────
 
-    def copy_to_clipboard(self) -> None:
-        """Copy last KAZMA assistant response to the system clipboard."""
+    def action_select_all(self) -> None:
+        """Select all text in the chat log."""
         try:
+            self.query_one(RichLog).text_select_all()
+        except Exception:
+            pass
+
+    def copy_to_clipboard(self) -> None:
+        """Copy currently selected text or last KAZMA response to system clipboard."""
+        try:
+            # Prefer screen-level text selection (mouse-drag on any widget)
+            selected = self.screen.get_selected_text()
+            if selected:
+                self.app.copy_to_clipboard(selected)
+                return
+            # Fallback: copy last KAZMA assistant response
             log = self.query_one(RichLog)
             for line in reversed(log.text.split("\n")):
                 if "KAZMA" in line:
