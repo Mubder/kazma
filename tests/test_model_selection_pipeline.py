@@ -82,7 +82,7 @@ class TestChatStreamReadsModel:
             json={"message": "hello", "model": "gpt-4o-mini"},
         )
 
-        mock_provider.reconfigure.assert_called_once_with(model="gpt-4o-mini")
+        mock_provider.reconfigure.assert_called_once_with(base_url=None, model="gpt-4o-mini", api_key=None)
 
     def test_no_model_in_body_does_not_reconfigure(self):
         """When 'model' is absent from the body, reconfigure is NOT called."""
