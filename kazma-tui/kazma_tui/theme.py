@@ -45,12 +45,11 @@ $code-bg: #1e293b;             /* code block background */
 Screen {
     background: $surface;
     color: $text;
-    layout: vertical;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   Tabbed Navigation — kazma.ai style
-   ═══════════════════════════════════════════════════════════════════════ */
+MetricsDashboard {
+    height: 8;
+}
 
 TabbedContent {
     height: 1fr;
@@ -59,13 +58,10 @@ TabbedContent {
 TabPane {
     height: 1fr;
     background: $surface;
+    padding: 0;
 }
 
 TabbedContent > ContentTabs {
-    background: $panel;
-    border-bottom: solid $border;
-    height: 3;
-}
 
 TabbedContent > ContentTabs > Tab {
     padding: 0 2;

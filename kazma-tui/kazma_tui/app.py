@@ -13,9 +13,10 @@ from textual.app import App, ComposeResult
 from textual.widgets import TabbedContent, TabPane
 
 from kazma_tui.chat import ChatPanel
+from kazma_tui.dashboard import MetricsDashboard
 from kazma_tui.footer import FooterShortcuts
-from kazma_tui.screens.chat_screen import ChatScreen
-from kazma_tui.screens.swarm_screen import SwarmScreen
+from kazma_tui.header import HeaderProviderModel
+from kazma_tui.panels.swarm_panel import SwarmPanel
 from kazma_tui.theme import KAZMA_CSS
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class KazmaTUI(App[None]):
     - ModelRegistry integration
     - Swarm worker registry with live bus events
     - Context-sensitive footer shortcuts
-    - kazma.ai dark/light theme
+    - kazma.ai dark theme
 
     Keys:
         Ctrl+T  — Switch tabs
@@ -50,12 +51,18 @@ class KazmaTUI(App[None]):
     ]
 
     def compose(self) -> ComposeResult:
-        """Create the tabbed application layout."""
-        with TabbedContent(initial="chat"):
-            with TabPane("💬 Chat", id="chat"):
-                yield ChatScreen()
-            with TabPane("🐝 Swarm", id="swarm"):
-                yield SwarmScreen()
+        """Create the tabbed application layout.
+
+        Widgets are composed directly inside TabPane (not Screen wrappers)
+        to avoid full re-renders on tab switches.
+        """
+        yield HeaderProviderModel()
+        yield MetricsDashboard()
+        with TabbedContent(initial="chat-tab"):
+            with TabPane("Chat", id="chat-tab"):
+                yield ChatPanel()
+            with TabPane("Swarm", id="swarm-tab"):
+                yield SwarmPanel()
         yield FooterShortcuts()
 
     def action_copy_last(self) -> None:
@@ -69,6 +76,7 @@ class KazmaTUI(App[None]):
     def action_command_palette(self) -> None:
         """Open the fuzzy-searchable command palette."""
         from kazma_tui.screens.command_palette import CommandPalette
+
         self.push_screen(CommandPalette())
 
 

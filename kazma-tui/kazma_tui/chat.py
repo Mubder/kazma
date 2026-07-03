@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from textual.app import ComposeResult
+from textual.containers import Vertical
 from textual.widget import Widget
 from textual.widgets import Input
 
@@ -20,35 +21,30 @@ _HELP_TEXT = """\
 Available commands:
   /help   — Show this help message
   /clear  — Clear the chat log
-  /quit   — Exit the application
-
-Text selection: drag mouse to select text, then Ctrl+C to copy."""
+  /quit   — Exit the application"""
 
 
-class ChatPanel(Widget):
-    """Chat interface — MessageList output (color-coded, markdown) + Input field."""
+class ChatPanel(Vertical):
+    """Chat interface — MessageList output + Input field."""
 
     DEFAULT_CSS = """
     ChatPanel {
         height: 1fr;
         border: solid $primary;
-        border-title-align: center;
-        border-title-color: $primary;
-        border-title-background: $surface;
-        border-title-style: bold;
-        layout: vertical;
         background: $surface;
     }
+
     ChatPanel > MessageList {
         height: 1fr;
     }
+
     ChatPanel > Input {
         dock: bottom;
         height: 3;
-        margin: 1;
-        background: #18181b;
-        border: solid #1e293b;
-        color: #e2e8f0;
+        margin: 1 2;
+        background: $panel-alt;
+        border: solid $border;
+        color: $text;
     }
     ChatPanel > Input:focus {
         border: solid $primary;
@@ -64,9 +60,7 @@ class ChatPanel(Widget):
         text = event.value.strip()
         if not text:
             return
-
         event.input.clear()
-
         if text.startswith("/"):
             self._handle_command(text)
         else:
@@ -75,8 +69,11 @@ class ChatPanel(Widget):
 
     def add_message(self, role: str, content: str) -> None:
         """Append a color-coded message to the list."""
-        msg_list = self.query_one(MessageList)
-        msg_list.add_message(role, content)
+        try:
+            msg_list = self.query_one(MessageList)
+            msg_list.add_message(role, content)
+        except Exception:
+            logger.debug("MessageList not mounted yet")
 
     def _handle_command(self, text: str) -> None:
         """Route a slash command."""
@@ -106,10 +103,13 @@ class ChatPanel(Widget):
             self.add_message("thinking", "Thinking...")
             response = await provider.chat(messages)
             content = response.content if hasattr(response, "content") else str(response)
-            # Remove thinking indicator
-            msg_list = self.query_one(MessageList)
-            for entry in list(msg_list.query("MessageEntry.msg-thinking")):
-                entry.remove()
+            # Remove thinking entry
+            try:
+                msg_list = self.query_one(MessageList)
+                for entry in list(msg_list.query("MessageEntry.msg-thinking")):
+                    entry.remove()
+            except Exception:
+                pass
             self.add_message("assistant", content)
         except Exception as exc:
             self.add_message("error", f"Error: {exc}")
