@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from kazma_core.swarm.blackboard import SwarmDispatchContext, context_text
+from kazma_core.swarm.blackboard import SwarmDispatchContext
 from kazma_core.swarm.task import WorkerCapabilities
 
 logger = logging.getLogger(__name__)
@@ -321,7 +321,7 @@ class InProcessWorker(SwarmWorker):
                 for tc in response.tool_calls:
                     if tool_registry is None:
                         result = {
-                            "content": f"Tool execution unavailable: registry not loaded.",
+                            "content": "Tool execution unavailable: registry not loaded.",
                             "is_error": True,
                         }
                     else:

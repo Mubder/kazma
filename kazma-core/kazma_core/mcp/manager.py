@@ -697,8 +697,9 @@ class UnifiedToolExecutor:
                     tier = classify_mcp_tool(tool_name)
                     if tier in ("danger", "unknown"):
                         try:
-                            from kazma_core.swarm.safety import get_safety
                             import json as _json
+
+                            from kazma_core.swarm.safety import get_safety
 
                             safety = get_safety()
                             if safety.enabled:

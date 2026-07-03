@@ -1,6 +1,4 @@
 """Slash command router — resolves common commands without LLM calls.
-
-Commands are matched by prefix before the message ever reaches the
 agent.  This keeps responses instant (<50ms) and saves tokens.
 
 Registered commands:
@@ -26,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 if TYPE_CHECKING:
-    from kazma_core.config_store import get_config_store
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +56,7 @@ def _get_config_path() -> Path:
     raise FileNotFoundError("kazma.yaml not found")
 
 
-def _get_config_store() -> ConfigStore:
+def _get_config_store() -> Any:
     """Return the shared ``ConfigStore`` (locked SQLite settings store).
 
     Lazily imported to avoid a hard gateway -> core import at module load.

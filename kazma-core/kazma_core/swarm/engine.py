@@ -29,6 +29,7 @@ from kazma_core.swarm.patterns import (
     execute_pipeline,
     resume_pipeline,
 )
+from kazma_core.swarm.phonebook import WorkerPhonebook
 from kazma_core.swarm.reliability import (
     BoundedConcurrency,
     CircuitBreaker,
@@ -50,7 +51,6 @@ from kazma_core.swarm.task import (
     WorkerResult,
 )
 from kazma_core.swarm.task_store import TaskStore
-from kazma_core.swarm.phonebook import WorkerPhonebook
 from kazma_core.swarm.tracing import TracingEmitter
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
 

@@ -14,8 +14,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
 from kazma_core.swarm.task import WorkerCapabilities
+from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
 
 logger = logging.getLogger(__name__)
 

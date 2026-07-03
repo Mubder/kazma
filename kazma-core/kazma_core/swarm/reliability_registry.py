@@ -14,7 +14,8 @@ to enumerate workers (passed by the engine).
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from kazma_core.swarm.reliability import (
     BoundedConcurrency,

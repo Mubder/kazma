@@ -258,6 +258,7 @@ class DiscordAdapter(BaseAdapter):
         task_id = None
         try:
             from kazma_core.swarm.bus import get_message_bus
+
             from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
 
             adapter = get_message_bus().adapter

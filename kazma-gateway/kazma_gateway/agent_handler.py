@@ -258,7 +258,7 @@ async def _try_swarm_command(
         if sub == "status":
             try:
                 worker_names = engine.worker_names
-                status_lines = [f"🐝 Swarm Status\n", f"Workers: {len(worker_names)}"]
+                status_lines = ["🐝 Swarm Status\n", f"Workers: {len(worker_names)}"]
                 for name in worker_names:
                     w = engine.get_worker(name)
                     busy = " (busy)" if w and getattr(w, "busy", False) else ""
@@ -526,8 +526,8 @@ async def _dispatch_auto_route(
     # Try capability routing
     routed_workers: list[str] = []
     try:
-        from kazma_core.swarm.task import SwarmTask, TaskType
         from kazma_core.swarm.router import CapabilityRouter
+        from kazma_core.swarm.task import SwarmTask, TaskType
 
         router = CapabilityRouter()
         temp_task = SwarmTask(
@@ -930,7 +930,7 @@ async def _try_model_command(
             for m in p["models"][:5]:
                 active = " *(active)*" if _is_active_model(m) else ""
                 lines.append(f"    {m}{active}")
-        lines.append(f"\nUse `/config model <model_name>` to switch.")
+        lines.append("\nUse `/config model <model_name>` to switch.")
         await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
         return True
 

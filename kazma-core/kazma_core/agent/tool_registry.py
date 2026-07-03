@@ -355,8 +355,9 @@ class LocalToolRegistry:
         # gate already approved this call.
         if not _hitl_already_approved:
             try:
-                from kazma_core.swarm.safety import get_safety
                 import json as _json
+
+                from kazma_core.swarm.safety import get_safety
 
                 safety = get_safety()
                 # Pre-filter: non-danger tools skip the bus entirely.

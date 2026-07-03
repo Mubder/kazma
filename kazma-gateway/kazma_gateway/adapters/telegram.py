@@ -774,6 +774,7 @@ class TelegramAdapter(BaseAdapter):
             task_id = None
             try:
                 from kazma_core.swarm.bus import get_message_bus
+
                 from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
 
                 adapter = get_message_bus().adapter

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse
@@ -108,7 +108,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
         }
 
     # ── System: flush caches + show config paths ──────────────────
-    import os as _os_sys, glob as _glob_sys
+    import glob as _glob_sys
+    import os as _os_sys
     @app.get("/api/system/flush")
     async def _system_flush():
         """Flush in-memory caches and return config file paths."""
@@ -121,7 +122,6 @@ def create_app(config_path: str | None = None) -> FastAPI:
         }
         # Flush model registry cache
         try:
-            from kazma_core.model_registry import _registry
             import kazma_core.model_registry as _mr
             _mr._registry = None
         except Exception:
@@ -143,7 +143,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     @app.get("/api/system/config-paths")
     async def _system_config_paths():
         """Return the file paths of all active configuration sources."""
-        import os as _osp, glob as _g
+        import os as _osp
         home = _osp.path.expanduser("~/.kazma")
         return {
             "kazma_home": home,
@@ -184,7 +184,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         return {"status": "stream_started", "worker_name": worker_name, "task_id": task_id}
 
     # ── Global error boundary (#16) ──────────────────────────────────
-    from kazma_core.swarm.middleware import GracefulErrorFallback as _gef
+    from kazma_core.swarm.middleware import GracefulErrorFallback as _gef  # noqa: N813
     @app.exception_handler(Exception)
     async def _global_error_handler(request: Request, exc: Exception):
         """Catch-all handler — never let a broken skill crash the pipeline."""
@@ -222,7 +222,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         thread_id = req.get("thread_id", "")
         iteration = req.get("iteration", 0)
         if not thread_id:
-            from fastapi import HTTPException as _httpx
+            from fastapi import HTTPException as _httpx  # noqa: N813
             raise _httpx(status_code=400, detail="thread_id required")
         engine = _tt_mod.ReplayEngine()
         return await engine.replay_from(thread_id, iteration)
