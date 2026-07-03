@@ -1,83 +1,72 @@
-"""Message list widget — color-coded conversation display with accent bars.
+"""Message list widget — color-coded conversation with accent bars.
 
-Each message is rendered with a left-side accent bar color-coded by role:
-  - user:      cyan ($accent)
-  - assistant: purple ($secondary)
-  - tool:      amber ($warning)
-  - system:    dim ($text-muted)
-  - error:     red ($error)
-  - thinking:  highlighted cyan with alternate background
+Uses Static widgets (proven Textual rendering) with left-side accent
+bars color-coded by role. Messages are markdown via rich Panel styling.
 """
 
 from __future__ import annotations
 
-import logging
-
 from textual.containers import VerticalScroll
-from textual.widgets import RichLog
+from textual.widgets import Static
 
-logger = logging.getLogger(__name__)
 
-# Role → CSS class
-ROLE_CLASS: dict[str, str] = {
-    "user": "msg-user",
-    "assistant": "msg-assistant",
-    "tool": "msg-tool",
-    "system": "msg-system",
-    "error": "msg-error",
-    "thinking": "msg-thinking",
+ROLE_ACCENT: dict[str, str] = {
+    "user": "#22d3ee",
+    "assistant": "#a855f7",
+    "tool": "#fbbf24",
+    "system": "#64748b",
+    "error": "#ef4444",
+    "thinking": "#22d3ee",
+}
+
+ROLE_LABEL: dict[str, str] = {
+    "user": "YOU",
+    "assistant": "KAZMA",
+    "tool": "TOOL",
+    "system": "SYS",
+    "error": "ERR",
+    "thinking": "···",
 }
 
 
-class MessageEntry(RichLog):
-    """A single color-coded message entry with accent bar."""
-
-    DEFAULT_CSS = """
-    MessageEntry {
-        width: 100%;
-        height: auto;
-        min-height: 2;
-        margin: 1 2;
-        border-left: heavy $accent;
-        padding: 0 2;
-        background: transparent;
-        color: $text;
-    }
-    MessageEntry.msg-user { border-left: heavy $accent; }
-    MessageEntry.msg-assistant { border-left: heavy $secondary; }
-    MessageEntry.msg-tool { border-left: heavy $warning; }
-    MessageEntry.msg-system { border-left: heavy $text-muted; }
-    MessageEntry.msg-error { border-left: heavy $error; }
-    MessageEntry.msg-thinking { border-left: heavy $accent; background: $panel; }
-    """
+class MessageEntry(Static):
+    """A single message with accent bar and role label."""
 
     def __init__(self, role: str, content: str) -> None:
-        super().__init__(highlight=True, markup=True, wrap=True, auto_scroll=True)
-        self._content = content
-        self.add_class(ROLE_CLASS.get(role, "msg-system"))
-        self.write(f"[bold dim]{role.upper()}[/]")
-        self.write(content)
+        accent = ROLE_ACCENT.get(role, "#64748b")
+        label = ROLE_LABEL.get(role, role.upper())
+        header = f"[{accent}]▌[/] [bold dim]{label}[/]"
+        body = f"\n{content}" if content.strip() else ""
+        super().__init__(f"{header}{body}")
 
 
 class MessageList(VerticalScroll):
-    """Scrollable list of MessageEntry widgets with auto-scroll."""
+    """Scrollable list of colored MessageEntry widgets."""
 
     DEFAULT_CSS = """
     MessageList {
         height: 1fr;
         width: 100%;
         background: $surface;
+        padding: 1 2;
+    }
+    MessageEntry {
+        width: 100%;
+        height: auto;
+        min-height: 1;
+        margin-bottom: 1;
+        padding: 1 1;
+        background: $panel;
+        border-left: heavy $accent;
     }
     """
 
     def add_message(self, role: str, content: str) -> MessageEntry:
-        """Append a message and scroll to it."""
         entry = MessageEntry(role, content)
         self.mount(entry)
         self.scroll_end(animate=False)
         return entry
 
     def clear(self) -> None:
-        """Remove all messages."""
         for child in list(self.query(MessageEntry)):
             child.remove()

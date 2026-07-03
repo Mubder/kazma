@@ -1,7 +1,6 @@
-"""Chat interface widget for the Kazma TUI.
+"""Chat interface for the Kazma TUI.
 
-Uses MessageList (RichLog-based, markdown-capable) for output
-and Input for message entry. Color-coded accent bars per role.
+Color-coded messages with accent bars per role. Input at bottom.
 """
 
 from __future__ import annotations
@@ -10,22 +9,17 @@ import logging
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widget import Widget
 from textual.widgets import Input
 
 from kazma_tui.widgets.message_list import MessageList
 
 logger = logging.getLogger(__name__)
 
-_HELP_TEXT = """\
-Available commands:
-  /help   — Show this help message
-  /clear  — Clear the chat log
-  /quit   — Exit the application"""
+_HELP_TEXT = """Commands: /help, /clear, /model, /quit"""
 
 
 class ChatPanel(Vertical):
-    """Chat interface — MessageList output + Input field."""
+    """Chat: MessageList + Input."""
 
     DEFAULT_CSS = """
     ChatPanel {
@@ -33,11 +27,9 @@ class ChatPanel(Vertical):
         border: solid $primary;
         background: $surface;
     }
-
     ChatPanel > MessageList {
         height: 1fr;
     }
-
     ChatPanel > Input {
         dock: bottom;
         height: 3;
@@ -53,10 +45,9 @@ class ChatPanel(Vertical):
 
     def compose(self) -> ComposeResult:
         yield MessageList(id="message-list")
-        yield Input(placeholder="Type a message...", id="chat-input")
+        yield Input(placeholder="Type a message...  /help for commands", id="chat-input")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle Enter in the input field."""
         text = event.value.strip()
         if not text:
             return
@@ -64,22 +55,16 @@ class ChatPanel(Vertical):
         if text.startswith("/"):
             self._handle_command(text)
         else:
-            self.add_message("user", text)
+            self._add("user", text)
             self.app.call_later(self._generate_response, text)
 
-    def add_message(self, role: str, content: str) -> None:
-        """Append a color-coded message to the list."""
-        try:
-            msg_list = self.query_one(MessageList)
-            msg_list.add_message(role, content)
-        except Exception:
-            logger.debug("MessageList not mounted yet")
+    def _add(self, role: str, content: str) -> None:
+        self.query_one(MessageList).add_message(role, content)
 
     def _handle_command(self, text: str) -> None:
-        """Route a slash command."""
         cmd = text.lower().split()[0]
         if cmd == "/help":
-            self.add_message("system", _HELP_TEXT)
+            self._add("system", _HELP_TEXT)
         elif cmd == "/clear":
             self.query_one(MessageList).clear()
         elif cmd == "/quit":
@@ -87,40 +72,38 @@ class ChatPanel(Vertical):
         elif cmd in ("/model", "/models"):
             try:
                 from kazma_core.settings.model_registry import get_model_list_text
-                self.add_message("system", get_model_list_text("tui"))
-            except Exception as exc:
-                self.add_message("error", f"Model registry unavailable: {exc}")
+                self._add("system", get_model_list_text("tui"))
+            except Exception as e:
+                self._add("error", f"Model registry: {e}")
         else:
-            self.add_message("system", f"Unknown command: {cmd}. Try /help.")
+            self._add("system", f"Unknown: {cmd}. Try /help.")
 
     async def _generate_response(self, prompt: str) -> None:
-        """Generate an AI response via ModelRegistry."""
         try:
             from kazma_core.model_registry import get_model_registry
             registry = get_model_registry()
             provider = registry.get_client()
-            messages = [{"role": "user", "content": prompt}]
-            self.add_message("thinking", "Thinking...")
-            response = await provider.chat(messages)
+            self._add("thinking", "Thinking...")
+            response = await provider.chat([{"role": "user", "content": prompt}])
             content = response.content if hasattr(response, "content") else str(response)
-            # Remove thinking entry
-            try:
-                msg_list = self.query_one(MessageList)
-                for entry in list(msg_list.query("MessageEntry.msg-thinking")):
+            # Remove thinking, add response
+            msg_list = self.query_one(MessageList)
+            for entry in list(msg_list.query("MessageEntry")):
+                if "···" in str(entry.render()):
                     entry.remove()
-            except Exception:
-                pass
-            self.add_message("assistant", content)
-        except Exception as exc:
-            self.add_message("error", f"Error: {exc}")
+            self._add("assistant", content)
+        except Exception as e:
+            self._add("error", f"Error: {e}")
 
     def action_copy_last(self) -> None:
-        """Copy the last assistant message to clipboard."""
+        """Copy last assistant response to clipboard."""
         try:
             import pyperclip
-            msg_list = self.query_one(MessageList)
-            entries = list(msg_list.query("MessageEntry.msg-assistant"))
-            if entries:
-                pyperclip.copy(entries[-1].content)
+            entries = list(self.query_one(MessageList).query("MessageEntry"))
+            for entry in reversed(entries):
+                text = str(entry.render())
+                if text.startswith("▌ KAZMA"):
+                    pyperclip.copy(text.split("\n", 1)[-1])
+                    return
         except Exception:
             pass
