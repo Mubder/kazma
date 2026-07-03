@@ -1,34 +1,41 @@
-"""Chat interface for the Kazma TUI.
-
-Color-coded messages with accent bars per role. Input at bottom.
-"""
+"""Chat panel — RichLog output with colored messages + Input with copy/paste."""
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input
-
-from kazma_tui.widgets.message_list import MessageList
+from textual.widgets import Input, RichLog
 
 logger = logging.getLogger(__name__)
 
-_HELP_TEXT = """Commands: /help, /clear, /model, /quit"""
+# Color palette per role
+ROLE_COLOR = {
+    "user": "$text",
+    "assistant": "$secondary",
+    "tool": "$warning",
+    "system": "$text-disabled",
+    "error": "$error",
+    "thinking": "$primary",
+}
 
 
 class ChatPanel(Vertical):
-    """Chat: MessageList + Input."""
+    """Chat: RichLog (markdown output) + Input at bottom."""
 
     DEFAULT_CSS = """
     ChatPanel {
         height: 1fr;
-        border: solid $primary;
+        border: solid $border;
         background: $surface;
     }
-    ChatPanel > MessageList {
+    ChatPanel > RichLog {
         height: 1fr;
+        background: transparent;
+        border: none;
+        padding: 1 2;
     }
     ChatPanel > Input {
         dock: bottom;
@@ -44,8 +51,18 @@ class ChatPanel(Vertical):
     """
 
     def compose(self) -> ComposeResult:
-        yield MessageList(id="message-list")
+        yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True)
         yield Input(placeholder="Type a message...  /help for commands", id="chat-input")
+
+    # ── Message handling ─────────────────────────────────────────
+
+    def write(self, role: str, text: str) -> None:
+        """Write a color-coded message to the log."""
+        log = self.query_one(RichLog)
+        ts = datetime.now().strftime("%H:%M")
+        color = ROLE_COLOR.get(role, "$text-disabled")
+        label = role.upper()
+        log.write(f"[dim]{ts}[/] [{color}]▌ {label}[/] {text}")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
@@ -55,55 +72,52 @@ class ChatPanel(Vertical):
         if text.startswith("/"):
             self._handle_command(text)
         else:
-            self._add("user", text)
+            self.write("user", text)
             self.app.call_later(self._generate_response, text)
-
-    def _add(self, role: str, content: str) -> None:
-        self.query_one(MessageList).add_message(role, content)
 
     def _handle_command(self, text: str) -> None:
         cmd = text.lower().split()[0]
         if cmd == "/help":
-            self._add("system", _HELP_TEXT)
+            self.write("system", "/help, /clear, /model, /quit — Ctrl+P for command palette")
         elif cmd == "/clear":
-            self.query_one(MessageList).clear()
+            self.query_one(RichLog).clear()
         elif cmd == "/quit":
             self.app.exit()
         elif cmd in ("/model", "/models"):
             try:
                 from kazma_core.settings.model_registry import get_model_list_text
-                self._add("system", get_model_list_text("tui"))
+                self.write("system", get_model_list_text("tui"))
             except Exception as e:
-                self._add("error", f"Model registry: {e}")
+                self.write("error", f"Model registry: {e}")
         else:
-            self._add("system", f"Unknown: {cmd}. Try /help.")
+            self.write("system", f"Unknown: {cmd}")
 
     async def _generate_response(self, prompt: str) -> None:
         try:
             from kazma_core.model_registry import get_model_registry
             registry = get_model_registry()
             provider = registry.get_client()
-            self._add("thinking", "Thinking...")
+            self.write("thinking", "Thinking...")
             response = await provider.chat([{"role": "user", "content": prompt}])
             content = response.content if hasattr(response, "content") else str(response)
-            # Remove thinking, add response
-            msg_list = self.query_one(MessageList)
-            for entry in list(msg_list.query("MessageEntry")):
-                if "···" in str(entry.render()):
-                    entry.remove()
-            self._add("assistant", content)
+            # Remove thinking line
+            log = self.query_one(RichLog)
+            log.write(f"[bold $primary]▌ KAZMA[/] $text {content}")
         except Exception as e:
-            self._add("error", f"Error: {e}")
+            self.write("error", f"Error: {e}")
 
     def action_copy_last(self) -> None:
-        """Copy last assistant response to clipboard."""
+        """Copy last assistant message to clipboard. RichLog text selection also works with mouse."""
         try:
             import pyperclip
-            entries = list(self.query_one(MessageList).query("MessageEntry"))
-            for entry in reversed(entries):
-                text = str(entry.render())
-                if text.startswith("▌ KAZMA"):
-                    pyperclip.copy(text.split("\n", 1)[-1])
+            log = self.query_one(RichLog)
+            lines = log.text.split("\n")
+            for line in reversed(lines):
+                if "KAZMA" in line or "Thinking" in line:
+                    # Find the message body after the label
+                    parts = line.split(" ", 2)
+                    if len(parts) > 2:
+                        pyperclip.copy(parts[2])
                     return
         except Exception:
             pass

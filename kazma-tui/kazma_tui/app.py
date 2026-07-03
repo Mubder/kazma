@@ -1,7 +1,6 @@
-"""Main Kazma TUI application — Textual-based professional dashboard.
+"""Kazma TUI — Professional terminal dashboard for the Kazma agent framework.
 
-Adopts the kazma.ai design language: deep charcoal background,
-cyan primary accent, purple secondary, tabbed navigation.
+Architecture: Header (model info) · TabbedContent (Chat | Swarm | Files) · Footer (shortcuts)
 """
 
 from __future__ import annotations
@@ -10,63 +9,40 @@ import logging
 import sys
 
 from textual.app import App, ComposeResult
-from textual.widgets import TabbedContent, TabPane
+from textual.widgets import Footer, Header, TabbedContent, TabPane
 
 from kazma_tui.chat import ChatPanel
-from kazma_tui.dashboard import MetricsDashboard
-from kazma_tui.footer import FooterShortcuts
-from kazma_tui.header import HeaderProviderModel
-from kazma_tui.panels.swarm_panel import SwarmPanel
-from kazma_tui.theme import KAZMA_CSS
+from kazma_tui.footer import KazmaFooter
+from kazma_tui.header import KazmaHeader
+from kazma_tui.swarm import SwarmPanel
+from kazma_tui.theme import KAZMA_THEME
 
 logger = logging.getLogger(__name__)
 
 
 class KazmaTUI(App[None]):
-    """Kazma TUI — Production terminal dashboard.
+    """Kazma Terminal Dashboard — kazma.ai Web UI theme."""
 
-    Features:
-    - Tabbed navigation: Chat | Swarm
-    - Metrics dashboard with CPU/Memory/RPM/Latency
-    - Chat interface with markdown and streaming
-    - ModelRegistry integration
-    - Swarm worker registry with live bus events
-    - Context-sensitive footer shortcuts
-    - kazma.ai dark theme
-
-    Keys:
-        Ctrl+T  — Switch tabs
-        Ctrl+P  — Command palette
-        Ctrl+Q  — Quit
-        Enter   — Send chat message
-    """
-
-    TITLE = "Kazma TUI"
-    CSS = KAZMA_CSS
+    TITLE = "Kazma"
+    CSS = KAZMA_THEME
 
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
-        ("ctrl+y", "copy_last", "Copy last"),
         ("ctrl+p", "command_palette", "Commands"),
+        ("ctrl+c", "copy", "Copy"),
     ]
 
     def compose(self) -> ComposeResult:
-        """Create the tabbed application layout.
-
-        Widgets are composed directly inside TabPane (not Screen wrappers)
-        to avoid full re-renders on tab switches.
-        """
-        yield HeaderProviderModel()
-        yield MetricsDashboard()
-        with TabbedContent(initial="chat-tab"):
-            with TabPane("Chat", id="chat-tab"):
+        yield KazmaHeader()
+        with TabbedContent(initial="chat"):
+            with TabPane("Chat", id="chat"):
                 yield ChatPanel()
-            with TabPane("Swarm", id="swarm-tab"):
+            with TabPane("Swarm", id="swarm"):
                 yield SwarmPanel()
-        yield FooterShortcuts()
+        yield KazmaFooter()
 
-    def action_copy_last(self) -> None:
-        """Copy the last chat message to clipboard."""
+    def action_copy(self) -> None:
+        """Copy selected text or last response to clipboard."""
         try:
             chat = self.query_one(ChatPanel)
             chat.action_copy_last()
@@ -74,17 +50,13 @@ class KazmaTUI(App[None]):
             pass
 
     def action_command_palette(self) -> None:
-        """Open the fuzzy-searchable command palette."""
-        from kazma_tui.screens.command_palette import CommandPalette
-
+        from kazma_tui.command_palette import CommandPalette
         self.push_screen(CommandPalette())
 
 
 def main() -> None:
-    """Launch the Kazma TUI application."""
     try:
-        app = KazmaTUI()
-        app.run()
+        KazmaTUI().run()
     except Exception:
-        logger.exception("Failed to launch Kazma TUI")
+        logger.exception("Kazma TUI crashed")
         sys.exit(1)

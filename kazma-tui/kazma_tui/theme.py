@@ -1,45 +1,42 @@
-"""Kazma TUI — Professional terminal dashboard theme.
+"""Kazma TUI Theme — exact kazma.ai Web UI color palette mapped to Textual TCSS.
 
-Adopts the exact color palette from kazma.ai:
-  - Deep charcoal background with subtle grid
-  - Cyan (#06b6d4) primary accent
-  - Purple (#a855f7) secondary accent
-  - Dark panel cards (#0f172a) with subtle borders
-  - Gradient cyan→purple for active elements
-  - Sans-serif / monospace font pairing
+Color sources from kazma-ui/kazma_ui/static/css/kazma.css:
+  bg:           #0a0f14  (deep charcoal page bg)
+  bg-panel:     #11171f  (card/panel bg)
+  accent:       #22d3ee  (cyan primary)
+  secondary:    #a855f7  (purple)
+  success:      #10b981  (green)
+  warning:      #f59e0b  (amber)
+  danger:       #ef4444  (red)
+  text-primary: #e6edf3  (near-white)
+  text-secondary: #b1bac4
+  text-tertiary:  #8b949e
+  border:       rgba(255,255,255,0.1)
 """
 
-# ── Color Palette (from kazma.ai) ───────────────────────────────────────
-KAZMA_CSS = """
+KAZMA_THEME = """
 /* ═══════════════════════════════════════════════════════════════════════
-   Kazma Terminal Theme — kazma.ai palette
+   Kazma Web UI Palette → Textual TCSS
    ═══════════════════════════════════════════════════════════════════════ */
 
-$primary: #06b6d4;        /* cyan — kazma.ai accent */
-$secondary: #a855f7;      /* purple — kazma.ai secondary */
-$accent: #22d3ee;         /* bright cyan — highlights */
-$error: #ef4444;          /* red */
-$success: #22c55e;        /* green */
+/* Base colors */
+$primary:    #22d3ee;      /* accent-cyan */
+$secondary:  #a855f7;      /* purple */
+$accent:     #22d3ee;
+$error:      #ef4444;      /* danger */
+$success:    #10b981;
+$warning:    #f59e0b;      /* amber */
+$surface:    #0a0f14;      /* bg — deepest */
+$panel:      #11171f;      /* bg-panel */
+$boost:      #141c25;      /* bg-surface */
+$border:     rgba(255,255,255,0.1);
 
-$surface: #02040a;         /* deepest bg — kazma.ai page bg */
-$panel: #0f172a;          /* card bg — kazma.ai panel */
-$panel-alt: #18181b;      /* alternating row / hover */
-$border: #1e293b;         /* subtle borders — kazma.ai card edge */
-$text: #e2e8f0;           /* near-white body */
-$text-muted: #94a3b8;     /* kazma.ai body text */
-$text-dim: #64748b;       /* very dim */
-
-/* Semantic message role colors (Grok-style accent bars) */
-$accent-user: #22d3ee;         /* cyan — user messages */
-$accent-assistant: #a855f7;    /* purple — assistant */
-$accent-tool: #fbbf24;         /* amber — tool calls */
-$accent-system: #64748b;       /* dim — system messages */
-$accent-error: #ef4444;        /* red — errors */
-$accent-thinking: #22d3ee;     /* cyan — thinking blocks */
-$code-bg: #1e293b;             /* code block background */
+$text:       #e6edf3;      /* text-primary */
+$text-muted: #b1bac4;      /* text-secondary */
+$text-disabled: #8b949e;   /* text-tertiary */
 
 /* ═══════════════════════════════════════════════════════════════════════
-   Screen
+   Global
    ═══════════════════════════════════════════════════════════════════════ */
 
 Screen {
@@ -47,256 +44,184 @@ Screen {
     color: $text;
 }
 
-MetricsDashboard {
-    height: 8;
+Header {
+    dock: top;
+    height: 3;
+    background: $panel;
+    border-bottom: solid $primary 40%;
+    color: $text;
+    text-style: bold;
 }
+
+Footer {
+    dock: bottom;
+    height: 1;
+    background: $primary 18%;
+    color: $primary;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Tabs — matching web UI nav style
+   ═══════════════════════════════════════════════════════════════════════ */
 
 TabbedContent {
     height: 1fr;
 }
-
 TabPane {
-    height: 1fr;
     background: $surface;
-    padding: 0;
+    padding: 1 2;
 }
-
-TabbedContent > ContentTabs > Tab {
-    padding: 0 2;
-    border: none;
-    background: transparent;
+ContentTabs {
+    background: $panel;
+    border-bottom: solid $border;
+    height: 3;
+}
+ContentTabs > Tab {
+    padding: 0 3;
     color: $text-muted;
+    background: transparent;
     text-style: bold;
+    border: none;
 }
-
-TabbedContent > ContentTabs > Tab:hover {
-    color: $text;
-    background: $panel-alt;
-}
-
-TabbedContent > ContentTabs > Tab.-active {
+ContentTabs > Tab:hover { color: $text; }
+ContentTabs > Tab.-active {
     color: $primary;
     background: $surface;
     border-bottom: double $primary;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   Header — cyan bottom border, centered
-   ═══════════════════════════════════════════════════════════════════════ */
-
-HeaderProviderModel {
-    dock: top;
-    height: 3;
-    background: $panel;
-    content-align: center middle;
-    border-bottom: heavy $primary;
-}
-
-HeaderProviderModel Static#provider-label {
-    color: $text-dim;
-    content-align: right middle;
-    width: auto;
-    padding-right: 1;
-}
-
-HeaderProviderModel Static#model-label {
-    color: $primary;
-    text-style: bold;
-    content-align: left middle;
-    width: auto;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Footer — subtle top border
-   ═══════════════════════════════════════════════════════════════════════ */
-
-FooterShortcuts {
-    dock: bottom;
-    height: 1;
-    background: $panel;
-    color: $text-dim;
-    content-align: center middle;
-    border-top: solid $border;
-}
-
-FooterShortcuts .shortcut-key {
-    color: $primary;
-    text-style: bold;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Metrics Dashboard — panel card with purple border title
-   ═══════════════════════════════════════════════════════════════════════ */
-
-MetricsDashboard {
-    height: 11;
-    min-height: 11;
-    max-height: 11;
-    background: $panel;
-    border: solid $border;
-    border-title-align: center;
-    border-title-color: $secondary;
-    border-title-background: $surface;
-    border-title-style: bold;
-    margin: 1 1 0 1;
-    padding: 0;
-    overflow: hidden;
-}
-
-MetricsDashboard > Vertical {
-    height: 100%;
-    padding: 1;
-}
-
-MetricsDashboard .gauge-label {
-    color: $text-muted;
-    text-style: bold;
-}
-
-MetricsDashboard .gauge-label {
-    color: $text-muted;
-    text-style: bold;
-}
-
-MetricsDashboard .gauge-value {
-    text-style: bold;
-}
-
-MetricsDashboard .gauge-good { color: $success; }
-MetricsDashboard .gauge-warn { color: $accent; }
-MetricsDashboard .gauge-bad  { color: $error; }
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Chat Panel — bordered card
+   Chat
    ═══════════════════════════════════════════════════════════════════════ */
 
 ChatPanel {
     height: 1fr;
-    background: $panel;
-    border: solid $border;
-    border-title-align: center;
-    border-title-color: $primary;
-    border-title-background: $surface;
-    border-title-style: bold;
-    margin: 1 1 0 1;
-    padding: 0;
-    layout: vertical;
+    background: $surface;
 }
-
-ChatPanel RichLog {
+ChatPanel > RichLog {
     height: 1fr;
     background: transparent;
     border: none;
-    margin: 0 1;
+    padding: 1 2;
 }
-
-ChatPanel Input {
+ChatPanel > Input {
     dock: bottom;
-    margin: 1;
-    background: $panel-alt;
+    height: 3;
+    margin: 1 2;
+    background: $panel;
     border: solid $border;
     color: $text;
 }
-
-ChatPanel Input:focus {
-    border: solid $primary;
-}
+ChatPanel > Input:focus { border: solid $primary; }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   Swarm Panel — split-pane with blue border
+   Swarm
    ═══════════════════════════════════════════════════════════════════════ */
 
-SwarmPanel {
+WorkerTable {
     height: 1fr;
+    background: transparent;
+}
+WorkerTable > .datatable--header {
     background: $panel;
-    border: solid $border;
-    border-title-align: center;
-    border-title-color: $accent;
-    border-title-background: $surface;
-    border-title-style: bold;
-    margin: 1 1 0 1;
-    padding: 0;
-}
-
-SwarmPanel > Horizontal { height: 1fr; }
-
-SwarmPanel WorkerTable {
-    width: 45%;
-    background: transparent;
-    border: none;
-    margin: 1;
-}
-
-SwarmPanel LogStream {
-    width: 55%;
-    background: transparent;
-    border-left: solid $border;
-    margin: 1;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   DataTable — modern terminal table styling
-   ═══════════════════════════════════════════════════════════════════════ */
-
-DataTable {
-    background: transparent;
-    border: none;
-}
-
-DataTable > .datatable--header {
-    background: $panel-alt;
     color: $primary;
     text-style: bold;
 }
 
-DataTable > .datatable--even-row { background: $panel; }
-DataTable > .datatable--odd-row  { background: $panel-alt; }
-DataTable > .datatable--cursor   { background: $secondary 15%; }
-
 /* ═══════════════════════════════════════════════════════════════════════
-   RichLog — clean log output
+   Shared components
    ═══════════════════════════════════════════════════════════════════════ */
+
+DataTable {
+    background: transparent;
+    border: solid $border;
+}
+DataTable > .datatable--header {
+    background: $panel;
+    color: $primary;
+}
+DataTable > .datatable--cursor {
+    background: $primary 12%;
+}
 
 RichLog {
     background: transparent;
-    scrollbar-color: $border;
-    scrollbar-color-hover: $secondary;
-    scrollbar-background: $surface;
+    scrollbar-color: $primary $panel;
+    scrollbar-color-hover: $primary;
+    scrollbar-color-active: $primary;
+    scrollbar-size: 1 1;
+}
+
+Input {
+    background: $panel;
+    border: solid $border;
+    color: $text;
+}
+Input:focus { border: solid $primary; }
+
+Button {
+    background: $panel;
+    border: solid $border;
+    color: $text;
+}
+Button:hover { border: solid $primary; background: $primary 8%; }
+
+SelectionList {
+    background: transparent;
+    border: solid $border;
+}
+SelectionList > ListItem {
+    padding: 0 2;
+}
+SelectionList > ListItem.-highlight {
+    background: $primary 12%;
+}
+
+Tree {
+    background: transparent;
+}
+Tree > .tree--cursor {
+    background: $primary 12%;
+}
+
+ProgressBar {
+    height: 1;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   Scrollbars
+   Command Palette
+   ═══════════════════════════════════════════════════════════════════════ */
+
+CommandPalette {
+    align: center middle;
+}
+CommandPalette > .palette-box {
+    width: 55%;
+    max-height: 55%;
+    background: $panel;
+    border: solid $primary;
+    padding: 1 2;
+}
+CommandPalette > Input {
+    width: 100%;
+    margin-bottom: 1;
+}
+CommandPalette > ListView {
+    height: 1fr;
+    background: transparent;
+}
+CommandPalette > ListView > ListItem.-highlight {
+    background: $primary 12%;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Scrollbar — matching web UI
    ═══════════════════════════════════════════════════════════════════════ */
 
 Scrollbar {
     scrollbar-color: $border;
-    scrollbar-color-hover: $secondary;
+    scrollbar-color-hover: $primary;
     scrollbar-color-active: $primary;
-    scrollbar-background: $surface;
-    scrollbar-size-vertical: 1;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Utility classes
-   ═══════════════════════════════════════════════════════════════════════ */
-
-.metric-value {
-    color: $text;
-    text-style: bold;
-}
-.metric-unit {
-    color: $text-dim;
-}
-.metric-label {
-    color: $text-muted;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Thinking block — highlighted accent (no animation; Textual CSS subset)
-   ═══════════════════════════════════════════════════════════════════════ */
-
-MessageEntry.msg-thinking {
-    border-left: heavy $accent;
-    background: $panel-alt;
+    scrollbar-size: 1 0;
 }
 """
