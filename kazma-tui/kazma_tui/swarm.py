@@ -1,13 +1,12 @@
-"""Swarm panel — worker registry DataTable + task history."""
+"""Swarm panel — DataTable workers + RichLog tasks + Tree hierarchy."""
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
-from textual.widgets import DataTable, RichLog, Static, TabbedContent, TabPane
+from textual.widgets import DataTable, RichLog, Static, TabbedContent, TabPane, Tree
 
 logger = logging.getLogger(__name__)
 
@@ -15,9 +14,7 @@ logger = logging.getLogger(__name__)
 class WorkerTable(DataTable):
     """DataTable showing registered swarm workers."""
 
-    DEFAULT_CSS = """
-    WorkerTable { height: 1fr; background: transparent; }
-    """
+    DEFAULT_CSS = """WorkerTable { height: 1fr; background: transparent; }"""
 
     def on_mount(self) -> None:
         self.cursor_type = "row"
@@ -45,9 +42,7 @@ class WorkerTable(DataTable):
 class SwarmTasksTable(DataTable):
     """DataTable showing recent task history."""
 
-    DEFAULT_CSS = """
-    SwarmTasksTable { height: 1fr; background: transparent; }
-    """
+    DEFAULT_CSS = """SwarmTasksTable { height: 1fr; background: transparent; }"""
 
     def on_mount(self) -> None:
         self.cursor_type = "row"
@@ -65,11 +60,8 @@ class SwarmTasksTable(DataTable):
             for t in tasks:
                 dur = f"{t.duration_seconds:.1f}s" if getattr(t, "duration_seconds", None) else "—"
                 self.add_row(
-                    t.id[:16],
-                    getattr(t, "type", "?"),
-                    t.status,
-                    ", ".join(t.workers[:3]) if hasattr(t, "workers") else "",
-                    dur,
+                    t.id[:16], getattr(t, "type", "?"), t.status,
+                    ", ".join(t.workers[:3]) if hasattr(t, "workers") else "", dur,
                 )
         except Exception:
             pass
@@ -81,12 +73,10 @@ class SwarmTasksTable(DataTable):
 class ActiveTasksLog(RichLog):
     """Log stream showing active/in-flight tasks."""
 
-    DEFAULT_CSS = """
-    ActiveTasksLog { height: 1fr; background: transparent; border: none; }
-    """
+    DEFAULT_CSS = """ActiveTasksLog { height: 1fr; background: transparent; border: none; }"""
 
     def on_mount(self) -> None:
-        self.write("[bold $primary]Active Tasks[/]")
+        self.write("[bold #22d3ee]Active Tasks[/]")
         self._refresh()
 
     def _refresh(self) -> None:
@@ -100,7 +90,7 @@ class ActiveTasksLog(RichLog):
                 self.write("[dim]No active tasks[/]")
                 return
             for t in active:
-                self.write(f"[$primary]●[/] {t.id[:12]} [{t.status}] {t.prompt[:60]}")
+                self.write(f"[#22d3ee]●[/] {t.id[:12]} [{t.status}] {t.prompt[:60]}")
         except Exception:
             pass
 
@@ -109,12 +99,44 @@ class ActiveTasksLog(RichLog):
         self.on_mount()
 
 
-class SwarmPanel(VerticalScroll):
-    """Swarm tab: sub-tabs for Workers, Active Tasks, Task History."""
+class WorkerTree(Tree):
+    """Tree showing worker hierarchy with capabilities."""
 
-    DEFAULT_CSS = """
-    SwarmPanel { height: 1fr; }
-    """
+    DEFAULT_CSS = """WorkerTree { height: 1fr; background: transparent; }"""
+
+    def on_mount(self) -> None:
+        self.show_root = False
+        root = self.root
+        try:
+            from kazma_core.swarm import get_swarm_engine
+            engine = get_swarm_engine()
+            if engine is None:
+                root.add_leaf("(no engine)")
+                return
+            for name, worker in engine._workers.items():
+                node = root.add(name, expand=True)
+                node.add_leaf(f"Role: {worker.role}")
+                node.add_leaf(f"Model: {worker.model or '?'}")
+                node.add_leaf(f"Status: {'online' if getattr(worker, '_running', False) else 'offline'}")
+                caps = getattr(worker, "capabilities", None)
+                if caps:
+                    expertise = getattr(caps, "expertise", [])
+                    if expertise:
+                        exp_node = node.add("Expertise", expand=True)
+                        for e in expertise:
+                            exp_node.add_leaf(e)
+        except Exception:
+            root.add_leaf("(unavailable)")
+
+    def on_show(self) -> None:
+        self.clear()
+        self.on_mount()
+
+
+class SwarmPanel(VerticalScroll):
+    """Swarm tab: sub-tabs Workers, Active, History, Tree."""
+
+    DEFAULT_CSS = """SwarmPanel { height: 1fr; }"""
 
     def compose(self) -> ComposeResult:
         with TabbedContent(initial="workers"):
@@ -125,5 +147,8 @@ class SwarmPanel(VerticalScroll):
                 yield Static("In-flight tasks", classes="section-label")
                 yield ActiveTasksLog()
             with TabPane("History", id="history"):
-                yield Static("Recent task history (last 20)", classes="section-label")
+                yield Static("Recent task history", classes="section-label")
                 yield SwarmTasksTable()
+            with TabPane("Tree", id="tree"):
+                yield Static("Worker capability hierarchy", classes="section-label")
+                yield WorkerTree()

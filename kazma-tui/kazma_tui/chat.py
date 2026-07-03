@@ -1,4 +1,4 @@
-"""Chat panel — RichLog output with colored messages + Input with copy/paste."""
+"""Chat panel — RichLog + Input + ProgressBar for thinking indicator."""
 
 from __future__ import annotations
 
@@ -7,12 +7,11 @@ from datetime import datetime
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input, RichLog
+from textual.widgets import Input, ProgressBar, RichLog
 
 logger = logging.getLogger(__name__)
 
-# Color palette per role (Rich markup uses CSS color names or hex)
-ROLE_COLOR = {
+ROLE_HEX: dict[str, str] = {
     "user": "#e6edf3",
     "assistant": "#a855f7",
     "tool": "#f59e0b",
@@ -23,46 +22,51 @@ ROLE_COLOR = {
 
 
 class ChatPanel(Vertical):
-    """Chat: RichLog (markdown output) + Input at bottom."""
+    """Chat: RichLog output + ProgressBar + Input."""
 
     DEFAULT_CSS = """
-    ChatPanel {
-        height: 1fr;
-        border: solid $border;
-        background: $surface;
-    }
-    ChatPanel > RichLog {
-        height: 1fr;
-        background: transparent;
-        border: none;
-        padding: 1 2;
-    }
+    ChatPanel { height: 1fr; border: solid $border; background: $surface; }
+    ChatPanel > RichLog { height: 1fr; background: transparent; border: none; padding: 1 2; }
+    ChatPanel > ProgressBar { height: 1; margin: 0 2; }
     ChatPanel > Input {
-        dock: bottom;
-        height: 3;
-        margin: 1 2;
-        background: $panel;
-        border: solid $border;
-        color: $text;
+        dock: bottom; height: 3; margin: 1 2;
+        background: $panel; border: solid $border; color: $text;
     }
-    ChatPanel > Input:focus {
-        border: solid $primary;
-    }
+    ChatPanel > Input:focus { border: solid $primary; }
     """
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True)
-        yield Input(placeholder="Type a message...  /help for commands", id="chat-input")
+        yield ProgressBar(id="chat-progress", total=100, show_eta=False)
+        yield Input(placeholder="Type... /help for commands", id="chat-input")
 
-    # ── Message handling ─────────────────────────────────────────
+    # ── Message writing ────────────────────────────────────────────
 
     def write(self, role: str, text: str) -> None:
-        """Write a color-coded message to the log."""
         log = self.query_one(RichLog)
         ts = datetime.now().strftime("%H:%M")
-        color = ROLE_COLOR.get(role, "$text-disabled")
+        hex_color = ROLE_HEX.get(role, "#8b949e")
         label = role.upper()
-        log.write(f"[dim]{ts}[/] [{color}]▌ {label}[/] {text}")
+        log.write(f"[dim]{ts}[/] [{hex_color}]▌ {label}[/] {text}")
+
+    def show_progress(self, visible: bool) -> None:
+        bar = self.query_one(ProgressBar)
+        bar.display = visible
+        if visible:
+            bar.update(progress=0)
+            self.set_interval(0.3, self._pulse_progress)
+
+    def hide_progress(self) -> None:
+        self.query_one(ProgressBar).display = False
+
+    def _pulse_progress(self) -> None:
+        bar = self.query_one(ProgressBar)
+        if bar.display:
+            bar.advance(5)
+            if bar.progress >= 100:
+                bar.update(progress=0)
+
+    # ── Input handling ─────────────────────────────────────────────
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
@@ -78,7 +82,7 @@ class ChatPanel(Vertical):
     def _handle_command(self, text: str) -> None:
         cmd = text.lower().split()[0]
         if cmd == "/help":
-            self.write("system", "/help, /clear, /model, /quit — Ctrl+P for command palette")
+            self.write("system", "/help, /clear, /model, /quit — Ctrl+P palette")
         elif cmd == "/clear":
             self.query_one(RichLog).clear()
         elif cmd == "/quit":
@@ -95,29 +99,26 @@ class ChatPanel(Vertical):
     async def _generate_response(self, prompt: str) -> None:
         try:
             from kazma_core.model_registry import get_model_registry
+            self.show_progress(True)
             registry = get_model_registry()
             provider = registry.get_client()
-            self.write("thinking", "Thinking...")
             response = await provider.chat([{"role": "user", "content": prompt}])
+            self.hide_progress()
             content = response.content if hasattr(response, "content") else str(response)
-            # Remove thinking line
-            log = self.query_one(RichLog)
-            log.write(f"[bold #22d3ee]▌ KAZMA[/] {content}")
+            self.write("assistant", content)
         except Exception as e:
+            self.hide_progress()
             self.write("error", f"Error: {e}")
 
     def action_copy_last(self) -> None:
-        """Copy last assistant message to clipboard. RichLog text selection also works with mouse."""
         try:
             import pyperclip
             log = self.query_one(RichLog)
-            lines = log.text.split("\n")
-            for line in reversed(lines):
-                if "KAZMA" in line or "Thinking" in line:
-                    # Find the message body after the label
-                    parts = line.split(" ", 2)
-                    if len(parts) > 2:
-                        pyperclip.copy(parts[2])
+            for line in reversed(log.text.split("\n")):
+                if "KAZMA" in line:
+                    parts = line.split(" ", 3)
+                    if len(parts) > 3:
+                        pyperclip.copy(parts[3])
                     return
         except Exception:
             pass
