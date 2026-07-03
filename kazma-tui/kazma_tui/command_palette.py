@@ -5,7 +5,7 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, ListItem, ListView
+from textual.widgets import Input, ListItem, ListView, Static
 
 
 class CommandPalette(ModalScreen[str | None]):
@@ -59,7 +59,7 @@ class CommandPalette(ModalScreen[str | None]):
         with Vertical():
             yield Input(placeholder="Search commands...", id="palette-search")
             yield ListView(
-                *[ListItem(f"  {name}    {desc}") for name, desc, _ in self.COMMANDS if name != "-"],
+                *[ListItem(Static(f"  {name}    {desc}")) for name, desc, _ in self.COMMANDS if name != "-"],
                 id="palette-list",
             )
 
@@ -74,12 +74,12 @@ class CommandPalette(ModalScreen[str | None]):
             if name == "-":
                 continue
             if q in name.lower() or q in desc.lower():
-                lst.append(ListItem(f"  {name}    {desc}"))
+                lst.append(ListItem(Static(f"  {name}    {desc}")))
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.item is None:
             return
-        text = str(event.item.render()).strip()
+        text = str(event.item.query_one(Static).renderable).strip()
         cmd = text.split("    ")[0].strip()
         if cmd == "/quit":
             self.app.exit()

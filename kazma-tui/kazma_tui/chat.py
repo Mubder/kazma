@@ -11,14 +11,14 @@ from textual.widgets import Input, RichLog
 
 logger = logging.getLogger(__name__)
 
-# Color palette per role
+# Color palette per role (Rich markup uses CSS color names or hex)
 ROLE_COLOR = {
-    "user": "$text",
-    "assistant": "$secondary",
-    "tool": "$warning",
-    "system": "$text-disabled",
-    "error": "$error",
-    "thinking": "$primary",
+    "user": "#e6edf3",
+    "assistant": "#a855f7",
+    "tool": "#f59e0b",
+    "system": "#8b949e",
+    "error": "#ef4444",
+    "thinking": "#22d3ee",
 }
 
 
@@ -102,7 +102,7 @@ class ChatPanel(Vertical):
             content = response.content if hasattr(response, "content") else str(response)
             # Remove thinking line
             log = self.query_one(RichLog)
-            log.write(f"[bold $primary]▌ KAZMA[/] $text {content}")
+            log.write(f"[bold #22d3ee]▌ KAZMA[/] {content}")
         except Exception as e:
             self.write("error", f"Error: {e}")
 
