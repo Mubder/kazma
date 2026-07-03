@@ -30,7 +30,8 @@ class WorkerTable(DataTable):
                 self.add_row("(no engine)", "", "", "")
                 return
             for name, worker in engine._workers.items():
-                status = "● online" if getattr(worker, "_running", False) else "○ offline"
+                running = getattr(worker, "_running", False)
+                status = "● online" if running else "○ offline"
                 self.add_row(name, worker.role, status, worker.model or "?")
         except Exception:
             self.add_row("(unavailable)", "", "", "")
@@ -58,13 +59,32 @@ class SwarmTasksTable(DataTable):
                 return
             tasks = engine.list_tasks()[:20]
             for t in tasks:
-                dur = f"{t.duration_seconds:.1f}s" if getattr(t, "duration_seconds", None) else "—"
+                dur = self._task_duration(t)
                 self.add_row(
-                    t.id[:16], getattr(t, "type", "?"), t.status,
-                    ", ".join(t.workers[:3]) if hasattr(t, "workers") else "", dur,
+                    t.id[:16],
+                    t.type.value if hasattr(t.type, "value") else str(t.type),
+                    t.status.value if hasattr(t.status, "value") else str(t.status),
+                    ", ".join(t.workers[:3]) if t.workers else "",
+                    dur,
                 )
         except Exception:
             pass
+
+    @staticmethod
+    def _task_duration(t: object) -> str:
+        """Compute task duration from created_at/completed_at timestamps."""
+        created = getattr(t, "created_at", None)
+        completed = getattr(t, "completed_at", None)
+        if created and completed:
+            try:
+                from datetime import datetime
+                start = datetime.fromisoformat(created)
+                end = datetime.fromisoformat(completed)
+                secs = (end - start).total_seconds()
+                return f"{secs:.1f}s"
+            except Exception:
+                pass
+        return "—"
 
     def on_show(self) -> None:
         self._refresh()

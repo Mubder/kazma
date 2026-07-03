@@ -32,14 +32,16 @@ class FilesPanel(VerticalScroll):
 
     def _show_preview(self, path: Path) -> None:
         container = self.query_one("#file-preview", Static)
-        container.remove_children()
+        # Properly remove all previously mounted child widgets
+        for child in list(container.children):
+            child.remove()
         try:
             content = path.read_text()
             if path.suffix in (".md", ".markdown", ".MD"):
                 container.mount(Markdown(content))
             else:
-                container.mount(RichLog(highlight=True, markup=True))
-                log = container.query_one(RichLog)
+                log = RichLog(highlight=True, markup=True)
+                container.mount(log)
                 log.write(f"[bold #22d3ee]{path.name}[/]\n")
                 log.write(content[:10000])
         except UnicodeDecodeError:

@@ -188,40 +188,14 @@ ProgressBar {
     height: 1;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   Command Palette
-   ═══════════════════════════════════════════════════════════════════════ */
+    /* ═══════════════════════════════════════════════════════════════════════
+       Scrollbar — matching web UI
+       ═══════════════════════════════════════════════════════════════════════ */
 
-CommandPalette {
-    align: center middle;
-}
-CommandPalette > .palette-box {
-    width: 55%;
-    max-height: 55%;
-    background: $panel;
-    border: solid $primary;
-    padding: 1 2;
-}
-CommandPalette > Input {
-    width: 100%;
-    margin-bottom: 1;
-}
-CommandPalette > ListView {
-    height: 1fr;
-    background: transparent;
-}
-CommandPalette > ListView > ListItem.-highlight {
-    background: $primary 12%;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Scrollbar — matching web UI
-   ═══════════════════════════════════════════════════════════════════════ */
-
-Scrollbar {
-    scrollbar-color: $border;
-   scrollbar-color-hover: $primary;
-   scrollbar-color-active: $primary;
-   scrollbar-size: 1 0;
-}
-"""
+    Scrollbar {
+        scrollbar-color: $border;
+        scrollbar-color-hover: $primary;
+        scrollbar-color-active: $primary;
+        scrollbar-size: 1 0;
+    }
+    """

@@ -30,9 +30,8 @@ class KazmaTUI(App[None]):
     BINDINGS = [
         ("ctrl+q", "quit", "Quit"),
         ("ctrl+p", "command_palette", "Commands"),
-        ("ctrl+c", "copy", "Copy"),
+        ("ctrl+shift+c", "copy_clipboard", "Copy"),
         ("ctrl+f", "focus_input", "Focus Chat"),
-        ("ctrl+l", "theme_notice", "Theme"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -48,9 +47,11 @@ class KazmaTUI(App[None]):
                 yield SettingsPanel()
         yield Footer()
 
-    def action_copy(self) -> None:
+    def action_copy_clipboard(self) -> None:
+        """Copy selected text or last KAZMA response to the system clipboard."""
         try:
-            self.query_one(ChatPanel).action_copy_last()
+            chat = self.query_one(ChatPanel)
+            chat.copy_to_clipboard()
         except Exception:
             pass
 
@@ -63,9 +64,6 @@ class KazmaTUI(App[None]):
             self.query_one("#chat-input").focus()
         except Exception:
             pass
-
-    def action_theme_notice(self) -> None:
-        self.notify("Light theme coming in a future update", severity="information", timeout=3)
 
 
 def main() -> None:

@@ -81,7 +81,13 @@ class ChatPanel(Vertical):
             # True token-by-token streaming via provider.chat(stream=True)
             response = await provider.chat(messages, stream=True)
             async for chunk in response:
-                delta = getattr(chunk, "content", None) or ""
+                delta: str = ""
+                if hasattr(chunk, "content") and chunk.content:
+                    delta = chunk.content
+                elif hasattr(chunk, "choices") and chunk.choices:
+                    choice = chunk.choices[0]
+                    if hasattr(choice, "delta") and choice.delta:
+                        delta = getattr(choice.delta, "content", "") or ""
                 if delta:
                     log.write(delta)
         except Exception as e:
@@ -124,15 +130,15 @@ class ChatPanel(Vertical):
 
     # ── Copy ───────────────────────────────────────────────────────
 
-    def action_copy_last(self) -> None:
+    def copy_to_clipboard(self) -> None:
+        """Copy last KAZMA assistant response to the system clipboard."""
         try:
-            import pyperclip
             log = self.query_one(RichLog)
             for line in reversed(log.text.split("\n")):
                 if "KAZMA" in line:
                     parts = line.split(" ", 3)
                     if len(parts) > 3:
-                        pyperclip.copy(parts[3])
+                        self.app.copy_to_clipboard(parts[3])
                     return
         except Exception:
             pass
