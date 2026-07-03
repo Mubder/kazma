@@ -298,17 +298,12 @@ Scrollbar {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   Animations
+   Thinking block — highlighted accent (no animation; Textual CSS subset)
    ═══════════════════════════════════════════════════════════════════════ */
 
-@keyframes pulse {
-    0%   { border-left-color: alpha($accent-thinking, 0.4); }
-    50%  { border-left-color: alpha($accent-thinking, 1.0); }
-    100% { border-left-color: alpha($accent-thinking, 0.4); }
-}
-
 MessageEntry.msg-thinking {
-    animation: pulse 1.5s infinite;
+    border-left: heavy $accent;
+    background: $panel-alt;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
