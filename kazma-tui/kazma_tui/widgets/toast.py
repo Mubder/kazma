@@ -6,17 +6,17 @@ Provides non-blocking, auto-dismissing notifications with different severity lev
 from __future__ import annotations
 
 from textual.app import ComposeResult
+from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Static
-from textual.containers import Vertical
 
 
 class Toast(ModalScreen[None]):
     """Non-blocking notification popup with auto-dismiss.
-    
+
     Displays a styled message with an icon based on severity level.
     Auto-dismisses after a configurable duration.
-    
+
     Levels:
         - info: ℹ️  General information
         - success: ✅  Operation completed successfully
@@ -29,7 +29,7 @@ class Toast(ModalScreen[None]):
         align: center top;
         offset: 0 2;
     }
-    
+
     Toast > .toast-content {
         background: $panel;
         border: solid $primary;
@@ -38,19 +38,19 @@ class Toast(ModalScreen[None]):
         text-style: bold;
         min-width: 40;
     }
-    
+
     Toast.-info > .toast-content {
         border: solid $primary;
     }
-    
+
     Toast.-success > .toast-content {
         border: solid $success;
     }
-    
+
     Toast.-warning > .toast-content {
         border: solid $warning;
     }
-    
+
     Toast.-error > .toast-content {
         border: solid $error;
     }
@@ -63,7 +63,7 @@ class Toast(ModalScreen[None]):
         duration: float = 3.0,
     ) -> None:
         """Initialize toast notification.
-        
+
         Args:
             message: The notification message to display.
             level: Severity level (info, success, warning, error).
@@ -91,4 +91,4 @@ class Toast(ModalScreen[None]):
 
     def key_escape(self) -> None:
         """Allow manual dismiss with Escape key."""
-        self.dismiss()
+        self.set_timer(0, self.dismiss)
