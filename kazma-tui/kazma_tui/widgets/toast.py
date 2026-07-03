@@ -91,4 +91,4 @@ class Toast(ModalScreen[None]):
 
     def key_escape(self) -> None:
         """Allow manual dismiss with Escape key."""
-        self.set_timer(0, self.dismiss)
+        self.call_next(self.dismiss)

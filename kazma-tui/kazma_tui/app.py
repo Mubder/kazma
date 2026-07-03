@@ -21,8 +21,8 @@ from datetime import datetime
 from typing import Optional
 
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, TabbedContent, TabPane, RichLog
 from textual.binding import Binding
+from textual.widgets import Footer, RichLog, TabbedContent, TabPane
 
 from kazma_tui.chat import ChatPanel
 from kazma_tui.files import FilesPanel
@@ -30,13 +30,13 @@ from kazma_tui.header import KazmaHeader
 from kazma_tui.settings_panel import SettingsPanel
 from kazma_tui.swarm import SwarmPanel
 from kazma_tui.theme import KAZMA_THEME
-from kazma_tui.widgets.toast import Toast
-from kazma_tui.widgets.confirm_dialog import ConfirmDialog
-from kazma_tui.widgets.command_palette import CommandPalette
-from kazma_tui.widgets.tutorial import TutorialScreen
-from kazma_tui.widgets.status_bar import KazmaStatusBar
-from kazma_tui.widgets.performance import PerformanceManager
 from kazma_tui.widgets.accessibility import FocusManager, HighContrastMode
+from kazma_tui.widgets.command_palette import CommandPalette
+from kazma_tui.widgets.confirm_dialog import ConfirmDialog
+from kazma_tui.widgets.performance import PerformanceManager
+from kazma_tui.widgets.status_bar import KazmaStatusBar
+from kazma_tui.widgets.toast import Toast
+from kazma_tui.widgets.tutorial import TutorialScreen
 
 logger = logging.getLogger(__name__)
 
@@ -97,51 +97,38 @@ class KazmaTUI(App[None]):
             self._status_bar = self.query_one("#status-bar", KazmaStatusBar)
         except Exception as e:
             logger.debug(f"Status bar not found: {e}")
-        
+
         # Initialize focus manager
-        self._focus_manager = FocusManager([
-            "chat-input",
-            "chat-log",
-            "worker-table",
-            "file-tree",
-            "settings-panel",
-        ])
-        
+        self._focus_manager = FocusManager(
+            [
+                "chat-input",
+                "chat-log",
+                "worker-table",
+                "file-tree",
+                "settings-panel",
+            ]
+        )
+
         # Initialize high contrast mode
         self._high_contrast = HighContrastMode(self)
-        
+
         # Initialize performance manager
         self._performance_manager = PerformanceManager()
         self._performance_manager.start()
-        
+
         # Check if first run - show tutorial
         try:
             from pathlib import Path
+
             config_dir = Path.home() / ".kazma"
             prefs_file = config_dir / "preferences.json"
-            
+
             if not prefs_file.exists():
                 # First run - show tutorial
-                def on_tutorial_complete(completed: bool) -> None:
-                    if completed:
-                        # Create preferences file
-                        config_dir.mkdir(exist_ok=True)
-                        prefs_file.write_text('{"tutorial_completed": true, "theme": "kazma-dark"}')
-                        self.push_screen(Toast("Tutorial completed! 🎉", "success", duration=2.0))
-                    else:
-                        self.push_screen(Toast("Press ? anytime for help", "info", duration=2.0))
-                
-                self.push_screen(TutorialScreen(), on_tutorial_complete)
-            else:
-                # Returning user - just show welcome
-                self.push_screen(
-                    Toast("Welcome to Kazma TUI! Press ? for help", "info", duration=2.0)
-                )
+                self.push_screen(TutorialScreen())
+            # No tutorial for returning users - silent start
         except Exception as e:
             logger.exception(f"Error in on_mount: {e}")
-            self.push_screen(
-                Toast("Welcome to Kazma TUI! Press ? for help", "info", duration=2.0)
-            )
 
     def action_copy_clipboard(self) -> None:
         """Copy selected text or last KAZMA response to the system clipboard."""
@@ -160,13 +147,15 @@ class KazmaTUI(App[None]):
         """Clear the chat log."""
         try:
             from kazma_tui.chat import ChatPanel
+
             chat = self.query_one(ChatPanel)
+
             # Show confirmation dialog
             def on_confirm(confirmed: bool) -> None:
                 if confirmed:
                     chat.query_one(RichLog).clear()
                     self.push_screen(Toast("Chat cleared", "success", duration=1.5))
-            
+
             dialog = ConfirmDialog(
                 "Are you sure you want to clear the chat history?",
                 title="Clear Chat",
@@ -184,8 +173,10 @@ class KazmaTUI(App[None]):
         """List available models."""
         try:
             from kazma_tui.chat import ChatPanel
+
             chat = self.query_one(ChatPanel)
             from kazma_core.settings.model_registry import get_model_list_text
+
             chat.write("system", get_model_list_text("tui"))
             self.push_screen(Toast("Model list displayed", "info", duration=2.0))
         except Exception as e:
@@ -200,8 +191,9 @@ class KazmaTUI(App[None]):
             current = tabs.active
             if current == "swarm":
                 from kazma_tui.swarm import SwarmPanel
+
                 swarm = self.query_one(SwarmPanel)
-                if hasattr(swarm, 'refresh_data'):
+                if hasattr(swarm, "refresh_data"):
                     swarm.refresh_data()
         except Exception:
             pass
@@ -309,9 +301,7 @@ class KazmaTUI(App[None]):
         if self._high_contrast:
             enabled = self._high_contrast.toggle()
             mode = "enabled" if enabled else "disabled"
-            self.push_screen(
-                Toast(f"High contrast mode {mode}", "info", duration=2.0)
-            )
+            self.push_screen(Toast(f"High contrast mode {mode}", "info", duration=2.0))
 
     def action_record_activity(self) -> None:
         """Record user activity for adaptive refresh."""

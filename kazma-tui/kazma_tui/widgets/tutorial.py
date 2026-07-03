@@ -205,7 +205,7 @@ class TutorialScreen(ModalScreen[bool]):
         """Initialize tutorial state."""
         step = self.STEPS[self.current_step]
         try:
-            self.query_one("#tutorial-message", Label).update(f"[bold]$primary]{step['title']}[/]\n\n{step['message']}")
+            self.query_one("#tutorial-message", Label).update(f"[bold]{step['title']}[/]\n\n{step['message']}")
             # Set initial button visibility - hide back/finish, show skip/next
             self.query_one("#btn-back", Button).set_class(True, "hidden")
             self.query_one("#btn-skip", Button).set_class(False, "hidden")
@@ -224,7 +224,7 @@ class TutorialScreen(ModalScreen[bool]):
             self.query_one("#tutorial-progress", ProgressBar).update(progress=self.current_step + 1)
 
             # Update content
-            content = f"[bold]$primary]{step['title']}[/]\n\n{step['message']}"
+            content = f"[bold]{step['title']}[/]\n\n{step['message']}"
             self.query_one("#tutorial-message", Label).update(content)
 
             # Update button visibility
@@ -261,21 +261,32 @@ class TutorialScreen(ModalScreen[bool]):
                 self._update_step()
 
         elif btn_id == "btn-skip":
-            self.completed = True
-            self.call_later(self._do_dismiss, True)
+            self._complete_tutorial(False)
 
         elif btn_id == "btn-finish":
-            self.completed = True
-            self.call_later(self._do_dismiss, True)
+            self._complete_tutorial(True)
 
-    def _do_dismiss(self, result: bool | None) -> None:
-        """Actually dismiss the screen (called via call_later)."""
-        self.dismiss(result)
+    def _complete_tutorial(self, completed: bool) -> None:
+        """Handle tutorial completion."""
+        try:
+            from pathlib import Path
+
+            config_dir = Path.home() / ".kazma"
+            prefs_file = config_dir / "preferences.json"
+            config_dir.mkdir(exist_ok=True)
+            prefs_file.write_text('{"tutorial_completed": true, "theme": "kazma-dark"}')
+        except Exception:
+            pass
+        # Use call_next to schedule dismiss after current message is processed
+        self.call_next(self._do_dismiss, completed)
+
+    def _do_dismiss(self, completed: bool) -> None:
+        """Actually dismiss the screen (called via call_next)."""
+        self.dismiss(completed)
 
     def key_escape(self) -> None:
         """Allow escape to skip."""
-        self.completed = True
-        self.call_later(self._do_dismiss, None)
+        self._complete_tutorial(False)
 
     def key_enter(self) -> None:
         """Enter advances to next step or completes."""
@@ -283,8 +294,7 @@ class TutorialScreen(ModalScreen[bool]):
             self.current_step += 1
             self._update_step()
         else:
-            self.completed = True
-            self.call_later(self._do_dismiss, True)
+            self._complete_tutorial(True)
 
     def key_n(self) -> None:
         """'n' for next."""
