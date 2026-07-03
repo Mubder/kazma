@@ -1,4 +1,4 @@
-"""Settings tab — SelectionList for config management."""
+"""Settings tab — SelectionList for feature toggles, persisted to ConfigStore."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from textual.widgets import SelectionList, Static
 
 
 class SettingsPanel(VerticalScroll):
-    """Settings: SelectionList for toggling features."""
+    """Settings: SelectionList toggles read/written to ConfigStore."""
 
     DEFAULT_CSS = """
     SettingsPanel { height: 1fr; background: $surface; padding: 1 2; }
@@ -23,21 +23,20 @@ class SettingsPanel(VerticalScroll):
         ("HITL approval (danger tools)", "safety.hitl_enabled", True),
     ]
 
+    def _read_config(self, key: str, default: bool) -> bool:
+        try:
+            from kazma_core.config_store import get_config_store
+            val = get_config_store().get(key)
+            return bool(val) if val is not None else default
+        except Exception:
+            return default
+
     def compose(self) -> ComposeResult:
-        yield Static("[bold $primary]Settings[/]  ·  [dim]Toggle features[/]", classes="section-label")
+        yield Static("[bold $primary]Settings[/]  ·  [dim]Toggle features on/off[/]", classes="section-label")
         sel: SelectionList = SelectionList()
         for label, key, default in self.SETTINGS:
-            try:
-                from kazma_core.config_store import get_config_store
-                val = get_config_store().get(key)
-                if val is None:
-                    val = default
-            except Exception:
-                val = default
-            # SelectionList.add_option() takes (label, id)
-            sel.add_option((label, key))
-            if val:
-                sel.select(key)
+            initial = self._read_config(key, default)
+            sel.add_option((label, key, initial))
         sel.border_title = "Feature Toggles"
         yield sel
 

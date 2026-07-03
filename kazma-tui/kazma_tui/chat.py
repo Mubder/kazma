@@ -1,4 +1,4 @@
-"""Chat panel — RichLog output + Input + ProgressBar."""
+"""Chat panel — RichLog + ProgressBar + Input + token-by-token streaming."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ ROLE_HEX: dict[str, str] = {
 
 
 class ChatPanel(Vertical):
-    """Chat: RichLog + ProgressBar + Input."""
+    """Chat: RichLog + ProgressBar + Input. Supports token-by-token streaming."""
 
     DEFAULT_CSS = """
     ChatPanel { height: 1fr; border: solid $border; background: $surface; }
@@ -40,15 +40,56 @@ class ChatPanel(Vertical):
         yield ProgressBar(id="chat-progress", total=100, show_eta=False)
         yield Input(placeholder="Type... /help for commands", id="chat-input")
 
+    # ── Message display ────────────────────────────────────────────
+
     def write(self, role: str, text: str) -> None:
         log = self.query_one(RichLog)
         ts = datetime.now().strftime("%H:%M")
         c = ROLE_HEX.get(role, "#8b949e")
-        label = role.upper()
-        log.write(f"[dim]{ts}[/] [{c}]▌ {label}[/] {text}")
+        log.write(f"[dim]{ts}[/] [{c}]▌ {role.upper()}[/] {text}")
 
-    def show_progress(self, v: bool) -> None:
-        self.query_one(ProgressBar).display = v
+    def show_progress(self, visible: bool) -> None:
+        bar = self.query_one(ProgressBar)
+        bar.display = visible
+        if visible:
+            bar.update(progress=0)
+            self._pulse_timer = self.set_interval(0.3, self._pulse_progress)
+
+    def _pulse_progress(self) -> None:
+        bar = self.query_one(ProgressBar)
+        if bar.display:
+            bar.advance(5)
+            if bar.progress >= 100:
+                bar.update(progress=0)
+
+    # ── Streaming ──────────────────────────────────────────────────
+
+    async def write_stream(self, prompt: str) -> None:
+        """Stream tokens from provider, writing each chunk to RichLog."""
+        log = self.query_one(RichLog)
+        ts = datetime.now().strftime("%H:%M")
+        log.write(f"[dim]{ts}[/] [#a855f7]▌ KAZMA[/] ")
+        self.show_progress(True)
+
+        try:
+            from kazma_core.model_registry import get_model_registry
+
+            registry = get_model_registry()
+            provider = registry.get_client()
+            messages = [{"role": "user", "content": prompt}]
+
+            # True token-by-token streaming via provider.chat(stream=True)
+            response = await provider.chat(messages, stream=True)
+            async for chunk in response:
+                delta = getattr(chunk, "content", None) or ""
+                if delta:
+                    log.write(delta)
+        except Exception as e:
+            log.write(f"\n[#ef4444]Error: {e}[/]")
+        finally:
+            self.show_progress(False)
+
+    # ── Input handling ─────────────────────────────────────────────
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
@@ -79,18 +120,9 @@ class ChatPanel(Vertical):
             self.write("system", f"Unknown: {cmd}")
 
     async def _generate_response(self, prompt: str) -> None:
-        try:
-            from kazma_core.model_registry import get_model_registry
-            self.show_progress(True)
-            registry = get_model_registry()
-            provider = registry.get_client()
-            response = await provider.chat([{"role": "user", "content": prompt}])
-            self.show_progress(False)
-            content = response.content if hasattr(response, "content") else str(response)
-            self.write("assistant", content)
-        except Exception as e:
-            self.show_progress(False)
-            self.write("error", f"Error: {e}")
+        await self.write_stream(prompt)
+
+    # ── Copy ───────────────────────────────────────────────────────
 
     def action_copy_last(self) -> None:
         try:
