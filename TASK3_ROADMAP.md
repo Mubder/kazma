@@ -85,8 +85,14 @@
 ## P2 — Medium (Quality Improvements)
 
 ### P2-1: Refactor engine.py (split god class)
-- **Effort:** XL | **Dependencies:** None | **Quick win:** No
+- **Effort:** XL | **Dependencies:** None | **Quick win:** No | **Status:** ✅ Done (Sprint 16)
 - **What:** Split 1,742-line SwarmEngine into: dispatch coordinator, persistence layer, handoff handler, metrics/tracing, autoscaler integration
+- **Resolution:** Extracted 3 modules from SwarmEngine:
+  - **ReliabilityRegistry** (`reliability_registry.py`, 174 lines) — circuit breakers, retry policies, timeout guards, output validators, bounded concurrency
+  - **WorkerPhonebook** (`phonebook.py`, 87 lines) — summon workers from WorkerRegistry, dispatch_by_name. Dead `consult()` deleted (zero callers).
+  - **CheckpointManager** (`checkpoint_manager.py`, 199 lines) — HITL pipeline checkpoint state, timeout auto-reject, restore from SQLite
+  - All public API methods retained as thin delegates on SwarmEngine. Constructor signature unchanged. De-facto public attrs kept on engine.
+  - **engine.py: 1878 → 1573 lines (-305, 16% reduction).**
 
 ### P2-2: Per-worker start/stop endpoints
 - **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** ✅ Done (Sprint 16)

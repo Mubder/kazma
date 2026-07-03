@@ -5,6 +5,45 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## Sprint 17 — Skill Checksums + Task Cancel/Retry + Config Reconcilation + Engine Refactor (July 2026)
+
+### P1-3: Enforce Skill Checksums Unconditionally
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Fail-closed verification** | Checksum mismatches, invalid signatures, and verification errors now raise SkillLoadError — no more `except: pass` | `loader.py` |
+| ✅ | **HMAC-SHA256 signatures** | Signature verified against KAZMA_SECRET using timing-safe comparison | `loader.py` |
+| ✅ | **`kazma hub sign` CLI** | New command writes checksum + HMAC signature into skill_manifest.yaml | `cli.py` |
+| ✅ | **Backward compat** | Unsigned skills still load with a warning — won't break existing installs | `loader.py` |
+
+### P2-3: Task Cancel/Retry from UI
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Cancel running tasks** | Cancel button stops in-flight tasks via asyncio.handle.cancel() + CANCELLED status | `engine.py` |
+| ✅ | **Retry failed tasks** | Retry button re-dispatches as new task with metadata['retry_of'] lineage | `engine.py` |
+| ✅ | **API routes** | POST /api/swarm/tasks/{id}/cancel and /retry | `swarm_panel.py` |
+| ✅ | **UI** | Cancel/Retry buttons in task detail modal, cancelled status in filter + colors | `swarm.html`, `swarm.js` |
+
+### P2-9: Unify Config Source of Truth
+
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **reconcile_from_yaml()** | Seeds DB with YAML keys on startup, non-clobbering (user changes win), idempotent | `config_store.py` |
+| ✅ | **Startup integration** | Called in create_app() right after singleton init | `app.py` |
+| ✅ | **MCP servers merged** | agent_runner reads from BOTH YAML and ConfigStore, merged by name | `agent_runner.py` |
+
+### P2-1: Refactor engine.py God Class
+
+| Status | Module | Lines | Responsibility |
+|:---:|:---|:---:|:---|
+| ✅ | `reliability_registry.py` | 174 | Circuit breakers, retry policies, timeout guards, output validators, bounded concurrency |
+| ✅ | `phonebook.py` | 87 | WorkerRegistry summon + dispatch_by_name. Dead `consult()` deleted (zero callers). |
+| ✅ | `checkpoint_manager.py` | 199 | HITL pipeline checkpoint state, timeout auto-reject, restore from SQLite |
+| ✅ | `engine.py` (refactored) | 1878→1573 | -305 lines (16% reduction). All public API unchanged. |
+
+---
+
 ## Sprint 16 — P2 Quick Wins: UI Badges + Worker Lifecycle + Docs (July 2026)
 
 ### P2-8: Circuit Breaker UI Badges

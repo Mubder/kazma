@@ -36,14 +36,17 @@ All packages are in scope. The four main packages:
 - Never remove the `status_code == 404 and "function" in detail.lower()` branch
 
 ### 4. Swarm Handoff Cycle Detection (`kazma-core/kazma_core/swarm/engine.py`)
-- `_handle_handoff()` accepts `_visited: set[str]` and `_depth: int`
+- `_handle_handoff()` accepts `_visited: dict[str, int]` and `_depth: int`
 - These thread through `_dispatch_worker_by_name_all` -> `_dispatch_worker` -> `_handle_handoff`
 - Max depth is 5; removing the guard causes infinite recursion on A->B->A cycles
+- Workers can be revisited up to `_MAX_VISITS=2` times (allows legitimate A->B->A return handoffs)
+- Visit counts are now tracked per-worker (not just a boolean set)
 
-### 5. Circuit Breaker Half-Open (`kazma-core/kazma_core/swarm/reliability.py`)
+### 5. Circuit Breaker Half-Open (`kazma-core/kazma_core/swarm/reliability.py`) + ReliabilityRegistry (`reliability_registry.py`)
 - `_probe_in_flight` flag ensures only ONE dispatch passes through half-open state
 - Both `record_success()` and `record_failure()` reset it
 - Never remove this flag or concurrent calls bypass the probe semantics
+- ReliabilityRegistry (P2-1 refactor) owns all breaker/retry/timeout/validator state
 
 ### 6. TaskStore WAL Mode (`kazma-core/kazma_core/swarm/task_store.py`)
 - SQLite uses WAL + `busy_timeout=5000` for concurrent read/write
@@ -88,7 +91,24 @@ unattended-danger-tool security gap:
 - Multi-key writes MUST use `batch_set()` or `transaction()` for atomicity
 - Never construct `ConfigStore()` in gateway/core code — use `get_config_store()`
 
-## Coding Conventions
+### 9. SwarmEngine Module Structure (P2-1 refactor — 3 extractions)
+
+The original 1878-line `engine.py` god class was split into focused modules.
+SwarmEngine remains the central orchestrator with thin delegates for backward
+compatibility. **All public API methods and constructors are unchanged.**
+
+| Module | Responsibility | When to open it |
+|--------|---------------|-----------------|
+| `engine.py` (1573 lines) | Dispatch, handoff, task lifecycle, worker registry | Always — the orchestrator |
+| `reliability_registry.py` | Circuit breakers, retries, timeouts, validators, concurrency | Configuring per-worker reliability |
+| `phonebook.py` | WorkerRegistry summon + dispatch_by_name | Topology/DAG worker lookup |
+| `checkpoint_manager.py` | HITL pipeline checkpoint state, timeout auto-reject, persistence | Pipeline pause/resume logic |
+
+**Rules after refactor:**
+- New reliability features go in `reliability_registry.py`, not `engine.py`.
+- `engine.py` public methods are thin delegates — the real logic lives in the extracted modules.
+- The de-facto public attrs (`_workers`, `_active_tasks`, `_task_handles`, `_metrics_collector`) remain on `SwarmEngine`.
+- Constructor signature is unchanged — test fixtures work without modification.
 
 - Follow existing Kazma code style (type hints, docstrings, logging)
 - Use `logger = logging.getLogger(__name__)` pattern
