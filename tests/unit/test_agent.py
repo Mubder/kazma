@@ -15,7 +15,7 @@ class TestAgentConfig:
     def test_default_values(self) -> None:
         config = AgentConfig()
         assert config.name == "kazma"
-        assert config.version == "0.1.0"
+        assert config.version == "0.2.0"
         assert config.language == "ar"
         assert config.rtl is True
         assert config.vector_dim == 1536
