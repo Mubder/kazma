@@ -61,8 +61,6 @@ TabPane {
     padding: 0;
 }
 
-TabbedContent > ContentTabs {
-
 TabbedContent > ContentTabs > Tab {
     padding: 0 2;
     border: none;
