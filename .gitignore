@@ -69,3 +69,6 @@ htmlcov/
 *.obj
 *.out
 ```
+/.pytest-tmp
+/.pytest_tmp
+/.pytest_tmp_run

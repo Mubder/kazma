@@ -88,7 +88,7 @@ class KazmaTUI(App[None]):
             with TabPane("Settings", id="settings"):
                 yield SettingsPanel()
         yield KazmaStatusBar(id="status-bar")
-        yield KazmaFooter()
+        yield Footer()
 
     def on_mount(self) -> None:
         """Initialize app state and show welcome notification."""
