@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
-from textual.widgets import Footer
+from textual.app import ComposeResult
+from textual.widgets import Footer, Static
+
+# Shortcut definitions for display
+CHAT_SHORTCUTS: list[tuple[str, str]] = [
+    ("Ctrl+Q", "Quit"),
+    ("Ctrl+P", "Commands"),
+    ("Enter", "Send"),
+    ("Ctrl+F", "Focus"),
+]
 
 
 class KazmaFooter(Footer):
     """Footer showing key bindings with enhanced visual design.
-    
+
     Features:
         - Context-sensitive bindings based on active tab
         - Enhanced color scheme matching kazma.ai palette
@@ -21,12 +30,12 @@ class KazmaFooter(Footer):
         background: $primary 18%;
         color: $primary;
     }
-    
+
     FooterKey {
         background: $primary 10%;
         color: $text;
     }
-    
+
     FooterKey > .footer-key--key {
         color: $primary;
         text-style: bold;
@@ -43,3 +52,11 @@ class KazmaFooter(Footer):
         ("ctrl+enter", "send_message", "Send"),
         ("ctrl+f", "focus_input", "Focus"),
     ]
+
+    def _get_shortcuts_text(self) -> str:
+        """Get formatted shortcuts text for display."""
+        return " | ".join(f"{key} {desc}" for key, desc in CHAT_SHORTCUTS)
+
+    def compose(self) -> ComposeResult:
+        """Compose the footer with shortcuts display."""
+        yield Static(self._get_shortcuts_text())

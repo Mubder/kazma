@@ -47,10 +47,15 @@ class ChatPanel(Vertical):
     # ── Message display ────────────────────────────────────────────
 
     def write(self, role: str, text: str) -> None:
+        """Write a message to the chat log with role prefix."""
         log = self.query_one(RichLog)
         ts = datetime.now().strftime("%H:%M")
         c = ROLE_HEX.get(role, "#8b949e")
         log.write(f"[dim]{ts}[/] [{c}]▌ {role.upper()}[/] {text}")
+
+    def add_message(self, role: str, text: str) -> None:
+        """Alias for write() - adds a message to the chat log."""
+        self.write(role, text)
 
     def show_progress(self, visible: bool) -> None:
         bar = self.query_one(ProgressBar)
@@ -123,6 +128,7 @@ class ChatPanel(Vertical):
         elif cmd in ("/model", "/models"):
             try:
                 from kazma_core.settings.model_registry import get_model_list_text
+
                 self.write("system", get_model_list_text("tui"))
             except Exception as e:
                 self.write("error", f"Model registry: {e}")

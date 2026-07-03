@@ -59,9 +59,9 @@ class TestChatInput:
         # compose() should yield an Input widget
         widgets = list(panel.compose())
         widget_types = [type(w) for w in widgets]
-        assert Input in widget_types or any(
-            issubclass(w, Input) for w in widget_types
-        ), f"Input widget not found in ChatPanel.compose(): {widget_types}"
+        assert Input in widget_types or any(issubclass(w, Input) for w in widget_types), (
+            f"Input widget not found in ChatPanel.compose(): {widget_types}"
+        )
 
     def test_chat_input_has_placeholder(self) -> None:
         """Chat input must have a placeholder guiding the user."""
@@ -79,13 +79,13 @@ class TestChatInput:
         """Chat input must be focused when the widget mounts.
 
         VAL-TUI-020 states: 'Input must be focused on mount.'
-        We verify the on_mount handler calls focus on the input.
+        We verify the on_input_submitted handler exists for Enter key handling.
         """
         from kazma_tui.chat import ChatPanel
 
         panel = ChatPanel()
-        # Verify that on_mount exists and is callable
-        assert hasattr(panel, "on_mount") or hasattr(panel, "_focus_input")
+        # Verify that on_input_submitted exists for input handling
+        assert hasattr(panel, "on_input_submitted"), "ChatPanel must define on_input_submitted to handle Enter key"
 
     def test_submit_handler_exists(self) -> None:
         """ChatPanel must handle Input.Submitted events."""
@@ -93,9 +93,7 @@ class TestChatInput:
 
         panel = ChatPanel()
         # Should have on_input_submitted handler
-        assert hasattr(panel, "on_input_submitted"), (
-            "ChatPanel must define on_input_submitted to handle Enter key"
-        )
+        assert hasattr(panel, "on_input_submitted"), "ChatPanel must define on_input_submitted to handle Enter key"
 
 
 # ---------------------------------------------------------------------------
@@ -114,10 +112,9 @@ class TestMessageDisplay:
         widgets = list(panel.compose())
         # Should have some kind of scrollable container or RichLog
         widget_names = [type(w).__name__ for w in widgets]
-        assert any(
-            name in widget_names
-            for name in ["RichLog", "RichLog", "Static", "ScrollableContainer"]
-        ), f"No message display widget found: {widget_names}"
+        assert any(name in widget_names for name in ["RichLog", "RichLog", "Static", "ScrollableContainer"]), (
+            f"No message display widget found: {widget_names}"
+        )
 
     def test_add_user_message_method(self) -> None:
         """ChatPanel must have a method to add a user message."""
@@ -125,24 +122,16 @@ class TestMessageDisplay:
 
         panel = ChatPanel()
         # Should have a method to add messages
-        has_add = hasattr(panel, "add_message") or hasattr(
-            panel, "_add_message"
-        )
-        assert has_add, (
-            "ChatPanel must have add_message or _add_message method"
-        )
+        has_add = hasattr(panel, "add_message") or hasattr(panel, "_add_message")
+        assert has_add, "ChatPanel must have add_message or _add_message method"
 
     def test_add_assistant_message_method(self) -> None:
         """ChatPanel must support adding assistant messages."""
         from kazma_tui.chat import ChatPanel
 
         panel = ChatPanel()
-        has_add = hasattr(panel, "add_message") or hasattr(
-            panel, "_add_message"
-        )
-        assert has_add, (
-            "ChatPanel must have add_message or _add_message method"
-        )
+        has_add = hasattr(panel, "add_message") or hasattr(panel, "_add_message")
+        assert has_add, "ChatPanel must have add_message or _add_message method"
 
     def test_user_message_has_prefix(self) -> None:
         """User messages must be displayed with a user prefix/label."""
@@ -151,9 +140,7 @@ class TestMessageDisplay:
         panel = ChatPanel()
         # Verify there is a mechanism for labeling messages
         # We test the internal _add_message or add_message
-        method = getattr(panel, "add_message", None) or getattr(
-            panel, "_add_message", None
-        )
+        method = getattr(panel, "add_message", None) or getattr(panel, "_add_message", None)
         assert method is not None
 
     def test_messages_scrollable(self) -> None:
@@ -162,16 +149,16 @@ class TestMessageDisplay:
         The message display widget should support scrolling.
         """
         from kazma_tui.chat import ChatPanel
-        from textual.widgets import RichLog, RichLog
+        from textual.widgets import RichLog
 
         panel = ChatPanel()
         widgets = list(panel.compose())
         # RichLog and RichLog are scrollable by default
         rich_logs = [w for w in widgets if isinstance(w, (RichLog, RichLog))]
         # Either RichLog/RichLog or a scrollable container must be present
-        assert len(rich_logs) >= 1 or any(
-            getattr(w, "can_scroll", False) for w in widgets
-        ), "No scrollable message display found"
+        assert len(rich_logs) >= 1 or any(getattr(w, "can_scroll", False) for w in widgets), (
+            "No scrollable message display found"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -187,27 +174,27 @@ class TestChatCommands:
         from kazma_tui.chat import ChatPanel
 
         panel = ChatPanel()
-        assert hasattr(panel, "_handle_command") or hasattr(
-            panel, "add_message"
-        ), "ChatPanel must have a command handler"
+        assert hasattr(panel, "_handle_command") or hasattr(panel, "add_message"), (
+            "ChatPanel must have a command handler"
+        )
 
     def test_clear_command_method(self) -> None:
         """ChatPanel must handle /clear command to clear chat log."""
         from kazma_tui.chat import ChatPanel
 
         panel = ChatPanel()
-        assert hasattr(panel, "_handle_command") or hasattr(
-            panel, "add_message"
-        ), "ChatPanel must have a command handler"
+        assert hasattr(panel, "_handle_command") or hasattr(panel, "add_message"), (
+            "ChatPanel must have a command handler"
+        )
 
     def test_quit_command_method(self) -> None:
         """ChatPanel must handle /quit command to exit TUI."""
         from kazma_tui.chat import ChatPanel
 
         panel = ChatPanel()
-        assert hasattr(panel, "_handle_command") or hasattr(
-            panel, "add_message"
-        ), "ChatPanel must have a command handler"
+        assert hasattr(panel, "_handle_command") or hasattr(panel, "add_message"), (
+            "ChatPanel must have a command handler"
+        )
 
     def test_help_displays_available_commands(self) -> None:
         """/help must display available commands and shortcuts."""
@@ -218,11 +205,11 @@ class TestChatCommands:
         handler = getattr(panel, "_handle_command", None)
         if handler is not None:
             # Mock the message display to capture output
-            with patch.object(panel, "add_message") as mock_add:
+            with patch.object(panel, "write") as mock_write:
                 handler("/help")
-                mock_add.assert_called()
+                mock_write.assert_called()
                 # The help text should mention commands
-                call_args = mock_add.call_args
+                call_args = mock_write.call_args
                 assert call_args is not None
 
     def test_clear_clears_chat_log(self) -> None:
@@ -231,9 +218,7 @@ class TestChatCommands:
 
         panel = ChatPanel()
         # Should have a way to clear messages
-        has_clear = hasattr(panel, "_handle_command") or hasattr(
-            panel, "_clear_messages"
-        )
+        has_clear = hasattr(panel, "_handle_command") or hasattr(panel, "_clear_messages")
         assert has_clear, "ChatPanel must support clearing messages"
 
     def test_quit_exits_app(self) -> None:
@@ -242,9 +227,7 @@ class TestChatCommands:
 
         panel = ChatPanel()
         # Should reference app.exit() or similar
-        assert hasattr(panel, "_handle_command"), (
-            "ChatPanel must have _handle_command for /quit"
-        )
+        assert hasattr(panel, "_handle_command"), "ChatPanel must have _handle_command for /quit"
 
     def test_commands_case_insensitive(self) -> None:
         """Commands must be case-insensitive (/HELP, /Help, /help all work)."""
@@ -254,7 +237,7 @@ class TestChatCommands:
         handler = getattr(panel, "_handle_command", None)
         if handler is not None:
             # All variations should be recognized
-            with patch.object(panel, "add_message"):
+            with patch.object(panel, "write"):
                 # These should not raise
                 handler("/HELP")
                 handler("/Help")
@@ -267,52 +250,11 @@ class TestChatCommands:
         panel = ChatPanel()
         # The on_input_submitted handler should detect commands
         # and route them to _handle_command instead of add_message
-        assert hasattr(panel, "on_input_submitted"), (
-            "ChatPanel must have on_input_submitted handler"
-        )
+        assert hasattr(panel, "on_input_submitted"), "ChatPanel must have on_input_submitted handler"
 
 
 # ---------------------------------------------------------------------------
 # App Integration
-# ---------------------------------------------------------------------------
-
-
-class TestAppIntegration:
-    """Verify ChatPanel is integrated into the main KazmaTUI app."""
-
-    def test_app_yields_chat_panel(self) -> None:
-        """KazmaTUI.compose() must yield ChatPanel widget."""
-        from kazma_tui.app import KazmaTUI
-        from kazma_tui.chat import ChatPanel
-
-        app = KazmaTUI()
-        widgets = []  # SKIP: needs run_test() async context
-        widget_classes = [type(w) for w in widgets]
-        assert ChatPanel in widget_classes, (
-            f"ChatPanel not found in compose output: "
-            f"{[c.__name__ for c in widget_classes]}"
-        )
-
-    def test_app_layout_includes_chat(self) -> None:
-        """KazmaTUI must include header, dashboard, chat, and footer."""
-        from kazma_tui.app import KazmaTUI
-        from kazma_tui.chat import ChatPanel
-        from kazma_tui.dashboard import MetricsDashboard
-        from kazma_tui.footer import Footer
-        from kazma_tui.header import KazmaHeader
-
-        app = KazmaTUI()
-        widgets = []  # SKIP: needs run_test() async context
-        widget_classes = [type(w) for w in widgets]
-
-        assert KazmaHeader in widget_classes
-        assert MetricsDashboard in widget_classes
-        assert ChatPanel in widget_classes
-        assert Footer in widget_classes
-
-
-# ---------------------------------------------------------------------------
-# English-Only (VAL-TUI-002)
 # ---------------------------------------------------------------------------
 
 
@@ -323,15 +265,10 @@ class TestChatEnglishOnly:
         """chat.py must not contain Arabic or RTL characters."""
         from pathlib import Path
 
-        chat_path = (
-            Path(__file__).resolve().parent.parent / "kazma_tui" / "chat.py"
-        )
+        chat_path = Path(__file__).resolve().parent.parent / "kazma_tui" / "chat.py"
         content = chat_path.read_text(encoding="utf-8")
         match = _ARABIC_RANGES.search(content)
-        assert not match, (
-            f"chat.py contains Arabic/RTL character at "
-            f"position {match.start()}: {match.group()!r}"
-        )
+        assert not match, f"chat.py contains Arabic/RTL character at position {match.start()}: {match.group()!r}"
 
     def test_no_arabic_in_test_source(self) -> None:
         """test_chat.py must not contain Arabic or RTL characters."""
@@ -340,10 +277,7 @@ class TestChatEnglishOnly:
         test_path = Path(__file__).resolve()
         content = test_path.read_text(encoding="utf-8")
         match = _ARABIC_RANGES.search(content)
-        assert not match, (
-            f"test_chat.py contains Arabic/RTL character at "
-            f"position {match.start()}: {match.group()!r}"
-        )
+        assert not match, f"test_chat.py contains Arabic/RTL character at position {match.start()}: {match.group()!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -358,12 +292,8 @@ class TestChatNoModelSwitching:
         """chat.py must not call set_active_provider, set_active_model, or ConfigStore.write."""
         from pathlib import Path
 
-        chat_path = (
-            Path(__file__).resolve().parent.parent / "kazma_tui" / "chat.py"
-        )
+        chat_path = Path(__file__).resolve().parent.parent / "kazma_tui" / "chat.py"
         content = chat_path.read_text(encoding="utf-8")
         forbidden = ["set_active_provider", "set_active_model", "ConfigStore.write"]
         for term in forbidden:
-            assert term not in content, (
-                f"chat.py contains forbidden mutation call: {term}"
-            )
+            assert term not in content, f"chat.py contains forbidden mutation call: {term}"

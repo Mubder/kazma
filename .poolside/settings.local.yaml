@@ -1,0 +1,13 @@
+tools:
+    shell:
+        allow:
+            - cd *
+            - .venv\Scripts\python.exe *
+            - head *
+            - mkdir *
+            - echo *
+            - sleep 30
+            - Select-String *
+            - findstr "FAILED"
+            - sleep 120
+            - sleep 180
