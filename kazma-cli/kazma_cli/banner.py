@@ -15,7 +15,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 def _get_version() -> str:
-    """Read version from pyproject.toml, falling back to '0.1.0'."""
+    """Read version from pyproject.toml, falling back to '0.2.0'."""
     try:
         pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
         if pyproject.exists():
@@ -25,7 +25,7 @@ def _get_version() -> str:
                     return line.split("=")[1].strip().strip('"').strip("'")
     except Exception:
         pass
-    return "0.1.0"
+    return "0.2.0"
 
 
 # ---------------------------------------------------------------------------

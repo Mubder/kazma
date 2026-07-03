@@ -830,7 +830,7 @@ class SettingsManager:
 
     def check_updates(self) -> dict[str, Any]:
         """Check for new Kazma versions."""
-        current_version = "0.1.0"
+        current_version = "0.2.0"
         try:
             import kazma_core
             current_version = getattr(kazma_core, "__version__", current_version)

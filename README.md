@@ -7,7 +7,7 @@
 ![Tests](https://img.shields.io/badge/tests-3409_passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
-![Version](https://img.shields.io/badge/version-0.1.0-blue)
+![Version](https://img.shields.io/badge/version-0.2.0-blue)
 ![Portability](https://img.shields.io/badge/portability-linux_|_macOS_|_Windows_|_docker_|_WSL-brightgreen)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
 [![Framework][langgraph-shield]][langgraph-url]
@@ -624,7 +624,7 @@ Kazma uses `kazma.yaml` at the project root:
 ```yaml
 agent:
   name: "kazma"
-  version: "0.1.0"
+  version: "0.2.0"
   language: "ar"
   rtl: true
 

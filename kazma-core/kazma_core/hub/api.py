@@ -49,7 +49,7 @@ def _require_auth(request: Request) -> None:
 # FastAPI app
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Kazma Hub API", version="0.1.0")
+app = FastAPI(title="Kazma Hub API", version="0.2.0")
 
 # ---------------------------------------------------------------------------
 # Response / request models
@@ -209,7 +209,7 @@ def _get_api() -> KazmaHubAPI:
 @app.get("/api/v1/health")
 async def health():
     """Health check endpoint for liveness/readiness probes."""
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "0.2.0"}
 
 
 # ---------------------------------------------------------------------------

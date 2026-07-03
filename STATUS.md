@@ -12,7 +12,7 @@ Generated: 2026-07-03
 | Environmental Failures | 3 (Windows admin, LM Studio offline, mock assertion) |
 | engine.py Lines | 1,573 (down from 1,878; 3 modules extracted) |
 | Python Version | 3.11+ |
-| Project Version | 0.1.0 |
+| Project Version | 0.2.0 |
 | Status | active_development |
 
 ## Namespace Audit

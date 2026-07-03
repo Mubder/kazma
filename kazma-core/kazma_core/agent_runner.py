@@ -51,7 +51,7 @@ class AgentConfig:
     """Configuration loaded from kazma.yaml."""
 
     name: str = "kazma"
-    version: str = "0.1.0"
+    version: str = "0.2.0"
     language: str = "ar"
     rtl: bool = True
     default_model: str = "gpt-4o-mini"
@@ -77,7 +77,7 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
 
     return AgentConfig(
         name=agent_cfg.get("name", "kazma"),
-        version=agent_cfg.get("version", "0.1.0"),
+        version=agent_cfg.get("version", "0.2.0"),
         language=agent_cfg.get("language", "ar"),
         rtl=agent_cfg.get("rtl", True),
         default_model=models_cfg.get("default", "gpt-4o-mini"),
