@@ -32,7 +32,6 @@ class KazmaTUI(App[None]):
         ("ctrl+p", "command_palette", "Commands"),
         ("ctrl+c", "copy", "Copy"),
         ("ctrl+f", "focus_input", "Focus Chat"),
-        ("ctrl+l", "toggle_theme", "Light/Dark"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -63,10 +62,6 @@ class KazmaTUI(App[None]):
             self.query_one("#chat-input").focus()
         except Exception:
             pass
-
-    def action_toggle_theme(self) -> None:
-        self.dark = not self.dark
-        self.notify(f"Theme: {'dark' if self.dark else 'light'}", timeout=2)
 
 
 def main() -> None:
