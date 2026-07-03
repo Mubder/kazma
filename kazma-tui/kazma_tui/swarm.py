@@ -102,6 +102,9 @@ class ActiveTasksLog(RichLog):
 class WorkerTree(Tree):
     """Tree showing worker hierarchy with capabilities."""
 
+    def __init__(self) -> None:
+        super().__init__("Workers")
+
     DEFAULT_CSS = """WorkerTree { height: 1fr; background: transparent; }"""
 
     def on_mount(self) -> None:
