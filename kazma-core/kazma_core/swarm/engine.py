@@ -49,6 +49,7 @@ from kazma_core.swarm.task import (
     WorkerResult,
 )
 from kazma_core.swarm.task_store import TaskStore
+from kazma_core.swarm.phonebook import WorkerPhonebook
 from kazma_core.swarm.tracing import TracingEmitter
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
 
@@ -104,6 +105,7 @@ class SwarmEngine:
         self._metrics_collector = metrics_collector or MetricsCollector(task_store=task_store)
         self._tracing_emitter = tracing_emitter or TracingEmitter()
         self._autoscaler = None  # lazily initialized
+        self._phonebook = WorkerPhonebook()
         self._build_workers()
 
     def get_autoscaler(self):
@@ -1682,131 +1684,13 @@ class SwarmEngine:
         return self._reliability.get_bounded_concurrency(task_max_concurrent)
 
     # ------------------------------------------------------------------
-    # Phonebook — Worker Registry integration
-    # ------------------------------------------------------------------
+    # Phonebook — delegated to WorkerPhonebook (P2-1 refactor)
+    # -----------------------------------------------------------------
 
     def summon(self, worker_name: str) -> SwarmWorker | None:
-        """Instantiate a worker from the WorkerRegistry by name.
-
-        Fetches the worker's Soul (system_prompt), applies the configured
-        model/provider, and returns a ready SwarmWorker instance.
-
-        This is the "phonebook" pattern: query the registry, get the
-        entry, build the worker.
-        """
-        from kazma_core.swarm.registry import WorkerRegistry
-
-        registry = WorkerRegistry()
-        entry = registry.get(worker_name)
-        if entry is None:
-            logger.warning("[SwarmEngine] summon failed — no worker named '%s'", worker_name)
-            return None
-        if not entry.enabled:
-            logger.warning("[SwarmEngine] summon skipped — worker '%s' is disabled", worker_name)
-            return None
-
-        # All worker types now resolve to InProcessWorker (the legacy
-        # TelegramWorker subprocess path was vestigial and is removed).
-        return InProcessWorker(
-            name=entry.name,
-            role=entry.roles[0] if entry.roles else "leaf",
-            model=entry.model,
-            provider=entry.provider,
-            system_prompt=entry.system_prompt,
-            capabilities=WorkerCapabilities(
-                role=entry.roles[0] if entry.roles else "leaf",
-                expertise=entry.expertise,
-                tools=[],  # all tools available unless restricted
-            ),
-        )
+        """Instantiate a worker from the WorkerRegistry by name."""
+        return self._phonebook.summon(worker_name)
 
     async def dispatch_by_name(self, worker_name: str, task: str) -> dict[str, Any]:
         """Summon a worker by name and dispatch a task with episodic memory context."""
-        worker = self.summon(worker_name)
-        if worker is None:
-            return {"synthesis": f"Worker '{worker_name}' not found", "opinions": []}
-        # Inject episodic memory context before dispatch
-        enriched = task
-        try:
-            from kazma_core.swarm.memory.adapter import get_adapter
-            adapter = get_adapter()
-            if adapter is not None:
-                hits = await adapter.search(task, limit=3)
-                if hits:
-                    strategies = [h.content or h.metadata.get("summary", "") for h in hits]
-                    episodic = " | ".join(s for s in strategies if s)
-                    if episodic:
-                        enriched = f"PREVIOUS_SUCCESSFUL_STRATEGIES: {episodic[:1500]}\n\n{task}"
-        except Exception:
-            pass
-        result = await worker.dispatch(enriched)
-        return {"synthesis": result.get("output", ""), "opinions": [result]}
-
-    async def consult(self, expertise: str, task: str) -> dict[str, Any]:
-        """Consult workers matching an expertise tag.
-
-        Queries the WorkerRegistry for workers with the given expertise,
-        dispatches the task to each, and returns aggregated results.
-
-        Args:
-            expertise: Expertise tag (e.g. "code", "security", "design").
-            task: The task description to send to each matching worker.
-
-        Returns:
-            Dict with keys: expertise, workers_consulted, results, synthesis.
-        """
-        from kazma_core.swarm.registry import WorkerRegistry
-
-        registry = WorkerRegistry()
-        entries = registry.find_by_expertise(expertise)
-        if not entries:
-            return {
-                "expertise": expertise,
-                "workers_consulted": 0,
-                "results": [],
-                "synthesis": f"No workers found with expertise '{expertise}'.",
-            }
-
-        results: list[dict[str, Any]] = []
-        for entry in entries:
-            worker = self.summon(entry.name)
-            if worker is None:
-                continue
-            try:
-                worker.mark_dispatched(task)
-                started = perf_counter()
-                result = await worker.dispatch(task)
-                elapsed = (perf_counter() - started) * 1000
-                worker.mark_completed(result.get("status", "unknown"))
-                results.append({
-                    "worker": entry.name,
-                    "role": entry.roles[0] if entry.roles else "",
-                    "status": result.get("status", "error"),
-                    "output": str(result.get("output", ""))[:500],
-                    "duration_ms": elapsed,
-                })
-            except Exception as exc:
-                logger.exception("[SwarmEngine] consult worker %s failed", entry.name)
-                results.append({
-                    "worker": entry.name,
-                    "status": "error",
-                    "output": str(exc),
-                    "duration_ms": 0,
-                })
-
-        return {
-            "expertise": expertise,
-            "workers_consulted": len(results),
-            "results": results,
-            "synthesis": self._synthesize_consult(results),
-        }
-
-    def _synthesize_consult(self, results: list[dict[str, Any]]) -> str:
-        """Build a simple synthesis from consult results."""
-        if not results:
-            return "No results to synthesize."
-        parts: list[str] = []
-        for r in results:
-            status_icon = "✅" if r["status"] == "success" else "❌"
-            parts.append(f"{status_icon} *{r['worker']}*: {r['output'][:200]}")
-        return "\n".join(parts)
+        return await self._phonebook.dispatch_by_name(worker_name, task)
