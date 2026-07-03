@@ -224,24 +224,4 @@ Scrollbar {
    scrollbar-color-active: $primary;
    scrollbar-size: 1 0;
 }
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Light Theme — toggle with app.dark or CSS class
-   ═══════════════════════════════════════════════════════════════════════ */
-
-.light {
-    $primary:    #0891b2;
-    $secondary:  #7c3aed;
-    $accent:     #06b6d4;
-    $error:      #dc2626;
-    $success:    #16a34a;
-    $warning:    #d97706;
-    $surface:    #f7f9fb;
-    $panel:      #ffffff;
-    $boost:      #f4f7fa;
-    $border:     rgba(15,23,42,0.1);
-    $text:       #0f1c2e;
-    $text-muted: #64748b;
-    $text-disabled: #94a3b8;
-}
 """
