@@ -11,6 +11,7 @@ from typing import Any
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.checkpoint import HITLCheckpoint, HITLCheckpointHandler
+from kazma_core.swarm.checkpoint_manager import CheckpointManager
 from kazma_core.swarm.config import SwarmConfig, WorkerConfig
 from kazma_core.swarm.consultation import (
     ConsultationConfigurationError,
@@ -106,6 +107,15 @@ class SwarmEngine:
         self._tracing_emitter = tracing_emitter or TracingEmitter()
         self._autoscaler = None  # lazily initialized
         self._phonebook = WorkerPhonebook()
+        self._checkpoint_mgr = CheckpointManager(
+            checkpoint_handler=self._checkpoint_handler,
+            task_store=task_store,
+            task_history=self._task_history,
+            max_history=self._max_history,
+        )
+        # Register reject callback so the checkpoint timeout auto-reject
+        # can call back into the engine without a circular reference.
+        self._checkpoint_mgr.set_reject_callback(self.reject_checkpoint)
         self._build_workers()
 
     def get_autoscaler(self):
@@ -1351,118 +1361,25 @@ class SwarmEngine:
         ]
 
     # ------------------------------------------------------------------
-    # HITL Checkpoint management
+    # HITL Checkpoint management — state delegated to CheckpointManager
+    # (P2-1 refactor). Resume/finalize logic stays on the engine.
     # ------------------------------------------------------------------
 
     def _handle_pipeline_checkpoint(
-        self,
-        *,
-        task: SwarmTask,
-        pattern_result: PatternExecution,
-        started: float,
+        self, *, task: SwarmTask, pattern_result: PatternExecution, started: float,
     ) -> TaskResult:
-        """Handle a pipeline that paused at an HITL checkpoint.
-
-        Stores the paused state, sets up auto-reject timeout if configured,
-        and returns a ``TaskResult`` with ``status="paused"``.
-        """
-        checkpoint_data = pattern_result.metadata.get("checkpoint", {})
-        step = checkpoint_data.get("step", 0)
-        worker = checkpoint_data.get("worker", "")
-        output_preview = checkpoint_data.get("output_preview", "")
-        task_id = checkpoint_data.get("task_id", task.id)
-
-        checkpoint = HITLCheckpoint(
-            task_id=task_id,
-            step=step,
-            worker=worker,
-            output_preview=output_preview,
-            needs_approval=True,
-            status="pending",
-        )
-
-        blackboard_data = pattern_result.metadata.get("paused_blackboard", {})
-
-        self._checkpoint_handler.store_paused_pipeline(
-            task=task,
-            checkpoint=checkpoint,
-            worker_results=pattern_result.worker_results,
-            blackboard_data=blackboard_data,
-        )
-
-        # Set up checkpoint timeout auto-reject if configured.
-        timeout_seconds = task.metadata.get("checkpoint_timeout")
-        if timeout_seconds and float(timeout_seconds) > 0:
-            timeout_task = asyncio.create_task(
-                self._checkpoint_timeout_reject(
-                    task_id,
-                    float(timeout_seconds),
-                )
-            )
-            self._checkpoint_handler.set_timeout_task(task_id, timeout_task)
-
-        # Store in task history as paused.
-        task.status = TaskStatus.PAUSED
-        task.completed_at = None  # Not completed yet.
-        duration = perf_counter() - started
-
-        result = TaskResult(
-            task_id=task.id,
-            status="paused",
-            worker_results=pattern_result.worker_results,
-            aggregated_output=pattern_result.aggregated_output,
-            total_cost=sum(item.cost for item in pattern_result.worker_results),
-            total_tokens=sum(item.tokens_used for item in pattern_result.worker_results),
-            duration_seconds=duration,
-            metadata=pattern_result.metadata,
-        )
-        task.result = result
-        self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
-        if len(self._task_history) > self._max_history:
-            excess = len(self._task_history) - self._max_history
-            for old_key in list(self._task_history.keys())[:excess]:
-                self._task_history.pop(old_key, None)
-
-        # Persist paused state to SQLite so it survives restart.
-        if self._task_store is not None:
-            try:
-                self._task_store.persist_task(task)
-            except Exception:
-                logger.exception(
-                    "[SwarmEngine] failed to persist paused task '%s'", task.id
-                )
-
-        logger.info(
-            "[SwarmEngine] pipeline '%s' paused at HITL checkpoint step %d",
-            task.id,
-            step,
-        )
-        return result
-
-    async def _checkpoint_timeout_reject(
-        self,
-        task_id: str,
-        timeout_seconds: float,
-    ) -> None:
-        """Auto-reject a checkpoint after the timeout expires."""
-        try:
-            await asyncio.sleep(timeout_seconds)
-        except asyncio.CancelledError:
-            return
-
-        logger.warning(
-            "[SwarmEngine] HITL checkpoint for task '%s' timed out after %.2fs, auto-rejecting",
-            task_id,
-            timeout_seconds,
-        )
-        await self.reject_checkpoint(
-            task_id,
-            reason=f"Checkpoint timed out after {timeout_seconds:g}s.",
+        """Handle a pipeline that paused at an HITL checkpoint."""
+        return self._checkpoint_mgr.handle_pipeline_checkpoint(
+            task=task, pattern_result=pattern_result, started=started,
         )
 
     def get_checkpoint_info(self, task_id: str) -> HITLCheckpoint | None:
         """Return checkpoint info for a paused task, or ``None``."""
-        return self._checkpoint_handler.get_checkpoint(task_id)
+        return self._checkpoint_mgr.get_checkpoint_info(task_id)
+
+    def restore_paused_tasks(self) -> list[SwarmTask]:
+        """Load paused tasks from SQLite so they can be resumed."""
+        return self._checkpoint_mgr.restore_paused_tasks()
 
     @property
     def task_store(self) -> TaskStore | None:
@@ -1478,46 +1395,6 @@ class SwarmEngine:
     def tracing_emitter(self) -> TracingEmitter:
         """Return the tracing emitter."""
         return self._tracing_emitter
-
-    def restore_paused_tasks(self) -> list[SwarmTask]:
-        """Load paused tasks from SQLite so they can be resumed.
-
-        Called on engine startup to restore HITL checkpoint state that
-        was persisted before a restart.  Returns the list of restored
-        paused tasks.
-        """
-        if self._task_store is None:
-            return []
-        paused_tasks = self._task_store.get_paused_tasks()
-        for task in paused_tasks:
-            self._task_history[task.id] = task
-            # Restore the checkpoint handler state if metadata is present.
-            checkpoint_meta = task.metadata.get("hitl_checkpoint", {})
-            if checkpoint_meta:
-                checkpoint = HITLCheckpoint(
-                    task_id=task.id,
-                    step=checkpoint_meta.get("step", 0),
-                    worker=checkpoint_meta.get("worker", ""),
-                    output_preview=checkpoint_meta.get("output_preview", ""),
-                    needs_approval=True,
-                    status="pending",
-                )
-                worker_results = (
-                    list(task.result.worker_results) if task.result else []
-                )
-                blackboard_data = task.metadata.get("paused_blackboard", {})
-                self._checkpoint_handler.store_paused_pipeline(
-                    task=task,
-                    checkpoint=checkpoint,
-                    worker_results=worker_results,
-                    blackboard_data=blackboard_data,
-                )
-                logger.info(
-                    "[SwarmEngine] restored paused pipeline '%s' at step %d",
-                    task.id,
-                    checkpoint.step,
-                )
-        return paused_tasks
 
     async def approve_checkpoint(self, task_id: str) -> TaskResult | None:
         """Approve a paused HITL checkpoint and resume the pipeline.
@@ -1548,7 +1425,7 @@ class SwarmEngine:
         )
 
         # Remove from paused state before resuming.
-        self._checkpoint_handler._paused.pop(task_id, None)
+        self._checkpoint_mgr.pop_paused_entry(task_id)
 
         # Resume from the next step.
         next_step = checkpoint.step + 1
@@ -1619,7 +1496,7 @@ class SwarmEngine:
                             )
                 else:
                     # If task not in history, store the result directly.
-                    self._checkpoint_handler.complete_pipeline(task_id, result)
+                    self._checkpoint_mgr.complete_pipeline(task_id, result)
         return result
 
     # ------------------------------------------------------------------
