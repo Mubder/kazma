@@ -767,28 +767,30 @@ class TestAppIntegration:
     """Verify MetricsDashboard is integrated into the main app."""
 
     def test_app_yields_metrics_dashboard(self) -> None:
-        """KazmaTUI.compose() must yield MetricsDashboard widget."""
+        """MetricsDashboard is composed in ChatScreen (inside TabbedContent)."""
         from kazma_tui.app import KazmaTUI
         from kazma_tui.dashboard import MetricsDashboard
+        from kazma_tui.screens.chat_screen import ChatScreen
 
         app = KazmaTUI()
-        widgets = list(app.compose())
+        # ChatScreen composes MetricsDashboard
+        screen = ChatScreen()
+        widgets = list(screen.compose())
         widget_classes = [type(w) for w in widgets]
         assert MetricsDashboard in widget_classes, (
-            f"MetricsDashboard not found in compose output: "
+            f"MetricsDashboard not found in ChatScreen: "
             f"{[c.__name__ for c in widget_classes]}"
         )
 
     def test_app_no_placeholder_widget(self) -> None:
-        """KazmaTUI.compose() must NOT yield PlaceholderWidget."""
-        from kazma_tui.app import KazmaTUI
+        """All screens must NOT yield PlaceholderWidget."""
+        from kazma_tui.screens.chat_screen import ChatScreen
+        from kazma_tui.screens.swarm_screen import SwarmScreen
 
-        app = KazmaTUI()
-        widgets = list(app.compose())
-        widget_names = [type(w).__name__ for w in widgets]
-        assert "PlaceholderWidget" not in widget_names, (
-            f"PlaceholderWidget should be replaced with MetricsDashboard: {widget_names}"
-        )
+        for ScreenCls in (ChatScreen, SwarmScreen):
+            widgets = list(ScreenCls().compose())
+            widget_names = [type(w).__name__ for w in widgets]
+            assert "PlaceholderWidget" not in widget_names
 
 
 # ---------------------------------------------------------------------------

@@ -40,6 +40,44 @@ Screen {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   Tabbed Navigation — kazma.ai style
+   ═══════════════════════════════════════════════════════════════════════ */
+
+TabbedContent {
+    height: 1fr;
+}
+
+TabPane {
+    height: 1fr;
+    background: $surface;
+}
+
+TabbedContent > ContentTabs {
+    background: $panel;
+    border-bottom: solid $border;
+    height: 3;
+}
+
+TabbedContent > ContentTabs > Tab {
+    padding: 0 2;
+    border: none;
+    background: transparent;
+    color: $text-muted;
+    text-style: bold;
+}
+
+TabbedContent > ContentTabs > Tab:hover {
+    color: $text;
+    background: $panel-alt;
+}
+
+TabbedContent > ContentTabs > Tab.-active {
+    color: $primary;
+    background: $surface;
+    border-bottom: double $primary;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    Header — cyan bottom border, centered
    ═══════════════════════════════════════════════════════════════════════ */
 

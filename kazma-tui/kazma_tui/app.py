@@ -1,7 +1,7 @@
 """Main Kazma TUI application — Textual-based professional dashboard.
 
 Adopts the kazma.ai design language: deep charcoal background,
-cyan primary accent, purple secondary, gradient borders.
+cyan primary accent, purple secondary, tabbed navigation.
 """
 
 from __future__ import annotations
@@ -10,11 +10,12 @@ import logging
 import sys
 
 from textual.app import App, ComposeResult
+from textual.widgets import TabbedContent, TabPane
 
 from kazma_tui.chat import ChatPanel
-from kazma_tui.dashboard import MetricsDashboard
 from kazma_tui.footer import FooterShortcuts
-from kazma_tui.header import HeaderProviderModel
+from kazma_tui.screens.chat_screen import ChatScreen
+from kazma_tui.screens.swarm_screen import SwarmScreen
 from kazma_tui.theme import KAZMA_CSS
 
 logger = logging.getLogger(__name__)
@@ -24,14 +25,17 @@ class KazmaTUI(App[None]):
     """Kazma TUI — Production terminal dashboard.
 
     Features:
-    - Metrics dashboard with CPU/Memory/RPM/Latency (gauge-style)
-    - Chat interface with command support
+    - Tabbed navigation: Chat | Swarm
+    - Metrics dashboard with CPU/Memory/RPM/Latency
+    - Chat interface with markdown and streaming
     - ModelRegistry integration
-    - Split-pane swarm panel (via Tab)
-    - kazma.ai dark theme
+    - Swarm worker registry with live bus events
+    - Context-sensitive footer shortcuts
+    - kazma.ai dark/light theme
 
     Keys:
-        Tab     — Switch focus between panels
+        Ctrl+T  — Switch tabs
+        Ctrl+P  — Command palette
         Ctrl+Q  — Quit
         Enter   — Send chat message
     """
@@ -45,10 +49,12 @@ class KazmaTUI(App[None]):
     ]
 
     def compose(self) -> ComposeResult:
-        """Create the application layout."""
-        yield HeaderProviderModel()
-        yield MetricsDashboard()
-        yield ChatPanel()
+        """Create the tabbed application layout."""
+        with TabbedContent(initial="chat"):
+            with TabPane("💬 Chat", id="chat"):
+                yield ChatScreen()
+            with TabPane("🐝 Swarm", id="swarm"):
+                yield SwarmScreen()
         yield FooterShortcuts()
 
     def action_copy_last(self) -> None:
