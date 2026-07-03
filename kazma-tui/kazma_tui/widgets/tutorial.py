@@ -170,7 +170,6 @@ class TutorialScreen(ModalScreen[bool]):
             )
             yield ProgressBar(
                 total=len(self.STEPS),
-                progress=self.current_step + 1,
                 show_eta=False,
                 id="tutorial-progress",
             )
