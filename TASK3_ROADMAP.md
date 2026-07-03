@@ -100,8 +100,9 @@
 - **Resolution:** Engine methods + API routes + UI buttons. Commit `8f0a97e`.
 
 ### P2-3: Task cancel/retry from UI
-- **Effort:** M | **Dependencies:** None | **Quick win:** No | **Status:** Open
+- **Effort:** M | **Dependencies:** None | **Quick win:** No | **Status:** ✅ Done (Sprint 16)
 - **What:** Add cancel (interrupt running dispatch) and retry (re-dispatch failed task) buttons
+- **Resolution:** Cancel kills asyncio handle + finalizes as CANCELLED. Retry builds fresh SwarmTask with `metadata['retry_of']` lineage. API routes + UI buttons. Commit `9a42017`.
 
 ### P2-4: Circuit breaker UI badges
 - **Effort:** S | **Dependencies:** None | **Quick win:** ✅ Yes | **Status:** ✅ Done (Sprint 16)
@@ -183,7 +184,7 @@
 | 2 | Gate destructive routes (P0-4) | S | ✅ `301df32` |
 | 3 | Fix Docker bind (P0-5) | S | ✅ Done |
 | 4 | Add SSRF validation (P1-1) | S | ✅ `301df32` |
-| 5 | Enforce skill checksums (P1-3) | S | ⬜ Open |
+| 5 | Enforce skill checksums (P1-3) | S | ✅ `b13cc57` |
 | 6 | Per-worker start/stop (P2-2) | S | ✅ `8f0a97e` |
 | 7 | Circuit breaker badges (P2-4) | S | ✅ `8f0a97e` |
 | 8 | Fix README accuracy (P2-8) | S | ✅ `8f0a97e` |

@@ -7,10 +7,10 @@ Generated: 2026-07-03
 | Metric | Value |
 |---|---|
 | Total Tests Passing | 3,409 |
-| Total Tests Collected | 3,425 |
+| Total Tests Collected | 3,439 |
 | Skipped (missing optional deps) | 13 |
 | Environmental Failures | 3 (Windows admin, LM Studio offline, mock assertion) |
-| Total Lines of Code (excluding .venv, tests/) | 57,481 |
+| engine.py Lines | 1,573 (down from 1,878; 3 modules extracted) |
 | Python Version | 3.11+ |
 | Project Version | 0.1.0 |
 | Status | active_development |
@@ -32,13 +32,11 @@ All project references use the current `kazma` namespace (`kazma`, `Kazma`, `.ka
 
 ## Recent Milestones
 
-- Namespace migration to kazma completed
-- Unified ModelRegistry singleton
-- Textual TUI with metrics dashboard and chat
-- Swarm task persistence and Results Dashboard fixes
-- Telegram adapter reliability fixes
-- CheckpointManager async writes
-- Retry/auth error mapping improvements
+- **Sprint 17** — Engine refactored (1,878→1,573 lines, 3 modules extracted). Config reconciliation on startup.
+- **Sprint 16** — Skill checksums (fail-closed + HMAC). Task cancel/retry from UI. Circuit breaker badges + per-worker start/stop.
+- **Sprint 15** — ConfigStore atomicity (WAL, batch transactions, singleton). MCP server auth + HITL gate + tool classification.
+- **Sprint 14** — HITL approval gates on ALL platforms (Web, Telegram, Discord, Slack). Fail-closed danger-tool gating. Test isolation (28→3 failures).
+- **Sprint 13** — Active Tasks tab, provider/model resolution fixes, swarm output routing, security quick wins.
 
 ## Notes
 

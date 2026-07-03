@@ -87,42 +87,51 @@ Sprint 6 (Month 3):   ██████████ 2/2 tasks ✅
 Sprint 7 (June 2026): ██████████ Web UI rebuild + memory ✅
 Sprint 8 (June 2026): ██████████ Architecture remediation ✅
 Sprint 9 (June 2026): ██████████ UI bug fixes + bilingual ✅
+Sprint 10 (June 2026):██████████ Model picker + tool-call fallback ✅
+Sprint 11 (June 2026):██████████ Swarm pro-grade overhaul (Phase 1-4) ✅
+Sprint 12 (June 2026):██████████ Swarm output routing + bugs ✅
+Sprint 13 (June 2026):██████████ Active Tasks + test fixes ✅
+Sprint 14 (July 2026):██████████ HITL gates (all platforms) + test isolation ✅
+Sprint 15 (July 2026):██████████ ConfigStore atomicity + MCP auth/HITL ✅
+Sprint 16 (July 2026):██████████ Skill checksums + task cancel/retry ✅
+Sprint 17 (July 2026):██████████ Config reconciliation + engine refactor ✅
 ```
 
-### Overall: 21/21 original features shipped ✅ + remediation rounds complete ✅
+### Overall: 21/21 original features shipped ✅ + 8 remediation sprints complete ✅
 
 ---
 
-## 🔜 Future Work — Hardening & Security (Post-Remediation Audit)
+## 🔜 Remediation Audit — Completed Items (Sprints 14–17)
 
-The following items were identified by the post-remediation weak-points audit and are
-prioritized for upcoming sprints.
+The following items were identified by the post-remediation weak-points audit and
+completed in Sprints 14-17.
 
-### P0 — Critical Security
+| Priority | Item | Status |
+|:---:|:---|:---:|
+| P0 | **HITL Approval Gates** — Wire HITL into WebUI + all gateway adapter paths (Web, Telegram, Discord, Slack). Fail-closed danger-tool gating with graph interrupt() + swarm bus + MCP classification. | ✅ Done |
+| P0 | **Test Isolation Fix** — Root-caused 36 failing tests. Fixed KAZMA_SECRET env leak (23 failures), handoff cycle detection, workspace singleton pollution. 36→3 failures. | ✅ Done |
+| P0 | **Hub API Auth** — Rewrote `hub/api.py` to read `X-Kazma-Secret` with `hmac.compare_digest`. | ✅ Done |
+| P0 | **Route Gating** — Added auth middleware to `/api/sessions`, `/api/mcp/servers`, `/api/approve`, `/api/system/*`. | ✅ Done |
+| P0 | **Docker Bind Fix** — Dockerfile CMD changed to `--host 0.0.0.0`. | ✅ Done |
+| P1 | **SSRF Validation** — Added URL validation to discover/MCP endpoints. | ✅ Done |
+| P1 | **Active Tasks Tab** — In-flight task tracking, non-blocking dispatch, live polling. | ✅ Done |
+| P1 | **MCP Auth + HITL** — Per-server auth (bearer tokens), trust levels, MCP tool classification + HITL gate. | ✅ Done |
+| P1 | **ConfigStore Atomicity** — WAL journaling, busy_timeout, batch transactions, process-wide singleton, YAML→SQLite reconciliation. | ✅ Done |
+| P1 | **Skill Checksums** — Fail-closed verification, HMAC-SHA256 signatures, `kazma hub sign` CLI. | ✅ Done |
+| P2 | **Circuit Breaker Badges** — Live per-worker ⚡ breaker state in swarm panel. | ✅ Done |
+| P2 | **Per-Worker Start/Stop** — Individual worker lifecycle control (API + UI). | ✅ Done |
+| P2 | **Task Cancel/Retry** — Cancel running tasks, retry failed tasks from UI. | ✅ Done |
+| P2 | **Docs Accuracy** — Test count, Slack description, README feature descriptions updated. | ✅ Done |
+| P2 | **Config Reconciliation** — YAML auto-seeds SQLite on startup, non-clobbering. | ✅ Done |
+| P2 | **Engine Refactor** — 1,878→1,573 lines. 3 modules extracted (ReliabilityRegistry, WorkerPhonebook, CheckpointManager). | ✅ Done |
 
-| Priority | Item | Description |
-|:---:|:---|:---|
-| P0 | API Authentication | Add authentication to all API endpoints (settings, swarm, MCP, skills) |
-| P0 | SSRF Protection | Guard URL-fetching tools (read_url, vision_analyze) against SSRF |
-| P0 | CORS Middleware | Add configurable CORS middleware to the FastAPI app |
+### Remaining Open Items
 
-### P1 — High Priority
-
-| Priority | Item | Description |
-|:---:|:---|:---|
-| P1 | Non-blocking web_search | Wrap blocking `web_search` call in `asyncio.to_thread` |
-| P1 | Bounded LRU Eviction | Add bounded LRU eviction to `_thread_locks`, `_sessions`, `SessionManager`, `_checkpoint_locks` |
-| P1 | Error Handler Leakage | Error handlers must not leak `str(exc)` to clients |
-| P1 | file_read Workspace Restriction | Restrict `file_read.py` to the configured workspace root |
-
-### P2 — Medium Priority
-
-| Priority | Item | Description |
-|:---:|:---|:---|
-| P2 | mypy Type Errors | Resolve the remaining 208 mypy type errors |
-| P2 | Test Coverage | Add tests for agent_runner.py, graph_builder.py, and tool modules |
-| P2 | LLM Retry with Backoff | Add retry with backoff to LLM calls on the main graph path |
-| P2 | SQLite Lock Handling | Improve "database is locked" error handling for concurrent access |
+| Priority | Item | Effort |
+|:---:|:---|:---:|
+| P2 | Unify routing algorithms (merge 3 implementations) | M |
+| P2 | Semantic routing (embeddings-based capability matching) | L |
+| P2 | Visual pipeline editor (drag-and-drop DAG) | XL |
 
 ---
 
