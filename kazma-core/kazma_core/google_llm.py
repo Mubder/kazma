@@ -3,15 +3,31 @@
 Authentication is handled exclusively via Application Default
 Credentials (ADC).  No API keys, no service-account JSON files.
 
-Typical usage::
+This module provides two integration levels:
+
+1. **GoogleGeminiClient** — standalone Vertex AI SDK wrapper for direct
+   `generate_text()` calls using the ``vertexai`` SDK.
+
+2. **GeminiProvider** — subclass of ``LLMProvider`` that plugs into
+   Kazma's provider dispatch system.  Uses Vertex AI's OpenAI-compatible
+   REST endpoint so all existing chat/tool/streaming code paths work
+   without modification.
+
+Typical usage (standalone)::
 
     from kazma_core.google_llm import GoogleGeminiClient
 
     client = GoogleGeminiClient(project_id="my-gcp-project")
     reply = client.generate_text("Explain monads in one paragraph.")
 
-This module is intentionally decoupled from any domain logic — it is
-a pure transport layer for Vertex AI generative models.
+Typical usage (integrated with Kazma provider system)::
+
+    from kazma_core.model_registry import get_model_registry
+
+    registry = get_model_registry()
+    registry.set_active_provider("google", model="gemini-2.5-flash")
+    provider = registry.get_client()
+    response = await provider.chat([{"role": "user", "content": "Hello"}])
 """
 
 from __future__ import annotations
@@ -19,8 +35,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
 import vertexai
 from vertexai.generative_models import GenerativeModel, GenerationConfig
+
+from kazma_core.llm_provider import LLMConfig, LLMProvider, LLMResponse
 
 logger = logging.getLogger(__name__)
 
@@ -153,3 +172,128 @@ class GoogleGeminiClient:
             raise GeminiAPIError("All candidate parts were empty")
 
         return "".join(texts).strip()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  GeminiProvider — Kazma LLMProvider integration
+# ══════════════════════════════════════════════════════════════════════
+
+# Vertex AI OpenAI-compatible endpoint template.
+#   {location}-aiplatform.googleapis.com/v1beta1/projects/{project}/
+#   locations/{location}/endpoints/openapi
+_VERTEX_OPENAI_TEMPLATE: str = (
+    "https://{location}-aiplatform.googleapis.com/v1beta1/"
+    "projects/{project}/locations/{location}/endpoints/openapi"
+)
+
+
+class GeminiProvider(LLMProvider):
+    """Kazma LLMProvider subclass for Vertex AI Gemini.
+
+    Uses Application Default Credentials for authentication — no API
+    keys.  Communicates via Vertex AI's OpenAI-compatible REST endpoint
+    so that all existing chat, tool-calling, and streaming code paths
+    work without modification.
+
+    Args:
+        config: Standard ``LLMConfig``.  ``api_key`` is ignored (ADC
+            provides the bearer token).  ``base_url`` is overridden with
+            the Vertex AI OpenAI-compatible endpoint.
+        project_id: GCP project ID.  If empty, resolved from ADC.
+        location: Vertex AI region.  Defaults to ``us-central1``.
+    """
+
+    def __init__(
+        self,
+        config: LLMConfig | None = None,
+        *,
+        project_id: str = "",
+        location: str = _DEFAULT_LOCATION,
+    ) -> None:
+        self._gcp_project = project_id
+        self._gcp_location = location
+
+        # Derive the Vertex AI OpenAI-compatible base URL.
+        resolved_project = self._resolve_project()
+        config = config or LLMConfig()
+        config.base_url = _VERTEX_OPENAI_TEMPLATE.format(
+            location=location,
+            project=resolved_project,
+        )
+
+        super().__init__(config)
+        logger.info(
+            "GeminiProvider ready | project=%s location=%s endpoint=%s",
+            resolved_project, location, config.base_url,
+        )
+
+    # ── Overrides ─────────────────────────────────────────────────
+
+    def _resolve_api_key(self) -> None:
+        """ADC provides the auth token — skip the API key resolution."""
+        # The bearer token is obtained on-demand via _get_client().
+        # We set a placeholder so the parent doesn't error on missing key.
+        self.config.api_key = "adc-placeholder"
+
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Return an httpx client authenticated with an ADC bearer token.
+
+        The token is refreshed on every call to ensure it never expires
+        mid-session.
+        """
+        token: str
+        try:
+            import google.auth
+            import google.auth.transport.requests
+
+            credentials, _project = google.auth.default()
+            auth_req = google.auth.transport.requests.Request()
+            credentials.refresh(auth_req)
+            token = credentials.token
+        except Exception as exc:
+            logger.exception("Failed to obtain ADC credentials")
+            raise RuntimeError(
+                "ADC authentication failed.  Run: gcloud auth application-default login"
+            ) from exc
+
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.AsyncClient(
+                base_url=self.config.base_url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                timeout=httpx.Timeout(self.config.timeout, connect=10.0),
+            )
+        else:
+            # Update the token on the existing client.
+            self._http.headers["Authorization"] = f"Bearer {token}"
+
+        return self._http
+
+    # ── Helpers ──────────────────────────────────────────────────
+
+    def _resolve_project(self) -> str:
+        """Resolve the GCP project ID.
+
+        Priority: explicit kwarg > GOOGLE_CLOUD_PROJECT > ADC default.
+        """
+        import os
+
+        if self._gcp_project:
+            return self._gcp_project
+        env_project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+        if env_project:
+            self._gcp_project = env_project
+            return env_project
+        try:
+            import google.auth
+            _, project = google.auth.default()
+            if project:
+                self._gcp_project = project
+                return project
+        except Exception:
+            pass
+        raise ValueError(
+            "GCP project ID not set.  Pass project_id= or set GOOGLE_CLOUD_PROJECT."
+        )

@@ -279,7 +279,22 @@ class ModelRegistry:
             "api_key": api_key,
             "model": effective_model,
         })
-        client = LLMProvider(config)
+
+        # ── Google Vertex AI → use GeminiProvider with ADC auth ──
+        if provider_name.lower() == "google":
+            from kazma_core.google_llm import GeminiProvider
+
+            location = str(
+                provider_entry.get("location", "")
+                if provider_entry else ""
+            ) or "us-central1"
+            project_id = str(
+                provider_entry.get("project_id", "")
+                if provider_entry else ""
+            )
+            client = GeminiProvider(config, project_id=project_id, location=location)
+        else:
+            client = LLMProvider(config)
 
         if model is None:
             self._clients[provider_name] = client
@@ -299,11 +314,19 @@ class ModelRegistry:
         # Search providers for one that lists this model (manual + discovered)
         owner = self.find_provider_for_model(clean_id)
         if owner:
+            owner_name = str(owner.get("name", "")).lower()
             config = LLMConfig.from_dict({
                 "base_url": str(owner.get("base_url", "")),
                 "api_key": str(owner.get("api_key", "")),
                 "model": clean_id,
             })
+            if owner_name == "google":
+                from kazma_core.google_llm import GeminiProvider
+                return GeminiProvider(
+                    config,
+                    project_id=str(owner.get("project_id", "")),
+                    location=str(owner.get("location", "")) or "us-central1",
+                )
             return LLMProvider(config)
 
         # Fallback: use active profile with overridden model
@@ -331,6 +354,13 @@ class ModelRegistry:
             "api_key": str(entry.get("api_key", "")),
             "model": effective_model,
         })
+        if provider_name.lower() == "google":
+            from kazma_core.google_llm import GeminiProvider
+            return GeminiProvider(
+                config,
+                project_id=str(entry.get("project_id", "")),
+                location=str(entry.get("location", "")) or "us-central1",
+            )
         return LLMProvider(config)
 
     def find_provider_for_model(self, model_id: str) -> dict[str, Any] | None:
@@ -371,6 +401,12 @@ class ModelRegistry:
         api_key = str(provider_entry.get("api_key", ""))
 
         if not base_url:
+            # Google Vertex AI has no static /models endpoint — models are
+            # hardcoded because the base URL is computed per project/location.
+            if clean_name == "google":
+                from kazma_core.providers import GEMINI_MODELS
+                self._discovered_models[clean_name] = list(GEMINI_MODELS)
+                return self._discovered_models[clean_name]
             logger.warning("discover_models: no base_url for %r", clean_name)
             return []
 

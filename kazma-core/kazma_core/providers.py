@@ -1,5 +1,15 @@
 """Provider presets with default base URLs and model discovery endpoints."""
 
+# Well-known Gemini models available via Vertex AI.
+# These are hardcoded because Vertex AI does not expose a static /models
+# REST endpoint — the base URL is computed dynamically per project/location.
+GEMINI_MODELS: list[str] = [
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+]
+
 PROVIDER_PRESETS: dict[str, dict[str, str]] = {
     "openai": {
         "name": "OpenAI",
@@ -24,10 +34,10 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
     },
     "google": {
         "name": "Google Gemini",
-        "base_url": "https://generativelanguage.googleapis.com/v1beta",
-        "models_endpoint": "/models",
-        "auth_header": "x-goog-api-key",
-        "docs": "https://aistudio.google.com/apikey",
+        "base_url": "",  # computed by GeminiProvider from project/location
+        "models_endpoint": "",  # models are hardcoded below (Vertex AI has no static /models)
+        "auth_header": "Bearer",
+        "docs": "https://console.cloud.google.com/vertex-ai",
     },
     "xai": {
         "name": "xAI / Grok",
