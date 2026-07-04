@@ -5,7 +5,8 @@ Provides endpoints for:
   - POST /api/gateway/start          — start gateway
   - POST /api/gateway/stop           — stop gateway
   - GET  /api/gateway/roadmap        — project roadmap JSON
-  - DELETE /api/sessions/{thread_id} — delete a session and its checkpoint
+
+DELETE /api/sessions/{thread_id} is registered in dashboard.py.
 """
 
 from __future__ import annotations
@@ -73,29 +74,8 @@ def create_gateway_router(
         except Exception as e:
             return {"error": str(e), "phases": []}
 
-    @router.delete("/api/sessions/{thread_id}", status_code=204)
-    async def delete_session(thread_id: str) -> None:
-        """Delete a session and its checkpoint data.
-
-        Args:
-            thread_id: The session thread ID to delete.
-        """
-        # Delete from session store
-        if session_store is not None:
-            await session_store.delete(thread_id)
-            logger.info("[Sessions] Deleted session %s", thread_id)
-
-        # Delete checkpoint if available
-        if checkpointer is not None:
-            try:
-                config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
-                await checkpointer.adelete_thread(thread_id)
-                logger.info("[Sessions] Deleted checkpoint for %s", thread_id)
-            except AttributeError:
-                logger.warning(
-                    "[Sessions] Checkpointer does not support adelete_thread — checkpoint data may remain"
-                )
-            except Exception as e:
-                logger.warning("[Sessions] Failed to delete checkpoint for %s: %s", thread_id, e)
+    # NOTE: DELETE /api/sessions/{thread_id} is registered in dashboard.py
+    # to avoid duplicate route registration. This router only handles
+    # gateway-specific endpoints.
 
     return router

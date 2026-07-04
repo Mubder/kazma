@@ -242,12 +242,18 @@ class TelegramAdapter(BaseAdapter):
                         # Stop the adapter — retrying will just spam the log.
                         self._running = False
                         break
-                    logger.exception("[telegram] HTTP %d polling error", exc.response.status_code)
+                    # Log status + response text without the full exception
+                    # string (which contains the URL with the bot token)
+                    try:
+                        err_body = exc.response.text[:300]
+                    except Exception:
+                        err_body = "<unreadable>"
+                    logger.error("[telegram] HTTP %d polling error: %s", exc.response.status_code, err_body)
                     if await self.jitter_sleep(shutdown_event):
                         break
                     continue
-                except Exception:
-                    logger.exception("[telegram] Poll error")
+                except Exception as poll_exc:
+                    logger.error("[telegram] Poll error: %s: %s", type(poll_exc).__name__, str(poll_exc)[:200])
                     if await self.jitter_sleep(shutdown_event):
                         break
                     continue
@@ -469,8 +475,9 @@ class TelegramAdapter(BaseAdapter):
             """
             # Webhook secret validation (if configured)
             if self._webhook_secret:
+                import hmac
                 provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-                if provided != self._webhook_secret:
+                if not hmac.compare_digest(provided, self._webhook_secret):
                     logger.warning("[telegram-webhook] Invalid or missing secret token")
                     return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
@@ -574,10 +581,15 @@ class TelegramAdapter(BaseAdapter):
             logger.info("[telegram] Downloaded voice file: %s (%d bytes)", file_path, len(dl_resp.content))
             return dl_resp.content
         except httpx.HTTPStatusError as exc:
-            logger.error("[telegram] HTTP %d downloading voice file: %s", exc.response.status_code, exc)
+            # Log status + body only — exc string contains the URL with bot token
+            try:
+                err_body = exc.response.text[:300]
+            except Exception:
+                err_body = "<unreadable>"
+            logger.error("[telegram] HTTP %d downloading voice file: %s", exc.response.status_code, err_body)
             return None
         except Exception:
-            logger.exception("[telegram] Failed to download voice file")
+            logger.error("[telegram] Failed to download voice file: %s", type(exc).__name__)
             return None
 
     async def transcribe_voice(self, audio_bytes: bytes) -> str | None:
@@ -768,6 +780,14 @@ class TelegramAdapter(BaseAdapter):
         data = callback_query.get("data", "")
         message = callback_query.get("message", {})
         from_user = callback_query.get("from", {})
+
+        # Enforce user whitelist on callback queries too
+        if self._allowed_users:
+            user_id = from_user.get("id", 0)
+            if user_id not in self._allowed_users:
+                logger.warning("[telegram] Callback from non-whitelisted user %d", user_id)
+                asyncio.create_task(self._answer_callback_query(cb_id, "Not authorized"))
+                return
 
         # Dismiss loading indicator
         asyncio.create_task(self._answer_callback_query(cb_id))
@@ -1069,11 +1089,16 @@ class TelegramAdapter(BaseAdapter):
                         payload.pop("parse_mode", None)
                         parse_mode_fallback_done = True
                         continue
+                    # Sanitize: exc string contains URL with bot token
+                    try:
+                        err_body = exc.response.text[:300]
+                    except Exception:
+                        err_body = "<unreadable>"
                     logger.error(
                         "[telegram] HTTP %d on send to %d: %s",
                         exc.response.status_code,
                         chat_id,
-                        exc,
+                        err_body,
                     )
                     chunk_sent = False
                     break

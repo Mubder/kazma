@@ -373,39 +373,44 @@ class DiscordAdapter(BaseAdapter):
                 logger.error("[discord] No channel_id available for send()")
                 return False
 
-        # Send with 429 retry
-        for attempt in range(_SEND_MAX_RETRIES):
-            try:
-                await self._rate_limiter.acquire()
-                resp = await self._http.post(
-                    f"/channels/{channel_id}/messages",
-                    json={"content": outbound.text[:2000]},
-                )
-
-                if resp.status_code == 429:
-                    body = resp.json()
-                    retry_after = body.get("retry_after", _SEND_BASE_DELAY * (2**attempt))
-                    jitter = random.uniform(0.5, 1.5)
-                    wait = retry_after + jitter
-                    logger.warning(
-                        "[discord] Rate-limited (429) — retrying in %.1fs (attempt %d/%d)",
-                        wait,
-                        attempt + 1,
-                        _SEND_MAX_RETRIES,
+        # Send with 429 retry — chunk long messages into 2000-char pieces
+        text = outbound.text
+        chunks = [text[i:i + 2000] for i in range(0, len(text), 2000)] if text else [""]
+        all_sent = True
+        for chunk in chunks:
+            for attempt in range(_SEND_MAX_RETRIES):
+                try:
+                    await self._rate_limiter.acquire()
+                    resp = await self._http.post(
+                        f"/channels/{channel_id}/messages",
+                        json={"content": chunk},
                     )
-                    await asyncio.sleep(wait)
-                    continue
 
-                resp.raise_for_status()
-                logger.debug("[discord] Sent to channel %s: %.80s", channel_id, outbound.text)
-                return True
+                    if resp.status_code == 429:
+                        body = resp.json()
+                        retry_after = body.get("retry_after", _SEND_BASE_DELAY * (2**attempt))
+                        jitter = random.uniform(0.5, 1.5)
+                        wait = retry_after + jitter
+                        logger.warning(
+                            "[discord] Rate-limited (429) — retrying in %.1fs (attempt %d/%d)",
+                            wait,
+                            attempt + 1,
+                            _SEND_MAX_RETRIES,
+                        )
+                        await asyncio.sleep(wait)
+                        continue
 
-            except httpx.HTTPStatusError as exc:
-                logger.error("[discord] HTTP %d on send to %s: %s", exc.response.status_code, channel_id, exc)
-                return False
-            except Exception:
-                logger.exception("[discord] Failed to send to channel %s", channel_id)
-                return False
+                    resp.raise_for_status()
+                    break  # success — move to next chunk
+                except httpx.HTTPStatusError as exc:
+                    logger.error("[discord] HTTP %d on send to %s: %s", exc.response.status_code, channel_id, exc.response.text[:200])
+                    all_sent = False
+                    break
+                except Exception as exc:
+                    logger.error("[discord] Send failed: %s: %s", type(exc).__name__, str(exc)[:200])
+                    all_sent = False
+                    break
 
-        logger.error("[discord] Rate-limit exceeded after %d retries for channel=%s", _SEND_MAX_RETRIES, channel_id)
-        return False
+        if all_sent:
+            logger.debug("[discord] Sent to channel %s: %.80s", channel_id, outbound.text)
+        return all_sent

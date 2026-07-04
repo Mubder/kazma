@@ -62,7 +62,7 @@ class CheckpointManager(BaseCheckpointSaver):
 
         Uses LRU ordering: existing entries are moved to the end
         (most-recently-used) and the oldest entry is evicted when the
-        bound is exceeded.
+        bound is exceeded. Locks that are currently held are never evicted.
         """
         lock = self._locks.get(thread_id)
         if lock is not None:
@@ -71,9 +71,16 @@ class CheckpointManager(BaseCheckpointSaver):
             return lock
         lock = asyncio.Lock()
         self._locks[thread_id] = lock
-        # Evict oldest entries when the bound is exceeded.
+        # Evict oldest non-held entries when the bound is exceeded.
         while len(self._locks) > self._max_locks:
-            self._locks.popitem(last=False)
+            evicted = False
+            for key in list(self._locks.keys()):
+                if not self._locks[key].locked():
+                    self._locks.pop(key)
+                    evicted = True
+                    break
+            if not evicted:
+                break  # All held — keep growing rather than breaking exclusion
         return lock
 
     async def aput(

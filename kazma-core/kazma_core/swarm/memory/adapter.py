@@ -192,8 +192,8 @@ class UnifiedMemoryAdapter:
             # Query default + enumerate registered workers
             workers = ["default"]
             try:
-                from kazma_core.swarm.registry import WorkerRegistry
-                workers.extend([w.name for w in WorkerRegistry().list_all()])
+                from kazma_core.swarm.registry import get_worker_registry
+                workers.extend([w.name for w in get_worker_registry().list_all()])
             except Exception:
                 pass
             for worker in workers:

@@ -59,6 +59,9 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/sessions", "/api/session",
     "/api/approve", "/api/system",
     "/api/workspace", "/api/memory",
+    "/api/pending-approvals", "/api/metrics",
+    "/api/telemetry/stream", "/api/telemetry/snapshot",
+    "/v1/models",
 )
 
 #: Exact read-only paths that are always open regardless of secret config.
@@ -69,7 +72,6 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/health",
     "/api/status",
     "/api/telemetry",
-    "/api/pending-approvals",
 })
 
 

@@ -279,7 +279,8 @@ def _cmd_edit(text: str) -> str:
         )
     return (
         f"✏️ *Edit received:* {parts[1]}\n\n"
-        "The edit has been applied to the conversation history."
+        "Note: /edit is not yet implemented. The conversation history "
+        "has not been modified."
     )
 
 

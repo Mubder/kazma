@@ -127,8 +127,13 @@ TOOL_MAP = {t["name"]: t for t in TOOLS}
 
 def _resolve(root: Path, p: str) -> Path:
     """Resolve a path relative to root, preventing escape."""
+    root_resolved = root.resolve()
     target = (root / p).resolve() if not os.path.isabs(p) else Path(p).resolve()
-    if not str(target).startswith(str(root.resolve())):
+    # Use relative_to() instead of str.startswith() to avoid prefix bypass
+    # (e.g. /home/user/project-evil starts with /home/user/project)
+    try:
+        target.relative_to(root_resolved)
+    except ValueError:
         raise PermissionError(f"Path {p} escapes project root")
     return target
 
@@ -139,7 +144,13 @@ def _tool_search_code(root: Path, args: dict[str, Any]) -> str:
 
     pattern = args["pattern"]
     glob = args.get("glob")
-    regex = re.compile(pattern, re.IGNORECASE)
+    # Validate regex complexity to prevent ReDoS
+    if len(pattern) > 500:
+        return "Error: pattern too long (max 500 chars)"
+    try:
+        regex = re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        return f"Error: invalid regex: {e}"
     matches: list[str] = []
 
     search_files = root.rglob(glob) if glob else root.rglob("*")

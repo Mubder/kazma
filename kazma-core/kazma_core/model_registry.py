@@ -428,7 +428,8 @@ class ModelRegistry:
             logger.warning("discover_models: SSRF blocked %r for %r: %s", url, clean_name, exc)
             return []
         except Exception:
-            logger.debug("discover_models: SSRF validation skipped (module unavailable)")
+            logger.warning("discover_models: SSRF validation unavailable — blocking request for safety")
+            return []
 
         # Build auth header
         auth_header_type = preset.get("auth_header", "Bearer")

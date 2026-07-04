@@ -84,17 +84,17 @@ class TelegramBusAdapter(BusAdapter):
             self._http = httpx.AsyncClient(timeout=15.0)
         return self._http
 
-    async def _post(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+    async def _post(self, payload: dict[str, Any], method: str = "sendMessage") -> dict[str, Any] | None:
         """Send a request to the Telegram API.  Returns parsed JSON or None."""
         try:
             http = await self._ensure_http()
             resp = await http.post(
-                f"{_TELEGRAM_API}/bot{self._bot_token}/sendMessage",
+                f"{_TELEGRAM_API}/bot{self._bot_token}/{method}",
                 json=payload,
             )
             return resp.json()
         except Exception as exc:
-            logger.warning("[TelegramBus] sendMessage failed: %s", exc)
+            logger.warning("[TelegramBus] %s failed: %s", method, exc)
             return None
 
     async def _edit_message(

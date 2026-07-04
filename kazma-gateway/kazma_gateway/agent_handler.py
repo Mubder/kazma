@@ -202,15 +202,24 @@ async def _try_swarm_command(
     # ── Detect swarm intent ─────────────────────────────────────
     # Accept both "/swarm ..." and bare "swarm" mentions.
     is_slash = text.lower().startswith("/swarm")
-    # Bare-word detection: message mentions "swarm" as a keyword
-    # (not just a substring of another word).
+    # Bare-word detection: only trigger on explicit intent patterns,
+    # not just any message containing the word "swarm".
+    # E.g. "use the swarm to X" → yes, "I saw a swarm of bees" → no.
     text_lower = text.lower()
     bare_swarm = False
     if not is_slash:
         import re
-        # Match "swarm" as a whole word, possibly followed by ":"
-        if re.search(r'\bswarm\b', text_lower):
-            bare_swarm = True
+        # Only match specific command patterns, not arbitrary word usage
+        bare_patterns = [
+            r'(?:use|ask|tell)\s+(?:the\s+)?swarm\s+(?:to\s+)?',
+            r'let\s+(?:the\s+)?swarm\s+',
+            r'^swarm\s*:\s*',  # "swarm: task" (must be at start)
+            r'^swarm\s+\S',    # "swarm <task>" (must be at start)
+        ]
+        for pat in bare_patterns:
+            if re.match(pat, text_lower):
+                bare_swarm = True
+                break
 
     if not is_slash and not bare_swarm:
         return False
@@ -1140,8 +1149,19 @@ def create_graph_handler(
                 return lock
             lock = asyncio.Lock()
             _thread_locks[thread_id] = lock
+            # Evict oldest entries, but skip any that are currently held
             while len(_thread_locks) > _MAX_DICT_ENTRIES:
-                _thread_locks.popitem(last=False)
+                # Find the oldest non-held lock to evict
+                evicted = False
+                for key in list(_thread_locks.keys()):
+                    if not _thread_locks[key].locked():
+                        _thread_locks.pop(key)
+                        evicted = True
+                        break
+                if not evicted:
+                    # All locks are held — keep growing rather than
+                    # breaking mutual exclusion
+                    break
             return lock
 
     async def handler(msg: IncomingMessage) -> None:
@@ -1478,6 +1498,29 @@ async def _handle_hitl_resume(
     ctx = await store.get(thread_id)
     if not ctx:
         ctx = msg.context_metadata
+
+    # Authorization: verify that the requester is the same user who
+    # initiated the paused task. Look up the target thread's context
+    # and compare sender_id. This prevents any user from approving
+    # another user's paused danger-tool execution.
+    if target_thread != thread_id:
+        target_ctx = await store.get(target_thread)
+        if target_ctx:
+            original_sender = target_ctx.get("sender_id", "")
+            current_sender = msg.sender_id
+            if original_sender and original_sender != current_sender:
+                logger.warning(
+                    "[HITL] Authz denied: %s tried to approve thread %s owned by %s",
+                    current_sender, target_thread, original_sender,
+                )
+                await manager.send(
+                    OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text="⚠️ You are not authorized to approve this task.",
+                        context_metadata=ctx,
+                    )
+                )
+                return True
 
     try:
         from langgraph.types import Command

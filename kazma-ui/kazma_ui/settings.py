@@ -203,7 +203,7 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         except ValueError as exc:
             return {"success": False, "error": f"Invalid URL: {exc}"}
         except ImportError:
-            pass  # ssrf module not available — proceed with caution
+            return {"success": False, "error": "SSRF validation module not available"}
 
         try:
             headers = {

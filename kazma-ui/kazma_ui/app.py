@@ -1271,9 +1271,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
                     content=_gef.to_json_error(exc),
                 )
             except Exception:
+                is_prod = os.environ.get("KAZMA_ENV") == "production"
                 return JSONResponse(
                     status_code=500,
-                    content={"error": "Internal server error", "detail": str(exc) if not _is_prod() else ""},
+                    content={"error": "Internal server error", "detail": "" if is_prod else str(exc)},
                 )
         return templates.TemplateResponse(
             request,

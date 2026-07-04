@@ -62,7 +62,9 @@ class ChatPanel(Vertical):
         log = self.query_one("#chat-log", RichLog)
         ts = datetime.now().strftime("%H:%M")
         c = ROLE_HEX.get(role, "#8b949e")
-        log.write(f"[dim]{ts}[/] [{c}]▌ {role.upper()}[/] {text}")
+        # Escape Rich markup in user/LLM text to prevent injection
+        from rich.text import Text
+        log.write(Text.from_markup(f"[dim]{ts}[/] [{c}]▌ {role.upper()}[/] ") + Text(text))
 
     def add_message(self, role: str, text: str) -> None:
         """Alias for write() - adds a message to the chat log."""

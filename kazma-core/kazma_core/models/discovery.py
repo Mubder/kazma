@@ -141,7 +141,8 @@ async def discover_lm_studio_models(
         logger.warning("discover_lm_studio_models: SSRF blocked %r: %s", models_url, exc)
         return info
     except Exception:
-        pass
+        logger.warning("discover_lm_studio_models: SSRF validation unavailable — blocking request for safety")
+        return info
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0)) as client:
@@ -197,7 +198,8 @@ async def discover_custom_models(base_url: str) -> ProviderInfo:
         logger.warning("discover_custom_models: SSRF blocked %r: %s", models_url, exc)
         return info
     except Exception:
-        pass
+        logger.warning("discover_custom_models: SSRF validation unavailable — blocking request for safety")
+        return info
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0)) as client:

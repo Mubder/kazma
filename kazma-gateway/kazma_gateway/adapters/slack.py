@@ -332,6 +332,11 @@ class SlackAdapter(BaseAdapter):
 
     async def _handle_message(self, channel_id: str, msg: dict[str, Any]) -> None:
         """Normalize a Slack message into an IncomingMessage and enqueue it."""
+        # Enforce channel whitelist if configured
+        if self._allowed_channels and channel_id not in self._allowed_channels:
+            logger.debug("[Slack] Message from non-whitelisted channel %s — skipping", channel_id)
+            return
+
         text = msg.get("text", "").strip()
         if not text:
             return
@@ -351,7 +356,11 @@ class SlackAdapter(BaseAdapter):
                 "username": username,
             },
         )
-        await self._queue.put(incoming)
+        try:
+            self._queue.put_nowait(incoming)
+        except asyncio.QueueFull:
+            logger.warning("[Slack] Queue full — dropping message from %s", user_id)
+            return
         logger.debug("[Slack] ← from %s: %.80s", user_id, text)
 
     # ── Lifecycle ───────────────────────────────────────────────────
