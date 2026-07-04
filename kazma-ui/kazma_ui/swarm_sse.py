@@ -100,7 +100,7 @@ class SSEEventBus:
 
         # Periodic cleanup of old terminal history (roughly every 60s).
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             if loop.is_running():
                 now = loop.time()
                 if now - self._last_cleanup_time > 60:
@@ -267,8 +267,8 @@ async def _stream_events(
 
             yield _sse_frame(entry["event"], entry["data"])
 
-            # Close the stream after the terminal event.
-            if entry["event"] == "task_completed":
+            # Close the stream after any terminal event.
+            if entry["event"] in ("task_completed", "task_failed"):
                 return
     finally:
         bus.unsubscribe(task_id, queue)

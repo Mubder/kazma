@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Header, Query
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ def create_models_router(config_store: Any = None) -> APIRouter:
     async def get_models(
         provider: str = Query("all", description="Provider key: openai, anthropic, deepseek, google, xai, openrouter, ollama, lm-studio, custom, all"),
         base_url: str | None = Query(None, description="Override base URL"),
-        api_key: str | None = Query(None, description="API key for authenticated model discovery"),
+        api_key: str | None = Header(None, alias="X-Api-Key", description="API key for authenticated model discovery"),
     ) -> dict[str, Any]:
         """Unified model discovery endpoint.
 

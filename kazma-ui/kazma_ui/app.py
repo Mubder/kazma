@@ -240,7 +240,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         allow_origins=_cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-        allow_headers=["*"],
+        allow_headers=["Content-Type", "X-Kazma-Secret", "X-Api-Key", "Accept"],
     )
     logger.info("[CORS] allow_origins=%s", _cors_origins)
 
@@ -369,14 +369,12 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # Dashboard WebSocket for real-time trace updates
     @app.websocket("/ws/dashboard")
     async def ws_dashboard(websocket: WebSocket) -> None:
-        # Authenticate WebSocket — check X-Kazma-Secret header or query param
+        # Authenticate WebSocket — check X-Kazma-Secret header only
+        # (query params are logged in access logs, so not safe for secrets)
         import os as _os
         expected = _os.environ.get("KAZMA_SECRET", "")
         if expected:
-            provided = (
-                websocket.headers.get("x-kazma-secret", "")
-                or websocket.query_params.get("secret", "")
-            )
+            provided = websocket.headers.get("x-kazma-secret", "")
             import hmac as _hmac
             if not _hmac.compare_digest(provided, expected):
                 await websocket.close(code=4003, reason="Unauthorized")
@@ -414,14 +412,11 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # WebSocket endpoint for chat
     @app.websocket("/ws/chat")
     async def ws_chat(websocket: WebSocket) -> None:
-        # Authenticate WebSocket — check X-Kazma-Secret header or query param
+        # Authenticate WebSocket — check X-Kazma-Secret header only
         import os as _os2
         expected2 = _os2.environ.get("KAZMA_SECRET", "")
         if expected2:
-            provided2 = (
-                websocket.headers.get("x-kazma-secret", "")
-                or websocket.query_params.get("secret", "")
-            )
+            provided2 = websocket.headers.get("x-kazma-secret", "")
             import hmac as _hmac2
             if not _hmac2.compare_digest(provided2, expected2):
                 await websocket.close(code=4003, reason="Unauthorized")
@@ -1303,15 +1298,14 @@ def main() -> None:
 
     import uvicorn
 
-    # Security: default to localhost.  Only bind 0.0.0.0 when
-    # KAZMA_SECRET is explicitly set, otherwise log a warning.
-    host = "127.0.0.1"
-    if _os3.environ.get("KAZMA_SECRET"):
-        host = "0.0.0.0"
-    else:
+    # Security: default to localhost.  Use KAZMA_HOST env var to
+    # explicitly bind to all interfaces (decoupled from KAZMA_SECRET).
+    host = _os3.environ.get("KAZMA_HOST", "127.0.0.1")
+    if host == "0.0.0.0" and not _os3.environ.get("KAZMA_SECRET"):
         logger.warning(
-            "[app] KAZMA_SECRET not set — binding to 127.0.0.1 only. "
-            "Set KAZMA_SECRET to bind on all interfaces."
+            "[app] Binding to 0.0.0.0 without KAZMA_SECRET — "
+            "anyone on the network can access the UI. "
+            "Set KAZMA_SECRET to enable authentication."
         )
 
     app = create_app()

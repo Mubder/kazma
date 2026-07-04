@@ -147,7 +147,9 @@ class TaskManager:
         """Spawn a managed background task.
         
         Args:
-            coro: Coroutine to execute
+            coro: Coroutine to execute, or a callable that returns a new
+                  coroutine (required for retry_count > 0 since coroutines
+                  cannot be awaited more than once).
             name: Task name for logging
             on_error: Optional error handler callback
             retry_count: Number of retries on failure
@@ -155,11 +157,17 @@ class TaskManager:
         Returns:
             The created asyncio.Task
         """
+        # If coro is a callable, use it as a factory to create fresh
+        # coroutines on each retry. Otherwise, only the first attempt
+        # can use it (coroutines are single-use).
+        coro_factory = coro if callable(coro) else None
+
         async def wrapper() -> None:
             attempts = 0
             while self._running:
                 try:
-                    await coro
+                    current = coro_factory() if coro_factory else coro
+                    await current
                     break  # Success, exit loop
                 except asyncio.CancelledError:
                     logger.debug(f"Task '{name}' cancelled")

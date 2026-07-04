@@ -369,6 +369,24 @@ class CircuitBreaker:
             "cooldown_seconds": self.cooldown_seconds,
         }
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CircuitBreaker:
+        """Restore a breaker from a serialized snapshot."""
+        breaker = cls(
+            failure_threshold=data.get("failure_threshold", 5),
+            cooldown_seconds=data.get("cooldown_seconds", 60.0),
+        )
+        breaker.consecutive_failures = data.get("consecutive_failures", 0)
+        state_str = data.get("state", "closed")
+        try:
+            breaker._state = CircuitState(state_str)
+        except ValueError:
+            breaker._state = CircuitState.CLOSED
+        if breaker._state == CircuitState.OPEN:
+            import time as _time
+            breaker._opened_at = _time.monotonic()
+        return breaker
+
 
 # ---------------------------------------------------------------------------
 # TimeoutGuard

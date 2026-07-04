@@ -51,7 +51,7 @@ class ChatPanel(Vertical):
         self._busy: bool = False
 
     def compose(self) -> ComposeResult:
-        yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True)
+        yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
         yield ProgressBar(id="chat-progress", total=100, show_eta=False)
         yield Input(placeholder="Type... /help for commands", id="chat-input")
 

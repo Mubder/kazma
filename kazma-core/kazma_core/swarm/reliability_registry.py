@@ -102,6 +102,26 @@ class ReliabilityRegistry:
             for name in self._worker_names()
         }
 
+    def save_breaker_state(self) -> dict[str, dict[str, Any]]:
+        """Serialize all circuit breaker states for persistence.
+
+        Call on shutdown/restart to preserve breaker stats.
+        """
+        return {
+            name: breaker.to_dict()
+            for name, breaker in self._circuit_breakers.items()
+        }
+
+    def load_breaker_state(self, data: dict[str, dict[str, Any]]) -> None:
+        """Restore circuit breaker states from a serialized snapshot.
+
+        Call on startup to recover breaker stats after a restart.
+        """
+        for name, state_dict in data.items():
+            self._circuit_breakers[name] = CircuitBreaker.from_dict(state_dict)
+        if data:
+            logger.info("[Reliability] Restored %d circuit breaker states", len(data))
+
     # ── Retry policies ──────────────────────────────────────────────
 
     def get_retry_policy(self, worker_name: str) -> RetryPolicy:

@@ -228,10 +228,24 @@ class SwarmTaskTracker:
         self._progress_interval = progress_interval
         self._tasks: dict[str, TrackedTask] = {}
         self._counter = 0
+        self._max_tasks = 500  # cap to prevent unbounded growth
 
     def _next_id(self) -> str:
         self._counter += 1
         return f"task-{self._counter}"
+
+    def _cleanup_completed(self) -> None:
+        """Remove oldest completed tasks when dict exceeds the cap."""
+        if len(self._tasks) <= self._max_tasks:
+            return
+        completed = [
+            (tid, t) for tid, t in self._tasks.items()
+            if t.completed_at is not None
+        ]
+        completed.sort(key=lambda x: x[1].completed_at or 0)
+        excess = len(self._tasks) - self._max_tasks
+        for tid, _ in completed[:excess]:
+            del self._tasks[tid]
 
     def start_task(
         self,
@@ -315,6 +329,7 @@ class SwarmTaskTracker:
 
         task.completed_at = time.monotonic()
         task.status = "completed" if success else "failed"
+        self._cleanup_completed()
 
         elapsed = task.completed_at - task.started_at
         icon = "✅" if success else "❌"

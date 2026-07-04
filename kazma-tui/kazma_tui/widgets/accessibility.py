@@ -353,16 +353,20 @@ class HighContrastMode:
         self._enabled = False
         # Restore previous stylesheet
         if self._prev_stylesheet is not None:
-            self.app.stylesheet = self._prev_stylesheet
             try:
+                self.app.stylesheet = self._prev_stylesheet
                 self.app.refresh_css()
             except Exception:
-                pass
-        else:
-            # Fallback: re-apply the default theme
-            from kazma_tui.themes.theme_manager import ThemeManager
-            tm = ThemeManager(self.app)
-            tm.apply_theme("kazma-dark")
+                logger.debug("[HighContrast] Failed to restore previous stylesheet", exc_info=True)
+                self._prev_stylesheet = None
+        # Fallback: re-apply the default theme
+        if self._prev_stylesheet is None:
+            try:
+                from kazma_tui.themes.theme_manager import ThemeManager
+                tm = ThemeManager(self.app)
+                tm.apply_theme("kazma-dark")
+            except Exception:
+                logger.debug("[HighContrast] ThemeManager fallback failed", exc_info=True)
     
     def toggle(self) -> bool:
         """Toggle high contrast mode."""

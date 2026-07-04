@@ -33,7 +33,6 @@ from kazma_tui.theme import KAZMA_THEME
 from kazma_tui.widgets.accessibility import FocusManager, HighContrastMode
 from kazma_tui.widgets.command_palette import CommandPalette
 from kazma_tui.widgets.confirm_dialog import ConfirmDialog
-from kazma_tui.widgets.performance import PerformanceManager
 from kazma_tui.widgets.status_bar import KazmaStatusBar
 from kazma_tui.widgets.toast import Toast
 from kazma_tui.widgets.tutorial import TutorialScreen
@@ -71,7 +70,6 @@ class KazmaTUI(App[None]):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._performance_manager: Optional[PerformanceManager] = None
         self._focus_manager: Optional[FocusManager] = None
         self._high_contrast: Optional[HighContrastMode] = None
         self._status_bar: Optional[KazmaStatusBar] = None
@@ -117,10 +115,6 @@ class KazmaTUI(App[None]):
 
         # Initialize high contrast mode
         self._high_contrast = HighContrastMode(self)
-
-        # Initialize performance manager
-        self._performance_manager = PerformanceManager()
-        self._performance_manager.start()
 
         # Check if first run - show tutorial
         try:
@@ -412,9 +406,8 @@ class KazmaTUI(App[None]):
             self.push_screen(Toast(f"High contrast mode {mode}", "info", duration=2.0))
 
     def action_record_activity(self) -> None:
-        """Record user activity for adaptive refresh."""
-        if self._performance_manager:
-            self._performance_manager.record_activity()
+        """Record user activity (no-op — adaptive refresh removed)."""
+        pass
 
 
 def main() -> None:

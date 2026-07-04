@@ -60,6 +60,15 @@ class RateFeedbackManager:
     def _get_bucket(self, user_id: str) -> _UserBucket:
         """Get or create a bucket for a user."""
         if user_id not in self._buckets:
+            # Periodic cleanup: remove stale buckets when dict grows large
+            if len(self._buckets) > 1000:
+                now = time.monotonic()
+                stale = [
+                    uid for uid, b in self._buckets.items()
+                    if (now - b.last_refill) > self._window * 10
+                ]
+                for uid in stale:
+                    del self._buckets[uid]
             self._buckets[user_id] = _UserBucket(
                 tokens=float(self._limit),
                 last_refill=time.monotonic(),

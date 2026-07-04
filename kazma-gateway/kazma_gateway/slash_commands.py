@@ -236,10 +236,6 @@ def _cmd_help() -> str:
     )
 
 
-def _cmd_reset() -> str:
-    return "🔄 Conversation has been reset. Starting fresh."
-
-
 def _cmd_context(ctx: dict[str, Any]) -> str:
     """Show context window token usage."""
     token_count = ctx.get("token_count", 0)
