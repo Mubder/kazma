@@ -48,6 +48,7 @@ class ChatPanel(Vertical):
         super().__init__()
         self._last_response: str = ""
         self._pulse_timer = None
+        self._busy: bool = False
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True)
@@ -135,6 +136,12 @@ class ChatPanel(Vertical):
             log.write(f"\n[#ef4444]Error: {e}[/]")
         finally:
             self.show_progress(False)
+            self._busy = False
+            # Re-enable input
+            try:
+                self.query_one("#chat-input", Input).disabled = False
+            except Exception:
+                pass
 
     # ── Input handling ─────────────────────────────────────────────
 
@@ -142,14 +149,21 @@ class ChatPanel(Vertical):
         text = event.value.strip()
         if not text:
             return
+        # Block input while a response is being generated
+        if self._busy:
+            return
         event.input.clear()
         if text.startswith("/"):
             self._handle_command(text)
         elif self._is_swarm_mention(text):
             self.write("user", text)
+            self._busy = True
+            event.input.disabled = True
             self.app.call_later(self._handle_swarm_command, text)
         else:
             self.write("user", text)
+            self._busy = True
+            event.input.disabled = True
             self.app.call_later(self._generate_response, text)
 
     @staticmethod
@@ -443,21 +457,20 @@ class ChatPanel(Vertical):
         except Exception:
             pass
 
-    def copy_to_clipboard(self) -> None:
+    def copy_to_clipboard(self) -> bool:
         """Copy currently selected text or last KAZMA response to system clipboard.
 
-        Tries screen-level text selection first (from mouse drag or
-        Ctrl+A).  Falls back to the last assistant response tracked in
-        _last_response, since RichLog has no .text property to read back.
+        Returns True if something was copied, False otherwise.
         """
         try:
             selected = self.screen.get_selected_text()
             if selected:
                 self.app.copy_to_clipboard(selected)
-                return
+                return True
         except Exception:
             pass
         # Fallback: copy the last tracked KAZMA response
         if self._last_response:
             self.app.copy_to_clipboard(self._last_response)
-            return
+            return True
+        return False

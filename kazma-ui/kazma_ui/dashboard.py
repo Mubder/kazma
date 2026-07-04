@@ -305,8 +305,18 @@ async def delete_session(thread_id: str) -> JSONResponse:
             (thread_id,),
         )
         await conn.commit()
-        
-        logger.info("Deleted session: %s", thread_id)
+
+        # Also delete from session store if available (fixes H3: data leak
+        # where dashboard.py only deleted checkpoints, leaving session store data)
+        try:
+            from kazma_gateway.stores.session_store import get_session_store
+            store = get_session_store()
+            if store is not None:
+                await store.delete(thread_id)
+        except Exception:
+            pass  # session store may not be initialized
+
+        logger.info("Deleted session: %s (checkpoints + session store)", thread_id)
         return JSONResponse({
             "deleted": True,
             "thread_id": thread_id,

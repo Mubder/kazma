@@ -530,6 +530,10 @@ def create_swarm_router(
                 if background:
                     _handle = asyncio.create_task(engine.broadcast(swarm_task))
                     engine._task_handles[swarm_task.id] = _handle
+                    # Clean up handle on completion to prevent memory leak
+                    _handle.add_done_callback(
+                        lambda h, tid=swarm_task.id: engine._task_handles.pop(tid, None)
+                    )
                     return JSONResponse({
                         "status": "ok",
                         "message": f"Task dispatched (background) to {len(dispatched)} worker(s)",
@@ -542,6 +546,10 @@ def create_swarm_router(
                 if background:
                     _handle = asyncio.create_task(engine.dispatch(swarm_task))
                     engine._task_handles[swarm_task.id] = _handle
+                    # Clean up handle on completion to prevent memory leak
+                    _handle.add_done_callback(
+                        lambda h, tid=swarm_task.id: engine._task_handles.pop(tid, None)
+                    )
                     return JSONResponse({
                         "status": "ok",
                         "message": f"Task dispatched (background) to {len(dispatched)} worker(s)",
@@ -1346,6 +1354,9 @@ def create_swarm_router(
         # Dispatch in the background (non-blocking)
         handle = asyncio.create_task(engine.dispatch(new_task))
         engine._task_handles[new_task.id] = handle
+        handle.add_done_callback(
+            lambda h, tid=new_task.id: engine._task_handles.pop(tid, None)
+        )
         return JSONResponse(
             {
                 "status": "ok",

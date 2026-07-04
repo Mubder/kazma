@@ -72,32 +72,10 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
             },
         )
 
-    @r.get("/api/chat/sessions")
-    async def api_list_sessions() -> list[dict[str, Any]]:
-        """List all chat sessions."""
-        return [
-            {
-                "session_id": s.session_id,
-                "message_count": len(s.messages),
-                "created_at": s.created_at,
-                "total_cost": s.total_cost,
-            }
-            for s in list_sessions()
-        ]
-
-    @r.get("/api/chat/sessions/{session_id}/messages")
-    async def api_session_messages(session_id: str) -> list[dict[str, Any]]:
-        """Get messages for a session."""
-        session = _sessions().get(session_id)
-        if not session:
-            return []
-        return session.messages
-
-    @r.delete("/api/chat/sessions/{session_id}")
-    async def api_delete_session(session_id: str) -> dict[str, str]:
-        """Delete a chat session."""
-        _sessions().delete(session_id)
-        return {"status": "ok"}
+    # NOTE: /api/chat/sessions, /api/chat/sessions/{id}/messages, and
+    # DELETE /api/chat/sessions/{id} are registered in sse_chat.py to
+    # avoid duplicate route registrations. This router only handles
+    # the chat page HTML and the WebSocket endpoint.
 
     return r
 
@@ -150,6 +128,17 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                 active_model = data.get("model", "") or llm_cfg["model"]
                 # Resolve base_url — client can send it, otherwise stay on default
                 active_base_url: str | None = data.get("base_url") or None
+                # SSRF protection: validate user-provided base_url
+                if active_base_url:
+                    try:
+                        from kazma_core.security.ssrf import validate_url
+                        validate_url(active_base_url)
+                    except Exception:
+                        await websocket.send_json({
+                            "type": "error",
+                            "content": "Blocked: base_url failed SSRF validation.",
+                        })
+                        continue
 
                 # Store user message
                 user_msg = {

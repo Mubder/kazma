@@ -225,12 +225,25 @@ class KazmaTUI(App[None]):
         except Exception as e:
             logger.warning("[TUI] SwarmEngine init failed: %s", e)
 
+        # ── Update status bar with active model info ──────────────────
+        try:
+            from kazma_core.model_registry import get_model_registry
+            registry = get_model_registry()
+            profile = registry.get_active_profile()
+            provider = profile.get("provider", "?")
+            model = profile.get("model", "?")
+            self._status_bar.set_model_info(provider, model)
+        except Exception:
+            pass  # status bar stays at defaults if registry unavailable
+
     def action_copy_clipboard(self) -> None:
         """Copy selected text or last KAZMA response to the system clipboard."""
         try:
             chat = self.query_one(ChatPanel)
-            chat.copy_to_clipboard()
-            self.push_screen(Toast("Copied to clipboard", "success", duration=1.5))
+            if chat.copy_to_clipboard():
+                self.push_screen(Toast("Copied to clipboard", "success", duration=1.5))
+            else:
+                self.push_screen(Toast("Nothing to copy", "warning", duration=1.5))
         except Exception:
             pass
 

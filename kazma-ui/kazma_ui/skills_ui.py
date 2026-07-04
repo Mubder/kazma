@@ -157,7 +157,8 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
 
         store = get_config_store()
         store.set(f"skills.enabled.{req.skill_id}", req.enabled, category="skills")
-        store.close()
+        # Do NOT close the shared ConfigStore singleton — it would break
+        # all other components that use it.
         return {"status": "ok", "enabled": str(req.enabled)}
 
     @router.post("/api/skills/validate")
