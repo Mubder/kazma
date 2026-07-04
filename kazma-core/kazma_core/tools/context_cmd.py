@@ -51,8 +51,8 @@ async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) ->
 
         store = get_config_store()
         context_window = store.get("memory.max_context_tokens", 16_000)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to read context_window config: %s", exc)
 
     pct = (total_tokens / context_window * 100) if context_window > 0 else 0
     threshold_pct = (TOKEN_THRESHOLD / context_window * 100) if context_window > 0 else 0

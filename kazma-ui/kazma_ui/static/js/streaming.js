@@ -202,7 +202,7 @@ var KazmaStream = (function() {
       html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
         var decodedUrl = url.replace(/&amp;/g, '&');
         if (/^(https?:|mailto:)/i.test(decodedUrl)) {
-          return '<a href="' + decodedUrl + '" target="_blank" rel="noopener">' + text + '</a>';
+          return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener">' + text + '</a>';
         }
         return '<a href="#" rel="noopener">' + text + '</a>';
       });
@@ -242,8 +242,12 @@ var KazmaStream = (function() {
   var _typingTimer = null;
   function showTyping(el, text) {
     if (!el) return;
-    el.innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span> ' +
-      (text || 'Thinking') + '...';
+    var span = document.createElement('span');
+    span.className = 'typing-dots';
+    span.innerHTML = '<span></span><span></span><span></span>';
+    el.textContent = '';
+    el.appendChild(span);
+    el.appendChild(document.createTextNode(' ' + (text || 'Thinking') + '...'));
     el.style.display = 'flex';
     el.classList.add('typing-visible');
   }

@@ -153,10 +153,8 @@ class SlackAdapter(BaseAdapter):
                 json={"channel": cid},
                 headers=self._headers(),
             )
-        except Exception:
-            pass
-
-    # ── Send ────────────────────────────────────────────────────────
+        except Exception as exc:
+            logger.debug("Slack typing indicator failed: %s", exc)
 
     async def send(self, outbound: OutboundMessage) -> bool:
         """Send a message to a Slack channel via chat.postMessage.

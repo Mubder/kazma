@@ -136,8 +136,8 @@ class SelfImprovementSkill:
                     past_context = "\nPast memory:\n" + "\n".join(
                         f"  [{layer}] {text[:200]}" for text, _, layer, _, _ in results[:3]
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Memory adapter search failed: %s", exc)
 
         # Construct Meta-Refiner prompt
         refiner_prompt = f"""You are a Meta-Refiner for the Kazma self-improvement engine.
@@ -199,8 +199,8 @@ Output ONLY the delta text, no preamble."""
                     past_context = "\nPast failures:\n" + "\n".join(
                         f"  [{layer}] {text[:200]}" for text, _, layer, _, _ in results[:3]
                     )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Memory adapter search failed: %s", exc)
 
         refiner_prompt = f"""You are a Meta-Refiner for the Kazma self-improvement engine.
 Worker '{worker_name}' FAILED {failed_count}/{len(stages)} stages (success rate {rate:.0%}).

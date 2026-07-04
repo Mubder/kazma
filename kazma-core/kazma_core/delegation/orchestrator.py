@@ -277,8 +277,8 @@ class DelegationOrchestrator:
                             break
                     if agent:
                         break
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Agent directory lookup failed: %s", exc)
 
             # 2 — Fall back to legacy discovery
             if agent is None:

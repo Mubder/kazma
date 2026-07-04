@@ -317,8 +317,8 @@ async def _discover_openai_compatible(base_url: str, api_key: str | None, provid
                 if isinstance(err, dict):
                     err = err.get("message", str(err))
                 return ProviderInfo(name=provider, label=provider.title(), base_url=base_url, error=f"HTTP {e.response.status_code}: {err}")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Error response body parse failed: %s", exc)
         return ProviderInfo(name=provider, label=provider.title(), base_url=base_url, error=f"HTTP {e.response.status_code}")
     except Exception as e:
         return ProviderInfo(name=provider, label=provider.title(), base_url=base_url, error=str(e))

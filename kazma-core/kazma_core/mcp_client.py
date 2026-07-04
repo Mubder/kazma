@@ -206,16 +206,17 @@ class MCPClient:
         if self._process is not None:
             try:
                 self._process.stdin.close()  # type: ignore[union-attr]
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Failed to close MCP stdin: %s", exc)
             try:
                 self._process.terminate()
                 self._process.wait(timeout=5)
-            except Exception:
+            except Exception as exc:
+                logger.debug("MCP terminate failed: %s, trying kill", exc)
                 try:
                     self._process.kill()
-                except Exception:
-                    pass
+                except Exception as kill_exc:
+                    logger.warning("Failed to kill MCP process: %s", kill_exc)
             self._process = None
 
         if self._http is not None:

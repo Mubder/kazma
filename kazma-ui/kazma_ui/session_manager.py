@@ -22,6 +22,7 @@ from typing import Any
 __all__ = [
     "ChatSession",
     "MAX_SESSIONS",
+    "MAX_MESSAGES_PER_SESSION",
     "SessionManager",
     "get_session_manager",
 ]
@@ -29,6 +30,9 @@ __all__ = [
 # Maximum number of sessions retained in memory.  When exceeded the
 # least-recently-used entry is evicted (LRU via OrderedDict).
 MAX_SESSIONS = 10_000
+
+# Maximum messages per session to prevent unbounded memory growth.
+MAX_MESSAGES_PER_SESSION = 200
 
 
 @dataclass
@@ -57,6 +61,11 @@ class ChatSession:
             "created_at": self.created_at,
             "total_cost": self.total_cost,
         }
+
+    def trim_messages(self, max_messages: int = MAX_MESSAGES_PER_SESSION) -> None:
+        """Cap the message history to prevent unbounded memory growth."""
+        if len(self.messages) > max_messages:
+            self.messages = self.messages[-max_messages:]
 
 
 class SessionManager:
@@ -137,6 +146,7 @@ class SessionManager:
             session = ChatSession(session_id=session_id)
             self._sessions[session_id] = session
         session.messages = list(data.get("messages", []))
+        session.trim_messages()
         session.total_cost = data.get("total_cost", 0.0)
         session.total_tokens = data.get("total_tokens", 0)
         # LRU: mark as most-recently-used.

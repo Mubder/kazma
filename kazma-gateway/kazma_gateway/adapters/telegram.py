@@ -235,9 +235,8 @@ class TelegramAdapter(BaseAdapter):
                         # 409 Conflict — another process is polling this bot.
                         # Log once, then back off for 30 seconds.
                         logger.error(
-                            "[telegram] 409 Conflict — another process is polling bot %s. "
+                            "[telegram] 409 Conflict — another process is polling this bot. "
                             "Stopping adapter. Stop the other process or use a different bot token.",
-                            self._token[:10] if self._token else "???",
                         )
                         # Stop the adapter — retrying will just spam the log.
                         self._running = False

@@ -194,8 +194,8 @@ class UnifiedMemoryAdapter:
             try:
                 from kazma_core.swarm.registry import get_worker_registry
                 workers.extend([w.name for w in get_worker_registry().list_all()])
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Worker registry lookup failed: %s", exc)
             for worker in workers:
                 results = self._l4.query(worker, text, limit=limit)
                 all_results.extend((r[0], r[1], "", "L4:sqlite_vec", {"worker": worker}) for r in results)

@@ -356,8 +356,8 @@ class SnapshotRecorder:
                 key = (rec.thread_id, rec.iteration)
                 if key not in seen:
                     seen[key] = rec
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to load snapshots for thread %s: %s", thread_id, exc)
 
         return sorted(seen.values(), key=lambda r: r.iteration)
 
@@ -380,8 +380,8 @@ class SnapshotRecorder:
         try:
             store = self._get_store(db_path)
             db_count = store.clear_thread(thread_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to clear DB snapshots for thread %s: %s", thread_id, exc)
 
         return mem_count + db_count
 

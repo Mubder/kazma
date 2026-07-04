@@ -131,5 +131,5 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
         # Clean up temp directory
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Temp dir cleanup failed: %s", exc)

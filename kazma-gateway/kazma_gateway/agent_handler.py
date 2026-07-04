@@ -968,8 +968,8 @@ async def _try_model_command(
                     context_metadata=reply_ctx,
                 ))
                 return True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Interactive model selection failed: %s", exc)
 
         lines = [f"Models for {provider_name}:\n"]
         for m in models:
@@ -1073,8 +1073,8 @@ async def _build_slash_ctx(
         agent = get_agent()
         if agent and agent.memory:
             ctx["memory_count"] = len(agent.memory)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Failed to get agent memory count: %s", exc)
 
     # Cost data from cost breaker
     ctx["total_tokens"] = 0

@@ -208,8 +208,8 @@ class CheckpointManager(BaseCheckpointSaver):
                         msg_count = self._try_decode_message_count(blob_row[0])
                     if blob_row and blob_row[1]:
                         created_at = self._try_decode_created_at(blob_row[1])
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Checkpoint blob decode failed for thread %s: %s", thread_id, exc)
                 results.append({
                     "thread_id": thread_id,
                     "checkpoint_id": str(checkpoint_id),

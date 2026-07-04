@@ -295,8 +295,8 @@ class GeminiProvider(LLMProvider):
             if project:
                 self._gcp_project = project
                 return project
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("google.auth.default() failed: %s", exc)
         # Fallback 1: read quota_project_id from ADC credentials file
         try:
             adc_path = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
@@ -309,8 +309,8 @@ class GeminiProvider(LLMProvider):
                     self._gcp_project = quota_project
                     logger.info("Resolved GCP project from ADC credentials: %s", quota_project)
                     return quota_project
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("ADC credentials file read failed: %s", exc)
         # Fallback 2: read project from gcloud config_default file
         try:
             config_path = Path.home() / ".config" / "gcloud" / "configurations" / "config_default"
@@ -326,8 +326,8 @@ class GeminiProvider(LLMProvider):
                             self._gcp_project = project
                             logger.info("Resolved GCP project from gcloud config: %s", project)
                             return project
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("gcloud config_default read failed: %s", exc)
         raise ValueError(
             "GCP project ID not set.  Pass project_id=, set GOOGLE_CLOUD_PROJECT, "
             "or run: gcloud auth application-default login --project=<your-project>"

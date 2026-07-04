@@ -167,6 +167,7 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                     "timestamp": datetime.now(UTC).isoformat(),
                 }
                 session.messages.append(user_msg)
+                session.trim_messages()
 
                 # Build messages for LLM
                 messages: list[dict[str, Any]] = []

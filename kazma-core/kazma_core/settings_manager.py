@@ -849,8 +849,8 @@ class SettingsManager:
                     "latest_version": latest,
                     "update_available": latest != current_version,
                 }
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("PyPI version check failed: %s", exc)
 
         return {
             "current_version": current_version,

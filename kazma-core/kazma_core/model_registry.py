@@ -898,8 +898,8 @@ class ModelRegistry:
                                 if line.strip().startswith("project"):
                                     project_id = line.partition("=")[2].strip()
                                     break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("gcloud project auto-detection failed: %s", exc)
             providers.append(
                 {
                     "name": key,
@@ -970,8 +970,8 @@ class ModelRegistry:
                                 if line.strip().startswith("project"):
                                     entry["project_id"] = line.partition("=")[2].strip()
                                     break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("gcloud project auto-detection failed: %s", exc)
 
             stored.append(entry)
             changed = True

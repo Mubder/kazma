@@ -75,7 +75,7 @@ class WorkerPhonebook:
                     episodic = " | ".join(s for s in strategies if s)
                     if episodic:
                         enriched = f"PREVIOUS_SUCCESSFUL_STRATEGIES: {episodic[:1500]}\n\n{task}"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Episodic memory lookup failed: %s", exc)
         result = await worker.dispatch(enriched)
         return {"synthesis": result.get("output", ""), "opinions": [result]}

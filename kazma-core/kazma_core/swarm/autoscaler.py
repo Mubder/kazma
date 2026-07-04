@@ -283,8 +283,8 @@ class AutoScaler:
         """Remove a single spawned worker instance."""
         try:
             self._engine.remove_worker(name)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to remove worker %s: %s", name, exc)
         self._instances.pop(name, None)
         logger.debug("[AutoScaler] Reaped idle worker: %s", name)
 
