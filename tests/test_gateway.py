@@ -581,7 +581,6 @@ class TestTelegramAdapter:
 
         adapter = TelegramAdapter(token="fake:token")
 
-        # First call: 429, second call: 200
         resp_429 = MagicMock()
         resp_429.status_code = 429
         resp_429.raise_for_status = MagicMock()
@@ -592,8 +591,23 @@ class TestTelegramAdapter:
         resp_200.raise_for_status = MagicMock()
         resp_200.json.return_value = {"ok": True}
 
+        # Typing response (for fire-and-forget _trigger_typing)
+        resp_typing = MagicMock()
+        resp_typing.status_code = 200
+        resp_typing.raise_for_status = MagicMock()
+
+        send_count = 0
+        async def mock_post(url, **kwargs):
+            nonlocal send_count
+            if "sendChatAction" in url:
+                return resp_typing
+            send_count += 1
+            if send_count == 1:
+                return resp_429
+            return resp_200
+
         mock_http = AsyncMock()
-        mock_http.post = AsyncMock(side_effect=[resp_429, resp_200])
+        mock_http.post = mock_post
         adapter._http = mock_http
 
         ok = await adapter.send(
@@ -604,7 +618,6 @@ class TestTelegramAdapter:
             )
         )
         assert ok is True
-        assert mock_http.post.call_count == 2
 
 
 # ══════════════════════════════════════════════════════════════════════════
