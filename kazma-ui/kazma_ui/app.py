@@ -532,6 +532,35 @@ def create_app(config_path: str | None = None) -> FastAPI:
             )
             logger.info("[Swarm] SwarmManager initialized (empty — UI-driven mode)")
         set_swarm_engine(_swarm_mgr.engine)
+
+        # Load persisted workers from WorkerRegistry (swarm_registry.json).
+        # The Web UI saves workers here when users add them via the Swarm
+        # panel. Without this, workers are lost on every app restart
+        # (e.g. after git pull + restart) because kazma.yaml has workers: [].
+        try:
+            from kazma_core.swarm.registry import get_worker_registry
+            from kazma_core.swarm.config import WorkerConfig as _WC
+            _reg = get_worker_registry()
+            _yaml_count = len(_swarm_mgr.worker_names)
+            for entry in _reg.list_all():
+                if entry.name not in _swarm_mgr.engine._workers:
+                    _swarm_mgr.engine.add_worker(_WC(
+                        name=entry.name,
+                        type=entry.worker_type or "in_process",
+                        model=entry.model,
+                        provider=entry.provider,
+                        role=entry.roles[0] if entry.roles else "",
+                        system_prompt=entry.system_prompt,
+                    ))
+            _total = len(_swarm_mgr.worker_names)
+            if _total > _yaml_count:
+                logger.info(
+                    "[Swarm] Loaded %d persisted worker(s) from swarm_registry.json",
+                    _total - _yaml_count,
+                )
+        except Exception as e:
+            logger.warning("[Swarm] Failed to load persisted workers: %s", e)
+
         try:
             _swarm_mgr.engine.restore_paused_tasks()
             logger.info("[Swarm] Restored paused tasks from TaskStore")

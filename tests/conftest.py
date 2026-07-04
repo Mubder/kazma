@@ -79,6 +79,50 @@ def _isolated_config_store(tmp_path):
     reset_config_store()
 
 
+@pytest.fixture(autouse=True)
+def _reset_swarm_singletons(tmp_path):
+    """Reset swarm engine and worker registry singletons before each test.
+
+    Without this, the SwarmEngine singleton (set via ``set_swarm_engine``)
+    and the WorkerRegistry singleton (set via ``get_worker_registry``)
+    persist across tests, causing worker-name conflicts (409 errors)
+    and state leakage between test classes.
+
+    Also redirects the registry file to an isolated temp file so that
+    ``create_app()`` does not load workers from the real
+    ``swarm_registry.json`` (which may contain data from prior runs).
+    """
+    # Reset swarm engine singleton
+    try:
+        from kazma_core.swarm.engine import set_swarm_engine
+        set_swarm_engine(None)
+    except Exception:
+        pass
+
+    # Reset worker registry singleton and redirect to temp file
+    try:
+        import kazma_core.swarm.registry as _reg_mod
+        _reg_mod._REGISTRY_SINGLETON = None
+        _reg_mod._DEFAULT_PATH = tmp_path / "test_swarm_registry.json"
+    except Exception:
+        pass
+
+    yield
+
+    # Clean up after test
+    try:
+        from kazma_core.swarm.engine import set_swarm_engine
+        set_swarm_engine(None)
+    except Exception:
+        pass
+
+    try:
+        import kazma_core.swarm.registry as _reg_mod
+        _reg_mod._REGISTRY_SINGLETON = None
+    except Exception:
+        pass
+
+
 @pytest.fixture
 def agent_config() -> AgentConfig:
     """Return a default agent config for testing."""

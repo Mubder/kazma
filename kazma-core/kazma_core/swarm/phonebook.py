@@ -32,9 +32,9 @@ class WorkerPhonebook:
         This is the "phonebook" pattern: query the registry, get the
         entry, build the worker.
         """
-        from kazma_core.swarm.registry import WorkerRegistry
+        from kazma_core.swarm.registry import get_worker_registry
 
-        registry = WorkerRegistry()
+        registry = get_worker_registry()
         entry = registry.get(worker_name)
         if entry is None:
             logger.warning("[Phonebook] summon failed — no worker named '%s'", worker_name)

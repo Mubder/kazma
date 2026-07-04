@@ -21,8 +21,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Default registry file lives at the project root.
-_DEFAULT_PATH = Path("swarm_registry.json")
+# Default registry file lives alongside kazma.yaml (project root or CWD).
+# We resolve to an absolute path at import time so workers are not lost
+# when the app is started from a different working directory.
+_DEFAULT_PATH = Path("swarm_registry.json").resolve()
 
 # Module-level singleton cache
 _REGISTRY_SINGLETON: WorkerRegistry | None = None

@@ -892,8 +892,8 @@ def create_swarm_router(
 
         # Sync to persistent WorkerRegistry
         try:
-            from kazma_core.swarm.registry import WorkerEntry, WorkerRegistry
-            registry = WorkerRegistry()
+            from kazma_core.swarm.registry import WorkerEntry, get_worker_registry
+            registry = get_worker_registry()
             registry.register(WorkerEntry(
                 name=name,
                 expertise=[role] if role else ["general"],
@@ -981,8 +981,8 @@ def create_swarm_router(
 
         # Sync to persistent WorkerRegistry
         try:
-            from kazma_core.swarm.registry import WorkerRegistry
-            registry = WorkerRegistry()
+            from kazma_core.swarm.registry import get_worker_registry
+            registry = get_worker_registry()
             registry.delete(name)
             logger.info("[Swarm] WorkerRegistry removed: %s", name)
         except Exception as exc:
@@ -1012,8 +1012,8 @@ def create_swarm_router(
 
         # Sync to persistent WorkerRegistry
         try:
-            from kazma_core.swarm.registry import WorkerRegistry
-            registry = WorkerRegistry()
+            from kazma_core.swarm.registry import get_worker_registry
+            registry = get_worker_registry()
             update_kwargs = {}
             if "model" in payload:
                 update_kwargs["model"] = payload["model"]
