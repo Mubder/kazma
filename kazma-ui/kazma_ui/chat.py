@@ -291,13 +291,33 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                         try:
                             from kazma_core.swarm.safety import get_safety
                             safety = get_safety()
-                            if not safety.check_sync(event.tool_call_name):
-                                await websocket.send_json({
-                                    "type": "tool_result",
-                                    "name": event.tool_call_name,
-                                    "result": f"Safety: '{event.tool_call_name}' requires HITL approval.",
-                                })
-                                continue
+                            if safety.is_danger_tool(event.tool_call_name):
+                                # Log tool name + args for audit trail
+                                logger.warning(
+                                    "[WS Safety] Danger tool '%s' blocked on WebSocket path. "
+                                    "Args: %.200s",
+                                    event.tool_call_name,
+                                    event.tool_call_args or "{}",
+                                )
+                                # Try async check first (may have a bus adapter)
+                                import asyncio as _asyncio
+                                try:
+                                    approved = await _asyncio.wait_for(
+                                        safety.check(
+                                            tool_name=event.tool_call_name,
+                                            tool_args=event.tool_call_args,
+                                        ),
+                                        timeout=5.0,
+                                    )
+                                except (_asyncio.TimeoutError, Exception):
+                                    approved = False
+                                if not approved:
+                                    await websocket.send_json({
+                                        "type": "tool_result",
+                                        "name": event.tool_call_name,
+                                        "result": f"Safety: '{event.tool_call_name}' requires HITL approval. Tool blocked (fail-closed).",
+                                    })
+                                    continue
                         except Exception as safety_exc:
                             # Fail-closed: block the tool on any safety check error
                             await websocket.send_json({

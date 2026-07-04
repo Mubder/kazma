@@ -173,6 +173,7 @@ class SlackBusAdapter(BusAdapter):
         finally:
             self._pending_approvals.pop(approval.task_id, None)
             self._pending_results.pop(approval.task_id, None)
+            self._pending_msg_ts.pop(approval.task_id, None)
 
         # Edit the original message to show result (remove buttons).
         if msg_ts:

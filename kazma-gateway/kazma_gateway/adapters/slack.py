@@ -37,9 +37,6 @@ _POLL_INTERVAL = 2.0
 _MAX_TIMEOUT = 15.0
 _MAX_RETRIES = 3
 
-# Slack message subtypes that should be filtered out at the adapter level
-_SKIP_SUBTYPES = frozenset({"message_changed", "message_deleted", "channel_join", "channel_leave"})
-
 
 class SlackAdapter(BaseAdapter):
     """Polling-based Slack adapter using Web API.

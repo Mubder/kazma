@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11"]
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -23,13 +23,13 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -e '.' chromadb
+          pip install -e '.' chromadb textual
           pip install pytest pytest-asyncio httpx
 
       - name: Lint
         run: |
           pip install ruff
-          ruff check kazma-core/ kazma-gateway/ kazma-ui/ kazma-cli/
+          ruff check kazma-core/ kazma-gateway/ kazma-ui/ kazma-tui/ kazma-cli/
 
       - name: Portability lint
         run: |

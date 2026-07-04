@@ -1142,19 +1142,6 @@ class TelegramAdapter(BaseAdapter):
                 )
             return False
 
-        logger.error(
-            "[telegram] Rate-limit exceeded after %d retries for chat=%d",
-            _SEND_MAX_RETRIES,
-            chat_id,
-        )
-        # React with ❌ on exhausted retries
-        original_msg_id = outbound.context_metadata.get("message_id")
-        if original_msg_id:
-            asyncio.create_task(
-                self._set_reaction(chat_id, original_msg_id, "❌")
-            )
-        return False
-
     async def _register_bot_commands(self) -> None:
         """Register slash commands with Telegram's setMyCommands API.
 

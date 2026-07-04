@@ -607,7 +607,7 @@ class GatewayManager:
                     if self._rate_feedback.is_limited(msg.sender_id):
                         if self._rate_feedback.should_send_feedback(msg.sender_id):
                             feedback_text = self._rate_feedback.get_feedback_message(msg.sender_id)
-                            self._rate_feedback.record_feedback(msg.sender_id)
+                            # should_send_feedback already updates last_feedback timestamp
                             # Send feedback via the appropriate adapter
                             try:
                                 feedback_msg = OutboundMessage(
