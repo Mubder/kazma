@@ -307,6 +307,8 @@ class ChatPanel(Vertical):
 
         self.write("system", f"Dispatching to swarm...")
         try:
+            from kazma_core.swarm.router import NoCapableWorkersError
+
             if broadcast:
                 swarm_task = SwarmTask(
                     id=f"tui-swarm-{task[:20]}",
@@ -332,7 +334,18 @@ class ChatPanel(Vertical):
                     workers=["auto"],
                 )
 
-            result = await engine.dispatch(swarm_task)
+            try:
+                result = await engine.dispatch(swarm_task)
+            except NoCapableWorkersError:
+                # No worker's capabilities matched the task keywords.
+                # Fall back to the first available worker.
+                names = engine.worker_names
+                if not names:
+                    self.write("error", "No workers registered. Add workers via the Web UI Swarm panel.")
+                    return
+                self.write("system", f"No keyword match — falling back to '{names[0]}'.")
+                swarm_task.workers = [names[0]]
+                result = await engine.dispatch(swarm_task)
 
             # TaskResult uses aggregated_output/synthesized_output, not output
             output = (
