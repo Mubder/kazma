@@ -332,10 +332,20 @@ class ChatPanel(Vertical):
 
             result = await engine.dispatch(swarm_task)
 
-            if result and result.output:
-                self._last_response = result.output
-                self.write("assistant", result.output)
-            elif result and result.error:
+            # TaskResult uses aggregated_output/synthesized_output, not output
+            output = (
+                getattr(result, "aggregated_output", None)
+                or getattr(result, "synthesized_output", None)
+                or ""
+            )
+            if not output and result and getattr(result, "worker_results", None):
+                # Fall back to first worker's output
+                output = getattr(result.worker_results[0], "output", "") or ""
+
+            if output:
+                self._last_response = output
+                self.write("assistant", output)
+            elif result and getattr(result, "error", None):
                 self.write("error", f"Swarm error: {result.error}")
             else:
                 self.write("system", "Swarm task completed (no output).")
