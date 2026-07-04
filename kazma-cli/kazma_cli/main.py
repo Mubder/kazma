@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 
 from kazma_cli.banner import check_config, show_banner, show_help_brief, show_status
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -355,7 +358,7 @@ def _run_status() -> None:
         try:
             port = int(env_port)
         except ValueError:
-            pass
+            logger.debug("Invalid KAZMA_PORT value: %s", env_port)
 
     server_running = False
     gateway_summary = "n/a"

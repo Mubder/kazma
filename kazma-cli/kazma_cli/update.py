@@ -127,18 +127,16 @@ def get_current_version() -> str:
         from importlib.metadata import version as pkg_version
 
         return pkg_version(PACKAGE_NAME)
-    except Exception:
-        pass
-
-    # Fallback: parse pip show output
+    except Exception as exc:
+        logger.debug("importlib.metadata version failed: %s", exc)
     try:
         result = _run_pip(["show", PACKAGE_NAME])
         if result.returncode == 0:
             for line in result.stdout.splitlines():
                 if line.strip().startswith("Version:"):
                     return line.split(":", 1)[1].strip()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("pip show version fallback failed: %s", exc)
 
     return _get_version()
 
@@ -247,8 +245,8 @@ def get_git_commit(ref: str = "HEAD") -> str:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("git remote detection failed: %s", exc)
     return "unknown"
 
 

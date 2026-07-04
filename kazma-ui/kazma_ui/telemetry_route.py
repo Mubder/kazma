@@ -76,7 +76,7 @@ def create_telemetry_router(monitor: Any = None) -> APIRouter:
                 logger.info("Telemetry SSE stream closed (client disconnect)")
             except Exception as exc:
                 logger.error("Telemetry SSE stream error: %s", exc)
-                error_payload = json.dumps({"error": str(exc), "timestamp": 0})
+                error_payload = json.dumps({"error": "Telemetry stream error", "timestamp": 0})
                 yield f"data: {error_payload}\n\n"
 
         return StreamingResponse(

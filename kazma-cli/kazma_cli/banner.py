@@ -23,8 +23,8 @@ def _get_version() -> str:
             for line in content.splitlines():
                 if line.strip().startswith("version ="):
                     return line.split("=")[1].strip().strip('"').strip("'")
-    except Exception:
-        pass
+    except Exception as exc:
+        logging.getLogger(__name__).debug("pyproject.toml version parse failed: %s", exc)
     return "0.2.0"
 
 

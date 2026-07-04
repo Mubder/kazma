@@ -6,7 +6,10 @@ model-name completion for --model.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -86,8 +89,8 @@ def list_available_models() -> list[str]:
         models = registry.get_discovered_models()
         if models:
             return sorted(set(models))
-    except (RuntimeError, ImportError):
-        pass
+    except (RuntimeError, ImportError) as exc:
+        logger.debug("Model registry unavailable for completions: %s", exc)
 
     # Fallback: read from ConfigStore/YAML
     models = []
@@ -109,8 +112,8 @@ def list_available_models() -> list[str]:
         llm = config.get("llm", {})
         if isinstance(llm, dict) and "model" in llm:
             models.append(llm["model"])
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Config model list parse failed: %s", exc)
 
     if not models:
         models = ["deepseek-chat", "gpt-4o-mini", "claude-sonnet-4"]

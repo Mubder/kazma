@@ -491,6 +491,8 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
     async def api_restore(request: Request) -> dict[str, str]:
         """Restore from backup."""
         body = await request.body()
+        if len(body) > 10 * 1024 * 1024:  # 10MB limit
+            return {"error": "Backup too large (max 10MB)"}
         count = _get_sm().restore_backup(body.decode("utf-8"))
         return {"status": "ok", "restored": str(count)}
 
