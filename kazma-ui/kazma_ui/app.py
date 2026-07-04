@@ -110,7 +110,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
     # ── System: flush caches + show config paths ──────────────────
     import glob as _glob_sys
     import os as _os_sys
-    @app.get("/api/system/flush")
+    @app.post("/api/system/flush")
     async def _system_flush():
         """Flush in-memory caches and return config file paths."""
         paths = {

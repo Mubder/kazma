@@ -189,8 +189,14 @@ var KazmaStream = (function() {
       // Inline code
       html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
 
-      // Links
-      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      // Links — sanitize URL to prevent javascript: protocol XSS
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
+        var decodedUrl = url.replace(/&amp;/g, '&');
+        if (/^(https?:|mailto:)/i.test(decodedUrl)) {
+          return '<a href="' + decodedUrl + '" target="_blank" rel="noopener">' + text + '</a>';
+        }
+        return '<a href="#" rel="noopener">' + text + '</a>';
+      });
 
       // Line breaks
       html = html.replace(/\n\n/g, '</p><p>');
@@ -248,7 +254,7 @@ var KazmaStream = (function() {
     if (!container) return;
     var el = document.createElement('div');
     el.className = 'toast toast-' + type;
-    el.innerHTML = msg;
+    el.textContent = msg;
     el.style.animation = 'slideIn 0.3s ease';
     container.appendChild(el);
     setTimeout(function() {

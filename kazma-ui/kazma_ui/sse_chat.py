@@ -334,7 +334,9 @@ def create_sse_chat_router(
     # SSE-only mapping: session_id -> thread_id used for LangGraph
     # checkpointing.  This is orthogonal to the shared message-history
     # store and therefore lives here rather than in SessionManager.
+    # Bounded: capped at 10 000 entries (matching SessionManager's LRU).
     _thread_ids: dict[str, str] = {}
+    _THREAD_IDS_MAX = 10_000
 
     def _resolve_session(session_id: str) -> tuple[Any, str]:
         """Return (ChatSession, thread_id) for ``session_id``.
@@ -347,6 +349,10 @@ def create_sse_chat_router(
         if thread_id is None:
             thread_id = str(uuid.uuid4())
             _thread_ids[session_id] = thread_id
+            # Enforce bound: remove oldest entries when exceeding the cap
+            if len(_thread_ids) > _THREAD_IDS_MAX:
+                oldest = next(iter(_thread_ids))
+                _thread_ids.pop(oldest, None)
         return session, thread_id
 
     @r.post("/api/chat/stream")
@@ -594,9 +600,9 @@ def create_sse_chat_router(
         # Fallback to local profile
         if not _active_profile:
             return {"provider": "none", "base_url": "", "model": "", "api_key": ""}
-        # Don't expose real API keys
+        # Don't expose real API keys — always mask
         safe = {**_active_profile}
-        if safe.get("api_key") and not safe["api_key"].startswith(("sk-lm", "sk-lit", "ollama", "not-needed")):
+        if safe.get("api_key"):
             safe["api_key"] = "***"
         return safe
 

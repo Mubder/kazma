@@ -147,6 +147,9 @@ class DiscordAdapter(BaseAdapter):
                 hello = json.loads(await ws.recv())
                 heartbeat_interval = hello["d"]["heartbeat_interval"] / 1000
 
+                # Cancel previous heartbeat task before starting a new one
+                if self._heartbeat_task and not self._heartbeat_task.done():
+                    self._heartbeat_task.cancel()
                 # Start heartbeat
                 self._heartbeat_task = asyncio.create_task(self._heartbeat(ws, heartbeat_interval, shutdown_event))
 

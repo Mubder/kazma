@@ -488,7 +488,7 @@ def _config_model(parts: list, ctx: dict[str, Any]) -> str:
         current = _resolve_current_model(_load_config(), ctx)
         return f"🧠 Current model: **{current}**\n\nUsage: `/config model <name>`"
 
-    model_name = parts[2].lower()
+    model_name = parts[2]  # Preserve case — model names are case-sensitive
     # Persist to kazma.yaml
     try:
         config = _load_config()
@@ -577,17 +577,27 @@ def _config_export() -> str:
     """Export current config as JSON."""
     try:
         config = _load_config()
-        # Redact sensitive keys
-        safe = dict(config)
-        if "llm" in safe and "api_key" in safe["llm"]:
-            safe["llm"]["api_key"] = "***REDACTED***"
-        for conn in safe.get("connectors", {}).values():
-            if isinstance(conn, dict) and "token" in conn:
-                conn["token"] = "***REDACTED***"
+        # Deep-redact sensitive keys at all nesting levels
+        safe = _redact_secrets(config)
         return f"```json\n{json.dumps(safe, indent=2, ensure_ascii=False)}\n```"
     except Exception as exc:
         logger.warning("[slash] /config export failed: %s", exc)
         return f"⚠️ Could not export config: {exc}"
+
+
+_REDACT_KEYS = {"api_key", "token", "secret", "password", "stt_api_key", "bot_token", "app_token"}
+
+
+def _redact_secrets(obj: Any) -> Any:
+    """Recursively redact sensitive keys in a nested dict/list."""
+    if isinstance(obj, dict):
+        return {
+            k: ("***REDACTED***" if k.lower() in _REDACT_KEYS and v else _redact_secrets(v))
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_redact_secrets(item) for item in obj]
+    return obj
 
 
 def _config_usage() -> str:

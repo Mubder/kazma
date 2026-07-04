@@ -199,10 +199,13 @@ def _tool_read_file(root: Path, args: dict[str, Any]) -> str:
 
 def _tool_write_file(root: Path, args: dict[str, Any]) -> str:
     """Write content to a file."""
+    content = args["content"]
+    if len(content) > 1_048_576:  # 1 MB limit matching read_file
+        return f"Error: content exceeds 1 MB write limit ({len(content)} chars)"
     fpath = _resolve(root, args["path"])
     fpath.parent.mkdir(parents=True, exist_ok=True)
-    fpath.write_text(args["content"], encoding="utf-8")
-    return f"Wrote {len(args['content'])} chars to {args['path']}"
+    fpath.write_text(content, encoding="utf-8")
+    return f"Wrote {len(content)} chars to {args['path']}"
 
 
 def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:

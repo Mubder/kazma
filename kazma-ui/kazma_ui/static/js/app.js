@@ -77,9 +77,12 @@ document.addEventListener('alpine:init', () => {
          * @param {Function} onConfirm
          */
         confirm(title, message, onConfirm) {
+            // Escape message to prevent XSS via HTML injection
+            var entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+            var escapedMsg = String(message).replace(/[&<>"']/g, function(c) { return entityMap[c]; });
             this.show({
                 title,
-                body: `<p style="color: var(--text-secondary); line-height: 1.6;">${message}</p>`,
+                body: `<p style="color: var(--text-secondary); line-height: 1.6;">${escapedMsg}</p>`,
                 size: 'sm',
                 actions: [
                     { label: 'Cancel', variant: 'btn-secondary' },

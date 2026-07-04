@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -53,21 +54,32 @@ class SQLiteSessionStore(SessionStore):
     def __init__(self, db_path: str = "kazma-data/sessions.db") -> None:
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
+        self._init_lock = asyncio.Lock()
 
     async def _ensure_db(self) -> aiosqlite.Connection:
         """Open the database and create the table if needed."""
         if self._db is not None:
             return self._db
+        # Guard against concurrent initialization creating multiple connections
+        async with self._init_lock:
+            if self._db is not None:
+                return self._db
+            # Ensure parent directory exists
+            if self._db_path != ":memory:":
+                Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # Ensure parent directory exists
-        if self._db_path != ":memory:":
-            Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
-
-        self._db = await aiosqlite.connect(self._db_path)
-        await self._db.execute(_CREATE_TABLE)
-        await self._db.commit()
-        logger.info("[SQLiteSessionStore] Opened %s", self._db_path)
-        return self._db
+            self._db = await aiosqlite.connect(self._db_path)
+            # Set WAL mode + busy_timeout for concurrent access (matching
+            # ConfigStore and TaskStore patterns)
+            try:
+                await self._db.execute("PRAGMA journal_mode=WAL")
+                await self._db.execute("PRAGMA busy_timeout=5000")
+            except Exception:
+                pass  # Not critical if WAL isn't supported
+            await self._db.execute(_CREATE_TABLE)
+            await self._db.commit()
+            logger.info("[SQLiteSessionStore] Opened %s", self._db_path)
+            return self._db
 
     async def get(self, thread_id: str) -> dict[str, Any]:
         """Retrieve context_metadata for a thread_id.

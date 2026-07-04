@@ -789,7 +789,9 @@ def create_swarm_router(
         }
         cs.set("swarm.output_target", target, category="swarm")
         logger.info("[Swarm] Output target set: chat_id=%s, bot_token=%s", chat_id, "set" if bot_token else "none")
-        return JSONResponse({"status": "ok", "output_target": target})
+        # Mask bot_token in response to avoid exposing it
+        response_target = {**target, "bot_token": "***" if bot_token else ""}
+        return JSONResponse({"status": "ok", "output_target": response_target})
 
     @router.get("/api/swarm/tasks/{task_id}")
     async def swarm_task_detail(task_id: str) -> JSONResponse:
@@ -1440,6 +1442,7 @@ def _fallback_html(has_core: bool, workers: list[dict[str, Any]]) -> str:
         </div>"""
 
     worker_rows = ""
+    from html import escape as _html_escape
     for worker in sorted(workers, key=lambda item: item["name"]):
         color = {"online": "#28a745", "offline": "#dc3545", "busy": "#ffc107"}.get(
             worker["status"],
@@ -1447,11 +1450,11 @@ def _fallback_html(has_core: bool, workers: list[dict[str, Any]]) -> str:
         )
         worker_rows += f"""
         <tr>
-          <td>{worker['name']}</td>
-          <td>{worker.get('model', '?')}</td>
-          <td>{worker.get('provider', '?')}</td>
-          <td>{worker.get('type', 'in-process')}</td>
-          <td><span style="color:{color};font-weight:bold;">● {worker['status']}</span></td>
+          <td>{_html_escape(str(worker['name']))}</td>
+          <td>{_html_escape(str(worker.get('model', '?')))}</td>
+          <td>{_html_escape(str(worker.get('provider', '?')))}</td>
+          <td>{_html_escape(str(worker.get('type', 'in-process')))}</td>
+          <td><span style="color:{color};font-weight:bold;">● {_html_escape(str(worker['status']))}</span></td>
         </tr>"""
 
     return f"""<!DOCTYPE html>

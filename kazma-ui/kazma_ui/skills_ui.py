@@ -174,8 +174,16 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
 
             from kazma_core.hub.validator import SkillValidator
 
+            # Restrict to skills directory to prevent path traversal
+            skills_root = Path("skills").resolve()
+            candidate = Path(skill_path).resolve()
+            try:
+                candidate.relative_to(skills_root)
+            except ValueError:
+                return {"error": "Path must be within the skills directory"}
+
             validator = SkillValidator()
-            result = await validator.validate(Path(skill_path))
+            result = await validator.validate(candidate)
             return {
                 "passed": result.passed,
                 "score": result.score,

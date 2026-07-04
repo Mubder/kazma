@@ -26,7 +26,7 @@
   function $(id) { return document.getElementById(id); }
   function esc(str) {
     if (!str) return '';
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   function setText(id, text) { var el = $(id); if (el) el.textContent = text; }
   function showToast(msg, ok) { if (KS && KS.toast) KS.toast(msg, ok ? 'success' : 'error', 4000); }
