@@ -347,6 +347,18 @@ class ChatPanel(Vertical):
                 swarm_task.workers = [names[0]]
                 result = await engine.dispatch(swarm_task)
 
+            # The engine catches NoCapableWorkersError internally and returns
+            # a TaskResult with status="failed" and error="No capable workers..."
+            # So also check the result for that error and retry with first worker.
+            if (not broadcast and not worker_name
+                    and getattr(result, "status", "") == "failed"
+                    and "No capable workers" in (getattr(result, "error", "") or "")):
+                names = engine.worker_names
+                if names:
+                    self.write("system", f"No keyword match — falling back to '{names[0]}'.")
+                    swarm_task.workers = [names[0]]
+                    result = await engine.dispatch(swarm_task)
+
             # TaskResult uses aggregated_output/synthesized_output, not output
             output = (
                 getattr(result, "aggregated_output", None)
