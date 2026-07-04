@@ -372,7 +372,7 @@ class CommandPalette(ModalScreen[str | None]):
             
             if cmd == "/clear":
                 try:
-                    self.app.query_one(RichLog).clear()
+                    self.app.query_one("#chat-log", RichLog).clear()
                 except Exception:
                     pass
             elif cmd == "/help":

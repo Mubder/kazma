@@ -202,21 +202,30 @@ class MetricsDashboard(Widget):
                     card_id="metric-agents",
                 )
 
-    def on_mount(self) -> None:
-        """Start periodic refresh on mount."""
-        self._refresh_now()
-        self.set_interval(self.REFRESH_INTERVAL, self._refresh_now)
+    async def on_mount(self) -> None:
+        """Run one refresh immediately, then schedule periodic refresh."""
+        await self._do_refresh()
+        self.set_interval(self.REFRESH_INTERVAL, self._do_refresh)
 
     def _refresh_now(self) -> None:
-        """Fetch all metrics and update widgets synchronously."""
+        """Synchronous helper kept for backward compatibility.
+
+        Schedules an async refresh on the running loop.  The actual
+        refresh logic lives in :meth:`_do_refresh` (async).
+        """
         try:
-            self._do_refresh()
+            self.app.call_later(self._do_refresh)
         except Exception:
             logger.exception("Dashboard refresh failed")
 
-    def _do_refresh(self) -> None:
-        """Fetch metrics from all sources and update MetricCard widgets."""
-        # ── CPU / RAM / VRAM ────────────────────────────────────────
+    async def _do_refresh(self) -> None:
+        """Fetch metrics from all sources and update MetricCard widgets.
+
+        Runs inside Textual's event loop, so ``await`` is the natural
+        way to pull the (async) HardwareMonitor snapshot.  All other
+        sources are sync and consumed directly.
+        """
+        # ── CPU / RAM / VRAM (async only) ───────────────────────────
         cpu_value: float | None = None
         ram_used: float | None = None
         ram_total: float | None = None
@@ -225,24 +234,16 @@ class MetricsDashboard(Widget):
         monitor = self._get_hardware_monitor()
         if monitor is not None:
             try:
-                import asyncio
-
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import asyncio as _aio
-
-                    _aio.ensure_future(self._update_hardware(monitor))
-                else:
-                    snapshot = loop.run_until_complete(monitor.get_stats())
-                    cpu_value = snapshot.cpu
-                    ram_used = snapshot.ram_used_gb
-                    ram_total = snapshot.ram_total_gb
-                    vram_used = snapshot.vram_used_gb
-                    vram_total = snapshot.vram_total_gb
+                snapshot = await monitor.get_stats()
+                cpu_value = snapshot.cpu
+                ram_used = snapshot.ram_used_gb
+                ram_total = snapshot.ram_total_gb
+                vram_used = snapshot.vram_used_gb
+                vram_total = snapshot.vram_total_gb
             except Exception:
                 logger.debug("HardwareMonitor unavailable", exc_info=True)
 
-        # ── RPM ─────────────────────────────────────────────────────
+        # ── RPM (sync) ──────────────────────────────────────────────
         rpm_val: int | None = None
         store = self._get_trace_store()
         if store is not None:
@@ -252,7 +253,7 @@ class MetricsDashboard(Widget):
             except Exception:
                 logger.debug("TraceStore unavailable", exc_info=True)
 
-        # ── Latency / Error Rate ────────────────────────────────────
+        # ── Latency / Error Rate (sync) ─────────────────────────────
         latency_val: float | None = None
         error_val: float | None = None
         collector = self._get_metrics_collector()
@@ -321,33 +322,6 @@ class MetricsDashboard(Widget):
             )
         except Exception:
             logger.debug("Dashboard MetricCard widgets not yet mounted", exc_info=True)
-
-    async def _update_hardware(self, monitor: Any) -> None:
-        """Async helper to fetch hardware metrics and update widgets."""
-        try:
-            snapshot = await monitor.get_stats()
-            cpu_value = snapshot.cpu
-            ram_used = snapshot.ram_used_gb
-            ram_total = snapshot.ram_total_gb
-            vram_used = snapshot.vram_used_gb
-            vram_total = snapshot.vram_total_gb
-
-            health_card = self.query_one("#metric-health", MetricCard)
-            health_card.update_card(
-                label="Health (CPU/Mem)",
-                value=self._format_health(cpu_value, ram_used, ram_total),
-                status="normal",
-            )
-
-            vram_card = self.query_one("#metric-vram", MetricCard)
-            vram_status = self._determine_vram_status(vram_used, vram_total)
-            vram_card.update_card(
-                label="VRAM (GB)",
-                value=self._format_vram(vram_used, vram_total),
-                status=vram_status,
-            )
-        except Exception:
-            logger.debug("Async hardware update failed", exc_info=True)
 
     # ── Data source resolution ──────────────────────────────────────
 

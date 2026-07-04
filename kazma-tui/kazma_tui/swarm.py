@@ -3,12 +3,41 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, UTC
 
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, RichLog, Static, TabbedContent, TabPane, Tree
 
 logger = logging.getLogger(__name__)
+
+_HEARTBEAT_STALE_SECONDS = 60
+
+
+def _parse_iso(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return None
+
+
+def _worker_is_online(worker) -> bool:
+    """Treat worker as online if explicitly running OR its last heartbeat is recent.
+
+    Some registration paths never call ``InProcessWorker.start()`` so
+    ``_running`` stays False even though the worker is dispatching
+    tasks; falling back to heartbeat recency avoids marking them as
+    offline while they are still active.
+    """
+    if getattr(worker, "_running", False):
+        return True
+    last_heartbeat = _parse_iso(getattr(worker, "last_heartbeat", None))
+    if last_heartbeat is None:
+        return False
+    delta = (datetime.now(UTC) - last_heartbeat).total_seconds()
+    return 0 <= delta <= _HEARTBEAT_STALE_SECONDS
 
 
 class WorkerTable(DataTable):
@@ -30,8 +59,7 @@ class WorkerTable(DataTable):
                 self.add_row("(no engine)", "", "", "")
                 return
             for name, worker in engine._workers.items():
-                running = getattr(worker, "_running", False)
-                status = "● online" if running else "○ offline"
+                status = "● online" if _worker_is_online(worker) else "○ offline"
                 self.add_row(name, worker.role, status, worker.model or "?")
         except Exception:
             self.add_row("(unavailable)", "", "", "")
@@ -140,7 +168,7 @@ class WorkerTree(Tree):
                 node = root.add(name, expand=True)
                 node.add_leaf(f"Role: {worker.role}")
                 node.add_leaf(f"Model: {worker.model or '?'}")
-                node.add_leaf(f"Status: {'online' if getattr(worker, '_running', False) else 'offline'}")
+                node.add_leaf(f"Status: {'online' if _worker_is_online(worker) else 'offline'}")
                 caps = getattr(worker, "capabilities", None)
                 if caps:
                     expertise = getattr(caps, "expertise", [])

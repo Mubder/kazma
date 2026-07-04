@@ -270,7 +270,7 @@ class TestMetricsRefreshFlow:
         widget._hardware_monitor = None
         with patch.object(widget, "_get_hardware_monitor", return_value=None):
             # Should not crash
-            widget._do_refresh()
+            widget._refresh_now()
 
     def test_dashboard_handles_trace_store_unavailable(self) -> None:
         """Step 5: Dashboard must handle TraceStore import failure gracefully."""
@@ -279,7 +279,7 @@ class TestMetricsRefreshFlow:
         widget = MetricsDashboard()
         widget._trace_store = None
         with patch.object(widget, "_get_trace_store", return_value=None):
-            widget._do_refresh()
+            widget._refresh_now()
 
     def test_dashboard_handles_metrics_collector_unavailable(self) -> None:
         """Step 5: Dashboard must handle MetricsCollector import failure gracefully."""
@@ -288,7 +288,7 @@ class TestMetricsRefreshFlow:
         widget = MetricsDashboard()
         widget._metrics_collector = None
         with patch.object(widget, "_get_metrics_collector", return_value=None):
-            widget._do_refresh()
+            widget._refresh_now()
 
     def test_dashboard_handles_swarm_engine_unavailable(self) -> None:
         """Step 5: Dashboard must handle SwarmEngine import failure gracefully."""
@@ -297,7 +297,7 @@ class TestMetricsRefreshFlow:
         widget = MetricsDashboard()
         widget._swarm_engine = None
         with patch.object(widget, "_get_swarm_engine", return_value=None):
-            widget._do_refresh()
+            widget._refresh_now()
 
 
 # ---------------------------------------------------------------------------

@@ -64,6 +64,7 @@ class SettingsPanel(VerticalScroll):
     def __init__(self) -> None:
         super().__init__()
         self.theme_manager = ThemeManager()
+        self._last_saved: dict[str, bool] = {}
 
     def _read_config(self, key: str, default: bool) -> bool:
         try:
@@ -149,9 +150,18 @@ class SettingsPanel(VerticalScroll):
         try:
             from kazma_core.config_store import get_config_store
             cs = get_config_store()
-            for label, key, _default in self.SETTINGS:
-                cs.set(key, key in sel.selected)
-            self.notify("Settings saved", severity="information")
+            # Only persist keys whose value actually flipped — avoid the
+            # round-trip per hover/move event that SelectedChanged fires on.
+            changed = 0
+            for _label, key, _default in self.SETTINGS:
+                new_val = key in sel.selected
+                prev_val = self._last_saved.get(key)
+                if prev_val is None or prev_val != new_val:
+                    cs.set(key, new_val)
+                    self._last_saved[key] = new_val
+                    changed += 1
+            if changed:
+                self.notify(f"Settings saved ({changed})", severity="information")
         except Exception as e:
             self.notify(f"Failed to save settings: {e}", severity="error")
 

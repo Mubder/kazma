@@ -37,6 +37,8 @@ class ChatPanel(Vertical):
 
     BINDINGS = [
         ("ctrl+a", "select_all", "Select All"),
+        ("shift+enter", "insert_newline", "Newline"),
+        ("ctrl+enter", "insert_newline", "Newline"),
     ]
 
     def compose(self) -> ComposeResult:
@@ -48,7 +50,7 @@ class ChatPanel(Vertical):
 
     def write(self, role: str, text: str) -> None:
         """Write a message to the chat log with role prefix."""
-        log = self.query_one(RichLog)
+        log = self.query_one("#chat-log", RichLog)
         ts = datetime.now().strftime("%H:%M")
         c = ROLE_HEX.get(role, "#8b949e")
         log.write(f"[dim]{ts}[/] [{c}]▌ {role.upper()}[/] {text}")
@@ -74,8 +76,8 @@ class ChatPanel(Vertical):
     # ── Streaming ──────────────────────────────────────────────────
 
     async def write_stream(self, prompt: str) -> None:
-        """Stream tokens from provider, writing each chunk to RichLog."""
-        log = self.query_one(RichLog)
+        """Send prompt to provider and write response to RichLog."""
+        log = self.query_one("#chat-log", RichLog)
         ts = datetime.now().strftime("%H:%M")
         log.write(f"[dim]{ts}[/] [#a855f7]▌ KAZMA[/] ")
         self.show_progress(True)
@@ -83,22 +85,30 @@ class ChatPanel(Vertical):
         try:
             from kazma_core.model_registry import get_model_registry
 
-            registry = get_model_registry()
-            provider = registry.get_client()
-            messages = [{"role": "user", "content": prompt}]
+            try:
+                registry = get_model_registry()
+                provider = registry.get_client()
+            except RuntimeError:
+                log.write(
+                    "\n[#ef4444]Error: ModelRegistry not initialized. "
+                    "Start the kazma-ui server first, or run "
+                    "kazma_core.bootstrap.initialize().[/]"
+                )
+                return
+            if provider is None:
+                log.write(
+                    "\n[#ef4444]Error: No LLM provider configured. "
+                    "Add a provider via /models in the chat, or via kazma.yaml.[/]"
+                )
+                return
 
-            # True token-by-token streaming via provider.chat(stream=True)
-            response = await provider.chat(messages, stream=True)
-            async for chunk in response:
-                delta: str = ""
-                if hasattr(chunk, "content") and chunk.content:
-                    delta = chunk.content
-                elif hasattr(chunk, "choices") and chunk.choices:
-                    choice = chunk.choices[0]
-                    if hasattr(choice, "delta") and choice.delta:
-                        delta = getattr(choice.delta, "content", "") or ""
-                if delta:
-                    log.write(delta)
+            messages = [{"role": "user", "content": prompt}]
+            response = await provider.chat(messages)
+            content = getattr(response, "content", "") or ""
+            if content:
+                log.write(content)
+            else:
+                log.write("[dim](empty response)[/]")
         except Exception as e:
             log.write(f"\n[#ef4444]Error: {e}[/]")
         finally:
@@ -122,7 +132,7 @@ class ChatPanel(Vertical):
         if cmd == "/help":
             self.write("system", "/help /clear /model /quit — Ctrl+P palette")
         elif cmd == "/clear":
-            self.query_one(RichLog).clear()
+            self.query_one("#chat-log", RichLog).clear()
         elif cmd == "/quit":
             self.app.exit()
         elif cmd in ("/model", "/models"):
@@ -143,7 +153,19 @@ class ChatPanel(Vertical):
     def action_select_all(self) -> None:
         """Select all text in the chat log."""
         try:
-            self.query_one(RichLog).text_select_all()
+            self.query_one("#chat-log", RichLog).text_select_all()
+        except Exception:
+            pass
+
+    def action_insert_newline(self) -> None:
+        """Insert a newline character at the cursor in the chat input.
+
+        Required so users can compose multi-line prompts without sending
+        them prematurely on Enter.
+        """
+        try:
+            chat_input = self.query_one("#chat-input", Input)
+            chat_input.insert("\n")
         except Exception:
             pass
 
@@ -155,9 +177,10 @@ class ChatPanel(Vertical):
             if selected:
                 self.app.copy_to_clipboard(selected)
                 return
-            # Fallback: copy last KAZMA assistant response
-            log = self.query_one(RichLog)
-            for line in reversed(log.text.split("\n")):
+            # Fallback: grab the last few visible lines from the chat log
+            log = self.query_one("#chat-log", RichLog)
+            log_text = log.text or ""
+            for line in reversed(log_text.split("\n")):
                 if "KAZMA" in line:
                     parts = line.split(" ", 3)
                     if len(parts) > 3:
