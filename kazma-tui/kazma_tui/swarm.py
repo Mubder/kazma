@@ -123,6 +123,9 @@ class ActiveTasksLog(RichLog):
 
     DEFAULT_CSS = """ActiveTasksLog { height: 1fr; background: transparent; border: none; }"""
 
+    def __init__(self, **kwargs) -> None:
+        super().__init__(markup=True, **kwargs)
+
     def on_mount(self) -> None:
         self.write("[bold #22d3ee]Active Tasks[/]")
         self._refresh()

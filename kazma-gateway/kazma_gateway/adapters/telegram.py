@@ -107,6 +107,7 @@ class TelegramAdapter(BaseAdapter):
         voice_enabled: bool = False,
         voice_provider: str = "openai",
         stt_api_key: str | None = None,
+        webhook_secret: str | None = None,
     ) -> None:
         super().__init__()
         self._token = token
@@ -123,6 +124,8 @@ class TelegramAdapter(BaseAdapter):
         self._voice_enabled = voice_enabled
         self._voice_provider = voice_provider
         self._stt_api_key = stt_api_key
+        # Webhook secret token for validating webhook ingress (optional)
+        self._webhook_secret = webhook_secret or ""
 
     def set_allowed_users(self, user_ids: list[int] | set[int]) -> None:
         """Set the whitelist of allowed Telegram user IDs (public setter).
@@ -459,7 +462,18 @@ class TelegramAdapter(BaseAdapter):
 
             Parses the update using the same _parse_update() as polling,
             and enqueues it on the unified message bus.
+
+            When a webhook_secret is configured, validates the
+            X-Telegram-Bot-Api-Secret-Token header to prevent
+            unauthorized webhook posts.
             """
+            # Webhook secret validation (if configured)
+            if self._webhook_secret:
+                provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+                if provided != self._webhook_secret:
+                    logger.warning("[telegram-webhook] Invalid or missing secret token")
+                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
             try:
                 update = await request.json()
             except Exception:
@@ -971,115 +985,125 @@ class TelegramAdapter(BaseAdapter):
                 logger.error("[telegram] No chat_id available for send()")
                 return False
 
-        # Send with 429 retry (exponential backoff)
-        payload: dict[str, Any] = {
-            "chat_id": chat_id,
-            "text": outbound.text[:4096],
-        }
-        if self._parse_mode:
-            payload["parse_mode"] = self._parse_mode
+        # Split long messages into chunks (Telegram limit: 4096 chars)
+        text = outbound.text
+        chunks = [text[i:i + 4096] for i in range(0, len(text), 4096)] if text else [""]
 
-        # Include inline keyboard if present
+        # Include inline keyboard only on the last chunk
         reply_markup = outbound.context_metadata.get("reply_markup")
-        if reply_markup:
-            payload["reply_markup"] = reply_markup
 
-        # One-time fallback flag: if sendMessage returns 400 (e.g. Markdown
-        # parse errors from unescaped _, *, `, [ in agent responses), retry
-        # once without parse_mode so the message still reaches the user.
-        parse_mode_fallback_done = False
+        all_sent = True
+        for chunk_idx, chunk in enumerate(chunks):
+            is_last = chunk_idx == len(chunks) - 1
+            payload: dict[str, Any] = {
+                "chat_id": chat_id,
+                "text": chunk,
+            }
+            if self._parse_mode:
+                payload["parse_mode"] = self._parse_mode
 
-        for attempt in range(_SEND_MAX_RETRIES):
-            try:
-                await self._rate_limiter.acquire()
-                resp = await self._http.post(
-                    "/sendMessage",
-                    json=payload,
-                )
+            # Include inline keyboard only on the last chunk
+            if is_last and reply_markup:
+                payload["reply_markup"] = reply_markup
 
-                if resp.status_code == 429:
-                    # Rate-limited — extract retry_after or use backoff
-                    try:
-                        body = resp.json()
-                        retry_after = body.get("parameters", {}).get(
-                            "retry_after",
-                            _SEND_BASE_DELAY * (2**attempt),
+            # One-time fallback flag: if sendMessage returns 400 (e.g. Markdown
+            # parse errors from unescaped _, *, `, [ in agent responses), retry
+            # once without parse_mode so the message still reaches the user.
+            parse_mode_fallback_done = False
+            chunk_sent = False
+
+            for attempt in range(_SEND_MAX_RETRIES):
+                try:
+                    await self._rate_limiter.acquire()
+                    resp = await self._http.post(
+                        "/sendMessage",
+                        json=payload,
+                    )
+
+                    if resp.status_code == 429:
+                        # Rate-limited — extract retry_after or use backoff
+                        try:
+                            body = resp.json()
+                            retry_after = body.get("parameters", {}).get(
+                                "retry_after",
+                                _SEND_BASE_DELAY * (2**attempt),
+                            )
+                        except Exception:
+                            retry_after = _SEND_BASE_DELAY * (2**attempt)
+
+                        jitter = random.uniform(0.5, 1.5)
+                        wait = retry_after + jitter
+                        logger.warning(
+                            "[telegram] Rate-limited (429) on send to %d — retrying in %.1fs (attempt %d/%d)",
+                            chat_id,
+                            wait,
+                            attempt + 1,
+                            _SEND_MAX_RETRIES,
                         )
-                    except Exception:
-                        retry_after = _SEND_BASE_DELAY * (2**attempt)
+                        await asyncio.sleep(wait)
+                        continue
 
-                    jitter = random.uniform(0.5, 1.5)
-                    wait = retry_after + jitter
-                    logger.warning(
-                        "[telegram] Rate-limited (429) on send to %d — retrying in %.1fs (attempt %d/%d)",
+                    resp.raise_for_status()
+                    result = resp.json()
+
+                    if result.get("ok"):
+                        chunk_sent = True
+                        break
+                    else:
+                        logger.error("[telegram] sendMessage not ok: %s", result)
+                        chunk_sent = False
+                        break
+
+                except httpx.HTTPStatusError as exc:
+                    # Retry once without parse_mode on 400 (Markdown parse errors
+                    # from unescaped _, *, `, [ characters in agent responses)
+                    if (
+                        exc.response.status_code == 400
+                        and "parse_mode" in payload
+                        and not parse_mode_fallback_done
+                    ):
+                        logger.debug(
+                            "[telegram] sendMessage returned 400 — retrying "
+                            "without parse_mode (Markdown fallback)"
+                        )
+                        payload.pop("parse_mode", None)
+                        parse_mode_fallback_done = True
+                        continue
+                    logger.error(
+                        "[telegram] HTTP %d on send to %d: %s",
+                        exc.response.status_code,
                         chat_id,
-                        wait,
-                        attempt + 1,
-                        _SEND_MAX_RETRIES,
+                        exc,
                     )
-                    await asyncio.sleep(wait)
-                    continue
+                    chunk_sent = False
+                    break
+                except Exception:
+                    logger.exception("[telegram] Failed to send to %d", chat_id)
+                    chunk_sent = False
+                    break
 
-                resp.raise_for_status()
-                result = resp.json()
+            if not chunk_sent:
+                all_sent = False
+                break
 
-                if result.get("ok"):
-                    logger.debug("[telegram] Sent to %d: %.80s", chat_id, outbound.text)
-                    # React with ✅ (or 🎯 if a tool was used)
-                    original_msg_id = outbound.context_metadata.get("message_id")
-                    if original_msg_id:
-                        emoji = "🎯" if outbound.context_metadata.get("tool_used") else "✅"
-                        asyncio.create_task(
-                            self._set_reaction(chat_id, original_msg_id, emoji)
-                        )
-                    return True
-                else:
-                    logger.error("[telegram] sendMessage not ok: %s", result)
-                    # React with ❌ on failure
-                    original_msg_id = outbound.context_metadata.get("message_id")
-                    if original_msg_id:
-                        asyncio.create_task(
-                            self._set_reaction(chat_id, original_msg_id, "❌")
-                        )
-                    return False
-
-            except httpx.HTTPStatusError as exc:
-                # Retry once without parse_mode on 400 (Markdown parse errors
-                # from unescaped _, *, `, [ characters in agent responses)
-                if (
-                    exc.response.status_code == 400
-                    and "parse_mode" in payload
-                    and not parse_mode_fallback_done
-                ):
-                    logger.debug(
-                        "[telegram] sendMessage returned 400 — retrying "
-                        "without parse_mode (Markdown fallback)"
-                    )
-                    payload.pop("parse_mode", None)
-                    parse_mode_fallback_done = True
-                    continue
-                logger.error(
-                    "[telegram] HTTP %d on send to %d: %s",
-                    exc.response.status_code,
-                    chat_id,
-                    exc,
+        if all_sent:
+            logger.debug("[telegram] Sent %d chunk(s) to %d: %.80s", len(chunks), chat_id, outbound.text)
+            # React with ✅ (or 🎯 if a tool was used)
+            original_msg_id = outbound.context_metadata.get("message_id")
+            if original_msg_id:
+                emoji = "🎯" if outbound.context_metadata.get("tool_used") else "✅"
+                asyncio.create_task(
+                    self._set_reaction(chat_id, original_msg_id, emoji)
                 )
-                # React with ❌ on error
-                original_msg_id = outbound.context_metadata.get("message_id")
-                if original_msg_id:
-                    asyncio.create_task(
-                        self._set_reaction(chat_id, original_msg_id, "❌")
-                    )
-                return False
-            except Exception:
-                logger.exception("[telegram] Failed to send to %d", chat_id)
-                # React with ❌ on error
-                original_msg_id = outbound.context_metadata.get("message_id")
-                if original_msg_id:
-                    asyncio.create_task(
-                        self._set_reaction(chat_id, original_msg_id, "❌")
-                    )
-                return False
+            return True
+        else:
+            # React with ❌ on failure
+            original_msg_id = outbound.context_metadata.get("message_id")
+            if original_msg_id:
+                asyncio.create_task(
+                    self._set_reaction(chat_id, original_msg_id, "❌")
+                )
+            return False
 
         logger.error(
             "[telegram] Rate-limit exceeded after %d retries for chat=%d",

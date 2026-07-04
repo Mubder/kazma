@@ -75,6 +75,10 @@ class SettingsPanel(VerticalScroll):
             return default
 
     def compose(self) -> ComposeResult:
+        # Populate _last_saved from config before any change events fire
+        for label, key, default in self.SETTINGS:
+            self._last_saved[key] = self._read_config(key, default)
+
         # Feature Toggles Section
         yield Static(
             "[bold $primary]⚙️ Settings[/]  ·  [dim]Configure features and preferences[/]",

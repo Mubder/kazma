@@ -101,32 +101,22 @@ class CommandPalette(ModalScreen[str | None]):
     # Categorized commands with icons
     COMMANDS = {
         "Navigation": [
-            ("tab:chat", "💬 Switch to Chat tab", "Ctrl+1"),
-            ("tab:files", "📁 Switch to Files tab", "Ctrl+2"),
-            ("tab:swarm", "🐝 Switch to Swarm tab", "Ctrl+3"),
-            ("tab:settings", "⚙️ Switch to Settings", "Ctrl+4"),
-            ("next-tab", "➡️ Next tab", "Ctrl+N"),
-            ("prev-tab", "⬅️ Previous tab", "Ctrl+B"),
+            ("tab:chat", "Switch to Chat tab", None),
+            ("tab:files", "Switch to Files tab", None),
+            ("tab:swarm", "Switch to Swarm tab", None),
+            ("tab:settings", "Switch to Settings", None),
+            ("next-tab", "Next tab", "Ctrl+N"),
+            ("prev-tab", "Previous tab", "Ctrl+B"),
         ],
         "Chat": [
-            ("/clear", "🗑️ Clear chat history", None),
-            ("/help", "❓ Show help", None),
-            ("/model", "🤖 List models", None),
-            ("/export", "📤 Export conversation", None),
-            ("send-message", "📮 Send message", "Ctrl+Enter"),
-        ],
-        "View": [
-            ("toggle-sidebar", "📊 Toggle sidebar", "Ctrl+B"),
-            ("zoom-in", "🔍 Zoom in", "Ctrl++"),
-            ("zoom-out", "🔎 Zoom out", "Ctrl+-"),
-            ("refresh", "🔄 Refresh", "F5"),
+            ("/clear", "Clear chat history", None),
+            ("/help", "Show help", None),
+            ("/model", "List models", None),
+            ("copy-selection", "Copy selection", "Ctrl+Shift+C"),
         ],
         "System": [
-            ("settings:theme", "🎨 Change theme", None),
-            ("settings:model", "⚙️ Configure model", None),
-            ("copy-selection", "📋 Copy selection", "Ctrl+C"),
-            ("copy-all", "📄 Copy all", "Ctrl+Shift+C"),
-            ("quit", "🚪 Exit Kazma", "Ctrl+Q"),
+            ("quit", "Exit Kazma", "Ctrl+Q"),
+            ("refresh", "Refresh", None),
         ],
     }
 
@@ -311,7 +301,6 @@ class CommandPalette(ModalScreen[str | None]):
         
         # Navigation commands
         if cmd_id == "next-tab":
-            self._switch_tab("chat")  # will cycle via app.action_next_tab
             try:
                 self.app.action_next_tab()
             except Exception:
