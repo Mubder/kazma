@@ -72,10 +72,30 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
             },
         )
 
-    # NOTE: /api/chat/sessions, /api/chat/sessions/{id}/messages, and
-    # DELETE /api/chat/sessions/{id} are registered in sse_chat.py to
-    # avoid duplicate route registrations. This router only handles
-    # the chat page HTML and the WebSocket endpoint.
+    # Session management endpoints — same format as sse_chat.py for
+    # cross-transport consistency (VAL-UX-007). Both use the shared
+    # SessionManager singleton so sessions are visible across transports.
+    @r.get("/api/chat/sessions")
+    async def api_list_sessions() -> list[dict[str, Any]]:
+        """List all chat sessions (shared store)."""
+        return [s.to_summary() for s in _sessions().list_all()]
+
+    @r.get("/api/chat/sessions/{session_id}/messages")
+    async def api_session_messages(session_id: str) -> list[dict[str, Any]]:
+        """Get messages for a session (shared store, role/content only)."""
+        session = _sessions().get(session_id)
+        if not session:
+            return []
+        return [
+            {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+            for msg in session.messages
+        ]
+
+    @r.delete("/api/chat/sessions/{session_id}")
+    async def api_delete_session(session_id: str) -> dict[str, str]:
+        """Delete a chat session (shared store)."""
+        _sessions().delete(session_id)
+        return {"status": "ok"}
 
     return r
 

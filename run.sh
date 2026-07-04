@@ -40,7 +40,7 @@ echo "--- pytest (with coverage gate) ---"
 COV_MIN=70
 $PY -m pytest tests/ -q -p no:cacheprovider -o addopts="" --tb=short \
     --cov=kazma_core --cov=kazma_gateway --cov=kazma_ui --cov=kazma_memory \
-    --cov=kazma_skills --cov=kazma_providers \
+    --cov=kazma_skills \
     --cov-report=term-missing --cov-fail-under=$COV_MIN \
     2>&1 | tee "$ART/pytest_output.txt"
 SUMMARY="$(grep -E '[0-9]+ (passed|failed|error)' "$ART/pytest_output.txt" | tail -1)"

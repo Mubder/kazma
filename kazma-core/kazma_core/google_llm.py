@@ -276,9 +276,12 @@ class GeminiProvider(LLMProvider):
     def _resolve_project(self) -> str:
         """Resolve the GCP project ID.
 
-        Priority: explicit kwarg > GOOGLE_CLOUD_PROJECT > ADC default.
+        Priority: explicit kwarg > GOOGLE_CLOUD_PROJECT env > ADC project
+        > ADC quota_project_id > gcloud config_default file.
         """
         import os
+        import json
+        from pathlib import Path
 
         if self._gcp_project:
             return self._gcp_project
@@ -294,6 +297,38 @@ class GeminiProvider(LLMProvider):
                 return project
         except Exception:
             pass
+        # Fallback 1: read quota_project_id from ADC credentials file
+        try:
+            adc_path = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
+            if not adc_path.exists():
+                adc_path = Path(os.environ.get("APPDATA", "")) / "gcloud" / "application_default_credentials.json"
+            if adc_path.exists():
+                data = json.loads(adc_path.read_text(encoding="utf-8"))
+                quota_project = data.get("quota_project_id") or data.get("project_id") or ""
+                if quota_project:
+                    self._gcp_project = quota_project
+                    logger.info("Resolved GCP project from ADC credentials: %s", quota_project)
+                    return quota_project
+        except Exception:
+            pass
+        # Fallback 2: read project from gcloud config_default file
+        try:
+            config_path = Path.home() / ".config" / "gcloud" / "configurations" / "config_default"
+            if not config_path.exists():
+                config_path = Path(os.environ.get("APPDATA", "")) / "gcloud" / "configurations" / "config_default"
+            if config_path.exists():
+                for line in config_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line.startswith("project"):
+                        _, _, project = line.partition("=")
+                        project = project.strip()
+                        if project:
+                            self._gcp_project = project
+                            logger.info("Resolved GCP project from gcloud config: %s", project)
+                            return project
+        except Exception:
+            pass
         raise ValueError(
-            "GCP project ID not set.  Pass project_id= or set GOOGLE_CLOUD_PROJECT."
+            "GCP project ID not set.  Pass project_id=, set GOOGLE_CLOUD_PROJECT, "
+            "or run: gcloud auth application-default login --project=<your-project>"
         )

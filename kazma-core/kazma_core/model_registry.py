@@ -871,9 +871,34 @@ class ModelRegistry:
                 continue
             enabled = key == "google"  # Google auto-enabled (ADC, no key needed)
             models: list[str] = []
+            project_id = ""
+            location = "us-central1"
             if key == "google":
                 from kazma_core.providers import GEMINI_MODELS
                 models = list(GEMINI_MODELS)
+                # Try to auto-detect project from ADC credentials or gcloud config
+                try:
+                    import json, os
+                    from pathlib import Path
+                    # Check ADC credentials file
+                    adc_path = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
+                    if not adc_path.exists():
+                        adc_path = Path(os.environ.get("APPDATA", "")) / "gcloud" / "application_default_credentials.json"
+                    if adc_path.exists():
+                        data = json.loads(adc_path.read_text(encoding="utf-8"))
+                        project_id = data.get("quota_project_id") or data.get("project_id") or ""
+                    # Check gcloud config_default file
+                    if not project_id:
+                        config_path = Path.home() / ".config" / "gcloud" / "configurations" / "config_default"
+                        if not config_path.exists():
+                            config_path = Path(os.environ.get("APPDATA", "")) / "gcloud" / "configurations" / "config_default"
+                        if config_path.exists():
+                            for line in config_path.read_text(encoding="utf-8").splitlines():
+                                if line.strip().startswith("project"):
+                                    project_id = line.partition("=")[2].strip()
+                                    break
+                except Exception:
+                    pass
             providers.append(
                 {
                     "name": key,
@@ -883,6 +908,8 @@ class ModelRegistry:
                     "models": models,
                     "enabled": enabled,
                     "health": "unknown",
+                    "project_id": project_id,
+                    "location": location,
                 }
             )
         return providers
@@ -919,6 +946,31 @@ class ModelRegistry:
             if key == "google":
                 from kazma_core.providers import GEMINI_MODELS
                 entry["models"] = list(GEMINI_MODELS)
+                # Auto-detect project from ADC credentials or gcloud config
+                entry["project_id"] = ""
+                entry["location"] = "us-central1"
+                try:
+                    import json, os
+                    from pathlib import Path
+                    # Check ADC credentials file
+                    adc_path = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
+                    if not adc_path.exists():
+                        adc_path = Path(os.environ.get("APPDATA", "")) / "gcloud" / "application_default_credentials.json"
+                    if adc_path.exists():
+                        data = json.loads(adc_path.read_text(encoding="utf-8"))
+                        entry["project_id"] = data.get("quota_project_id") or data.get("project_id") or ""
+                    # Check gcloud config_default file
+                    if not entry["project_id"]:
+                        config_path = Path.home() / ".config" / "gcloud" / "configurations" / "config_default"
+                        if not config_path.exists():
+                            config_path = Path(os.environ.get("APPDATA", "")) / "gcloud" / "configurations" / "config_default"
+                        if config_path.exists():
+                            for line in config_path.read_text(encoding="utf-8").splitlines():
+                                if line.strip().startswith("project"):
+                                    entry["project_id"] = line.partition("=")[2].strip()
+                                    break
+                except Exception:
+                    pass
 
             stored.append(entry)
             changed = True
@@ -937,6 +989,8 @@ class ModelRegistry:
             "models": self._normalize_models(provider.get("models", [])),
             "enabled": bool(provider.get("enabled", True)),
             "health": str(provider.get("health") or "unknown"),
+            "project_id": str(provider.get("project_id") or ""),
+            "location": str(provider.get("location") or "us-central1"),
         }
 
     def _normalize_models(self, models: Any) -> list[str]:

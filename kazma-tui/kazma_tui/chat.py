@@ -184,7 +184,8 @@ class ChatPanel(Vertical):
         if cmd == "/help":
             self.write("system", "Commands: /help /clear /model /swarm /quit | Copy: Ctrl+A then Ctrl+Shift+C, or Shift+drag mouse to select text")
         elif cmd == "/clear":
-            self.query_one("#chat-log", RichLog).clear()
+            # Use the app-level action which shows a confirmation dialog
+            self.app.action_clear_chat()
         elif cmd == "/quit":
             self.app.exit()
         elif cmd in ("/model", "/models"):

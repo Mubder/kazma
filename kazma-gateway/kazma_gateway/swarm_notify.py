@@ -325,7 +325,11 @@ class SwarmTaskTracker:
             f"Duration: {elapsed:.1f}s\n"
         )
         if summary:
-            text += f"\n{summary}"
+            # Escape Markdown special chars in worker output to prevent
+            # Telegram Markdown parse errors (_ * ` [ ])
+            import re
+            escaped = re.sub(r'([_*`\[\]])', r'\\\1', summary)
+            text += f"\n{escaped}"
         return await self._notifier.send_message(task.chat_id, text)
 
     async def should_post_progress(self, task_id: str) -> bool:
