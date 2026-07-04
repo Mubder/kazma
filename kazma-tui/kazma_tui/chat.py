@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
@@ -142,7 +143,7 @@ class ChatPanel(Vertical):
     def _handle_command(self, text: str) -> None:
         cmd = text.lower().split()[0]
         if cmd == "/help":
-            self.write("system", "Commands: /help /clear /model /quit | Copy: Ctrl+A then Ctrl+Shift+C, or Shift+drag mouse to select text")
+            self.write("system", "Commands: /help /clear /model /swarm /quit | Copy: Ctrl+A then Ctrl+Shift+C, or Shift+drag mouse to select text")
         elif cmd == "/clear":
             self.query_one("#chat-log", RichLog).clear()
         elif cmd == "/quit":
@@ -150,12 +151,148 @@ class ChatPanel(Vertical):
         elif cmd in ("/model", "/models"):
             try:
                 from kazma_core.settings.model_registry import get_model_list_text
-
                 self.write("system", get_model_list_text("tui"))
             except Exception as e:
                 self.write("error", f"Model registry: {e}")
+        elif cmd == "/swarm":
+            self.app.call_later(self._handle_swarm_command, text)
         else:
             self.write("system", f"Unknown: {cmd}")
+
+    async def _handle_swarm_command(self, text: str) -> None:
+        """Handle /swarm commands in the TUI chat.
+
+        Subcommands:
+            /swarm                — show help
+            /swarm status         — show swarm status
+            /swarm list           — list workers
+            /swarm <task>         — auto-route and dispatch
+            /swarm <worker> <task>— dispatch to specific worker
+            /swarm broadcast <task>— all workers
+        """
+        parts = text.split(None, 2)
+        if len(parts) < 2:
+            self.write("system",
+                "Swarm Commands:\n"
+                "  /swarm <task> — auto-route to best worker\n"
+                "  /swarm <worker> <task> — dispatch to one worker\n"
+                "  /swarm broadcast <task> — all workers\n"
+                "  /swarm status — show swarm status\n"
+                "  /swarm list — list workers")
+            return
+
+        try:
+            from kazma_core.swarm import get_swarm_engine
+        except Exception:
+            self.write("error", "Swarm engine not available.")
+            return
+
+        engine = get_swarm_engine()
+        if engine is None:
+            self.write("error", "Swarm engine not initialized.")
+            return
+
+        sub = parts[1].lower()
+        task_body = parts[2] if len(parts) > 2 else ""
+
+        # /swarm status
+        if sub == "status":
+            names = engine.worker_names
+            lines = [f"Swarm Status ({len(names)} workers):"]
+            for name in names:
+                w = engine.get_worker(name)
+                model = getattr(w, "model", "") or "?"
+                lines.append(f"  {name} [{model}]")
+            if not names:
+                lines.append("  (no workers registered)")
+            self.write("system", "\n".join(lines))
+            return
+
+        # /swarm list
+        if sub == "list":
+            names = engine.worker_names
+            if not names:
+                self.write("system", "No workers registered. Add workers via the Web UI Swarm panel.")
+            else:
+                lines = [f"Workers ({len(names)}):"]
+                for name in names:
+                    w = engine.get_worker(name)
+                    role = getattr(w, "role", "") or ""
+                    model = getattr(w, "model", "") or ""
+                    lines.append(f"  {name}" + (f" ({role})" if role else "") + (f" [{model}]" if model else ""))
+                self.write("system", "\n".join(lines))
+            return
+
+        # /swarm broadcast <task>
+        if sub == "broadcast":
+            if not task_body:
+                self.write("error", "Usage: /swarm broadcast <task>")
+                return
+            await self._dispatch_swarm(task_body, engine, broadcast=True)
+            return
+
+        # /swarm <worker> <task>  OR  /swarm <task>
+        # Check if the first word is a worker name
+        if sub in [n.lower() for n in engine.worker_names]:
+            if not task_body:
+                self.write("error", f"Usage: /swarm {sub} <task>")
+                return
+            await self._dispatch_swarm(task_body, engine, worker_name=sub)
+            return
+
+        # Otherwise treat the whole thing as a task for auto-routing
+        task = text[len("/swarm "):].strip()
+        if not task:
+            self.write("error", "Usage: /swarm <task>")
+            return
+        await self._dispatch_swarm(task, engine)
+
+    async def _dispatch_swarm(
+        self,
+        task: str,
+        engine: Any,
+        worker_name: str = "",
+        broadcast: bool = False,
+    ) -> None:
+        """Dispatch a task to the swarm engine and show the result."""
+        from kazma_core.swarm.task import SwarmTask, TaskType
+
+        self.write("system", f"Dispatching to swarm...")
+        try:
+            if broadcast:
+                swarm_task = SwarmTask(
+                    id=f"tui-swarm-{task[:20]}",
+                    type=TaskType.BROADCAST,
+                    prompt=task,
+                    workers=[],
+                )
+            elif worker_name:
+                swarm_task = SwarmTask(
+                    id=f"tui-swarm-{task[:20]}",
+                    type=TaskType.SINGLE,
+                    prompt=task,
+                    workers=[worker_name],
+                )
+            else:
+                # Auto-route: let the engine pick the best worker
+                swarm_task = SwarmTask(
+                    id=f"tui-swarm-{task[:20]}",
+                    type=TaskType.SINGLE,
+                    prompt=task,
+                    workers=[],
+                )
+
+            result = await engine.dispatch(swarm_task)
+
+            if result and result.output:
+                self._last_response = result.output
+                self.write("assistant", result.output)
+            elif result and result.error:
+                self.write("error", f"Swarm error: {result.error}")
+            else:
+                self.write("system", "Swarm task completed (no output).")
+        except Exception as exc:
+            self.write("error", f"Swarm dispatch failed: {exc}")
 
     async def _generate_response(self, prompt: str) -> None:
         await self.write_stream(prompt)

@@ -206,7 +206,7 @@ Header {
     dock: top;
     height: 4;
     background: $panel;
-    border-bottom: thick $primary;
+    border-bottom: solid $primary;
     color: $text;
     text-style: bold;
 }
@@ -241,7 +241,7 @@ ContentTabs > Tab:hover { color: $text; }
 ContentTabs > Tab.-active {
     color: $surface;
     background: $primary;
-    border-bottom: thick $text;
+    border-bottom: solid $text;
 }
 
 ChatPanel {
@@ -259,10 +259,10 @@ ChatPanel > Input {
     height: 3;
     margin: 1 2;
     background: $panel;
-    border: thick $border;
+    border: solid $border;
     color: $text;
 }
-ChatPanel > Input:focus { border: thick $primary; }
+ChatPanel > Input:focus { border: solid $primary; }
 
 WorkerTable {
     height: 1fr;
@@ -276,7 +276,7 @@ WorkerTable > .datatable--header {
 
 DataTable {
     background: transparent;
-    border: thick $border;
+    border: solid $border;
 }
 DataTable > .datatable--header {
     background: $panel;
@@ -296,21 +296,21 @@ RichLog {
 
 Input {
     background: $panel;
-    border: thick $border;
+    border: solid $border;
     color: $text;
 }
-Input:focus { border: thick $primary; }
+Input:focus { border: solid $primary; }
 
 Button {
     background: $panel;
-    border: thick $border;
+    border: solid $border;
     color: $text;
 }
-Button:hover { border: thick $primary; background: $primary 15%; }
+Button:hover { border: solid $primary; background: $primary 15%; }
 
 SelectionList {
     background: transparent;
-    border: thick $border;
+    border: solid $border;
 }
 SelectionList > ListItem {
     padding: 0 2;
@@ -603,7 +603,6 @@ class ThemeManager:
         theme_name = theme_name or self.current_theme
         
         if theme_name == "kazma-dark":
-            # Import from theme.py
             from kazma_tui.theme import KAZMA_THEME
             css = KAZMA_THEME
         else:
@@ -611,7 +610,28 @@ class ThemeManager:
             if css is None:
                 raise ValueError(f"Unknown theme: {theme_name}")
         
-        app.stylesheet = type(app).CSS.__class__(css)
+        # Build a fresh Stylesheet with the new theme CSS + all widget
+        # DEFAULT_CSS.  We do NOT pass the old app variables because the
+        # new theme redefines them (passing old + new causes parse errors
+        # on some themes like high-contrast).
+        from textual.css.stylesheet import Stylesheet
+        
+        new_stylesheet = Stylesheet()
+        # Re-add all widget default CSS (preserves widget styling)
+        for read_from, css_text, tie_breaker, scope in app._get_default_css():
+            new_stylesheet.add_source(
+                css_text,
+                read_from=read_from,
+                is_default_css=True,
+                tie_breaker=tie_breaker,
+                scope=scope,
+            )
+        # Add the new theme CSS (replaces the old App.CSS with new variables)
+        new_stylesheet.add_source(css)
+        app.stylesheet = new_stylesheet
+        # refresh_css() sets the app's CSS variables (framework defaults
+        # + theme variables) and re-parses the stylesheet.  This is the
+        # correct way to apply a new stylesheet in Textual 8.x.
         app.refresh_css()
     
     def get_available_themes(self) -> list[str]:
