@@ -24,6 +24,8 @@ ROLE_HEX: dict[str, str] = {
 class ChatPanel(Vertical):
     """Chat: RichLog + ProgressBar + Input. Supports token-by-token streaming."""
 
+    ALLOW_SELECT = True
+
     DEFAULT_CSS = """
     ChatPanel { height: 1fr; border: solid $border; background: $surface; }
     ChatPanel > RichLog { height: 1fr; background: transparent; border: none; padding: 1 2; }
@@ -130,7 +132,7 @@ class ChatPanel(Vertical):
     def _handle_command(self, text: str) -> None:
         cmd = text.lower().split()[0]
         if cmd == "/help":
-            self.write("system", "/help /clear /model /quit — Ctrl+P palette")
+            self.write("system", "/help /clear /model /quit — Ctrl+A select all, Ctrl+Shift+C copy, Shift+drag mouse to select")
         elif cmd == "/clear":
             self.query_one("#chat-log", RichLog).clear()
         elif cmd == "/quit":

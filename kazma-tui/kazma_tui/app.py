@@ -91,7 +91,13 @@ class KazmaTUI(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        """Initialize app state and show welcome notification."""
+        """Initialize app state, core singletons, and show welcome notification."""
+        # ── Core initialization (ModelRegistry + SwarmEngine) ──────────
+        # When the TUI is launched standalone (python -m kazma_tui), the
+        # ModelRegistry and SwarmEngine singletons have not been created.
+        # We initialize them here so chat, header, and swarm panel all work.
+        self._initialize_core()
+
         # Initialize status bar reference
         try:
             self._status_bar = self.query_one("#status-bar", KazmaStatusBar)
@@ -129,6 +135,73 @@ class KazmaTUI(App[None]):
             # No tutorial for returning users - silent start
         except Exception as e:
             logger.exception(f"Error in on_mount: {e}")
+
+    def _initialize_core(self) -> None:
+        """Initialize ModelRegistry and SwarmEngine if not already done.
+
+        Mirrors the startup sequence from kazma_ui.app:create_app() but
+        trimmed to the essentials the TUI needs: ConfigStore, ModelRegistry,
+        and an empty SwarmEngine (loaded from kazma.yaml if present).
+        """
+        # ── ConfigStore ─────────────────────────────────────────────
+        try:
+            from kazma_core.config_store import ConfigStore, get_config_store, set_config_store
+
+            # Check if already initialized (e.g. launched from within the server)
+            try:
+                cs = get_config_store()
+                # If we got here, it was already initialized
+            except Exception:
+                cs = ConfigStore()
+                set_config_store(cs)
+                cs.reconcile_from_yaml()
+                logger.info("[TUI] ConfigStore initialized from kazma.yaml")
+        except Exception as e:
+            logger.warning("[TUI] ConfigStore init failed: %s", e)
+
+        # ── ModelRegistry ───────────────────────────────────────────
+        try:
+            from kazma_core.model_registry import get_model_registry, initialize_model_registry
+
+            try:
+                get_model_registry()
+                # Already initialized
+            except RuntimeError:
+                from kazma_core.config_store import get_config_store
+                initialize_model_registry(get_config_store())
+                logger.info("[TUI] ModelRegistry initialized")
+        except Exception as e:
+            logger.warning("[TUI] ModelRegistry init failed: %s", e)
+
+        # ── SwarmEngine ─────────────────────────────────────────────
+        try:
+            from kazma_core.swarm import get_swarm_engine, set_swarm_engine
+            from kazma_core.swarm.config import SwarmConfig
+            from kazma_core.swarm.engine import SwarmEngine
+            from kazma_core.swarm.task_store import TaskStore
+
+            if get_swarm_engine() is None:
+                swarm_cfg = SwarmConfig.from_yaml("kazma.yaml")
+                if swarm_cfg is not None and swarm_cfg.enabled:
+                    task_store = TaskStore()
+                    engine = SwarmEngine(swarm_cfg, task_store=task_store)
+                    # Register workers from config
+                    for wc in swarm_cfg.workers:
+                        engine.add_worker(wc)
+                    set_swarm_engine(engine)
+                    logger.info(
+                        "[TUI] SwarmEngine initialized from kazma.yaml — %d worker(s)",
+                        len(engine._workers),
+                    )
+                else:
+                    engine = SwarmEngine(
+                        SwarmConfig(enabled=True, workers=[]),
+                        task_store=TaskStore(),
+                    )
+                    set_swarm_engine(engine)
+                    logger.info("[TUI] SwarmEngine initialized (empty)")
+        except Exception as e:
+            logger.warning("[TUI] SwarmEngine init failed: %s", e)
 
     def action_copy_clipboard(self) -> None:
         """Copy selected text or last KAZMA response to the system clipboard."""
