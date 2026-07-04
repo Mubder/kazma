@@ -322,12 +322,14 @@ class ChatPanel(Vertical):
                     workers=[worker_name],
                 )
             else:
-                # Auto-route: let the engine pick the best worker
+                # Auto-route: let the engine pick the best worker.
+                # Must use ["auto"] not [] — the engine checks for
+                # ["auto"] to trigger CapabilityRouter.
                 swarm_task = SwarmTask(
                     id=f"tui-swarm-{task[:20]}",
                     type=TaskType.DISPATCH,
                     prompt=task,
-                    workers=[],
+                    workers=["auto"],
                 )
 
             result = await engine.dispatch(swarm_task)
