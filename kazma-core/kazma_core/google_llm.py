@@ -1,0 +1,155 @@
+"""Google Vertex AI Gemini Client — reusable, project-agnostic wrapper.
+
+Authentication is handled exclusively via Application Default
+Credentials (ADC).  No API keys, no service-account JSON files.
+
+Typical usage::
+
+    from kazma_core.google_llm import GoogleGeminiClient
+
+    client = GoogleGeminiClient(project_id="my-gcp-project")
+    reply = client.generate_text("Explain monads in one paragraph.")
+
+This module is intentionally decoupled from any domain logic — it is
+a pure transport layer for Vertex AI generative models.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
+
+logger = logging.getLogger(__name__)
+
+# ── Defaults ────────────────────────────────────────────────────────
+_DEFAULT_LOCATION: str = "us-central1"
+_DEFAULT_MODEL: str = "gemini-2.5-flash"
+_DEFAULT_TEMPERATURE: float = 0.2
+
+
+class GeminiAPIError(Exception):
+    """Recoverable failure from the Vertex AI Gemini API."""
+
+
+class GoogleGeminiClient:
+    """Production-grade, reusable Gemini model client.
+
+    Authenticates via Application Default Credentials only — compliant
+    with corporate policies that prohibit plain-text API keys.
+
+    Args:
+        project_id: GCP project ID (required).
+        location: Vertex AI region.  Defaults to ``us-central1``.
+        default_model: Model identifier used when no model override is
+            passed to ``generate_text``.  Defaults to ``gemini-2.5-flash``.
+    """
+
+    def __init__(
+        self,
+        project_id: str,
+        location: str = _DEFAULT_LOCATION,
+        default_model: str = _DEFAULT_MODEL,
+    ) -> None:
+        if not project_id or not project_id.strip():
+            raise ValueError("project_id is required for Vertex AI ADC auth")
+
+        self._project_id = project_id
+        self._location = location
+        self._default_model = default_model
+
+        # ── Bootstrap Vertex AI with ADC ───────────────────────────
+        try:
+            vertexai.init(project=project_id, location=location)
+        except Exception as exc:
+            raise GeminiAPIError(
+                f"Failed to initialise Vertex AI (check ADC / gcloud auth): {exc}"
+            ) from exc
+
+        logger.info(
+            "GoogleGeminiClient ready | project=%s location=%s model=%s",
+            project_id,
+            location,
+            default_model,
+        )
+
+    # ── Public API ───────────────────────────────────────────────────
+
+    def generate_text(
+        self,
+        prompt: str,
+        *,
+        system_instruction: str | None = None,
+        temperature: float = _DEFAULT_TEMPERATURE,
+        model: str | None = None,
+    ) -> str:
+        """Send a prompt to Gemini and return the text response.
+
+        Args:
+            prompt: The user-facing content to send.
+            system_instruction: Optional high-level behavioural directive
+                passed as the model's system prompt.
+            temperature: Sampling temperature (0.0 – 1.0).  Lower values
+                produce more deterministic output.
+            model: Override the default model for this call only.
+
+        Returns:
+            The model's text response, stripped of surrounding whitespace.
+
+        Raises:
+            GeminiAPIError: When the API call fails, credentials are
+                invalid, or the response contains no text.
+        """
+        model_name = model or self._default_model
+        gen_model = GenerativeModel(model_name)
+        config = GenerationConfig(temperature=temperature)
+
+        logger.debug("Calling %s (temp=%.2f, prompt_len=%d)", model_name, temperature, len(prompt))
+
+        try:
+            response = gen_model.generate_content(
+                contents=prompt,
+                generation_config=config,
+                system_instruction=system_instruction,
+            )
+        except Exception as exc:
+            logger.exception("Gemini API call failed | model=%s", model_name)
+            raise GeminiAPIError(f"Gemini generation failed: {exc}") from exc
+
+        return self._extract_text(response)
+
+    # ── Internals ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_text(response: Any) -> str:
+        """Safely extract the text payload from a Gemini API response."""
+        if response is None:
+            raise GeminiAPIError("Gemini returned a null response")
+
+        candidates: list[Any] = getattr(response, "candidates", None) or []
+        if not candidates:
+            raise GeminiAPIError("Gemini response contains no candidates")
+
+        candidate = candidates[0]
+        content = getattr(candidate, "content", None)
+        if content is None:
+            raise GeminiAPIError("Candidate payload is empty")
+
+        # Primary path: iterate over ``content.parts``.
+        parts: list[Any] = getattr(content, "parts", None) or []
+        texts: list[str] = []
+        for part in parts:
+            chunk = getattr(part, "text", None)
+            if chunk:
+                texts.append(chunk)
+
+        # Fallback: some response shapes expose ``content.text`` directly.
+        if not texts:
+            fallback = getattr(content, "text", None)
+            if fallback:
+                return fallback.strip()
+            raise GeminiAPIError("All candidate parts were empty")
+
+        return "".join(texts).strip()
