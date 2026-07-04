@@ -848,14 +848,19 @@ class ModelRegistry:
         for key, preset in PROVIDER_PRESETS.items():
             if key == "custom":
                 continue
+            enabled = key == "google"  # Google auto-enabled (ADC, no key needed)
+            models: list[str] = []
+            if key == "google":
+                from kazma_core.providers import GEMINI_MODELS
+                models = list(GEMINI_MODELS)
             providers.append(
                 {
                     "name": key,
                     "display_name": preset.get("name", key),
                     "base_url": preset.get("base_url", ""),
                     "api_key": "",
-                    "models": [],
-                    "enabled": False,
+                    "models": models,
+                    "enabled": enabled,
                     "health": "unknown",
                 }
             )
@@ -869,11 +874,7 @@ class ModelRegistry:
         Existing customisations (api_key, enabled status) are preserved.
         """
         stored = self._load_providers()
-        if not stored:
-            # Nothing stored yet — defaults will be used on first access.
-            return
-
-        stored_by_name = {p.get("name", ""): p for p in stored}
+        stored_by_name = {p.get("name", ""): p for p in stored} if stored else {}
         changed = False
 
         for key, preset in PROVIDER_PRESETS.items():
