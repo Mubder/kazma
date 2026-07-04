@@ -317,7 +317,7 @@ class ChatPanel(Vertical):
             elif worker_name:
                 swarm_task = SwarmTask(
                     id=f"tui-swarm-{task[:20]}",
-                    type=TaskType.SINGLE,
+                    type=TaskType.DISPATCH,
                     prompt=task,
                     workers=[worker_name],
                 )
@@ -325,7 +325,7 @@ class ChatPanel(Vertical):
                 # Auto-route: let the engine pick the best worker
                 swarm_task = SwarmTask(
                     id=f"tui-swarm-{task[:20]}",
-                    type=TaskType.SINGLE,
+                    type=TaskType.DISPATCH,
                     prompt=task,
                     workers=[],
                 )
