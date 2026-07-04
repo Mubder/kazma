@@ -488,6 +488,9 @@ class ModelRegistry:
         self._active_provider = str(self._cs.get("registry.active_provider", "") or "")
         self._active_model = str(self._cs.get("registry.active_model", "") or "")
 
+        # ── Seed any preset providers not yet in the stored list ──
+        self._seed_missing_presets()
+
         raw = self._cs.get("registry.discovered_models", {})
         if isinstance(raw, str):
             try:
@@ -857,6 +860,50 @@ class ModelRegistry:
                 }
             )
         return providers
+
+    def _seed_missing_presets(self) -> None:
+        """Ensure every preset provider exists in the stored list.
+
+        New providers (e.g. Google Gemini) added in a code update will
+        automatically appear in the UI without requiring manual setup.
+        Existing customisations (api_key, enabled status) are preserved.
+        """
+        stored = self._load_providers()
+        if not stored:
+            # Nothing stored yet — defaults will be used on first access.
+            return
+
+        stored_by_name = {p.get("name", ""): p for p in stored}
+        changed = False
+
+        for key, preset in PROVIDER_PRESETS.items():
+            if key == "custom":
+                continue
+            if key in stored_by_name:
+                continue  # already exists — don't overwrite user changes
+
+            # Build a new entry from the preset
+            entry: dict[str, Any] = {
+                "name": key,
+                "display_name": preset.get("name", key),
+                "base_url": preset.get("base_url", ""),
+                "api_key": "",
+                "models": [],
+                "enabled": key == "google",  # auto-enable Google (ADC, no key needed)
+                "health": "unknown",
+            }
+
+            # Pre-populate models for providers that hardcode them
+            if key == "google":
+                from kazma_core.providers import GEMINI_MODELS
+                entry["models"] = list(GEMINI_MODELS)
+
+            stored.append(entry)
+            changed = True
+            logger.info("[ModelRegistry] Seeded new preset provider: %s", key)
+
+        if changed:
+            self._save_providers(stored)
 
     def _normalize_provider_entry(self, provider: dict[str, Any]) -> dict[str, Any]:
         name = str(provider.get("name") or "").strip()
