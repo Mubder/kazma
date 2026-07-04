@@ -67,9 +67,10 @@ class SSEEventBus:
     def __init__(self, max_history_per_task: int = 1000) -> None:
         self._history: dict[str, list[dict[str, Any]]] = {}
         self._subscribers: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
-        self._lock = asyncio.Lock()
         self._max_history_per_task = max_history_per_task
         self._last_cleanup_time = 0.0
+        # No lock needed: all methods are sync and run in asyncio's
+        # single-threaded event loop, so there are no interleaving points.
 
     def emit(self, task_id: str, event: str, data: dict[str, Any]) -> None:
         """Emit an event for a task.

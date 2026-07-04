@@ -137,13 +137,26 @@
   function onFileSelected(e) {
     var file = e.target.files[0];
     if (!file) return;
+    // Validate file size (max 1MB for text attachment)
+    if (file.size > 1048576) {
+      KS.toast('File too large (max 1MB for text attachments)', 'error', 3000);
+      e.target.value = '';
+      return;
+    }
+    // Validate file type — text only
+    var allowedTypes = ['text/plain', 'text/markdown', 'text/html', 'application/json', 'text/csv', 'text/x-python', 'text/javascript'];
+    var allowedExts = ['.txt', '.md', '.markdown', '.json', '.csv', '.py', '.js', '.ts', '.yaml', '.yml', '.xml', '.html', '.css', '.sh', '.sql'];
+    var ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+    if (allowedTypes.indexOf(file.type) === -1 && allowedExts.indexOf(ext) === -1) {
+      KS.toast('Only text files are supported', 'error', 3000);
+      e.target.value = '';
+      return;
+    }
     var reader = new FileReader();
     reader.onload = function(evt) {
       var content = evt.target.result;
       var name = file.name;
-      // Show file attachment preview
       KS.toast('Attached: ' + name + ' (' + KS.formatTokens(file.size) + ' bytes)', 'info', 2500);
-      // Store for sending
       inputEl.dataset.attachment = content;
       inputEl.dataset.attachmentName = name;
       inputEl.placeholder = '\uD83D\uDCCE ' + name + ' attached. Type a message\u2026';
@@ -675,7 +688,7 @@
 
   function deleteSession(sessionId) {
     if (!confirm('Delete session ' + sessionId.slice(0, 8) + '?')) return;
-    fetch('/api/chat/sessions/' + sessionId, { method: 'DELETE' })
+    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' })
       .then(function() {
         KS.toast('Session deleted', 'success', 2000);
         loadSessions();

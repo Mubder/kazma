@@ -100,6 +100,8 @@ var KazmaStream = (function() {
     var reconnectTimer = null;
     var reconnectDelay = 1000;
     var maxReconnect = 30000;
+    var reconnectCount = 0;
+    var maxReconnectAttempts = 50;
 
     function connect() {
       if (callbacks.onStatus) callbacks.onStatus('connecting');
@@ -110,6 +112,7 @@ var KazmaStream = (function() {
 
       ws.onopen = function() {
         reconnectDelay = 1000;
+        reconnectCount = 0;
         if (callbacks.onStatus) callbacks.onStatus('connected');
         if (callbacks.onOpen) callbacks.onOpen();
       };
@@ -133,6 +136,12 @@ var KazmaStream = (function() {
 
     function scheduleReconnect() {
       if (reconnectTimer) return;
+      if (reconnectCount >= maxReconnectAttempts) {
+        if (callbacks.onStatus) callbacks.onStatus('failed');
+        if (callbacks.onError) callbacks.onError('Max reconnection attempts reached');
+        return;
+      }
+      reconnectCount++;
       if (callbacks.onStatus) callbacks.onStatus('reconnecting');
       reconnectTimer = setTimeout(function() {
         reconnectTimer = null;

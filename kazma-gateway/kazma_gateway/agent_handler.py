@@ -1353,10 +1353,9 @@ def create_graph_handler(
 
             except Exception:
                 logger.exception("[agent-handler] Graph invocation failed for %s", sender)
-                ctx = await _store.get(thread_id)
-                if not ctx:
-                    ctx = msg.context_metadata
-                # Keep the session entry for recovery routing; only evict via TTL.
+                # Use msg.context_metadata directly instead of re-accessing
+                # the store (which may be the source of the original exception)
+                ctx = msg.context_metadata
                 await manager.send(
                     OutboundMessage(
                         target_id=_build_target_id(msg.platform, ctx),

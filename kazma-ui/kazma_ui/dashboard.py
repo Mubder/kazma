@@ -275,7 +275,7 @@ async def list_sessions(limit: int = 50) -> JSONResponse:
         return JSONResponse({"sessions": sessions, "count": len(sessions)})
     except Exception as e:
         logger.exception("Failed to list sessions")
-        return JSONResponse({"sessions": [], "error": str(e)}, status_code=500)
+        return JSONResponse({"sessions": [], "error": "Internal error"}, status_code=500)
 
 
 @router.delete("/api/sessions/{thread_id}")
@@ -324,7 +324,7 @@ async def delete_session(thread_id: str) -> JSONResponse:
         })
     except Exception as e:
         logger.exception("Failed to delete session %s", thread_id)
-        return JSONResponse({"deleted": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"deleted": False, "error": "Internal error"}, status_code=500)
 
 
 @router.post("/api/sessions/clear-all")
@@ -363,4 +363,4 @@ async def clear_all_sessions() -> JSONResponse:
         })
     except Exception as e:
         logger.exception("Failed to clear all sessions")
-        return JSONResponse({"deleted": False, "error": str(e)}, status_code=500)
+        return JSONResponse({"deleted": False, "error": "Internal error"}, status_code=500)

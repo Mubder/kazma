@@ -342,7 +342,7 @@ class SlackAdapter(BaseAdapter):
             return
 
         user_id = msg.get("user", "")
-        username = msg.get("user", f"slack_{user_id}")
+        username = f"slack_{user_id}" if user_id else "slack_unknown"
 
         incoming = IncomingMessage(
             platform="slack",

@@ -175,7 +175,7 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
             )
         except Exception as e:
             logger.warning("Failed to list hub agents: %s", e)
-            return JSONResponse({"agents": [], "count": 0, "error": str(e)})
+            return JSONResponse({"agents": [], "count": 0, "error": "Internal error"})
 
     return router
 

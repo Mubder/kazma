@@ -693,8 +693,12 @@ class TelegramAdapter(BaseAdapter):
         """Send a 'typing…' chat action to the user (fire-and-forget)."""
         chat_id = target_id.split(":", 1)[1] if ":" in target_id else target_id
         try:
-            async with httpx.AsyncClient(base_url=self._api_base, timeout=5.0) as c:
-                await c.post("/sendChatAction", json={"chat_id": chat_id, "action": "typing"})
+            if not self._http:
+                self._http = httpx.AsyncClient(
+                    base_url=self._api_base,
+                    timeout=httpx.Timeout(30.0, connect=5.0),
+                )
+            await self._http.post("/sendChatAction", json={"chat_id": chat_id, "action": "typing"})
         except Exception:
             pass  # fire-and-forget — never block
 
@@ -718,23 +722,27 @@ class TelegramAdapter(BaseAdapter):
         """
         reaction = _EMOJI_MAP.get(emoji, [{"type": "emoji", "emoji": emoji}])
         try:
-            async with httpx.AsyncClient(base_url=self._api_base, timeout=5.0) as c:
-                resp = await c.post(
-                    "/setMessageReaction",
-                    json={
-                        "chat_id": chat_id,
-                        "message_id": message_id,
-                        "reaction": reaction,
-                        "is_big": False,
-                    },
+            if not self._http:
+                self._http = httpx.AsyncClient(
+                    base_url=self._api_base,
+                    timeout=httpx.Timeout(30.0, connect=5.0),
                 )
-                if resp.status_code != 200:
-                    logger.debug(
-                        "[telegram] setMessageReaction %s failed (%d): %s",
-                        emoji,
-                        resp.status_code,
-                        resp.text[:200],
-                    )
+            resp = await self._http.post(
+                "/setMessageReaction",
+                json={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "reaction": reaction,
+                    "is_big": False,
+                },
+            )
+            if resp.status_code != 200:
+                logger.debug(
+                    "[telegram] setMessageReaction %s failed (%d): %s",
+                    emoji,
+                    resp.status_code,
+                    resp.text[:200],
+                )
         except Exception:
             logger.debug("[telegram] setMessageReaction error (fire-and-forget)")
 
@@ -754,11 +762,15 @@ class TelegramAdapter(BaseAdapter):
             text:              Optional notification text to show.
         """
         try:
-            async with httpx.AsyncClient(base_url=self._api_base, timeout=5.0) as c:
-                payload: dict[str, Any] = {"callback_query_id": callback_query_id}
-                if text:
-                    payload["text"] = text
-                await c.post("/answerCallbackQuery", json=payload)
+            if not self._http:
+                self._http = httpx.AsyncClient(
+                    base_url=self._api_base,
+                    timeout=httpx.Timeout(30.0, connect=5.0),
+                )
+            payload: dict[str, Any] = {"callback_query_id": callback_query_id}
+            if text:
+                payload["text"] = text
+            await self._http.post("/answerCallbackQuery", json=payload)
         except Exception:
             logger.debug("[telegram] answerCallbackQuery error (fire-and-forget)")
 

@@ -93,7 +93,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             count = await agent.tools.connect_server(server_cfg)
             return {"status": "ok", "tool_count": count}
         except Exception as e:
-            return {"status": "error", "error": str(e)}
+            return {"status": "error", "error": "Internal error"}
 
     @router.post("/api/mcp/servers/{name}/stop")
     async def api_stop_server(name: str) -> dict[str, str]:
@@ -102,7 +102,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             try:
                 await agent.tools.disconnect_server(name)
             except Exception as e:
-                return {"status": "error", "error": str(e)}
+                return {"status": "error", "error": "Internal error"}
         return {"status": "ok"}
 
     @router.post("/api/mcp/servers/{name}/test")

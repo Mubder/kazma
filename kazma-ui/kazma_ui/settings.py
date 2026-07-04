@@ -76,7 +76,7 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         except RuntimeError:
             model_settings = {
                 "base_url": config_store.get("llm.base_url", llm_cfg["base_url"]),
-                "api_key": config_store.get("llm.api_key", llm_cfg["api_key"]),
+                "api_key": "***" if config_store.get("llm.api_key", llm_cfg["api_key"]) else "",
                 "model": config_store.get("llm.model", llm_cfg["model"]),
                 "max_tokens": config_store.get("llm.max_tokens", llm_cfg["max_tokens"]),
                 "temperature": config_store.get("llm.temperature", llm_cfg["temperature"]),
@@ -88,11 +88,11 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
             "system_prompt": config_store.get("agent.system_prompt", agent.system_prompt),
         }
         connector_settings = {
-            "telegram_token": config_store.get("connectors.telegram.token", ""),
+            "telegram_token": "***" if config_store.get("connectors.telegram.token", "") else "",
             "telegram_allowed_users": config_store.get("connectors.telegram.allowed_users", ""),
-            "discord_token": config_store.get("connectors.discord.token", ""),
-            "slack_token": config_store.get("connectors.slack.token", ""),
-            "slack_app_token": config_store.get("connectors.slack.app_token", ""),
+            "discord_token": "***" if config_store.get("connectors.discord.token", "") else "",
+            "slack_token": "***" if config_store.get("connectors.slack.token", "") else "",
+            "slack_app_token": "***" if config_store.get("connectors.slack.app_token", "") else "",
         }
 
         return templates.TemplateResponse(

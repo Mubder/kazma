@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class OllamaPullRequest(BaseModel):
     """Request body for POST /api/ollama/pull."""
 
-    model: str
+    model: str  # Validated in the endpoint handler
 
 
 class SaveModelProfileRequest(BaseModel):
@@ -63,6 +63,18 @@ def create_models_router(config_store: Any = None) -> APIRouter:
 
     # ── Background pull tasks (tracked by PID) ────────────────────
     _pull_tasks: dict[str, dict[str, Any]] = {}
+    _MAX_PULL_TASKS = 50
+
+    def _cleanup_pull_tasks() -> None:
+        """Remove completed pull tasks when dict exceeds the cap."""
+        if len(_pull_tasks) <= _MAX_PULL_TASKS:
+            return
+        done = [
+            name for name, info in _pull_tasks.items()
+            if info.get("status") in ("done", "error", "pulled")
+        ]
+        for name in done[:len(_pull_tasks) - _MAX_PULL_TASKS]:
+            del _pull_tasks[name]
 
     @r.get("/api/models")
     @r.get("/v1/models")
@@ -127,12 +139,18 @@ def create_models_router(config_store: Any = None) -> APIRouter:
         Returns:
             {"status": "pulling", "model": "llama3.2", "pid": 12345}
         """
+        import re
+        # Validate model name to prevent command injection
+        if not re.match(r'^[a-zA-Z0-9._:-]+$', req.model):
+            return {"status": "error", "model": req.model, "error": "Invalid model name (only alphanumeric, ., _, :, - allowed)"}
+
         from kazma_core.models.discovery import pull_ollama_model
 
         result = await pull_ollama_model(req.model)
 
         if result.get("status") == "pulling":
             _pull_tasks[req.model] = result
+            _cleanup_pull_tasks()
             logger.info("Ollama pull queued: %s (pid=%s)", req.model, result.get("pid"))
 
         return result

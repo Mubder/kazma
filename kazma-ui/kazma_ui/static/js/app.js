@@ -210,7 +210,8 @@ function kazmaApp() {
             // Store in localStorage
             localStorage.setItem('kazma-lang', newLang);
             // Store in cookie so server-side middleware reads it on next request
-            document.cookie = 'kazma-lang=' + newLang + ';path=/;max-age=31536000;samesite=lax';
+            var secureFlag = window.location.protocol === 'https:' ? ';secure' : '';
+            document.cookie = 'kazma-lang=' + newLang + ';path=/;max-age=31536000;samesite=lax' + secureFlag;
             // Reload so server-side rendering picks up the new language
             window.location.reload();
         },

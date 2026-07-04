@@ -175,6 +175,17 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                     messages.append({"role": "system", "content": agent.system_prompt})
                 messages.extend({k: v for k, v in m.items() if k in ("role", "content")} for m in session.messages)
 
+                # Apply context compaction to avoid unbounded token growth
+                # (matches the SSE/graph path which uses ContextAuthority)
+                # Heuristic: ~4 chars per token, keep under ~32K tokens
+                total_chars = sum(len(str(m.get("content", ""))) for m in messages)
+                if total_chars > 128_000:  # ~32K tokens
+                    system_msgs = [m for m in messages if m.get("role") == "system"]
+                    conversation = [m for m in messages if m.get("role") != "system"]
+                    compacted = system_msgs + conversation[-20:]  # keep last 20 turns
+                    messages = compacted
+                    logger.info("[WS chat] Compacted context: %d → %d messages", len(session.messages), len(compacted))
+
                 # Get tool definitions
                 tool_defs = agent.tools.get_tool_definitions()
 

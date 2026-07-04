@@ -269,25 +269,35 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
     # ── i18n Middleware: read kazma-lang cookie per-request ────────────
     # The cookie is set by the language toggle button (JS) and overrides
-    # the startup language from kazma.yaml.  The middleware mutates the
-    # shared Jinja2 env globals before each request so that server-side
-    # rendering reflects the user's language choice.
+    # the startup language from kazma.yaml.  Uses contextvars to avoid
+    # race conditions when concurrent requests use different languages.
+    import contextvars
     from kazma_ui.i18n import make_translator as _make_translator
 
     _startup_lang = _lang  # default language from kazma.yaml
+    _current_lang: contextvars.ContextVar[str] = contextvars.ContextVar("_current_lang", default=_startup_lang)
+
+    # Store a dynamic translator in globals that reads the current language
+    # from the contextvar, avoiding shared-state race conditions.
+    def _dynamic_translate(key: str, **kwargs) -> str:
+        return _make_translator(_current_lang.get())(key, **kwargs)
+
+    templates.env.globals["t"] = _dynamic_translate
+    templates.env.globals["lang"] = _startup_lang
+    templates.env.globals["dir"] = "rtl" if _startup_lang == "ar" else "ltr"
 
     @app.middleware("http")
     async def language_middleware(request: Request, call_next):
-        """Set i18n globals (t, lang, dir) per-request based on kazma-lang cookie."""
+        """Set i18n context per-request based on kazma-lang cookie."""
         cookie_lang = request.cookies.get("kazma-lang")
         if cookie_lang in ("ar", "en"):
             req_lang = cookie_lang
         else:
             req_lang = _startup_lang
-        req_dir = "rtl" if req_lang == "ar" else "ltr"
-        templates.env.globals["t"] = _make_translator(req_lang)
+        # Set per-request context (no shared mutable state)
+        _current_lang.set(req_lang)
         templates.env.globals["lang"] = req_lang
-        templates.env.globals["dir"] = req_dir
+        templates.env.globals["dir"] = "rtl" if req_lang == "ar" else "ltr"
         return await call_next(request)
 
     # Create routers
@@ -888,7 +898,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
 
             except Exception as e:
                 logger.exception("[HITL] Failed to resume graph for thread=%s", thread_id)
-                return _JSONResponse({"error": str(e)}, status_code=500)
+                return _JSONResponse({"error": "Internal error"}, status_code=500)
 
         logger.info("[HITL] Approval endpoint mounted at /api/approve/{thread_id}")
 
