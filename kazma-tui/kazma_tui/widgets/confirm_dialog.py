@@ -93,8 +93,14 @@ class ConfirmDialog(ModalScreen[bool]):
         self._safe_dismiss(confirmed)
 
     def key_enter(self) -> None:
-        """Enter confirms the action."""
-        self._safe_dismiss(True)
+        """Enter activates the focused button (cancel by default for safety)."""
+        focused = self.focused
+        if focused is not None and isinstance(focused, Button):
+            confirmed = focused.id == "btn-confirm"
+            self._safe_dismiss(confirmed)
+        else:
+            # No button focused — default to cancel for safety
+            self._safe_dismiss(False)
 
     def key_escape(self) -> None:
         """Escape cancels the action."""

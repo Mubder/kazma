@@ -267,6 +267,7 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                             args = {}
 
                         # Safety gate: block danger-tier tools without approval
+                        # Fail-closed: if the safety check raises, block the tool.
                         try:
                             from kazma_core.swarm.safety import get_safety
                             safety = get_safety()
@@ -277,8 +278,14 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                                     "result": f"Safety: '{event.tool_call_name}' requires HITL approval.",
                                 })
                                 continue
-                        except Exception:
-                            pass
+                        except Exception as safety_exc:
+                            # Fail-closed: block the tool on any safety check error
+                            await websocket.send_json({
+                                "type": "tool_result",
+                                "name": event.tool_call_name,
+                                "result": f"Safety check failed for '{event.tool_call_name}': {safety_exc}. Tool blocked (fail-closed).",
+                            })
+                            continue
 
                         result = await agent.tools.execute(event.tool_call_name, args)
                         result_content = result.get("content", "")

@@ -67,19 +67,43 @@ async def read_url(url: str) -> str:
     except ValueError as exc:
         return f"Error: Invalid URL — {exc}"
 
+    # Fetch — disable follow_redirects to prevent SSRF redirect bypass.
+    # A public URL could 302-redirect to http://169.254.169.254/ (cloud
+    # metadata). We validate the URL above, but following redirects would
+    # bypass that check. Instead, we manually handle redirects and
+    # re-validate each Location header.
     try:
         import httpx
     except ImportError:
         return "Error: httpx package not installed. Run: pip install httpx"
 
-    # Fetch
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=30.0,
             headers={"User-Agent": "KazmaBot/1.0 (web reader)"},
         ) as client:
             response = await client.get(url)
+            # Manually handle up to 3 redirects, re-validating each target
+            for _ in range(3):
+                if response.status_code not in (301, 302, 303, 307, 308):
+                    break
+                redirect_url = response.headers.get("location", "")
+                if not redirect_url:
+                    break
+                # Resolve relative redirects
+                if not redirect_url.startswith(("http://", "https://")):
+                    redirect_url = str(httpx.URL(url).join(redirect_url))
+                # Re-validate the redirect target for SSRF
+                try:
+                    from kazma_core.security.ssrf import SSRFError, validate_url
+                    validate_url(redirect_url)
+                except SSRFError as exc:
+                    return f"Error: Redirect blocked (SSRF): {exc}"
+                except ValueError as exc:
+                    return f"Error: Redirect target invalid — {exc}"
+                response = await client.get(redirect_url)
+                url = redirect_url
             response.raise_for_status()
             html = response.text
     except ConnectionError:

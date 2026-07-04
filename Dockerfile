@@ -14,8 +14,12 @@ COPY . .
 # Install with RAG extras (chromadb + sentence-transformers)
 RUN pip install --no-cache-dir -e ".[rag]"
 
-# Create data dirs for SQLite + ChromaDB
-RUN mkdir -p /app/kazma-data /root/.kazma/vector_memory
+# Create non-root user for security (least-privilege)
+RUN useradd -r -m -d /home/kazma -s /bin/bash kazma \
+    && mkdir -p /app/kazma-data /home/kazma/.kazma/vector_memory \
+    && chown -R kazma:kazma /app /home/kazma
+
+USER kazma
 
 EXPOSE 8000
 

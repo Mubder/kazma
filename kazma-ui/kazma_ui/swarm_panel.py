@@ -720,6 +720,9 @@ def create_swarm_router(
         target.setdefault("chat_id", None)
         target.setdefault("enabled", False)
         target.setdefault("bot_token", "")
+        # Mask bot_token in GET response to avoid exposing it in the API
+        if target.get("bot_token"):
+            target = {**target, "bot_token": "***"}
         # Serialize chat_id as a string so large Telegram supergroup IDs
         # (>2^53) survive JSON.parse on the client without precision loss.
         if target["chat_id"] is not None:

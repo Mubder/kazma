@@ -47,6 +47,7 @@ class ChatPanel(Vertical):
     def __init__(self) -> None:
         super().__init__()
         self._last_response: str = ""
+        self._pulse_timer = None
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True)
@@ -71,7 +72,15 @@ class ChatPanel(Vertical):
         bar.display = visible
         if visible:
             bar.update(progress=0)
+            # Stop any existing timer before creating a new one
+            if self._pulse_timer is not None:
+                self._pulse_timer.stop()
             self._pulse_timer = self.set_interval(0.3, self._pulse_progress)
+        else:
+            # Stop the timer when hiding the progress bar
+            if self._pulse_timer is not None:
+                self._pulse_timer.stop()
+                self._pulse_timer = None
 
     def _pulse_progress(self) -> None:
         bar = self.query_one(ProgressBar)

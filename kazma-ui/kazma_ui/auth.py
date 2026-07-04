@@ -40,6 +40,9 @@ SECRET_HEADER = "X-Kazma-Secret"
 #: entire auth layer is bypassed (backward-compatible open mode).
 SECRET_ENV_VAR = "KAZMA_SECRET"
 
+#: Cookie name used to pass the secret in browser sessions (HttpOnly).
+SECRET_COOKIE = "kazma-secret"
+
 #: API path prefixes that require authentication when the secret is set.
 SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/settings",
@@ -48,12 +51,14 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/skills",
     "/api/models",
     "/api/ollama",
-    "/api/agents", "/api/providers", "/api/connectors",
+    "/api/agents", "/api/providers", "/api/provider",
+    "/api/connectors",
     "/api/chat", "/api/gateway",
     # Destructive / privileged routes that must be gated even when
     # other endpoints are open (sessions, HITL approval, system ops).
     "/api/sessions", "/api/session",
     "/api/approve", "/api/system",
+    "/api/workspace", "/api/memory",
 )
 
 #: Exact read-only paths that are always open regardless of secret config.
@@ -147,24 +152,62 @@ def create_auth_middleware(
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
         path = request.url.path
+        expected = static_secret if static_secret is not None else get_kazma_secret()
 
-        # 1. Read-only & page routes always pass through.
+        # Set HttpOnly cookie on all responses when secret is configured
+        # (so browser-based JS can make authenticated API calls without
+        # the secret being exposed in page source).
+        response = await call_next(request)
+        if expected and not request.cookies.get(SECRET_COOKIE):
+            response.set_cookie(
+                key=SECRET_COOKIE,
+                value=expected,
+                httponly=True,
+                samesite="strict",
+                path="/",
+            )
+        return response
+
+    # ── Separate gate for sensitive paths ────────────────────────────
+    # We need to check auth BEFORE the route handler, but set cookies
+    # AFTER. So we use a two-pass approach: check first, then set cookie
+    # on the response.
+
+    async def auth_middleware_with_gate(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        path = request.url.path
+        expected = static_secret if static_secret is not None else get_kazma_secret()
+
+        # 1. Read-only & page routes always pass through (but still get cookie).
         if is_always_open(path):
-            return await call_next(request)
+            response = await call_next(request)
+            if expected and not request.cookies.get(SECRET_COOKIE):
+                response.set_cookie(
+                    key=SECRET_COOKIE, value=expected,
+                    httponly=True, samesite="strict", path="/",
+                )
+            return response
 
         # 2. Only sensitive prefixes are gated.
         if not is_sensitive_path(path):
-            return await call_next(request)
+            response = await call_next(request)
+            if expected and not request.cookies.get(SECRET_COOKIE):
+                response.set_cookie(
+                    key=SECRET_COOKIE, value=expected,
+                    httponly=True, samesite="strict", path="/",
+                )
+            return response
 
-        # 3. Resolve the expected secret (static or dynamic).
-        expected = static_secret if static_secret is not None else get_kazma_secret()
-
-        # 4. No secret configured → open mode (backward compatible).
+        # 3. No secret configured → open mode (backward compatible).
         if not expected:
             return await call_next(request)
 
-        # 5. Verify the header using timing-safe comparison.
+        # 4. Verify the header or cookie using timing-safe comparison.
         provided = request.headers.get(SECRET_HEADER, "")
+        if not provided:
+            provided = request.cookies.get(SECRET_COOKIE, "")
         if not verify_secret(provided, expected):
             return Response(
                 content='{"detail":"Missing or invalid X-Kazma-Secret header"}',
@@ -173,13 +216,20 @@ def create_auth_middleware(
                 headers={"WWW-Authenticate": SECRET_HEADER},
             )
 
-        return await call_next(request)
+        response = await call_next(request)
+        if not request.cookies.get(SECRET_COOKIE):
+            response.set_cookie(
+                key=SECRET_COOKIE, value=expected,
+                httponly=True, samesite="strict", path="/",
+            )
+        return response
 
-    return auth_middleware
+    return auth_middleware_with_gate
 
 
 __all__: list[str] = [
     "SECRET_HEADER",
+    "SECRET_COOKIE",
     "SECRET_ENV_VAR",
     "SENSITIVE_PREFIXES",
     "ALWAYS_OPEN_PATHS",

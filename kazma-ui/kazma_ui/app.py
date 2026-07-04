@@ -183,16 +183,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
         logger.info("[Stream] Typing started — worker=%s task=%s", worker_name, task_id)
         return {"status": "stream_started", "worker_name": worker_name, "task_id": task_id}
 
-    # ── Global error boundary (#16) ──────────────────────────────────
-    from kazma_core.swarm.middleware import GracefulErrorFallback as _gef  # noqa: N813
-    @app.exception_handler(Exception)
-    async def _global_error_handler(request: Request, exc: Exception):
-        """Catch-all handler — never let a broken skill crash the pipeline."""
-        logger.error("[GlobalError] %s: %s", type(exc).__name__, exc)
-        return JSONResponse(
-            status_code=500,
-            content=_gef.to_json_error(exc),
-        )
+    # ── Global error boundary — handled by unified catch_all at bottom ──
 
     # ── Swarm Brain — Knowledge Graph (#18) ───────────────────────────
     import kazma_core.swarm.memory.graph as _kg_mod
@@ -271,9 +262,10 @@ def create_app(config_path: str | None = None) -> FastAPI:
     from kazma_ui.i18n import make_translator
 
     templates.env.globals["t"] = make_translator(_lang)
-    # Expose KAZMA_SECRET to templates so the HITL approval frontend can
-    # send it as the X-Kazma-Secret header on /api/approve requests.
-    templates.env.globals["kazma_secret"] = os.environ.get("KAZMA_SECRET", "")
+    # KAZMA_SECRET is no longer exposed in page source (security: prevents
+    # XSS from stealing the shared secret). Instead, it's set as an
+    # HttpOnly cookie by the auth middleware when the secret is configured.
+    # The cookie is sent automatically with same-origin requests.
 
     # ── i18n Middleware: read kazma-lang cookie per-request ────────────
     # The cookie is set by the language toggle button (JS) and overrides
@@ -1265,9 +1257,24 @@ def create_app(config_path: str | None = None) -> FastAPI:
         )
 
     @app.exception_handler(Exception)
-    async def catch_all(request: Request, exc: Any) -> HTMLResponse:
+    async def catch_all(request: Request, exc: Any) -> Any:
+        """Unified catch-all — returns JSON for API routes, HTML for pages."""
         # Log full traceback server-side; never expose internals to clients.
         logger.exception("[app] Unhandled exception on %s %s", request.method, request.url.path)
+        path = request.url.path
+        # API routes get JSON errors; page routes get HTML error page
+        if path.startswith("/api/") or request.headers.get("accept", "").startswith("application/json"):
+            try:
+                from kazma_core.swarm.middleware import GracefulErrorFallback as _gef
+                return JSONResponse(
+                    status_code=500,
+                    content=_gef.to_json_error(exc),
+                )
+            except Exception:
+                return JSONResponse(
+                    status_code=500,
+                    content={"error": "Internal server error", "detail": str(exc) if not _is_prod() else ""},
+                )
         return templates.TemplateResponse(
             request,
             "error.html",

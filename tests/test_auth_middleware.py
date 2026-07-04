@@ -80,9 +80,9 @@ def _build_test_app() -> FastAPI:
     async def telemetry() -> dict:
         return {"ok": True}
 
-    # A non-sensitive API route (workspace is not in SENSITIVE_PREFIXES)
-    @app.get("/api/workspace/files")
-    async def workspace_files() -> dict:
+    # A non-sensitive API route (not in SENSITIVE_PREFIXES)
+    @app.get("/api/public/info")
+    async def public_info() -> dict:
         return {"ok": True}
 
     return app
@@ -115,8 +115,8 @@ class TestIsSensitivePath:
         assert is_sensitive_path("/api/status") is False
 
     def test_unrelated_api_is_not_sensitive(self):
-        assert is_sensitive_path("/api/workspace/files") is False
         assert is_sensitive_path("/api/telemetry") is False
+        assert is_sensitive_path("/api/something-random") is False
 
     def test_chat_stream_is_sensitive(self):
         """/api/chat/* is a sensitive prefix (chat can invoke tools/models)."""
@@ -225,7 +225,7 @@ OPEN_TEST_PATHS = [
     ("/", "GET"),
     ("/api/status", "GET"),
     ("/api/telemetry", "GET"),
-    ("/api/workspace/files", "GET"),
+    ("/api/public/info", "GET"),
 ]
 
 

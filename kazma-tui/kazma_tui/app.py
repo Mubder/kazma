@@ -146,16 +146,19 @@ class KazmaTUI(App[None]):
         # ── ConfigStore ─────────────────────────────────────────────
         try:
             from kazma_core.config_store import ConfigStore, get_config_store, set_config_store
+            import kazma_core.config_store as _cs_mod
 
-            # Check if already initialized (e.g. launched from within the server)
-            try:
-                cs = get_config_store()
-                # If we got here, it was already initialized
-            except Exception:
+            # get_config_store() lazily creates a singleton and never raises.
+            # Check if the singleton is already set; if not, create one
+            # and load values from kazma.yaml.
+            if _cs_mod._config_store is None:
                 cs = ConfigStore()
                 set_config_store(cs)
                 cs.reconcile_from_yaml()
                 logger.info("[TUI] ConfigStore initialized from kazma.yaml")
+            else:
+                cs = get_config_store()
+                logger.info("[TUI] ConfigStore already initialized")
         except Exception as e:
             logger.warning("[TUI] ConfigStore init failed: %s", e)
 

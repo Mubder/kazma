@@ -193,7 +193,7 @@ class KazmaStatusBar(Widget):
                 
                 # Center-left: Provider/Model info
                 yield Static(
-                    f"[dim]{self.provider}[/] [bold]$primary[/] | [bold]{self.model}[/]",
+                    f"[dim]{self.provider}[/] [bold $primary]|[/] [bold]{self.model}[/]",
                     id="model-info",
                 )
                 
@@ -248,7 +248,7 @@ class KazmaStatusBar(Widget):
         try:
             model_info = self.query_one("#model-info", Static)
             model_info.update(
-                f"[dim]{provider}[/] [bold]$primary[/] | [bold]{model}[/]"
+                f"[dim]{provider}[/] [bold $primary]|[/] [bold]{model}[/]"
             )
         except Exception as e:
             logger.debug(f"Error updating model info: {e}")

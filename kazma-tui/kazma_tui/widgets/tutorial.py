@@ -269,12 +269,30 @@ class TutorialScreen(ModalScreen[bool]):
     def _complete_tutorial(self, completed: bool) -> None:
         """Handle tutorial completion."""
         try:
+            import json
             from pathlib import Path
 
             config_dir = Path.home() / ".kazma"
             prefs_file = config_dir / "preferences.json"
             config_dir.mkdir(exist_ok=True)
-            prefs_file.write_text('{"tutorial_completed": true, "theme": "kazma-dark"}')
+
+            # Read existing preferences to preserve user customizations
+            existing = {}
+            if prefs_file.exists():
+                try:
+                    existing = json.loads(prefs_file.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    existing = {}
+
+            # Merge tutorial completion into existing preferences
+            existing["tutorial_completed"] = True
+            if "theme" not in existing:
+                existing["theme"] = "kazma-dark"
+
+            prefs_file.write_text(
+                json.dumps(existing, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
         except Exception:
             pass
         # Use call_next to schedule dismiss after current message is processed

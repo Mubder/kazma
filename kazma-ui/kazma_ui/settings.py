@@ -195,6 +195,17 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         import httpx
 
         try:
+            # SSRF protection: validate the base_url
+            from kazma_core.security.ssrf import SSRFError, validate_url
+            validate_url(req.base_url)
+        except SSRFError as exc:
+            return {"success": False, "error": f"Blocked: {exc}"}
+        except ValueError as exc:
+            return {"success": False, "error": f"Invalid URL: {exc}"}
+        except ImportError:
+            pass  # ssrf module not available — proceed with caution
+
+        try:
             headers = {
                 "Authorization": f"Bearer {req.api_key or 'not-needed'}",
                 "Content-Type": "application/json",

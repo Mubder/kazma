@@ -296,7 +296,7 @@ class HighContrastMode:
     
     Button {
         background: black;
-        border: solid yellow 2;
+        border: heavy yellow;
     }
     
     Button:hover, Button:focus {
@@ -318,18 +318,51 @@ class HighContrastMode:
     def __init__(self, app) -> None:
         self.app = app
         self._enabled = False
+        self._prev_stylesheet = None
     
     def enable(self) -> None:
         """Enable high contrast mode."""
         self._enabled = True
-        self.app.stylesheet = self.HIGH_CONTRAST_CSS
+        # Save current stylesheet to restore later
+        self._prev_stylesheet = self.app.stylesheet
+        # Build a proper Stylesheet object (not a raw string)
+        from textual.stylesheet import Stylesheet
+        ss = Stylesheet()
+        # Preserve widget default CSS
+        try:
+            for css_path, css_text, tie_breaker, scope in self.app._get_default_css():
+                ss.add_source(
+                    css_text,
+                    path=css_path,
+                    tie_breaker=tie_breaker,
+                    scope=scope,
+                )
+        except Exception:
+            pass
+        # Add high contrast overrides
+        ss.add_source(self.HIGH_CONTRAST_CSS, path="<high-contrast>")
+        ss.apply(self.app)
+        self.app.stylesheet = ss
+        try:
+            self.app.refresh_css()
+        except Exception:
+            pass
     
     def disable(self) -> None:
         """Disable high contrast mode."""
         self._enabled = False
-        # Restore default theme
-        from kazma_tui.theme import KAZMA_THEME
-        self.app.stylesheet = KAZMA_THEME
+        # Restore previous stylesheet
+        if self._prev_stylesheet is not None:
+            self.app.stylesheet = self._prev_stylesheet
+            try:
+                self.app.refresh_css()
+            except Exception:
+                pass
+        else:
+            # Fallback: re-apply the default theme
+            from kazma_tui.themes.theme_manager import ThemeManager
+            tm = ThemeManager(self.app)
+            tm.apply_theme("kazma-dark")
     
     def toggle(self) -> bool:
         """Toggle high contrast mode."""

@@ -5,8 +5,9 @@
  * renders approval cards with tool name + arguments, and wires up
  * Approve / Deny buttons that POST to /api/approve/{thread_id}.
  *
- * The KAZMA_SECRET header (X-Kazma-Secret) is included if the
- * window.__KAZMA_SECRET__ value is set (injected by the template).
+ * Authentication uses an HttpOnly cookie (set by the server when
+ * KAZMA_SECRET is configured). No secret is exposed in page source.
+ * All fetch calls use credentials: 'same-origin' to send the cookie.
  */
 (function () {
   'use strict';
@@ -15,24 +16,11 @@
   const containerId = 'hitl-approvals-panel';
 
   /**
-   * Get the X-Kazma-Secret header value if configured.
-   * @returns {string}
-   */
-  function getSecret() {
-    return window.__KAZMA_SECRET__ || '';
-  }
-
-  /**
    * Build the headers for an approval/deny request.
    * @returns {Object<string, string>}
    */
   function approvalHeaders() {
-    var headers = { 'Content-Type': 'application/json' };
-    var secret = getSecret();
-    if (secret) {
-      headers['X-Kazma-Secret'] = secret;
-    }
-    return headers;
+    return { 'Content-Type': 'application/json' };
   }
 
   /**
@@ -138,6 +126,7 @@
         method: 'POST',
         headers: approvalHeaders(),
         body: JSON.stringify({ action: approve ? 'approve' : 'deny' }),
+        credentials: 'same-origin',
       });
 
       if (resp.status === 202) {
@@ -178,7 +167,7 @@
    */
   async function refreshPending() {
     try {
-      var resp = await fetch('/api/pending-approvals');
+      var resp = await fetch('/api/pending-approvals', { credentials: 'same-origin' });
       if (!resp.ok) return;
       var data = await resp.json();
       renderApprovals(data.pending || []);
