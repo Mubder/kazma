@@ -488,9 +488,6 @@ class ModelRegistry:
         self._active_provider = str(self._cs.get("registry.active_provider", "") or "")
         self._active_model = str(self._cs.get("registry.active_model", "") or "")
 
-        # ── Seed any preset providers not yet in the stored list ──
-        self._seed_missing_presets()
-
         raw = self._cs.get("registry.discovered_models", {})
         if isinstance(raw, str):
             try:
@@ -525,11 +522,35 @@ class ModelRegistry:
     # ── Providers ──────────────────────────────────────────────────
 
     def list_providers(self) -> list[dict[str, Any]]:
-        """Return all providers from ``providers.list`` or default presets."""
-        providers = self._load_providers()
-        if providers:
-            return providers
-        return self._default_provider_entries()
+        """Return all providers, merging stored entries with preset defaults.
+
+        Preset providers that don't exist in the stored list are included
+        from their default entries.  Stored values always take priority
+        (preserving user customisations like api_key, enabled status).
+        """
+        stored = self._load_providers()
+        defaults = self._default_provider_entries()
+        stored_by_name = {p.get("name", ""): p for p in stored}
+        defaults_by_name = {p.get("name", ""): p for p in defaults}
+
+        merged: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        # Start with stored providers (user customisations win)
+        for p in stored:
+            name = p.get("name", "")
+            if name and name not in seen:
+                merged.append(p)
+                seen.add(name)
+
+        # Fill in any preset defaults not in the stored list
+        for p in defaults:
+            name = p.get("name", "")
+            if name and name not in seen:
+                merged.append(p)
+                seen.add(name)
+
+        return merged
 
     def get_provider(self, name: str) -> dict[str, Any] | None:
         """Return provider entry by name (fuzzy, case-insensitive matching).
