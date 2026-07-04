@@ -306,7 +306,7 @@ class CommandPalette(ModalScreen[str | None]):
                 "tab:settings": "settings",
             }
             self._switch_tab(tab_map.get(cmd_id, "chat"))
-            self.dismiss(cmd_id)
+            self._safe_dismiss(cmd_id)
             return
         
         # Navigation commands
@@ -316,7 +316,7 @@ class CommandPalette(ModalScreen[str | None]):
                 self.app.action_next_tab()
             except Exception:
                 pass
-            self.dismiss(cmd_id)
+            self._safe_dismiss(cmd_id)
             return
         
         if cmd_id == "prev-tab":
@@ -324,7 +324,7 @@ class CommandPalette(ModalScreen[str | None]):
                 self.app.action_prev_tab()
             except Exception:
                 pass
-            self.dismiss(cmd_id)
+            self._safe_dismiss(cmd_id)
             return
         
         # Built-in actions
@@ -345,16 +345,28 @@ class CommandPalette(ModalScreen[str | None]):
                     action_method()
             except Exception:
                 pass
-            self.dismiss(cmd_id)
+            self._safe_dismiss(cmd_id)
             return
         
         # Pass command to chat panel
         if cmd_id.startswith("/"):
             self._route_to_chat(cmd_id)
-            self.dismiss(cmd_id)
+            self._safe_dismiss(cmd_id)
             return
         
-        self.dismiss(cmd_id)
+        self._safe_dismiss(cmd_id)
+
+    def _safe_dismiss(self, result=None) -> None:
+        """Dismiss without returning AwaitComplete (crash fix for Textual 8.x).
+
+        Screen.dismiss() returns AwaitComplete.  When used as a timer or
+        call_next callback, Textual's invoke() awaits it, raising
+        ScreenError.  This wrapper returns None instead.
+        """
+        try:
+            self.dismiss(result)
+        except Exception:
+            pass
 
     def _switch_tab(self, tab_id: str) -> None:
         """Switch to specified tab."""
@@ -388,10 +400,7 @@ class CommandPalette(ModalScreen[str | None]):
 
     def key_escape(self) -> None:
         """Dismiss on escape."""
-        try:
-            self.dismiss(None)
-        except Exception:
-            pass
+        self._safe_dismiss(None)
 
     def action_cursor_up(self) -> None:
         """Move cursor up in list."""

@@ -43,6 +43,10 @@ class ChatPanel(Vertical):
         ("ctrl+enter", "insert_newline", "Newline"),
     ]
 
+    def __init__(self) -> None:
+        super().__init__()
+        self._last_response: str = ""
+
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True)
         yield ProgressBar(id="chat-progress", total=100, show_eta=False)
@@ -113,6 +117,7 @@ class ChatPanel(Vertical):
             response = await provider.chat(messages)
             content = getattr(response, "content", "") or ""
             if content:
+                self._last_response = content
                 log.write(content)
             else:
                 log.write("[dim](empty response)[/]")
@@ -137,7 +142,7 @@ class ChatPanel(Vertical):
     def _handle_command(self, text: str) -> None:
         cmd = text.lower().split()[0]
         if cmd == "/help":
-            self.write("system", "/help /clear /model /quit — Ctrl+A select all, Ctrl+Shift+C copy, Shift+drag mouse to select")
+            self.write("system", "Commands: /help /clear /model /quit | Copy: Ctrl+A then Ctrl+Shift+C, or Shift+drag mouse to select text")
         elif cmd == "/clear":
             self.query_one("#chat-log", RichLog).clear()
         elif cmd == "/quit":
@@ -208,21 +213,20 @@ class ChatPanel(Vertical):
             pass
 
     def copy_to_clipboard(self) -> None:
-        """Copy currently selected text or last KAZMA response to system clipboard."""
+        """Copy currently selected text or last KAZMA response to system clipboard.
+
+        Tries screen-level text selection first (from mouse drag or
+        Ctrl+A).  Falls back to the last assistant response tracked in
+        _last_response, since RichLog has no .text property to read back.
+        """
         try:
-            # Prefer screen-level text selection (mouse-drag on any widget)
             selected = self.screen.get_selected_text()
             if selected:
                 self.app.copy_to_clipboard(selected)
                 return
-            # Fallback: grab the last few visible lines from the chat log
-            log = self.query_one("#chat-log", RichLog)
-            log_text = log.text or ""
-            for line in reversed(log_text.split("\n")):
-                if "KAZMA" in line:
-                    parts = line.split(" ", 3)
-                    if len(parts) > 3:
-                        self.app.copy_to_clipboard(parts[3])
-                    return
         except Exception:
             pass
+        # Fallback: copy the last tracked KAZMA response
+        if self._last_response:
+            self.app.copy_to_clipboard(self._last_response)
+            return

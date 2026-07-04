@@ -431,11 +431,18 @@ class FocusTrap(ModalScreen):
     
     def action_confirm(self) -> None:
         """Handle confirmation."""
-        self.dismiss(True)
+        self._safe_dismiss(True)
     
     def action_cancel(self) -> None:
         """Handle cancellation."""
-        self.dismiss(False)
+        self._safe_dismiss(False)
+    
+    def _safe_dismiss(self, result=None) -> None:
+        """Dismiss without returning AwaitComplete (Textual 8.x crash fix)."""
+        try:
+            self.dismiss(result)
+        except Exception:
+            pass
     
     BINDINGS = [
         ("enter", "confirm", "Confirm"),
