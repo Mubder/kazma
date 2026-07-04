@@ -87,8 +87,21 @@ class Toast(ModalScreen[None]):
 
     def on_mount(self) -> None:
         if self.duration > 0:
-            self.set_timer(self.duration, self.dismiss)
+            self.set_timer(self.duration, self._safe_dismiss)
+
+    def _safe_dismiss(self) -> None:
+        """Dismiss without returning the awaitable.
+
+        Screen.dismiss() in Textual 8.x returns a value that the
+        push_screen caller can await.  When used as a timer or call_next
+        callback, that return value gets awaited inside a message
+        handler, raising ScreenError.  Wrapping it here returns None.
+        """
+        try:
+            self.dismiss()
+        except Exception:
+            pass
 
     def key_escape(self) -> None:
         """Allow manual dismiss with Escape key."""
-        self.call_next(self.dismiss)
+        self._safe_dismiss()

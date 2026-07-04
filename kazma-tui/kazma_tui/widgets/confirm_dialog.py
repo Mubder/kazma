@@ -90,12 +90,19 @@ class ConfirmDialog(ModalScreen[bool]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press and dismiss with result."""
         confirmed = event.button.id == "btn-confirm"
-        self.dismiss(confirmed)
+        self._safe_dismiss(confirmed)
 
     def key_enter(self) -> None:
         """Enter confirms the action."""
-        self.dismiss(True)
+        self._safe_dismiss(True)
 
     def key_escape(self) -> None:
         """Escape cancels the action."""
-        self.dismiss(False)
+        self._safe_dismiss(False)
+
+    def _safe_dismiss(self, result: bool) -> None:
+        """Dismiss without returning an awaitable from a message handler."""
+        try:
+            self.dismiss(result)
+        except Exception:
+            pass

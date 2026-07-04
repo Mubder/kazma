@@ -105,6 +105,11 @@ class ChatPanel(Vertical):
                 return
 
             messages = [{"role": "user", "content": prompt}]
+            # Inject system prompt from kazma.yaml so the model knows to
+            # respond in the user's language and follow Kazma's persona.
+            system_prompt = self._get_system_prompt()
+            if system_prompt:
+                messages.insert(0, {"role": "system", "content": system_prompt})
             response = await provider.chat(messages)
             content = getattr(response, "content", "") or ""
             if content:
@@ -149,6 +154,37 @@ class ChatPanel(Vertical):
 
     async def _generate_response(self, prompt: str) -> None:
         await self.write_stream(prompt)
+
+    @staticmethod
+    def _get_system_prompt() -> str:
+        """Load the system prompt from kazma.yaml or ConfigStore.
+
+        The TUI chat is a direct LLM call (no LangGraph supervisor),
+        so we must inject the system prompt ourselves to ensure the
+        model follows Kazma's persona and language-matching rules.
+        """
+        try:
+            from kazma_core.config_store import get_config_store
+            cs = get_config_store()
+            prompt = cs.get("system_prompt")
+            if prompt:
+                return str(prompt)
+        except Exception:
+            pass
+        # Fallback: read directly from kazma.yaml
+        try:
+            from pathlib import Path
+            import yaml
+            yaml_path = Path("kazma.yaml")
+            if yaml_path.exists():
+                with open(yaml_path, encoding="utf-8") as fh:
+                    data = yaml.safe_load(fh) or {}
+                prompt = data.get("system_prompt")
+                if prompt:
+                    return str(prompt)
+        except Exception:
+            pass
+        return ""
 
     # ── Copy ───────────────────────────────────────────────────────
 

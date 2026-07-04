@@ -388,7 +388,10 @@ class CommandPalette(ModalScreen[str | None]):
 
     def key_escape(self) -> None:
         """Dismiss on escape."""
-        self.dismiss(None)
+        try:
+            self.dismiss(None)
+        except Exception:
+            pass
 
     def action_cursor_up(self) -> None:
         """Move cursor up in list."""

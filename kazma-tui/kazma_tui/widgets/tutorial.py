@@ -282,7 +282,10 @@ class TutorialScreen(ModalScreen[bool]):
 
     def _do_dismiss(self, completed: bool) -> None:
         """Actually dismiss the screen (called via call_next)."""
-        self.dismiss(completed)
+        try:
+            self.dismiss(completed)
+        except Exception:
+            pass
 
     def key_escape(self) -> None:
         """Allow escape to skip."""

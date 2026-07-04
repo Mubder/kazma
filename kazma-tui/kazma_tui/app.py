@@ -188,18 +188,37 @@ class KazmaTUI(App[None]):
                     # Register workers from config
                     for wc in swarm_cfg.workers:
                         engine.add_worker(wc)
-                    set_swarm_engine(engine)
-                    logger.info(
-                        "[TUI] SwarmEngine initialized from kazma.yaml — %d worker(s)",
-                        len(engine._workers),
-                    )
                 else:
                     engine = SwarmEngine(
                         SwarmConfig(enabled=True, workers=[]),
                         task_store=TaskStore(),
                     )
-                    set_swarm_engine(engine)
-                    logger.info("[TUI] SwarmEngine initialized (empty)")
+                set_swarm_engine(engine)
+
+                # Load persisted workers from WorkerRegistry (swarm_registry.json).
+                # The Web UI saves workers here when users add them via the
+                # Swarm panel; the TUI must read the same file to see them.
+                try:
+                    from kazma_core.swarm.registry import get_worker_registry
+                    from kazma_core.swarm.config import WorkerConfig as _WC
+                    reg = get_worker_registry()
+                    for entry in reg.list_all():
+                        if entry.name not in engine._workers:
+                            engine.add_worker(_WC(
+                                name=entry.name,
+                                type=entry.worker_type or "in_process",
+                                model=entry.model,
+                                provider=entry.provider,
+                                role=entry.roles[0] if entry.roles else "",
+                                system_prompt=entry.system_prompt,
+                            ))
+                    logger.info(
+                        "[TUI] SwarmEngine initialized — %d worker(s) from YAML + %d from registry",
+                        len(swarm_cfg.workers) if swarm_cfg else 0,
+                        len(engine._workers) - len(swarm_cfg.workers if swarm_cfg else []),
+                    )
+                except Exception as exc:
+                    logger.warning("[TUI] Failed to load workers from registry: %s", exc)
         except Exception as e:
             logger.warning("[TUI] SwarmEngine init failed: %s", e)
 
