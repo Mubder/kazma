@@ -48,6 +48,11 @@ class SubTask:
     max_budget: float = 0.10
     timeout_seconds: int = 300
     created_at: float = field(default_factory=time.time)
+    # Request id of the delegation created for this sub-task.  Lets
+    # handle_timeout / handle_failure correlate the callback to the
+    # correct sub-task even when ``result`` is still None (i.e. the
+    # delegation failed/timed out before producing a result).
+    delegation_request_id: str = ""
 
 
 @dataclass
@@ -136,7 +141,10 @@ class DelegationOrchestrator:
         assignments = await self._discover_and_assign(sub_tasks, max_agents)
 
         # Step 4: Execute delegations in parallel
-        exec_results = await self._execute_delegations(assignments, budget_per_task, timeout_seconds)
+        sub_task_map = {st.task_id: st for st in sub_tasks}
+        exec_results = await self._execute_delegations(
+            assignments, budget_per_task, timeout_seconds, sub_task_map=sub_task_map
+        )
 
         # Step 5: Collect results
         for sub_task in sub_tasks:
@@ -296,10 +304,12 @@ class DelegationOrchestrator:
         assignments: dict[str, AgentInfo],
         budget_per_task: float,
         timeout_seconds: int,
+        sub_task_map: dict[str, SubTask] | None = None,
     ) -> dict[str, DelegationResult]:
         """Execute all delegations in parallel with concurrency limit."""
         results: dict[str, DelegationResult] = {}
         semaphore = asyncio.Semaphore(min(len(assignments), 5))
+        st_map = sub_task_map or {}
 
         async def _execute_one(sub_task_id: str, agent: AgentInfo) -> tuple[str, DelegationResult]:
             async with semaphore:
@@ -309,6 +319,11 @@ class DelegationOrchestrator:
                     max_budget=budget_per_task,
                     timeout_seconds=timeout_seconds,
                 )
+                # Record the request id on the sub-task so timeout/failure
+                # callbacks can correlate back to it even with no result.
+                st = st_map.get(sub_task_id)
+                if st is not None:
+                    st.delegation_request_id = request.request_id
                 result = await asyncio.wait_for(
                     self.protocol.execute_delegated_task(request),
                     timeout=timeout_seconds,
@@ -346,24 +361,27 @@ class DelegationOrchestrator:
     async def handle_timeout(self, request_id: str) -> None:
         """Handle delegation timeout for a specific request."""
         logger.warning("Delegation timeout: %s", request_id)
-        orch = self._active_orchestrations.get(request_id)
-        if orch is None:
-            return
-        for st in orch.sub_tasks:
-            if st.status == SubTaskStatus.PENDING and st.result is None:
-                st.status = SubTaskStatus.TIMED_OUT
-                if st.assigned_agent:
-                    await self.discovery.update_reputation(st.assigned_agent, 0.5)
+        for orch in self._active_orchestrations.values():
+            for st in orch.sub_tasks:
+                if st.delegation_request_id != request_id:
+                    continue
+                if st.status in (SubTaskStatus.PENDING, SubTaskStatus.ASSIGNED, SubTaskStatus.EXECUTING) and st.result is None:
+                    st.status = SubTaskStatus.TIMED_OUT
+                    if st.assigned_agent:
+                        await self.discovery.update_reputation(st.assigned_agent, 0.5)
 
     async def handle_failure(self, request_id: str, error: str) -> None:
         """Handle delegation failure for a specific request."""
         logger.error("Delegation failure: %s — %s", request_id, error)
-        orch = self._active_orchestrations.get(request_id)
-        if orch is None:
-            return
-        for st in orch.sub_tasks:
-            if st.result and st.result.request_id == request_id:
-                st.status = SubTaskStatus.FAILED
+        for orch in self._active_orchestrations.values():
+            for st in orch.sub_tasks:
+                if st.delegation_request_id != request_id:
+                    continue
+                # Match whether or not a result was produced.  A failed
+                # delegation often has result=None, so we cannot rely on
+                # st.result.request_id alone.
+                if st.status not in (SubTaskStatus.COMPLETED, SubTaskStatus.FAILED, SubTaskStatus.TIMED_OUT):
+                    st.status = SubTaskStatus.FAILED
 
     def get_orchestration(self, task_id: str) -> OrchestrationResult | None:
         """Get an orchestration result by ID."""

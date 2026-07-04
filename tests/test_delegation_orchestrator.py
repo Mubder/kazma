@@ -101,6 +101,28 @@ class TestHandleTimeout:
         # Should not raise
         await orchestrator.handle_timeout("nonexistent-request")
 
+    async def test_handle_timeout_correlates_by_request_id(self, orchestrator):
+        """handle_timeout marks only the sub-task whose delegation_request_id matches."""
+        st_target = SubTask(
+            task_id="t1", description="d", required_capabilities=["c"],
+            assigned_agent="agent-a", status=SubTaskStatus.EXECUTING,
+            delegation_request_id="req-target",
+        )
+        st_other = SubTask(
+            task_id="t2", description="d", required_capabilities=["c"],
+            assigned_agent="agent-b", status=SubTaskStatus.EXECUTING,
+            delegation_request_id="req-other",
+        )
+        orch = OrchestrationResult(
+            task_id="orch-1", status=RequestStatus.EXECUTING, sub_tasks=[st_target, st_other],
+        )
+        orchestrator._active_orchestrations["orch-1"] = orch
+
+        await orchestrator.handle_timeout("req-target")
+
+        assert st_target.status == SubTaskStatus.TIMED_OUT
+        assert st_other.status == SubTaskStatus.EXECUTING
+
 
 class TestHandleFailure:
     """Test failure handling."""
@@ -108,6 +130,29 @@ class TestHandleFailure:
     async def test_handle_failure(self, orchestrator):
         # Should not raise
         await orchestrator.handle_failure("req-1", "Something went wrong")
+
+    async def test_handle_failure_correlates_by_request_id(self, orchestrator):
+        """handle_failure marks the matching sub-task FAILED even when result is None."""
+        st_target = SubTask(
+            task_id="t1", description="d", required_capabilities=["c"],
+            assigned_agent="agent-a", status=SubTaskStatus.EXECUTING,
+            result=None,  # failed before producing a result
+            delegation_request_id="req-fail",
+        )
+        st_other = SubTask(
+            task_id="t2", description="d", required_capabilities=["c"],
+            assigned_agent="agent-b", status=SubTaskStatus.EXECUTING,
+            delegation_request_id="req-ok",
+        )
+        orch = OrchestrationResult(
+            task_id="orch-1", status=RequestStatus.EXECUTING, sub_tasks=[st_target, st_other],
+        )
+        orchestrator._active_orchestrations["orch-1"] = orch
+
+        await orchestrator.handle_failure("req-fail", "boom")
+
+        assert st_target.status == SubTaskStatus.FAILED
+        assert st_other.status == SubTaskStatus.EXECUTING
 
 
 class TestGetOrchestration:

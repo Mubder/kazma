@@ -18,6 +18,53 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Bound self-improvement prompt growth so approved deltas cannot accumulate
+# forever and eventually overflow the model context window.
+_MAX_SYSTEM_PROMPT_CHARS = 8000
+_MAX_EVOLUTION_BLOCKS = 12
+_MAX_DELTA_CHARS = 1000  # per-delta cap so one runaway delta can't blow the prompt
+_EVOLUTION_MARKER = "[SelfImprovement]"
+
+
+def _cap_evolution_prompt(base_prompt: str, new_delta: str) -> str:
+    """Append a SelfImprovement delta, bounded by max chars/blocks.
+
+    Splits *base_prompt* into the original Soul text and any previously
+    accumulated ``[SelfImprovement]`` blocks, appends *new_delta*, then
+    keeps only the most recent blocks that fit within
+    ``_MAX_SYSTEM_PROMPT_CHARS`` and ``_MAX_EVOLUTION_BLOCKS`` so the
+    system prompt cannot grow without bound across pipeline runs.
+    """
+    if not new_delta:
+        return base_prompt
+    soul, _, rest = base_prompt.partition(_EVOLUTION_MARKER)
+    soul = soul.rstrip()
+    existing = [
+        f"\n\n{_EVOLUTION_MARKER}{blk}"
+        for blk in rest.split(_EVOLUTION_MARKER)
+        if blk.strip()
+    ]
+    delta = new_delta.strip()
+    if _EVOLUTION_MARKER not in delta:
+        delta = f"{_EVOLUTION_MARKER} {delta}"
+    if not delta.startswith("\n\n"):
+        delta = "\n\n" + delta
+    # Truncate a single runaway delta so it cannot exceed the cap alone.
+    if len(delta) > _MAX_DELTA_CHARS:
+        delta = delta[:_MAX_DELTA_CHARS].rstrip() + "…"
+    blocks = existing + [delta]
+    kept: list[str] = []
+    total = len(soul)
+    for blk in reversed(blocks):
+        if len(kept) >= _MAX_EVOLUTION_BLOCKS:
+            break
+        if total + len(blk) > _MAX_SYSTEM_PROMPT_CHARS and kept:
+            break
+        kept.append(blk)
+        total += len(blk)
+    kept.reverse()
+    return soul + "".join(kept)
+
 
 class SelfImprovementSkill:
     """Automated feedback loop for worker Soul optimisation.
@@ -266,7 +313,7 @@ Output ONLY the delta text, no preamble."""
             registry = WorkerRegistry()
             worker_entry = registry.get(entry["worker_name"])
             if worker_entry is not None:
-                new_prompt = worker_entry.system_prompt + "\n" + entry["delta"]
+                new_prompt = _cap_evolution_prompt(worker_entry.system_prompt, entry["delta"])
                 registry.update(entry["worker_name"], system_prompt=new_prompt)
             entry["status"] = "approved"
             remaining.append(entry)

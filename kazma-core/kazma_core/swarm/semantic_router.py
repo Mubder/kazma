@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,12 @@ class SemanticRouter:
         self._collection: Any = None
         self._available: bool = False
         self._initialized: bool = False
+        # Guard profile rebuilds so concurrent route() calls (e.g. from
+        # multiple threads) cannot interleave delete/add and corrupt the
+        # collection.  ``_profile_sig`` caches the worker-set signature
+        # so we only rebuild when the profiles actually change.
+        self._profile_lock = threading.Lock()
+        self._profile_sig: tuple[tuple[str, str], ...] = ()
 
     # ── Lazy initialization ────────────────────────────────────────────
 
@@ -171,47 +178,56 @@ class SemanticRouter:
         if not workers:
             return
 
-        # Skip rebuild if worker count hasn't changed
-        if self._collection.count() == len(workers):
-            return
+        # Content signature: rebuild only when the worker profiles change,
+        # not on every route() call.  Sorted for stable comparison.
+        sig = tuple(sorted(
+            (str(w.get("name", "")), ",".join(sorted(w.get("expertise", []))))
+            for w in workers
+        ))
+        with self._profile_lock:
+            if sig == self._profile_sig and self._collection.count() == len(workers):
+                return  # already up to date
+            self._profile_sig = sig
 
-        # Build text profiles for embedding
-        ids: list[str] = []
-        documents: list[str] = []
-        metadatas: list[dict[str, Any]] = []
+            # Build text profiles for embedding
+            ids: list[str] = []
+            documents: list[str] = []
+            metadatas: list[dict[str, Any]] = []
 
-        for w in workers:
-            wid = w.get("name", "")
-            expertise = w.get("expertise", [])
-            system_prompt = w.get("system_prompt", "")
-            roles = w.get("roles", [])
+            for w in workers:
+                wid = w.get("name", "")
+                expertise = w.get("expertise", [])
+                system_prompt = w.get("system_prompt", "")
+                roles = w.get("roles", [])
 
-            # Build a rich text profile for embedding
-            profile_text = f"Worker: {wid}\nExpertise: {', '.join(expertise)}\n"
-            if system_prompt:
-                profile_text += f"Description: {system_prompt[:200]}\n"
+                # Build a rich text profile for embedding
+                profile_text = f"Worker: {wid}\nExpertise: {', '.join(expertise)}\n"
+                if system_prompt:
+                    profile_text += f"Description: {system_prompt[:200]}\n"
 
-            ids.append(wid)
-            documents.append(profile_text)
-            metadatas.append({
-                "name": wid,
-                "expertise": ",".join(expertise),
-                "roles": ",".join(roles),
-            })
+                ids.append(wid)
+                documents.append(profile_text)
+                metadatas.append({
+                    "name": wid,
+                    "expertise": ",".join(expertise),
+                    "roles": ",".join(roles),
+                })
 
-        try:
-            # Clear and rebuild
-            existing = self._collection.get()
-            if existing and existing.get("ids"):
-                self._collection.delete(ids=existing["ids"])
-            self._collection.add(
-                ids=ids,
-                documents=documents,
-                metadatas=metadatas,
-            )
-            logger.info("[SemanticRouter] Built profiles for %d workers", len(workers))
-        except Exception as exc:
-            logger.warning("[SemanticRouter] Profile build failed: %s", exc)
+            try:
+                # Clear and rebuild
+                existing = self._collection.get()
+                if existing and existing.get("ids"):
+                    self._collection.delete(ids=existing["ids"])
+                self._collection.add(
+                    ids=ids,
+                    documents=documents,
+                    metadatas=metadatas,
+                )
+                logger.info("[SemanticRouter] Built profiles for %d workers", len(workers))
+            except Exception as exc:
+                logger.warning("[SemanticRouter] Profile build failed: %s", exc)
+                # Invalidate the cache so the next call retries.
+                self._profile_sig = ()
 
     def _embed(self, text: str) -> list[float] | None:
         """Embed a query text.  Returns None on failure."""

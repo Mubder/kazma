@@ -186,23 +186,27 @@ class CheckpointManager(BaseCheckpointSaver):
             for row in rows:
                 thread_id = row[0]
                 checkpoint_id = row[1]
-                # Try to extract message count from the checkpoint blob
+                # Try to extract message count + created_at from the
+                # checkpoint blob and metadata column.
                 msg_count = 0
+                created_at = ""
                 try:
                     blob_cursor = await conn.execute(
-                        "SELECT checkpoint FROM checkpoints "
+                        "SELECT checkpoint, metadata FROM checkpoints "
                         "WHERE thread_id = ? AND checkpoint_id = ? LIMIT 1",
                         (thread_id, checkpoint_id),
                     )
                     blob_row = await blob_cursor.fetchone()
                     if blob_row and blob_row[0]:
                         msg_count = self._try_decode_message_count(blob_row[0])
+                    if blob_row and blob_row[1]:
+                        created_at = self._try_decode_created_at(blob_row[1])
                 except Exception:
                     pass
                 results.append({
                     "thread_id": thread_id,
                     "checkpoint_id": str(checkpoint_id),
-                    "created_at": "",
+                    "created_at": created_at,
                     "message_count": msg_count,
                     "context_tokens": 0,
                 })
@@ -229,6 +233,30 @@ class CheckpointManager(BaseCheckpointSaver):
                 return 0
         msgs = cp_data.get("channel_values", {}).get("messages", [])
         return len(msgs) if isinstance(msgs, list) else 0
+
+    @staticmethod
+    def _try_decode_created_at(metadata_blob: bytes | str) -> str:
+        """Best-effort extraction of a created-at timestamp from metadata.
+
+        LangGraph stores ``metadata`` as JSON.  Standard savers do not
+        record a timestamp, but custom metadata or tracing integrations
+        may include ``created_at``/``ts``/``timestamp``.  Returns ``""``
+        when no timestamp is found.
+        """
+        import json
+
+        try:
+            raw = metadata_blob if isinstance(metadata_blob, str) else metadata_blob.decode("utf-8", errors="replace")
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                return ""
+            for key in ("created_at", "ts", "timestamp", "created"):
+                val = data.get(key)
+                if isinstance(val, str) and val:
+                    return val
+        except Exception:
+            return ""
+        return ""
 
     @property
     def active_locks(self) -> int:

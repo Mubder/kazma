@@ -110,8 +110,8 @@ class SQLiteVectorStore:
             conn.execute(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS {table}
                 USING vec0(
-                    id INTEGER PRIMARY KEY,
-                    embedding FLOAT[384]
+                    embedding FLOAT[384],
+                    +doc_id TEXT
                 )
             """)
             conn.commit()
@@ -157,8 +157,13 @@ class SQLiteVectorStore:
             return False
         table = self._table_name(worker_name)
         try:
+            # vec0 uses an implicit integer rowid; doc_id lives in an
+            # auxiliary column.  Delete-then-insert gives upsert-by-doc_id
+            # semantics (vec0 does not support INSERT OR REPLACE on the
+            # auxiliary column key).
+            conn.execute(f"DELETE FROM {table} WHERE doc_id = ?", (doc_id,))
             conn.execute(
-                f"INSERT OR REPLACE INTO {table} (id, embedding) VALUES (?, ?)",
+                f"INSERT INTO {table} (doc_id, embedding) VALUES (?, ?)",
                 (doc_id, emb_bytes),
             )
             conn.commit()
@@ -203,7 +208,7 @@ class SQLiteVectorStore:
         try:
             cursor = conn.execute(
                 f"""
-                SELECT id, distance
+                SELECT doc_id, distance
                 FROM {table}
                 WHERE embedding MATCH ?
                 ORDER BY distance
@@ -212,7 +217,7 @@ class SQLiteVectorStore:
                 (emb_bytes, limit),
             )
             rows = cursor.fetchall()
-            return [(r[0], 1.0 - float(r[1])) for r in rows if r[1] is not None]
+            return [(str(r[0]), 1.0 - float(r[1])) for r in rows if r[1] is not None and r[0] is not None]
         except Exception as exc:
             logger.warning("[SQLiteVector] Query failed for %s: %s", worker_name, exc)
             return []
@@ -224,7 +229,7 @@ class SQLiteVectorStore:
             return False
         table = self._table_name(worker_name)
         try:
-            conn.execute(f"DELETE FROM {table} WHERE id = ?", (doc_id,))
+            conn.execute(f"DELETE FROM {table} WHERE doc_id = ?", (doc_id,))
             conn.commit()
             return True
         except Exception as exc:

@@ -57,6 +57,23 @@ from typing import Any, get_type_hints
 
 logger = logging.getLogger(__name__)
 
+
+def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
+    """Return a safety error string if *p* is outside the workspace.
+
+    Returns ``None`` when the path is allowed.  Denies by default when
+    the workspace module cannot be imported (fail-closed) so a broken
+    install never silently opens the whole filesystem.
+    """
+    try:
+        from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _WORKSPACE_ROOT
+    except (ImportError, OSError):
+        return f"Safety: workspace module unavailable — {op} denied. Path: {path}"
+    if _WORKSPACE_ROOT and not _ALLOW_ABSOLUTE:
+        if not p.is_relative_to(_WORKSPACE_ROOT) and not p.is_relative_to(Path("/tmp")):
+            return f"Safety: {op} outside workspace are not allowed. Path: {path}"
+    return None
+
 # ── VectorMemory singleton for RAG tools ─────────────────────────────
 _vector_memory: Any = None
 
@@ -478,14 +495,10 @@ class LocalToolRegistry:
                 return f"Error: File not found: {path}"
             if not p.is_file():
                 return f"Error: Not a file: {path}"
-            # Workspace scoping — block reads outside workspace unless allowed
-            try:
-                from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _WORKSPACE_ROOT  # noqa: F811
-                if _WORKSPACE_ROOT and not _ALLOW_ABSOLUTE:
-                    if not p.is_relative_to(_WORKSPACE_ROOT) and not p.is_relative_to(Path("/tmp")):
-                        return f"Safety: reads outside workspace are not allowed. Path: {path}"
-            except (ImportError, OSError):
-                pass
+            # Workspace scoping — block reads outside workspace (fail-closed)
+            scope_err = _workspace_scope_error(p, path, "reads")
+            if scope_err:
+                return scope_err
             if p.stat().st_size > 1_000_000:  # 1MB cap
                 return f"Error: File too large ({p.stat().st_size} bytes). Max 1MB."
             return p.read_text(encoding=encoding)
@@ -496,14 +509,10 @@ class LocalToolRegistry:
         )
         async def file_write(path: str, content: str, encoding: str = "utf-8") -> str:
             p = Path(path).expanduser().resolve()
-            # Workspace scoping — block writes outside workspace unless allowed
-            try:
-                from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _WORKSPACE_ROOT  # noqa: F811
-                if _WORKSPACE_ROOT and not _ALLOW_ABSOLUTE:
-                    if not p.is_relative_to(_WORKSPACE_ROOT) and not p.is_relative_to(Path("/tmp")):
-                        return f"Safety: writes outside workspace are not allowed. Path: {path}"
-            except (ImportError, OSError):
-                pass
+            # Workspace scoping — block writes outside workspace (fail-closed)
+            scope_err = _workspace_scope_error(p, path, "writes")
+            if scope_err:
+                return scope_err
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding=encoding)
             return f"Wrote {len(content)} chars to {path}"
@@ -540,6 +549,10 @@ class LocalToolRegistry:
             root = Path(path).expanduser().resolve()
             if not root.exists():
                 return f"Error: Path not found: {path}"
+            # Workspace scoping — block searches outside workspace (fail-closed)
+            scope_err = _workspace_scope_error(root, path, "searches")
+            if scope_err:
+                return scope_err
 
             regex = re.compile(pattern)
             results: list[str] = []
