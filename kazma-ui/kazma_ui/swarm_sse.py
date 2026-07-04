@@ -107,8 +107,8 @@ class SSEEventBus:
                 if now - self._last_cleanup_time > 60:
                     self._cleanup_terminal_history()
                     self._last_cleanup_time = now
-        except RuntimeError:
-            pass
+        except RuntimeError as exc:
+            logger.debug("SSE event loop cleanup skipped: %s", exc)
 
     def _cleanup_terminal_history(self) -> None:
         """Remove history for terminal tasks that have no subscribers."""

@@ -57,8 +57,8 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
             try:
                 sessions = await session_store.list_active()
                 active_threads = len(sessions)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("list_active failed for metrics: %s", exc)
 
         lines.append("# HELP kazma_active_threads Current active conversation threads")
         lines.append("# TYPE kazma_active_threads gauge")

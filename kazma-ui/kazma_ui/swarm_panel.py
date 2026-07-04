@@ -221,7 +221,8 @@ def _serialize_worker(worker: Any, engine: Any = None) -> dict[str, Any]:
     if engine is not None and hasattr(engine, "get_circuit_breaker_status"):
         try:
             result["circuit_breaker"] = engine.get_circuit_breaker_status(worker.name)
-        except Exception:
+        except Exception as exc:
+            logger.debug("Circuit breaker status failed for %s: %s", worker.name, exc)
             result["circuit_breaker"] = {"state": "closed", "consecutive_failures": 0}
     return result
 
@@ -248,7 +249,8 @@ def _build_worker_config(payload: dict[str, Any]) -> Any:
         try:
             from kazma_core.swarm.config import WorkerCapabilities
             capabilities = WorkerCapabilities.from_dict(caps_data)
-        except Exception:
+        except Exception as exc:
+            logger.debug("WorkerCapabilities parse failed: %s", exc)
             capabilities = None
 
     return WorkerConfig(

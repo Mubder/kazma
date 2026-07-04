@@ -71,8 +71,8 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         if agent.tools.is_server_connected(name):
             try:
                 await agent.tools.disconnect_server(name)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("MCP server disconnect failed for %s: %s", name, exc)
 
         return {"status": "ok"}
 

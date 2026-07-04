@@ -48,8 +48,8 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                     "capabilities": t.get("capabilities", []),
                     "tags": t.get("tags", []),
                 })
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Tool registry skills load failed: %s", exc)
 
         # Hub-registered skills
         try:
@@ -71,8 +71,8 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                     "capabilities": m.data.get("capabilities", []),
                     "tags": m.data.get("tags", []),
                 })
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Hub skills load failed: %s", exc)
         return skills
 
     async def _search_hub(query: str = "") -> list[dict[str, Any]]:

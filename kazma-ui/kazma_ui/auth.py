@@ -43,6 +43,14 @@ SECRET_ENV_VAR = "KAZMA_SECRET"
 #: Cookie name used to pass the secret in browser sessions (HttpOnly).
 SECRET_COOKIE = "kazma-secret"
 
+
+def _is_https(request: Request) -> bool:
+    """Check if the request is over HTTPS (either direct or via proxy)."""
+    return (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto") == "https"
+    )
+
 #: API path prefixes that require authentication when the secret is set.
 SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/settings",
@@ -167,6 +175,7 @@ def create_auth_middleware(
                 httponly=True,
                 samesite="strict",
                 path="/",
+                secure=_is_https(request),
             )
         return response
 
@@ -189,6 +198,7 @@ def create_auth_middleware(
                 response.set_cookie(
                     key=SECRET_COOKIE, value=expected,
                     httponly=True, samesite="strict", path="/",
+                    secure=_is_https(request),
                 )
             return response
 
@@ -199,6 +209,7 @@ def create_auth_middleware(
                 response.set_cookie(
                     key=SECRET_COOKIE, value=expected,
                     httponly=True, samesite="strict", path="/",
+                    secure=_is_https(request),
                 )
             return response
 
@@ -223,6 +234,7 @@ def create_auth_middleware(
             response.set_cookie(
                 key=SECRET_COOKIE, value=expected,
                 httponly=True, samesite="strict", path="/",
+                secure=_is_https(request),
             )
         return response
 

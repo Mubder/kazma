@@ -584,10 +584,9 @@ def _patch_jinja2_templates() -> None:
             env.globals.setdefault("t", make_translator("en"))
             env.globals.setdefault("lang", "en")
             env.globals.setdefault("dir", "ltr")
-        except Exception:
-            pass
-        return result
-
+        except Exception as exc:
+            logger.debug("i18n Jinja2 patch failed: %s", exc)
+        return result  # type: ignore[attr-defined]
     _patched_init._kazma_i18n_patched = True  # type: ignore[attr-defined]
     _Templates.__init__ = _patched_init  # type: ignore[method-assign]
 

@@ -124,20 +124,20 @@ def create_app(config_path: str | None = None) -> FastAPI:
         try:
             import kazma_core.model_registry as _mr
             _mr._registry = None
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Model registry cache flush failed: %s", exc)
         # Flush WorkerRegistry cache
         try:
             from kazma_core.swarm.registry import WorkerRegistry
             WorkerRegistry._instance = None
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Worker registry cache flush failed: %s", exc)
         # Flush tool registry
         try:
             from kazma_core.tools.registry import ToolRegistry
             ToolRegistry._instance = None
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Tool registry cache flush failed: %s", exc)
         return {"status": "flushed", "config_paths": paths}
 
     @app.get("/api/system/config-paths")
@@ -414,8 +414,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
                     continue
                 except Exception:
                     break
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("WS events handler stopped: %s", exc)
         finally:
             store.unregister_ws(websocket)
 
@@ -1209,8 +1209,8 @@ def create_app(config_path: str | None = None) -> FastAPI:
             store_ref = locals().get("_cron_store_ref") or globals().get("_cron_store_ref")
             if store_ref is not None:
                 await store_ref.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Session store close failed: %s", exc)
 
         # 5. Give loops time to exit cleanly
         await asyncio.sleep(0.5)
@@ -1218,22 +1218,22 @@ def create_app(config_path: str | None = None) -> FastAPI:
         # 6. Shutdown agent
         try:
             await agent.shutdown()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Agent shutdown failed: %s", exc)
 
         # 7. Close config store
         try:
             config_store.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Config store close failed: %s", exc)
 
         # 8. Flush Langfuse tracer
         try:
             if hasattr(agent, "tracer") and hasattr(agent.tracer, "flush"):
                 agent.tracer.flush()
                 logger.info("[Shutdown] Tracer flushed")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Tracer flush failed: %s", exc)
 
         logger.info("[Shutdown] Graceful shutdown complete")
 

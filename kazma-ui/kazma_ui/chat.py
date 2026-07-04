@@ -117,8 +117,8 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
     try:
         from kazma_core.model_registry import get_model_registry
         _registry_client = get_model_registry().get_client()
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        logger.debug("Model registry init failed for WS chat: %s", exc)
 
     await websocket.accept()
     session_id = str(uuid.uuid4())
@@ -248,8 +248,8 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                             chat_base_url = str(_owner.get("base_url", ""))
                             chat_api_key = str(_owner.get("api_key", ""))
                             chat_model = active_model
-                    except Exception:
-                        pass  # fall through to defaults below
+                    except Exception as exc:
+                        logger.debug("Provider config lookup failed: %s", exc)  # fall through to defaults
 
                 async for event in stream_chat(
                     client=_registry_client or await agent.get_llm_client(),
@@ -453,5 +453,5 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
         logger.error("WebSocket error: %s", e)
         try:
             await websocket.send_json({"type": "error", "content": str(e)})
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to send WS error to client: %s", exc)
