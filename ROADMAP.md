@@ -127,11 +127,11 @@ completed in Sprints 14-17.
 
 ### Remaining Open Items
 
-| Priority | Item | Effort |
-|:---:|:---|:---:|
-| P2 | Unify routing algorithms (merge 3 implementations) | M |
-| P2 | Semantic routing (embeddings-based capability matching) | L |
-| P2 | Visual pipeline editor (drag-and-drop DAG) | XL |
+| Priority | Item | Effort | Status |
+|:---:|:---|:---:|:---:|
+| P2 | Unify routing algorithms (merge 3 implementations) | M | ✅ Done |
+| P2 | Semantic routing (embeddings-based capability matching) | L | ✅ Done |
+| P2 | Visual pipeline editor (drag-and-drop DAG) | XL | |
 
 ---
 
