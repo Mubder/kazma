@@ -47,7 +47,7 @@ class SwarmWorker(ABC):
     last_heartbeat: str | None = field(default=None, init=False)
     logs: list[str] = field(default_factory=list, init=False)
     _running: bool = field(default=False, init=False, repr=False)
-    _consecutive_empty_searches: int = field(default=0, init=False, repr=False)
+    _consecutive_tool_failures: int = field(default=0, init=False, repr=False)
 
     @abstractmethod
     async def dispatch(
@@ -360,39 +360,36 @@ class InProcessWorker(SwarmWorker):
                                     "content": f"Tool execution error: {tc.name}",
                                     "is_error": True,
                                 }
+                    # 3. Universal Empty-Result Circuit Breaker
+                    content_str = str(result.get("content", "")).strip()
+                    is_empty_or_denied = (
+                        not content_str or 
+                        content_str == "[]" or 
+                        "no results" in content_str.lower() or 
+                        "denied by user" in content_str.lower() or
+                        result.get("is_error", False)
+                    )
+                    
+                    if is_empty_or_denied:
+                        self._consecutive_tool_failures += 1
+                    else:
+                        self._consecutive_tool_failures = 0
+
+                    if self._consecutive_tool_failures >= 2:
+                        logger.warning(
+                            "[InProcessWorker:%s] Circuit breaker tripped! 2 consecutive tool failures for %s.",
+                            self.name, tc.name
+                        )
+                        result["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
+                        self._consecutive_tool_failures = 0
+                        # We do NOT break here. The tool loop must continue to process
+                        # remaining tool calls in the batch to avoid HTTP 400 errors.
+
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "content": result.get("content", ""),
                     })
-
-                    # 3. Empty-Result Circuit Breaker
-                    name_lower = tc.name.lower()
-                    if "search" in name_lower or "exec" in name_lower or "fetch" in name_lower:
-                        content_str = str(result.get("content", "")).strip()
-                        is_empty_or_denied = (
-                            not content_str or 
-                            content_str == "[]" or 
-                            "no results" in content_str.lower() or 
-                            "denied by user" in content_str.lower() or
-                            result.get("is_error", False)
-                        )
-                        if is_empty_or_denied:
-                            self._consecutive_empty_searches += 1
-                        else:
-                            self._consecutive_empty_searches = 0
-
-                        if self._consecutive_empty_searches >= 2:
-                            logger.warning(
-                                "[InProcessWorker:%s] Circuit breaker tripped! 2 consecutive empty/denied results for %s.",
-                                self.name, tc.name
-                            )
-                            messages.append({
-                                "role": "system",
-                                "content": "SYSTEM ERROR: The network environment is blind or blocked. You are forbidden from calling web_search or shell_exec again for this task. Synthesize your final response immediately based exclusively on your baseline knowledge or local files."
-                            })
-                            self._consecutive_empty_searches = 0
-                            break  # break tool execution loop to let LLM respond
 
             else:
                 # Iteration limit exhausted — return the last response we got.
