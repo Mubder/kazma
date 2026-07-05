@@ -46,6 +46,7 @@ class WorkerEntry:
     worker_type: str = "in_process"  # "in_process" | "telegram_bot"
     system_prompt: str = ""          # the worker's "Soul" — instructions
     enabled: bool = True
+    tools: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -59,6 +60,7 @@ class WorkerEntry:
             worker_type=str(data.get("worker_type", "in_process")),
             system_prompt=str(data.get("system_prompt", "")),
             enabled=bool(data.get("enabled", True)),
+            tools=list(data.get("tools", [])),
             metadata=dict(data.get("metadata", {})),
         )
 
@@ -81,6 +83,7 @@ class WorkerEntry:
             "worker_type": self.worker_type,
             "system_prompt": self.system_prompt,
             "enabled": self.enabled,
+            "tools": self.tools,
             "metadata": self.metadata,
         }
 

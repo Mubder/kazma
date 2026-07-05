@@ -253,6 +253,7 @@ class KazmaAppBuilder:
             try:
                 from kazma_core.swarm.config import WorkerConfig as _WC
                 from kazma_core.swarm.registry import get_worker_registry
+                from kazma_core.swarm.task import WorkerCapabilities as _Caps
 
                 _reg = get_worker_registry()
                 _yaml_count = len(self.swarm_manager.worker_names)
@@ -266,6 +267,11 @@ class KazmaAppBuilder:
                                 provider=entry.provider,
                                 role=entry.roles[0] if entry.roles else "",
                                 system_prompt=entry.system_prompt,
+                                capabilities=_Caps(
+                                    role=entry.roles[0] if entry.roles else "",
+                                    expertise=entry.expertise,
+                                    tools=getattr(entry, "tools", []),
+                                ),
                             )
                         )
                 _total = len(self.swarm_manager.worker_names)

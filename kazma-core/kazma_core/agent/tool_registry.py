@@ -599,7 +599,25 @@ class LocalToolRegistry:
             limit: int = 100,
         ) -> str:
             # Safety: only allow SELECT or WITH
-            normalized = query.strip().upper()
+            def strip_leading_comments(sql: str) -> str:
+                while True:
+                    sql = sql.strip()
+                    if sql.startswith("--"):
+                        nl = sql.find("\n")
+                        if nl == -1:
+                            return ""
+                        sql = sql[nl:]
+                    elif sql.startswith("/*"):
+                        end = sql.find("*/")
+                        if end == -1:
+                            break
+                        sql = sql[end+2:]
+                    else:
+                        break
+                return sql.strip()
+
+            sql_clean = strip_leading_comments(query)
+            normalized = sql_clean.upper()
             if not (normalized.startswith("SELECT") or normalized.startswith("WITH")):
                 raise ValueError("Only SELECT and WITH read-only queries are allowed for safety.")
             # Block multi-statement queries
@@ -615,32 +633,41 @@ class LocalToolRegistry:
             if forbidden_keywords.search(query):
                 raise ValueError("Write operations or administrative commands are not allowed.")
 
-            path = Path(db_path).expanduser().resolve()
+            if db_path == ":memory:":
+                allowed = True
+                path_exists = True
+                conn_target = ":memory:"
+            else:
+                path = Path(db_path).expanduser().resolve()
+                path_str = str(path).lower()
+                
+                # Security: restrict to known Kazma data directories + active workspace
+                from kazma_core.tools.file_write import _get_workspace
+                workspace = _get_workspace()
+                _ALLOWED_DB_ROOTS = [
+                    Path("kazma-data").resolve(),
+                    Path.home() / ".kazma",
+                    Path("/tmp").resolve(),  # for tests
+                    workspace.resolve(),
+                ]
+                allowed = any(
+                    path_str.startswith(str(root).lower()) or path == root
+                    for root in _ALLOWED_DB_ROOTS
+                )
+                path_exists = path.exists()
+                conn_target = str(path)
 
-            # Security: restrict to known Kazma data directories + active workspace
-            from kazma_core.tools.file_write import _get_workspace
-            workspace = _get_workspace()
-            _ALLOWED_DB_ROOTS = [
-                Path("kazma-data").resolve(),
-                Path.home() / ".kazma",
-                Path("/tmp").resolve(),  # for tests
-                workspace.resolve(),
-            ]
-            allowed = any(
-                path.is_relative_to(root) or path == root
-                for root in _ALLOWED_DB_ROOTS
-            )
             if not allowed:
                 return (
                     f"Error: Access denied. Database path must be under "
                     f"kazma-data/, ~/.kazma/, or the active workspace. Got: {db_path}"
                 )
 
-            if not path.exists():
+            if not path_exists:
                 return f"Error: Database not found: {db_path}"
 
             try:
-                conn = sqlite3.connect(str(path))
+                conn = sqlite3.connect(conn_target)
                 conn.row_factory = sqlite3.Row
                 
                 # Set database-level read-only authorizer
