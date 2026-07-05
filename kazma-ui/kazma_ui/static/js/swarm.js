@@ -10,6 +10,10 @@
   var pollInterval = null;
   var workers = [];
   var activeTasks = {};        // task_id -> {sse, events, data}
+  var currentPlaygroundTaskId = null;
+  var playgroundSSE = null;
+  var playgroundTimer = null;
+  var playgroundTotalTokens = 0;
   var completedResults = [];   // array of task result objects
   var historyPage = 1;
   var historyPageSize = 20;
@@ -104,6 +108,17 @@
     if (tabId === 'task-history') loadTaskHistory();
     if (tabId === 'results-dashboard') loadResultsDashboard();
     if (tabId === 'worker-registry') loadWorkerMetrics();
+    if (tabId === 'workflow-editor') {
+      if (typeof mermaid !== 'undefined') {
+        try {
+          mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+        } catch (e) { console.error("Mermaid init error:", e); }
+      }
+      var ta = $('workflow-textarea');
+      if (ta && !ta.value.trim()) {
+        loadEditorExample();
+      }
+    }
     if (tabId === 'active-tasks') {
       loadActiveTasks();
       // Poll for updates while the tab is visible
@@ -1538,6 +1553,460 @@
   }
 
   // ══════════════════════════════════════════════════════
+  // OPTION A: WORKFLOW EDITOR BEHAVIORS
+  // ══════════════════════════════════════════════════════
+
+  var editorTimeout = null;
+
+  function onEditorInput() {
+    if (editorTimeout) clearTimeout(editorTimeout);
+    var spinner = $('workflow-mermaid-spinner');
+    if (spinner) spinner.style.display = 'block';
+    editorTimeout = setTimeout(function() {
+      validateWorkflow();
+    }, 400);
+  }
+
+  function validateWorkflow() {
+    var ta = $('workflow-textarea');
+    if (!ta) return;
+    var val = ta.value;
+    var spinner = $('workflow-mermaid-spinner');
+    
+    fetch('/api/swarm/workflows/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workflow_definition: val })
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (spinner) spinner.style.display = 'none';
+        var statusEl = $('workflow-status');
+        if (data.valid) {
+          if (statusEl) {
+            statusEl.style.display = 'block';
+            statusEl.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+            statusEl.style.border = '1px solid var(--success)';
+            statusEl.innerHTML = '<span style="color:var(--success);font-weight:600;">✓ Validation Succeeded</span>';
+          }
+          if (data.mermaid) {
+            updateMermaidDiagram(data.mermaid);
+          }
+        } else {
+          if (statusEl) {
+            statusEl.style.display = 'block';
+            statusEl.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+            statusEl.style.border = '1px solid var(--danger)';
+            statusEl.innerHTML = '<span style="color:var(--danger);font-weight:600;">✕ Validation Failed:</span><pre style="margin:4px 0 0 0;font-size:0.75rem;font-family:var(--font-mono);color:var(--text-secondary);white-space:pre-wrap;max-height:120px;overflow-y:auto;">' + esc(data.error) + '</pre>';
+          }
+        }
+      })
+      .catch(function(err) {
+        if (spinner) spinner.style.display = 'none';
+        var statusEl = $('workflow-status');
+        if (statusEl) {
+          statusEl.style.display = 'block';
+          statusEl.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+          statusEl.style.border = '1px solid var(--danger)';
+          statusEl.innerHTML = '<span style="color:var(--danger);font-weight:600;">Network error validating workflow</span>';
+        }
+      });
+  }
+
+  function updateMermaidDiagram(mermaidCode) {
+    var target = $('workflow-mermaid');
+    if (!target) return;
+    target.removeAttribute('data-processed');
+    if (typeof mermaid !== 'undefined') {
+      try {
+        var uniqueId = 'mermaid-' + Math.floor(Math.random() * 1000000);
+        mermaid.render(uniqueId, mermaidCode).then(function(res) {
+          target.innerHTML = res.svg;
+        }).catch(function(err) {
+          console.error("Mermaid render failed, trying init fallback:", err);
+          target.textContent = mermaidCode;
+          mermaid.init(undefined, target);
+        });
+      } catch (e) {
+        console.error("Mermaid error:", e);
+        try {
+          target.textContent = mermaidCode;
+          mermaid.init(undefined, target);
+        } catch (inner) {
+          target.innerHTML = '<pre style="color:var(--danger);font-family:var(--font-mono);">' + esc(mermaidCode) + '</pre>';
+        }
+      }
+    } else {
+      target.innerHTML = '<pre style="color:var(--danger);font-family:var(--font-mono);">Mermaid library not loaded.</pre>';
+    }
+  }
+
+  function loadEditorExample() {
+    var ta = $('workflow-textarea');
+    if (!ta) return;
+    ta.value = [
+      'id: customer_feedback_pipeline',
+      'name: Customer Feedback Pipeline',
+      'description: Analyzes, researches, reviews, and synthesizes customer feedback.',
+      'version: 1.1.0',
+      'nodes:',
+      '  triage_node:',
+      '    id: triage_node',
+      '    type: dispatch',
+      '    workers:',
+      '      - auto',
+      '    prompt_template: "Classify the feedback category and urgency: {{ feedback_text }}"',
+      '    reliability_policy:',
+      '      max_retries: 2',
+      '      timeout_seconds: 30.0',
+      '  analysis_node:',
+      '    id: analysis_node',
+      '    type: dispatch',
+      '    workers:',
+      '      - auto',
+      '    prompt_template: "Extract specific technical issues and key customer sentiments."',
+      '  synthesis_node:',
+      '    id: synthesis_node',
+      '    type: dispatch',
+      '    workers:',
+      '      - auto',
+      '    prompt_template: "Synthesize findings into an actionable bug ticket or customer reply."',
+      'edges:',
+      '  - from_node: triage_node',
+      '    to_node: analysis_node',
+      '  - from_node: analysis_node',
+      '    to_node: synthesis_node'
+    ].join('\n');
+    validateWorkflow();
+  }
+
+  function copyEditorCode() {
+    var ta = $('workflow-textarea');
+    if (!ta || !ta.value.trim()) return;
+    navigator.clipboard.writeText(ta.value)
+      .then(function() {
+        showToast('Workflow definition copied to clipboard!', true);
+      })
+      .catch(function() {
+        showError('Failed to copy to clipboard.');
+      });
+  }
+
+  function clearEditor() {
+    var ta = $('workflow-textarea');
+    if (ta) ta.value = '';
+    var statusEl = $('workflow-status');
+    if (statusEl) statusEl.style.display = 'none';
+    var target = $('workflow-mermaid');
+    if (target) target.innerHTML = '<div style="color:var(--text-muted);font-size:0.85rem;">Diagram cleared. Populate workflow code...</div>';
+  }
+
+  // ══════════════════════════════════════════════════════
+  // OPTION C: PLAYGROUND PANEL BEHAVIORS
+  // ══════════════════════════════════════════════════════
+
+  function onPlayPatternChange(val) {
+    var hint = $('play-pattern-hint');
+    if (!hint) return;
+    switch (val) {
+      case 'dispatch':
+        hint.textContent = '🎯 Dispatch: Runs a single worker on your prompt.';
+        break;
+      case 'broadcast':
+        hint.textContent = '📢 Broadcast: Broadcasts your prompt to all selected workers in parallel.';
+        break;
+      case 'pipeline':
+        hint.textContent = '🔗 Pipeline: Executes selected workers sequentially as a chain (A ➜ B ➜ C).';
+        break;
+      case 'fan_out':
+        hint.textContent = '🌀 Fan-Out: Executes workers in parallel, then aggregates results.';
+        break;
+      case 'consult':
+        hint.textContent = '💬 Consult: Gathers multiple opinions and synthesizes them.';
+        break;
+      case 'conditional':
+        hint.textContent = '🔀 Conditional: Evaluates condition to determine route.';
+        break;
+      default:
+        hint.textContent = '';
+    }
+  }
+
+  function runPlayground() {
+    var checkboxes = document.querySelectorAll('input[name="play_selected_workers"]:checked');
+    var workerList = [];
+    checkboxes.forEach(function(cb) { workerList.push(cb.value); });
+
+    var pattern = ($('play-pattern-select') || {}).value || 'dispatch';
+    var task = ($('play-dispatch-task') || {}).value || '';
+
+    if (!task.trim()) {
+      showError('Task prompt is required');
+      return;
+    }
+    if (!workerList.length && pattern !== 'broadcast') {
+      showError('Select at least one worker');
+      return;
+    }
+
+    var payload = {
+      workers: workerList,
+      task: task,
+      pattern: pattern,
+      timeout: parseFloat(($('play-adv-timeout') || {}).value) || 300,
+      max_retries: parseInt(($('play-adv-retries') || {}).value, 10) || 0,
+    };
+
+    var metadataStr = ($('play-adv-metadata') || {}).value || '';
+    if (metadataStr.trim()) {
+      try {
+        payload.metadata = JSON.parse(metadataStr);
+      } catch (e) {
+        showError('Invalid metadata JSON: ' + e.message);
+        return;
+      }
+    }
+
+    var btn = $('btn-play-run');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Executing...'; }
+
+    var terminal = $('playground-terminal');
+    if (terminal) {
+      terminal.innerHTML = '<div style="color:var(--text-muted);font-style:italic;">Initializing swarm session...</div>';
+    }
+
+    var timerEl = $('play-live-timer');
+    if (timerEl) { timerEl.style.display = 'inline'; timerEl.textContent = '0s'; }
+
+    setText('play-state-status', 'RUNNING');
+    var statusBadge = $('play-state-status');
+    if (statusBadge) { statusBadge.className = 'badge badge-warning'; }
+    setText('play-state-node', '—');
+    setText('play-state-tokens', '0 tokens');
+    setText('play-state-cost', '$0.0000');
+
+    var hitlGate = $('play-hitl-gate');
+    if (hitlGate) hitlGate.style.display = 'none';
+
+    var startTime = Date.now();
+    if (playgroundTimer) clearInterval(playgroundTimer);
+    playgroundTimer = setInterval(function() {
+      var elapsed = Math.round((Date.now() - startTime) / 1000);
+      var timerEl = $('play-live-timer');
+      if (timerEl) timerEl.textContent = elapsed + 's';
+    }, 1000);
+
+    if (playgroundSSE) {
+      try { playgroundSSE.close(); } catch (e) {}
+      playgroundSSE = null;
+    }
+
+    fetch('/api/swarm/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok' || data.status === 'warning') {
+          if (data.task_id) {
+            currentPlaygroundTaskId = data.task_id;
+            connectPlaygroundSSE(data.task_id);
+          } else {
+            addTerminalLine('❌', 'No task_id returned by dispatch.');
+            resetPlaygroundBtn();
+          }
+        } else {
+          addTerminalLine('❌', 'Dispatch failed: ' + (data.message || 'unknown error'));
+          resetPlaygroundBtn();
+        }
+      })
+      .catch(function(err) {
+        addTerminalLine('❌', 'Network error dispatching: ' + err.message);
+        resetPlaygroundBtn();
+      });
+  }
+
+  function addTerminalLine(icon, text) {
+    var terminal = $('playground-terminal');
+    if (!terminal) return;
+    
+    if (terminal.innerHTML.indexOf('terminal idle') !== -1 || terminal.innerHTML.indexOf('Initializing swarm') !== -1) {
+      terminal.innerHTML = '';
+    }
+    
+    var line = document.createElement('div');
+    line.style.cssText = 'margin-bottom:4px;display:flex;align-items:flex-start;gap:8px;animation:fadeIn 0.2s ease;';
+    
+    var iconSpan = document.createElement('span');
+    iconSpan.textContent = icon;
+    
+    var textSpan = document.createElement('span');
+    textSpan.style.flex = '1';
+    textSpan.innerHTML = text;
+    
+    line.appendChild(iconSpan);
+    line.appendChild(textSpan);
+    terminal.appendChild(line);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  function connectPlaygroundSSE(taskId) {
+    playgroundTotalTokens = 0;
+    var source = new EventSource('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/stream');
+    playgroundSSE = source;
+
+    source.addEventListener('task_started', function(e) {
+      addTerminalLine('🚀', 'Task execution started.');
+    });
+
+    source.addEventListener('worker_started', function(e) {
+      var d = JSON.parse(e.data);
+      addTerminalLine('⚙️', 'Worker <strong style="color:var(--accent);">' + esc(d.worker) + '</strong> activated (Step ' + d.step + ')');
+      setText('play-state-node', esc(d.worker));
+    });
+
+    source.addEventListener('worker_progress', function(e) {
+      var d = JSON.parse(e.data);
+      var tokens = d.tokens || 0;
+      playgroundTotalTokens += tokens;
+      setText('play-state-tokens', playgroundTotalTokens + ' tokens');
+      
+      var estCost = playgroundTotalTokens * 0.0000015;
+      setText('play-state-cost', '$' + estCost.toFixed(4));
+
+      addTerminalLine('📝', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> is working (Processed ' + tokens + ' tokens)');
+    });
+
+    source.addEventListener('worker_completed', function(e) {
+      var d = JSON.parse(e.data);
+      var icon = d.status === 'success' ? '✅' : '❌';
+      var color = d.status === 'success' ? 'var(--success)' : 'var(--danger)';
+      addTerminalLine(icon, 'Worker <strong style="color:' + color + ';">' + esc(d.worker) + '</strong> completed with status: ' + esc(d.status));
+    });
+
+    source.addEventListener('checkpoint', function(e) {
+      var d = JSON.parse(e.data);
+      addTerminalLine('⏸', 'Human-in-the-Loop checkpoint encountered (Step ' + d.step + '). Awaiting user confirmation...');
+      
+      var hitlGate = $('play-hitl-gate');
+      var hitlPreview = $('play-hitl-preview');
+      if (hitlGate && hitlPreview) {
+        hitlPreview.textContent = d.output_preview || 'No preview available.';
+        hitlGate.style.display = 'block';
+        hitlGate.style.animation = 'slideDown 0.3s ease';
+      }
+      setText('play-state-status', 'AWAITING APPROVAL');
+      var statusBadge = $('play-state-status');
+      if (statusBadge) statusBadge.className = 'badge badge-warning';
+    });
+
+    source.addEventListener('handoff', function(e) {
+      var d = JSON.parse(e.data);
+      addTerminalLine('🔀', 'Swarm Handoff: <span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
+    });
+
+    source.addEventListener('task_completed', function(e) {
+      var d = JSON.parse(e.data);
+      addTerminalLine('🏁', 'Task finalized. Synthesis finished.');
+      
+      var res = d.result || {};
+      var finalStatus = res.status || 'success';
+      setText('play-state-status', finalStatus.toUpperCase());
+      var statusBadge = $('play-state-status');
+      if (statusBadge) {
+        statusBadge.className = 'badge badge-' + (finalStatus === 'success' ? 'success' : 'danger');
+      }
+      
+      if (res.total_tokens) {
+        setText('play-state-tokens', res.total_tokens + ' tokens');
+      }
+      if (res.total_cost !== undefined) {
+        setText('play-state-cost', '$' + parseFloat(res.total_cost).toFixed(4));
+      }
+      
+      var summary = res.synthesis || res.response || 'No final synthesis output returned.';
+      addTerminalLine('📝', '<strong>Synthesis Output:</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
+      
+      cleanupPlaygroundSession();
+    });
+
+    source.onerror = function() {
+      console.log("Playground SSE connection encountered an error.");
+    };
+  }
+
+  function cleanupPlaygroundSession() {
+    if (playgroundSSE) {
+      try { playgroundSSE.close(); } catch (e) {}
+      playgroundSSE = null;
+    }
+    if (playgroundTimer) {
+      clearInterval(playgroundTimer);
+      playgroundTimer = null;
+    }
+    resetPlaygroundBtn();
+  }
+
+  function resetPlaygroundBtn() {
+    var btn = $('btn-play-run');
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Task'; }
+  }
+
+  function approvePlaygroundHitl() {
+    if (!currentPlaygroundTaskId) return;
+    var btnApprove = $('btn-play-approve');
+    var btnReject = $('btn-play-reject');
+    if (btnApprove) btnApprove.disabled = true;
+    if (btnReject) btnReject.disabled = true;
+    
+    fetch('/api/swarm/tasks/' + encodeURIComponent(currentPlaygroundTaskId) + '/approve', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        showToast('Playground checkpoint approved.', true);
+        var hitlGate = $('play-hitl-gate');
+        if (hitlGate) hitlGate.style.display = 'none';
+        setText('play-state-status', 'RUNNING');
+        var statusBadge = $('play-state-status');
+        if (statusBadge) statusBadge.className = 'badge badge-warning';
+      })
+      .catch(function(err) {
+        showError('Approve failed: ' + err.message);
+      })
+      .finally(function() {
+        if (btnApprove) btnApprove.disabled = false;
+        if (btnReject) btnReject.disabled = false;
+      });
+  }
+
+  function rejectPlaygroundHitl() {
+    if (!currentPlaygroundTaskId) return;
+    var btnApprove = $('btn-play-approve');
+    var btnReject = $('btn-play-reject');
+    if (btnApprove) btnApprove.disabled = true;
+    if (btnReject) btnReject.disabled = true;
+    
+    fetch('/api/swarm/tasks/' + encodeURIComponent(currentPlaygroundTaskId) + '/reject', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        showToast('Playground checkpoint rejected. Execution stopped.', true);
+        var hitlGate = $('play-hitl-gate');
+        if (hitlGate) hitlGate.style.display = 'none';
+        cleanupPlaygroundSession();
+        setText('play-state-status', 'REJECTED');
+        var statusBadge = $('play-state-status');
+        if (statusBadge) statusBadge.className = 'badge badge-danger';
+      })
+      .catch(function(err) {
+        showError('Reject failed: ' + err.message);
+      })
+      .finally(function() {
+        if (btnApprove) btnApprove.disabled = false;
+        if (btnReject) btnReject.disabled = false;
+      });
+  }
+
+  // ══════════════════════════════════════════════════════
   // BOOT
   // ══════════════════════════════════════════════════════
 
@@ -1582,5 +2051,13 @@
     applySavedProfile: applySavedProfile,
     saveOutputTarget: saveOutputTarget,
     clearOutputTarget: clearOutputTarget,
+    onEditorInput: onEditorInput,
+    loadEditorExample: loadEditorExample,
+    copyEditorCode: copyEditorCode,
+    clearEditor: clearEditor,
+    onPlayPatternChange: onPlayPatternChange,
+    runPlayground: runPlayground,
+    approvePlaygroundHitl: approvePlaygroundHitl,
+    rejectPlaygroundHitl: rejectPlaygroundHitl,
   };
 })();

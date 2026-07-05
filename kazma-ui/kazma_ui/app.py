@@ -60,6 +60,13 @@ class KazmaAppBuilder:
 
     def _bootstrap_environment(self) -> None:
         """Initialize configurations, core agent, and model registry."""
+        # Setup structured JSON logging if requested
+        try:
+            from kazma_core.logging_config import setup_logging
+            setup_logging()
+        except Exception as e:
+            logger.warning("[App] Failed to setup logging configurations: %s", e)
+
         from kazma_core.agent import KazmaAgent, load_config
         from kazma_core.config_store import ConfigStore, set_config_store
         from kazma_core.model_registry import initialize_model_registry, ModelRegistry

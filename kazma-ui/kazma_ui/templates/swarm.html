@@ -59,6 +59,8 @@
   <!-- ── Tab Navigation ── -->
   <div class="tabs" id="swarm-tabs" style="margin-bottom:0;">
     <button class="tab active" data-tab="task-builder" onclick="KazmaSwarm.switchTab('task-builder')">🔧 {{ t('swarm.tab_task_builder') }}</button>
+    <button class="tab" data-tab="workflow-editor" onclick="KazmaSwarm.switchTab('workflow-editor')">🎨 {{ t('swarm.tab_workflow_editor') }}</button>
+    <button class="tab" data-tab="playground" onclick="KazmaSwarm.switchTab('playground')">🎮 {{ t('swarm.tab_playground') }}</button>
     <button class="tab" data-tab="active-tasks" onclick="KazmaSwarm.switchTab('active-tasks')">⚡ {{ t('swarm.tab_active_tasks') }}</button>
     <button class="tab" data-tab="results-dashboard" onclick="KazmaSwarm.switchTab('results-dashboard')">📊 {{ t('swarm.tab_results_dashboard') }}</button>
     <button class="tab" data-tab="worker-registry" onclick="KazmaSwarm.switchTab('worker-registry')">👷 {{ t('swarm.tab_worker_registry') }}</button>
@@ -188,6 +190,188 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB: Workflow Editor (Option A)                                 -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="panel-workflow-editor" style="display:none;">
+    <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:20px;">
+      <!-- Monospace YAML/JSON Textarea Left Column -->
+      <div class="card" style="display:flex;flex-direction:column;gap:12px;min-height:550px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <h3 style="font-size:0.95rem;font-weight:600;margin:0;">✍️ {{ t('swarm.workflow_definition') }}</h3>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-sm btn-secondary" onclick="KazmaSwarm.loadEditorExample()">📋 Example</button>
+            <button class="btn btn-sm btn-secondary" onclick="KazmaSwarm.copyEditorCode()">🔗 Copy</button>
+            <button class="btn btn-sm btn-danger" onclick="KazmaSwarm.clearEditor()">🗑️ Clear</button>
+          </div>
+        </div>
+        
+        <div class="form-group" style="flex:1;display:flex;flex-direction:column;margin:0;">
+          <textarea id="workflow-textarea" class="form-textarea" style="flex:1;font-family:var(--font-mono);font-size:0.8rem;line-height:1.4;background:rgba(0,0,0,0.2);color:#abb2bf;padding:12px;border:1px solid var(--border);border-radius:var(--radius);resize:none;" placeholder="Enter YAML/JSON DAG workflow here..." oninput="KazmaSwarm.onEditorInput()"></textarea>
+        </div>
+
+        <div id="workflow-status" class="alert" style="display:none;padding:10px 12px;border-radius:var(--radius);font-size:0.8rem;"></div>
+      </div>
+
+      <!-- Live Rendered Right Column -->
+      <div class="card" style="display:flex;flex-direction:column;gap:12px;min-height:550px;">
+        <h3 style="font-size:0.95rem;font-weight:600;margin:0;">📊 {{ t('swarm.workflow_mermaid_visual') }}</h3>
+        <div id="workflow-mermaid-container" style="flex:1;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.01);border:1px dashed var(--border);border-radius:var(--radius);padding:16px;overflow:auto;min-height:400px;position:relative;">
+          <div id="workflow-mermaid-spinner" style="display:none;position:absolute;color:var(--text-muted);font-size:0.85rem;">🔄 Re-rendering...</div>
+          <div id="workflow-mermaid" class="mermaid" style="width:100%;text-align:center;"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- TAB: Playground (Option C)                                      -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div class="tab-panel" id="panel-playground" style="display:none;">
+    <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:20px;">
+      
+      <!-- Playground Config Left Column -->
+      <div class="card" style="min-height:550px;">
+        <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;">🎮 {{ t('swarm.playground_title') }}</h3>
+        <form id="playground-form" onsubmit="return false;">
+          
+          <!-- Orchestration Pattern Selector -->
+          <div class="form-group">
+            <label class="form-label">{{ t('swarm.orchestration_pattern') }} *</label>
+            <select id="play-pattern-select" class="form-select" onchange="KazmaSwarm.onPlayPatternChange(this.value)">
+              <option value="dispatch">🎯 Dispatch — Single worker execution</option>
+              <option value="broadcast">📢 Broadcast — All workers in parallel</option>
+              <option value="pipeline">🔗 Pipeline — Sequential chain (A → B → C)</option>
+              <option value="fan_out">🌀 Fan-Out — Parallel execution + aggregation</option>
+              <option value="consult">💬 Consult — Multi-opinion + synthesis</option>
+              <option value="conditional">🔀 Conditional — Route based on evaluation</option>
+            </select>
+          </div>
+
+          <!-- Workers Select dropdown -->
+          <div class="form-group">
+            <label class="form-label">{{ t('swarm.workers_label') }} *</label>
+            <div id="play-worker-select-container" style="border:1px solid var(--border);border-radius:var(--radius);padding:8px;min-height:80px;background:rgba(255,255,255,0.02);max-height:150px;overflow-y:auto;">
+              <div id="play-worker-checkboxes" style="display:flex;flex-direction:column;gap:4px;">
+                {% for w in workers %}
+                <label style="display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:0.85rem;" class="worker-check-label">
+                  <input type="checkbox" name="play_selected_workers" value="{{ w.name }}" style="accent-color:var(--accent);">
+                  <span style="font-weight:500;">{{ w.name }}</span>
+                  {% if w.get('role') %}<span class="badge badge-accent" style="font-size:0.7rem;">{{ w.role }}</span>{% endif %}
+                  {% if w.get('capabilities') and w.capabilities.get('expertise') %}
+                    {% for tag in w.capabilities.expertise[:2] %}
+                    <span class="badge badge-info" style="font-size:0.65rem;">{{ tag }}</span>
+                    {% endfor %}
+                  {% endif %}
+                  <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto;">{{ w.get('model', '?') }}</span>
+                </label>
+                {% endfor %}
+                {% if not workers %}
+                <div style="color:var(--text-muted);font-size:0.85rem;padding:8px;">{{ t('swarm.no_workers_registered') }}</div>
+                {% endif %}
+              </div>
+            </div>
+            <span style="font-size:0.7rem;color:var(--text-muted);" id="play-pattern-hint">Select a single worker for dispatch</span>
+          </div>
+
+          <!-- Prompt text area -->
+          <div class="form-group">
+            <label class="form-label">{{ t('swarm.prompt') }} *</label>
+            <textarea id="play-dispatch-task" class="form-textarea" rows="3" placeholder="{{ t('swarm.prompt_placeholder') }}" required></textarea>
+          </div>
+
+          <!-- Advanced collapsible variables -->
+          <details style="margin-top:12px;border:1px solid var(--border);border-radius:var(--radius);padding:0;">
+            <summary style="padding:10px 12px;cursor:pointer;font-size:0.85rem;font-weight:500;color:var(--text-secondary);background:rgba(255,255,255,0.02);border-radius:var(--radius);">
+              ⚙️ {{ t('swarm.advanced_options') }}
+            </summary>
+            <div style="padding:12px;display:flex;flex-direction:column;gap:12px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.timeout_seconds') }}</label>
+                  <input type="number" id="play-adv-timeout" class="form-input" value="300" min="1" max="3600">
+                </div>
+                <div class="form-group" style="margin:0;">
+                  <label class="form-label" style="font-size:0.8rem;">{{ t('swarm.max_retry_count') }}</label>
+                  <input type="number" id="play-adv-retries" class="form-input" value="0" min="0" max="10">
+                </div>
+              </div>
+              <div class="form-group" style="margin:0;">
+                <label class="form-label" style="font-size:0.8rem;">Metadata JSON</label>
+                <textarea id="play-adv-metadata" class="form-textarea" rows="2" placeholder='{"key": "value"}' style="font-family:var(--font-mono);font-size:0.75rem;"></textarea>
+              </div>
+            </div>
+          </details>
+
+          <!-- Submit -->
+          <div class="form-actions" style="margin-top:16px;">
+            <button type="button" class="btn btn-primary btn-full" id="btn-play-run" onclick="KazmaSwarm.runPlayground()">
+              ⚡ {{ t('swarm.run_task') }}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Playground Live Monitor Right Column -->
+      <div style="display:flex;flex-direction:column;gap:16px;min-height:550px;">
+        
+        <!-- Live SSE Terminal Panel -->
+        <div class="card" style="flex:1.2;display:flex;flex-direction:column;gap:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <h3 style="font-size:0.95rem;font-weight:600;margin:0;">📜 {{ t('swarm.logs_live') }}</h3>
+            <span id="play-live-timer" style="font-family:var(--font-mono);font-size:0.8rem;color:var(--text-muted);display:none;">0s</span>
+          </div>
+          
+          <!-- Monospace terminal container -->
+          <div id="playground-terminal" style="flex:1;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;font-family:var(--font-mono);font-size:0.8rem;line-height:1.5;color:#c9d1d9;overflow-y:auto;height:250px;min-height:220px;box-shadow:inset 0 0 10px rgba(0,0,0,0.5);">
+            <div style="color:var(--text-muted);">Playground terminal idle. Set your inputs and click "Run Task" to observe live trace logs...</div>
+          </div>
+        </div>
+
+        <!-- State Inspector & HITL Panel -->
+        <div class="card" style="flex:1;display:flex;flex-direction:column;gap:12px;">
+          <h3 style="font-size:0.95rem;font-weight:600;margin:0;">🕵️ {{ t('swarm.state_inspector') }}</h3>
+          
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:0.75rem;color:var(--text-muted);">{{ t('swarm.status') }}</div>
+              <span id="play-state-status" class="badge badge-secondary" style="margin-top:4px;">IDLE</span>
+            </div>
+            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:0.75rem;color:var(--text-muted);">{{ t('swarm.active_node') }}</div>
+              <span id="play-state-node" style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin-top:4px;display:block;">—</span>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:0.75rem;color:var(--text-muted);">{{ t('swarm.token_usage') }}</div>
+              <span id="play-state-tokens" style="font-size:0.85rem;font-weight:600;color:var(--text-primary);margin-top:4px;display:block;">0 tokens</span>
+            </div>
+            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:6px;padding:8px 10px;">
+              <div style="font-size:0.75rem;color:var(--text-muted);">{{ t('swarm.accumulated_cost') }}</div>
+              <span id="play-state-cost" style="font-size:0.85rem;font-weight:600;color:var(--success);margin-top:4px;display:block;">$0.0000</span>
+            </div>
+          </div>
+
+          <!-- HITL approval container inside the playground -->
+          <div id="play-hitl-gate" style="display:none;padding:12px;border:1px solid var(--warning);border-radius:var(--radius);background:rgba(210,153,34,0.06);margin-top:8px;">
+            <div style="font-weight:600;font-size:0.85rem;color:var(--warning);display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+              <span>⏸</span> {{ t('swarm.hitl_approval') }}
+            </div>
+            <div id="play-hitl-preview" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);background:rgba(0,0,0,0.15);border:1px solid var(--border-subtle);border-radius:4px;padding:6px;max-height:80px;overflow-y:auto;margin-bottom:10px;"></div>
+            <div style="display:flex;gap:8px;">
+              <button id="btn-play-approve" class="btn btn-primary btn-sm" onclick="KazmaSwarm.approvePlaygroundHitl()">✓ {{ t('swarm.approve_continue') }}</button>
+              <button id="btn-play-reject" class="btn btn-danger btn-sm" onclick="KazmaSwarm.rejectPlaygroundHitl()">✕ {{ t('swarm.reject_stop') }}</button>
+            </div>
+          </div>
+          
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -526,6 +710,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="/static/js/streaming.js"></script>
 <script src="/static/js/swarm.js"></script>
 {% endblock %}

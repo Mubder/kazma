@@ -204,6 +204,34 @@ class LLMProvider:
         Returns:
             LLMResponse with content, tool_calls, usage, and cost.
         """
+        # Check semantic cache if enabled
+        cache_enabled = os.environ.get("KAZMA_SEMANTIC_CACHE", "true").lower() == "true"
+        prompt_str = json.dumps(messages, sort_keys=True)
+        if cache_enabled:
+            try:
+                from kazma_core.swarm.semantic_cache import SemanticCache
+                global _semantic_cache_singleton
+                if "_semantic_cache_singleton" not in globals():
+                    _semantic_cache_singleton = SemanticCache()
+                cached_data = _semantic_cache_singleton.lookup(prompt_str, tools=tools)
+                if cached_data is not None:
+                    tool_calls = [
+                        ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
+                        for tc in cached_data.get("tool_calls", [])
+                    ]
+                    logger.info("[LLMProvider] Cache hit! Returning cached response.")
+                    return LLMResponse(
+                        content=cached_data.get("content", ""),
+                        tool_calls=tool_calls,
+                        finish_reason=cached_data.get("finish_reason", ""),
+                        model=cached_data.get("model", ""),
+                        usage=cached_data.get("usage", {}),
+                        cost_usd=cached_data.get("cost_usd", 0.0),
+                        duration_ms=0.0,
+                    )
+            except Exception as cache_exc:
+                logger.warning("[LLMProvider] Semantic cache lookup error: %s", cache_exc)
+
         client = await self._get_client()
 
         payload: dict[str, Any] = {
@@ -267,7 +295,22 @@ class LLMProvider:
                         f"LLM call failed (HTTP {retry_err.response.status_code}): {retry_detail[:300]}"
                     ) from retry_err
                 duration_ms = (time.monotonic() - start) * 1000
-                return self._parse_response(data, duration_ms)
+                response = self._parse_response(data, duration_ms)
+                if cache_enabled:
+                    try:
+                        response_dict = {
+                            "content": response.content,
+                            "tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in response.tool_calls],
+                            "finish_reason": response.finish_reason,
+                            "model": response.model,
+                            "usage": response.usage,
+                            "cost_usd": response.cost_usd,
+                            "duration_ms": response.duration_ms,
+                        }
+                        _semantic_cache_singleton.store(prompt_str, response_dict, tools=tools)
+                    except Exception as cache_exc:
+                        logger.warning("[LLMProvider] Semantic cache store error: %s", cache_exc)
+                return response
 
             # Try fallback model if configured
             if self.config.fallback_model and self.config.router == "litellm":
@@ -299,7 +342,22 @@ class LLMProvider:
 
         duration_ms = (time.monotonic() - start) * 1000
 
-        return self._parse_response(data, duration_ms)
+        response = self._parse_response(data, duration_ms)
+        if cache_enabled:
+            try:
+                response_dict = {
+                    "content": response.content,
+                    "tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in response.tool_calls],
+                    "finish_reason": response.finish_reason,
+                    "model": response.model,
+                    "usage": response.usage,
+                    "cost_usd": response.cost_usd,
+                    "duration_ms": response.duration_ms,
+                }
+                _semantic_cache_singleton.store(prompt_str, response_dict, tools=tools)
+            except Exception as cache_exc:
+                logger.warning("[LLMProvider] Semantic cache store error: %s", cache_exc)
+        return response
 
     def _parse_response(self, data: dict[str, Any], duration_ms: float) -> LLMResponse:
         """Parse the OpenAI-format response into an LLMResponse."""

@@ -26,12 +26,13 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
         session_store: SQLiteSessionStore (for active thread count).
 
     Returns:
-        APIRouter with GET /metrics.
+        APIRouter with GET /metrics and GET /api/metrics.
     """
 
     router = APIRouter(tags=["metrics"])
 
     @router.get("/metrics")
+    @router.get("/api/metrics")
     async def metrics() -> PlainTextResponse:
         """Prometheus text format metrics."""
         lines: list[str] = []
@@ -75,6 +76,45 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
         lines.append("# HELP kazma_queue_depth Current message queue depth")
         lines.append("# TYPE kazma_queue_depth gauge")
         lines.append(f"kazma_queue_depth {gateway.queue.qsize()}")
+
+        # ── Swarm indicators ──────────────────────────────────────
+        try:
+            from kazma_core.swarm import get_swarm_engine
+            engine = get_swarm_engine()
+            if engine is not None:
+                # 1. Active tasks gauge
+                active_tasks = len(engine.list_active_tasks()) if hasattr(engine, "list_active_tasks") else 0
+                lines.append("# HELP kazma_active_tasks Current in-flight swarm tasks")
+                lines.append("# TYPE kazma_active_tasks gauge")
+                lines.append(f"kazma_active_tasks {active_tasks}")
+
+                # 2. Worker status gauge
+                lines.append("# HELP kazma_worker_status Swarm worker status gauge")
+                lines.append("# TYPE kazma_worker_status gauge")
+                for worker in engine._workers.values():
+                    status = "offline"
+                    if getattr(worker, "_running", False):
+                        status = "busy" if getattr(worker, "busy", False) else "online"
+                    for possible_status in ("offline", "online", "busy"):
+                        val = 1 if status == possible_status else 0
+                        lines.append(
+                            f'kazma_worker_status{{worker="{worker.name}",status="{possible_status}"}} {val}'
+                        )
+
+                # 3. Circuit breaker failures
+                lines.append("# HELP kazma_circuit_breaker_failures_total Cumulative consecutive failures of worker circuit breakers")
+                lines.append("# TYPE kazma_circuit_breaker_failures_total counter")
+                for worker in engine._workers.values():
+                    failures = 0
+                    if hasattr(engine, "_reliability"):
+                        try:
+                            breaker = engine._reliability.get_circuit_breaker(worker.name)
+                            failures = getattr(breaker, "consecutive_failures", 0)
+                        except Exception:
+                            pass
+                    lines.append(f'kazma_circuit_breaker_failures_total{{worker="{worker.name}"}} {failures}')
+        except Exception as exc:
+            logger.debug("Failed to append Swarm metrics: %s", exc)
 
         return PlainTextResponse(
             content="\n".join(lines) + "\n",
