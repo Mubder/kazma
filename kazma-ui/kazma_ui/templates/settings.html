@@ -203,6 +203,15 @@
         <div x-show="hubProviderModal" class="modal-overlay" @click.self="hubProviderModal = false">
             <div class="modal">
                 <h2 x-text="hubEditingProvider._existing ? '{{ t('settings.edit_provider') }}' : '{{ t('settings.add_provider') }}'"></h2>
+                <div class="form-group" x-show="!hubEditingProvider._existing" style="margin-bottom: 16px;">
+                    <label>{{ t('settings.choose_preset') }}</label>
+                    <select class="form-select" @change="applyHubProviderPreset($event.target.value); $event.target.value = ''">
+                        <option value="">{{ t('settings.choose_preset_placeholder') }}</option>
+                        <template x-for="preset in providerPresets" :key="preset.key">
+                            <option :value="preset.key" x-text="preset.name" x-show="preset.key !== 'custom'"></option>
+                        </template>
+                    </select>
+                </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label>{{ t('settings.name_id') }}</label>

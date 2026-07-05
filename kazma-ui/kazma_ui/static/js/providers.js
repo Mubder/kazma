@@ -14,6 +14,7 @@ const ProvidersManager = {
         openrouter: { name: 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', docs: 'https://openrouter.ai/keys' },
         ollama: { name: 'Ollama (Local)', base_url: 'http://127.0.0.1:11434/v1', docs: '' },
         'lm-studio': { name: 'LM Studio (Local)', base_url: 'http://localhost:1234/v1', docs: '' },
+        nvidia: { name: 'NVIDIA NIM', base_url: 'https://integrate.api.nvidia.com/v1', docs: 'https://build.nvidia.com' },
         custom: { name: 'Custom Endpoint', base_url: '', docs: '' },
     },
 

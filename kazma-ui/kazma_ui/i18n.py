@@ -162,6 +162,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.connected_latency": {"en": "✓ Connected! Latency:", "ar": "✓ تم الاتصال! زمن الاستجابة:"},
     "settings.preset": {"en": "Preset", "ar": "القالب"},
     "settings.custom": {"en": "— Custom —", "ar": "— مخصص —"},
+    "settings.choose_preset": {"en": "Choose a Preset (Optional)", "ar": "اختر قالباً (اختياري)"},
+    "settings.choose_preset_placeholder": {"en": "-- Choose a Preset --", "ar": "-- اختر قالباً --"},
     "settings.name_id": {"en": "Name (ID)", "ar": "الاسم (المعرّف)"},
     "settings.display_name": {"en": "Display Name", "ar": "اسم العرض"},
     "settings.base_url": {"en": "Base URL", "ar": "عنوان الخادم"},
