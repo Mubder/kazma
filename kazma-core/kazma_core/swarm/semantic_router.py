@@ -36,25 +36,7 @@ def _tokenize(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", normalized))
 
 
-# ── Keyword scoring (fallback) ────────────────────────────────────────────
 
-
-def keyword_match_score(task_description: str, expertise_tags: list[str]) -> int:
-    """Score a worker's expertise against a task description using keyword overlap.
-
-    Returns an integer score; higher is better.
-    """
-    desc_lower = task_description.lower()
-    score = 0
-    for tag in expertise_tags:
-        if tag.lower() in desc_lower:
-            score += 10
-    # Bonus for word-level overlap
-    for kw in desc_lower.split():
-        for tag in expertise_tags:
-            if kw in tag.lower() or tag.lower() in kw:
-                score += 2
-    return score
 
 
 # ── Semantic routing ──────────────────────────────────────────────────────
@@ -287,27 +269,18 @@ class SemanticRouter:
         workers: list[dict[str, Any]],
         top_n: int = 5,
     ) -> list[str]:
-        """Route a task to the best workers using semantic + fallback.
+        """Route a task to the best workers using semantic similarity.
 
         1. Try semantic similarity via ChromaDB.
-        2. If unavailable or empty, fall back to keyword matching.
-        3. Return worker names sorted by relevance.
+        2. Return worker names sorted by relevance, or empty list if unavailable.
         """
-        # 1 — Semantic
         if self.available:
             self.build_profiles(workers)
             scored = self.query(task_description, top_n=top_n)
             if scored:
                 return [name for name, _score in scored]
 
-        # 2 — Keyword fallback
-        logger.info("[SemanticRouter] Using keyword fallback for routing")
-        keyword_scored: list[tuple[str, int]] = []
-        for w in workers:
-            score = keyword_match_score(task_description, w.get("expertise", []))
-            keyword_scored.append((w["name"], score))
-        keyword_scored.sort(key=lambda x: x[1], reverse=True)
-        return [name for name, s in keyword_scored[:top_n] if s > 0]
+        return []
 
 
 # ── Module-level singleton ────────────────────────────────────────────────

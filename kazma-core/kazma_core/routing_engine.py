@@ -1,95 +1,185 @@
-"""Polymorphic routing engine for the Kazma agent framework.
+"""Unified routing engine for the Kazma agent framework.
 
-Provides a unified, sequential, and extensible routing pipeline that chains or
-falls back across Semantic, Dialect-aware, and Capability-based routers.
+Provides a unified router that chains Semantic, Dialect-aware, and Capability-based
+fallback routing in a single cohesive execution path.
 """
 
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
+import re
+from dataclasses import dataclass
 from typing import Any
 
-from kazma_core.swarm.task import SwarmTask
-from kazma_core.swarm.router import CapabilityRouter
+from kazma_core.swarm.task import SwarmTask, WorkerCapabilities
 from kazma_core.swarm.semantic_router import get_semantic_router
 from kazma_core.router import DialectRouter, AgentRequest
 
 logger = logging.getLogger(__name__)
 
 
-class BaseRouter(ABC):
-    """Abstract base class for all swarm routing strategies."""
+class NoCapableWorkersError(ValueError):
+    """Raised when no workers match the task requirements."""
 
-    @abstractmethod
+
+def _tokenize(text: str) -> set[str]:
+    """Lowercase and split text into word tokens, normalizing underscores/hyphens."""
+    normalized = text.lower().replace("_", " ").replace("-", " ")
+    return set(re.findall(r"[a-z0-9]+", normalized))
+
+
+@dataclass
+class _ScoredWorker:
+    """Internal holder for a worker name and its routing score."""
+
+    name: str
+    score: int
+
+
+class UnifiedRouter:
+    """Matches task requirements to worker capabilities using multiple strategies.
+
+    Strategies applied sequentially (with dialect boosting):
+    1. Semantic Routing (if chromadb is available and task provides enough context)
+    2. Dialect Boosting (if Arabic dialects detected, boost matching workers)
+    3. Keyword Fallback (if no semantic matches, overlap task text and capabilities)
+
+    Usage::
+
+        router = UnifiedRouter()
+        selected = await router.route(task, available_workers)
+    """
+
+    DEFAULT_TOP_N: int = 5
+
+    def __init__(self) -> None:
+        self._semantic_router = get_semantic_router()
+        self._dialect_router = DialectRouter()
+
     async def route(
         self,
         task: SwarmTask,
         available_workers: list[dict[str, Any]],
     ) -> list[str]:
-        """Route a task to selected workers.
+        """Route a task to the best-suited workers.
 
         Args:
-            task: The SwarmTask to route.
-            available_workers: List of worker info dictionaries.
+            task: The swarm task to route.
+            available_workers: List of worker info dicts, each containing
+                at least ``"name"`` and ``"capabilities"`` (a
+                :class:`WorkerCapabilities` instance).
 
         Returns:
-            A list of selected worker names, sorted by relevance.
+            A list of selected worker names, sorted by relevance score
+            (highest first).
+
+        Raises:
+            NoCapableWorkersError: If ``workers=["auto"]`` and no workers
+                match the task requirements.
         """
-        pass
+        if not self._is_auto_routing(task):
+            return list(task.workers)
 
+        if not available_workers:
+            raise NoCapableWorkersError("No capable workers available for auto-routing.")
 
-class CapabilityRouterWrapper(BaseRouter):
-    """Wraps the legacy CapabilityRouter for polymorphic routing.
+        top_n = self._resolve_top_n(task)
 
-    Scores workers using keyword-overlap between task prompt/context and worker
-    declared capabilities (expertise, role, model specialty).
-    """
+        # Build consistent profiles for semantic & dialect routing
+        worker_profiles = self._build_worker_profiles(available_workers)
 
-    def __init__(self, router: CapabilityRouter | None = None) -> None:
-        self._router = router or CapabilityRouter()
+        scored_names: list[str] = []
 
-    async def route(
-        self,
-        task: SwarmTask,
-        available_workers: list[dict[str, Any]],
-    ) -> list[str]:
-        """Execute legacy capability routing."""
-        logger.info("[CapabilityRouterWrapper] Scoring workers via keyword-overlap.")
-        try:
-            return self._router.route(task, available_workers)
-        except Exception as exc:
-            logger.warning("[CapabilityRouterWrapper] Legacy capability router failed: %s", exc)
-            return []
+        # ── 1. Dialect & Semantic Routing ──
+        dialect_boosts = self._calculate_dialect_boosts(task.prompt, worker_profiles)
 
+        if self._semantic_router.available:
+            logger.info("[UnifiedRouter] Attempting Semantic routing.")
+            try:
+                # route() returns a list of names
+                semantic_results = self._semantic_router.route(
+                    task_description=task.prompt,
+                    workers=worker_profiles,
+                    top_n=top_n * 2, # fetch more for dialect resorting
+                )
+                if semantic_results:
+                    logger.info("[UnifiedRouter] Semantic routing yielded: %s", semantic_results)
+                    scored_names = semantic_results
+            except Exception as exc:
+                logger.warning("[UnifiedRouter] Semantic router failed, falling back to keyword: %s", exc)
 
-class SemanticRouterWrapper(BaseRouter):
-    """Wraps the SemanticRouter using sentence-transformers and ChromaDB.
+        # ── 2. Keyword Fallback Routing ──
+        if not scored_names:
+            logger.info("[UnifiedRouter] Falling back to Keyword capability routing.")
+            scored_names = self._keyword_route(task, available_workers)
 
-    Retrieves workers based on semantic cosine similarity of their profile
-    embeddings to the task description.
-    """
+        # Add any workers that got a dialect boost to the scored_names so they aren't lost
+        if dialect_boosts:
+            for name in dialect_boosts:
+                if name not in scored_names:
+                    scored_names.append(name)
 
-    def __init__(self, persist_dir: str | None = None) -> None:
-        self._router = get_semantic_router()
-        if persist_dir:
-            from kazma_core.swarm.semantic_router import SemanticRouter
-            self._router = SemanticRouter(persist_dir=persist_dir)
+        if not scored_names:
+             raise NoCapableWorkersError(
+                "No capable workers matched the task requirements. "
+                f"Task prompt: '{task.prompt[:100]}'; "
+                f"available workers: {[w['name'] for w in available_workers]}"
+            )
 
-    async def route(
-        self,
-        task: SwarmTask,
-        available_workers: list[dict[str, Any]],
-    ) -> list[str]:
-        """Execute semantic similarity routing."""
-        if not self._router.available:
-            logger.info("[SemanticRouterWrapper] Embedding models or ChromaDB unavailable; skipping.")
-            return []
+        # ── 3. Apply Dialect Boosts & Final Sort ──
+        if dialect_boosts:
+            logger.info("[UnifiedRouter] Applying dialect boosts: %s", dialect_boosts)
+            
+            # Convert list to scored items
+            # Semantic routing doesn't return raw scores in route(), so we create a synthetic score
+            # based on rank, then add the dialect boost.
+            base_score_map = {name: (len(scored_names) - i) * 10 for i, name in enumerate(scored_names)}
+            
+            final_scored = []
+            for name in scored_names:
+                boost = dialect_boosts.get(name, 0)
+                final_scored.append(_ScoredWorker(name=name, score=base_score_map[name] + boost))
+            
+            final_scored.sort(key=lambda x: x.score, reverse=True)
+            scored_names = [item.name for item in final_scored]
 
-        logger.info("[SemanticRouterWrapper] Routing task '%s' using semantic embedding similarity.", task.id)
+        selected_names = scored_names[:top_n]
+
+        # Record metadata
+        task.metadata["routed_workers"] = selected_names
         
-        # Translate workers array to match SemanticRouter profile builder expectation
-        workers_list = []
+        logger.info(
+            "[UnifiedRouter] auto-routed task '%s' to %s",
+            task.id,
+            selected_names,
+        )
+
+        return selected_names
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_auto_routing(task: SwarmTask) -> bool:
+        """Return True when the task requests automatic worker routing."""
+        return list(task.workers) == ["auto"]
+
+    @staticmethod
+    def _resolve_top_n(task: SwarmTask) -> int:
+        """Return the maximum number of workers to select."""
+        raw = task.metadata.get("top_n")
+        if raw is not None:
+            try:
+                return max(1, int(raw))
+            except (TypeError, ValueError):
+                pass
+        return UnifiedRouter.DEFAULT_TOP_N
+
+    @staticmethod
+    def _build_worker_profiles(available_workers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Translate worker info dicts into profiles for Semantic/Dialect logic."""
+        profiles = []
         for w in available_workers:
             caps = w.get("capabilities")
             expertise = []
@@ -105,160 +195,105 @@ class SemanticRouterWrapper(BaseRouter):
                 roles = w.get("roles", []) or ([w.get("role")] if w.get("role") else [])
                 system_prompt = w.get("system_prompt", "") or w.get("role", "")
 
-            workers_list.append({
+            profiles.append({
                 "name": w["name"],
                 "expertise": expertise,
                 "roles": roles,
                 "system_prompt": system_prompt,
             })
+        return profiles
 
-        top_n = task.metadata.get("top_n", 5)
+    def _calculate_dialect_boosts(self, prompt: str, worker_profiles: list[dict[str, Any]]) -> dict[str, int]:
+        """Determine if dialect boosts should be applied, and return worker score boosts."""
+        boosts = {}
         try:
-            return self._router.route(
-                task_description=task.prompt,
-                workers=workers_list,
-                top_n=top_n,
-            )
-        except Exception as exc:
-            logger.warning("[SemanticRouterWrapper] Semantic router query failed: %s", exc)
-            return []
-
-
-class DialectRouterWrapper(BaseRouter):
-    """Wraps the DialectRouter to prioritize workers matching the input register.
-
-    Checks if the task prompt is written in specific Arabic dialects (e.g. Kuwaiti)
-    and prioritizes workers whose expertise or role matches that dialect.
-    """
-
-    def __init__(self, router: DialectRouter | None = None) -> None:
-        self._router = router or DialectRouter()
-
-    async def route(
-        self,
-        task: SwarmTask,
-        available_workers: list[dict[str, Any]],
-    ) -> list[str]:
-        """Prioritize workers based on detected Arabic dialect."""
-        logger.info("[DialectRouterWrapper] Analyzing dialect for prompt routing.")
-        try:
-            req = AgentRequest(text=task.prompt)
-            token_result = self._router.tokenizer.tokenize(req.text)
+            req = AgentRequest(text=prompt)
+            token_result = self._dialect_router.tokenizer.tokenize(req.text)
             dialect = token_result.dialect.dialect  # e.g., "kw" (Kuwaiti) or "msa"
             confidence = token_result.dialect.confidence
 
-            logger.info("[DialectRouterWrapper] Detected dialect: %s (confidence: %.2f)", dialect, confidence)
+            if dialect not in ("kw", "msa") or confidence < 0.3:
+                return boosts
 
-            # Prioritize workers with matching dialect capabilities
-            scored_workers = []
-            for w in available_workers:
-                caps = w.get("capabilities")
-                expertise_set = set()
-                role = ""
-                if caps:
-                    expertise_set = {e.lower() for e in getattr(caps, "expertise", [])}
-                    role = getattr(caps, "role", "").lower()
-                else:
-                    expertise_set = {e.lower() for e in w.get("expertise", [])}
-                    role = w.get("role", "").lower()
+            logger.debug("[UnifiedRouter] Detected dialect: %s (confidence: %.2f)", dialect, confidence)
 
+            for p in worker_profiles:
                 score = 0
+                expertise_set = {e.lower() for e in p["expertise"]}
+                role = " ".join(p["roles"]).lower()
+
                 if dialect == "kw":
-                    # Look for Kuwaiti or Gulf keywords
                     if any(kw in role for kw in ("kuwait", "gulf", "colloquial", "kw")):
-                        score += 15
+                        score += 150
                     if any("kuwait" in e or "gulf" in e or "kw" in e for e in expertise_set):
-                        score += 10
+                        score += 100
                 elif dialect == "msa":
-                    # Look for MSA or Standard Arabic keywords
                     if any(kw in role for kw in ("msa", "standard", "formal")):
-                        score += 15
+                        score += 150
                     if any("msa" in e or "standard" in e or "arabic" in e for e in expertise_set):
-                        score += 10
+                        score += 100
+                
+                if score > 0:
+                    boosts[p["name"]] = score
 
-                scored_workers.append((w["name"], score))
-
-            scored_workers.sort(key=lambda x: x[1], reverse=True)
-            
-            # If we found matches with positive scoring, route strictly to them
-            matching_workers = [name for name, score in scored_workers if score > 0]
-            if matching_workers:
-                logger.info("[DialectRouterWrapper] Routed task to matching dialect specialists: %s", matching_workers)
-                return matching_workers
-
-            logger.info("[DialectRouterWrapper] No dialect-specific workers matched; passing through.")
-            return []
         except Exception as exc:
-            logger.warning("[DialectRouterWrapper] Dialect routing failed: %s", exc)
-            return []
+            logger.warning("[UnifiedRouter] Dialect analysis failed: %s", exc)
 
+        return boosts
 
-class RoutingEngine(BaseRouter):
-    """Coordinates and cascades multiple routing strategies.
+    def _keyword_route(self, task: SwarmTask, available_workers: list[dict[str, Any]]) -> list[str]:
+        """Legacy capability-based keyword overlap routing."""
+        requirements_tokens = self._extract_requirement_tokens(task)
 
-    Executes a chain of routers in sequence. Supports fallback (first router that
-    successfully routes) and cooperative chaining (sequentially narrowing down).
-    """
+        scored: list[_ScoredWorker] = []
+        for worker_info in available_workers:
+            name = worker_info["name"]
+            capabilities: WorkerCapabilities = worker_info["capabilities"]
+            score = self._score_worker(requirements_tokens, capabilities)
+            if score > 0:
+                scored.append(_ScoredWorker(name=name, score=score))
 
-    def __init__(self, routers: list[BaseRouter] | None = None, mode: str = "fallback") -> None:
-        """Initialize the RoutingEngine.
+        scored.sort(key=lambda item: item.score, reverse=True)
+        return [item.name for item in scored]
 
-        Args:
-            routers: A list of BaseRouter instances. Defaults to Semantic -> Dialect -> Capability.
-            mode: "fallback" (runs until one returns non-empty) or "chain" (successive intersection).
-        """
-        self.routers = routers if routers is not None else [
-            SemanticRouterWrapper(),
-            DialectRouterWrapper(),
-            CapabilityRouterWrapper(),
-        ]
-        self.mode = mode
+    @staticmethod
+    def _extract_requirement_tokens(task: SwarmTask) -> set[str]:
+        """Build a set of requirement tokens from the task's textual fields."""
+        tokens: set[str] = set()
 
-    def add_router(self, router: BaseRouter) -> None:
-        """Add a routing strategy to the engine."""
-        self.routers.append(router)
+        if task.prompt:
+            tokens |= _tokenize(task.prompt)
+        if task.context:
+            tokens |= _tokenize(task.context)
 
-    async def route(
-        self,
-        task: SwarmTask,
-        available_workers: list[dict[str, Any]],
-    ) -> list[str]:
-        """Execute the polymorphic routing chain."""
-        if not available_workers:
-            return []
+        requirements = task.metadata.get("requirements", [])
+        if isinstance(requirements, list):
+            for req in requirements:
+                tokens |= _tokenize(str(req))
 
-        if self.mode == "fallback":
-            for router in self.routers:
-                try:
-                    logger.info("[RoutingEngine] Attempting route via: %s", router.__class__.__name__)
-                    routed = await router.route(task, available_workers)
-                    if routed:
-                        logger.info("[RoutingEngine] Strategy %s succeeded: %s", router.__class__.__name__, routed)
-                        return routed
-                except Exception as exc:
-                    logger.error("[RoutingEngine] Router %s failed: %s", router.__class__.__name__, exc)
-                    continue
-            
-            # Ultimate safety fallback if all failed: return all available workers or run basic CapabilityRouter
-            logger.warning("[RoutingEngine] All routing strategies in fallback chain failed/returned empty.")
-            return [w["name"] for w in available_workers]
+        return tokens
 
-        elif self.mode == "chain":
-            current_workers = list(available_workers)
-            for router in self.routers:
-                if not current_workers:
-                    break
-                try:
-                    logger.info("[RoutingEngine] Chaining route via: %s", router.__class__.__name__)
-                    routed = await router.route(task, current_workers)
-                    if routed:
-                        # Narrow down current_workers to those selected
-                        routed_set = set(routed)
-                        current_workers = [w for w in current_workers if w["name"] in routed_set]
-                except Exception as exc:
-                    logger.error("[RoutingEngine] Chaining router %s failed: %s", router.__class__.__name__, exc)
-                    continue
+    @staticmethod
+    def _score_worker(
+        requirement_tokens: set[str],
+        capabilities: WorkerCapabilities,
+    ) -> int:
+        """Score a worker's capabilities against the requirement tokens."""
+        if not requirement_tokens:
+            return 0
 
-            return [w["name"] for w in current_workers]
+        capability_tokens: set[str] = set()
 
-        return []
+        for expertise_item in capabilities.expertise:
+            capability_tokens |= _tokenize(expertise_item)
+
+        if capabilities.role:
+            capability_tokens |= _tokenize(capabilities.role)
+
+        if capabilities.model_specialty:
+            capability_tokens |= _tokenize(capabilities.model_specialty)
+
+        for tool in capabilities.tools:
+            capability_tokens |= _tokenize(tool)
+
+        return len(requirement_tokens & capability_tokens)

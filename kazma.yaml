@@ -120,3 +120,38 @@ swarm:
   # /api/swarm/workers API. No preset workers here — users add their own
   # with the correct provider, model, and system prompt.
   workers: []
+
+pipelines:
+  standard:
+    - name: researcher
+      role: researcher
+      worker_name: core
+      system_prompt: "You are a Researcher. Analyze the task broadly and provide comprehensive findings."
+      depends_on: []
+    - name: refiner
+      role: refiner
+      worker_name: bridge
+      system_prompt: "You are a Refiner — a middleman worker that intercepts raw, verbose output from a Researcher and condenses it into a clean, actionable payload for the Builder. Your job: 1. Strip hallucinations, fluff, and redundant explanations. 2. Extract only the core facts, code snippets, and decisions. 3. Format the output as a structured payload: - Key findings (3-5 bullet points) - Code snippets (if any) - Recommended next action (1 sentence) 4. Never add new information. Only distill what was provided. Output format:\n```\n## Key Findings\n- Point 1\n- Point 2\n\n## Code\n```python\n...\n```\n\n## Recommended Next Action\nOne sentence.\n```"
+      depends_on: ["researcher"]
+    - name: builder
+      role: builder
+      worker_name: core
+      system_prompt: "You are a Builder. Implement the solution based on the refined research."
+      depends_on: ["refiner"]
+    - name: validator
+      role: validator
+      worker_name: bridge
+      system_prompt: "You are a Validator. Check the Builder's output against the original task. Reject if wrong, approve if correct."
+      depends_on: ["builder"]
+
+  quick:
+    - name: researcher
+      role: researcher
+      worker_name: core
+      system_prompt: "You are a Researcher. Provide a concise, actionable answer."
+      depends_on: []
+    - name: builder
+      role: builder
+      worker_name: core
+      system_prompt: "You are a Builder. Implement based on the research above."
+      depends_on: ["researcher"]

@@ -42,7 +42,7 @@ from kazma_core.swarm.reliability import (
     RetryPolicy,
     TimeoutGuard,
 )
-from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
+from kazma_core.routing_engine import UnifiedRouter, NoCapableWorkersError
 from kazma_core.swarm.safety import SafetyMiddleware, SafetyViolationError, get_safety
 from kazma_core.swarm.task import (
     HandoffRecord,
@@ -54,14 +54,6 @@ from kazma_core.swarm.task import (
     WorkerResult,
 )
 from kazma_core.swarm.task_store import TaskStore
-from kazma_core.swarm.topology import (
-    STANDARD_PIPELINE,
-    PipelineEngine,
-    PipelineResult,
-    PipelineStage,
-    RefinerStage,
-    StageRole,
-)
 from kazma_core.swarm.tracing import InMemorySpanExporter, Span, TracingEmitter
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
 
@@ -70,7 +62,7 @@ __all__ = [
     "BoundedConcurrency",
     "BusAdapter",
     "BusMessage",
-    "CapabilityRouter",
+    "UnifiedRouter",
     "CircuitBreaker",
     "CircuitBreakerOpenError",
     "CircuitState",
@@ -85,17 +77,11 @@ __all__ = [
     "NoCapableWorkersError",
     "NullBusAdapter",
     "OutputValidator",
-    "PipelineEngine",
-    "PipelineResult",
-    "PipelineStage",
-    "RefinerStage",
     "ResultAggregator",
     "RetryPolicy",
-    "STANDARD_PIPELINE",
     "SafetyMiddleware",
     "SafetyViolationError",
     "Span",
-    "StageRole",
     "SwarmConfig",
     "SwarmEngine",
     "SwarmManager",
@@ -123,3 +109,4 @@ __all__ = [
     "request_handoff",
     "set_swarm_engine",
 ]
+

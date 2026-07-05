@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import os
+# Prevent local .env file leakage and environment variable pollution from breaking tests
+os.environ.pop("KAZMA_SECRET", None)
+import dotenv
+dotenv.load_dotenv = lambda *args, **kwargs: None
+
 # Import i18n early so the Jinja2Templates patch (which injects the default
 # ``t`` global) is applied before any test creates a Jinja2Templates instance.
 import kazma_ui.i18n  # noqa: F401
@@ -121,6 +127,22 @@ def _reset_swarm_singletons(tmp_path):
         _reg_mod._REGISTRY_SINGLETON = None
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _clean_kazma_secret():
+    """Ensure KAZMA_SECRET is cleared from the environment after each test.
+
+    FastAPI app startup auto-generates KAZMA_SECRET if unset and stores it in
+    os.environ. This leaks into subsequent tests in the same process, causing
+    401 failures on clean client instances. This fixture isolates each test.
+    """
+    orig = os.environ.get("KAZMA_SECRET")
+    yield
+    if orig is None:
+        os.environ.pop("KAZMA_SECRET", None)
+    else:
+        os.environ["KAZMA_SECRET"] = orig
 
 
 @pytest.fixture

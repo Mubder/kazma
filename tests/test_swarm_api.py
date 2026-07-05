@@ -331,7 +331,7 @@ class TestDocsHaveSwarm:
         from pathlib import Path
 
         readme = Path(__file__).resolve().parent.parent / "README.md"
-        content = readme.read_text()
+        content = readme.read_text(encoding="utf-8")
         assert "Swarm Orchestration" in content
         assert "Swarm Panel" in content
         assert "swarm:" in content  # YAML config block
@@ -341,6 +341,6 @@ class TestDocsHaveSwarm:
         from pathlib import Path
 
         changelog = Path(__file__).resolve().parent.parent / "CHANGELOG.md"
-        content = changelog.read_text()
+        content = changelog.read_text(encoding="utf-8")
         assert "gw-067" in content
         assert "Swarm" in content

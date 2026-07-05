@@ -125,6 +125,9 @@ class SupervisorState(TypedDict, total=False):
     consecutive_tool_failures: int
     """Counter for consecutive empty/failed results from tools."""
 
+    circuit_breaker_tripped: bool
+    """Flag indicating whether the tool execution circuit breaker has tripped."""
+
 
 # ── Factory ─────────────────────────────────────────────────────────────
 
@@ -159,4 +162,5 @@ def initial_supervisor_state(
         snapshot_iteration=-1,
         created_at=now,
         consecutive_tool_failures=0,
+        circuit_breaker_tripped=False,
     )

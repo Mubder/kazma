@@ -97,6 +97,111 @@ def _join_errors(worker_results: list[WorkerResult]) -> str | None:
     return "; ".join(error_messages)
 
 
+import time as _time
+
+async def _synthesize_refined_output(
+    task: str,
+    worker_results: list[WorkerResult],
+    overall_status: str,
+    total_ms: float,
+) -> str:
+    """Synthesize pipeline outputs via LLM Refiner."""
+    all_outputs = [r.output for r in worker_results if r.status == "success" and r.output]
+    combined = "\n---\n".join(o.strip() for o in all_outputs if o.strip()) or "No output"
+
+    user_prompt = f"Task: {task[:300]}\nStatus: {overall_status}\nDuration: {total_ms:.0f}ms\n\nRaw worker outputs:\n{combined[:4000]}"
+
+    try:
+        from kazma_core.model_registry import get_model_registry
+        registry = get_model_registry()
+        provider = registry.get_client()
+        if provider is not None:
+            messages = [
+                {"role": "system", "content": "You are a Refiner. Distill worker outputs into key findings, code, and next actions. Output in Markdown."},
+                {"role": "user", "content": user_prompt},
+            ]
+            response = await provider.chat(messages)
+            return response.content
+    except Exception as exc:
+        logger.warning("[Refiner] LLM call failed, using raw output: %s", exc)
+
+    lines: list[str] = []
+    lines.append("## Swarm Report (raw)")
+    lines.append("")
+    lines.append(f"**Task:** {task[:200]}")
+    lines.append(f"**Status:** {overall_status}")
+    lines.append(f"**Duration:** {total_ms:.0f}ms")
+    lines.append("")
+    lines.append(combined[:2000])
+    return "\n".join(lines)
+
+
+async def _finalize_pipeline(
+    task: SwarmTask,
+    worker_results: list[WorkerResult],
+    status: str,
+    blackboard: BlackboardStore,
+    started_ms: float,
+) -> PatternExecution:
+    total_ms = (_time.perf_counter() * 1000) - started_ms
+    aggregated_output = _last_success_output(worker_results)
+    
+    # 1. Synthesize Output
+    refined_output = await _synthesize_refined_output(task.prompt, worker_results, status, total_ms)
+    
+    # 2. Self-Improvement Hook
+    try:
+        from kazma_core.skills.self_improvement import get_self_improvement
+        si = get_self_improvement()
+        for res in worker_results:
+            if res.worker:
+                class MockStage:
+                    def __init__(self, r: WorkerResult):
+                        self.role = r.worker
+                        self.worker_name = r.worker
+                        self.status = "completed" if r.status == "success" else r.status
+                        self.output = r.output
+                        self.error = r.error
+                        self.duration_ms = 0
+                
+                analysis = await si.analyze(
+                    worker_name=res.worker,
+                    task=task.prompt,
+                    stages=[MockStage(r) for r in worker_results],
+                    status="completed" if status == "success" else status,
+                )
+                if analysis.get("action") == "mutate":
+                    await si.apply_mutation(res.worker, analysis["delta"])
+    except Exception as exc:
+        logger.debug("[SwarmPatterns] Self-improvement hook failed: %s", exc)
+        
+    # 3. Pipeline Logger Hook
+    try:
+        from kazma_core.swarm.memory.pipeline_logger import get_pipeline_logger
+        plog = get_pipeline_logger()
+        cid = task.id
+        for res in worker_results:
+            st = "completed" if res.status == "success" else res.status
+            plog.log_output(cid, res.worker, res.worker, res.output or "")
+            plog.log_step(cid, res.worker, res.worker, "info", "stage_" + st,
+                          f"Stage {res.worker}: {st}")
+        plog.log_step(cid, "orchestrator", "pipeline", "info", "pipeline_complete",
+                      f"Pipeline {cid}: {status} in {total_ms:.0f}ms",
+                      {"stages": len(worker_results), "completed": len([r for r in worker_results if r.status == "success"])})
+    except Exception as exc:
+        logger.debug("[SwarmPatterns] Logging hook failed: %s", exc)
+        
+    # 4. Final Execution State
+    return PatternExecution(
+        worker_results=worker_results,
+        status=status,
+        aggregated_output=aggregated_output,
+        synthesized_output=refined_output,
+        error=worker_results[-1].error if status != "success" else None,
+        metadata=await _build_blackboard_metadata(blackboard),
+    )
+
+
 async def _build_pipeline_context_text(
     task: SwarmTask,
     previous_result: WorkerResult | None,
@@ -142,8 +247,10 @@ async def execute_pipeline(
     if not task.workers:
         raise PipelineConfigurationError("Pipeline requires at least one worker.")
 
-    hitl_checkpoints: set[int] = set(task.metadata.get("hitl_checkpoints", []))
+    started_ms = _time.perf_counter() * 1000
     blackboard = BlackboardStore()
+    hitl_checkpoints: set[int] = set(task.metadata.get("hitl_checkpoints", []))
+
     worker_results: list[WorkerResult] = []
     previous_result: WorkerResult | None = None
 
@@ -194,12 +301,12 @@ async def execute_pipeline(
         worker_results.append(worker_result)
 
         if worker_result.status != "success":
-            return PatternExecution(
+            return await _finalize_pipeline(
+                task=task,
                 worker_results=worker_results,
                 status=_failure_status(worker_results, worker_result),
-                aggregated_output=_last_success_output(worker_results),
-                error=worker_result.error or f"Worker '{worker_name}' failed.",
-                metadata=await _build_blackboard_metadata(blackboard),
+                blackboard=blackboard,
+                started_ms=started_ms,
             )
 
         await blackboard.set("last_worker", worker_result.worker)
@@ -246,11 +353,12 @@ async def execute_pipeline(
                 },
             )
 
-    return PatternExecution(
+    return await _finalize_pipeline(
+        task=task,
         worker_results=worker_results,
         status="success",
-        aggregated_output=worker_results[-1].output,
-        metadata=await _build_blackboard_metadata(blackboard),
+        blackboard=blackboard,
+        started_ms=started_ms,
     )
 
 
@@ -267,6 +375,7 @@ async def resume_pipeline(
     Rebuilds the blackboard from *blackboard_data* and continues executing
     remaining workers.  Returns the final ``PatternExecution``.
     """
+    started_ms = _time.perf_counter() * 1000
     blackboard = BlackboardStore.from_snapshot(blackboard_data)
     hitl_checkpoints: set[int] = set(task.metadata.get("hitl_checkpoints", []))
 
@@ -322,12 +431,12 @@ async def resume_pipeline(
         worker_results.append(worker_result)
 
         if worker_result.status != "success":
-            return PatternExecution(
+            return await _finalize_pipeline(
+                task=task,
                 worker_results=worker_results,
                 status=_failure_status(worker_results, worker_result),
-                aggregated_output=_last_success_output(worker_results),
-                error=worker_result.error or f"Worker '{worker_name}' failed.",
-                metadata=await _build_blackboard_metadata(blackboard),
+                blackboard=blackboard,
+                started_ms=started_ms,
             )
 
         await blackboard.set("last_worker", worker_result.worker)
@@ -374,11 +483,12 @@ async def resume_pipeline(
                 },
             )
 
-    return PatternExecution(
+    return await _finalize_pipeline(
+        task=task,
         worker_results=worker_results,
         status="success",
-        aggregated_output=worker_results[-1].output,
-        metadata=await _build_blackboard_metadata(blackboard),
+        blackboard=blackboard,
+        started_ms=started_ms,
     )
 
 

@@ -40,7 +40,7 @@ from kazma_core.swarm.reliability import (
     TimeoutGuard,
 )
 from kazma_core.swarm.reliability_registry import ReliabilityRegistry
-from kazma_core.swarm.router import CapabilityRouter, NoCapableWorkersError
+from kazma_core.routing_engine import UnifiedRouter, NoCapableWorkersError
 from kazma_core.swarm.task import (
     HandoffRecord,
     SwarmTask,
@@ -83,7 +83,6 @@ class SwarmEngine:
         config: SwarmConfig | None = None,
         *,
         result_aggregator: ResultAggregator | None = None,
-        capability_router: CapabilityRouter | None = None,
         task_store: TaskStore | None = None,
         metrics_collector: MetricsCollector | None = None,
         tracing_emitter: TracingEmitter | None = None,
@@ -96,13 +95,8 @@ class SwarmEngine:
         self._task_lock = asyncio.Lock()  # protects _task_history mutations
         self._max_history = 500  # LRU cap to prevent unbounded memory growth
         self._result_aggregator = result_aggregator or ResultAggregator()
-        self._capability_router = capability_router or CapabilityRouter()
-        from kazma_core.routing_engine import RoutingEngine, CapabilityRouterWrapper, SemanticRouterWrapper, DialectRouterWrapper
-        self._routing_engine = RoutingEngine([
-            SemanticRouterWrapper(),
-            DialectRouterWrapper(),
-            CapabilityRouterWrapper(self._capability_router),
-        ])
+        from kazma_core.routing_engine import UnifiedRouter
+        self._routing_engine = UnifiedRouter()
         # Reliability config delegated to ReliabilityRegistry (P2-1 refactor).
         self._reliability = ReliabilityRegistry(
             worker_names=lambda: list(self._workers.keys()),

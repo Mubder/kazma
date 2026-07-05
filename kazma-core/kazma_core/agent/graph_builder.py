@@ -331,6 +331,44 @@ async def tool_worker_node(
         logger.warning("[ToolWorker] No pending tool calls — routing back")
         return {"next_node": NodeName.SUPERVISOR}
 
+    # ── Check Circuit Breaker ──────────────────────────────────────
+    breaker_tripped = state.get("circuit_breaker_tripped", False) or (state.get("consecutive_tool_failures", 0) >= 2)
+    if breaker_tripped:
+        logger.warning("[ToolWorker] Circuit breaker is active! Bypassing all execution.")
+        results = [
+            ToolResult(
+                tool_call_id=tc["id"],
+                name=tc["name"],
+                content="SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now.",
+                is_error=True,
+                duration_ms=0.0,
+            )
+            for tc in pending
+        ]
+        # Build tool-role messages for the conversation
+        messages = list(state.get("messages", []))
+        tool_messages = [
+            {
+                "role": "tool",
+                "tool_call_id": tr["tool_call_id"],
+                "content": tr["content"],
+            }
+            for tr in results
+        ]
+        cumulative = dict(state.get("tool_results", {}))
+        for tr in results:
+            cumulative[tr["tool_call_id"]] = tr
+
+        return {
+            "messages": messages + tool_messages,
+            "tool_calls_pending": [],
+            "tool_calls_done": list(results),
+            "tool_results": cumulative,
+            "consecutive_tool_failures": state.get("consecutive_tool_failures", 0),
+            "circuit_breaker_tripped": True,
+            "next_node": NodeName.SUPERVISOR,
+        }
+
     logger.info("[ToolWorker] Executing %d tool calls", len(pending))
 
     # ── Bind session messages to the current async context ─────────
@@ -443,11 +481,17 @@ async def tool_worker_node(
 
         # ── Empty-Result Circuit Breaker ──────────────────────────────
         consecutive_failures = state.get("consecutive_tool_failures", 0)
-        
+        breaker_tripped_now = False
+
         # We process results, but instead of appending a stray system message,
         # we format the circuit breaker warning directly into the tool response
         # so we don't violate the API schema (1 tool response per tool call).
         for tr in results:
+            if breaker_tripped_now:
+                tr["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
+                tr["is_error"] = True
+                continue
+
             content_str = str(tr.get("content", "")).strip()
             is_empty_or_denied = (
                 not content_str or 
@@ -463,11 +507,10 @@ async def tool_worker_node(
                 consecutive_failures = 0
 
             if consecutive_failures >= 2:
-                logger.warning("[ToolWorker] Circuit breaker tripped! 2 consecutive tool failures.")
+                logger.warning("[ToolWorker] Circuit breaker tripped! %d consecutive tool failures.", consecutive_failures)
                 tr["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
-                consecutive_failures = 0  # reset after tripping
-                # We do NOT break here, because we must process any remaining
-                # tool calls in this batch to prevent HTTP 400 errors.
+                tr["is_error"] = True
+                breaker_tripped_now = True
 
         # Build tool-role messages for the conversation
         messages = list(state.get("messages", []))
@@ -492,6 +535,7 @@ async def tool_worker_node(
             "tool_calls_done": list(results),
             "tool_results": cumulative,
             "consecutive_tool_failures": consecutive_failures,
+            "circuit_breaker_tripped": breaker_tripped_now,
             "next_node": NodeName.SUPERVISOR,  # loop back
         }
     finally:

@@ -268,6 +268,8 @@ class InProcessWorker(SwarmWorker):
             # ── ReAct loop ────────────────────────────────────────────
             final_output = ""
             executed_tools: dict[str, str] = {}  # Track "tool_name:sorted_json_args" -> result_content
+            _circuit_breaker_tripped = False
+            self._consecutive_tool_failures = 0
 
             for iteration in range(1, MAX_ITERATIONS + 1):
                 response = await provider.chat(
@@ -321,69 +323,81 @@ class InProcessWorker(SwarmWorker):
 
                 # Execute each tool call and append the result.
                 for tc in response.tool_calls:
-                    tc_args_str = _json.dumps(tc.arguments, sort_keys=True)
-                    tc_key = f"{tc.name}:{tc_args_str}"
-
-                    # 1. Loop-Prevention Intercept
-                    if tc_key in executed_tools:
-                        prev_res = executed_tools[tc_key]
+                    if _circuit_breaker_tripped:
                         logger.warning(
-                            "[InProcessWorker:%s] Loop detected! Tool '%s' called with identical args.",
+                            "[InProcessWorker:%s] Circuit breaker is active! Bypassing tool execution for '%s'.",
                             self.name, tc.name
                         )
-                        result_content = (
-                            f"System Note: You already executed '{tc.name}' with these identical arguments. "
-                            f"The previous result was: '{prev_res}'. "
-                            f"Repeating this call is forbidden and will not change the outcome. "
-                            f"Please either try a different search query variation, use an alternative tool, "
-                            f"or formulate your final response using available knowledge."
-                        )
-                        result = {"content": result_content, "is_error": True}
+                        result = {
+                            "content": "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now.",
+                            "is_error": True,
+                        }
                     else:
-                        # 2. Fresh Tool Execution
-                        if tool_registry is None:
-                            result = {
-                                "content": "Tool execution unavailable: registry not loaded.",
-                                "is_error": True,
-                            }
+                        tc_args_str = _json.dumps(tc.arguments, sort_keys=True)
+                        tc_key = f"{tc.name}:{tc_args_str}"
+
+                        # 1. Loop-Prevention Intercept
+                        if tc_key in executed_tools:
+                            prev_res = executed_tools[tc_key]
+                            logger.warning(
+                                "[InProcessWorker:%s] Loop detected! Tool '%s' called with identical args.",
+                                self.name, tc.name
+                            )
+                            result_content = (
+                                f"System Note: You already executed '{tc.name}' with these identical arguments. "
+                                f"The previous result was: '{prev_res}'. "
+                                f"Repeating this call is forbidden and will not change the outcome. "
+                                f"Please either try a different search query variation, use an alternative tool, "
+                                f"or formulate your final response using available knowledge."
+                            )
+                            result = {"content": result_content, "is_error": True}
                         else:
-                            try:
-                                result = await tool_registry.execute(tc.name, tc.arguments)
-                                # Record result content for deduplication
-                                executed_tools[tc_key] = result.get("content", "")
-                            except Exception:
-                                logger.exception(
-                                    "[InProcessWorker:%s] tool %s execution failed",
-                                    self.name, tc.name,
-                                )
+                            # 2. Fresh Tool Execution
+                            if tool_registry is None:
                                 result = {
-                                    "content": f"Tool execution error: {tc.name}",
+                                    "content": "Tool execution unavailable: registry not loaded.",
                                     "is_error": True,
                                 }
-                    # 3. Universal Empty-Result Circuit Breaker
-                    content_str = str(result.get("content", "")).strip()
-                    is_empty_or_denied = (
-                        not content_str or 
-                        content_str == "[]" or 
-                        "no results" in content_str.lower() or 
-                        "denied by user" in content_str.lower() or
-                        result.get("is_error", False)
-                    )
-                    
-                    if is_empty_or_denied:
-                        self._consecutive_tool_failures += 1
-                    else:
-                        self._consecutive_tool_failures = 0
+                            else:
+                                try:
+                                    result = await tool_registry.execute(tc.name, tc.arguments)
+                                    # Record result content for deduplication
+                                    executed_tools[tc_key] = result.get("content", "")
+                                except Exception:
+                                    logger.exception(
+                                        "[InProcessWorker:%s] tool %s execution failed",
+                                        self.name, tc.name,
+                                    )
+                                    result = {
+                                        "content": f"Tool execution error: {tc.name}",
+                                        "is_error": True,
+                                    }
 
-                    if self._consecutive_tool_failures >= 2:
-                        logger.warning(
-                            "[InProcessWorker:%s] Circuit breaker tripped! 2 consecutive tool failures for %s.",
-                            self.name, tc.name
+                        # 3. Universal Empty-Result Circuit Breaker
+                        content_str = str(result.get("content", "")).strip()
+                        is_empty_or_denied = (
+                            not content_str or 
+                            content_str == "[]" or 
+                            "no results" in content_str.lower() or 
+                            "denied by user" in content_str.lower() or
+                            result.get("is_error", False)
                         )
-                        result["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
-                        self._consecutive_tool_failures = 0
-                        # We do NOT break here. The tool loop must continue to process
-                        # remaining tool calls in the batch to avoid HTTP 400 errors.
+                        
+                        if is_empty_or_denied:
+                            self._consecutive_tool_failures += 1
+                        else:
+                            self._consecutive_tool_failures = 0
+
+                        if self._consecutive_tool_failures >= 2:
+                            logger.warning(
+                                "[InProcessWorker:%s] Circuit breaker tripped! %d consecutive tool failures for %s.",
+                                self.name, self._consecutive_tool_failures, tc.name
+                            )
+                            result["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
+                            result["is_error"] = True
+                            _circuit_breaker_tripped = True
+                            # We do NOT break here. The tool loop must continue to process
+                            # remaining tool calls in the batch to avoid HTTP 400 errors.
 
                     messages.append({
                         "role": "tool",
