@@ -230,7 +230,8 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         except httpx.HTTPStatusError as e:
             return {"success": False, "error": f"HTTP {e.response.status_code}: {e.response.text[:200]}"}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            logger.debug("Provider test failed: %s", e)
+            return {"success": False, "error": "Connection test failed unexpectedly"}
 
     # ── Models ───────────────────────────────────────────────────────
 

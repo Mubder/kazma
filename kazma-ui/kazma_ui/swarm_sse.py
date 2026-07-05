@@ -30,23 +30,10 @@ logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# SSE frame helper
+# SSE frame helper (imported from shared utility)
 # ══════════════════════════════════════════════════════════════════════════
 
-
-def _sse_frame(event: str, data: str | dict[str, Any] | list[Any]) -> str:
-    """Format a single SSE frame.
-
-    Args:
-        event: The event type name.
-        data: Payload -- dict/list is JSON-serialized, str is used as-is.
-
-    Returns:
-        Formatted SSE string: ``event: <type>\\ndata: <json>\\n\\n``
-    """
-    if isinstance(data, (dict, list)):
-        data = json.dumps(data, ensure_ascii=False)
-    return f"event: {event}\ndata: {data}\n\n"
+from kazma_ui.sse_utils import sse_frame as _sse_frame
 
 
 # ══════════════════════════════════════════════════════════════════════════

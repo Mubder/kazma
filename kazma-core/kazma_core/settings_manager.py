@@ -421,32 +421,44 @@ class SettingsManager:
             return {"success": False, "error": f"No token configured for {platform_name}"}
 
         if platform_name == "telegram":
-            import httpx
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        return {"success": True, "bot_name": data.get("result", {}).get("username", "")}
-                    return {"success": False, "error": f"HTTP {resp.status_code}"}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
+            return await self._test_http_connector(
+                f"https://api.telegram.org/bot{token}/getMe",
+                headers=None,
+                name_key="result.username",
+            )
         elif platform_name == "discord":
-            import httpx
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get(
-                        "https://discord.com/api/v10/users/@me",
-                        headers={"Authorization": f"Bot {token}"},
-                    )
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        return {"success": True, "bot_name": data.get("username", "")}
-                    return {"success": False, "error": f"HTTP {resp.status_code}"}
-            except Exception as e:
-                return {"success": False, "error": str(e)}
+            return await self._test_http_connector(
+                "https://discord.com/api/v10/users/@me",
+                headers={"Authorization": f"Bot {token}"},
+                name_key="username",
+            )
         else:
             return {"success": True, "message": f"Token configured for {platform_name}. Restart gateway to verify."}
+
+    @staticmethod
+    async def _test_http_connector(
+        url: str,
+        headers: dict[str, str] | None,
+        name_key: str,
+    ) -> dict[str, Any]:
+        """Shared HTTP connector test for Telegram/Discord."""
+        import httpx
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Navigate dotted key path (e.g. "result.username")
+                    val: Any = data
+                    for part in name_key.split("."):
+                        val = val.get(part, "") if isinstance(val, dict) else ""
+                    return {"success": True, "bot_name": val}
+                return {"success": False, "error": f"HTTP {resp.status_code}"}
+        except httpx.ConnectError:
+            return {"success": False, "error": "Cannot connect to service"}
+        except Exception as e:
+            logger.debug("Connector test failed: %s", e)
+            return {"success": False, "error": "Connection test failed"}
 
     def get_connector_status(self, platform_name: str) -> dict[str, Any]:
         """Check if a connector is configured and has a token."""
@@ -935,34 +947,34 @@ class SettingsManager:
 
         items: list[tuple[str, Any, str]] = []
 
-        def _flatten(d: dict, prefix: str = "") -> None:
+        def _flatten_to_items(d: dict, prefix: str = "") -> None:
             for k, v in d.items():
                 full_key = f"{prefix}.{k}" if prefix else k
                 if isinstance(v, dict):
-                    _flatten(v, full_key)
+                    _flatten_to_items(v, full_key)
                 else:
                     cat = prefix.split(".")[0] if prefix else "general"
                     items.append((full_key, v, cat))
 
-        _flatten(parsed)
+        _flatten_to_items(parsed)
         return self._cs.batch_set(items)
 
     def get_config_diff(self, old_config: dict[str, Any], new_config: dict[str, Any]) -> dict[str, Any]:
         """Compare two config dicts and return differences."""
         diff: dict[str, Any] = {"added": {}, "removed": {}, "changed": {}}
 
-        def _flatten(d: dict, prefix: str = "") -> dict[str, Any]:
+        def _flatten_to_dict(d: dict, prefix: str = "") -> dict[str, Any]:
             result: dict[str, Any] = {}
             for k, v in d.items():
                 full_key = f"{prefix}.{k}" if prefix else k
                 if isinstance(v, dict):
-                    result.update(_flatten(v, full_key))
+                    result.update(_flatten_to_dict(v, full_key))
                 else:
                     result[full_key] = v
             return result
 
-        old_flat = _flatten(old_config)
-        new_flat = _flatten(new_config)
+        old_flat = _flatten_to_dict(old_config)
+        new_flat = _flatten_to_dict(new_config)
 
         for key, value in new_flat.items():
             if key not in old_flat:
