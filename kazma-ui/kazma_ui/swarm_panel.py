@@ -68,12 +68,25 @@ def _create_empty_engine(task_store: Any = None) -> Any:
     return SwarmEngine(SwarmConfig(enabled=True, workers=[]), task_store=store)
 
 
-_SHARED_TASK_STORE: Any | None = None
+class _SharedTaskStore:
+    """Encapsulated shared task store state (replaces bare module-level global)."""
+    _instance: Any | None = None
+
+    @classmethod
+    def get(cls) -> Any | None:
+        return cls._instance
+
+    @classmethod
+    def set(cls, value: Any | None) -> None:
+        cls._instance = value
+
+    @classmethod
+    def reset(cls) -> None:
+        cls._instance = None
 
 
 def _resolve_engine(swarm_manager: Any = None) -> Any:
     """Resolve the engine used by the router at request time."""
-    global _SHARED_TASK_STORE
     if not _has_swarm_core():
         return None
 
@@ -88,10 +101,10 @@ def _resolve_engine(swarm_manager: Any = None) -> Any:
             engine = get_swarm_engine()
 
     if engine is None:
-        engine = _create_empty_engine(_SHARED_TASK_STORE)
+        engine = _create_empty_engine(_SharedTaskStore.get())
     else:
         # Share the existing engine's task store with fallback engines.
-        _SHARED_TASK_STORE = getattr(engine, "task_store", None) or _SHARED_TASK_STORE
+        _SharedTaskStore.set(getattr(engine, "task_store", None) or _SharedTaskStore.get())
     if engine is not None:
         set_swarm_engine(engine)
     return engine
@@ -99,10 +112,9 @@ def _resolve_engine(swarm_manager: Any = None) -> Any:
 
 def _reset_swarm_state() -> None:
     """Reset the shared engine for tests."""
-    global _SHARED_TASK_STORE
     if not _has_swarm_core():
         return
-    _SHARED_TASK_STORE = None
+    _SharedTaskStore.reset()
     engine = _create_empty_engine()
     # Clear persisted task/metric data so tests start with a clean slate.
     store = getattr(engine, "_task_store", None)

@@ -93,6 +93,34 @@ class ModelRegistry:
 
     # ── Active profile management ──────────────────────────────────
 
+    def _resolve_provider_config(
+        self, provider_name: str, model: str = "",
+    ) -> tuple[str, str, str, str]:
+        """Resolve provider config from stored providers or legacy llm.* keys.
+
+        Returns (provider_name, base_url, api_key, model).
+        Falls back to legacy ``llm.*`` keys when no stored provider entry
+        exists.
+        """
+        provider_entry = self.get_provider(provider_name) if provider_name else None
+        base_url = ""
+        api_key = ""
+        effective_model = model
+
+        if provider_entry:
+            base_url = str(provider_entry.get("base_url", ""))
+            api_key = str(provider_entry.get("api_key", ""))
+        else:
+            # Fallback: legacy llm.* keys
+            base_url = str(self._config_store.get("llm.base_url", "") or "")
+            api_key = str(self._config_store.get("llm.api_key", "") or "")
+            if not effective_model:
+                effective_model = str(self._config_store.get("llm.model", "") or "")
+            if not provider_name:
+                provider_name = "custom"
+
+        return provider_name, base_url, api_key, effective_model
+
     def get_active_profile(self) -> dict[str, str]:
         """Return the active provider profile.
 
@@ -100,26 +128,9 @@ class ModelRegistry:
         ``api_key`` (masked).  Falls back to legacy ``llm.*`` keys when no
         active profile has been explicitly set.
         """
-        provider_name = self._active_provider
-        model = self._active_model
-
-        # Try to resolve from stored providers first
-        provider_entry = self.get_provider(provider_name) if provider_name else None
-
-        base_url = ""
-        api_key = ""
-
-        if provider_entry:
-            base_url = str(provider_entry.get("base_url", ""))
-            api_key = str(provider_entry.get("api_key", ""))
-        elif not provider_name or not provider_entry:
-            # Fallback: legacy llm.* keys
-            base_url = str(self._config_store.get("llm.base_url", "") or "")
-            api_key = str(self._config_store.get("llm.api_key", "") or "")
-            if not model:
-                model = str(self._config_store.get("llm.model", "") or "")
-            if not provider_name:
-                provider_name = "custom"
+        provider_name, base_url, api_key, model = self._resolve_provider_config(
+            self._active_provider, self._active_model,
+        )
 
         masked_key = "***" if api_key else ""
         return {
@@ -262,18 +273,12 @@ class ModelRegistry:
         if model is None and provider_name in self._clients:
             return self._clients[provider_name]
 
-        provider_entry = self.get_provider(provider_name)
-        base_url = ""
-        api_key = ""
-        if provider_entry:
-            base_url = str(provider_entry.get("base_url", ""))
-            api_key = str(provider_entry.get("api_key", ""))
+        # Resolve provider config (shared with get_active_profile)
+        _, base_url, api_key, effective_model = self._resolve_provider_config(
+            provider_name, effective_model,
+        )
 
-        if not base_url:
-            # Fallback to legacy keys
-            base_url = str(self._config_store.get("llm.base_url", "") or "")
-        if not api_key:
-            api_key = str(self._config_store.get("llm.api_key", "") or "")
+        # Fallback model if still empty
         if not effective_model:
             effective_model = str(self._config_store.get("llm.model", "") or "gpt-4o-mini")
 
@@ -287,13 +292,14 @@ class ModelRegistry:
         if provider_name.lower() == "google":
             from kazma_core.google_llm import GeminiProvider
 
+            google_entry = self.get_provider(provider_name)
             location = str(
-                provider_entry.get("location", "")
-                if provider_entry else ""
+                google_entry.get("location", "")
+                if google_entry else ""
             ) or "us-central1"
             project_id = str(
-                provider_entry.get("project_id", "")
-                if provider_entry else ""
+                google_entry.get("project_id", "")
+                if google_entry else ""
             )
             client = GeminiProvider(config, project_id=project_id, location=location)
         else:
