@@ -279,6 +279,18 @@ class CommandPalette(ModalScreen[str | None]):
         
         cmd_id = getattr(event.item, "_cmd_id", "")
         if not cmd_id:
+            # Fallback to standard Textual render string extraction (Textual 8.2.7 compliant):
+            try:
+                text = str(event.item.query_one(Static).render()).strip()
+                # Parse cmd_id from rendered text, e.g. "  /clear    Clear chat"
+                parts = text.split()
+                if parts:
+                    cmd_id = parts[0].strip()
+            except Exception as exc:
+                logger.debug("Failed to extract command via render fallback: %s", exc)
+                return
+        
+        if not cmd_id:
             return
         
         # Track recent command
