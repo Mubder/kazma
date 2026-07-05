@@ -121,6 +121,10 @@ class SupervisorState(TypedDict, total=False):
     created_at: str
     """ISO-8601 UTC timestamp of state creation."""
 
+    # ── Circuit Breaker ─────────────────────────────────────────────
+    consecutive_empty_searches: int
+    """Counter for consecutive empty results from data-fetching tools."""
+
 
 # ── Factory ─────────────────────────────────────────────────────────────
 
@@ -154,4 +158,5 @@ def initial_supervisor_state(
         snapshot_id="",
         snapshot_iteration=-1,
         created_at=now,
+        consecutive_empty_searches=0,
     )

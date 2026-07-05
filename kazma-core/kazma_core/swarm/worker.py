@@ -47,6 +47,7 @@ class SwarmWorker(ABC):
     last_heartbeat: str | None = field(default=None, init=False)
     logs: list[str] = field(default_factory=list, init=False)
     _running: bool = field(default=False, init=False, repr=False)
+    _consecutive_empty_searches: int = field(default=0, init=False, repr=False)
 
     @abstractmethod
     async def dispatch(
@@ -188,6 +189,11 @@ class InProcessWorker(SwarmWorker):
         MAX_ITERATIONS = 15
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
         logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")
+        
+        # Initialize variables before try block so exception handler can access them safely
+        total_tokens = 0
+        total_cost = 0.0
+        last_content = ""
         dispatch_started = time.monotonic()
         try:
             from kazma_core.model_registry import get_model_registry
@@ -260,12 +266,7 @@ class InProcessWorker(SwarmWorker):
             messages.append({"role": "user", "content": user_content})
 
             # ── ReAct loop ────────────────────────────────────────────
-            total_tokens = 0
-            total_cost = 0.0
             final_output = ""
-            # Track the last non-empty content so partial progress is
-            # preserved if provider.chat() raises on a later iteration.
-            last_content = ""
             executed_tools: dict[str, str] = {}  # Track "tool_name:sorted_json_args" -> result_content
 
             for iteration in range(1, MAX_ITERATIONS + 1):
@@ -364,6 +365,34 @@ class InProcessWorker(SwarmWorker):
                         "tool_call_id": tc.id,
                         "content": result.get("content", ""),
                     })
+
+                    # 3. Empty-Result Circuit Breaker
+                    name_lower = tc.name.lower()
+                    if "search" in name_lower or "exec" in name_lower or "fetch" in name_lower:
+                        content_str = str(result.get("content", "")).strip()
+                        is_empty_or_denied = (
+                            not content_str or 
+                            content_str == "[]" or 
+                            "no results" in content_str.lower() or 
+                            "denied by user" in content_str.lower() or
+                            result.get("is_error", False)
+                        )
+                        if is_empty_or_denied:
+                            self._consecutive_empty_searches += 1
+                        else:
+                            self._consecutive_empty_searches = 0
+
+                        if self._consecutive_empty_searches >= 2:
+                            logger.warning(
+                                "[InProcessWorker:%s] Circuit breaker tripped! 2 consecutive empty/denied results for %s.",
+                                self.name, tc.name
+                            )
+                            messages.append({
+                                "role": "system",
+                                "content": "SYSTEM ERROR: The network environment is blind or blocked. You are forbidden from calling web_search or shell_exec again for this task. Synthesize your final response immediately based exclusively on your baseline knowledge or local files."
+                            })
+                            self._consecutive_empty_searches = 0
+                            break  # break tool execution loop to let LLM respond
 
             else:
                 # Iteration limit exhausted — return the last response we got.

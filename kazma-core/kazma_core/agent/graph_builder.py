@@ -453,6 +453,32 @@ async def tool_worker_node(
                 }
             )
 
+        # ── Empty-Result Circuit Breaker ──────────────────────────────
+        consecutive_empty = state.get("consecutive_empty_searches", 0)
+        for tr in results:
+            name_lower = tr["name"].lower()
+            if "search" in name_lower or "exec" in name_lower or "fetch" in name_lower:
+                content_str = str(tr.get("content", "")).strip()
+                is_empty_or_denied = (
+                    not content_str or 
+                    content_str == "[]" or 
+                    "no results" in content_str.lower() or 
+                    "denied by user" in content_str.lower()
+                )
+                if is_empty_or_denied:
+                    consecutive_empty += 1
+                else:
+                    consecutive_empty = 0
+
+                if consecutive_empty >= 2:
+                    logger.warning("[ToolWorker] Circuit breaker tripped! 2 consecutive empty/denied results.")
+                    tool_messages.append({
+                        "role": "system",
+                        "content": "SYSTEM ERROR: The network environment is blind or blocked. You are forbidden from calling web_search or shell_exec again for this task. Synthesize your final response immediately based exclusively on your baseline knowledge or local files."
+                    })
+                    consecutive_empty = 0  # reset after tripping
+                    break
+
         # Merge into cumulative tool_results
         cumulative = dict(state.get("tool_results", {}))
         for tr in results:
@@ -463,6 +489,7 @@ async def tool_worker_node(
             "tool_calls_pending": [],  # all consumed
             "tool_calls_done": list(results),
             "tool_results": cumulative,
+            "consecutive_empty_searches": consecutive_empty,
             "next_node": NodeName.SUPERVISOR,  # loop back
         }
     finally:
