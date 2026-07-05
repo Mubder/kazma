@@ -52,6 +52,7 @@ def initialize_model_registry(config_store: Any) -> ModelRegistry:
     global _registry
     _registry = ModelRegistry(config_store)
     _registry._deserialize()
+    _registry._seed_missing_presets()
     return _registry
 
 

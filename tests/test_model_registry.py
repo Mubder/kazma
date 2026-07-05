@@ -57,6 +57,17 @@ class TestSingletonLifecycle:
         registry = initialize_model_registry(config_store)
         assert isinstance(registry, ModelRegistry)
 
+    def test_initialize_seeds_default_presets(self, config_store):
+        from kazma_core.model_registry import initialize_model_registry
+
+        registry = initialize_model_registry(config_store)
+        providers = registry.list_providers()
+        names = [p["name"] for p in providers]
+        assert "openai" in names
+        assert "anthropic" in names
+        assert "deepseek" in names
+        assert "google" in names
+
     def test_get_returns_same_instance(self, config_store):
         from kazma_core.model_registry import get_model_registry, initialize_model_registry
 
