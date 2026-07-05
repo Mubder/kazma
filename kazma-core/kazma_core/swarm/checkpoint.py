@@ -42,6 +42,7 @@ class _PausedPipeline:
     worker_results: list[WorkerResult]
     blackboard_data: dict[str, Any]
     approval_event: asyncio.Event = field(default_factory=asyncio.Event)
+    completion_event: asyncio.Event = field(default_factory=asyncio.Event)
     timeout_task: asyncio.Task[None] | None = None
     final_result: TaskResult | None = None
 
@@ -123,8 +124,9 @@ class HITLCheckpointHandler:
         # Signal the engine to resume.
         entry.approval_event.set()
 
-        # Wait for the pipeline to complete.
-        await entry.approval_event.wait()
+        # Wait for the pipeline to complete (completion_event is set by
+        # complete_pipeline() once final_result is populated).
+        await entry.completion_event.wait()
 
         # Return the final result once available.
         return entry.final_result
@@ -171,6 +173,9 @@ class HITLCheckpointHandler:
         entry.task.completed_at = datetime.now(UTC).isoformat()
         entry.task.result = result
 
+        # Signal any waiting approve() callers that the result is ready.
+        entry.completion_event.set()
+
         # Remove from active pausing.
         self._paused.pop(task_id, None)
         return result
@@ -188,7 +193,7 @@ class HITLCheckpointHandler:
         if entry:
             entry.final_result = result
             # Signal waiters (approve callers) that the result is ready.
-            entry.approval_event.set()
+            entry.completion_event.set()
             # Clean up.
             self._paused.pop(task_id, None)
 
