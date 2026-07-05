@@ -266,6 +266,7 @@ class InProcessWorker(SwarmWorker):
             # Track the last non-empty content so partial progress is
             # preserved if provider.chat() raises on a later iteration.
             last_content = ""
+            executed_tools: dict[str, str] = {}  # Track "tool_name:sorted_json_args" -> result_content
 
             for iteration in range(1, MAX_ITERATIONS + 1):
                 response = await provider.chat(
@@ -319,23 +320,45 @@ class InProcessWorker(SwarmWorker):
 
                 # Execute each tool call and append the result.
                 for tc in response.tool_calls:
-                    if tool_registry is None:
-                        result = {
-                            "content": "Tool execution unavailable: registry not loaded.",
-                            "is_error": True,
-                        }
+                    tc_args_str = _json.dumps(tc.arguments, sort_keys=True)
+                    tc_key = f"{tc.name}:{tc_args_str}"
+
+                    # 1. Loop-Prevention Intercept
+                    if tc_key in executed_tools:
+                        prev_res = executed_tools[tc_key]
+                        logger.warning(
+                            "[InProcessWorker:%s] Loop detected! Tool '%s' called with identical args.",
+                            self.name, tc.name
+                        )
+                        result_content = (
+                            f"System Note: You already executed '{tc.name}' with these identical arguments. "
+                            f"The previous result was: '{prev_res}'. "
+                            f"Repeating this call is forbidden and will not change the outcome. "
+                            f"Please either try a different search query variation, use an alternative tool, "
+                            f"or formulate your final response using available knowledge."
+                        )
+                        result = {"content": result_content, "is_error": True}
                     else:
-                        try:
-                            result = await tool_registry.execute(tc.name, tc.arguments)
-                        except Exception:
-                            logger.exception(
-                                "[InProcessWorker:%s] tool %s execution failed",
-                                self.name, tc.name,
-                            )
+                        # 2. Fresh Tool Execution
+                        if tool_registry is None:
                             result = {
-                                "content": f"Tool execution error: {tc.name}",
+                                "content": "Tool execution unavailable: registry not loaded.",
                                 "is_error": True,
                             }
+                        else:
+                            try:
+                                result = await tool_registry.execute(tc.name, tc.arguments)
+                                # Record result content for deduplication
+                                executed_tools[tc_key] = result.get("content", "")
+                            except Exception:
+                                logger.exception(
+                                    "[InProcessWorker:%s] tool %s execution failed",
+                                    self.name, tc.name,
+                                )
+                                result = {
+                                    "content": f"Tool execution error: {tc.name}",
+                                    "is_error": True,
+                                }
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,

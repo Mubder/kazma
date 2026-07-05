@@ -489,3 +489,76 @@ class TestDispatchErrorPath:
         assert result["output"] == ""
         assert result["tokens_used"] == 0
         assert result["cost"] == 0.0
+
+
+class TestWorkerToolDeduplication:
+    """The ReAct loop deduplicates identical tool calls and injects system notes."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_tool_call_intercepted_and_warned(self):
+        """Identical tool calls are intercepted, warning returned without execution."""
+        from kazma_core.swarm.worker import InProcessWorker
+        from kazma_core.swarm.task import WorkerCapabilities
+
+        worker = InProcessWorker(
+            name="test",
+            role="researcher",
+            capabilities=WorkerCapabilities(role="researcher", tools=["web_search"]),
+        )
+
+        mock_provider = MagicMock()
+        mock_provider.chat = AsyncMock(
+            side_effect=[
+                # Call 1: Model issues a search
+                _make_response(
+                    tool_calls=[
+                        _make_tool_call("c1", "web_search", {"query": "kazma.ai"})
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                # Call 2: Model stubbornly repeats the search
+                _make_response(
+                    tool_calls=[
+                        _make_tool_call("c2", "web_search", {"query": "kazma.ai"})
+                    ],
+                    finish_reason="tool_calls",
+                ),
+                # Call 3: Model yields a final answer
+                _make_response(content="I verified no results exist for kazma.ai."),
+            ]
+        )
+        mock_registry = MagicMock()
+        mock_registry.get_client = MagicMock(return_value=mock_provider)
+
+        with patch(
+            "kazma_core.model_registry.get_model_registry",
+            return_value=mock_registry,
+        ):
+            with patch(
+                "kazma_core.agent.tool_registry.get_tool_registry",
+            ) as mock_get_tr:
+                mock_tr = MagicMock()
+                mock_tr.get_tool_definitions.return_value = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "web_search",
+                            "description": "search",
+                            "parameters": {},
+                        },
+                    }
+                ]
+                mock_tr.execute = AsyncMock(
+                    return_value={"content": "No results found for: kazma.ai", "is_error": False}
+                )
+                mock_get_tr.return_value = mock_tr
+
+                result = await worker.dispatch("search for kazma.ai")
+
+        assert result["status"] == "success"
+        assert result["output"] == "I verified no results exist for kazma.ai."
+        # Tool execution must have been called ONLY once because the second call was intercepted!
+        assert mock_tr.execute.call_count == 1
+        # Chat loop called exactly 3 times
+        assert mock_provider.chat.call_count == 3
+
