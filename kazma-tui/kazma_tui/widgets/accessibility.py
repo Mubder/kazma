@@ -218,8 +218,8 @@ class AccessibleStatusIndicator(AccessibleWidget):
         # Update displayed text
         try:
             self.query_one(Static).update(self.accessible_label)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Status indicator update failed: %s", exc)
     
     def get_accessibility_info(self) -> dict:
         """Return enhanced accessibility info."""
@@ -337,16 +337,16 @@ class HighContrastMode:
                     tie_breaker=tie_breaker,
                     scope=scope,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("CSS source copy failed: %s", exc)
         # Add high contrast overrides
         ss.add_source(self.HIGH_CONTRAST_CSS, path="<high-contrast>")
         ss.apply(self.app)
         self.app.stylesheet = ss
         try:
             self.app.refresh_css()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("CSS refresh failed: %s", exc)
     
     def disable(self) -> None:
         """Disable high contrast mode."""
@@ -478,8 +478,8 @@ class FocusTrap(ModalScreen):
         """Dismiss without returning AwaitComplete (Textual 8.x crash fix)."""
         try:
             self.dismiss(result)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Modal dismiss failed: %s", exc)
     
     BINDINGS = [
         ("enter", "confirm", "Confirm"),

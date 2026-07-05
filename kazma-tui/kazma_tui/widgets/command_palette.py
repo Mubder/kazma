@@ -269,8 +269,8 @@ class CommandPalette(ModalScreen[str | None]):
                 info.update(f"{count or 0}/{total} matches • ESC to close")
             else:
                 info.update(f"{len(self._all_commands)} commands • Type to filter")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Search info update failed: %s", exc)
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle command selection."""
@@ -306,16 +306,16 @@ class CommandPalette(ModalScreen[str | None]):
         if cmd_id == "next-tab":
             try:
                 self.app.action_next_tab()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Next tab action failed: %s", exc)
             self._safe_dismiss(cmd_id)
             return
         
         if cmd_id == "prev-tab":
             try:
                 self.app.action_prev_tab()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Prev tab action failed: %s", exc)
             self._safe_dismiss(cmd_id)
             return
         
@@ -335,8 +335,8 @@ class CommandPalette(ModalScreen[str | None]):
                 action_method = getattr(self.app, f"action_{action_name}", None)
                 if action_method:
                     action_method()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Command action failed: %s", exc)
             self._safe_dismiss(cmd_id)
             return
         
@@ -357,16 +357,16 @@ class CommandPalette(ModalScreen[str | None]):
         """
         try:
             self.dismiss(result)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Palette dismiss failed: %s", exc)
 
     def _switch_tab(self, tab_id: str) -> None:
         """Switch to specified tab."""
         try:
             tabs = self.app.query_one(TabbedContent)
             tabs.active = tab_id
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Tab switch failed: %s", exc)
 
     def _route_to_chat(self, cmd: str) -> None:
         """Send slash command to chat panel."""
@@ -377,8 +377,8 @@ class CommandPalette(ModalScreen[str | None]):
             if cmd == "/clear":
                 try:
                     self.app.query_one("#chat-log", RichLog).clear()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Chat log clear failed: %s", exc)
             elif cmd == "/help":
                 chat.write("system", "Commands: /clear, /help, /model, /export")
             elif cmd == "/model":
@@ -387,8 +387,8 @@ class CommandPalette(ModalScreen[str | None]):
                     chat.write("system", get_model_list_text("tui"))
                 except Exception:
                     chat.write("error", "Model registry unavailable")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Route to chat failed: %s", exc)
 
     def key_escape(self) -> None:
         """Dismiss on escape."""
@@ -399,16 +399,16 @@ class CommandPalette(ModalScreen[str | None]):
         try:
             lst = self.query_one(ListView)
             lst.action_cursor_up()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Cursor up failed: %s", exc)
 
     def action_cursor_down(self) -> None:
         """Move cursor down in list."""
         try:
             lst = self.query_one(ListView)
             lst.action_cursor_down()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Cursor down failed: %s", exc)
 
     def action_select(self) -> None:
         """Select highlighted item."""
@@ -419,8 +419,8 @@ class CommandPalette(ModalScreen[str | None]):
                 self.on_list_view_selected(
                     ListView.Selected(lst, child, lst.index)
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Select action failed: %s", exc)
 
     def action_delete_prev_word(self) -> None:
         """Delete previous word in search input."""
@@ -431,5 +431,5 @@ class CommandPalette(ModalScreen[str | None]):
                 input_widget.value = words[0]
             else:
                 input_widget.value = ""
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Delete prev word failed: %s", exc)

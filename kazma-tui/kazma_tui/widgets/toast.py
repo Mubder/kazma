@@ -102,8 +102,8 @@ class Toast(ModalScreen[None]):
         """
         try:
             self.dismiss()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Toast dismiss failed: %s", exc)
 
     def key_escape(self) -> None:
         """Allow manual dismiss with Escape key."""

@@ -150,8 +150,8 @@ class SettingsPanel(VerticalScroll):
             try:
                 btn = self.query_one(f"#theme-{theme_name}", Button)
                 btn.variant = "primary" if theme_name == current else "default"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Theme button update failed: %s", exc)
 
     def on_selection_list_selected_changed(self, event: SelectionList.SelectedChanged) -> None:
         sel = event.selection_list

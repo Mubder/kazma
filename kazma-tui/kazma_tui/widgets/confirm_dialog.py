@@ -113,5 +113,5 @@ class ConfirmDialog(ModalScreen[bool]):
         """Dismiss without returning an awaitable from a message handler."""
         try:
             self.dismiss(result)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("ConfirmDialog dismiss failed: %s", exc)

@@ -215,8 +215,8 @@ class TutorialScreen(ModalScreen[bool]):
             self.query_one("#btn-next", Button).set_class(False, "hidden")
             self.query_one("#btn-finish", Button).set_class(True, "hidden")
             self.query_one("#btn-next", Button).focus()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Tutorial button update failed: %s", exc)
 
     def _update_step(self) -> None:
         """Update UI for current step."""
@@ -296,8 +296,8 @@ class TutorialScreen(ModalScreen[bool]):
                 json.dumps(existing, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Tutorial prefs save failed: %s", exc)
         # Use call_next to schedule dismiss after current message is processed
         self.call_next(self._do_dismiss, completed)
 
@@ -305,8 +305,8 @@ class TutorialScreen(ModalScreen[bool]):
         """Actually dismiss the screen (called via call_next)."""
         try:
             self.dismiss(completed)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Tutorial dismiss failed: %s", exc)
 
     def key_escape(self) -> None:
         """Allow escape to skip."""
