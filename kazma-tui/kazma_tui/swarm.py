@@ -95,8 +95,8 @@ class SwarmTasksTable(DataTable):
                     ", ".join(t.workers[:3]) if t.workers else "",
                     dur,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Task history refresh failed: %s", exc)
 
     @staticmethod
     def _task_duration(t: object) -> str:
@@ -110,8 +110,8 @@ class SwarmTasksTable(DataTable):
                 end = datetime.fromisoformat(completed)
                 secs = (end - start).total_seconds()
                 return f"{secs:.1f}s"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Task duration calc failed: %s", exc)
         return "—"
 
     def on_show(self) -> None:
@@ -142,8 +142,8 @@ class ActiveTasksLog(RichLog):
                 return
             for t in active:
                 self.write(f"[#22d3ee]●[/] {t.id[:12]} [{t.status}] {t.prompt[:60]}")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Active tasks refresh failed: %s", exc)
 
     def on_show(self) -> None:
         self.clear()

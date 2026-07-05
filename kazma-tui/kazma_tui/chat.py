@@ -142,8 +142,8 @@ class ChatPanel(Vertical):
             # Re-enable input
             try:
                 self.query_one("#chat-input", Input).disabled = False
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Re-enable input failed: %s", exc)
 
     # ── Input handling ─────────────────────────────────────────────
 
@@ -422,8 +422,8 @@ class ChatPanel(Vertical):
             prompt = cs.get("system_prompt")
             if prompt:
                 return str(prompt)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("ConfigStore system prompt read failed: %s", exc)
         # Fallback: read directly from kazma.yaml
         try:
             from pathlib import Path
@@ -435,8 +435,8 @@ class ChatPanel(Vertical):
                 prompt = data.get("system_prompt")
                 if prompt:
                     return str(prompt)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("YAML system prompt read failed: %s", exc)
         return ""
 
     # ── Copy ───────────────────────────────────────────────────────
@@ -445,8 +445,8 @@ class ChatPanel(Vertical):
         """Select all text in the chat log."""
         try:
             self.query_one("#chat-log", RichLog).text_select_all()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Select all failed: %s", exc)
 
     def action_insert_newline(self) -> None:
         """Insert a newline character at the cursor in the chat input.
@@ -457,8 +457,8 @@ class ChatPanel(Vertical):
         try:
             chat_input = self.query_one("#chat-input", Input)
             chat_input.insert("\n")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Insert newline failed: %s", exc)
 
     def copy_to_clipboard(self) -> bool:
         """Copy currently selected text or last KAZMA response to system clipboard.
@@ -470,8 +470,8 @@ class ChatPanel(Vertical):
             if selected:
                 self.app.copy_to_clipboard(selected)
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Copy selected text failed: %s", exc)
         # Fallback: copy the last tracked KAZMA response
         if self._last_response:
             self.app.copy_to_clipboard(self._last_response)
