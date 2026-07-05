@@ -14,12 +14,12 @@ kazma-core/              Core agent framework
   model_registry.py      Model/provider registry (singleton)
   swarm/                 Swarm orchestration engine
     engine.py            SwarmEngine — dispatch, consult, broadcast
-    registry.py          WorkerRegistry — persistent worker phonebook
-    topology.py          PipelineEngine — multi-stage DAG execution
+    patterns.py          Sequential stage patterns (pipeline, fanout, conditional)
+    reliability.py       Reliability registry and circuit breaker state management
     safety.py            SafetyMiddleware — HITL danger-tool gating
     bus.py               SwarmMessageBus — platform-agnostic streaming
-    router.py            CapabilityRouter — semantic + keyword routing
-    memory/              4-layer co-processing memory
+  routing_engine.py      UnifiedRouter — semantic vector search + dialect boosting + keyword overlap fallback
+  memory/                4-layer co-processing memory
       vector.py          Layer 1 — ChromaDB global semantic search
       graph.py           Layer 2 — NetworkX knowledge graph
       fts5.py            Layer 3 — SQLite FTS5 lexical + BM25
@@ -56,17 +56,17 @@ All LLM interactions flow through `ModelRegistry` — a process-wide singleton. 
 ### 4-Layer Co-Processing Memory
 Queries fan out to all 4 backends in parallel, then blend via Reciprocal Rank Fusion (RRF, k=60). See `docs/architecture/MEMORY.md` for the full query flow.
 
-### Smart-Fallback Routing
-If no specialist worker matches a task, the engine auto-delegates to any available generalist worker (no expertise tags or no Soul). Falls back to all enabled workers as last resort. Zero dispatch failures.
+### Smart-Fallback Routing (Unified Routing)
+If no specialist worker matches a task, the `UnifiedRouter` manages distribution. It resolves tasks using semantic similarity vector search, language/dialect-aware score boosting, and falls back to precise token-overlap keyword matching. If still unmapped, it auto-delegates to any available generalist worker, guaranteeing zero dispatch failures.
 
 ### WorkerRegistry — Single Source of Truth
-Workers are persisted in `swarm_registry.json`. The REST API, CLI, and Web UI all read/write through the same CRUD interface. Workers survive reboots.
+Workers are persisted in `swarm_registry.json`. The REST API, CLI, and Web UI all read/write through the same CRUD interface. Workers survive reboots. Worker capabilities are strictly sandboxed via persistent `tools` arrays in the registry, enforcing the Principle of Least Privilege.
 
 ### SwarmMessageBus
 Workers stream logs/outputs to the active platform adapter (Telegram/Discord/Slack) without knowing the specific platform. Formatted Swarm Report cards with inline HITL approval/reject buttons.
 
 ### Pipeline Engine
-Multi-stage DAG execution: Researcher → Refiner → Builder → Validator. Each stage forwards context to the next. After completion, the Refiner synthesizes a Markdown report card. Every step is logged to `pipeline_logs.db` for Web UI diagnostics.
+Robust, sequential stage execution (e.g., Researcher → Refiner → Builder → Validator). Each stage forwards context to the next. Every step is logged to SQLite via WAL-mode `pipeline_logger` for Web UI diagnostics. After completion, the Refiner synthesizes a Markdown report card, and the `SelfImprovementSkill` hook triggers to analyze pipeline outputs and suggest improvements.
 
 ### SafetyMiddleware
 Danger-tier tool calls (`shell_exec`, `file_write`, `python_exec`, `spawn_agent`) are gated behind operator approval via the SwarmMessageBus. Approval cards expire after 60s.

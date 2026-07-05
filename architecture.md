@@ -55,25 +55,24 @@ and an OpenAI-compatible LLM provider layer.
 - `SwarmDispatchContext` — structured context with system_prompt and blackboard
 - `WorkerCapabilities` — role, expertise tags, tools, model_specialty
 
-**Reliability** (`reliability.py`):
-- `CircuitBreaker` — closed/open/half-open with single-probe gating
-- `RetryPolicy` — exponential backoff with retryable predicate (skips auth/config errors)
-- `TimeoutGuard` — configurable per-worker timeout
-- `FallbackChain` — ordered fallback workers on failure
+**Reliability** (`reliability.py` & `reliability_registry.py`):
+- `CircuitBreaker` — closed/open/half-open with single-probe gating.
+- `RetryPolicy` — exponential backoff with retryable predicate (skips auth/config errors).
+- `TimeoutGuard` — configurable per-worker timeout.
+- `FallbackChain` — ordered fallback workers on failure.
+- **Persistent Circuit Breaker (3-Strike System):** Tracks `consecutive_tool_failures` persistently across both LangGraph `SupervisorState` and Swarm worker dispatches. When the threshold is reached, subsequent tool runs are completely bypassed to prevent infinite retry loops.
+- **Advanced Tool-Denial Mocking (HTTP 400 Prevention):** To satisfy strict API format rules (LiteLLM/OpenAI), when the breaker trips mid-batch, Kazma automatically generates conformant `role: tool` mock responses containing override messages for all blocked tool calls.
 
-**Routing** (`router.py`):
-- `CapabilityRouter` — keyword-overlap scoring between task and worker capabilities
-- Returns sorted worker list or raises `NoCapableWorkersError`
+**Routing Engine** (`routing_engine.py`):
+- `UnifiedRouter` — A consolidated routing engine that manages task distribution.
+- Performs semantic vector matching (via ChromaDB `SemanticRouter`) first, boosts scores based on dialect/language metrics, and falls back to a clean static `_keyword_match` overlap score when the vector database is offline or below matching thresholds.
+- Eliminates legacy `BaseRouter` and redundant polymorphic router wrappers.
 
 **Patterns** (`patterns.py`):
-- `execute_pipeline()` — sequential stages with HITL checkpoint support
-- `execute_fan_out()` — parallel dispatch with aggregation
-- `execute_conditional()` — router-based dynamic dispatch
-
-**Pipeline Topology** (`topology.py`):
-- `PipelineEngine` — DAG stage execution with dependency resolution
-- `PipelineStage` — name, role, worker_name, system_prompt, depends_on
-- Stage system_prompt delivered to dispatch via SwarmDispatchContext
+- `execute_pipeline()` — sequential stages with SQLite WAL stage-output logging, HITL checkpoint gating, synthetic refined output merging (`_synthesize_refined_output`), and `SelfImprovementSkill` hooks.
+- `execute_fan_out()` — parallel dispatch with aggregation.
+- `execute_conditional()` — router-based dynamic dispatch.
+- Note: DAG-based pipeline topology execution (`topology.py`) is formally deprecated.
 
 **Persistence** (`task_store.py`):
 - SQLite with WAL mode, busy_timeout, auto-migration

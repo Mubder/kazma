@@ -414,7 +414,7 @@ The swarm engine supports these worker orchestration patterns:
 - `fan_out` for concurrent execution of the same prompt across selected workers
 - `consult` for collecting independent role-aware worker opinions and synthesizing a consolidated answer
 - `conditional` for routing to different workers based on a router worker's evaluation of the prompt
-- `auto` routing via `CapabilityRouter` — when `workers=["auto"]`, the engine scores registered workers by keyword overlap between the task prompt/context/requirements and each worker's declared capabilities (expertise, role, tools, model specialty), then selects the top N matches
+- `auto` routing via `UnifiedRouter` — when `workers=["auto"]`, the engine performs high-accuracy task distribution using a multi-stage routing pipeline: it queries `SemanticRouter` first for semantic similarity vector distance (via ChromaDB), applies language/dialect-aware score boosting metrics to the weights, and falls back gracefully to a high-performance static token-overlap keyword match (`_keyword_match`) if vector databases are offline or return below-threshold scores.
 
 Fan-out supports `first_valid`, `merge_all`, `vote`, `synthesize`, and
 `collect` aggregation strategies. Parallel dispatches are bounded by
@@ -459,9 +459,7 @@ with five components that protect worker dispatches:
 - **RetryPolicy** — configurable retry with exponential backoff and jitter.
   Per-worker via `engine.set_retry_policy()`. Default `max_retries=0` for
   backward compatibility.
-- **CircuitBreaker** — per-worker closed/open/half-open state machine. Trips
-  after N consecutive failures, auto-recovers after cooldown. Open breaker
-  rejects dispatch immediately.
+- **CircuitBreaker** — per-worker closed/open/half-open state machine. Tracks `consecutive_tool_failures` persistently across both LangGraph `SupervisorState` and Swarm worker dispatches. It trips persistently after 3 consecutive failures to prevent infinite retry loops. To guarantee compliance with strict API format rules (LiteLLM/OpenAI) and prevent HTTP 400 validation errors, when the breaker trips mid-batch, Kazma automatically generates conformant `role: tool` mock responses containing override messages for all blocked tool calls.
 - **TimeoutGuard** — per-task timeout via `asyncio.wait_for` with clean
   coroutine cancellation. Configurable `on_timeout` behavior:
   `fail` (terminal), `retry` (counts against retry budget), `skip` (continue
