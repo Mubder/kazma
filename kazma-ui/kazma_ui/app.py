@@ -137,9 +137,10 @@ class KazmaAppBuilder:
 
     def _setup_templates_and_middlewares(self) -> None:
         """Configure auth, CORS, language middleware, static files, and templates."""
-        from kazma_ui.auth import create_auth_middleware
+        from kazma_ui.auth import create_auth_middleware, create_tenant_middleware
 
         self.app.middleware("http")(create_auth_middleware())
+        self.app.middleware("http")(create_tenant_middleware())
 
         # CORS
         from fastapi.middleware.cors import CORSMiddleware
@@ -159,7 +160,7 @@ class KazmaAppBuilder:
             allow_origins=_cors_origins,
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-            allow_headers=["Content-Type", "X-Kazma-Secret", "X-Api-Key", "Accept"],
+            allow_headers=["Content-Type", "X-Kazma-Secret", "X-Api-Key", "Accept", "X-Tenant-ID"],
         )
         logger.info("[CORS] allow_origins=%s", _cors_origins)
 

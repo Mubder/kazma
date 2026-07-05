@@ -291,6 +291,95 @@ def create_auth_middleware(
     return auth_middleware_with_gate
 
 
+def extract_tenant_from_jwt(token: str) -> str | None:
+    """Extract tenant_id or tenant claim from a base64url-encoded JWT token."""
+    try:
+        parts = token.split(".")
+        if len(parts) == 3:
+            payload_b64 = parts[1]
+            # Add padding if needed for base64 decoding
+            rem = len(payload_b64) % 4
+            if rem > 0:
+                payload_b64 += "=" * (4 - rem)
+            import base64
+            import json
+            decoded = base64.urlsafe_b64decode(payload_b64).decode("utf-8")
+            payload = json.loads(decoded)
+            if isinstance(payload, dict):
+                return payload.get("tenant_id") or payload.get("tenant")
+    except Exception as exc:
+        logger.debug("[TENANT] Failed to extract tenant from JWT: %s", exc)
+    return None
+
+
+def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitable[Response]]], Awaitable[Response]]:
+    """Create an HTTP middleware that extracts X-Tenant-ID and propagates it using ContextVar.
+    
+    Extracts from:
+    1. Header: X-Tenant-ID or x-tenant-id
+    2. Cookie: X-Tenant-ID, x-tenant-id, or tenant_id
+    3. Authorization header: Bearer JWT (containing tenant_id or tenant claim)
+    4. JWT Cookie fallback: jwt, token, x-tenant-id-jwt, or tenant_jwt
+    """
+    from kazma_core.tenant_context import set_current_tenant_id, reset_current_tenant_id
+
+    async def tenant_middleware(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        # 1. Check header
+        tenant_id = request.headers.get("X-Tenant-ID") or request.headers.get("x-tenant-id")
+
+        # 2. Check cookie fallback
+        if not tenant_id:
+            tenant_id = (
+                request.cookies.get("X-Tenant-ID")
+                or request.cookies.get("x-tenant-id")
+                or request.cookies.get("tenant_id")
+            )
+
+        # 3. Check Authorization Bearer JWT
+        if not tenant_id:
+            auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+            if auth_header and auth_header.lower().startswith("bearer "):
+                token = auth_header[7:].strip()
+                tenant_id = extract_tenant_from_jwt(token)
+
+        # 4. Check Cookie JWT fallback
+        if not tenant_id:
+            for cookie_name in ("jwt", "token", "x-tenant-id-jwt", "tenant_jwt"):
+                token = request.cookies.get(cookie_name)
+                if token:
+                    tenant_id = extract_tenant_from_jwt(token)
+                    if tenant_id:
+                        break
+
+        # Log active tenant context if found
+        if tenant_id:
+            logger.debug("[TENANT] Inbound request scoped to tenant_id: %s", tenant_id)
+
+        # Set tenant context variable
+        token = set_current_tenant_id(tenant_id)
+        try:
+            response = await call_next(request)
+            # Propagate tenant_id cookie on response for subsequent requests
+            if tenant_id:
+                if request.cookies.get("X-Tenant-ID") != tenant_id:
+                    response.set_cookie(
+                        key="X-Tenant-ID",
+                        value=tenant_id,
+                        httponly=True,
+                        samesite="strict",
+                        path="/",
+                        secure=_is_https(request),
+                    )
+            return response
+        finally:
+            reset_current_tenant_id(token)
+
+    return tenant_middleware
+
+
 __all__: list[str] = [
     "SECRET_HEADER",
     "SECRET_COOKIE",
@@ -303,8 +392,9 @@ __all__: list[str] = [
     "is_always_open",
     "require_kazma_secret",
     "verify_secret",
+    "create_tenant_middleware",
 ]
 
 
 # Silence unused-import warnings for re-exported symbols.
-_ = (Any, status)
+_ = (Any, status, Awaitable)

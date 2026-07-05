@@ -15,6 +15,7 @@ from typing import Any
 import aiosqlite
 
 from .arabic_tokenizer import ArabicTokenizer
+from kazma_core.tenant_context import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -136,6 +137,7 @@ class SQLiteMemoryBackend:
             relevance = memory.get("relevance", 1.0)
             embedding = memory.get("embedding", None)
             resolved_tenant = tenant_id or memory.get("tenant_id") or (metadata.get("tenant_id") if isinstance(metadata, dict) else None)
+            resolved_tenant = resolved_tenant if resolved_tenant is not None else get_current_tenant_id()
         else:
             memory_id = getattr(memory, "id", self._generate_id())
             content = getattr(memory, "content", "")
@@ -145,6 +147,7 @@ class SQLiteMemoryBackend:
             relevance = getattr(memory, "relevance", 1.0)
             embedding = getattr(memory, "embedding", None)
             resolved_tenant = tenant_id or getattr(memory, "tenant_id", None) or (metadata.get("tenant_id") if isinstance(metadata, dict) else None)
+            resolved_tenant = resolved_tenant if resolved_tenant is not None else get_current_tenant_id()
 
         # Process content through Arabic tokenizer
         content_arabic = self._arabic_tokenizer.tokenize(content)
@@ -176,7 +179,7 @@ class SQLiteMemoryBackend:
             List of memory dictionaries ranked by relevance.
         """
         conn = await self._ensure_connection()
-        tenant_id = kwargs.get("tenant_id")
+        tenant_id = kwargs.get("tenant_id") if kwargs.get("tenant_id") is not None else get_current_tenant_id()
 
         # Process query through Arabic tokenizer for better matching
         query_arabic = self._arabic_tokenizer.tokenize(query)

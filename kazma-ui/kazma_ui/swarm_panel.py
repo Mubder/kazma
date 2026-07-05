@@ -431,6 +431,128 @@ class SwarmRouterBuilder:
                 )
             return result
 
+        def _workflow_to_mermaid(workflow: Any) -> str:
+            """Generate a Mermaid.js diagram string from a DAGWorkflow."""
+            lines = ["graph TD"]
+            # Style definitions for luxury, enterprise feel
+            lines.append("    classDef agent fill:#1a1b26,stroke:#7aa2f7,stroke-width:2px,color:#c0caf5;")
+            lines.append("    classDef router fill:#1e1e2e,stroke:#f5c2e7,stroke-width:2px,color:#cdd6f4;")
+            lines.append("    classDef default fill:#15161e,stroke:#414868,stroke-width:1px,color:#a9b1d6;")
+
+            # Add nodes
+            for node_id, node in workflow.nodes.items():
+                node_type = getattr(node, "type", "dispatch")
+                prompt = getattr(node, "prompt_template", "")
+                prompt_preview = (prompt[:30] + "...") if len(prompt) > 30 else prompt
+                label = f'"{node_id}<br/><small style=\'color:#565f89;\'>{node_type}</small>"'
+                lines.append(f"    {node_id}[{label}]")
+                
+                # Apply style classes
+                if "router" in node_type.lower() or "dispatch" in node_type.lower() or "decision" in node_type.lower():
+                    lines.append(f"    class {node_id} router;")
+                else:
+                    lines.append(f"    class {node_id} agent;")
+
+            # Add edges with conditions
+            for edge in workflow.edges:
+                src = edge.from_node
+                tgt = edge.to_node
+                cond = getattr(edge, "condition", "")
+                if cond:
+                    cond_escaped = cond.replace('"', "'")
+                    lines.append(f'    {src} -->|"{cond_escaped}"| {tgt}')
+                else:
+                    lines.append(f"    {src} --> {tgt}")
+
+            return "\n".join(lines)
+
+        @router.post("/api/swarm/workflows/validate")
+        async def validate_workflow(request: Request) -> JSONResponse:
+            """Validate and parse a YAML/JSON DAG workflow definition.
+
+            Accepts:
+                { "workflow_definition": "..." } (string can be JSON or YAML)
+                Or raw JSON matching DAGWorkflow.
+            """
+            from pydantic import ValidationError
+            import yaml
+            
+            try:
+                from kazma_core.swarm.dag_schema import DAGWorkflow
+            except ImportError:
+                return JSONResponse(
+                    content={"valid": False, "error": "DAGWorkflow schema is not available in kazma_core"},
+                    status_code=400,
+                )
+
+            try:
+                body = await request.json()
+            except Exception:
+                return JSONResponse(
+                    content={"valid": False, "error": "Invalid request body; must be valid JSON"},
+                    status_code=400,
+                )
+
+            definition_str = body.get("workflow_definition")
+            if not definition_str:
+                # Fallback to the whole body if it's already a dict representation
+                try:
+                    workflow = DAGWorkflow(**body)
+                    return JSONResponse(
+                        content={
+                            "valid": True,
+                            "workflow": workflow.model_dump(),
+                            "nodes": [n.model_dump() for n in workflow.nodes.values()],
+                            "edges": [e.model_dump() for e in workflow.edges],
+                            "mermaid": _workflow_to_mermaid(workflow),
+                        }
+                    )
+                except ValidationError as err:
+                    return JSONResponse(
+                        content={"valid": False, "error": str(err)},
+                        status_code=200,
+                    )
+                except Exception as exc:
+                    return JSONResponse(
+                        content={"valid": False, "error": f"Validation error: {exc}"},
+                        status_code=200,
+                    )
+
+            # Try parsing definition_str as JSON or YAML
+            try:
+                parsed_data = yaml.safe_load(definition_str)
+                if not isinstance(parsed_data, dict):
+                    return JSONResponse(
+                        content={"valid": False, "error": "Parsed workflow must be a top-level JSON/YAML object/dictionary"},
+                        status_code=200,
+                    )
+                
+                workflow = DAGWorkflow(**parsed_data)
+                return JSONResponse(
+                    content={
+                        "valid": True,
+                        "workflow": workflow.model_dump(),
+                        "nodes": [n.model_dump() for n in workflow.nodes.values()],
+                        "edges": [e.model_dump() for e in workflow.edges],
+                        "mermaid": _workflow_to_mermaid(workflow),
+                    }
+                )
+            except yaml.YAMLError as yerr:
+                return JSONResponse(
+                    content={"valid": False, "error": f"YAML/JSON Syntax Error: {yerr}"},
+                    status_code=200,
+                )
+            except ValidationError as err:
+                return JSONResponse(
+                    content={"valid": False, "error": str(err)},
+                    status_code=200,
+                )
+            except Exception as exc:
+                return JSONResponse(
+                    content={"valid": False, "error": f"Validation error: {exc}"},
+                    status_code=200,
+                )
+
         @router.get("/api/swarm/output-target")
         async def get_output_target() -> JSONResponse:
             """Return the current swarm output-routing target.

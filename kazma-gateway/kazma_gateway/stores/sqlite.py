@@ -23,6 +23,7 @@ from typing import Any
 import aiosqlite
 
 from kazma_gateway.gateway import SessionStore
+from kazma_core.tenant_context import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +94,10 @@ class SQLiteSessionStore(SessionStore):
         Returns empty dict if not found.
         """
         db = await self._ensure_db()
-        if tenant_id is not None:
+        resolved_tenant = tenant_id if tenant_id is not None else get_current_tenant_id()
+        if resolved_tenant is not None:
             query = "SELECT context FROM sessions WHERE thread_id = ? AND (tenant_id = ? OR tenant_id IS NULL)"
-            params = (thread_id, tenant_id)
+            params = (thread_id, resolved_tenant)
         else:
             query = _GET_BY_THREAD
             params = (thread_id,)
@@ -114,15 +116,16 @@ class SQLiteSessionStore(SessionStore):
         """Store context_metadata for a thread_id (upsert), optionally scoped by tenant_id."""
         db = await self._ensure_db()
         serialized = json.dumps(context, ensure_ascii=False)
-        resolved_tenant = tenant_id or context.get("tenant_id")
+        resolved_tenant = tenant_id if tenant_id is not None else (get_current_tenant_id() or context.get("tenant_id"))
         await db.execute(_UPSERT, (thread_id, serialized, resolved_tenant))
         await db.commit()
 
     async def delete(self, thread_id: str, tenant_id: str | None = None) -> None:
         """Remove stored context for a thread_id, optionally scoped by tenant_id. No-op if not found."""
         db = await self._ensure_db()
-        if tenant_id is not None:
-            await db.execute("DELETE FROM sessions WHERE thread_id = ? AND tenant_id = ?", (thread_id, tenant_id))
+        resolved_tenant = tenant_id if tenant_id is not None else get_current_tenant_id()
+        if resolved_tenant is not None:
+            await db.execute("DELETE FROM sessions WHERE thread_id = ? AND tenant_id = ?", (thread_id, resolved_tenant))
         else:
             await db.execute(_DELETE, (thread_id,))
         await db.commit()
@@ -155,9 +158,10 @@ class SQLiteSessionStore(SessionStore):
         """
         db = await self._ensure_db()
         rows: list[dict[str, Any]] = []
-        if tenant_id is not None:
+        resolved_tenant = tenant_id if tenant_id is not None else get_current_tenant_id()
+        if resolved_tenant is not None:
             query = "SELECT thread_id, context, updated_at, tenant_id FROM sessions WHERE tenant_id = ?"
-            params = (tenant_id,)
+            params = (resolved_tenant,)
         else:
             query = "SELECT thread_id, context, updated_at, tenant_id FROM sessions"
             params = ()
