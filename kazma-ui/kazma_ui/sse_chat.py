@@ -84,7 +84,6 @@ async def _stream_langgraph_events(
     total_cost = 0.0
     turn_start = time.monotonic()
     content_acc = ""  # accumulated assistant text for the done event
-    error_yielded = False
 
     try:
         async for event in graph.astream_events(input_state, config=config, version="v2"):
@@ -251,12 +250,10 @@ async def _stream_langgraph_events(
     except asyncio.CancelledError:
         logger.warning("SSE stream cancelled by client disconnect")
         yield _sse_frame("error", {"content": "Connection cancelled"})
-        error_yielded = True
 
     except Exception as exc:
         logger.error("SSE stream error: %s", exc, exc_info=True)
         yield _sse_frame("error", {"content": str(exc)})
-        error_yielded = True
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -290,7 +287,7 @@ def _is_cloud_url(base_url: str) -> bool:
 
 def create_sse_chat_router(
     graph: Any,
-    checkpointer: Any,
+    checkpointer: Any = None,  # deprecated, kept for API compatibility
     system_prompt: str = "",
     cost_breaker: Any = None,
     authority: Any = None,
@@ -453,7 +450,7 @@ def create_sse_chat_router(
         # ── Cost breaker gate ──────────────────────────────────────
         if cost_breaker and cost_breaker.should_halt():
             return StreamingResponse(
-                iter([_sse_frame("error", {"content": "⚠️ ميزانية الجلسة انتهت. أعد التشغيل. (Budget exceeded)"})]),
+                iter([_sse_frame("error", {"content": "Session budget exceeded. Please restart."})]),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )

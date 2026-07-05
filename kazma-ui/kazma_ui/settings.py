@@ -115,13 +115,13 @@ def create_settings_router(agent: KazmaAgent, config_store: ConfigStore, templat
         return config_store.get_all()
 
     @router.get("/api/settings/export")
-    async def api_export_yaml(format: str = Query("yaml")) -> Response:
+    async def api_export_yaml(fmt: str = Query("yaml", alias="format")) -> Response:
         """Export settings as YAML or JSON file download."""
         sm = _get_sm()
         try:
-            content = sm.export_config(format)
-            media = "application/json" if format == "json" else "text/yaml"
-            ext = "json" if format == "json" else "yaml"
+            content = sm.export_config(fmt)
+            media = "application/json" if fmt == "json" else "text/yaml"
+            ext = "json" if fmt == "json" else "yaml"
             return Response(
                 content=content,
                 media_type=f"{media}; charset=utf-8",

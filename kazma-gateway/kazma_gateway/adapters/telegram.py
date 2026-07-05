@@ -369,7 +369,8 @@ class TelegramAdapter(BaseAdapter):
         Returns:
             List of Telegram Update objects.
         """
-        assert self._http is not None
+        if self._http is None:
+            raise RuntimeError("HTTP client not initialized")
 
         params: dict[str, Any] = {"timeout": self._poll_timeout}
         if self._offset:
@@ -538,7 +539,8 @@ class TelegramAdapter(BaseAdapter):
 
     async def download_voice_file(self, file_id: str) -> bytes | None:
         """Download a voice/audio file from Telegram using getFile."""
-        assert self._http is not None, "HTTP client not initialized -- adapter not started"
+        if self._http is None:
+            raise RuntimeError("HTTP client not initialized -- adapter not started")
         try:
             resp = await self._http.get(
                 "/getFile",
@@ -673,14 +675,14 @@ class TelegramAdapter(BaseAdapter):
             chat_id = message.get("chat", {}).get("id")
             if chat_id:
                 try:
-                    assert self._http is not None
-                    await self._http.post(
-                        "/sendMessage",
-                        json={
-                            "chat_id": chat_id,
-                            "text": "Voice received but transcription is unavailable. Please configure an STT provider (openai/groq) or type your message.",
-                        },
-                    )
+                    if self._http is not None:
+                        await self._http.post(
+                            "/sendMessage",
+                            json={
+                                "chat_id": chat_id,
+                                "text": "Voice received but transcription is unavailable. Please configure an STT provider (openai/groq) or type your message.",
+                            },
+                        )
                 except Exception:
                     logger.debug("[telegram] Failed to send voice fallback message")
             return None
@@ -1173,7 +1175,8 @@ class TelegramAdapter(BaseAdapter):
             ("all_group_chats", "all_group_chats"),
         ]
 
-        assert self._http is not None, "HTTP client not initialized"
+        if self._http is None:
+            raise RuntimeError("HTTP client not initialized")
 
         for scope_label, scope_type in scopes:
             try:

@@ -903,16 +903,16 @@ class SettingsManager:
     # IMPORT / EXPORT
     # ══════════════════════════════════════════════════════════════════
 
-    def export_config(self, format: str = "yaml") -> str:
+    def export_config(self, fmt: str = "yaml") -> str:
         """Export configuration as YAML or JSON."""
-        if format == "json":
+        if fmt == "json":
             all_settings = self._cs.get_all()
             return json.dumps(all_settings, indent=2, ensure_ascii=False)
         return self._cs.export_yaml()
 
-    def import_config(self, data: str, format: str = "yaml", selective: bool = False, sections: list[str] | None = None) -> int:
+    def import_config(self, data: str, fmt: str = "yaml", selective: bool = False, sections: list[str] | None = None) -> int:
         """Import configuration from YAML or JSON string."""
-        if format == "json":
+        if fmt == "json":
             try:
                 parsed = json.loads(data)
             except json.JSONDecodeError as e:

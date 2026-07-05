@@ -43,7 +43,6 @@ class KazmaHeader(Static):
     """
 
     provider: reactive[str] = reactive("?")
-    model: reactive[str] = reactive("?")
 
     def _build_header_text(self) -> str:
         """Build header text from ModelRegistry (for testing)."""

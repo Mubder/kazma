@@ -158,7 +158,7 @@ class TestChatStreamEndpoint:
         assert resp.status_code == 200
         body = resp.text
         assert "event: error" in body
-        assert "ميزانية" in body  # Arabic budget message
+        assert "budget exceeded" in body.lower()  # Budget exceeded message
 
     def test_session_listing_empty(self):
         app, _ = self._make_app()

@@ -190,10 +190,10 @@ class TestDownloadVoiceFile:
 
     @pytest.mark.asyncio
     async def test_download_voice_file_no_http_client(self) -> None:
-        """Raises AssertionError when HTTP client not initialized."""
+        """Raises RuntimeError when HTTP client not initialized."""
         adapter = TelegramAdapter(token="fake:token")
         # _http is None by default
-        with pytest.raises(AssertionError, match="HTTP client not initialized"):
+        with pytest.raises(RuntimeError, match="HTTP client not initialized"):
             await adapter.download_voice_file("file_id")
 
 
