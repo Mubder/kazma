@@ -138,14 +138,16 @@ def create_agents_router(agent: Any, templates: Jinja2Templates) -> APIRouter:
                 logger.info("Agent started")
                 return JSONResponse({"status": "ok", "running": True})
             except Exception as e:
-                return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+                logger.debug("Agent start failed: %s", e)
+                return JSONResponse({"status": "error", "message": "Internal error"}, status_code=500)
         elif action == "stop":
             try:
                 agent.set_running(False)
                 logger.info("Agent stopped")
                 return JSONResponse({"status": "ok", "running": False})
             except Exception as e:
-                return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+                logger.debug("Agent stop failed: %s", e)
+                return JSONResponse({"status": "error", "message": "Internal error"}, status_code=500)
         else:
             return JSONResponse({"status": "error", "message": f"Unknown action: {action}"}, status_code=400)
 

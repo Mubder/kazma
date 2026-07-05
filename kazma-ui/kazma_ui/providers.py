@@ -213,7 +213,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         except Exception as exc:  # pragma: no cover - defensive
             registry.set_provider_health(name, "down")
             logger.error("Provider test failed for %r: %s", name, exc)
-            return {"success": False, "error": str(exc)}
+            return {"success": False, "error": "Provider test failed unexpectedly"}
 
     @router.post("/api/providers/{name}/discover")
     async def discover_provider_models(name: str) -> dict[str, Any]:
@@ -351,9 +351,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         return {"success": True, "bot_name": data.get("result", {}).get("username", "")}
                     return {"success": False, "error": f"HTTP {resp.status_code}"}
             except Exception as exc:
-                return {"success": False, "error": str(exc)}
-
-        if name == "discord":
+                logger.debug("Telegram connector test failed: %s", exc)
+                return {"success": False, "error": "Connection test failed"}
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.get(
@@ -365,7 +364,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         return {"success": True, "bot_name": data.get("username", "")}
                     return {"success": False, "error": f"HTTP {resp.status_code}"}
             except Exception as exc:
-                return {"success": False, "error": str(exc)}
+                logger.debug("Discord connector test failed: %s", exc)
+                return {"success": False, "error": "Connection test failed"}
 
         if name == "slack":
             app_token = str(config.get("app_token", ""))
@@ -382,7 +382,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         return {"success": False, "error": data.get("error", "Slack auth.test failed")}
                     return {"success": False, "error": f"HTTP {resp.status_code}"}
             except Exception as exc:
-                return {"success": False, "error": str(exc)}
+                logger.debug("Slack connector test failed: %s", exc)
+                return {"success": False, "error": "Connection test failed"}
 
         # Generic connectors cannot be tested remotely; report token presence.
         return {"success": True, "message": f"Token configured for {name}"}

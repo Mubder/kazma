@@ -927,7 +927,7 @@ def create_app(config_path: str | None = None) -> FastAPI:
                 return _JSONResponse({"pending": pending, "count": len(pending)})
             except Exception as exc:
                 logger.exception("[HITL] Failed to list pending approvals")
-                return _JSONResponse({"pending": [], "count": 0, "error": str(exc)}, status_code=500)
+                return _JSONResponse({"pending": [], "count": 0, "error": "Internal error"}, status_code=500)
 
         logger.info("[HITL] Pending approvals endpoint mounted at /api/pending-approvals")
 
