@@ -13,7 +13,7 @@ import os
 from unittest.mock import patch
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
 from kazma_ui.auth import (
     SECRET_HEADER,
@@ -84,6 +84,23 @@ def _build_test_app() -> FastAPI:
     @app.get("/api/public/info")
     async def public_info() -> dict:
         return {"ok": True}
+
+    @app.websocket("/ws/dashboard")
+    async def ws_dashboard(websocket: WebSocket) -> None:
+        from kazma_ui.auth import get_kazma_secret, SECRET_COOKIE
+        expected = get_kazma_secret()
+        if expected:
+            provided = websocket.headers.get("x-kazma-secret", "")
+            if not provided:
+                provided = websocket.cookies.get(SECRET_COOKIE, "")
+            import hmac as _hmac
+
+            if not provided or not _hmac.compare_digest(provided, expected):
+                await websocket.close(code=4003, reason="Unauthorized")
+                return
+        await websocket.accept()
+        await websocket.send_text("connected")
+        await websocket.close()
 
     return app
 
@@ -278,6 +295,32 @@ class TestAuthMiddlewareWithSecret:
         else:
             resp = self.client.get(path)
         assert resp.status_code == 200, f"Expected 200 for open {path}, got {resp.status_code}"
+
+    def test_websocket_unauthorized_without_secret(self):
+        """Websocket connection fails when secret is required but not provided."""
+        with pytest.raises(Exception):
+            with self.client.websocket_connect("/ws/dashboard") as ws:
+                pass
+
+    def test_websocket_authorized_with_header(self):
+        """Websocket connection succeeds when secret is provided in the headers."""
+        with self.client.websocket_connect(
+            "/ws/dashboard",
+            headers={"x-kazma-secret": TEST_SECRET}
+        ) as ws:
+            data = ws.receive_text()
+            assert data == "connected"
+
+    def test_websocket_authorized_with_cookie(self):
+        """Websocket connection succeeds when secret is provided in cookies (browser fallback)."""
+        # Pass the secret via cookies, representing browser WebSocket behavior
+        self.client.cookies.set("kazma-secret", TEST_SECRET)
+        try:
+            with self.client.websocket_connect("/ws/dashboard") as ws:
+                data = ws.receive_text()
+                assert data == "connected"
+        finally:
+            self.client.cookies.clear()
 
 
 class TestAuthMiddlewareWithoutSecret:

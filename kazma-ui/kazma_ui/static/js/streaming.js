@@ -123,8 +123,22 @@ var KazmaStream = (function() {
         if (callbacks.onMessage) callbacks.onMessage(data);
       };
 
-      ws.onclose = function() {
+      ws.onclose = function(event) {
         if (callbacks.onStatus) callbacks.onStatus('disconnected');
+        if (event && event.code === 4003) {
+          console.warn('[KazmaStream] WebSocket closed with 4003 (Unauthorized). Reloading page to refresh credentials...');
+          var lastReload = sessionStorage.getItem('kazma_last_reload');
+          var now = Date.now();
+          if (!lastReload || (now - parseInt(lastReload, 10)) > 10000) {
+            sessionStorage.setItem('kazma_last_reload', String(now));
+            location.reload();
+          } else {
+            if (callbacks.onError) {
+              callbacks.onError('Unauthorized session. Please refresh the page manually.');
+            }
+          }
+          return;
+        }
         scheduleReconnect();
         if (callbacks.onClose) callbacks.onClose();
       };

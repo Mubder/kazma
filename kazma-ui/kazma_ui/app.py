@@ -72,6 +72,14 @@ class KazmaAppBuilder:
         from kazma_core.model_registry import initialize_model_registry, ModelRegistry
         from kazma_core.service_container import get_container
 
+        # Ensure .env is loaded on startup if present
+        try:
+            from dotenv import load_dotenv
+            load_dotenv()
+            logger.info("[Auth] Loaded environment variables from .env")
+        except Exception as e:
+            logger.debug("[Auth] Failed to load .env: %s", e)
+
         # Ensure KAZMA_SECRET is configured
         _secret = os.environ.get("KAZMA_SECRET", "").strip()
         if not _secret:
@@ -749,12 +757,15 @@ class KazmaAppBuilder:
 
         @self.app.websocket("/ws/dashboard")
         async def ws_dashboard(websocket: WebSocket) -> None:
-            expected = os.environ.get("KAZMA_SECRET", "")
+            from kazma_ui.auth import get_kazma_secret, SECRET_COOKIE
+            expected = get_kazma_secret()
             if expected:
                 provided = websocket.headers.get("x-kazma-secret", "")
+                if not provided:
+                    provided = websocket.cookies.get(SECRET_COOKIE, "")
                 import hmac as _hmac
 
-                if not _hmac.compare_digest(provided, expected):
+                if not provided or not _hmac.compare_digest(provided, expected):
                     await websocket.close(code=4003, reason="Unauthorized")
                     return
             await websocket.accept()
@@ -788,12 +799,15 @@ class KazmaAppBuilder:
 
         @self.app.websocket("/ws/chat")
         async def ws_chat(websocket: WebSocket) -> None:
-            expected2 = os.environ.get("KAZMA_SECRET", "")
+            from kazma_ui.auth import get_kazma_secret, SECRET_COOKIE
+            expected2 = get_kazma_secret()
             if expected2:
                 provided2 = websocket.headers.get("x-kazma-secret", "")
+                if not provided2:
+                    provided2 = websocket.cookies.get(SECRET_COOKIE, "")
                 import hmac as _hmac2
 
-                if not _hmac2.compare_digest(provided2, expected2):
+                if not provided2 or not _hmac2.compare_digest(provided2, expected2):
                     await websocket.close(code=4003, reason="Unauthorized")
                     return
             from kazma_ui.chat import chat_websocket_handler

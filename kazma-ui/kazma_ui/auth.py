@@ -272,12 +272,15 @@ def create_auth_middleware(
         if not provided:
             provided = request.cookies.get(SECRET_COOKIE, "")
         if not verify_secret(provided, expected):
-            return Response(
+            response = Response(
                 content='{"detail":"Missing or invalid X-Kazma-Secret header"}',
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 media_type="application/json",
                 headers={"WWW-Authenticate": SECRET_HEADER},
             )
+            if request.cookies.get(SECRET_COOKIE):
+                response.delete_cookie(SECRET_COOKIE, path="/")
+            return response
 
         response = await call_next(request)
         if not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected:
