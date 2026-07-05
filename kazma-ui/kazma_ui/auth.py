@@ -218,7 +218,7 @@ def create_auth_middleware(
         # (so browser-based JS can make authenticated API calls without
         # the secret being exposed in page source).
         response = await call_next(request)
-        if expected and not request.cookies.get(SECRET_COOKIE):
+        if expected and (not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected):
             response.set_cookie(
                 key=SECRET_COOKIE,
                 value=expected,
@@ -244,7 +244,7 @@ def create_auth_middleware(
         # 1. Read-only & page routes always pass through (but still get cookie).
         if is_always_open(path):
             response = await call_next(request)
-            if expected and not request.cookies.get(SECRET_COOKIE):
+            if expected and (not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected):
                 response.set_cookie(
                     key=SECRET_COOKIE, value=expected,
                     httponly=True, samesite="strict", path="/",
@@ -255,7 +255,7 @@ def create_auth_middleware(
         # 2. Only sensitive prefixes are gated.
         if not is_sensitive_path(path):
             response = await call_next(request)
-            if expected and not request.cookies.get(SECRET_COOKIE):
+            if expected and (not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected):
                 response.set_cookie(
                     key=SECRET_COOKIE, value=expected,
                     httponly=True, samesite="strict", path="/",
@@ -280,7 +280,7 @@ def create_auth_middleware(
             )
 
         response = await call_next(request)
-        if not request.cookies.get(SECRET_COOKIE):
+        if not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected:
             response.set_cookie(
                 key=SECRET_COOKIE, value=expected,
                 httponly=True, samesite="strict", path="/",
