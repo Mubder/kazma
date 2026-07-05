@@ -339,6 +339,11 @@ def create_sse_chat_router(
                 _thread_ids.pop(oldest, None)
         return session, thread_id
 
+    # ── Provider profile management ───────────────────────────────
+
+    # Mutable provider profile (can be switched at runtime)
+    _active_profile: dict[str, Any] = provider_profile or {}
+
     @r.post("/api/chat/stream")
     async def chat_stream(request: Request) -> StreamingResponse:
         """Stream a chat turn as Server-Sent Events.
@@ -567,10 +572,7 @@ def create_sse_chat_router(
             for msg in session.messages
         ]
 
-    # ── Provider profile management ───────────────────────────────
-
-    # Mutable provider profile (can be switched at runtime)
-    _active_profile: dict[str, Any] = provider_profile or {}
+    # ── Provider profile management (continued) ───────────────────
 
     @r.get("/api/provider/active")
     async def get_active_provider() -> dict[str, Any]:
