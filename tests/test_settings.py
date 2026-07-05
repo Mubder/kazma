@@ -6,15 +6,9 @@ Tests both the SettingsManager (unit tests) and the API endpoints (integration t
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
-# Add project roots to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-core"))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-ui"))
 
 
 # ══════════════════════════════════════════════════════════════════════

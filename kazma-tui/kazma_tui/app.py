@@ -238,8 +238,8 @@ class KazmaTUI(App[None]):
                 self.push_screen(Toast("Copied to clipboard", "success", duration=1.5))
             else:
                 self.push_screen(Toast("Nothing to copy", "warning", duration=1.5))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Copy to clipboard failed: %s", exc)
 
     def action_command_palette(self) -> None:
         """Show enhanced command palette with fuzzy search."""
@@ -297,14 +297,14 @@ class KazmaTUI(App[None]):
                 swarm = self.query_one(SwarmPanel)
                 if hasattr(swarm, "refresh_data"):
                     swarm.refresh_data()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Refresh all panels failed: %s", exc)
 
     def action_focus_input(self) -> None:
         try:
             self.query_one("#chat-input").focus()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Focus input failed: %s", exc)
 
     def action_scroll_down(self) -> None:
         """Scroll down in the focused widget."""
@@ -312,8 +312,8 @@ class KazmaTUI(App[None]):
         if focused:
             try:
                 focused.scroll_relative(y=3)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Scroll down failed: %s", exc)
 
     def action_scroll_up(self) -> None:
         """Scroll up in the focused widget."""
@@ -321,8 +321,8 @@ class KazmaTUI(App[None]):
         if focused:
             try:
                 focused.scroll_relative(y=-3)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Scroll up failed: %s", exc)
 
     def action_scroll_top(self) -> None:
         """Scroll to top of focused widget."""
@@ -330,8 +330,8 @@ class KazmaTUI(App[None]):
         if focused:
             try:
                 focused.scroll_home()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Scroll top failed: %s", exc)
 
     def action_scroll_bottom(self) -> None:
         """Scroll to bottom of focused widget."""
@@ -339,8 +339,8 @@ class KazmaTUI(App[None]):
         if focused:
             try:
                 focused.scroll_end()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Scroll bottom failed: %s", exc)
 
     def action_next_tab(self) -> None:
         """Switch to next tab."""
@@ -351,8 +351,8 @@ class KazmaTUI(App[None]):
             if current in tab_order:
                 next_idx = (tab_order.index(current) + 1) % len(tab_order)
                 tabs.active = tab_order[next_idx]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Next tab switch failed: %s", exc)
 
     def action_prev_tab(self) -> None:
         """Switch to previous tab."""
@@ -363,8 +363,8 @@ class KazmaTUI(App[None]):
             if current in tab_order:
                 prev_idx = (tab_order.index(current) - 1) % len(tab_order)
                 tabs.active = tab_order[prev_idx]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Prev tab switch failed: %s", exc)
 
     def action_help_screen(self) -> None:
         """Show contextual help based on current tab."""
@@ -379,8 +379,8 @@ class KazmaTUI(App[None]):
             }
             msg = help_messages.get(current, "Press Ctrl+P for command palette")
             self.push_screen(Toast(msg, "info", duration=3.0))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Help screen failed: %s", exc)
 
     def action_focus_next(self) -> None:
         """Focus next widget in order (accessibility)."""

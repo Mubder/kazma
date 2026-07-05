@@ -5,10 +5,13 @@ Provides non-blocking, auto-dismissing notifications with different severity lev
 
 from __future__ import annotations
 
+import logging
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Static
+
+logger = logging.getLogger(__name__)
 
 
 class Toast(ModalScreen[None]):

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, ProgressBar, Static
+
+logger = logging.getLogger(__name__)
 
 
 class TutorialScreen(ModalScreen[bool]):

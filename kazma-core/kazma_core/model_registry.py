@@ -24,12 +24,15 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import httpx
 
 from kazma_core.llm_provider import LLMConfig, LLMProvider
 from kazma_core.providers import PROVIDER_PRESETS
+
+if TYPE_CHECKING:
+    from kazma_core.config_store import ConfigStore
 
 logger = logging.getLogger(__name__)
 
@@ -81,8 +84,8 @@ class ModelRegistry:
     caching, and model discovery.
     """
 
-    def __init__(self, config_store: Any) -> None:
-        self._cs = config_store
+    def __init__(self, config_store: ConfigStore | Any) -> None:
+        self._config_store = config_store
         self._clients: dict[str, LLMProvider] = {}
         self._active_provider: str = ""
         self._active_model: str = ""
@@ -111,10 +114,10 @@ class ModelRegistry:
             api_key = str(provider_entry.get("api_key", ""))
         elif not provider_name or not provider_entry:
             # Fallback: legacy llm.* keys
-            base_url = str(self._cs.get("llm.base_url", "") or "")
-            api_key = str(self._cs.get("llm.api_key", "") or "")
+            base_url = str(self._config_store.get("llm.base_url", "") or "")
+            api_key = str(self._config_store.get("llm.api_key", "") or "")
             if not model:
-                model = str(self._cs.get("llm.model", "") or "")
+                model = str(self._config_store.get("llm.model", "") or "")
             if not provider_name:
                 provider_name = "custom"
 
@@ -165,9 +168,9 @@ class ModelRegistry:
             self._active_model = model
 
         # Persist
-        self._cs.set("registry.active_provider", clean_provider, category="registry")
+        self._config_store.set("registry.active_provider", clean_provider, category="registry")
         if self._active_model:
-            self._cs.set("registry.active_model", self._active_model, category="registry")
+            self._config_store.set("registry.active_model", self._active_model, category="registry")
 
         # Invalidate cached client
         self._clients.pop(clean_provider, None)
@@ -183,7 +186,7 @@ class ModelRegistry:
         """
         clean_model = (model or "").strip()
         self._active_model = clean_model
-        self._cs.set("registry.active_model", self._active_model, category="registry")
+        self._config_store.set("registry.active_model", self._active_model, category="registry")
 
         # Auto-switch provider if this model belongs to a different one
         owner = self.find_provider_for_model(clean_model)
@@ -197,7 +200,7 @@ class ModelRegistry:
                     clean_model,
                 )
                 self._active_provider = owner_name
-                self._cs.set("registry.active_provider", owner_name, category="registry")
+                self._config_store.set("registry.active_provider", owner_name, category="registry")
 
         # Invalidate ALL cached clients so they rebuild with correct URL+model
         self._clients.clear()
@@ -245,7 +248,7 @@ class ModelRegistry:
                     # for every per-call model request.
                     if model is None:
                         self._active_provider = owner_name
-                        self._cs.set("registry.active_provider", owner_name, category="registry")
+                        self._config_store.set("registry.active_provider", owner_name, category="registry")
             else:
                 # Model not found in any provider — warn so misconfigs
                 # are visible instead of silently routing to a random
@@ -268,11 +271,11 @@ class ModelRegistry:
 
         if not base_url:
             # Fallback to legacy keys
-            base_url = str(self._cs.get("llm.base_url", "") or "")
+            base_url = str(self._config_store.get("llm.base_url", "") or "")
         if not api_key:
-            api_key = str(self._cs.get("llm.api_key", "") or "")
+            api_key = str(self._config_store.get("llm.api_key", "") or "")
         if not effective_model:
-            effective_model = str(self._cs.get("llm.model", "") or "gpt-4o-mini")
+            effective_model = str(self._config_store.get("llm.model", "") or "gpt-4o-mini")
 
         config = LLMConfig.from_dict({
             "base_url": base_url,
@@ -486,10 +489,10 @@ class ModelRegistry:
 
     def _deserialize(self) -> None:
         """Load active profile and discovered models from ConfigStore."""
-        self._active_provider = str(self._cs.get("registry.active_provider", "") or "")
-        self._active_model = str(self._cs.get("registry.active_model", "") or "")
+        self._active_provider = str(self._config_store.get("registry.active_provider", "") or "")
+        self._active_model = str(self._config_store.get("registry.active_model", "") or "")
 
-        raw = self._cs.get("registry.discovered_models", {})
+        raw = self._config_store.get("registry.discovered_models", {})
         if isinstance(raw, str):
             try:
                 raw = json.loads(raw)
@@ -504,17 +507,17 @@ class ModelRegistry:
 
         # Legacy fallback: if no active provider, check llm.* keys
         if not self._active_provider:
-            legacy_url = str(self._cs.get("llm.base_url", "") or "")
+            legacy_url = str(self._config_store.get("llm.base_url", "") or "")
             if legacy_url:
                 self._active_provider = "custom"
                 if not self._active_model:
-                    self._active_model = str(self._cs.get("llm.model", "") or "")
+                    self._active_model = str(self._config_store.get("llm.model", "") or "")
 
     def serialize(self) -> None:
         """Save current state to ConfigStore."""
-        self._cs.set("registry.active_provider", self._active_provider, category="registry")
-        self._cs.set("registry.active_model", self._active_model, category="registry")
-        self._cs.set(
+        self._config_store.set("registry.active_provider", self._active_provider, category="registry")
+        self._config_store.set("registry.active_model", self._active_model, category="registry")
+        self._config_store.set(
             "registry.discovered_models",
             json.dumps(self._discovered_models),
             category="registry",
@@ -679,7 +682,7 @@ class ModelRegistry:
         clean = (provider_name or "").strip()
         if not clean:
             return []
-        raw = self._cs.get(f"providers.{clean}.selected_models", [])
+        raw = self._config_store.get(f"providers.{clean}.selected_models", [])
         if isinstance(raw, str):
             try:
                 raw = json.loads(raw)
@@ -694,7 +697,7 @@ class ModelRegistry:
         clean = (provider_name or "").strip()
         if not clean:
             return
-        self._cs.set(
+        self._config_store.set(
             f"providers.{clean}.selected_models",
             [str(m) for m in models],
             category="providers",
@@ -733,12 +736,12 @@ class ModelRegistry:
             profile["provider"] = "custom"
         profile["name"] = clean_name
 
-        self._cs.set(f"models.saved.{clean_name}", profile, category="models")
+        self._config_store.set(f"models.saved.{clean_name}", profile, category="models")
         return self._mask_profile(profile)
 
     def list_model_profiles(self, *, mask_api_key: bool = True) -> list[dict[str, Any]]:
         """Return all saved model profiles."""
-        category = self._cs.get_category("models")
+        category = self._config_store.get_category("models")
         profiles: list[dict[str, Any]] = []
         for key, value in category.items():
             if not key.startswith("models.saved.") or not isinstance(value, dict):
@@ -754,7 +757,7 @@ class ModelRegistry:
         clean_name = (name or "").strip()
         if not clean_name:
             return None
-        profile = self._cs.get(f"models.saved.{clean_name}", None)
+        profile = self._config_store.get(f"models.saved.{clean_name}", None)
         return profile if isinstance(profile, dict) else None
 
     def delete_model_profile(self, name: str) -> bool:
@@ -762,7 +765,7 @@ class ModelRegistry:
         clean_name = (name or "").strip()
         if not clean_name:
             return False
-        return bool(self._cs.delete(f"models.saved.{clean_name}"))
+        return bool(self._config_store.delete(f"models.saved.{clean_name}"))
 
     # ── Unified options ────────────────────────────────────────────
 
@@ -792,18 +795,18 @@ class ModelRegistry:
             if provider_name:
                 provider_names.add(provider_name)
 
-        llm_model = str(self._cs.get("llm.model", "") or "").strip()
+        llm_model = str(self._config_store.get("llm.model", "") or "").strip()
         if llm_model:
             models.add(llm_model)
 
-        yaml_default_model = str(self._cs.get("models.default", "") or "").strip()
+        yaml_default_model = str(self._config_store.get("models.default", "") or "").strip()
         if yaml_default_model:
             models.add(yaml_default_model)
 
         task_defaults = self._collect_task_defaults()
         models.update(task_defaults.values())
 
-        for model_name in self._extract_registry_models(self._cs.get("models.registry", [])):
+        for model_name in self._extract_registry_models(self._config_store.get("models.registry", [])):
             models.add(model_name)
 
         return {
@@ -832,7 +835,7 @@ class ModelRegistry:
         during load; if parsing failed, it wrote an empty list over the
         real data, destroying it permanently. That will never happen again.
         """
-        raw = self._cs.get("providers.list", [])
+        raw = self._config_store.get("providers.list", [])
         # Legacy: ConfigStore.get returns a JSON-parsed value, but the
         # old _save_providers stored json.dumps(list) — so after one
         # json.loads inside ConfigStore.get we may still have a string.
@@ -863,7 +866,7 @@ class ModelRegistry:
         # pre-encode, or the stored string gets double-JSON-encoded
         # (str of a str).  The previous json.dumps here caused every
         # read to need two json.loads calls to recover the list.
-        self._cs.set("providers.list", providers, category="providers")
+        self._config_store.set("providers.list", providers, category="providers")
 
     def _default_provider_entries(self) -> list[dict[str, Any]]:
         providers: list[dict[str, Any]] = []
@@ -1007,14 +1010,14 @@ class ModelRegistry:
 
     def _collect_task_defaults(self) -> dict[str, str]:
         defaults: dict[str, str] = {}
-        category = self._cs.get_category("models")
+        category = self._config_store.get_category("models")
         for key, value in category.items():
             if key.startswith("models.defaults.") and isinstance(value, str) and value.strip():
                 defaults[key[len("models.defaults."):]] = value.strip()
 
         for task in _DEFAULT_TASKS:
             if task not in defaults:
-                value = self._cs.get(f"models.defaults.{task}", "")
+                value = self._config_store.get(f"models.defaults.{task}", "")
                 if isinstance(value, str) and value.strip():
                     defaults[task] = value.strip()
         return defaults

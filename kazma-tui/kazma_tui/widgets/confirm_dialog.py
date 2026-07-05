@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, Static
+
+logger = logging.getLogger(__name__)
 
 
 class ConfirmDialog(ModalScreen[bool]):

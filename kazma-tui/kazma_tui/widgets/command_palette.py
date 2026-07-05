@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, ListItem, ListView, Static, Label, TabbedContent, RichLog
 from textual.binding import Binding
+
+logger = logging.getLogger(__name__)
 
 
 class FuzzyMatcher:

@@ -10,16 +10,9 @@ Covers:
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-# Add project roots to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-core"))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-ui"))
 
 
 # ══════════════════════════════════════════════════════════════════════

@@ -5,12 +5,16 @@ Enhanced with theme switching and user preferences.
 
 from __future__ import annotations
 
+import logging
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll, Container
 from textual.widgets import SelectionList, Static, Button, Label
 
 from kazma_tui.themes.theme_manager import ThemeManager
+
+logger = logging.getLogger(__name__)
 
 
 class SettingsPanel(VerticalScroll):
