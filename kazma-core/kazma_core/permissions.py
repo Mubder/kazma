@@ -177,7 +177,8 @@ class PermissionManager:
     def _ensure_loaded(self) -> dict[str, Any]:
         if self._data is None:
             self.load_permissions()
-        assert self._data is not None  # always set after load_permissions
+        if self._data is None:  # load_permissions failed
+            self._data = {}
         return self._data
 
     def _get_user(self, user: str) -> dict[str, Any]:

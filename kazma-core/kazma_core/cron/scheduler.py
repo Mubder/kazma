@@ -173,7 +173,8 @@ class SQLiteCronStore:
 
     async def insert(self, job: ScheduledJob) -> None:
         """Insert a new scheduled job."""
-        assert self._db is not None
+        if self._db is None:
+            raise RuntimeError("CronDB not initialized")
         await self._db.execute(
             "INSERT INTO cron_jobs (job_id, timing, prompt, platform, thread_id, status, created_at, next_run) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -184,7 +185,8 @@ class SQLiteCronStore:
 
     async def list_active(self) -> list[ScheduledJob]:
         """List all pending/running jobs."""
-        assert self._db is not None
+        if self._db is None:
+            raise RuntimeError("CronDB not initialized")
         async with self._db.execute(
             "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, next_run, last_result "
             "FROM cron_jobs WHERE status IN ('pending', 'running')"
@@ -201,7 +203,8 @@ class SQLiteCronStore:
 
     async def list_all(self) -> list[ScheduledJob]:
         """List all jobs regardless of status."""
-        assert self._db is not None
+        if self._db is None:
+            raise RuntimeError("CronDB not initialized")
         async with self._db.execute(
             "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, next_run, last_result "
             "FROM cron_jobs ORDER BY created_at DESC"
@@ -218,7 +221,8 @@ class SQLiteCronStore:
 
     async def update_status(self, job_id: str, status: JobStatus) -> None:
         """Update a job's status."""
-        assert self._db is not None
+        if self._db is None:
+            raise RuntimeError("CronDB not initialized")
         await self._db.execute(
             "UPDATE cron_jobs SET status = ? WHERE job_id = ?",
             (status.value, job_id),

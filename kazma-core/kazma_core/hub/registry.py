@@ -173,7 +173,8 @@ class KazmaHub:
             (name, author, version),
         )
         skill_row = await cursor.fetchone()
-        assert skill_row is not None  # we just inserted it
+        if skill_row is None:
+            raise RuntimeError(f"Failed to insert skill {name}")
         skill_id_int = skill_row["id"]
 
         await conn.execute("DELETE FROM skill_dependencies WHERE skill_id=?", (skill_id_int,))

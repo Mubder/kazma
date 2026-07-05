@@ -233,7 +233,8 @@ class CulturalContext:
         """Return the current cultural context state."""
         if self._state is None:
             self.update_context()
-        assert self._state is not None
+        if self._state is None:  # update_context failed
+            self._state = {}
         return self._state
 
     def get_hijri_date(self) -> tuple[int, int, int]:
