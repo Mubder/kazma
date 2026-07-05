@@ -66,12 +66,26 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     install never silently opens the whole filesystem.
     """
     try:
-        from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _WORKSPACE_ROOT
+        from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _get_workspace
     except (ImportError, OSError):
         return f"Safety: workspace module unavailable — {op} denied. Path: {path}"
-    if _WORKSPACE_ROOT and not _ALLOW_ABSOLUTE:
-        if not p.is_relative_to(_WORKSPACE_ROOT) and not p.is_relative_to(Path("/tmp")):
-            return f"Safety: {op} outside workspace are not allowed. Path: {path}"
+    
+    workspace = _get_workspace().resolve()
+    resolved_p = p.expanduser().resolve()
+    if not _ALLOW_ABSOLUTE:
+        try:
+            resolved_p.relative_to(workspace)
+        except ValueError:
+            # Check temp directories as fallbacks for testing
+            try:
+                resolved_p.relative_to(Path("/tmp").resolve())
+            except ValueError:
+                import tempfile
+                sys_temp = Path(tempfile.gettempdir()).resolve()
+                try:
+                    resolved_p.relative_to(sys_temp)
+                except ValueError:
+                    return f"Safety: {op} outside workspace are not allowed. Path: {path}"
     return None
 
 # ── VectorMemory singleton for RAG tools ─────────────────────────────
@@ -360,7 +374,8 @@ class LocalToolRegistry:
             max_attempts = cfg["max_attempts"]
             min_wait = cfg["min_wait"]
             max_wait = cfg["max_wait"]
-        except Exception:
+        except Exception as exc:
+            logger.debug("[ToolRegistry] Failed to load retry config, using default limits: %s", exc)
             max_attempts = 1  # No retry if config unavailable
             min_wait = 2
             max_wait = 10
@@ -392,8 +407,9 @@ class LocalToolRegistry:
                             "content": f"Tool '{tool_name}' denied by HITL approval gate.",
                             "is_error": True,
                         }
-            except Exception:
+            except Exception as exc:
                 # Safety unavailable — fail closed (do not execute danger tools).
+                logger.warning("[ToolRegistry] Safety check failed or unavailable for %s: %s", tool_name, exc)
                 return {
                     "content": f"Tool '{tool_name}' blocked — SafetyMiddleware unavailable.",
                     "is_error": True,
@@ -508,14 +524,8 @@ class LocalToolRegistry:
             category="filesystem",
         )
         async def file_write(path: str, content: str, encoding: str = "utf-8") -> str:
-            p = Path(path).expanduser().resolve()
-            # Workspace scoping — block writes outside workspace (fail-closed)
-            scope_err = _workspace_scope_error(p, path, "writes")
-            if scope_err:
-                return scope_err
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(content, encoding=encoding)
-            return f"Wrote {len(content)} chars to {path}"
+            from kazma_core.tools.file_write import file_write as _fw_tool
+            return await _fw_tool(path, content)
 
         @self.register(
             description="List files and directories at a path. Returns names sorted alphabetically.",
@@ -523,6 +533,10 @@ class LocalToolRegistry:
         )
         async def file_list(path: str = ".", pattern: str = "*") -> str:
             p = Path(path).expanduser().resolve()
+            # Workspace scoping — block listing outside workspace (fail-closed)
+            scope_err = _workspace_scope_error(p, path, "listings")
+            if scope_err:
+                return scope_err
             if not p.exists():
                 return f"Error: Path not found: {path}"
             if not p.is_dir():
@@ -565,7 +579,8 @@ class LocalToolRegistry:
                                 results.append(f"{file_path}:{i}: {line.strip()}")
                                 if len(results) >= limit:
                                     return "\n".join(results)
-                    except Exception:
+                    except Exception as exc:
+                        logger.debug("[ToolRegistry] Failed to read %s in search: %s", file_path, exc)
                         continue
 
             return "\n".join(results) if results else f"No matches for '{pattern}' in {path}/{glob}"
@@ -583,21 +598,33 @@ class LocalToolRegistry:
             params: list[Any] | None = None,
             limit: int = 100,
         ) -> str:
-            # Safety: only allow SELECT
+            # Safety: only allow SELECT or WITH
             normalized = query.strip().upper()
-            if not normalized.startswith("SELECT"):
-                raise ValueError("Only SELECT queries are allowed for safety.")
+            if not (normalized.startswith("SELECT") or normalized.startswith("WITH")):
+                raise ValueError("Only SELECT and WITH read-only queries are allowed for safety.")
             # Block multi-statement queries
             if ";" in query.strip().rstrip(";"):
                 raise ValueError("Multi-statement queries are not allowed.")
 
+            # Double-layer AST/word-boundary safety check
+            import re
+            forbidden_keywords = re.compile(
+                r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|RENAME|PRAGMA|ATTACH|DETACH|VACUUM)\b",
+                re.IGNORECASE,
+            )
+            if forbidden_keywords.search(query):
+                raise ValueError("Write operations or administrative commands are not allowed.")
+
             path = Path(db_path).expanduser().resolve()
 
-            # Security: restrict to known Kazma data directories
+            # Security: restrict to known Kazma data directories + active workspace
+            from kazma_core.tools.file_write import _get_workspace
+            workspace = _get_workspace()
             _ALLOWED_DB_ROOTS = [
                 Path("kazma-data").resolve(),
                 Path.home() / ".kazma",
-                Path("/tmp"),  # for tests
+                Path("/tmp").resolve(),  # for tests
+                workspace.resolve(),
             ]
             allowed = any(
                 path.is_relative_to(root) or path == root
@@ -606,7 +633,7 @@ class LocalToolRegistry:
             if not allowed:
                 return (
                     f"Error: Access denied. Database path must be under "
-                    f"kazma-data/ or ~/.kazma/. Got: {db_path}"
+                    f"kazma-data/, ~/.kazma/, or the active workspace. Got: {db_path}"
                 )
 
             if not path.exists():
@@ -615,6 +642,19 @@ class LocalToolRegistry:
             try:
                 conn = sqlite3.connect(str(path))
                 conn.row_factory = sqlite3.Row
+                
+                # Set database-level read-only authorizer
+                def authorizer_callback(action, arg1, arg2, dbname, trigger_name):
+                    allowed_actions = {
+                        sqlite3.SQLITE_SELECT,
+                        sqlite3.SQLITE_READ,
+                    }
+                    if action in allowed_actions:
+                        return sqlite3.SQLITE_OK
+                    return sqlite3.SQLITE_DENY
+                
+                conn.set_authorizer(authorizer_callback)
+                
                 cursor = conn.execute(query, params or [])
                 rows = cursor.fetchmany(limit)
                 conn.close()
@@ -677,8 +717,8 @@ class LocalToolRegistry:
             category="system",
         )
         async def shell_exec(command: str, timeout: int = 30) -> str:
+            import asyncio
             import shlex
-            import subprocess
             # Log all shell_exec invocations — this is a dangerous tool
             logger.warning(
                 "[SECURITY] shell_exec called: %s",
@@ -726,22 +766,35 @@ class LocalToolRegistry:
                     )
 
             try:
-                result = subprocess.run(
-                    args,
-                    capture_output=True,
-                    timeout=timeout,
-                    text=True,
-                    shell=False,
-                    env=None,  # inherit OS environment
+                # Restrict context strictly to active workspace
+                from kazma_core.tools.file_write import _get_workspace
+                cwd = _get_workspace()
+
+                # Run process asynchronously with timeout and restricted context
+                proc = await asyncio.create_subprocess_exec(
+                    args[0],
+                    *args[1:],
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
                 )
-                output = result.stdout
-                if result.stderr:
-                    output += f"\n[stderr]\n{result.stderr}"
-                if result.returncode != 0:
-                    output += f"\n[exit code: {result.returncode}]"
+                
+                try:
+                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    return f"Error: Command timed out after {timeout}s"
+
+                output = stdout.decode("utf-8", errors="replace")
+                err_output = stderr.decode("utf-8", errors="replace")
+                if err_output:
+                    output += f"\n[stderr]\n{err_output}"
+                if proc.returncode != 0:
+                    output += f"\n[exit code: {proc.returncode}]"
                 return output[:10_000]  # cap output
-            except TimeoutError:
-                return f"Error: Command timed out after {timeout}s"
             except FileNotFoundError:
                 return f"Error: Command not found: {args[0]}"
             except Exception as exc:

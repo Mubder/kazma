@@ -39,6 +39,9 @@ CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
 """
 
 
+_MISSING = object()
+
+
 class ConfigStore:
     """SQLite-backed runtime configuration with YAML fallback."""
 
@@ -49,6 +52,7 @@ class ConfigStore:
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
         self._yaml_cache: dict[str, Any] | None = None
+        self._cache: dict[str, Any] = {}
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -85,6 +89,8 @@ class ConfigStore:
     def invalidate_yaml_cache(self) -> None:
         """Force re-read of kazma.yaml on next access."""
         self._yaml_cache = None
+        with self._lock:
+            self._cache.clear()
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -123,13 +129,22 @@ class ConfigStore:
             3. YAML dotted-key lookup.
         """
         with self._lock:
+            if key in self._cache:
+                cached = self._cache[key]
+                if cached is _MISSING:
+                    return default
+                return cached
+
             conn = self._get_conn()
             row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
             if row is not None:
-                return json.loads(row["value"])
+                val = json.loads(row["value"])
+                self._cache[key] = val
+                return val
             # Re-merge flattened children (e.g. from import_yaml round-trip).
             merged = self._collect_prefixed(conn, key)
             if merged:
+                self._cache[key] = merged
                 return merged
 
         # Fall back to YAML (supports dotted keys like "llm.model")
@@ -142,7 +157,14 @@ class ConfigStore:
             else:
                 val = None
                 break
-        return val if val is not None else default
+
+        with self._lock:
+            if val is not None:
+                self._cache[key] = val
+                return val
+            else:
+                self._cache[key] = _MISSING
+                return default
 
     def set(self, key: str, value: Any, category: str = "general") -> None:
         """Set a setting in the DB."""
@@ -155,6 +177,7 @@ class ConfigStore:
                 (key, json.dumps(value), category, now),
             )
             conn.commit()
+            self._cache.clear()
         logger.info("Setting updated: %s = %s (category=%s)", key, value, category)
 
     def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
@@ -184,6 +207,7 @@ class ConfigStore:
                         (key, json.dumps(value), category, now),
                     )
                 conn.execute("COMMIT")
+                self._cache.clear()
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
@@ -209,6 +233,7 @@ class ConfigStore:
             try:
                 yield conn
                 conn.execute("COMMIT")
+                self._cache.clear()
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
@@ -239,7 +264,10 @@ class ConfigStore:
             conn = self._get_conn()
             cursor = conn.execute("DELETE FROM settings WHERE key = ?", (key,))
             conn.commit()
-            return cursor.rowcount > 0
+            if cursor.rowcount > 0:
+                self._cache.clear()
+                return True
+            return False
 
     def export_yaml(self) -> str:
         """Export current settings as YAML, merging DB overrides with base YAML."""
@@ -353,6 +381,7 @@ class ConfigStore:
             conn = self._get_conn()
             cursor = conn.execute("DELETE FROM settings")
             conn.commit()
+            self._cache.clear()
             return cursor.rowcount
 
     def close(self) -> None:

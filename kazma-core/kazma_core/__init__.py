@@ -22,9 +22,13 @@ from kazma_core.router import AgentRequest, AgentResponse, DialectRouter
 from kazma_core.state import AgentState, initial_state
 from kazma_core.tokenizer import DualEngineTokenizer, TokenResult
 from kazma_core.tone_adapter import FormalityLevel, ToneAdapter, ToneProfile
+from kazma_core.service_container import ServiceContainer, get_container, reset_container
 from kazma_core.tracing import KazmaTracer, create_tracer
 
 __all__ = [
+    "ServiceContainer",
+    "get_container",
+    "reset_container",
     "AgentState",
     "ApprovalResult",
     "AuditEntry",

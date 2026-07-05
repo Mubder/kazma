@@ -97,6 +97,12 @@ class SwarmEngine:
         self._max_history = 500  # LRU cap to prevent unbounded memory growth
         self._result_aggregator = result_aggregator or ResultAggregator()
         self._capability_router = capability_router or CapabilityRouter()
+        from kazma_core.routing_engine import RoutingEngine, CapabilityRouterWrapper, SemanticRouterWrapper, DialectRouterWrapper
+        self._routing_engine = RoutingEngine([
+            SemanticRouterWrapper(),
+            DialectRouterWrapper(),
+            CapabilityRouterWrapper(self._capability_router),
+        ])
         # Reliability config delegated to ReliabilityRegistry (P2-1 refactor).
         self._reliability = ReliabilityRegistry(
             worker_names=lambda: list(self._workers.keys()),
@@ -289,10 +295,10 @@ class SwarmEngine:
     async def _dispatch_inner(self, task: SwarmTask, started: float, task_span: Any) -> TaskResult:
         """Inner dispatch logic, wrapped by dispatch() for catch-all safety."""
 
-        # Auto-routing: resolve workers=["auto"] via CapabilityRouter.
+        # Auto-routing: resolve workers=["auto"] via Polymorphic Routing Engine.
         if list(task.workers) == ["auto"]:
             try:
-                routed = self._capability_router.route(
+                routed = await self._routing_engine.route(
                     task,
                     self._build_available_workers_list(),
                 )

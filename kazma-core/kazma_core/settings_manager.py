@@ -62,21 +62,16 @@ DEFAULT_MODEL_DEFAULTS: dict[str, str] = {
 _START_TIME = time.monotonic()
 
 
-class SettingsManager:
-    """Comprehensive settings manager wrapping ConfigStore."""
+class ProviderSettingsService:
+    """Service handling provider-specific settings, connections, and health checks."""
 
-    def __init__(self, config_store: Any) -> None:
+    def __init__(self, config_store: Any, registry: Any = None) -> None:
         self._cs = config_store
-        # Always create a local ModelRegistry from the provided config_store.
-        # The global singleton may point to a different ConfigStore instance
-        # (e.g. in tests), so we must not use it here.
-        from kazma_core.model_registry import ModelRegistry
-
-        self._registry = ModelRegistry(config_store)
-
-    # ══════════════════════════════════════════════════════════════════
-    # PROVIDERS
-    # ══════════════════════════════════════════════════════════════════
+        if registry is None:
+            from kazma_core.model_registry import ModelRegistry
+            self._registry = ModelRegistry(config_store)
+        else:
+            self._registry = registry
 
     def get_all_providers(self) -> list[dict[str, Any]]:
         """List all configured providers."""
@@ -146,6 +141,152 @@ class SettingsManager:
         self._cs.set(f"providers.health.{name}", status, category="providers")
         self._cs.set(f"providers.health.{name}.last_check", datetime.now(UTC).isoformat(), category="providers")
         self._registry.set_provider_health(name, status)
+
+
+class MCPSettingsService:
+    """Service handling MCP server configuration, state, and client connection testing."""
+
+    def __init__(self, config_store: Any) -> None:
+        self._cs = config_store
+
+    def get_mcp_servers(self) -> list[dict[str, Any]]:
+        """List all MCP servers with status."""
+        servers = self._cs.get("mcp.servers", [])
+        if isinstance(servers, str):
+            try:
+                servers = json.loads(servers)
+            except (json.JSONDecodeError, TypeError):
+                servers = []
+        return servers if isinstance(servers, list) else []
+
+    def add_mcp_server(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Add a new MCP server."""
+        servers = self.get_mcp_servers()
+        name = data.get("name", "")
+        if not name:
+            return {"error": "Server name is required"}
+        # Check for duplicates
+        for s in servers:
+            if s.get("name") == name:
+                s.update(data)
+                self._cs.set("mcp.servers", json.dumps(servers), category="mcp")
+                return s
+        server = {
+            "name": name,
+            "transport": data.get("transport", "stdio"),
+            "command": data.get("command", []),
+            "url": data.get("url", ""),
+            "env": data.get("env", {}),
+            "enabled": True,
+            "connected": False,
+            "tool_count": 0,
+            "tools": [],
+        }
+        servers.append(server)
+        self._cs.set("mcp.servers", json.dumps(servers), category="mcp")
+        return server
+
+    def delete_mcp_server(self, name: str) -> None:
+        """Remove an MCP server."""
+        servers = self.get_mcp_servers()
+        servers = [s for s in servers if s.get("name") != name]
+        self._cs.set("mcp.servers", json.dumps(servers), category="mcp")
+
+    def toggle_mcp_server(self, name: str, enabled: bool) -> None:
+        """Enable/disable an MCP server."""
+        servers = self.get_mcp_servers()
+        for s in servers:
+            if s.get("name") == name:
+                s["enabled"] = enabled
+                break
+        self._cs.set("mcp.servers", json.dumps(servers), category="mcp")
+
+    async def test_mcp_server(self, name: str) -> dict[str, Any]:
+        """Test an MCP server connection."""
+        servers = self.get_mcp_servers()
+        server = None
+        for s in servers:
+            if s.get("name") == name:
+                server = s
+                break
+        if not server:
+            return {"success": False, "error": f"Server '{name}' not found"}
+
+        try:
+            from kazma_core.mcp.manager import AsyncMCPManager
+            manager = AsyncMCPManager()
+            count = await manager.connect_from_config([server])
+            tool_schemas = manager.get_all_tool_schemas()
+            tool_names = [t.get("function", {}).get("name", "") for t in tool_schemas]
+            await manager.shutdown()
+            return {"success": True, "tool_count": count, "tools": tool_names[:20]}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_mcp_tools(self, server_name: str) -> list[dict[str, Any]]:
+        """List tools for an MCP server."""
+        servers = self.get_mcp_servers()
+        for s in servers:
+            if s.get("name") == server_name:
+                return s.get("tools", [])
+        return []
+
+
+class SettingsManager:
+    """Comprehensive settings manager wrapping ConfigStore."""
+
+    def __init__(self, config_store: Any) -> None:
+        self._cs = config_store
+        # Always create a local ModelRegistry from the provided config_store.
+        # The global singleton may point to a different ConfigStore instance
+        # (e.g. in tests), so we must not use it here.
+        from kazma_core.model_registry import ModelRegistry
+
+        self._registry = ModelRegistry(config_store)
+
+        # Instantiate modular services
+        self.providers_service = ProviderSettingsService(config_store, self._registry)
+        self.mcp_service = MCPSettingsService(config_store)
+
+        # Register services on global Dependency Injection container
+        from kazma_core.service_container import get_container
+        try:
+            get_container().register(ProviderSettingsService, self.providers_service)
+            get_container().register(MCPSettingsService, self.mcp_service)
+        except Exception as exc:
+            logger.debug("[SettingsManager] Container registration skipped: %s", exc)
+
+    # ══════════════════════════════════════════════════════════════════
+    # PROVIDERS (Delegated to ProviderSettingsService)
+    # ══════════════════════════════════════════════════════════════════
+
+    def get_all_providers(self) -> list[dict[str, Any]]:
+        """List all configured providers."""
+        return self.providers_service.get_all_providers()
+
+    def add_provider(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Add a new provider."""
+        return self.providers_service.add_provider(data)
+
+    def delete_provider(self, name: str) -> None:
+        """Delete a provider by name."""
+        self.providers_service.delete_provider(name)
+
+    def toggle_provider(self, name: str, enabled: bool) -> None:
+        """Enable/disable a provider."""
+        self.providers_service.toggle_provider(name, enabled)
+
+    async def test_provider(self, name: str) -> dict[str, Any]:
+        """Test a provider connection with a real HTTP call."""
+        return await self.providers_service.test_provider(name)
+
+    def get_provider_health(self, name: str) -> dict[str, Any]:
+        """Get health status for a provider."""
+        return self.providers_service.get_provider_health(name)
+
+    def _update_provider_health(self, name: str, status: str) -> None:
+        """Update provider health status in store."""
+        self.providers_service._update_provider_health(name, status)
 
     # ══════════════════════════════════════════════════════════════════
     # MODELS

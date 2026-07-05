@@ -149,45 +149,47 @@ async def _download_image(url: str) -> tuple[bytes, str]:
     """
     if not _is_safe_url(url):
         raise ValueError(f"Blocked potentially unsafe URL: {url}")
-    import httpx
+    from kazma_core.http_pool import get_http_client
 
     try:
-        async with httpx.AsyncClient(
+        client = get_http_client()
+        async with client.stream(
+            "GET",
+            url,
             follow_redirects=True,
             timeout=REQUEST_TIMEOUT,
             headers={"User-Agent": "KazmaBot/1.0 (vision analyzer)"},
-        ) as client:
-            async with client.stream("GET", url) as resp:
-                resp.raise_for_status()
+        ) as resp:
+            resp.raise_for_status()
 
-                # Check Content-Length header first (may be absent)
-                content_length = int(resp.headers.get("content-length", 0))
-                if content_length > MAX_DOWNLOAD_BYTES:
+            # Check Content-Length header first (may be absent)
+            content_length = int(resp.headers.get("content-length", 0))
+            if content_length > MAX_DOWNLOAD_BYTES:
+                raise ValueError(
+                    f"Image too large ({content_length / 1_048_576:.1f} MB). "
+                    f"Max {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB."
+                )
+
+            # Stream-based size check — protects against missing Content-Length
+            chunks: list[bytes] = []
+            total_bytes = 0
+            async for chunk in resp.aiter_bytes(chunk_size=65536):
+                total_bytes += len(chunk)
+                if total_bytes > MAX_DOWNLOAD_BYTES:
                     raise ValueError(
-                        f"Image too large ({content_length / 1_048_576:.1f} MB). "
-                        f"Max {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB."
+                        f"Image download exceeds {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB limit "
+                        f"(downloaded {total_bytes / 1_048_576:.1f} MB so far)."
                     )
+                chunks.append(chunk)
+            image_bytes = b"".join(chunks)
 
-                # Stream-based size check — protects against missing Content-Length
-                chunks: list[bytes] = []
-                total_bytes = 0
-                async for chunk in resp.aiter_bytes(chunk_size=65536):
-                    total_bytes += len(chunk)
-                    if total_bytes > MAX_DOWNLOAD_BYTES:
-                        raise ValueError(
-                            f"Image download exceeds {MAX_DOWNLOAD_BYTES / 1_048_576:.0f} MB limit "
-                            f"(downloaded {total_bytes / 1_048_576:.1f} MB so far)."
-                        )
-                    chunks.append(chunk)
-                image_bytes = b"".join(chunks)
+        # Detect MIME from Content-Type header, fallback to PNG
+        content_type = resp.headers.get("content-type", "image/png")
+        mime = content_type.split(";")[0].strip().lower()
+        if mime not in MIME_MAP.values():
+            mime = "image/png"  # best-effort fallback
 
-            # Detect MIME from Content-Type header, fallback to PNG
-            content_type = resp.headers.get("content-type", "image/png")
-            mime = content_type.split(";")[0].strip().lower()
-            if mime not in MIME_MAP.values():
-                mime = "image/png"  # best-effort fallback
-
-            return image_bytes, mime
+        return image_bytes, mime
 
     except httpx.HTTPStatusError as exc:
         raise ValueError(

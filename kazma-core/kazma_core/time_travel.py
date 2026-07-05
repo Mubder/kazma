@@ -331,7 +331,8 @@ class SnapshotRecorder:
         try:
             store = self._get_store(db_path)
             return store.get(thread_id, iteration)
-        except Exception:
+        except Exception as exc:
+            logger.debug("[SnapshotStore] SQLite fallback failed for thread %s, iteration %d: %s", thread_id, iteration, exc)
             return None
 
     def list_snapshots(

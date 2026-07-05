@@ -68,9 +68,16 @@ class SQLiteMemoryBackend:
                 timestamp INTEGER DEFAULT 0,
                 source TEXT DEFAULT '',
                 relevance REAL DEFAULT 1.0,
-                embedding BLOB
+                embedding BLOB,
+                tenant_id TEXT
             )
         """)
+
+        # Auto-migration: add tenant_id if not present in existing databases
+        try:
+            await conn.execute("ALTER TABLE memories ADD COLUMN tenant_id TEXT")
+        except Exception:
+            pass  # Already exists
 
         # Create FTS5 table for full-text search (self-contained)
         # memory_id stores the memories.id for reliable joins.
@@ -107,11 +114,12 @@ class SQLiteMemoryBackend:
         await conn.commit()
         return conn
 
-    async def index(self, memory: Any) -> str:
+    async def index(self, memory: Any, tenant_id: str | None = None) -> str:
         """Index a memory to SQLite with Arabic tokenization.
 
         Args:
             memory: Memory dict or Memory object.
+            tenant_id: Optional tenant isolation ID.
 
         Returns:
             Document ID.
@@ -126,6 +134,8 @@ class SQLiteMemoryBackend:
             timestamp = memory.get("timestamp", 0)
             source = memory.get("source", "")
             relevance = memory.get("relevance", 1.0)
+            embedding = memory.get("embedding", None)
+            resolved_tenant = tenant_id or memory.get("tenant_id") or (metadata.get("tenant_id") if isinstance(metadata, dict) else None)
         else:
             memory_id = getattr(memory, "id", self._generate_id())
             content = getattr(memory, "content", "")
@@ -133,6 +143,8 @@ class SQLiteMemoryBackend:
             timestamp = getattr(memory, "timestamp", 0)
             source = getattr(memory, "source", "")
             relevance = getattr(memory, "relevance", 1.0)
+            embedding = getattr(memory, "embedding", None)
+            resolved_tenant = tenant_id or getattr(memory, "tenant_id", None) or (metadata.get("tenant_id") if isinstance(metadata, dict) else None)
 
         # Process content through Arabic tokenizer
         content_arabic = self._arabic_tokenizer.tokenize(content)
@@ -142,10 +154,10 @@ class SQLiteMemoryBackend:
 
         await conn.execute(
             """
-            INSERT OR REPLACE INTO memories (id, content, content_arabic, metadata, timestamp, source, relevance)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO memories (id, content, content_arabic, metadata, timestamp, source, relevance, embedding, tenant_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (memory_id, content, content_arabic, metadata, timestamp, source, relevance),
+            (memory_id, content, content_arabic, metadata, timestamp, source, relevance, embedding, resolved_tenant),
         )
 
         # Triggers will automatically update FTS5 table
@@ -158,12 +170,13 @@ class SQLiteMemoryBackend:
         Args:
             query: Search query string.
             limit: Maximum number of results to return.
-            **kwargs: Additional parameters (embedding, semantic_search, etc.)
+            **kwargs: Additional parameters (embedding, semantic_search, tenant_id, etc.)
 
         Returns:
             List of memory dictionaries ranked by relevance.
         """
         conn = await self._ensure_connection()
+        tenant_id = kwargs.get("tenant_id")
 
         # Process query through Arabic tokenizer for better matching
         query_arabic = self._arabic_tokenizer.tokenize(query)
@@ -172,18 +185,30 @@ class SQLiteMemoryBackend:
 
         # Try FTS5 BM25 search first (keyword matching)
         try:
-            # Use the external content table pattern for FTS5
-            # Search directly in FTS5 table with rowid, then join
-            cursor = await conn.execute(
-                """
-                SELECT memory_id, bm25(memories_fts) as bm25_score
-                FROM memories_fts
-                WHERE memories_fts MATCH ?
-                ORDER BY bm25_score ASC
-                LIMIT ?
-                """,
-                (query, limit),
-            )
+            # Search directly in FTS5 table with rowid, and filter by tenant_id on memories join if specified
+            if tenant_id is not None:
+                cursor = await conn.execute(
+                    """
+                    SELECT f.memory_id, bm25(f.memories_fts) as bm25_score
+                    FROM memories_fts f
+                    JOIN memories m ON m.id = f.memory_id
+                    WHERE f.memories_fts MATCH ? AND (m.tenant_id = ? OR m.tenant_id IS NULL)
+                    ORDER BY bm25_score ASC
+                    LIMIT ?
+                    """,
+                    (query, tenant_id, limit),
+                )
+            else:
+                cursor = await conn.execute(
+                    """
+                    SELECT memory_id, bm25(memories_fts) as bm25_score
+                    FROM memories_fts
+                    WHERE memories_fts MATCH ?
+                    ORDER BY bm25_score ASC
+                    LIMIT ?
+                    """,
+                    (query, limit),
+                )
             fts_rows = await cursor.fetchall()
 
             if fts_rows:
@@ -192,14 +217,24 @@ class SQLiteMemoryBackend:
 
                 # Fetch full memory records by id
                 placeholders = ",".join(["?"] * len(memory_ids))
-                cursor = await conn.execute(
-                    f"""
-                    SELECT id, content, content_arabic, metadata, timestamp, source, relevance
-                    FROM memories
-                    WHERE id IN ({placeholders})
-                    """,
-                    memory_ids,
-                )
+                if tenant_id is not None:
+                    cursor = await conn.execute(
+                        f"""
+                        SELECT id, content, content_arabic, metadata, timestamp, source, relevance
+                        FROM memories
+                        WHERE id IN ({placeholders}) AND (tenant_id = ? OR tenant_id IS NULL)
+                        """,
+                        memory_ids + [tenant_id],
+                    )
+                else:
+                    cursor = await conn.execute(
+                        f"""
+                        SELECT id, content, content_arabic, metadata, timestamp, source, relevance
+                        FROM memories
+                        WHERE id IN ({placeholders})
+                        """,
+                        memory_ids,
+                    )
                 memory_rows = await cursor.fetchall()
 
                 for row in memory_rows:
@@ -221,10 +256,16 @@ class SQLiteMemoryBackend:
         except Exception as e:
             logger.warning("FTS5 search failed: %s", e)
             # Fallback to simple LIKE search
-            cursor = await conn.execute(
-                "SELECT id, content, metadata, timestamp, source, relevance FROM memories WHERE content LIKE ? LIMIT ?",
-                (f"%{query}%", limit),
-            )
+            if tenant_id is not None:
+                cursor = await conn.execute(
+                    "SELECT id, content, metadata, timestamp, source, relevance FROM memories WHERE content LIKE ? AND (tenant_id = ? OR tenant_id IS NULL) LIMIT ?",
+                    (f"%{query}%", tenant_id, limit),
+                )
+            else:
+                cursor = await conn.execute(
+                    "SELECT id, content, metadata, timestamp, source, relevance FROM memories WHERE content LIKE ? LIMIT ?",
+                    (f"%{query}%", limit),
+                )
             rows = await cursor.fetchall()
             results.extend(
                 [
@@ -247,6 +288,7 @@ class SQLiteMemoryBackend:
                 vector_results = await self._vector_search(
                     kwargs["embedding"],
                     limit=max(limit // 2, 3),  # Reserve half slots for vector search
+                    tenant_id=tenant_id,
                 )
                 results.extend(vector_results)
             except Exception as e:
@@ -274,12 +316,13 @@ class SQLiteMemoryBackend:
 
         return sorted_results[:limit]
 
-    async def _vector_search(self, embedding: bytes, limit: int = 10) -> list[dict[str, Any]]:
+    async def _vector_search(self, embedding: bytes, limit: int = 10, tenant_id: str | None = None) -> list[dict[str, Any]]:
         """Perform vector similarity search using sqlite-vec.
 
         Args:
             embedding: Query embedding vector.
             limit: Maximum number of results.
+            tenant_id: Optional tenant isolation ID.
 
         Returns:
             List of memory dictionaries.
@@ -288,16 +331,28 @@ class SQLiteMemoryBackend:
 
         try:
             # Use sqlite-vec for vector similarity search
-            cursor = await conn.execute(
-                """
-                SELECT id, content, metadata, timestamp, source, relevance
-                FROM memories
-                WHERE embedding IS NOT NULL
-                ORDER BY distance(embedding, ?)
-                LIMIT ?
-                """,
-                (embedding, limit),
-            )
+            if tenant_id is not None:
+                cursor = await conn.execute(
+                    """
+                    SELECT id, content, metadata, timestamp, source, relevance
+                    FROM memories
+                    WHERE embedding IS NOT NULL AND (tenant_id = ? OR tenant_id IS NULL)
+                    ORDER BY distance(embedding, ?)
+                    LIMIT ?
+                    """,
+                    (tenant_id, embedding, limit),
+                )
+            else:
+                cursor = await conn.execute(
+                    """
+                    SELECT id, content, metadata, timestamp, source, relevance
+                    FROM memories
+                    WHERE embedding IS NOT NULL
+                    ORDER BY distance(embedding, ?)
+                    LIMIT ?
+                    """,
+                    (embedding, limit),
+                )
             rows = await cursor.fetchall()
 
             return [
@@ -371,16 +426,17 @@ class SearchBackend:
         """
         return await self.backend.search(query, limit=limit, **kwargs)
 
-    async def index(self, memory: Any) -> str:
+    async def index(self, memory: Any, tenant_id: str | None = None) -> str:
         """Index a memory with Arabic tokenization.
 
         Args:
             memory: Memory object to index.
+            tenant_id: Optional tenant isolation ID.
 
         Returns:
             Document ID.
         """
-        return await self.backend.index(memory)
+        return await self.backend.index(memory, tenant_id=tenant_id)
 
     async def count(self) -> int:
         """Get total document count.

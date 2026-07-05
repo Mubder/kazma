@@ -30,12 +30,13 @@ _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS sessions (
     thread_id TEXT PRIMARY KEY,
     context   TEXT NOT NULL,
-    updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
+    updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    tenant_id TEXT
 );
 """
 
 _GET_BY_THREAD = "SELECT context FROM sessions WHERE thread_id = ?"
-_UPSERT = "INSERT OR REPLACE INTO sessions (thread_id, context, updated_at) VALUES (?, ?, strftime('%s', 'now'))"
+_UPSERT = "INSERT OR REPLACE INTO sessions (thread_id, context, updated_at, tenant_id) VALUES (?, ?, strftime('%s', 'now'), ?)"
 _DELETE = "DELETE FROM sessions WHERE thread_id = ?"
 _EVICT_OLDER_THAN = "DELETE FROM sessions WHERE updated_at < ?"
 
@@ -77,17 +78,29 @@ class SQLiteSessionStore(SessionStore):
             except Exception:
                 pass  # Not critical if WAL isn't supported
             await self._db.execute(_CREATE_TABLE)
+            # Schema auto-migration: add tenant_id if not present
+            try:
+                await self._db.execute("ALTER TABLE sessions ADD COLUMN tenant_id TEXT")
+            except Exception:
+                pass  # Ignore error if column is already present
             await self._db.commit()
-            logger.info("[SQLiteSessionStore] Opened %s", self._db_path)
+            logger.info("[SQLiteSessionStore] Opened %s and auto-migrated schema if needed", self._db_path)
             return self._db
 
-    async def get(self, thread_id: str) -> dict[str, Any]:
-        """Retrieve context_metadata for a thread_id.
+    async def get(self, thread_id: str, tenant_id: str | None = None) -> dict[str, Any]:
+        """Retrieve context_metadata for a thread_id, optionally scoped by tenant_id.
 
         Returns empty dict if not found.
         """
         db = await self._ensure_db()
-        async with db.execute(_GET_BY_THREAD, (thread_id,)) as cursor:
+        if tenant_id is not None:
+            query = "SELECT context FROM sessions WHERE thread_id = ? AND (tenant_id = ? OR tenant_id IS NULL)"
+            params = (thread_id, tenant_id)
+        else:
+            query = _GET_BY_THREAD
+            params = (thread_id,)
+
+        async with db.execute(query, params) as cursor:
             row = await cursor.fetchone()
             if row is None:
                 return {}
@@ -97,17 +110,21 @@ class SQLiteSessionStore(SessionStore):
                 logger.warning("[SQLiteSessionStore] Corrupt context for %s", thread_id)
                 return {}
 
-    async def put(self, thread_id: str, context: dict[str, Any]) -> None:
-        """Store context_metadata for a thread_id (upsert)."""
+    async def put(self, thread_id: str, context: dict[str, Any], tenant_id: str | None = None) -> None:
+        """Store context_metadata for a thread_id (upsert), optionally scoped by tenant_id."""
         db = await self._ensure_db()
         serialized = json.dumps(context, ensure_ascii=False)
-        await db.execute(_UPSERT, (thread_id, serialized))
+        resolved_tenant = tenant_id or context.get("tenant_id")
+        await db.execute(_UPSERT, (thread_id, serialized, resolved_tenant))
         await db.commit()
 
-    async def delete(self, thread_id: str) -> None:
-        """Remove stored context for a thread_id. No-op if not found."""
+    async def delete(self, thread_id: str, tenant_id: str | None = None) -> None:
+        """Remove stored context for a thread_id, optionally scoped by tenant_id. No-op if not found."""
         db = await self._ensure_db()
-        await db.execute(_DELETE, (thread_id,))
+        if tenant_id is not None:
+            await db.execute("DELETE FROM sessions WHERE thread_id = ? AND tenant_id = ?", (thread_id, tenant_id))
+        else:
+            await db.execute(_DELETE, (thread_id,))
         await db.commit()
 
     async def evict_older_than(self, seconds: float) -> int:
@@ -130,15 +147,22 @@ class SQLiteSessionStore(SessionStore):
         await db.commit()
         return cursor.rowcount or 0
 
-    async def list_active(self) -> list[dict[str, Any]]:
-        """List all stored sessions with their metadata.
+    async def list_active(self, tenant_id: str | None = None) -> list[dict[str, Any]]:
+        """List all stored sessions with their metadata, optionally filtered by tenant_id.
 
         Returns:
             List of dicts with thread_id, context fields, and updated_at.
         """
         db = await self._ensure_db()
         rows: list[dict[str, Any]] = []
-        async with db.execute("SELECT thread_id, context, updated_at FROM sessions") as cursor:
+        if tenant_id is not None:
+            query = "SELECT thread_id, context, updated_at, tenant_id FROM sessions WHERE tenant_id = ?"
+            params = (tenant_id,)
+        else:
+            query = "SELECT thread_id, context, updated_at, tenant_id FROM sessions"
+            params = ()
+
+        async with db.execute(query, params) as cursor:
             async for row in cursor:
                 try:
                     ctx = json.loads(row[1])
@@ -148,6 +172,7 @@ class SQLiteSessionStore(SessionStore):
                     {
                         "thread_id": row[0],
                         "updated_at": row[2],
+                        "tenant_id": row[3],
                         "platform": ctx.get("platform", "unknown"),
                         "display_name": ctx.get("username", "unknown"),
                         **ctx,
