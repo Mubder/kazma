@@ -684,7 +684,13 @@ function settingsApp() {
             this.hubTestResult = { type: 'provider' };
             try {
                 const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/test`, { method: 'POST' });
-                this.hubTestResult = { type: 'provider', ...await resp.json() };
+                const result = await resp.json();
+                let success = !!result.success;
+                let errorMsg = result.error || result.detail || (resp.ok ? null : `HTTP ${resp.status}`);
+                if (typeof errorMsg === 'object') {
+                    errorMsg = JSON.stringify(errorMsg);
+                }
+                this.hubTestResult = { type: 'provider', success, error: errorMsg, ...result };
             } catch (e) {
                 this.hubTestResult = { type: 'provider', success: false, error: e.message };
             }
@@ -706,20 +712,34 @@ function settingsApp() {
                     temp.models = temp.models.split(',').map(m => m.trim()).filter(Boolean);
                 }
                 delete temp._existing;
-                await fetch('/api/providers', {
+                const upsertResp = await fetch('/api/providers', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(temp),
                 });
+                if (!upsertResp.ok) {
+                    const upsertData = await upsertResp.json();
+                    let errMsg = upsertData.error || upsertData.detail || `HTTP ${upsertResp.status}`;
+                    if (typeof errMsg === 'object') errMsg = JSON.stringify(errMsg);
+                    throw new Error(errMsg);
+                }
                 const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/test`, { method: 'POST' });
                 const result = await resp.json();
-                this.hubTestResult = { type: 'provider', ...result };
-                if (result.success) {
-                    this.hubProviderTested = true;
+                let success = !!result.success;
+                let errorMsg = result.error || result.detail || (resp.ok ? null : `HTTP ${resp.status}`);
+                if (typeof errorMsg === 'object') {
+                    errorMsg = JSON.stringify(errorMsg);
                 }
-                showToast(result.success ? 'Connection test succeeded' : `Test failed: ${result.error}`, result.success ? 'success' : 'error');
+                this.hubTestResult = { type: 'provider', success, error: errorMsg, ...result };
+                this.hubProviderTested = true; // attempt completed: enable save
+                if (success) {
+                    showToast('Connection test succeeded', 'success');
+                } else {
+                    showToast(`Test failed: ${errorMsg}`, 'error');
+                }
             } catch (e) {
                 this.hubTestResult = { type: 'provider', success: false, error: e.message };
+                this.hubProviderTested = true; // attempt completed on exception: enable save
                 showToast('Test failed: ' + e.message, 'error');
             }
             this.hubTestingProvider = null;
