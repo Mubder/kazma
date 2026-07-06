@@ -1926,9 +1926,9 @@
       var stepNum = index + 1;
       var nodeName = 'Step' + stepNum;
       if (stage.hitl) {
-        lines.push('  style ' + nodeName + ' fill:rgba(245,158,11,0.1),stroke:#f59e0b,stroke-width:2px');
+        lines.push('  style ' + nodeName + ' fill:#f59e0b,fill-opacity:0.1,stroke:#f59e0b,stroke-width:2px');
       } else {
-        lines.push('  style ' + nodeName + ' fill:rgba(16,185,129,0.05),stroke:#10b981,stroke-width:1px');
+        lines.push('  style ' + nodeName + ' fill:#10b981,fill-opacity:0.05,stroke:#10b981,stroke-width:1px');
       }
     });
 
