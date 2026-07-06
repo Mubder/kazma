@@ -91,7 +91,6 @@ class HitlApprovalScreen(ModalScreen[bool]):
     }
 
     .hitl-args-text {
-        font-family: monospace;
         color: $text-muted;
     }
 

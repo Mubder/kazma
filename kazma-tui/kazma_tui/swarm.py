@@ -195,7 +195,6 @@ class SwarmTopology(Static):
         height: 1fr;
         background: transparent;
         padding: 1 2;
-        font-family: monospace;
     }
     """
 
