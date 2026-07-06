@@ -22,6 +22,8 @@ from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
 
+from kazma_tui.widgets.sparkline import Sparkline
+
 logger = logging.getLogger(__name__)
 
 _NA = "N/A"
@@ -36,6 +38,7 @@ class MetricCard(Widget):
         label: Metric name (e.g. "VRAM", "Latency").
         value: Formatted value string.
         status: One of "normal", "warning", "critical".
+        show_sparkline: True to show an inline sparkline.
         card_id: Optional widget ID.
     """
 
@@ -43,11 +46,20 @@ class MetricCard(Widget):
     MetricCard {
         height: auto;
         width: 1fr;
-        padding: 0 1;
+        padding: 1 2;
+        background: $panel;
+        border: solid $border;
+        margin: 0 1;
     }
 
     MetricCard > .card-label {
         color: $text-muted;
+        text-style: bold;
+    }
+
+    MetricCard > Sparkline {
+        margin-top: 1;
+        color: $primary;
     }
     """
 
@@ -56,6 +68,7 @@ class MetricCard(Widget):
         label: str = "",
         value: str = "",
         status: str = "normal",
+        show_sparkline: bool = False,
         *,
         card_id: str | None = None,
     ) -> None:
@@ -63,19 +76,23 @@ class MetricCard(Widget):
         self._label = label
         self._value = value
         self._status = status
+        self.show_sparkline = show_sparkline
 
     def compose(self) -> ComposeResult:
-        """Compose the card with label and value."""
+        """Compose the card with label, value, and optional sparkline."""
         yield Static(self._label, classes="card-label")
         yield Static(self._render_value())
+        if self.show_sparkline:
+            yield Sparkline(max_points=25, id="card-sparkline")
 
-    def update_card(self, label: str, value: str, status: str = "normal") -> None:
+    def update_card(self, label: str, value: str, status: str = "normal", spark_val: float | None = None) -> None:
         """Update the card content and refresh the display.
 
         Args:
             label: New metric label.
             value: New formatted value.
             status: New status ("normal", "warning", "critical").
+            spark_val: New numeric value for sparkline trend tracking.
         """
         self._label = label
         self._value = value
@@ -86,6 +103,12 @@ class MetricCard(Widget):
             value_widgets = self.query(Static)
             if len(value_widgets) >= 2:
                 value_widgets[1].update(self._render_value())
+            if self.show_sparkline and spark_val is not None:
+                try:
+                    sp = self.query_one("#card-sparkline", Sparkline)
+                    sp.add_point(spark_val)
+                except Exception:
+                    pass
         except Exception:
             logger.debug("MetricCard widgets not yet mounted", exc_info=True)
 
@@ -96,6 +119,7 @@ class MetricCard(Widget):
         if self._status == "warning":
             return f"[bold $secondary]{self._value}[/bold $secondary]"
         return f"[bold $primary]{self._value}[/bold $primary]"
+
 
 
 class MetricsDashboard(Widget):
@@ -168,18 +192,21 @@ class MetricsDashboard(Widget):
                     label="Throughput (RPM)",
                     value=self._format_rpm(None),
                     status="normal",
+                    show_sparkline=True,
                     card_id="metric-rpm",
                 )
                 yield MetricCard(
                     label="Latency (ms)",
                     value=self._format_latency(None),
                     status="normal",
+                    show_sparkline=True,
                     card_id="metric-latency",
                 )
                 yield MetricCard(
                     label="Health (CPU/Mem)",
                     value=self._format_health(None, None, None),
                     status="normal",
+                    show_sparkline=True,
                     card_id="metric-health",
                 )
             with Horizontal(classes="metric-row"):
@@ -187,18 +214,21 @@ class MetricsDashboard(Widget):
                     label="VRAM (GB)",
                     value=self._format_vram(None, None),
                     status="normal",
+                    show_sparkline=True,
                     card_id="metric-vram",
                 )
                 yield MetricCard(
                     label="Error Rate (%)",
                     value=self._format_error_rate(None),
                     status="normal",
+                    show_sparkline=True,
                     card_id="metric-errors",
                 )
                 yield MetricCard(
                     label="Active Agents",
                     value=self._format_agents([]),
                     status="normal",
+                    show_sparkline=False,
                     card_id="metric-agents",
                 )
 
@@ -281,6 +311,7 @@ class MetricsDashboard(Widget):
                 label="Throughput (RPM)",
                 value=self._format_rpm(rpm_val),
                 status="normal",
+                spark_val=float(rpm_val) if rpm_val is not None else 0.0,
             )
 
             latency_card = self.query_one("#metric-latency", MetricCard)
@@ -289,6 +320,7 @@ class MetricsDashboard(Widget):
                 label="Latency (ms)",
                 value=self._format_latency(latency_val),
                 status=latency_status,
+                spark_val=latency_val if latency_val is not None else 0.0,
             )
 
             health_card = self.query_one("#metric-health", MetricCard)
@@ -296,6 +328,7 @@ class MetricsDashboard(Widget):
                 label="Health (CPU/Mem)",
                 value=self._format_health(cpu_value, ram_used, ram_total),
                 status="normal",
+                spark_val=cpu_value if cpu_value is not None else 0.0,
             )
 
             vram_card = self.query_one("#metric-vram", MetricCard)
@@ -304,6 +337,7 @@ class MetricsDashboard(Widget):
                 label="VRAM (GB)",
                 value=self._format_vram(vram_used, vram_total),
                 status=vram_status,
+                spark_val=vram_used if vram_used is not None else 0.0,
             )
 
             error_card = self.query_one("#metric-errors", MetricCard)
@@ -312,6 +346,7 @@ class MetricsDashboard(Widget):
                 label="Error Rate (%)",
                 value=self._format_error_rate(error_val),
                 status=error_status,
+                spark_val=error_val if error_val is not None else 0.0,
             )
 
             agents_card = self.query_one("#metric-agents", MetricCard)

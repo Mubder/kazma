@@ -187,8 +187,98 @@ class WorkerTree(Tree):
         self.on_mount()
 
 
+class SwarmTopology(Static):
+    """Pulsing NOC-style ASCII/Unicode network topology diagram."""
+
+    DEFAULT_CSS = """
+    SwarmTopology {
+        height: 1fr;
+        background: transparent;
+        padding: 1 2;
+        font-family: monospace;
+    }
+    """
+
+    def on_mount(self) -> None:
+        self._refresh()
+        self.set_interval(2.0, self._refresh)
+
+    def _refresh(self) -> None:
+        try:
+            from kazma_core.swarm import get_swarm_engine
+            engine = get_swarm_engine()
+            if engine is None:
+                self.update("[dim]No Swarm Engine initialized[/]")
+                return
+
+            workers = engine._workers
+            active_tasks = engine.list_active_tasks()
+            
+            # Map active workers based on task participants
+            busy_workers = set()
+            for t in active_tasks:
+                if hasattr(t, "workers") and t.workers:
+                    for w in t.workers:
+                        busy_workers.add(w)
+
+            # Let's construct a beautiful diagram!
+            lines = []
+            lines.append("                     [bold #22d3ee]┌──────────────────────────┐[/]")
+            lines.append("                     [bold #22d3ee]│        SUPERVISOR        │[/]")
+            lines.append("                     [bold #22d3ee]│     (LangGraph Brain)    │[/]")
+            lines.append("                     [bold #22d3ee]└─────────────┬────────────┘[/]")
+            
+            if not workers:
+                lines.append("                                   │")
+                lines.append("                          [dim](No registered workers)[/]")
+                self.update("\n".join(lines))
+                return
+
+            worker_list = list(workers.items())
+            num_workers = len(worker_list)
+
+            for idx, (name, worker) in enumerate(worker_list):
+                is_last = (idx == num_workers - 1)
+                branch = "    └──" if is_last else "    ├──"
+                
+                online = _worker_is_online(worker)
+                busy = name in busy_workers
+                
+                if busy:
+                    wire_label = "[bold #10b981]═══[⚡ BUSY]═══>[/]"
+                    node_style = "[bold #10b981]"
+                    node_status = "BUSY"
+                elif online:
+                    wire_label = "[#22d3ee]───(idle)───>[/]"
+                    node_style = "[#22d3ee]"
+                    node_status = "ONLINE"
+                else:
+                    wire_label = "[dim]───x[offline]x──>[/]"
+                    node_style = "[dim]"
+                    node_status = "OFFLINE"
+                    
+                lines.append(f"                   │")
+                lines.append(
+                    f"{branch} [bold]{name:<12}[/] {wire_label} {node_style}┌──────────────────────┐[/]"
+                )
+                lines.append(
+                    f"                                   {node_style}│ {node_status:<20} │[/]"
+                    f" [dim]{worker.role[:20]}[/]"
+                )
+                lines.append(
+                    f"                                   {node_style}└──────────────────────┘[/]"
+                )
+
+            self.update("\n".join(lines))
+        except Exception as e:
+            self.update(f"[red]Topology Render Error: {e}[/]")
+
+    def on_show(self) -> None:
+        self._refresh()
+
+
 class SwarmPanel(VerticalScroll):
-    """Swarm tab: sub-tabs Workers, Active, History, Tree."""
+    """Swarm tab: sub-tabs Workers, Active, History, Tree, Topology."""
 
     DEFAULT_CSS = """SwarmPanel { height: 1fr; }"""
 
@@ -206,3 +296,6 @@ class SwarmPanel(VerticalScroll):
             with TabPane("Tree", id="tree"):
                 yield Static("Worker capability hierarchy", classes="section-label")
                 yield WorkerTree()
+            with TabPane("Topology", id="topology"):
+                yield Static("Active Swarm Network Map", classes="section-label")
+                yield SwarmTopology()

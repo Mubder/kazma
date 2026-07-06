@@ -526,6 +526,7 @@ class ThemeManager:
         "font_size": "medium",
         "auto_scroll": True,
         "animations_enabled": True,
+        "language": "en",
     }
     
     def __init__(self) -> None:
@@ -551,6 +552,18 @@ class ThemeManager:
     def animations_enabled(self) -> bool:
         """Get animations enabled setting."""
         return self._preferences["animations_enabled"]
+
+    @property
+    def language(self) -> str:
+        """Get bilingual localization language setting (en or ar)."""
+        return self._preferences.get("language", "en")
+
+    def set_language(self, lang: str) -> None:
+        """Set bilingual language and save preferences."""
+        if lang not in ("en", "ar"):
+            raise ValueError(f"Invalid language: {lang}. Valid: en, ar")
+        self._preferences["language"] = lang
+        self.save()
     
     def load(self) -> None:
         """Load preferences from config file."""
@@ -610,6 +623,9 @@ class ThemeManager:
             if css is None:
                 raise ValueError(f"Unknown theme: {theme_name}")
         
+        if self.language == "ar":
+            css = css + "\n" + RTL_CSS_OVERRIDES
+
         # Build a fresh Stylesheet with the new theme CSS + all widget
         # DEFAULT_CSS.  We do NOT pass the old app variables because the
         # new theme redefines them (passing old + new causes parse errors
@@ -625,7 +641,7 @@ class ThemeManager:
                 is_default_css=True,
                 tie_breaker=tie_breaker,
                 scope=scope,
-            )
+              )
         # Add the new theme CSS (replaces the old App.CSS with new variables)
         new_stylesheet.add_source(css)
         app.stylesheet = new_stylesheet
@@ -637,3 +653,26 @@ class ThemeManager:
     def get_available_themes(self) -> list[str]:
         """Get list of available theme names."""
         return list(THEMES.keys())
+
+
+RTL_CSS_OVERRIDES = """
+/* ═══════════════════════════════════════════════════════════════════════
+   Arabic RTL Mode Styling Overrides
+   ═══════════════════════════════════════════════════════════════════════ */
+
+Screen.rtl-mode Label, Screen.rtl-mode Static, Screen.rtl-mode Input, Screen.rtl-mode Button, Screen.rtl-mode ListItem, Screen.rtl-mode Option {
+    text-align: right;
+}
+Screen.rtl-mode Header {
+    text-align: right;
+}
+Screen.rtl-mode Footer {
+    text-align: right;
+}
+Screen.rtl-mode TabPane {
+    align: right top;
+}
+Screen.rtl-mode ContentTabs {
+    align: right top;
+}
+"""

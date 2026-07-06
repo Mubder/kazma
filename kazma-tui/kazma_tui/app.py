@@ -15,6 +15,7 @@ Features:
 
 from __future__ import annotations
 
+import os
 import logging
 import sys
 from datetime import datetime
@@ -25,17 +26,21 @@ from textual.binding import Binding
 from textual.widgets import Footer, RichLog, TabbedContent, TabPane
 
 from kazma_tui.chat import ChatPanel
+from kazma_tui.dashboard import MetricsDashboard
 from kazma_tui.files import FilesPanel
 from kazma_tui.header import KazmaHeader
 from kazma_tui.settings_panel import SettingsPanel
 from kazma_tui.swarm import SwarmPanel
+from kazma_tui.traces import TracesPanel
 from kazma_tui.theme import KAZMA_THEME
 from kazma_tui.widgets.accessibility import FocusManager, HighContrastMode
+from kazma_tui.widgets.command_bar import CommandConsole
 from kazma_tui.widgets.command_palette import CommandPalette
 from kazma_tui.widgets.confirm_dialog import ConfirmDialog
 from kazma_tui.widgets.status_bar import KazmaStatusBar
 from kazma_tui.widgets.toast import Toast
 from kazma_tui.widgets.tutorial import TutorialScreen
+from kazma_tui.widgets.hitl_modal import HitlApprovalScreen
 
 logger = logging.getLogger(__name__)
 
@@ -66,21 +71,29 @@ class KazmaTUI(App[None]):
         Binding("Tab", "focus_next", "Next Focus", show=False),
         Binding("shift+tab", "focus_previous", "Prev Focus", show=False),
         Binding("ctrl+h", "toggle_high_contrast", "High Contrast", show=False),
+        Binding(":", "command_bar", "Console", show=False),
     ]
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
+        from kazma_tui.themes.theme_manager import ThemeManager
+        self.theme_manager = ThemeManager()
         self._focus_manager: Optional[FocusManager] = None
         self._high_contrast: Optional[HighContrastMode] = None
         self._status_bar: Optional[KazmaStatusBar] = None
+        self._shown_approvals: set[str] = set()
 
     def compose(self) -> ComposeResult:
         yield KazmaHeader()
-        with TabbedContent(initial="chat", id="main-tabs"):
+        with TabbedContent(initial="dashboard", id="main-tabs"):
+            with TabPane("Dashboard", id="dashboard"):
+                yield MetricsDashboard()
             with TabPane("Chat", id="chat"):
                 yield ChatPanel()
             with TabPane("Files", id="files"):
                 yield FilesPanel()
+            with TabPane("Traces", id="traces"):
+                yield TracesPanel()
             with TabPane("Swarm", id="swarm"):
                 yield SwarmPanel()
             with TabPane("Settings", id="settings"):
@@ -90,6 +103,13 @@ class KazmaTUI(App[None]):
 
     def on_mount(self) -> None:
         """Initialize app state, core singletons, and show welcome notification."""
+        # Apply the saved theme and language preference on startup
+        try:
+            self.theme_manager.apply_theme(self)
+            self.update_localization()
+        except Exception as e:
+            logger.exception(f"Error applying initial theme/localization: {e}")
+
         # ── Core initialization (ModelRegistry + SwarmEngine) ──────────
         # When the TUI is launched standalone (python -m kazma_tui), the
         # ModelRegistry and SwarmEngine singletons have not been created.
@@ -109,6 +129,8 @@ class KazmaTUI(App[None]):
                 "chat-log",
                 "worker-table",
                 "file-tree",
+                "trace-search",
+                "trace-table",
                 "settings-panel",
             ]
         )
@@ -129,6 +151,9 @@ class KazmaTUI(App[None]):
             # No tutorial for returning users - silent start
         except Exception as e:
             logger.exception(f"Error in on_mount: {e}")
+
+        # Periodic background polling to check for pending HITL approvals (every 3.0s)
+        self.set_interval(3.0, self._check_pending_approvals)
 
     def _initialize_core(self) -> None:
         """Initialize ModelRegistry and SwarmEngine if not already done.
@@ -245,6 +270,10 @@ class KazmaTUI(App[None]):
         """Show enhanced command palette with fuzzy search."""
         self.push_screen(CommandPalette())
 
+    def action_command_bar(self) -> None:
+        """Show Vim/Tmux-style Command Console."""
+        self.push_screen(CommandConsole())
+
     def action_clear_chat(self) -> None:
         """Clear the chat log."""
         try:
@@ -347,7 +376,7 @@ class KazmaTUI(App[None]):
         try:
             tabs = self.query_one("#main-tabs", TabbedContent)
             current = tabs.active
-            tab_order = ["chat", "files", "swarm", "settings"]
+            tab_order = ["dashboard", "chat", "files", "traces", "swarm", "settings"]
             if current in tab_order:
                 next_idx = (tab_order.index(current) + 1) % len(tab_order)
                 tabs.active = tab_order[next_idx]
@@ -359,7 +388,7 @@ class KazmaTUI(App[None]):
         try:
             tabs = self.query_one("#main-tabs", TabbedContent)
             current = tabs.active
-            tab_order = ["chat", "files", "swarm", "settings"]
+            tab_order = ["dashboard", "chat", "files", "traces", "swarm", "settings"]
             if current in tab_order:
                 prev_idx = (tab_order.index(current) - 1) % len(tab_order)
                 tabs.active = tab_order[prev_idx]
@@ -372,8 +401,10 @@ class KazmaTUI(App[None]):
             tabs = self.query_one("#main-tabs", TabbedContent)
             current = tabs.active
             help_messages = {
+                "dashboard": "Dashboard: Live resource usage trend lines and agent framework health.",
                 "chat": "Chat: Type message, Ctrl+Enter send, /help commands",
                 "files": "Files: Browse workspace files, Click to open",
+                "traces": "Traces: Live log audit trail, filter by term, navigate with keys",
                 "swarm": "Swarm: Monitor workers, View task history",
                 "settings": "Settings: Configure model, provider, preferences",
             }
@@ -408,6 +439,135 @@ class KazmaTUI(App[None]):
     def action_record_activity(self) -> None:
         """Record user activity (no-op — adaptive refresh removed)."""
         pass
+
+    async def _check_pending_approvals(self) -> None:
+        """Background checker for pending HITL approval tasks."""
+        import httpx
+        try:
+            headers = {}
+            secret = os.environ.get("KAZMA_SECRET", "")
+            if secret:
+                headers["X-Kazma-Secret"] = secret
+
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get("http://127.0.0.1:8090/api/pending-approvals", headers=headers)
+                if response.status_code == 200:
+                    data = response.json()
+                    pending_list = data.get("pending", [])
+                    
+                    for item in pending_list:
+                        thread_id = item.get("thread_id")
+                        if thread_id and thread_id not in self._shown_approvals:
+                            self._shown_approvals.add(thread_id)
+                            tool_name = item.get("tool_name", "unknown")
+                            arguments = item.get("arguments", {})
+                            message = item.get("message", "")
+                            
+                            def handle_dismiss(approved: bool | None) -> None:
+                                self.run_worker(self._submit_hitl_decision(thread_id, approved))
+                            
+                            screen = HitlApprovalScreen(
+                                thread_id=thread_id,
+                                tool_name=tool_name,
+                                arguments=arguments,
+                                message=message
+                            )
+                            self.push_screen(screen, handle_dismiss)
+                            break  # Show one modal at a time
+        except Exception as exc:
+            logger.debug("Failed to check pending approvals: %s", exc)
+
+    async def _submit_hitl_decision(self, thread_id: str, approved: bool | None) -> None:
+        """Post the user's HITL decision back to the FastAPI backend."""
+        import httpx
+        from kazma_tui.widgets.toast import Toast
+
+        decision = "approve" if approved else "deny"
+        try:
+            headers = {}
+            secret = os.environ.get("KAZMA_SECRET", "")
+            if secret:
+                headers["X-Kazma-Secret"] = secret
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    f"http://127.0.0.1:8090/api/approve/{thread_id}",
+                    json={"action": decision},
+                    headers=headers,
+                )
+                if response.status_code in (200, 202):
+                    self.push_screen(Toast(f"HITL task {decision}d successfully", "success"))
+                else:
+                    self.push_screen(Toast(f"Error submitting decision: {response.text}", "error"))
+        except Exception as exc:
+            logger.exception("Failed to submit HITL decision")
+            self.push_screen(Toast(f"Failed to submit decision: {exc}", "error"))
+        finally:
+            if thread_id in self._shown_approvals:
+                self._shown_approvals.remove(thread_id)
+
+    def update_localization(self) -> None:
+        """Apply dynamic translations and text mirroring based on preferred language."""
+        lang = self.theme_manager.language
+        
+        # 1. Toggle the 'rtl-mode' class on the screen
+        try:
+            screen = self.screen
+            if lang == "ar":
+                screen.add_class("rtl-mode")
+            else:
+                screen.remove_class("rtl-mode")
+        except Exception as exc:
+            logger.debug("Failed to toggle rtl-mode class: %s", exc)
+
+        # 2. Translate Tab labels dynamically
+        try:
+            tabs = self.query_one("#main-tabs", TabbedContent)
+            labels = {
+                "en": {
+                    "dashboard": "Dashboard",
+                    "chat": "Chat",
+                    "files": "Files",
+                    "traces": "Traces",
+                    "swarm": "Swarm",
+                    "settings": "Settings"
+                },
+                "ar": {
+                    "dashboard": "لوحة القيادة",
+                    "chat": "المحادثة",
+                    "files": "الملفات",
+                    "traces": "التتبعات",
+                    "swarm": "السرب",
+                    "settings": "الإعدادات"
+                }
+            }
+            for tab_id, label in labels[lang].items():
+                try:
+                    tab = tabs.tabs.get_tab(tab_id)
+                    tab.label = label
+                except Exception as tab_exc:
+                    logger.debug("Failed to update tab label for %s: %s", tab_id, tab_exc)
+        except Exception as exc:
+            logger.debug("Failed to locate or update main-tabs: %s", exc)
+
+        # 3. Update Header title/logo
+        try:
+            header = self.query_one(KazmaHeader)
+            if lang == "ar":
+                try:
+                    registry = header._get_model_registry() if hasattr(header, "_get_model_registry") else None
+                    profile = registry.get_active_profile() if registry else {}
+                    model = profile.get("model", "?")
+                    provider = profile.get("provider", "?")
+                    header_text = f"╭─ [bold $primary]كازما[/] ─╮  [dim]{provider} / {model}[/]"
+                except Exception:
+                    header_text = "╭─ [bold $primary]كازما[/] ─╮  [dim]تكوين نشط[/]"
+                header.update(header_text)
+            else:
+                if hasattr(header, "_build_header_text"):
+                    header.update(header._build_header_text())
+        except Exception as exc:
+            logger.debug("Failed to update header localization: %s", exc)
 
 
 def main() -> None:
