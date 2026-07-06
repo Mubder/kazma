@@ -846,49 +846,50 @@ class SwarmRouterBuilder:
                     if worker is not None:
                         worker.mark_completed(result.get("status", "error"))
                     results.append(result)
-            elif dispatched:
-                swarm_task = SwarmTask(
-                    prompt=task,
-                    context=context,
-                    workers=dispatched,
-                    type=task_type,
-                    timeout=timeout,
-                    aggregation=str(payload.get("aggregation") or "collect"),
-                    metadata=task_metadata,
-                )
-                if task_type == TaskType.BROADCAST:
-                    if background:
-                        _handle = asyncio.create_task(engine.broadcast(swarm_task))
-                        engine._task_handles[swarm_task.id] = _handle
-                        # Clean up handle on completion to prevent memory leak
-                        _handle.add_done_callback(
-                            lambda h, tid=swarm_task.id: engine._task_handles.pop(tid, None)
-                        )
-                        return JSONResponse({
-                            "status": "ok",
-                            "message": f"Task dispatched (background) to {len(dispatched)} worker(s)",
-                            "task_id": swarm_task.id,
-                            "result_status": "running",
-                            "dispatched": dispatched,
-                        })
-                    task_result = await engine.broadcast(swarm_task)
-                else:
-                    if background:
-                        _handle = asyncio.create_task(engine.dispatch(swarm_task))
-                        engine._task_handles[swarm_task.id] = _handle
-                        # Clean up handle on completion to prevent memory leak
-                        _handle.add_done_callback(
-                            lambda h, tid=swarm_task.id: engine._task_handles.pop(tid, None)
-                        )
-                        return JSONResponse({
-                            "status": "ok",
-                            "message": f"Task dispatched (background) to {len(dispatched)} worker(s)",
-                            "task_id": swarm_task.id,
-                            "result_status": "running",
-                            "dispatched": dispatched,
-                        })
-                    task_result = await engine.dispatch(swarm_task)
-                results = [item.to_dict() for item in task_result.worker_results]
+
+            swarm_task = SwarmTask(
+                prompt=task,
+                context=context,
+                workers=dispatched,
+                type=task_type,
+                timeout=timeout,
+                aggregation=str(payload.get("aggregation") or "collect"),
+                fallback_chain=list(payload.get("fallback_chain", [])),
+                metadata=task_metadata,
+            )
+            if task_type == TaskType.BROADCAST:
+                if background:
+                    _handle = asyncio.create_task(engine.broadcast(swarm_task))
+                    engine._task_handles[swarm_task.id] = _handle
+                    # Clean up handle on completion to prevent memory leak
+                    _handle.add_done_callback(
+                        lambda h, tid=swarm_task.id: engine._task_handles.pop(tid, None)
+                    )
+                    return JSONResponse({
+                        "status": "ok",
+                        "message": f"Task dispatched (background) to {len(dispatched)} worker(s)",
+                        "task_id": swarm_task.id,
+                        "result_status": "running",
+                        "dispatched": dispatched,
+                    })
+                task_result = await engine.broadcast(swarm_task)
+            else:
+                if background:
+                    _handle = asyncio.create_task(engine.dispatch(swarm_task))
+                    engine._task_handles[swarm_task.id] = _handle
+                    # Clean up handle on completion to prevent memory leak
+                    _handle.add_done_callback(
+                        lambda h, tid=swarm_task.id: engine._task_handles.pop(tid, None)
+                    )
+                    return JSONResponse({
+                        "status": "ok",
+                        "message": f"Task dispatched (background) to {len(dispatched)} worker(s)",
+                        "task_id": swarm_task.id,
+                        "result_status": "running",
+                        "dispatched": dispatched,
+                    })
+                task_result = await engine.dispatch(swarm_task)
+            results = [item.to_dict() for item in task_result.worker_results]
 
             # Include checkpoint info for HITL paused pipelines.
             checkpoint_info = None

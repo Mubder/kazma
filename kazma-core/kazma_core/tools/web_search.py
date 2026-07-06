@@ -162,7 +162,7 @@ def _run_search(query: str, max_results: int) -> list[dict[str, str]]:
 
     except Exception as exc:
         logger.error("[web_search] Bing fallback search failed. Error: %s", exc)
-        return []
+        raise
 
 
 async def web_search(query: str, max_results: int = 5) -> str:

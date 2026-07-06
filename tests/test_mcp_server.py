@@ -245,7 +245,7 @@ class TestWriteFileTool:
         resp = json.loads(server.handle_request(line))
         assert resp["result"]["isError"] is False
         assert "Wrote" in resp["result"]["content"][0]["text"]
-        assert (tmp_path / "new.py").read_text() == "x = 42\n"
+        assert (tmp_path / "new.py").read_text(encoding="utf-8") == "x = 42\n"
 
     def test_write_file_creates_dirs(self, tmp_path: Path):
         server = MCPServer(root=tmp_path)
@@ -260,7 +260,7 @@ class TestWriteFileTool:
         })
         resp = json.loads(server.handle_request(line))
         assert resp["result"]["isError"] is False
-        assert (tmp_path / "deep" / "nested" / "file.py").read_text() == "ok"
+        assert (tmp_path / "deep" / "nested" / "file.py").read_text(encoding="utf-8") == "ok"
 
     def test_write_file_overwrites(self, tmp_path: Path):
         (tmp_path / "existing.txt").write_text("old")
@@ -276,7 +276,7 @@ class TestWriteFileTool:
         })
         resp = json.loads(server.handle_request(line))
         assert resp["result"]["isError"] is False
-        assert (tmp_path / "existing.txt").read_text() == "new"
+        assert (tmp_path / "existing.txt").read_text(encoding="utf-8") == "new"
 
     def test_write_file_escape_blocked(self, tmp_path: Path):
         server = MCPServer(root=tmp_path)

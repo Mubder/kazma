@@ -258,9 +258,15 @@ class TestLanguageMiddleware:
 
     def test_middleware_registered(self, app_py_text: str) -> None:
         """Middleware is registered with @app.middleware."""
-        assert '@app.middleware("http")' in app_py_text or "@app.middleware('http')" in app_py_text, (
+        assert (
+            '@app.middleware("http")' in app_py_text 
+            or "@app.middleware('http')" in app_py_text
+            or '@self.app.middleware("http")' in app_py_text
+            or "@self.app.middleware('http')" in app_py_text
+        ), (
             "Language middleware must be registered as @app.middleware"
         )
+
 
 
 # ═══════════════════════════════════════════════════════════════════

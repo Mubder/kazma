@@ -30,7 +30,7 @@ class TestWorkspaceRouterWired:
     """app.py must register the workspace API router."""
 
     def test_workspace_router_imported_and_mounted(self) -> None:
-        source = (_UI_DIR / "app.py").read_text()
+        source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
         assert "workspace_api" in source, "workspace_api module not imported in app.py"
         assert "create_workspace_router" in source, (
             "create_workspace_router not called in app.py"

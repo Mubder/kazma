@@ -245,7 +245,7 @@ class TestFixIssues:
         # Should have created .env and updated .gitignore
         assert (project_with_secrets / ".env").exists()
         assert (project_with_secrets / ".gitignore").exists()
-        assert ".env" in (project_with_secrets / ".gitignore").read_text()
+        assert ".env" in (project_with_secrets / ".gitignore").read_text(encoding="utf-8")
 
     @pytest.mark.asyncio
     async def test_fix_issues_no_failures(self, project_clean: Path):

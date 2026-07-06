@@ -44,7 +44,7 @@ class StubLLM:
             return LLMResponse(
                 content="",
                 tool_calls=[
-                    ToolCall(id="call_1", name="shell_exec", arguments={"command": "echo kazma-graph-ok"})
+                    ToolCall(id="call_1", name="shell_exec", arguments={"command": "git version"})
                 ],
                 finish_reason="tool_calls",
                 model="stub",
@@ -100,11 +100,11 @@ class TestRealGraphRoundTrip:
             assert llm.calls >= 2
             # A real tool executed and its stdout flowed back into the loop.
             assert llm.last_tool_output is not None
-            assert "kazma-graph-ok" in llm.last_tool_output
+            assert "version" in llm.last_tool_output
             # The final assistant message reflects the tool output.
             assistant = [m for m in final["messages"] if m.get("role") == "assistant"]
             assert assistant, "no assistant message produced"
-            assert "kazma-graph-ok" in assistant[-1]["content"]
+            assert "version" in assistant[-1]["content"]
             # A tool-role message is present in the persisted conversation.
             assert any(m.get("role") == "tool" for m in final["messages"])
         finally:

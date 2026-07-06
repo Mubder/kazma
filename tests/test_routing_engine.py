@@ -106,3 +106,33 @@ async def test_unified_router_no_capable_workers() -> None:
         pass
     else:
         pytest.fail("Should have raised NoCapableWorkersError")
+
+
+@pytest.mark.anyio
+async def test_unified_router_routing_diagnostics() -> None:
+    """Test UnifiedRouter populating routing_diagnostics in task metadata."""
+    router = UnifiedRouter()
+
+    task = SwarmTask(
+        id="task_diag",
+        prompt="شلونك يا خوي؟ شنو تبي نسوي اليوم؟", # Kuwaiti dialect
+        workers=["auto"],
+    )
+
+    workers = [
+        {"name": "KuwaitiSpecialist", "capabilities": WorkerCapabilities(expertise=["Kuwaiti dialect", "Gulf culture"], role="Kuwait Advisor")},
+        {"name": "PythonExpert", "capabilities": WorkerCapabilities(expertise=["python", "json"], role="Developer")},
+    ]
+
+    routed = await router.route(task, workers)
+    assert len(routed) > 0
+    assert "routing_diagnostics" in task.metadata
+    
+    diag = task.metadata["routing_diagnostics"]
+    assert diag["dialect_detected"] == "kw"
+    assert diag["dialect_confidence"] > 0.3
+    assert "KuwaitiSpecialist" in diag["scores"]
+    assert "PythonExpert" in diag["scores"]
+    assert diag["scores"]["KuwaitiSpecialist"]["dialect_boost"] > 0
+    assert diag["scores"]["PythonExpert"]["dialect_boost"] == 0
+

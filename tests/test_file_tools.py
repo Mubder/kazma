@@ -92,7 +92,7 @@ class TestFileWrite:
 
         assert "Wrote" in result
         assert "2 lines" in result
-        assert target.read_text() == "hello\nworld\n"
+        assert target.read_text(encoding="utf-8") == "hello\nworld\n"
 
     @pytest.mark.asyncio
     async def test_file_write_creates_parent_dirs(self, tmp_path: Path) -> None:
@@ -106,7 +106,7 @@ class TestFileWrite:
 
         assert "Wrote" in result
         assert target.exists()
-        assert target.read_text() == "nested content"
+        assert target.read_text(encoding="utf-8") == "nested content"
 
     @pytest.mark.asyncio
     async def test_file_write_blocks_escape(self, tmp_path: Path) -> None:

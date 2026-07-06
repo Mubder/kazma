@@ -52,7 +52,7 @@ class TestChatTemplate:
         """Chat template exists and is a valid Jinja2 template."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
         assert template_path.exists()
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "{% extends" in content
         assert "{% block" in content
         assert len(content) > 500
@@ -60,7 +60,7 @@ class TestChatTemplate:
     def test_chat_template_has_streaming_input(self):
         """Chat template includes streaming-ready input elements."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "chat-input" in content
         assert "chat-messages" in content
         assert "session-list" in content
@@ -68,13 +68,13 @@ class TestChatTemplate:
     def test_chat_template_has_message_actions(self):
         """Chat JS renders edit/copy/reaction actions dynamically."""
         js_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
-        content = js_path.read_text()
+        content = js_path.read_text(encoding="utf-8")
         assert "message-actions" in content or "msg-action" in content
 
     def test_chat_template_has_welcome_hints(self):
         """Chat template shows conversation starter hints."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "hint-chip" in content or "welcome" in content.lower()
 
 
@@ -90,7 +90,7 @@ class TestDashboardTemplate:
         """Dashboard template exists and is a valid Jinja2 template."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "dashboard.html"
         assert template_path.exists()
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "{% extends" in content
         assert "{% block" in content
         assert len(content) > 1000
@@ -98,7 +98,7 @@ class TestDashboardTemplate:
     def test_dashboard_has_metrics_cards(self):
         """Dashboard includes cost, tokens, tool call metric cards."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "dashboard.html"
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "metric-cost" in content
         assert "metric-tokens" in content
         assert "metric-tools" in content
@@ -106,32 +106,32 @@ class TestDashboardTemplate:
     def test_dashboard_has_charts(self):
         """Dashboard includes chart canvases."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "dashboard.html"
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "token-chart" in content
         assert "cost-chart" in content
 
     def test_dashboard_has_connection_status(self):
         """Dashboard shows WebSocket connection indicator."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "dashboard.html"
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "connection-status" in content
 
     def test_dashboard_has_session_management(self):
         """Dashboard includes session list table."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "dashboard.html"
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "sessions-table" in content or "sessions-tbody" in content
 
     def test_dashboard_has_traces_table(self):
         """Dashboard includes recent traces table."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "dashboard.html"
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "traces-tbody" in content
 
     def test_dashboard_api_status_endpoint(self):
         """GET /api/dashboard/status route is defined in dashboard.py."""
         dash_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "dashboard.py"
-        content = dash_path.read_text()
+        content = dash_path.read_text(encoding="utf-8")
         assert "/api/dashboard/status" in content
         assert "JSONResponse" in content
         # Route returns expected structure
@@ -150,7 +150,7 @@ class TestSwarmInteractive:
     def test_swarm_page_renders_with_features(self):
         """Swarm page includes worker list, add form, dispatch form."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "swarm.html"
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "worker-list-body" in content
         assert "add-worker-form" in content
         assert "dispatch-form" in content
@@ -192,14 +192,14 @@ class TestSwarmInteractive:
     def test_swarm_metrics_visible(self):
         """Swarm page shows worker count and status metrics."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "swarm.html"
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "metric-worker-count" in content
         assert "metric-swarm-status" in content
 
     def test_swarm_has_logs_modal(self):
         """Swarm page has worker logs viewer modal."""
         template_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "swarm.html"
-        content = template_path.read_text()
+        content = template_path.read_text(encoding="utf-8")
         assert "logs-modal" in content
         assert "logs-content" in content
 
@@ -245,43 +245,43 @@ class TestWorkspaceTemplate:
         """Workspace template file is present and non-trivial."""
         path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "workspace.html"
         assert path.exists()
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert len(content) > 1000  # Non-trivial
 
     def test_workspace_has_file_browser(self):
         """Workspace includes file list for project browsing."""
         path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "workspace.html"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "file-list" in content or "files" in content.lower()
 
     def test_workspace_has_git_status(self):
         """Workspace displays git branch and status."""
         path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "workspace.html"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "gitBranch" in content or "git" in content.lower()
 
     def test_workspace_has_terminal_integration(self):
         """Workspace has terminal command input."""
         path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "workspace.html"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "showTerminal" in content or "terminal" in content.lower()
 
     def test_workspace_has_quick_actions(self):
         """Workspace has quick action buttons (run tests, build)."""
         path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "workspace.html"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "runTests" in content or "Run Tests" in content
 
     def test_workspace_has_bookmarks(self):
         """Workspace has bookmark management."""
         path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "workspace.html"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "bookmarks" in content.lower() or "addBookmark" in content
 
     def test_workspace_has_recent_files(self):
         """Workspace shows recent files list."""
         path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "templates" / "workspace.html"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "recentFiles" in content
 
 
@@ -299,7 +299,7 @@ class TestStaticAssets:
         """streaming.js is present and contains SSE/WebSocket utilities."""
         path = self.STATIC / "js" / "streaming.js"
         assert path.exists()
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "KazmaStream" in content
         assert "ssePost" in content or "SSE" in content
 
@@ -307,7 +307,7 @@ class TestStaticAssets:
         """chat.js uses SSE streaming and has message actions."""
         path = self.STATIC / "js" / "chat.js"
         assert path.exists()
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "KazmaStream" in content
         assert "message-actions" in content or "msg-action" in content
 
@@ -315,14 +315,14 @@ class TestStaticAssets:
         """dashboard.js has WebSocket and chart rendering."""
         path = self.STATIC / "js" / "dashboard.js"
         assert path.exists()
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "wsConnect" in content or "WebSocket" in content or "drawTokenChart" in content
 
     def test_swarm_js_exists(self):
         """swarm.js has worker management functions."""
         path = self.STATIC / "js" / "swarm.js"
         assert path.exists()
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "KazmaSwarm" in content
         assert "addWorker" in content or "dispatchTask" in content
 
@@ -330,7 +330,7 @@ class TestStaticAssets:
         """kazma.css includes Phase 3 component styles."""
         path = self.STATIC / "css" / "kazma.css"
         assert path.exists()
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         assert "metrics-grid" in content
         assert "code-block" in content
         assert "workspace-grid" in content
@@ -357,7 +357,7 @@ class TestRealtimeEndpoints:
     def test_sse_chat_stream_endpoint_exists(self):
         """POST /api/chat/stream is defined in sse_chat module."""
         sse_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "sse_chat.py"
-        content = sse_path.read_text()
+        content = sse_path.read_text(encoding="utf-8")
         assert "/api/chat/stream" in content
         assert "StreamingResponse" in content
         assert "text/event-stream" in content
@@ -365,19 +365,19 @@ class TestRealtimeEndpoints:
     def test_websocket_chat_endpoint(self):
         """WebSocket /ws/chat is wired in app.py."""
         app_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "app.py"
-        content = app_path.read_text()
+        content = app_path.read_text(encoding="utf-8")
         assert "/ws/chat" in content
 
     def test_websocket_dashboard_endpoint(self):
         """WebSocket /ws/dashboard is wired in app.py."""
         app_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "app.py"
-        content = app_path.read_text()
+        content = app_path.read_text(encoding="utf-8")
         assert "/ws/dashboard" in content
 
     def test_telemetry_sse_endpoint(self):
         """Telemetry SSE endpoint is configured."""
         app_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "app.py"
-        content = app_path.read_text()
+        content = app_path.read_text(encoding="utf-8")
         assert "telemetry" in content.lower()
 
 
@@ -392,6 +392,6 @@ class TestWorkspaceEndpoints:
     def test_workspace_api_in_app(self):
         """Workspace API routes are mentioned in app.py."""
         app_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "app.py"
-        content = app_path.read_text()
+        content = app_path.read_text(encoding="utf-8")
         # workspace routes might be under / or /workspace
         assert "workspace" in content.lower() or "index.html" in content

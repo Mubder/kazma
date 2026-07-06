@@ -180,9 +180,10 @@ class TestLLMProvider:
         assert result.content == "Hello!"
 
     @pytest.mark.asyncio
-    async def test_chat_connection_error(self) -> None:
+    async def test_chat_connection_error(self, monkeypatch) -> None:
         import httpx
 
+        monkeypatch.setenv("KAZMA_SEMANTIC_CACHE", "false")
         provider = LLMProvider(LLMConfig(base_url="http://fake.api/v1", api_key="test"))
 
         mock_client = AsyncMock()

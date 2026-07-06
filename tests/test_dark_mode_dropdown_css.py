@@ -33,7 +33,7 @@ _CSS_PATH = (
 @pytest.fixture(scope="module")
 def css_text() -> str:
     """Read the kazma.css source once for all tests in this module."""
-    return _CSS_PATH.read_text()
+    return _CSS_PATH.read_text(encoding="utf-8")
 
 
 class TestDarkModeOptionRules:

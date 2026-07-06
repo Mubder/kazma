@@ -51,7 +51,7 @@ def _sign_skill(skill_dir: Path, secret: str = "test-secret") -> None:
     signature = hmac.new(
         secret.encode(), actual_hash.encode(), hashlib.sha256
     ).hexdigest()
-    manifest = yaml.safe_load((skill_dir / "skill_manifest.yaml").read_text())
+    manifest = yaml.safe_load((skill_dir / "skill_manifest.yaml").read_text(encoding="utf-8"))
     manifest["checksum"] = actual_hash
     manifest["signature"] = signature
     (skill_dir / "skill_manifest.yaml").write_text(yaml.dump(manifest))
@@ -179,7 +179,7 @@ class TestSignCommand:
 
         # Verify the manifest now has checksum + signature
         manifest = yaml.safe_load(
-            (skill_dir / "skill_manifest.yaml").read_text()
+            (skill_dir / "skill_manifest.yaml").read_text(encoding="utf-8")
         )
         assert "checksum" in manifest
         assert "signature" in manifest

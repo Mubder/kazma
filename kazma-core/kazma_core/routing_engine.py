@@ -89,29 +89,50 @@ class UnifiedRouter:
         worker_profiles = self._build_worker_profiles(available_workers)
 
         scored_names: list[str] = []
+        semantic_scores: dict[str, float] = {}
+        dialect_detected = None
+        dialect_confidence = 0.0
 
-        # ── 1. Dialect & Semantic Routing ──
+        # ── 1. Dialect Detection ──
+        try:
+            req = AgentRequest(text=task.prompt)
+            token_result = self._dialect_router.tokenizer.tokenize(req.text)
+            dialect_detected = token_result.dialect.dialect
+            dialect_confidence = float(token_result.dialect.confidence)
+        except Exception as exc:
+            logger.debug("[UnifiedRouter] Dialect tokenization for diagnostics failed: %s", exc)
+
         dialect_boosts = self._calculate_dialect_boosts(task.prompt, worker_profiles)
 
+        # ── 2. Semantic Routing ──
         if self._semantic_router.available:
             logger.info("[UnifiedRouter] Attempting Semantic routing.")
             try:
-                # route() returns a list of names
-                semantic_results = self._semantic_router.route(
-                    task_description=task.prompt,
-                    workers=worker_profiles,
-                    top_n=top_n * 2, # fetch more for dialect resorting
-                )
-                if semantic_results:
-                    logger.info("[UnifiedRouter] Semantic routing yielded: %s", semantic_results)
-                    scored_names = semantic_results
+                self._semantic_router.build_profiles(worker_profiles)
+                scored = self._semantic_router.query(task.prompt, top_n=top_n * 2)
+                if scored:
+                    logger.info("[UnifiedRouter] Semantic query yielded: %s", scored)
+                    scored_names = [name for name, _score in scored]
+                    for name, sim in scored:
+                        semantic_scores[name] = float(sim)
             except Exception as exc:
                 logger.warning("[UnifiedRouter] Semantic router failed, falling back to keyword: %s", exc)
 
-        # ── 2. Keyword Fallback Routing ──
+        # Calculate keyword overlaps for ALL workers for routing diagnostics
+        keyword_overlaps: dict[str, int] = {}
+        requirements_tokens = self._extract_requirement_tokens(task)
+        for worker_info in available_workers:
+            name = worker_info["name"]
+            capabilities = worker_info["capabilities"]
+            overlap = self._score_worker(requirements_tokens, capabilities)
+            keyword_overlaps[name] = int(overlap)
+
+        # ── 3. Keyword Fallback Routing ──
         if not scored_names:
             logger.info("[UnifiedRouter] Falling back to Keyword capability routing.")
-            scored_names = self._keyword_route(task, available_workers)
+            scored_workers = [_ScoredWorker(name=name, score=score) for name, score in keyword_overlaps.items() if score > 0]
+            scored_workers.sort(key=lambda item: item.score, reverse=True)
+            scored_names = [item.name for item in scored_workers]
 
         # Add any workers that got a dialect boost to the scored_names so they aren't lost
         if dialect_boosts:
@@ -126,14 +147,11 @@ class UnifiedRouter:
                 f"available workers: {[w['name'] for w in available_workers]}"
             )
 
-        # ── 3. Apply Dialect Boosts & Final Sort ──
+        # ── 4. Apply Dialect Boosts & Final Sort ──
+        base_score_map = {name: (len(scored_names) - i) * 10 for i, name in enumerate(scored_names)}
+        
         if dialect_boosts:
             logger.info("[UnifiedRouter] Applying dialect boosts: %s", dialect_boosts)
-            
-            # Convert list to scored items
-            # Semantic routing doesn't return raw scores in route(), so we create a synthetic score
-            # based on rank, then add the dialect boost.
-            base_score_map = {name: (len(scored_names) - i) * 10 for i, name in enumerate(scored_names)}
             
             final_scored = []
             for name in scored_names:
@@ -145,8 +163,24 @@ class UnifiedRouter:
 
         selected_names = scored_names[:top_n]
 
-        # Record metadata
+        # ── 5. Record Routing Diagnostics ──
+        diagnostics = {
+            "strategy_used": "semantic" if (self._semantic_router.available and semantic_scores) else "keyword",
+            "dialect_detected": dialect_detected if (dialect_detected in ("kw", "msa") and dialect_confidence >= 0.3) else None,
+            "dialect_confidence": dialect_confidence if (dialect_detected in ("kw", "msa") and dialect_confidence >= 0.3) else 0.0,
+            "scores": {}
+        }
+        for worker_info in available_workers:
+            name = worker_info["name"]
+            diagnostics["scores"][name] = {
+                "semantic_similarity": float(semantic_scores.get(name, 0.0)),
+                "keyword_overlap": int(keyword_overlaps.get(name, 0)),
+                "dialect_boost": int(dialect_boosts.get(name, 0)),
+                "final_score": int(base_score_map.get(name, 0) + dialect_boosts.get(name, 0) if dialect_boosts else (semantic_scores.get(name, 0.0) * 100 if semantic_scores else keyword_overlaps.get(name, 0)))
+            }
+        
         task.metadata["routed_workers"] = selected_names
+        task.metadata["routing_diagnostics"] = diagnostics
         
         logger.info(
             "[UnifiedRouter] auto-routed task '%s' to %s",

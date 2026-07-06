@@ -29,7 +29,7 @@ class TestTelemetryRouteDedup:
 
     @pytest.fixture
     def app_py(self):
-        return (_UI_DIR / "app.py").read_text()
+        return (_UI_DIR / "app.py").read_text(encoding="utf-8")
 
     def test_only_one_telemetry_stream_route(self, app_py):
         """grep for '/api/telemetry/stream' returns exactly one route definition."""
@@ -63,7 +63,7 @@ class TestToastFix:
 
     @pytest.fixture
     def streaming_js(self):
-        return (_JS_DIR / "streaming.js").read_text()
+        return (_JS_DIR / "streaming.js").read_text(encoding="utf-8")
 
     def test_toast_falls_back_to_query_selector(self, streaming_js):
         """toast() uses querySelector('.toast-container') as fallback."""
@@ -171,7 +171,7 @@ class TestCostBreakerType:
 
     @pytest.fixture
     def chat_py(self):
-        return (_UI_DIR / "chat.py").read_text()
+        return (_UI_DIR / "chat.py").read_text(encoding="utf-8")
 
     def test_cost_breaker_sends_error_type(self, chat_py):
         """The cost breaker message must use type 'error', not 'done'."""
@@ -206,7 +206,7 @@ class TestInitErrorsSurfaced:
 
     @pytest.fixture
     def app_py(self):
-        return (_UI_DIR / "app.py").read_text()
+        return (_UI_DIR / "app.py").read_text(encoding="utf-8")
 
     def test_init_errors_list_exists(self, app_py):
         """app.py defines an _init_errors list to track failures."""

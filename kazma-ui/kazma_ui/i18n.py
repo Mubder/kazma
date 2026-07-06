@@ -385,6 +385,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "swarm.tab_worker_registry": {"en": "Worker Registry", "ar": "سجل العمال"},
     "swarm.tab_task_history": {"en": "Task History", "ar": "سجل المهام"},
     "swarm.workflow_editor_title": {"en": "Visual Workflow Editor", "ar": "محرر سير العمل المرئي"},
+    "swarm.visual_pipeline_editor": {"en": "Visual Pipeline Editor", "ar": "محرر خط الأنابيب المرئي"},
     "swarm.workflow_definition": {"en": "Workflow Definition (YAML/JSON)", "ar": "تعريف سير العمل (YAML/JSON)"},
     "swarm.workflow_mermaid_visual": {"en": "Visual DAG Diagram", "ar": "مخطط سير العمل المرئي (DAG)"},
     "swarm.validate": {"en": "Validate", "ar": "تحقق من الصحة"},

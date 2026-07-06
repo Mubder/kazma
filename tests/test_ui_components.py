@@ -54,7 +54,7 @@ class TestBaseTemplate:
 
     @pytest.fixture
     def base_html(self):
-        return (_TEMPLATES_DIR / "base.html").read_text()
+        return (_TEMPLATES_DIR / "base.html").read_text(encoding="utf-8")
 
     def test_has_doctype(self, base_html):
         assert "<!DOCTYPE html>" in base_html
@@ -119,7 +119,7 @@ class TestSidebarComponent:
 
     @pytest.fixture
     def sidebar_html(self):
-        return (_COMPONENTS_DIR / "sidebar.html").read_text()
+        return (_COMPONENTS_DIR / "sidebar.html").read_text(encoding="utf-8")
 
     def test_has_nav_links(self, sidebar_html):
         assert "nav-link" in sidebar_html
@@ -174,7 +174,7 @@ class TestHeaderComponent:
 
     @pytest.fixture
     def header_html(self):
-        return (_COMPONENTS_DIR / "header.html").read_text()
+        return (_COMPONENTS_DIR / "header.html").read_text(encoding="utf-8")
 
     def test_has_page_title(self, header_html):
         assert "page_title" in header_html or "header-title" in header_html
@@ -205,7 +205,7 @@ class TestModalComponent:
 
     @pytest.fixture
     def modal_html(self):
-        return (_COMPONENTS_DIR / "modal.html").read_text()
+        return (_COMPONENTS_DIR / "modal.html").read_text(encoding="utf-8")
 
     def test_has_modal_overlay(self, modal_html):
         assert "modal-overlay" in modal_html
@@ -240,7 +240,7 @@ class TestToastComponent:
 
     @pytest.fixture
     def toast_html(self):
-        return (_COMPONENTS_DIR / "toast.html").read_text()
+        return (_COMPONENTS_DIR / "toast.html").read_text(encoding="utf-8")
 
     def test_has_toast_container(self, toast_html):
         assert "toast-container" in toast_html
@@ -275,7 +275,7 @@ class TestCSSDesignSystem:
 
     @pytest.fixture
     def css(self):
-        return (_CSS_DIR / "kazma.css").read_text()
+        return (_CSS_DIR / "kazma.css").read_text(encoding="utf-8")
 
     # Variables
     def test_has_accent_color(self, css):
@@ -444,7 +444,7 @@ class TestAppJS:
 
     @pytest.fixture
     def js(self):
-        return (_JS_DIR / "app.js").read_text()
+        return (_JS_DIR / "app.js").read_text(encoding="utf-8")
 
     def test_has_toast_store(self, js):
         assert "Alpine.store('toast'" in js
@@ -519,7 +519,7 @@ class TestAppJS:
 
     def test_modal_sizes_in_template(self):
         """Modal size classes are defined in modal.html template."""
-        modal_html = (_COMPONENTS_DIR / "modal.html").read_text()
+        modal_html = (_COMPONENTS_DIR / "modal.html").read_text(encoding="utf-8")
         for size in ["modal-sm", "modal-md", "modal-lg", "modal-xl"]:
             assert size in modal_html, f"Missing size class: {size}"
 
@@ -578,14 +578,14 @@ class TestConsistency:
                 continue
             if html_file.name == "error.html":
                 continue
-            content = html_file.read_text()
+            content = html_file.read_text(encoding="utf-8")
             assert 'extends "base.html"' in content or "extends 'base.html'" in content, \
                 f"{html_file.name} does not extend base.html"
 
     def test_nav_links_match_routes(self):
         """Sidebar nav links should match app.py routes."""
-        sidebar = (_COMPONENTS_DIR / "sidebar.html").read_text()
-        app_py = (_UI_DIR / "app.py").read_text()
+        sidebar = (_COMPONENTS_DIR / "sidebar.html").read_text(encoding="utf-8")
+        app_py = (_UI_DIR / "app.py").read_text(encoding="utf-8")
 
         # Extract hrefs from sidebar
         hrefs = re.findall(r'href="(/[^"]*)"', sidebar)
@@ -600,8 +600,8 @@ class TestConsistency:
 
     def test_css_classes_used_in_templates(self):
         """Key CSS classes should be used in templates."""
-        css = (_CSS_DIR / "kazma.css").read_text()
-        sidebar = (_COMPONENTS_DIR / "sidebar.html").read_text()
+        css = (_CSS_DIR / "kazma.css").read_text(encoding="utf-8")
+        sidebar = (_COMPONENTS_DIR / "sidebar.html").read_text(encoding="utf-8")
 
         # These classes must exist in CSS and be used in sidebar
         key_classes = ["nav-link", "sidebar", "logo", "status-dot"]

@@ -106,17 +106,17 @@ def mock_agent() -> Any:
 
 @pytest.fixture
 def agents_html() -> str:
-    return (_TEMPLATES_DIR / "agents.html").read_text()
+    return (_TEMPLATES_DIR / "agents.html").read_text(encoding="utf-8")
 
 
 @pytest.fixture
 def agents_py() -> str:
-    return (_UI_DIR / "agents.py").read_text()
+    return (_UI_DIR / "agents.py").read_text(encoding="utf-8")
 
 
 @pytest.fixture
 def agents_js() -> str:
-    return (_JS_DIR / "agents.js").read_text()
+    return (_JS_DIR / "agents.js").read_text(encoding="utf-8")
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -368,6 +368,6 @@ class TestSidebarAgentsLink:
     """The sidebar must include a link to the Agents page."""
 
     def test_sidebar_has_agents_link(self):
-        sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text()
+        sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text(encoding="utf-8")
         assert 'href="/agents"' in sidebar
         assert "active_page == 'agents'" in sidebar

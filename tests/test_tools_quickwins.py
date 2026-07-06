@@ -73,7 +73,12 @@ class TestWebSearch:
         mock_ddgs.text = MagicMock(return_value=[])
 
         fake_mod = _make_mock_ddgs(mock_ddgs)
-        with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        with (
+            patch.dict(sys.modules, {"duckduckgo_search": fake_mod}),
+            patch("httpx.get", return_value=mock_response),
+        ):
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("nonexistent query xyz")
@@ -213,7 +218,10 @@ class TestFriendlyErrors:
         mock_ddgs.text = MagicMock(side_effect=ConnectionError("Network unreachable"))
 
         fake_mod = _make_mock_ddgs(mock_ddgs)
-        with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
+        with (
+            patch.dict(sys.modules, {"duckduckgo_search": fake_mod}),
+            patch("httpx.get", side_effect=ConnectionError("Network unreachable")),
+        ):
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("test")
@@ -450,7 +458,10 @@ class TestWebSearchEdgeCases:
         mock_ddgs.text = MagicMock(side_effect=TimeoutError("timed out"))
 
         fake_mod = _make_mock_ddgs(mock_ddgs)
-        with patch.dict(sys.modules, {"duckduckgo_search": fake_mod}):
+        with (
+            patch.dict(sys.modules, {"duckduckgo_search": fake_mod}),
+            patch("httpx.get", side_effect=TimeoutError("timed out")),
+        ):
             from kazma_core.tools.web_search import web_search
 
             result = await web_search("test")

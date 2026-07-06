@@ -260,6 +260,7 @@ class TestUrlImage:
         mock_provider = _mock_llm_provider("A 16x16 red square from the web.")
 
         with patch.dict("sys.modules", {"httpx": mock_httpx}), \
+             patch("kazma_core.http_pool.get_http_client", return_value=mock_client), \
              patch(
                  "kazma_core.tools.vision_analyze._get_llm_provider",
                  return_value=mock_provider,
@@ -288,7 +289,8 @@ class TestUrlImage:
         mock_client.__aexit__ = AsyncMock(return_value=False)
         mock_httpx.AsyncClient.return_value = mock_client
 
-        with patch.dict("sys.modules", {"httpx": mock_httpx}):
+        with patch.dict("sys.modules", {"httpx": mock_httpx}), \
+             patch("kazma_core.http_pool.get_http_client", return_value=mock_client):
             # Patch the real httpx classes used in the except blocks
             with patch("kazma_core.tools.vision_analyze.httpx", mock_httpx, create=True):
                 result = await analyze_image("https://broken.example.com/img.png")
@@ -486,7 +488,7 @@ class TestStreamDownloadSizeCap:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
+        with patch("kazma_core.http_pool.get_http_client", return_value=mock_client):
             with pytest.raises(ValueError, match="too large"):
                 await _download_image("https://example.com/huge.png")
 
@@ -507,7 +509,7 @@ class TestStreamDownloadSizeCap:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("httpx.AsyncClient", return_value=mock_client), \
+        with patch("kazma_core.http_pool.get_http_client", return_value=mock_client), \
              patch("kazma_core.tools.vision_analyze.MAX_DOWNLOAD_BYTES", 100):
             with pytest.raises(ValueError, match="exceeds"):
                 await _download_image("https://example.com/stealth.png")
@@ -532,7 +534,7 @@ class TestStreamDownloadSizeCap:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
+        with patch("kazma_core.http_pool.get_http_client", return_value=mock_client):
             image_bytes, mime = await _download_image("https://example.com/small.png")
 
         assert image_bytes == png_data
@@ -558,7 +560,7 @@ class TestStreamDownloadSizeCap:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
-        with patch("httpx.AsyncClient", return_value=mock_client):
+        with patch("kazma_core.http_pool.get_http_client", return_value=mock_client):
             image_bytes, mime = await _download_image("https://example.com/photo.jpg")
 
         assert image_bytes == png_data

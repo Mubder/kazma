@@ -88,7 +88,7 @@ class TestSidebarSourceHasDynamicModel:
 
     def test_sidebar_html_uses_x_text_for_model(self) -> None:
         """sidebar.html must use Alpine x-text bound to activeModel."""
-        sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text()
+        sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text(encoding="utf-8")
         assert "x-text" in sidebar, "sidebar.html must use x-text for reactive model display"
         assert "activeModel" in sidebar, (
             "sidebar.html must reference activeModel from sidebarComponent()"
@@ -101,7 +101,7 @@ class TestSidebarSourceHasDynamicModel:
         replaces it with the fetched value. We verify the model display
         section contains x-text (not just a Jinja expression alone).
         """
-        sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text()
+        sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text(encoding="utf-8")
         # The template uses sidebar-model-selector for the model display.
         badge_idx = sidebar.find("sidebar-model-selector")
         assert badge_idx != -1, "sidebar-model-selector section not found in sidebar.html"
@@ -116,7 +116,7 @@ class TestSidebarSourceHasDynamicModel:
 
     def test_app_js_sidebar_component_has_fetch(self) -> None:
         """sidebarComponent() in app.js must fetch /api/provider/active."""
-        js = (_JS_DIR / "app.js").read_text()
+        js = (_JS_DIR / "app.js").read_text(encoding="utf-8")
         # Find the sidebarComponent function
         idx = js.find("function sidebarComponent()")
         assert idx != -1, "sidebarComponent() not found in app.js"
@@ -127,7 +127,7 @@ class TestSidebarSourceHasDynamicModel:
 
     def test_app_js_sidebar_component_has_init(self) -> None:
         """sidebarComponent() must have an init() that triggers the fetch."""
-        js = (_JS_DIR / "app.js").read_text()
+        js = (_JS_DIR / "app.js").read_text(encoding="utf-8")
         idx = js.find("function sidebarComponent()")
         section = js[idx:]
         assert "init()" in section, "sidebarComponent() must define init()"
@@ -137,7 +137,7 @@ class TestSidebarSourceHasDynamicModel:
 
     def test_app_js_sidebar_component_has_active_model_state(self) -> None:
         """sidebarComponent() must have activeModel state property."""
-        js = (_JS_DIR / "app.js").read_text()
+        js = (_JS_DIR / "app.js").read_text(encoding="utf-8")
         idx = js.find("function sidebarComponent()")
         section = js[idx:]
         assert "activeModel" in section, (

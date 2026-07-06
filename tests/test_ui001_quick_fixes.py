@@ -56,7 +56,7 @@ class TestWorkspaceRoute:
 
     def test_workspace_route_not_redirect_in_source(self) -> None:
         """app.py source must not have RedirectResponse for /workspace."""
-        app_source = (_UI_DIR / "app.py").read_text()
+        app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
         # The /workspace route should NOT return RedirectResponse
         # Find the /workspace route block
         assert "/workspace" in app_source
@@ -75,13 +75,13 @@ class TestSidebarWorkspaceLink:
     """Sidebar workspace link must point to /workspace."""
 
     def test_sidebar_links_to_workspace(self) -> None:
-        sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text()
+        sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text(encoding="utf-8")
         # The workspace nav link must have href="/workspace"
         assert 'href="/workspace"' in sidebar
 
     def test_sidebar_no_workspace_link_to_root(self) -> None:
         """The workspace nav link must NOT point to bare '/'."""
-        sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text()
+        sidebar = (_TEMPLATES_DIR / "components" / "sidebar.html").read_text(encoding="utf-8")
         lines = sidebar.split("\n")
         for line in lines:
             if "active_page == 'workspace'" in line:
@@ -100,19 +100,19 @@ class TestKeyboardShortcutCapture:
     """Settings page must capture key combinations on keydown."""
 
     def test_capture_shortcut_function_exists(self) -> None:
-        js = (_JS_DIR / "settings.js").read_text()
+        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
         assert "captureShortcut" in js, "captureShortcut function missing from settings.js"
 
     def test_capture_shortcut_prevents_default(self) -> None:
-        js = (_JS_DIR / "settings.js").read_text()
+        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
         # The HTML binds @keydown.prevent which prevents default
-        html = (_TEMPLATES_DIR / "settings.html").read_text()
+        html = (_TEMPLATES_DIR / "settings.html").read_text(encoding="utf-8")
         assert "@keydown" in html or "keydown" in html, (
             "Shortcuts tab must use keydown event, not @change"
         )
 
     def test_capture_shortcut_detects_modifiers(self) -> None:
-        js = (_JS_DIR / "settings.js").read_text()
+        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
         # Must detect ctrl, alt, shift, meta
         assert "ctrlKey" in js or "event.ctrlKey" in js
         assert "altKey" in js or "event.altKey" in js
@@ -120,13 +120,13 @@ class TestKeyboardShortcutCapture:
         assert "metaKey" in js or "event.metaKey" in js
 
     def test_capture_shortcut_formats_combination(self) -> None:
-        js = (_JS_DIR / "settings.js").read_text()
+        js = (_JS_DIR / "settings.js").read_text(encoding="utf-8")
         # Must join with '+' to format the combination
         assert ".join('+')" in js or "join('+')" in js
 
     def test_shortcuts_tab_no_change_handler(self) -> None:
         """Shortcuts inputs must NOT use @change (old text input pattern)."""
-        html = (_TEMPLATES_DIR / "settings.html").read_text()
+        html = (_TEMPLATES_DIR / "settings.html").read_text(encoding="utf-8")
         # The shortcuts tab content section starts with x-show containing shortcuts
         # Find the Shortcuts tab CONTENT (x-show), not the nav button
         shortcuts_start = html.find('x-show="tab === \'shortcuts\'"')
@@ -143,7 +143,7 @@ class TestKeyboardShortcutCapture:
 
     def test_shortcut_inputs_are_readonly(self) -> None:
         """Shortcut inputs should be readonly (capture-only, no manual typing)."""
-        html = (_TEMPLATES_DIR / "settings.html").read_text()
+        html = (_TEMPLATES_DIR / "settings.html").read_text(encoding="utf-8")
         shortcuts_start = html.find('x-show="tab === \'shortcuts\'"')
         shortcuts_end = html.find('x-show="tab === \'account\'"')
         assert shortcuts_start != -1
@@ -163,7 +163,7 @@ class TestChromaDBWarningSuppressed:
 
     def test_no_warning_level_for_vector_memory(self) -> None:
         """app.py must not use logger.warning for VectorMemory unavailability."""
-        app_source = (_UI_DIR / "app.py").read_text()
+        app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
         # Find the VectorMemory exception handler
         vm_idx = app_source.find("[VectorMemory] Not available")
         assert vm_idx != -1, "VectorMemory handler not found"
@@ -175,7 +175,7 @@ class TestChromaDBWarningSuppressed:
 
     def test_debug_level_for_vector_memory(self) -> None:
         """app.py must use logger.debug for VectorMemory unavailability."""
-        app_source = (_UI_DIR / "app.py").read_text()
+        app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
         vm_idx = app_source.find("[VectorMemory] Not available")
         assert vm_idx != -1
         context = app_source[max(0, vm_idx - 100) : vm_idx + 50]
@@ -185,7 +185,7 @@ class TestChromaDBWarningSuppressed:
 
     def test_helpful_hint_present(self) -> None:
         """A helpful hint about installing the rag extra should be present."""
-        app_source = (_UI_DIR / "app.py").read_text()
+        app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
         # Look for a hint about rag extra or chromadb
         assert "rag" in app_source.lower() or "chromadb" in app_source.lower(), (
             "No helpful hint about chromadb/rag installation found"
@@ -202,7 +202,7 @@ class TestAgentStatusDynamic:
 
     def test_agents_html_no_static_agent_process(self) -> None:
         """agents.html must NOT have static 'agent process' text."""
-        html = (_TEMPLATES_DIR / "agents.html").read_text()
+        html = (_TEMPLATES_DIR / "agents.html").read_text(encoding="utf-8")
         # The static "agent process" text should not be in the status card
         assert ">agent process<" not in html, (
             "Static 'agent process' text still present in agents.html"
@@ -210,7 +210,7 @@ class TestAgentStatusDynamic:
 
     def test_agents_html_shows_last_activity(self) -> None:
         """agents.html must display last_activity context."""
-        html = (_TEMPLATES_DIR / "agents.html").read_text()
+        html = (_TEMPLATES_DIR / "agents.html").read_text(encoding="utf-8")
         assert "last_activity" in html, (
             "agents.html does not show last_activity"
         )

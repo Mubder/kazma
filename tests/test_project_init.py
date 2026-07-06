@@ -45,14 +45,14 @@ class TestProjectInit:
             # Run init again
             init_project(tmp)
             # Content should be preserved
-            assert rules_path.read_text() == "language: rust\ntest_command: cargo test\n"
+            assert rules_path.read_text(encoding="utf-8") == "language: rust\ntest_command: cargo test\n"
 
     def test_init_writes_valid_yaml_defaults(self) -> None:
         """Default rules.yaml contains expected keys and valid YAML."""
         with tempfile.TemporaryDirectory() as tmp:
             init_project(tmp)
             rules_path = Path(tmp) / ".kazma" / "rules.yaml"
-            data = yaml.safe_load(rules_path.read_text())
+            data = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
             assert data["language"] == "python"
             assert data["test_command"] == "python -m pytest tests/ -q"
             assert data["git_branch"] == "main"

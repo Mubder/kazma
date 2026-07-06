@@ -198,22 +198,73 @@
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-workflow-editor" style="display:none;">
     <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:20px;">
-      <!-- Monospace YAML/JSON Textarea Left Column -->
+      <!-- Visual Pipeline Editor Left Column -->
       <div class="card" style="display:flex;flex-direction:column;gap:12px;min-height:550px;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <h3 style="font-size:0.95rem;font-weight:600;margin:0;">✍️ {{ t('swarm.workflow_definition') }}</h3>
+          <h3 style="font-size:0.95rem;font-weight:600;margin:0;">✍️ {{ t('swarm.visual_pipeline_editor') }}</h3>
           <div style="display:flex;gap:6px;">
-            <button class="btn btn-sm btn-secondary" onclick="KazmaSwarm.loadEditorExample()">📋 Example</button>
-            <button class="btn btn-sm btn-secondary" onclick="KazmaSwarm.copyEditorCode()">🔗 Copy</button>
-            <button class="btn btn-sm btn-danger" onclick="KazmaSwarm.clearEditor()">🗑️ Clear</button>
+            <button class="btn btn-sm btn-secondary" onclick="KazmaSwarm.loadPipelineExample()">📋 Example</button>
+            <button class="btn btn-sm btn-danger" onclick="KazmaSwarm.clearPipeline()">🗑️ Clear All</button>
           </div>
         </div>
         
-        <div class="form-group" style="flex:1;display:flex;flex-direction:column;margin:0;">
-          <textarea id="workflow-textarea" class="form-textarea" style="flex:1;font-family:var(--font-mono);font-size:0.8rem;line-height:1.4;background:rgba(0,0,0,0.2);color:#abb2bf;padding:12px;border:1px solid var(--border);border-radius:var(--radius);resize:none;" placeholder="Enter YAML/JSON DAG workflow here..." oninput="KazmaSwarm.onEditorInput()"></textarea>
+        <!-- Pipeline Prompt -->
+        <div class="form-group" style="margin-bottom:8px;">
+          <label class="form-label" style="font-size:0.8rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">📝 Master Task Prompt *</label>
+          <textarea id="pipeline-prompt" class="form-textarea" style="font-size:0.8rem;padding:8px 12px;background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:var(--radius);resize:vertical;min-height:70px;" placeholder="What should the sequential pipeline process?"></textarea>
         </div>
 
-        <div id="workflow-status" class="alert" style="display:none;padding:10px 12px;border-radius:var(--radius);font-size:0.8rem;"></div>
+        <!-- Global Timeout & Fallback Worker side-by-side -->
+        <div style="display:flex;gap:12px;margin-bottom:8px;align-items:flex-end;">
+          <div class="form-group" style="flex:1;margin-bottom:0;">
+            <label class="form-label" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">⏱️ Step Timeout (sec)</label>
+            <input type="number" id="pipeline-timeout" class="form-input" style="height:32px;font-size:0.8rem;padding:4px 8px;background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:var(--radius);" value="300">
+          </div>
+          <div class="form-group" style="flex:1.5;margin-bottom:0;">
+            <label class="form-label" style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px;">🛡️ Fallback Worker</label>
+            <select id="pipeline-fallback-select" class="form-select" style="height:32px;font-size:0.8rem;padding:4px 8px;background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:var(--radius);">
+              <option value="">None (Fail Closed)</option>
+              {% for w in workers %}
+              <option value="{{ w.name }}">{{ w.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <!-- Steps Header & Add Step -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;margin-bottom:4px;">
+          <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);">🔗 Pipeline Sequence Stages</span>
+          <button class="btn btn-sm btn-primary" onclick="KazmaSwarm.addPipelineStage()" style="padding:4px 10px;font-size:0.75rem;">➕ Add Step</button>
+        </div>
+
+        <!-- Steps Drag and Drop Container -->
+        <div id="pipeline-steps-container" style="flex:1;overflow-y:auto;max-height:220px;border:1px dashed var(--border);border-radius:var(--radius);padding:8px;background:rgba(0,0,0,0.1);min-height:100px;">
+          <!-- steps will be populated by JS -->
+        </div>
+
+        <!-- Run Dispatch Section -->
+        <div style="margin-top:8px;">
+          <button id="btn-pipeline-run" class="btn btn-primary" onclick="KazmaSwarm.dispatchVisualPipeline()" style="width:100%;font-weight:600;height:38px;">🚀 Run Visual Pipeline</button>
+        </div>
+
+        <!-- Inline HITL Approval Gating Panel -->
+        <div id="pipeline-hitl-gate" class="alert alert-warning" style="display:none;margin-top:10px;border:1px solid var(--warning);background:rgba(245,158,11,0.05);padding:10px 12px;border-radius:var(--radius);">
+          <div style="font-weight:600;color:var(--warning);margin-bottom:4px;font-size:0.8rem;">⏸️ Pipeline Gated: Awaiting Approval</div>
+          <pre id="pipeline-hitl-preview" style="background:rgba(0,0,0,0.3);padding:6px;border-radius:4px;font-size:0.7rem;font-family:var(--font-mono);margin-bottom:8px;max-height:80px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);"></pre>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-sm btn-primary" onclick="KazmaSwarm.approvePipelineCheck()" style="padding:2px 8px;font-size:0.75rem;">Approve</button>
+            <button class="btn btn-sm btn-danger" onclick="KazmaSwarm.rejectPipelineCheck()" style="padding:2px 8px;font-size:0.75rem;">Reject</button>
+          </div>
+        </div>
+
+        <!-- Inline Run Logs/Terminal -->
+        <div id="pipeline-terminal-card" style="display:none;margin-top:10px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:var(--radius);padding:10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <span style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);">🖥️ Pipeline Run Logs</span>
+            <span id="pipeline-live-timer" class="badge badge-info" style="font-size:0.65rem;">0s</span>
+          </div>
+          <div id="pipeline-terminal" style="font-family:var(--font-mono);font-size:0.7rem;background:#060611;border-radius:4px;padding:8px;height:120px;overflow-y:auto;border:1px solid rgba(255,255,255,0.03);line-height:1.4;color:var(--text-secondary);"></div>
+        </div>
       </div>
 
       <!-- Live Rendered Right Column -->
@@ -710,6 +761,9 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+  window.KAZMA_WORKERS = {{ workers | tojson | safe if workers else '[]' }};
+</script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script src="/static/js/streaming.js"></script>
 <script src="/static/js/swarm.js"></script>

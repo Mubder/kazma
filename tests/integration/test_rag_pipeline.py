@@ -97,7 +97,7 @@ class TestRAGPipeline:
         if not graph_builder_path.exists():
             pytest.skip("graph_builder.py not found")
 
-        source = graph_builder_path.read_text()
+        source = graph_builder_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
 
         for node in ast.walk(tree):
@@ -116,7 +116,7 @@ class TestRAGPipeline:
         if not handler_path.exists():
             pytest.skip("agent_handler.py not found")
 
-        source = handler_path.read_text()
+        source = handler_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
 
         for node in ast.walk(tree):

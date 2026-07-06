@@ -114,10 +114,7 @@
           mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
         } catch (e) { console.error("Mermaid init error:", e); }
       }
-      var ta = $('workflow-textarea');
-      if (ta && !ta.value.trim()) {
-        loadEditorExample();
-      }
+      initVisualPipeline();
     }
     if (tabId === 'active-tasks') {
       loadActiveTasks();
@@ -1256,6 +1253,94 @@
     if (task.context) html += '<div style="grid-column:1/-1;"><strong>Context:</strong> ' + esc(task.context) + '</div>';
     html += '</div>';
 
+    // Unified Routing Diagnostics UI
+    var diagnostics = task.metadata && task.metadata.routing_diagnostics;
+    if (diagnostics) {
+      html += '<h4 style="margin-top:16px;margin-bottom:8px;display:flex;align-items:center;gap:6px;">🎯 Unified Routing Diagnostics</h4>';
+      html += '<div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:var(--radius);padding:12px;margin-bottom:16px;">';
+      
+      html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
+      var strategy = diagnostics.strategy_used || 'keyword';
+      var stratColor = strategy === 'semantic' ? 'var(--accent)' : 'var(--warning)';
+      html += '<span class="badge" style="background:' + stratColor + '22;color:' + stratColor + ';border:1px solid ' + stratColor + '44;text-transform:capitalize;font-weight:600;padding:4px 8px;font-size:0.75rem;">Strategy: ' + esc(strategy) + '</span>';
+      
+      if (diagnostics.dialect_detected) {
+        var dialectName = diagnostics.dialect_detected === 'msa' ? 'Modern Standard Arabic' : 'Khaleeji Dialect';
+        var dialectConf = diagnostics.dialect_confidence ? (diagnostics.dialect_confidence * 100).toFixed(0) + '%' : '100%';
+        html += '<span class="badge" style="background:var(--success)22;color:var(--success);border:1px solid var(--success)44;font-weight:600;padding:4px 8px;font-size:0.75rem;">🗣️ Arabic Dialect: ' + esc(dialectName) + ' (' + dialectConf + ')</span>';
+      }
+      html += '</div>';
+
+      html += '<div style="overflow-x:auto;">';
+      html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:left;">';
+      html += '<thead>';
+      html += '<tr style="border-bottom:2px solid var(--border);">';
+      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Worker</th>';
+      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Routed</th>';
+      if (strategy === 'semantic') {
+        html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Semantic Similarity</th>';
+      } else {
+        html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Keyword Overlap</th>';
+      }
+      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Dialect Boost</th>';
+      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Final Score</th>';
+      html += '</tr>';
+      html += '</thead>';
+      html += '<tbody>';
+      
+      var scores = diagnostics.scores || {};
+      var sortedWorkers = Object.keys(scores).sort(function(a, b) {
+        return (scores[b].final_score || 0) - (scores[a].final_score || 0);
+      });
+      var routedWorkers = task.metadata.routed_workers || [];
+
+      sortedWorkers.forEach(function(wName) {
+        var scoreInfo = scores[wName] || {};
+        var isRouted = routedWorkers.indexOf(wName) !== -1;
+        var rowBg = isRouted ? 'rgba(var(--accent-rgb), 0.05)' : 'transparent';
+        html += '<tr style="border-bottom:1px solid var(--border-subtle);background:' + rowBg + ';">';
+        html += '<td style="padding:8px;font-weight:500;">' + esc(wName) + '</td>';
+        
+        if (isRouted) {
+          html += '<td style="padding:8px;"><span class="badge badge-accent" style="font-weight:600;font-size:0.7rem;padding:2px 6px;">🎯 YES</span></td>';
+        } else {
+          html += '<td style="padding:8px;color:var(--text-muted);font-size:0.75rem;">—</td>';
+        }
+
+        if (strategy === 'semantic') {
+          var semSim = scoreInfo.semantic_similarity || 0.0;
+          var semSimPct = Math.min(100, Math.max(0, (semSim * 100))).toFixed(0) + '%';
+          html += '<td style="padding:8px;vertical-align:middle;">';
+          html += '<div style="display:flex;align-items:center;gap:8px;">';
+          html += '<div style="flex:1;background:rgba(255,255,255,0.05);height:6px;border-radius:3px;overflow:hidden;min-width:60px;">';
+          html += '<div style="background:var(--accent);width:' + semSimPct + ';height:100%;"></div>';
+          html += '</div>';
+          html += '<span style="font-family:var(--font-mono);font-size:0.75rem;">' + semSim.toFixed(3) + '</span>';
+          html += '</div>';
+          html += '</td>';
+        } else {
+          var kwOverlap = scoreInfo.keyword_overlap || 0;
+          html += '<td style="padding:8px;"><span class="badge badge-secondary" style="font-family:var(--font-mono);font-size:0.75rem;padding:2px 6px;">' + kwOverlap + ' tokens</span></td>';
+        }
+
+        var dBoost = scoreInfo.dialect_boost || 0;
+        if (dBoost > 0) {
+          html += '<td style="padding:8px;"><span class="badge badge-success" style="font-size:0.7rem;font-weight:600;padding:2px 6px;">+' + dBoost + ' Boost</span></td>';
+        } else {
+          html += '<td style="padding:8px;color:var(--text-muted);font-size:0.75rem;">0</td>';
+        }
+
+        var fScore = typeof scoreInfo.final_score === 'number' ? scoreInfo.final_score.toFixed(1) : (scoreInfo.final_score || '0');
+        html += '<td style="padding:8px;font-family:var(--font-mono);font-weight:600;">' + esc(fScore) + '</td>';
+        html += '</tr>';
+      });
+
+      html += '</tbody>';
+      html += '</table>';
+      html += '</div>';
+      html += '</div>';
+    }
+
     // Worker Results
     var results = task.worker_results || [];
     if (results.length) {
@@ -1553,64 +1638,306 @@
   }
 
   // ══════════════════════════════════════════════════════
-  // OPTION A: WORKFLOW EDITOR BEHAVIORS
+  // OPTION A: VISUAL PIPELINE EDITOR BEHAVIORS
   // ══════════════════════════════════════════════════════
 
-  var editorTimeout = null;
+  var pipelineStages = [];
+  var pipelineSSE = null;
+  var pipelineInterval = null;
+  var pipelineTimerSec = 0;
+  var pipelineActiveTaskId = null;
+  var dragSourceIndex = null;
 
-  function onEditorInput() {
-    if (editorTimeout) clearTimeout(editorTimeout);
-    var spinner = $('workflow-mermaid-spinner');
-    if (spinner) spinner.style.display = 'block';
-    editorTimeout = setTimeout(function() {
-      validateWorkflow();
-    }, 400);
+  function initVisualPipeline() {
+    if (pipelineStages.length === 0) {
+      loadPipelineExample();
+    } else {
+      renderPipelineStages();
+      updatePipelineDiagram();
+    }
   }
 
-  function validateWorkflow() {
-    var ta = $('workflow-textarea');
-    if (!ta) return;
-    var val = ta.value;
-    var spinner = $('workflow-mermaid-spinner');
+  function loadPipelineExample() {
+    pipelineStages = [
+      { id: 1, worker: "ResearchWorker", hitl: false, timeout: 300 },
+      { id: 2, worker: "ReviewWorker", hitl: true, timeout: 300 },
+      { id: 3, worker: "SynthesizeWorker", hitl: false, timeout: 300 }
+    ];
     
-    fetch('/api/swarm/workflows/validate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workflow_definition: val })
-    })
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (spinner) spinner.style.display = 'none';
-        var statusEl = $('workflow-status');
-        if (data.valid) {
-          if (statusEl) {
-            statusEl.style.display = 'block';
-            statusEl.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
-            statusEl.style.border = '1px solid var(--success)';
-            statusEl.innerHTML = '<span style="color:var(--success);font-weight:600;">✓ Validation Succeeded</span>';
-          }
-          if (data.mermaid) {
-            updateMermaidDiagram(data.mermaid);
-          }
-        } else {
-          if (statusEl) {
-            statusEl.style.display = 'block';
-            statusEl.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-            statusEl.style.border = '1px solid var(--danger)';
-            statusEl.innerHTML = '<span style="color:var(--danger);font-weight:600;">✕ Validation Failed:</span><pre style="margin:4px 0 0 0;font-size:0.75rem;font-family:var(--font-mono);color:var(--text-secondary);white-space:pre-wrap;max-height:120px;overflow-y:auto;">' + esc(data.error) + '</pre>';
-          }
-        }
-      })
-      .catch(function(err) {
-        if (spinner) spinner.style.display = 'none';
-        var statusEl = $('workflow-status');
-        if (statusEl) {
-          statusEl.style.display = 'block';
-          statusEl.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
-          statusEl.style.border = '1px solid var(--danger)';
-          statusEl.innerHTML = '<span style="color:var(--danger);font-weight:600;">Network error validating workflow</span>';
+    if (window.KAZMA_WORKERS && window.KAZMA_WORKERS.length) {
+      var availableNames = window.KAZMA_WORKERS.map(function(w) { return w.name; });
+      pipelineStages.forEach(function(stage, idx) {
+        if (availableNames.indexOf(stage.worker) === -1) {
+          stage.worker = availableNames[idx % availableNames.length];
         }
       });
+    }
+
+    var promptEl = $('pipeline-prompt');
+    if (promptEl) {
+      promptEl.value = "Compile and analyze market reports, review for policy guidelines, and draft executive summary.";
+    }
+
+    renderPipelineStages();
+    updatePipelineDiagram();
+  }
+
+  function renderPipelineStages() {
+    var container = $('pipeline-steps-container');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    if (pipelineStages.length === 0) {
+      container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:0.8rem;">No steps added yet. Click "Add Step" above.</div>';
+      return;
+    }
+    
+    pipelineStages.forEach(function(stage, index) {
+      var card = document.createElement('div');
+      card.className = 'pipeline-stage-card';
+      card.setAttribute('draggable', 'true');
+      card.dataset.index = index;
+      
+      card.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:var(--radius);margin-bottom:8px;cursor:grab;transition:all 0.2s ease;position:relative;user-select:none;';
+      
+      card.onmouseenter = function() { 
+        card.style.background = 'rgba(255,255,255,0.06)'; 
+        card.style.borderColor = 'var(--accent-subtle)'; 
+      };
+      card.onmouseleave = function() { 
+        card.style.background = 'rgba(255,255,255,0.03)'; 
+        card.style.borderColor = 'var(--border-subtle)'; 
+      };
+      
+      card.addEventListener('dragstart', handleDragStart);
+      card.addEventListener('dragover', handleDragOver);
+      card.addEventListener('dragenter', handleDragEnter);
+      card.addEventListener('dragleave', handleDragLeave);
+      card.addEventListener('drop', handleDrop);
+      card.addEventListener('dragend', handleDragEnd);
+
+      var dragHandle = document.createElement('div');
+      dragHandle.innerHTML = '☰';
+      dragHandle.style.cssText = 'color:var(--text-muted);cursor:grab;font-size:0.9rem;padding-right:4px;';
+      card.appendChild(dragHandle);
+
+      var stepBadge = document.createElement('span');
+      stepBadge.textContent = 'Step ' + (index + 1);
+      stepBadge.className = 'badge badge-secondary';
+      stepBadge.style.cssText = 'font-size:0.7rem;font-weight:600;min-width:45px;text-align:center;';
+      card.appendChild(stepBadge);
+
+      var workerSelect = document.createElement('select');
+      workerSelect.className = 'form-select';
+      workerSelect.style.cssText = 'flex:1;height:28px;font-size:0.75rem;padding:2px 6px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:var(--radius);min-width:110px;';
+      
+      if (window.KAZMA_WORKERS && window.KAZMA_WORKERS.length) {
+        window.KAZMA_WORKERS.forEach(function(w) {
+          var opt = document.createElement('option');
+          opt.value = w.name;
+          opt.textContent = w.name;
+          if (w.name === stage.worker) opt.selected = true;
+          workerSelect.appendChild(opt);
+        });
+      } else {
+        var opt = document.createElement('option');
+        opt.value = stage.worker;
+        opt.textContent = stage.worker;
+        opt.selected = true;
+        workerSelect.appendChild(opt);
+      }
+      
+      workerSelect.onchange = function() {
+        stage.worker = workerSelect.value;
+        updatePipelineDiagram();
+      };
+      card.appendChild(workerSelect);
+
+      var hitlLabel = document.createElement('label');
+      hitlLabel.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:0.75rem;color:var(--text-secondary);cursor:pointer;margin-bottom:0;';
+      
+      var hitlCheck = document.createElement('input');
+      hitlCheck.type = 'checkbox';
+      hitlCheck.checked = stage.hitl;
+      hitlCheck.style.cssText = 'accent-color:var(--accent);';
+      hitlCheck.onchange = function() {
+        stage.hitl = hitlCheck.checked;
+        updatePipelineDiagram();
+      };
+      hitlLabel.appendChild(hitlCheck);
+      hitlLabel.appendChild(document.createTextNode('⏸ HITL'));
+      card.appendChild(hitlLabel);
+
+      var timeoutInput = document.createElement('input');
+      timeoutInput.type = 'number';
+      timeoutInput.placeholder = 'Timeout';
+      timeoutInput.value = stage.timeout || 300;
+      timeoutInput.style.cssText = 'width:60px;height:28px;font-size:0.75rem;padding:2px 6px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:var(--radius);text-align:center;';
+      timeoutInput.onchange = function() {
+        stage.timeout = parseInt(timeoutInput.value, 10) || 300;
+      };
+      card.appendChild(timeoutInput);
+
+      var reorderGroup = document.createElement('div');
+      reorderGroup.style.cssText = 'display:flex;gap:2px;';
+
+      var btnUp = document.createElement('button');
+      btnUp.className = 'btn btn-sm btn-secondary';
+      btnUp.innerHTML = '▲';
+      btnUp.style.cssText = 'padding:2px 6px;font-size:0.65rem;height:24px;line-height:1;';
+      btnUp.disabled = (index === 0);
+      btnUp.onclick = function(e) {
+        e.stopPropagation();
+        movePipelineStage(index, index - 1);
+      };
+      reorderGroup.appendChild(btnUp);
+
+      var btnDown = document.createElement('button');
+      btnDown.className = 'btn btn-sm btn-secondary';
+      btnDown.innerHTML = '▼';
+      btnDown.style.cssText = 'padding:2px 6px;font-size:0.65rem;height:24px;line-height:1;';
+      btnDown.disabled = (index === pipelineStages.length - 1);
+      btnDown.onclick = function(e) {
+        e.stopPropagation();
+        movePipelineStage(index, index + 1);
+      };
+      reorderGroup.appendChild(btnDown);
+      card.appendChild(reorderGroup);
+
+      var btnDelete = document.createElement('button');
+      btnDelete.className = 'btn btn-sm btn-danger';
+      btnDelete.innerHTML = '🗑️';
+      btnDelete.style.cssText = 'padding:2px 6px;font-size:0.7rem;height:24px;line-height:1;';
+      btnDelete.onclick = function(e) {
+        e.stopPropagation();
+        removePipelineStage(index);
+      };
+      card.appendChild(btnDelete);
+
+      container.appendChild(card);
+    });
+  }
+
+  function handleDragStart(e) {
+    dragSourceIndex = parseInt(this.dataset.index, 10);
+    this.style.opacity = '0.4';
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', dragSourceIndex);
+  }
+
+  function handleDragOver(e) {
+    if (e.preventDefault) {
+      e.preventDefault();
+    }
+    e.dataTransfer.dropEffect = 'move';
+    return false;
+  }
+
+  function handleDragEnter(e) {
+    this.style.border = '1px dashed var(--accent)';
+    this.style.background = 'rgba(var(--accent-rgb), 0.1)';
+  }
+
+  function handleDragLeave(e) {
+    this.style.border = '1px solid var(--border-subtle)';
+    this.style.background = 'rgba(255,255,255,0.03)';
+  }
+
+  function handleDrop(e) {
+    if (e.stopPropagation) {
+      e.stopPropagation();
+    }
+    var targetIndex = parseInt(this.dataset.index, 10);
+    var sourceIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    
+    if (sourceIndex !== targetIndex) {
+      movePipelineStage(sourceIndex, targetIndex);
+    }
+    return false;
+  }
+
+  function handleDragEnd(e) {
+    this.style.opacity = '1';
+    var cols = document.querySelectorAll('.pipeline-stage-card');
+    cols.forEach(function (col) {
+      col.style.border = '1px solid var(--border-subtle)';
+      col.style.background = 'rgba(255,255,255,0.03)';
+    });
+  }
+
+  function movePipelineStage(fromIndex, toIndex) {
+    if (toIndex < 0 || toIndex >= pipelineStages.length) return;
+    var element = pipelineStages.splice(fromIndex, 1)[0];
+    pipelineStages.splice(toIndex, 0, element);
+    renderPipelineStages();
+    updatePipelineDiagram();
+  }
+
+  function removePipelineStage(index) {
+    pipelineStages.splice(index, 1);
+    renderPipelineStages();
+    updatePipelineDiagram();
+  }
+
+  function addPipelineStage() {
+    var newStage = {
+      id: Date.now() + Math.random(),
+      worker: window.KAZMA_WORKERS && window.KAZMA_WORKERS.length ? window.KAZMA_WORKERS[0].name : "Worker",
+      hitl: false,
+      timeout: 300
+    };
+    pipelineStages.push(newStage);
+    renderPipelineStages();
+    updatePipelineDiagram();
+    
+    var container = $('pipeline-steps-container');
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }
+
+  function clearPipeline() {
+    pipelineStages = [];
+    renderPipelineStages();
+    updatePipelineDiagram();
+  }
+
+  function generateMermaidCode() {
+    if (pipelineStages.length === 0) {
+      return 'graph TD\n  Empty[Diagram cleared. Populate steps...]';
+    }
+    
+    var lines = ['graph TD'];
+    pipelineStages.forEach(function(stage, index) {
+      var stepNum = index + 1;
+      var label = 'Step ' + stepNum + ': ' + stage.worker;
+      if (stage.hitl) {
+        label = '⏸ ' + label;
+      }
+      var nodeName = 'Step' + stepNum;
+      lines.push('  ' + nodeName + '["' + label + '"]');
+    });
+
+    for (var i = 0; i < pipelineStages.length - 1; i++) {
+      lines.push('  Step' + (i + 1) + ' --> Step' + (i + 2));
+    }
+
+    pipelineStages.forEach(function(stage, index) {
+      var stepNum = index + 1;
+      var nodeName = 'Step' + stepNum;
+      if (stage.hitl) {
+        lines.push('  style ' + nodeName + ' fill:rgba(245,158,11,0.1),stroke:#f59e0b,stroke-width:2px');
+      } else {
+        lines.push('  style ' + nodeName + ' fill:rgba(16,185,129,0.05),stroke:#10b981,stroke-width:1px');
+      }
+    });
+
+    return lines.join('\n');
+  }
+
+  function updatePipelineDiagram() {
+    var code = generateMermaidCode();
+    updateMermaidDiagram(code);
   }
 
   function updateMermaidDiagram(mermaidCode) {
@@ -1641,64 +1968,247 @@
     }
   }
 
-  function loadEditorExample() {
-    var ta = $('workflow-textarea');
-    if (!ta) return;
-    ta.value = [
-      'id: customer_feedback_pipeline',
-      'name: Customer Feedback Pipeline',
-      'description: Analyzes, researches, reviews, and synthesizes customer feedback.',
-      'version: 1.1.0',
-      'nodes:',
-      '  triage_node:',
-      '    id: triage_node',
-      '    type: dispatch',
-      '    workers:',
-      '      - auto',
-      '    prompt_template: "Classify the feedback category and urgency: {{ feedback_text }}"',
-      '    reliability_policy:',
-      '      max_retries: 2',
-      '      timeout_seconds: 30.0',
-      '  analysis_node:',
-      '    id: analysis_node',
-      '    type: dispatch',
-      '    workers:',
-      '      - auto',
-      '    prompt_template: "Extract specific technical issues and key customer sentiments."',
-      '  synthesis_node:',
-      '    id: synthesis_node',
-      '    type: dispatch',
-      '    workers:',
-      '      - auto',
-      '    prompt_template: "Synthesize findings into an actionable bug ticket or customer reply."',
-      'edges:',
-      '  - from_node: triage_node',
-      '    to_node: analysis_node',
-      '  - from_node: analysis_node',
-      '    to_node: synthesis_node'
-    ].join('\n');
-    validateWorkflow();
-  }
+  function dispatchVisualPipeline() {
+    var promptEl = $('pipeline-prompt');
+    var prompt = promptEl ? promptEl.value.trim() : '';
+    if (!prompt) {
+      showError('Master Task Prompt is required.');
+      return;
+    }
+    
+    if (pipelineStages.length === 0) {
+      showError('Please add at least one step to the pipeline.');
+      return;
+    }
 
-  function copyEditorCode() {
-    var ta = $('workflow-textarea');
-    if (!ta || !ta.value.trim()) return;
-    navigator.clipboard.writeText(ta.value)
-      .then(function() {
-        showToast('Workflow definition copied to clipboard!', true);
+    var workers = pipelineStages.map(function(s) { return s.worker; });
+    var hitlCheckpoints = [];
+    pipelineStages.forEach(function(s, idx) {
+      if (s.hitl) {
+        hitlCheckpoints.push(idx + 1);
+      }
+    });
+
+    var fallbackSelect = $('pipeline-fallback-select');
+    var fallbackWorker = fallbackSelect ? fallbackSelect.value : '';
+    var fallbackChain = fallbackWorker ? [fallbackWorker] : [];
+
+    var payload = {
+      workers: workers,
+      task: prompt,
+      pattern: 'pipeline',
+      timeout: parseFloat(($('pipeline-timeout') || {}).value) || 300,
+      max_retries: 0,
+      fallback_chain: fallbackChain,
+      metadata: {
+        hitl_checkpoints: hitlCheckpoints,
+        step_timeouts: pipelineStages.map(function(s) { return s.timeout || 300; })
+      }
+    };
+
+    var btn = $('btn-pipeline-run');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Executing...';
+    }
+
+    var termCard = $('pipeline-terminal-card');
+    if (termCard) termCard.style.display = 'block';
+    
+    var terminal = $('pipeline-terminal');
+    if (terminal) {
+      terminal.innerHTML = '<div style="color:var(--text-muted);font-style:italic;">Initializing pipeline session...</div>';
+    }
+
+    var liveTimer = $('pipeline-live-timer');
+    if (liveTimer) {
+      liveTimer.style.display = 'inline';
+      liveTimer.textContent = '0s';
+    }
+    
+    pipelineTimerSec = 0;
+    if (pipelineInterval) clearInterval(pipelineInterval);
+    var startTime = Date.now();
+    pipelineInterval = setInterval(function() {
+      pipelineTimerSec = Math.round((Date.now() - startTime) / 1000);
+      if (liveTimer) liveTimer.textContent = pipelineTimerSec + 's';
+    }, 1000);
+
+    var hitlGate = $('pipeline-hitl-gate');
+    if (hitlGate) hitlGate.style.display = 'none';
+
+    if (pipelineSSE) {
+      try { pipelineSSE.close(); } catch (e) {}
+      pipelineSSE = null;
+    }
+
+    fetch('/api/swarm/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok' || data.status === 'warning') {
+          if (data.task_id) {
+            pipelineActiveTaskId = data.task_id;
+            connectPipelineSSE(data.task_id);
+          } else {
+            addPipelineTerminalLine('❌', 'No task_id returned by dispatch.');
+            resetPipelineRunBtn();
+          }
+        } else {
+          addPipelineTerminalLine('❌', 'Dispatch failed: ' + (data.message || 'unknown error'));
+          resetPipelineRunBtn();
+        }
       })
-      .catch(function() {
-        showError('Failed to copy to clipboard.');
+      .catch(function(err) {
+        addPipelineTerminalLine('❌', 'Network error: ' + err.message);
+        resetPipelineRunBtn();
       });
   }
 
-  function clearEditor() {
-    var ta = $('workflow-textarea');
-    if (ta) ta.value = '';
-    var statusEl = $('workflow-status');
-    if (statusEl) statusEl.style.display = 'none';
-    var target = $('workflow-mermaid');
-    if (target) target.innerHTML = '<div style="color:var(--text-muted);font-size:0.85rem;">Diagram cleared. Populate workflow code...</div>';
+  function addPipelineTerminalLine(icon, text) {
+    var terminal = $('pipeline-terminal');
+    if (!terminal) return;
+    
+    if (terminal.innerHTML.indexOf('Initializing pipeline') !== -1) {
+      terminal.innerHTML = '';
+    }
+    
+    var line = document.createElement('div');
+    line.style.cssText = 'margin-bottom:4px;display:flex;align-items:flex-start;gap:8px;animation:fadeIn 0.2s ease;';
+    
+    var iconSpan = document.createElement('span');
+    iconSpan.textContent = icon;
+    
+    var textSpan = document.createElement('span');
+    textSpan.style.flex = '1';
+    textSpan.innerHTML = text;
+    
+    line.appendChild(iconSpan);
+    line.appendChild(textSpan);
+    terminal.appendChild(line);
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+
+  function connectPipelineSSE(taskId) {
+    var source = new EventSource('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/stream');
+    pipelineSSE = source;
+
+    source.addEventListener('task_started', function(e) {
+      addPipelineTerminalLine('🚀', 'Pipeline execution started.');
+    });
+
+    source.addEventListener('worker_started', function(e) {
+      var d = JSON.parse(e.data);
+      addPipelineTerminalLine('⚙️', 'Worker <strong style="color:var(--accent);">' + esc(d.worker) + '</strong> activated (Step ' + d.step + ')');
+    });
+
+    source.addEventListener('worker_progress', function(e) {
+      var d = JSON.parse(e.data);
+      var tokens = d.tokens || 0;
+      addPipelineTerminalLine('📝', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> is working (Processed ' + tokens + ' tokens)');
+    });
+
+    source.addEventListener('worker_completed', function(e) {
+      var d = JSON.parse(e.data);
+      var icon = d.status === 'success' ? '✅' : '❌';
+      var color = d.status === 'success' ? 'var(--success)' : 'var(--danger)';
+      addPipelineTerminalLine(icon, 'Worker <strong style="color:' + color + ';">' + esc(d.worker) + '</strong> completed with status: ' + esc(d.status));
+    });
+
+    source.addEventListener('checkpoint', function(e) {
+      var d = JSON.parse(e.data);
+      addPipelineTerminalLine('⏸', 'Human-in-the-Loop checkpoint encountered (Step ' + d.step + '). Awaiting user confirmation...');
+      
+      var hitlGate = $('pipeline-hitl-gate');
+      var hitlPreview = $('pipeline-hitl-preview');
+      if (hitlGate && hitlPreview) {
+        hitlPreview.textContent = d.output_preview || 'No preview available.';
+        hitlGate.style.display = 'block';
+        hitlGate.style.animation = 'slideDown 0.3s ease';
+      }
+    });
+
+    source.addEventListener('handoff', function(e) {
+      var d = JSON.parse(e.data);
+      addPipelineTerminalLine('🔀', 'Swarm Handoff: <span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
+    });
+
+    source.addEventListener('task_completed', function(e) {
+      var d = JSON.parse(e.data);
+      addPipelineTerminalLine('🏁', 'Pipeline execution finalized.');
+      
+      var res = d.result || {};
+      var summary = res.synthesis || res.response || 'No final synthesis output returned.';
+      addPipelineTerminalLine('📝', '<strong>Synthesis Output:</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
+      
+      cleanupPipelineSession();
+    });
+
+    source.onerror = function() {
+      console.log("Pipeline SSE connection error.");
+    };
+  }
+
+  function cleanupPipelineSession() {
+    if (pipelineSSE) {
+      try { pipelineSSE.close(); } catch (e) {}
+      pipelineSSE = null;
+    }
+    if (pipelineInterval) {
+      clearInterval(pipelineInterval);
+      pipelineInterval = null;
+    }
+    resetPipelineRunBtn();
+  }
+
+  function resetPipelineRunBtn() {
+    var btn = $('btn-pipeline-run');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🚀 Run Visual Pipeline';
+    }
+  }
+
+  function approvePipelineCheck() {
+    if (!pipelineActiveTaskId) return;
+    var hitlGate = $('pipeline-hitl-gate');
+    if (hitlGate) hitlGate.style.display = 'none';
+
+    fetch('/api/swarm/tasks/' + encodeURIComponent(pipelineActiveTaskId) + '/approve', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') {
+          addPipelineTerminalLine('✅', 'Pipeline checkpoint approved. Continuing execution...');
+        } else {
+          addPipelineTerminalLine('❌', 'Approval failed: ' + (data.message || 'unknown error'));
+        }
+      })
+      .catch(function(err) {
+        addPipelineTerminalLine('❌', 'Network error approving: ' + err.message);
+      });
+  }
+
+  function rejectPipelineCheck() {
+    if (!pipelineActiveTaskId) return;
+    var hitlGate = $('pipeline-hitl-gate');
+    if (hitlGate) hitlGate.style.display = 'none';
+
+    fetch('/api/swarm/tasks/' + encodeURIComponent(pipelineActiveTaskId) + '/reject', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') {
+          addPipelineTerminalLine('❌', 'Pipeline checkpoint rejected. Task aborted.');
+          cleanupPipelineSession();
+        } else {
+          addPipelineTerminalLine('❌', 'Rejection failed: ' + (data.message || 'unknown error'));
+        }
+      })
+      .catch(function(err) {
+        addPipelineTerminalLine('❌', 'Network error rejecting: ' + err.message);
+      });
   }
 
   // ══════════════════════════════════════════════════════
@@ -2051,10 +2561,21 @@
     applySavedProfile: applySavedProfile,
     saveOutputTarget: saveOutputTarget,
     clearOutputTarget: clearOutputTarget,
-    onEditorInput: onEditorInput,
-    loadEditorExample: loadEditorExample,
-    copyEditorCode: copyEditorCode,
-    clearEditor: clearEditor,
+    
+    // Visual Pipeline Editor hooks
+    loadPipelineExample: loadPipelineExample,
+    clearPipeline: clearPipeline,
+    addPipelineStage: addPipelineStage,
+    dispatchVisualPipeline: dispatchVisualPipeline,
+    approvePipelineCheck: approvePipelineCheck,
+    rejectPipelineCheck: rejectPipelineCheck,
+
+    // Backward compatibility mappings
+    onEditorInput: function() {},
+    loadEditorExample: loadPipelineExample,
+    copyEditorCode: function() { showToast('Visual pipeline has no YAML text to copy.', true); },
+    clearEditor: clearPipeline,
+
     onPlayPatternChange: onPlayPatternChange,
     runPlayground: runPlayground,
     approvePlaygroundHitl: approvePlaygroundHitl,

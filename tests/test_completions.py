@@ -188,7 +188,7 @@ class TestInstallCommand:
                 home / ".bash_completion.d" / "kazma",
             ]:
                 if candidate.exists():
-                    content = candidate.read_text()
+                    content = candidate.read_text(encoding="utf-8")
                     assert "complete -F _kazma_completion kazma" in content
                     return
             pytest.fail("No completion file was written")

@@ -260,7 +260,7 @@ class TestBuiltinTools:
         try:
             write_result = await registry.execute("file_write", {"path": path, "content": "hello kazma"})
             assert write_result["is_error"] is False
-            assert "chars" in write_result["content"]
+            assert "bytes" in write_result["content"]
 
             read_result = await registry.execute("file_read", {"path": path})
             assert read_result["content"] == "hello kazma"
@@ -328,11 +328,15 @@ class TestBuiltinTools:
     @pytest.mark.asyncio
     async def test_shell_exec(self):
         registry = LocalToolRegistry(include_builtins=True)
-        result = await registry.execute("shell_exec", {"command": "echo hello"})
+        result = await registry.execute("shell_exec", {"command": "git version"})
         assert result["is_error"] is False
-        assert "hello" in result["content"]
+        assert "git" in result["content"].lower()
 
     @pytest.mark.asyncio
+    @pytest.mark.skipif(
+        __import__("os").name == "nt",
+        reason="sleep command not natively available on Windows"
+    )
     async def test_shell_exec_timeout(self):
         registry = LocalToolRegistry(include_builtins=True)
         result = await registry.execute("shell_exec", {"command": "sleep 10", "timeout": 1})
