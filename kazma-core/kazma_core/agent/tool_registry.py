@@ -459,7 +459,7 @@ class LocalToolRegistry:
                 # Non-retryable error — return immediately
                 duration_ms = (time.monotonic() - start) * 1000
                 logger.error("Tool '%s' failed after %.0fms: %s", tool_name, duration_ms, exc)
-                return {"content": f"Error: {exc}", "is_error": True}
+                return {"content": "Error: Tool execution failed. Check server logs for details.", "is_error": True}
 
         # All retry attempts exhausted
         duration_ms = (time.monotonic() - start) * 1000
@@ -619,10 +619,10 @@ class LocalToolRegistry:
             sql_clean = strip_leading_comments(query)
             normalized = sql_clean.upper()
             if not (normalized.startswith("SELECT") or normalized.startswith("WITH")):
-                raise ValueError("Only SELECT and WITH read-only queries are allowed for safety.")
+                return "Error: Only SELECT and WITH read-only queries are allowed for safety."
             # Block multi-statement queries
             if ";" in query.strip().rstrip(";"):
-                raise ValueError("Multi-statement queries are not allowed.")
+                return "Error: Multi-statement queries are not allowed."
 
             # Double-layer AST/word-boundary safety check
             import re
@@ -631,7 +631,7 @@ class LocalToolRegistry:
                 re.IGNORECASE,
             )
             if forbidden_keywords.search(query):
-                raise ValueError("Write operations or administrative commands are not allowed.")
+                return "Error: Write operations or administrative commands are not allowed."
 
             if db_path == ":memory:":
                 allowed = True
@@ -692,7 +692,7 @@ class LocalToolRegistry:
                 result = [dict(row) for row in rows]
                 return json.dumps(result, ensure_ascii=False, indent=2)
             except Exception as exc:
-                return f"SQL Error: {exc}"
+                return "SQL Error: Query execution failed. Check syntax and permissions."
 
         @self.register(
             description=(
@@ -776,7 +776,7 @@ class LocalToolRegistry:
                 "ps", "pgrep",
                 # Text processing (read-only)
                 "jq", "tr", "cut",
-                # File ops (read-only)
+                # File ops (write — HITL approval required in practice via safety layer)
                 "mkdir", "cp", "mv", "touch",
                 # Process control (safe)
                 "sleep",
@@ -835,7 +835,7 @@ class LocalToolRegistry:
             except FileNotFoundError:
                 return f"Error: Command not found: {args[0]}"
             except Exception as exc:
-                return f"Error: {exc}"
+                return "Error: Shell command execution failed."
 
         # ── Generic send_message tool ─────────────────────────────
         @self.register(

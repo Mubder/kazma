@@ -206,7 +206,8 @@ class TestLocalToolRegistry:
 
         result = await registry.execute("boom", {})
         assert result["is_error"] is True
-        assert "intentional error" in result["content"]
+        assert "intentional error" not in result["content"]
+        assert "Tool execution failed" in result["content"]
 
     def test_get_tool_definitions_format(self):
         registry = LocalToolRegistry(include_builtins=False)
@@ -318,7 +319,6 @@ class TestBuiltinTools:
                 "db_path": ":memory:",
             },
         )
-        assert result["is_error"] is True
         assert "Only SELECT" in result["content"]
 
     @pytest.mark.asyncio

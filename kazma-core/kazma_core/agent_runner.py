@@ -608,7 +608,7 @@ class KazmaAgent:
             result = await graph.ainvoke(graph_state, config)
         except Exception as e:
             logger.error("Graph invocation failed: %s", e)
-            return f"عذراً، حدث خطأ في الاتصال: {e}"
+            return "عذراً، حدث خطأ تقني. يرجى المحاولة مرة أخرى."
 
         # Extract the final assistant message text.
         final_messages = result.get("messages", [])

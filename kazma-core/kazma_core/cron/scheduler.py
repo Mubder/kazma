@@ -231,7 +231,8 @@ class SQLiteCronStore:
 
     async def update_result(self, job_id: str, result: str) -> None:
         """Update a job's last result."""
-        assert self._db is not None
+        if self._db is None:
+            raise RuntimeError("CronStore DB not initialized")
         await self._db.execute(
             "UPDATE cron_jobs SET last_result = ? WHERE job_id = ?",
             (result[:5000], job_id),
@@ -240,7 +241,8 @@ class SQLiteCronStore:
 
     async def update_next_run(self, job_id: str, next_run: str) -> None:
         """Update the next run time for a job."""
-        assert self._db is not None
+        if self._db is None:
+            raise RuntimeError("CronStore DB not initialized")
         await self._db.execute(
             "UPDATE cron_jobs SET next_run = ?, status = 'pending' WHERE job_id = ?",
             (next_run, job_id),
@@ -249,7 +251,8 @@ class SQLiteCronStore:
 
     async def cancel(self, job_id: str) -> bool:
         """Cancel a pending job. Returns True if found."""
-        assert self._db is not None
+        if self._db is None:
+            raise RuntimeError("CronStore DB not initialized")
         cursor = await self._db.execute(
             "UPDATE cron_jobs SET status = 'cancelled' WHERE job_id = ? AND status = 'pending'",
             (job_id,),

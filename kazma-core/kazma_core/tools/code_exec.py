@@ -11,8 +11,11 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shutil
+
+logger = logging.getLogger(__name__)
 import sys
 import tempfile
 from pathlib import Path

@@ -541,6 +541,7 @@ class TestToolWorkerIntegration:
         assert len(result["tool_calls_done"]) == 2
         results_by_id = {r["tool_call_id"]: r for r in result["tool_calls_done"]}
         assert results_by_id["tc_bad"]["is_error"] is True
-        assert "intentional crash" in results_by_id["tc_bad"]["content"]
+        assert "intentional crash" not in results_by_id["tc_bad"]["content"]
+        assert "Tool execution failed" in results_by_id["tc_bad"]["content"]
         assert results_by_id["tc_good"]["is_error"] is False
         assert results_by_id["tc_good"]["content"] == "ok"

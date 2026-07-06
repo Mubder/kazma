@@ -518,8 +518,12 @@ class SecurityHardeningRunner:
 
             trail = SecurityAuditTrail()
             # Verify the module is functional by checking it has expected methods
-            assert hasattr(trail, "log_event")
-            assert hasattr(trail, "get_events")
+            if not hasattr(trail, "log_event") or not hasattr(trail, "get_events"):
+                return HardeningCheck(
+                    name="check_audit_logging",
+                    passed=False,
+                    message="SecurityAuditTrail missing required methods: log_event, get_events",
+                )
             return HardeningCheck(
                 name="check_audit_logging",
                 passed=True,

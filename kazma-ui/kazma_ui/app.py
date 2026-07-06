@@ -353,16 +353,25 @@ class KazmaAppBuilder:
                 logger.info("[Gateway] No DISCORD_BOT_TOKEN — Discord adapter skipped")
 
             # Slack adapter
-            slack_bot_token = self.config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
-            slack_app_token = self.config_store.get("connectors.slack.app_token", "") or os.environ.get("SLACK_APP_TOKEN", "")
-            if slack_bot_token and slack_app_token:
+            # Slack adapter — resolve tokens from config_store or env.
+            # ConfigStore may store masked tokens (e.g. "***3554") from the
+            # settings UI, so fall back to env vars when the stored value
+            # doesn't look like a real token.
+            _cs_slack_bot = self.config_store.get("connectors.slack.token", "")
+            _cs_slack_app = self.config_store.get("connectors.slack.app_token", "")
+            slack_bot_token = (_cs_slack_bot if _cs_slack_bot.startswith("xoxb-") else "") or os.environ.get("SLACK_BOT_TOKEN", "")
+            slack_app_token = (_cs_slack_app if _cs_slack_app.startswith("xapp-") else "") or os.environ.get("SLACK_APP_TOKEN", "")
+            if slack_bot_token:
                 from kazma_gateway.adapters.slack import SlackAdapter
 
-                slack_adapter = SlackAdapter(bot_token=slack_bot_token, app_token=slack_app_token)
+                slack_adapter = SlackAdapter(bot_token=slack_bot_token, app_token=slack_app_token or None)
                 self.gateway.add_adapter(slack_adapter)
-                logger.info("[Gateway] Slack adapter registered (Socket Mode)")
+                if slack_app_token:
+                    logger.info("[Gateway] Slack adapter registered (Socket Mode)")
+                else:
+                    logger.info("[Gateway] Slack adapter registered (polling mode — no app token)")
             else:
-                logger.info("[Gateway] No SLACK_BOT_TOKEN/SLACK_APP_TOKEN — Slack adapter skipped")
+                logger.info("[Gateway] No SLACK_BOT_TOKEN — Slack adapter skipped")
 
             # Session Store
             self.session_store = SQLiteSessionStore("kazma-data/sessions.db")
@@ -901,12 +910,14 @@ class KazmaAppBuilder:
                 self.gateway.add_adapter(discord_adapter)
                 logger.info("[Gateway] Discord adapter re-registered via refresh")
 
-            slack_bot_token = self.config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
-            slack_app_token = self.config_store.get("connectors.slack.app_token", "") or os.environ.get("SLACK_APP_TOKEN", "")
-            if slack_bot_token and slack_app_token:
+            _cs_slack_bot2 = self.config_store.get("connectors.slack.token", "")
+            _cs_slack_app2 = self.config_store.get("connectors.slack.app_token", "")
+            slack_bot_token = (_cs_slack_bot2 if _cs_slack_bot2.startswith("xoxb-") else "") or os.environ.get("SLACK_BOT_TOKEN", "")
+            slack_app_token = (_cs_slack_app2 if _cs_slack_app2.startswith("xapp-") else "") or os.environ.get("SLACK_APP_TOKEN", "")
+            if slack_bot_token:
                 from kazma_gateway.adapters.slack import SlackAdapter
 
-                slack_adapter = SlackAdapter(bot_token=slack_bot_token, app_token=slack_app_token)
+                slack_adapter = SlackAdapter(bot_token=slack_bot_token, app_token=slack_app_token or None)
                 self.gateway.add_adapter(slack_adapter)
                 logger.info("[Gateway] Slack adapter re-registered via refresh")
 

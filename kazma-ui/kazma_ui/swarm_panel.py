@@ -518,15 +518,15 @@ class SwarmRouterBuilder:
                             "mermaid": _workflow_to_mermaid(workflow),
                         }
                     )
-                except ValidationError as err:
+                except ValidationError:
                     return JSONResponse(
-                        content={"valid": False, "error": f"Workflow validation failed: {err}"},
-                        status_code=200,
+                        content={"valid": False, "error": "Workflow validation failed. Check node and edge definitions."},
+                        status_code=422,
                     )
-                except Exception as err:
+                except Exception:
                     return JSONResponse(
-                        content={"valid": False, "error": f"Validation error: {err}"},
-                        status_code=200,
+                        content={"valid": False, "error": "Validation error. Check workflow definition syntax."},
+                        status_code=422,
                     )
 
             # Try parsing definition_str as JSON or YAML
@@ -535,7 +535,7 @@ class SwarmRouterBuilder:
                 if not isinstance(parsed_data, dict):
                     return JSONResponse(
                         content={"valid": False, "error": "Parsed workflow must be a top-level JSON/YAML object/dictionary"},
-                        status_code=200,
+                        status_code=422,
                     )
                 
                 workflow = DAGWorkflow(**parsed_data)
@@ -548,20 +548,20 @@ class SwarmRouterBuilder:
                         "mermaid": _workflow_to_mermaid(workflow),
                     }
                 )
-            except yaml.YAMLError as err:
+            except yaml.YAMLError:
                 return JSONResponse(
-                    content={"valid": False, "error": f"YAML/JSON syntax error: {err}"},
-                    status_code=200,
+                    content={"valid": False, "error": "YAML/JSON syntax error. Check workflow definition format."},
+                    status_code=422,
                 )
-            except ValidationError as err:
+            except ValidationError:
                 return JSONResponse(
-                    content={"valid": False, "error": f"Workflow validation failed: {err}"},
-                    status_code=200,
+                    content={"valid": False, "error": "Workflow validation failed. Check node and edge definitions."},
+                    status_code=422,
                 )
-            except Exception as err:
+            except Exception:
                 return JSONResponse(
-                    content={"valid": False, "error": f"Validation error: {err}"},
-                    status_code=200,
+                    content={"valid": False, "error": "Validation error. Check workflow definition syntax."},
+                    status_code=422,
                 )
 
         @router.get("/api/swarm/output-target")
@@ -861,7 +861,7 @@ class SwarmRouterBuilder:
                             "task_id": "",
                             "status": "error",
                             "output": "",
-                            "error": str(exc)[:500],
+                            "error": "Dispatch failed — check server logs for details.",
                         }
                     if worker is not None:
                         worker.mark_completed(result.get("status", "error"))

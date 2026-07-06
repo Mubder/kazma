@@ -703,7 +703,7 @@
       if (cpEl) {
         cpEl.style.display = 'block';
         cpEl.innerHTML =
-          '<div style="font-weight:600;margin-bottom:8px;color:var(--warning);">⏸ HITL Checkpoint — Step ' + data.step + '</div>' +
+          '<div style="font-weight:600;margin-bottom:8px;color:var(--warning);">⏸ HITL Checkpoint — Step ' + (Number(data.step) || 0) + '</div>' +
           '<div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:8px;max-height:100px;overflow-y:auto;">' + esc(data.output_preview || 'No preview') + '</div>' +
           '<div style="display:flex;gap:8px;">' +
             '<button class="btn btn-primary btn-sm" data-action="approve" data-task-id="' + esc(taskId) + '">✓ Approve</button>' +
@@ -958,8 +958,8 @@
       var html = '<div class="card result-card" data-pattern="' + esc(pattern) + '" data-task-id="' + esc(r.task_id || r.id) + '" style="margin-bottom:12px;cursor:pointer;">';
       html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
       html += '<div style="display:flex;align-items:center;gap:8px;">';
-      html += '<span style="font-weight:600;font-size:0.85rem;">' + patternLabel + '</span>';
-      html += '<span class="badge" style="color:' + statusColor + ';">' + status + '</span>';
+      html += '<span style="font-weight:600;font-size:0.85rem;">' + esc(patternLabel) + '</span>';
+      html += '<span class="badge" style="color:' + statusColor + ';">' + esc(status) + '</span>';
       html += '</div>';
       html += '<span style="font-size:0.75rem;color:var(--text-muted);">' + (r.duration_seconds ? r.duration_seconds.toFixed(1) + 's' : '') + '</span>';
       html += '</div>';
@@ -1222,21 +1222,14 @@
     var url = '/api/swarm/tasks?page=' + historyPage + '&pageSize=' + historyPageSize;
     if (typeFilter) url += '&type=' + encodeURIComponent(typeFilter);
     if (statusFilter) url += '&status=' + encodeURIComponent(statusFilter);
+    if (searchQuery) url += '&q=' + encodeURIComponent(searchQuery);
 
     fetch(url)
       .then(function(r) { return r.json(); })
       .then(function(data) {
         historyData = data.tasks || [];
         historyTotal = data.total || historyData.length;
-        var filtered = historyData;
-        if (searchQuery) {
-          var q = searchQuery.toLowerCase();
-          filtered = historyData.filter(function(t) {
-            return (t.id || '').toLowerCase().indexOf(q) >= 0 ||
-                   (t.prompt || '').toLowerCase().indexOf(q) >= 0;
-          });
-        }
-        renderHistoryTable(filtered);
+        renderHistoryTable(historyData);
         updateHistoryPagination();
       })
       .catch(function() {
@@ -1620,7 +1613,7 @@
             card.innerHTML =
               '<div style="display:flex;justify-content:space-between;align-items:center;">' +
                 '<div>' +
-                  '<strong>' + esc(t.prompt || t.id).substring(0, 60) + '</strong>' +
+                  '<strong>' + esc((t.prompt || t.id).substring(0, 60)) + '</strong>' +
                   '<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">' +
                     'Workers: ' + esc(workers) + ' · Type: ' + esc(t.type || 'dispatch') +
                   '</div>' +
@@ -2156,12 +2149,12 @@
             resetPipelineRunBtn();
           }
         } else {
-          addPipelineTerminalLine('❌', 'Dispatch failed: ' + (data.message || 'unknown error'));
+          addPipelineTerminalLine('❌', 'Dispatch failed: ' + esc(data.message || 'unknown error'));
           resetPipelineRunBtn();
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('❌', 'Network error: ' + err.message);
+        addPipelineTerminalLine('❌', 'Network error: ' + esc(err.message));
         resetPipelineRunBtn();
       });
   }
@@ -2218,7 +2211,7 @@
 
     source.addEventListener('checkpoint', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('⏸', 'Human-in-the-Loop checkpoint encountered (Step ' + d.step + '). Awaiting user confirmation...');
+      addPipelineTerminalLine('⏸', 'Human-in-the-Loop checkpoint encountered (Step ' + (Number(d.step) || 0) + '). Awaiting user confirmation...');
       
       var hitlGate = $('pipeline-hitl-gate');
       var hitlPreview = $('pipeline-hitl-preview');
@@ -2283,11 +2276,11 @@
         if (data.status === 'ok') {
           addPipelineTerminalLine('✅', 'Pipeline checkpoint approved. Continuing execution...');
         } else {
-          addPipelineTerminalLine('❌', 'Approval failed: ' + (data.message || 'unknown error'));
+          addPipelineTerminalLine('❌', 'Approval failed: ' + esc(data.message || 'unknown error'));
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('❌', 'Network error approving: ' + err.message);
+        addPipelineTerminalLine('❌', 'Network error approving: ' + esc(err.message));
       });
   }
 
@@ -2303,11 +2296,11 @@
           addPipelineTerminalLine('❌', 'Pipeline checkpoint rejected. Task aborted.');
           cleanupPipelineSession();
         } else {
-          addPipelineTerminalLine('❌', 'Rejection failed: ' + (data.message || 'unknown error'));
+          addPipelineTerminalLine('❌', 'Rejection failed: ' + esc(data.message || 'unknown error'));
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('❌', 'Network error rejecting: ' + err.message);
+        addPipelineTerminalLine('❌', 'Network error rejecting: ' + esc(err.message));
       });
   }
 
@@ -2427,12 +2420,12 @@
             resetPlaygroundBtn();
           }
         } else {
-          addTerminalLine('❌', 'Dispatch failed: ' + (data.message || 'unknown error'));
+          addTerminalLine('❌', 'Dispatch failed: ' + esc(data.message || 'unknown error'));
           resetPlaygroundBtn();
         }
       })
       .catch(function(err) {
-        addTerminalLine('❌', 'Network error dispatching: ' + err.message);
+        addTerminalLine('❌', 'Network error dispatching: ' + esc(err.message));
         resetPlaygroundBtn();
       });
   }
@@ -2497,7 +2490,7 @@
 
     source.addEventListener('checkpoint', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('⏸', 'Human-in-the-Loop checkpoint encountered (Step ' + d.step + '). Awaiting user confirmation...');
+      addTerminalLine('⏸', 'Human-in-the-Loop checkpoint encountered (Step ' + (Number(d.step) || 0) + '). Awaiting user confirmation...');
       
       var hitlGate = $('play-hitl-gate');
       var hitlPreview = $('play-hitl-preview');

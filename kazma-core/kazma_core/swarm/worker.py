@@ -47,7 +47,6 @@ class SwarmWorker(ABC):
     last_heartbeat: str | None = field(default=None, init=False)
     logs: list[str] = field(default_factory=list, init=False)
     _running: bool = field(default=False, init=False, repr=False)
-    _consecutive_tool_failures: int = field(default=0, init=False, repr=False)
 
     @abstractmethod
     async def dispatch(

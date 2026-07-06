@@ -1,17 +1,20 @@
 """Slack adapter for Kazma Gateway.
 
 Connects to Slack via bot token using Slack's Web API (httpx).
-Receives messages via polling the conversations.list + conversations.history
-pattern (no Socket Mode dependency). Delivers outbound messages via
-chat.postMessage REST API with 429 rate-limit retry.
+When an app-level token (xapp-...) is provided, uses Socket Mode for
+real-time event delivery (recommended). Falls back to polling the
+conversations.list + conversations.history pattern when no app token
+is available (requires channels:read scope).
 
-No webhooks, no tunnels, no Socket Mode required.
-Platform-specific IDs (channel_id, user_id, team_id) live in
-context_metadata and NEVER enter Brain state.
+Socket Mode receives app_mention and message events in real-time
+without needing channels:read scope or public tunneling.
+
+Delivers outbound messages via chat.postMessage REST API with
+429 rate-limit retry.
 
 Environment:
     SLACK_BOT_TOKEN — Slack bot token (xoxb-...)
-    SLACK_APP_TOKEN — Slack app-level token (optional, for Socket Mode)
+    SLACK_APP_TOKEN — Slack app-level token (xapp-...) for Socket Mode
 
 context_metadata keys:
     channel_id:  str — Slack channel ID
@@ -23,6 +26,7 @@ context_metadata keys:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -36,16 +40,25 @@ _SLACK_API = "https://slack.com/api"
 _POLL_INTERVAL = 2.0
 _MAX_TIMEOUT = 15.0
 _MAX_RETRIES = 3
+_SOCKET_RECONNECT_DELAY = 2.0
+_SOCKET_MAX_RECONNECT_DELAY = 30.0
 
 
 class SlackAdapter(BaseAdapter):
-    """Polling-based Slack adapter using Web API.
+    """Slack adapter supporting Socket Mode and polling.
+
+    When an app_token (xapp-...) is provided, uses Socket Mode for
+    real-time event delivery. This is the recommended mode as it
+    receives app_mention events without requiring channels:read scope.
+
+    Without an app_token, falls back to polling conversations.history
+    (requires channels:read, groups:read, im:read scopes).
 
     Args:
         bot_token: Slack bot token (xoxb-...). If None, reads SLACK_BOT_TOKEN
                    from the environment.
         app_token: Slack app-level token (xapp-...) for Socket Mode.
-                   Optional — not used by the polling adapter.
+                   If None, reads SLACK_APP_TOKEN from the environment.
         allowed_teams: Optional iterable of team IDs to whitelist.
         allowed_channels: Optional iterable of channel IDs to whitelist.
     """
@@ -73,6 +86,7 @@ class SlackAdapter(BaseAdapter):
         self._http: httpx.AsyncClient | None = None
         self._known_channels: list[dict[str, Any]] = []
         self._last_ts: dict[str, str] = {}  # channel_id → last seen ts
+        self._seen_events: set[tuple[str, str]] = set()  # (channel_id, ts) — deduplicates app_mention+message
 
     # ── Helpers ─────────────────────────────────────────────────────
 
@@ -238,9 +252,10 @@ class SlackAdapter(BaseAdapter):
         queue: asyncio.Queue[IncomingMessage],
         shutdown_event: asyncio.Event,
     ) -> None:
-        """Poll Slack for new messages and enqueue them.
+        """Receive messages from Slack and enqueue them.
 
-        Implements the BaseAdapter abstract method.
+        Uses Socket Mode when an app_token is available (real-time,
+        no channels:read scope needed). Falls back to polling otherwise.
         """
         if not self._bot_token:
             return
@@ -249,13 +264,139 @@ class SlackAdapter(BaseAdapter):
         self._queue = queue
         self._shutdown = shutdown_event
 
+        if self._app_token:
+            logger.info("[Slack] Socket Mode enabled — using real-time event delivery")
+            await self._listen_socket_mode()
+        else:
+            logger.info("[Slack] No app token — falling back to polling mode")
+            await self._listen_polling()
+
+        await self._http.aclose()
+
+    # ── Socket Mode ─────────────────────────────────────────────────
+
+    async def _listen_socket_mode(self) -> None:
+        """Connect to Slack Socket Mode and receive events in real-time."""
+        import websockets
+
+        reconnect_delay = _SOCKET_RECONNECT_DELAY
+
+        while not self._shutdown.is_set():
+            try:
+                # Get WSS URL from Slack
+                resp = await self._http.post(
+                    f"{_SLACK_API}/apps.connections.open",
+                    headers={"Authorization": f"Bearer {self._app_token}"},
+                )
+                data = resp.json()
+                if not data.get("ok"):
+                    logger.error("[Slack] Socket Mode connection failed: %s", data.get("error", "unknown"))
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, _SOCKET_MAX_RECONNECT_DELAY)
+                    continue
+
+                wss_url = data.get("url", "")
+                if not wss_url:
+                    logger.error("[Slack] Socket Mode: no WSS URL returned")
+                    await asyncio.sleep(reconnect_delay)
+                    continue
+
+                logger.info("[Slack] Socket Mode connecting to WSS endpoint")
+                reconnect_delay = _SOCKET_RECONNECT_DELAY  # reset on successful connection
+
+                async with websockets.connect(wss_url) as ws:
+                    logger.info("[Slack] Socket Mode connected — listening for events")
+
+                    while not self._shutdown.is_set():
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=30.0)
+                        except TimeoutError:
+                            # No event in 30s — send ping to keep alive
+                            try:
+                                await ws.ping()
+                            except Exception:
+                                logger.debug("[Slack] Ping failed, connection may be stale")
+                                break
+                            continue
+
+                        try:
+                            msg = json.loads(raw)
+                        except (json.JSONDecodeError, TypeError):
+                            logger.debug("[Slack] Socket Mode: invalid JSON received")
+                            continue
+
+                        msg_type = msg.get("type", "")
+
+                        if msg_type == "hello":
+                            logger.info("[Slack] Socket Mode handshake confirmed")
+                            continue
+
+                        if msg_type == "disconnect":
+                            logger.info("[Slack] Socket Mode disconnect received — reconnecting")
+                            break
+
+                        if msg_type == "events_api":
+                            envelope_id = msg.get("envelope_id", "")
+                            # ACK the event immediately
+                            if envelope_id:
+                                try:
+                                    await ws.send(json.dumps({"envelope_id": envelope_id}))
+                                except Exception:
+                                    logger.debug("[Slack] Failed to ACK envelope")
+
+                            # Parse the Slack event
+                            payload = msg.get("payload", {})
+                            event = payload.get("event", {})
+                            incoming = self._parse_event(event)
+                            if incoming is not None:
+                                # Deduplicate: Slack sends both app_mention AND message
+                                # events for the same mention. The underlying message
+                                # shares the same ts (timestamp), so we skip duplicates.
+                                cid = incoming.context_metadata.get("channel_id", "")
+                                msg_ts = incoming.context_metadata.get("message_ts", "")
+                                if msg_ts:
+                                    key = (cid, msg_ts)
+                                    if key in self._seen_events:
+                                        continue
+                                    self._seen_events.add(key)
+                                    # Prune old entries periodically (keep last 500)
+                                    if len(self._seen_events) > 500:
+                                        self._seen_events = set(list(self._seen_events)[-250:])
+                                # Enforce channel whitelist if configured
+                                if self._allowed_channels and cid not in self._allowed_channels:
+                                    logger.debug("[Slack] Event from non-whitelisted channel %s — skipping", cid)
+                                    continue
+                                try:
+                                    self._queue.put_nowait(incoming)
+                                    logger.debug("[Slack] ← event: type=%s user=%s text=%.80s",
+                                                 event.get("type", "?"),
+                                                 event.get("user", "?"),
+                                                 event.get("text", ""))
+                                except asyncio.QueueFull:
+                                    logger.warning("[Slack] Queue full — dropping event")
+                            continue
+
+                        logger.debug("[Slack] Socket Mode: unhandled message type: %s", msg_type)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                if not self._shutdown.is_set():
+                    logger.warning("[Slack] Socket Mode error: %s — reconnecting in %.1fs", exc, reconnect_delay)
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, _SOCKET_MAX_RECONNECT_DELAY)
+
+    # ── Polling fallback ────────────────────────────────────────────
+
+    async def _listen_polling(self) -> None:
+        """Poll Slack for new messages (fallback when no app_token)."""
         # Fetch channel list on first poll
         await self._refresh_channels()
 
-        while not shutdown_event.is_set():
+        while not self._shutdown.is_set():
             try:
                 await self._poll_channels()
-                should_exit = await self.jitter_sleep(shutdown_event)
+                should_exit = await self.jitter_sleep(self._shutdown)
                 if should_exit:
                     break
             except asyncio.CancelledError:
@@ -263,8 +404,6 @@ class SlackAdapter(BaseAdapter):
             except Exception as exc:
                 logger.warning("[Slack] Poll error: %s", exc)
                 await asyncio.sleep(5)
-
-        await self._http.aclose()
 
     # ── Polling internals ───────────────────────────────────────────
 
@@ -280,6 +419,18 @@ class SlackAdapter(BaseAdapter):
             if data.get("ok"):
                 self._known_channels = data.get("channels", [])
                 logger.info("[Slack] Found %d channels", len(self._known_channels))
+            else:
+                error = data.get("error", "unknown")
+                if error == "missing_scope":
+                    needed = data.get("needed", "")
+                    logger.error(
+                        "[Slack] Missing scopes for polling: needed=%s. "
+                        "Add an app-level token (SLACK_APP_TOKEN) to use Socket Mode instead, "
+                        "or add the required scopes in your Slack app settings.",
+                        needed,
+                    )
+                else:
+                    logger.error("[Slack] conversations.list failed: %s", error)
         except Exception as exc:
             logger.warning("[Slack] Failed to list channels: %s", exc)
 
