@@ -627,21 +627,21 @@ class ThemeManager:
             css = css + "\n" + RTL_CSS_OVERRIDES
 
         # Build a fresh Stylesheet with the new theme CSS + all widget
-        # DEFAULT_CSS.  We do NOT pass the old app variables because the
-        # new theme redefines them (passing old + new causes parse errors
-        # on some themes like high-contrast).
+        # default CSS from the old stylesheet (which preserves widget styling
+        # like TabbedContent, inputs, buttons, etc.).
         from textual.css.stylesheet import Stylesheet
         
         new_stylesheet = Stylesheet()
-        # Re-add all widget default CSS (preserves widget styling)
-        for read_from, css_text, tie_breaker, scope in app._get_default_css():
-            new_stylesheet.add_source(
-                css_text,
-                read_from=read_from,
-                is_default_css=True,
-                tie_breaker=tie_breaker,
-                scope=scope,
-              )
+        # Re-add all existing compiled default CSS from the old stylesheet
+        for key, source in app.stylesheet.source.items():
+            if source.is_defaults:
+                new_stylesheet.add_source(
+                    source.content,
+                    read_from=key,
+                    is_default_css=True,
+                    tie_breaker=source.tie_breaker,
+                    scope=source.scope,
+                )
         # Add the new theme CSS (replaces the old App.CSS with new variables)
         new_stylesheet.add_source(css)
         app.stylesheet = new_stylesheet
