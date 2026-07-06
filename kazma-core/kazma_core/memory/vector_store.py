@@ -73,8 +73,15 @@ class VectorMemory:
         Returns:
             The document ID used for storage.
         """
+        from kazma_core.tenant_context import get_current_tenant_id
+
         doc_id = doc_id or str(uuid.uuid4())
-        meta = metadata or {"source": "agent"}
+        meta = metadata.copy() if metadata is not None else {"source": "agent"}
+        
+        tenant_id = get_current_tenant_id()
+        if tenant_id:
+            meta["tenant_id"] = tenant_id
+
         self._collection.add(
             documents=[text],
             metadatas=[meta],
@@ -93,9 +100,17 @@ class VectorMemory:
         Returns:
             List of dicts with 'text', 'metadata', and 'distance' keys.
         """
+        from kazma_core.tenant_context import get_current_tenant_id
+
+        where_filter = None
+        tenant_id = get_current_tenant_id()
+        if tenant_id:
+            where_filter = {"tenant_id": tenant_id}
+
         results = self._collection.query(
             query_texts=[query],
             n_results=min(n_results, self._collection.count() or 1),
+            where=where_filter,
         )
 
         if not results["documents"] or not results["documents"][0]:

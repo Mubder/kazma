@@ -591,6 +591,75 @@
     return card;
   }
 
+  function ResilientEventSource(url, options) {
+    options = options || {};
+    var self = this;
+    this.url = url;
+    this.listeners = {};
+    this.maxRetries = options.maxRetries || 10;
+    this.baseDelay = options.baseDelay || 1000;
+    this.maxDelay = options.maxDelay || 30000;
+    this.retryCount = 0;
+    this.source = null;
+    this.isClosedManually = false;
+    this.onerror = null;
+    this.onopen = null;
+
+    this.addEventListener = function(event, callback) {
+      if (!self.listeners[event]) self.listeners[event] = [];
+      self.listeners[event].push(callback);
+      if (self.source) {
+        self.source.addEventListener(event, callback);
+      }
+    };
+
+    this.close = function() {
+      self.isClosedManually = true;
+      if (self.source) {
+        try { self.source.close(); } catch(e) {}
+      }
+    };
+
+    function connect() {
+      if (self.isClosedManually) return;
+      self.source = new EventSource(self.url);
+
+      // Re-bind all registered event listeners
+      Object.keys(self.listeners).forEach(function(event) {
+        self.listeners[event].forEach(function(callback) {
+          self.source.addEventListener(event, function(e) {
+            self.retryCount = 0; // reset on message/event
+            callback(e);
+          });
+        });
+      });
+
+      self.source.onopen = function() {
+        self.retryCount = 0;
+        if (self.onopen) self.onopen();
+      };
+
+      self.source.onerror = function(err) {
+        if (self.isClosedManually) return;
+        try { self.source.close(); } catch(e) {}
+
+        self.retryCount++;
+        if (self.retryCount > self.maxRetries) {
+          console.warn("SSE connection to " + self.url + " failed repeatedly after " + self.maxRetries + " retries.");
+          if (self.onerror) self.onerror(err);
+          return;
+        }
+
+        var delay = Math.min(self.maxDelay, self.baseDelay * Math.pow(2, self.retryCount - 1)) + Math.random() * 1000;
+        console.log("SSE disconnected from " + self.url + ". Reconnecting in " + Math.round(delay) + "ms (attempt " + self.retryCount + ")...");
+        
+        setTimeout(connect, delay);
+      };
+    }
+
+    connect();
+  }
+
   function connectSSE(taskId, initialData) {
     // Create or reuse active task card
     var card = createActiveTaskCard(taskId, initialData);
@@ -604,7 +673,7 @@
     }, 1000);
 
     // SSE connection
-    var evtSource = new EventSource('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/stream');
+    var evtSource = new ResilientEventSource('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/stream');
     activeTasks[taskId] = { sse: evtSource, events: [], timer: timerInterval };
 
     evtSource.addEventListener('task_started', function(e) {
@@ -692,17 +761,13 @@
       }, 5000);
     });
 
-    var sseErrorCount = 0;
     evtSource.onerror = function() {
-      sseErrorCount++;
-      if (sseErrorCount > 5) {
-        console.warn('SSE connection failed repeatedly, closing.');
-        evtSource.close();
-        clearInterval(timerInterval);
-        delete activeTasks[taskId];
-        var statusEl = $('status-' + taskId);
-        if (statusEl) statusEl.textContent = 'Disconnected';
-      }
+      console.warn('SSE connection failed repeatedly, closing.');
+      evtSource.close();
+      clearInterval(timerInterval);
+      delete activeTasks[taskId];
+      var statusEl = $('status-' + taskId);
+      if (statusEl) statusEl.textContent = 'Disconnected';
     };
   }
 
@@ -2126,7 +2191,7 @@
   }
 
   function connectPipelineSSE(taskId) {
-    var source = new EventSource('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/stream');
+    var source = new ResilientEventSource('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/stream');
     pipelineSSE = source;
 
     source.addEventListener('task_started', function(e) {
@@ -2180,14 +2245,10 @@
       cleanupPipelineSession();
     });
 
-    var pipelineErrCount = 0;
     source.onerror = function() {
-      pipelineErrCount++;
-      if (pipelineErrCount > 5) {
-        console.warn("Pipeline SSE connection failed repeatedly, closing.");
-        source.close();
-        cleanupPipelineSession();
-      }
+      console.warn("Pipeline SSE connection failed repeatedly, closing.");
+      source.close();
+      cleanupPipelineSession();
     };
   }
 
@@ -2402,7 +2463,7 @@
 
   function connectPlaygroundSSE(taskId) {
     playgroundTotalTokens = 0;
-    var source = new EventSource('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/stream');
+    var source = new ResilientEventSource('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/stream');
     playgroundSSE = source;
 
     source.addEventListener('task_started', function(e) {
@@ -2480,14 +2541,10 @@
       cleanupPlaygroundSession();
     });
 
-    var playErrCount = 0;
     source.onerror = function() {
-      playErrCount++;
-      if (playErrCount > 5) {
-        console.warn("Playground SSE connection failed repeatedly, closing.");
-        source.close();
-        cleanupPlaygroundSession();
-      }
+      console.warn("Playground SSE connection failed repeatedly, closing.");
+      source.close();
+      cleanupPlaygroundSession();
     };
   }
 

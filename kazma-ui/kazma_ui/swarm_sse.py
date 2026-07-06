@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -56,6 +57,7 @@ class SSEEventBus:
         self._subscribers: dict[str, list[asyncio.Queue[dict[str, Any]]]] = {}
         self._max_history_per_task = max_history_per_task
         self._last_cleanup_time = 0.0
+        self._last_update_time: dict[str, float] = {}
         # No lock needed: all methods are sync and run in asyncio's
         # single-threaded event loop, so there are no interleaving points.
 
@@ -66,6 +68,7 @@ class SSEEventBus:
         subscribers for the given task_id.
         """
         entry: dict[str, Any] = {"event": event, "data": data}
+        self._last_update_time[task_id] = time.time()
 
         # Store in history with bounded size to avoid memory growth.
         if task_id not in self._history:
@@ -98,20 +101,34 @@ class SSEEventBus:
             logger.debug("SSE event loop cleanup skipped: %s", exc)
 
     def _cleanup_terminal_history(self) -> None:
-        """Remove history for terminal tasks that have no subscribers."""
+        """Remove history for terminal tasks that have no subscribers, or older than TTL."""
         terminal_events = frozenset({"task_completed", "task_failed"})
         tasks_to_remove: list[str] = []
-        for task_id, history in self._history.items():
+        now = time.time()
+        ttl_seconds = 3600.0  # 1 hour TTL limit to prevent unbounded memory growth
+
+        for task_id, history in list(self._history.items()):
+            # Unconditional TTL check
+            last_update = self._last_update_time.get(task_id, 0.0)
+            if last_update > 0.0 and (now - last_update > ttl_seconds):
+                tasks_to_remove.append(task_id)
+                continue
+
+            # Existing subscribers guard
             if self._subscribers.get(task_id):
                 continue
+
             if not history:
                 tasks_to_remove.append(task_id)
                 continue
+
             last_event = history[-1].get("event")
             if last_event in terminal_events:
                 tasks_to_remove.append(task_id)
+
         for task_id in tasks_to_remove:
             self._history.pop(task_id, None)
+            self._last_update_time.pop(task_id, None)
 
     def subscribe(self, task_id: str) -> asyncio.Queue[dict[str, Any]]:
         """Subscribe to live events for a task.

@@ -57,7 +57,11 @@ class ConfigStore:
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+            self._conn = sqlite3.connect(
+                str(self._db_path),
+                check_same_thread=False,
+                isolation_level=None,
+            )
             self._conn.row_factory = sqlite3.Row
             # WAL + busy_timeout — matches every other SQLite store in Kazma
             # (task_store, checkpoint, time_travel). WAL allows concurrent
@@ -71,7 +75,6 @@ class ConfigStore:
         with self._lock:
             conn = self._get_conn()
             conn.executescript(_SCHEMA)
-            conn.commit()
 
     def _load_yaml(self) -> dict[str, Any]:
         """Load and cache the base YAML config."""
@@ -171,13 +174,18 @@ class ConfigStore:
         now = datetime.now(UTC).isoformat()
         with self._lock:
             conn = self._get_conn()
-            conn.execute(
-                """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
-                   VALUES (?, ?, ?, ?)""",
-                (key, json.dumps(value), category, now),
-            )
-            conn.commit()
-            self._cache.clear()
+            try:
+                conn.execute("BEGIN")
+                conn.execute(
+                    """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (key, json.dumps(value), category, now),
+                )
+                conn.execute("COMMIT")
+                self._cache.clear()
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
         logger.info("Setting updated: %s = %s (category=%s)", key, value, category)
 
     def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
@@ -262,12 +270,17 @@ class ConfigStore:
         """Delete a setting. Returns True if a row was deleted."""
         with self._lock:
             conn = self._get_conn()
-            cursor = conn.execute("DELETE FROM settings WHERE key = ?", (key,))
-            conn.commit()
-            if cursor.rowcount > 0:
-                self._cache.clear()
-                return True
-            return False
+            try:
+                conn.execute("BEGIN")
+                cursor = conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+                conn.execute("COMMIT")
+                if cursor.rowcount > 0:
+                    self._cache.clear()
+                    return True
+                return False
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
 
     def export_yaml(self) -> str:
         """Export current settings as YAML, merging DB overrides with base YAML."""
@@ -379,10 +392,15 @@ class ConfigStore:
         """Delete all DB settings (reverts to YAML defaults). Returns count deleted."""
         with self._lock:
             conn = self._get_conn()
-            cursor = conn.execute("DELETE FROM settings")
-            conn.commit()
-            self._cache.clear()
-            return cursor.rowcount
+            try:
+                conn.execute("BEGIN")
+                cursor = conn.execute("DELETE FROM settings")
+                conn.execute("COMMIT")
+                self._cache.clear()
+                return cursor.rowcount
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
 
     def close(self) -> None:
         """Close the database connection."""

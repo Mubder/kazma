@@ -783,10 +783,20 @@ class LocalToolRegistry:
                 # Kazma internal
                 "hermes", "kazma",
             }
-            binary = Path(args[0]).name  # resolve paths like /full/path/ls → ls
+            import os
+
+            p = Path(args[0])
+            binary = p.name
+            if os.name == "nt" and p.suffix.lower() == ".exe":
+                binary = p.stem
+
             if binary not in _SAFE_BINARIES:
-                # Also check if it's an absolute path to a safe binary
-                if not any(args[0].endswith(f"/{b}") for b in _SAFE_BINARIES):
+                # Also check if it's an absolute/relative path to a safe binary
+                posix_path = p.as_posix()
+                if not any(
+                    posix_path.endswith(f"/{b}") or (os.name == "nt" and posix_path.endswith(f"/{b}.exe"))
+                    for b in _SAFE_BINARIES
+                ):
                     return (
                         f"Error: '{binary}' is not in the allowed binary list. "
                         f"Allowed: {', '.join(sorted(_SAFE_BINARIES))}"
