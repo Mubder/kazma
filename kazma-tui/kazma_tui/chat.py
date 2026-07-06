@@ -333,7 +333,7 @@ class ChatPanel(Vertical):
 
         self.write("system", f"Dispatching to swarm...")
         try:
-            from kazma_core.swarm.router import NoCapableWorkersError
+            from kazma_core.swarm import NoCapableWorkersError
 
             if broadcast:
                 swarm_task = SwarmTask(

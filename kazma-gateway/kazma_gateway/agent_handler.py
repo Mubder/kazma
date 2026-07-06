@@ -535,17 +535,17 @@ async def _dispatch_auto_route(
     # Try capability routing
     routed_workers: list[str] = []
     try:
-        from kazma_core.swarm.router import CapabilityRouter
+        from kazma_core.swarm import UnifiedRouter
         from kazma_core.swarm.task import SwarmTask, TaskType
 
-        router = CapabilityRouter()
+        router = UnifiedRouter()
         temp_task = SwarmTask(
             id="auto-route-temp",
             type=TaskType.DISPATCH,
             prompt=task,
             workers=["auto"],
         )
-        routed_workers = router.route(temp_task, available)
+        routed_workers = await router.route(temp_task, available)
     except Exception as exc:
         logger.warning("[agent-handler] Auto-route failed: %s", exc)
 
