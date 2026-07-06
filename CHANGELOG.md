@@ -42,6 +42,14 @@ Features are listed with their implementation PR/commit where available.
 | ✅ | `checkpoint_manager.py` | 199 | HITL pipeline checkpoint state, timeout auto-reject, restore from SQLite |
 | ✅ | `engine.py` (refactored) | 1878→1573 | -305 lines (16% reduction). All public API unchanged. |
 
+### Web UI: Visual Swarm DAG Diagram Fixes
+
+| Status | Feature / Bug Fix | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Prevent global Mermaid re-scan** | Replaced the deprecated/broken `mermaid.init` fallback with isolated, async, programmatic `mermaid.render(id, code, target)` calls, mapping target DOM containers explicitly to shield page text/logs from re-render pollution | `swarm.js` |
+| ✅ | **Target class isolation** | Changed the element class from `.mermaid` to `.swarm-mermaid-diagram` to disable standard auto-init scans | `swarm.html` |
+| ✅ | **Eliminate comma-based style syntax error** | Replaced `fill:rgba(...)` format with explicit `fill:#HEX,fill-opacity:A` parameters, neutralizing the syntax parser crash triggered by nested commas | `swarm.js` |
+
 ---
 
 ## Sprint 16 — P2 Quick Wins: UI Badges + Worker Lifecycle + Docs (July 2026)
