@@ -30,7 +30,7 @@ class TracesPanel(Vertical):
         padding: 1 2;
         background: $panel;
         border-bottom: solid $border;
-        align: middle;
+        align: left middle;
     }
 
     TracesPanel > .toolbar > Input {
