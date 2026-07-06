@@ -66,7 +66,7 @@ class TestWorkspaceRoute:
             if '"/workspace"' in line and "app.get" in line:
                 # Check the next few lines for RedirectResponse
                 block = "\n".join(lines[i : i + 10])
-                assert "RedirectResponse" not in block or "workspace_redirect" not in block, (
+                assert "RedirectResponse" not in block, (
                     "/workspace route still uses RedirectResponse"
                 )
 

@@ -125,7 +125,7 @@ class TestSidebarComponent:
         assert "nav-link" in sidebar_html
 
     def test_has_workspace_link(self, sidebar_html):
-        assert 'href="/"' in sidebar_html
+        assert 'href="/workspace"' in sidebar_html
 
     def test_has_chat_link(self, sidebar_html):
         assert 'href="/chat"' in sidebar_html
@@ -246,17 +246,17 @@ class TestToastComponent:
         assert "toast-container" in toast_html
 
     def test_has_success_type(self, toast_html):
-        assert "toast-" in toast_html
+        assert "toast-success" in toast_html or "toast.type" in toast_html
 
     def test_has_error_type(self, toast_html):
         # Uses dynamic binding: 'toast-' + toast.type
         assert "toast.type" in toast_html or "toast-" in toast_html
 
     def test_has_warning_type(self, toast_html):
-        assert "toast-" in toast_html
+        assert "toast-warning" in toast_html or "toast.type" in toast_html
 
     def test_has_info_type(self, toast_html):
-        assert "toast-" in toast_html
+        assert "toast-info" in toast_html or "toast.type" in toast_html
 
     def test_has_dismiss_button(self, toast_html):
         assert "toast-dismiss" in toast_html

@@ -348,11 +348,9 @@ class TestRealtimeEndpoints:
         """SSE chat endpoint is importable."""
         try:
             from kazma_ui.sse_chat import create_sse_chat_router
-
-            assert callable(create_sse_chat_router)
         except ImportError:
-            # If graph deps not available, skip
-            pass
+            pytest.skip("kazma_ui.sse_chat not available (graph deps missing)")
+        assert callable(create_sse_chat_router)
 
     def test_sse_chat_stream_endpoint_exists(self):
         """POST /api/chat/stream is defined in sse_chat module."""

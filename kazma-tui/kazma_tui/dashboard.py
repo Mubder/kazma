@@ -261,7 +261,11 @@ class MetricsDashboard(Widget):
         ram_total: float | None = None
         vram_used: float | None = None
         vram_total: float | None = None
-        monitor = self._get_hardware_monitor()
+        try:
+            monitor = self._get_hardware_monitor()
+        except Exception:
+            logger.debug("HardwareMonitor init failed", exc_info=True)
+            monitor = None
         if monitor is not None:
             try:
                 snapshot = await monitor.get_stats()
@@ -275,7 +279,11 @@ class MetricsDashboard(Widget):
 
         # ── RPM (sync) ──────────────────────────────────────────────
         rpm_val: int | None = None
-        store = self._get_trace_store()
+        try:
+            store = self._get_trace_store()
+        except Exception:
+            logger.debug("TraceStore init failed", exc_info=True)
+            store = None
         if store is not None:
             try:
                 entries = store.recent(limit=200)
@@ -286,7 +294,11 @@ class MetricsDashboard(Widget):
         # ── Latency / Error Rate (sync) ─────────────────────────────
         latency_val: float | None = None
         error_val: float | None = None
-        collector = self._get_metrics_collector()
+        try:
+            collector = self._get_metrics_collector()
+        except Exception:
+            logger.debug("MetricsCollector init failed", exc_info=True)
+            collector = None
         if collector is not None:
             try:
                 all_metrics = collector.get_all_metrics()
@@ -297,7 +309,11 @@ class MetricsDashboard(Widget):
 
         # ── Active Agents ───────────────────────────────────────────
         agent_names: list[str] = []
-        engine = self._get_swarm_engine()
+        try:
+            engine = self._get_swarm_engine()
+        except Exception:
+            logger.debug("SwarmEngine init failed", exc_info=True)
+            engine = None
         if engine is not None:
             try:
                 agent_names = self._get_agent_names(engine)
@@ -521,28 +537,16 @@ class MetricsDashboard(Widget):
     def _calculate_rpm(self, entries: list[Any]) -> int:
         """Calculate requests per minute from recent trace entries.
 
-        Counts entries within the last 60 seconds. If the actual time
-        span of those entries is shorter than 60 seconds, the count is
-        extrapolated to a full minute for a more accurate rate.
+        Counts entries within the last 60 seconds. Returns the actual
+        count within the window without extrapolation to avoid
+        over-inflating RPM for short observation periods.
         """
         if not entries:
             return 0
         now = time.time()
         window = 60.0
         recent = [e for e in entries if (now - e.timestamp) <= window]
-        if not recent:
-            return 0
-        count = len(recent)
-        # Determine actual time span of the recent entries
-        timestamps = [e.timestamp for e in recent]
-        span = max(timestamps) - min(timestamps)
-        if span <= 0:
-            # All entries at the same instant; treat as a burst
-            return count
-        if span < window:
-            # Extrapolate to a full minute
-            return int(round(count * (window / span)))
-        return count
+        return len(recent)
 
     def _calculate_avg_latency(self, data: list[dict[str, Any]]) -> float:
         """Calculate weighted average latency from MetricsCollector data.

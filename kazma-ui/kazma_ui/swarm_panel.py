@@ -433,6 +433,8 @@ class SwarmRouterBuilder:
 
         def _workflow_to_mermaid(workflow: Any) -> str:
             """Generate a Mermaid.js diagram string from a DAGWorkflow."""
+            import html as _html
+
             lines = ["graph TD"]
             # Style definitions for luxury, enterprise feel
             lines.append("    classDef agent fill:#1a1b26,stroke:#7aa2f7,stroke-width:2px,color:#c0caf5;")
@@ -442,13 +444,16 @@ class SwarmRouterBuilder:
             def _safe_id(name: str) -> str:
                 return "".join(c if c.isalnum() else "_" for c in name)
 
+            def _mermaid_escape(s: str) -> str:
+                """Escape HTML entities and Mermaid metacharacters for safe labels."""
+                return _html.escape(s, quote=True).replace("&#x27;", "'").replace("]", "&#93;").replace("|", "&#124;")
+
             # Add nodes
             for node_id, node in workflow.nodes.items():
                 node_type = getattr(node, "type", "dispatch")
                 prompt = getattr(node, "prompt_template", "")
                 prompt_preview = (prompt[:30] + "...") if len(prompt) > 30 else prompt
-                node_id_escaped = node_id.replace('"', "'")
-                label = f'"{node_id_escaped}<br/><small style=\'color:#565f89;\'>{node_type}</small>"'
+                label = f'"{_mermaid_escape(node_id)}<br/><small style=\'color:#565f89;\'>{_mermaid_escape(node_type)}</small>"'
                 safe_node_id = _safe_id(node_id)
                 lines.append(f"    {safe_node_id}[{label}]")
                 
@@ -466,8 +471,7 @@ class SwarmRouterBuilder:
                 safe_tgt = _safe_id(tgt)
                 cond = getattr(edge, "condition", "")
                 if cond:
-                    cond_escaped = cond.replace('"', "'")
-                    lines.append(f'    {safe_src} -->|"{cond_escaped}"| {safe_tgt}')
+                    lines.append(f'    {safe_src} -->|"{_mermaid_escape(cond)}"| {safe_tgt}')
                 else:
                     lines.append(f"    {safe_src} --> {safe_tgt}")
 
@@ -516,12 +520,12 @@ class SwarmRouterBuilder:
                     )
                 except ValidationError as err:
                     return JSONResponse(
-                        content={"valid": False, "error": str(err)},
+                        content={"valid": False, "error": f"Workflow validation failed: {err}"},
                         status_code=200,
                     )
-                except Exception as exc:
+                except Exception as err:
                     return JSONResponse(
-                        content={"valid": False, "error": f"Validation error: {exc}"},
+                        content={"valid": False, "error": f"Validation error: {err}"},
                         status_code=200,
                     )
 
@@ -544,19 +548,19 @@ class SwarmRouterBuilder:
                         "mermaid": _workflow_to_mermaid(workflow),
                     }
                 )
-            except yaml.YAMLError as yerr:
+            except yaml.YAMLError as err:
                 return JSONResponse(
-                    content={"valid": False, "error": f"YAML/JSON Syntax Error: {yerr}"},
+                    content={"valid": False, "error": f"YAML/JSON syntax error: {err}"},
                     status_code=200,
                 )
             except ValidationError as err:
                 return JSONResponse(
-                    content={"valid": False, "error": str(err)},
+                    content={"valid": False, "error": f"Workflow validation failed: {err}"},
                     status_code=200,
                 )
-            except Exception as exc:
+            except Exception as err:
                 return JSONResponse(
-                    content={"valid": False, "error": f"Validation error: {exc}"},
+                    content={"valid": False, "error": f"Validation error: {err}"},
                     status_code=200,
                 )
 
@@ -745,7 +749,7 @@ class SwarmRouterBuilder:
             """
             worker_names = payload.get("workers", [])
             task = str(payload.get("task", "")).strip()
-            context = payload.get("context", "")
+            context = str(payload.get("context", ""))
             task_type = _coerce_task_type(payload, worker_names)
             timeout = _coerce_timeout(payload)
             background = bool(payload.get("background", False))
@@ -810,6 +814,15 @@ class SwarmRouterBuilder:
 
             dispatched = [name for name in worker_names if engine.get_worker(name) is not None]
             missing = [name for name in worker_names if name not in dispatched]
+            if not dispatched:
+                return JSONResponse(
+                    {
+                        "status": "error",
+                        "message": "None of the specified workers are registered",
+                        "missing": missing,
+                    },
+                    status_code=400,
+                )
             results: list[dict[str, Any]] = []
             task_result: Any | None = None
             task_metadata = dict(payload.get("metadata", {})) if isinstance(
@@ -986,19 +999,31 @@ class SwarmRouterBuilder:
             # Use TaskStore for paginated queries when available.
             store = getattr(engine, "task_store", None) or getattr(engine, "_task_store", None)
             if store is not None:
-                tasks, total = store.list_tasks(
-                    page=page,
-                    page_size=page_size,
-                    status=status,
-                    task_type=task_type,
-                    worker=worker,
-                    include_count=True,
-                )
-                # Server-side search on prompt text
+                # When searching, fetch all matching tasks then paginate in-memory
+                # to avoid missing results on other pages.
                 if q:
+                    all_tasks, _ = store.list_tasks(
+                        page=1,
+                        page_size=10000,
+                        status=status,
+                        task_type=task_type,
+                        worker=worker,
+                        include_count=False,
+                    )
                     q_lower = q.lower()
-                    tasks = [t for t in tasks if q_lower in (t.prompt or "").lower()]
-                    total = len(tasks)
+                    filtered = [t for t in all_tasks if q_lower in (t.prompt or "").lower()]
+                    total = len(filtered)
+                    start_idx = (page - 1) * page_size
+                    tasks = filtered[start_idx:start_idx + page_size]
+                else:
+                    tasks, total = store.list_tasks(
+                        page=page,
+                        page_size=page_size,
+                        status=status,
+                        task_type=task_type,
+                        worker=worker,
+                        include_count=True,
+                    )
                 return JSONResponse({
                     "tasks": [_flatten_swarm_task(task) for task in tasks],
                     "count": len(tasks),

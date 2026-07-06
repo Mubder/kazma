@@ -8,6 +8,9 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _friendly_error(exc: Exception) -> str:
@@ -17,8 +20,10 @@ def _friendly_error(exc: Exception) -> str:
     if isinstance(exc, TimeoutError):
         return "Error: Search request timed out. Please try again."
     if isinstance(exc, OSError):
-        return f"Error: Network error — {exc}"
-    return f"Error: Search failed — {exc}"
+        logger.debug("[web_search] Network error: %s", exc, exc_info=True)
+        return "Error: Network error occurred during search. Please check your connection."
+    logger.debug("[web_search] Search failed: %s", exc, exc_info=True)
+    return "Error: Search failed. Please try again."
 
 
 def _run_search(query: str, max_results: int) -> list[dict[str, str]]:

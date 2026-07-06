@@ -55,6 +55,19 @@ logger = logging.getLogger(__name__)
 
 _PERSONALITY_MARKER = "[KAZMA_PERSONALITY]"
 
+TOOL_RESULT_MAX_CHARS = 4000
+
+
+def truncate_tool_result(content: str, max_chars: int = TOOL_RESULT_MAX_CHARS) -> str:
+    """Truncate tool result content to *max_chars* with a truncation marker.
+
+    If *content* is shorter than *max_chars*, it is returned unchanged.
+    """
+    if len(content) > max_chars:
+        original_len = len(content)
+        return content[:max_chars] + f"\n[truncated {original_len - max_chars} chars]"
+    return content
+
 
 def _ensure_personality(
     messages: list[dict[str, Any]],
@@ -121,10 +134,21 @@ async def supervisor_node(
 
     logger.info("[Supervisor] iteration=%d messages=%d", iteration, len(messages))
 
+    # ── Reset tool circuit breaker on new user turn ────────────────
+    # The breaker trips after 2 consecutive empty/failed tool results.
+    # Without this reset, the breaker stays tripped permanently across
+    # all subsequent turns (state persists in the checkpointer).
+    breaker_reset = {}
+    if iteration == 0:
+        if state.get("circuit_breaker_tripped", False) or state.get("consecutive_tool_failures", 0) > 0:
+            logger.info("[Supervisor] Resetting tool circuit breaker for new turn")
+        breaker_reset = {"circuit_breaker_tripped": False, "consecutive_tool_failures": 0}
+
     # ── Cost breaker gate ──────────────────────────────────────────
     if cost_breaker.should_halt():
         logger.warning("[Supervisor] Cost breaker tripped — forcing respond")
         return {
+            **breaker_reset,
             "next_node": NodeName.RESPOND,
             "messages": messages
             + [
@@ -141,6 +165,7 @@ async def supervisor_node(
     if compacted_state is not state_for_check:
         logger.info("[Supervisor] Context compacted — restarting with fresh context")
         return {
+            **breaker_reset,
             "messages": compacted_state.get("messages", []),
             "needs_compaction": False,
             "next_node": NodeName.SUPERVISOR,  # re-enter supervisor
@@ -235,6 +260,7 @@ async def supervisor_node(
 
         error_content = friendly_llm_error(exc)
         return {
+            **breaker_reset,
             "next_node": NodeName.RESPOND,
             "messages": messages + [{"role": "assistant", "content": error_content}],
         }
@@ -266,6 +292,7 @@ async def supervisor_node(
         # Pure text response → RESPOND
         assistant_msg = {"role": "assistant", "content": response.content}
         return {
+            **breaker_reset,
             "messages": messages + [assistant_msg],
             "next_node": NodeName.RESPOND,
             "last_model": response.model,
@@ -293,6 +320,7 @@ async def supervisor_node(
     pending = [PendingToolCall(id=tc.id, name=tc.name, arguments=tc.arguments) for tc in response.tool_calls]
 
     return {
+        **breaker_reset,
         "messages": messages + [assistant_msg],
         "tool_calls_pending": pending,
         "tool_calls_done": [],  # reset for this iteration
@@ -399,8 +427,6 @@ async def tool_worker_node(
         else:
             safe_tools = list(pending)
 
-        TOOL_RESULT_MAX_CHARS = 4000
-
         async def _exec_one(tc: PendingToolCall) -> ToolResult:
             start = time.monotonic()
             result = await tool_executor.execute(tc["name"], tc.get("arguments") or {})
@@ -422,12 +448,11 @@ async def tool_worker_node(
             )
 
             # ── Truncation middleware ──────────────────────────────────
-            content = result.get("content", "")
-            if len(content) > TOOL_RESULT_MAX_CHARS:
-                original_len = len(content)
-                content = content[:TOOL_RESULT_MAX_CHARS] + f"\n[truncated {original_len - TOOL_RESULT_MAX_CHARS} chars]"
+            raw_content = result.get("content", "")
+            content = truncate_tool_result(raw_content)
+            if len(content) != len(raw_content):
                 logger.info(
-                    "[ToolWorker] Truncated result from %s (%d → %d chars)", tc["name"], original_len, TOOL_RESULT_MAX_CHARS
+                    "[ToolWorker] Truncated result from %s (%d → %d chars)", tc["name"], len(raw_content), len(content)
                 )
 
             return ToolResult(

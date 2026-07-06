@@ -32,6 +32,13 @@
     if (!str) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+  function escapeMermaidLabel(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\]/g, '&#93;').replace(/\|/g, '&#124;');
+  }
+  function parseSseData(e) {
+    try { return JSON.parse(e.data); } catch(err) { console.error('SSE parse failed', err); return null; }
+  }
   function setText(id, text) { var el = $(id); if (el) el.textContent = text; }
   function showToast(msg, ok) { if (KS && KS.toast) KS.toast(msg, ok ? 'success' : 'error', 4000); }
   function showError(msg) { if (KS && KS.toast) KS.toast(msg, 'error', 5000); }
@@ -89,6 +96,14 @@
       else if (btn.dataset.action === 'retry') retryTask(btn.dataset.taskId);
       else if (btn.dataset.action === 'view-task') viewTaskDetail(btn.dataset.taskId);
     });
+
+    // Event delegation for clickable task cards and rows with data-task-id
+    document.addEventListener('click', function(e) {
+      var el = e.target.closest('[data-task-id]:not(button):not([data-action])');
+      if (!el) return;
+      var tid = el.dataset.taskId;
+      if (tid) viewTaskDetail(tid);
+    });
   }
 
   // ══════════════════════════════════════════════════════
@@ -111,7 +126,7 @@
     if (tabId === 'workflow-editor') {
       if (typeof mermaid !== 'undefined') {
         try {
-          mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+          mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
         } catch (e) { console.error("Mermaid init error:", e); }
       }
       initVisualPipeline();
@@ -438,9 +453,6 @@
       }
     }
 
-    // Show pending state in the builder results preview
-    appendPendingResult(workerList, task, pattern);
-
     // Disable dispatch button to prevent double-submit
     var dispatchBtn = $('btn-dispatch');
     if (dispatchBtn) { dispatchBtn.disabled = true; dispatchBtn.textContent = 'Dispatching...'; }
@@ -600,23 +612,23 @@
     });
 
     evtSource.addEventListener('worker_started', function(e) {
-      var data = JSON.parse(e.data);
-      addEventLine(taskId, '⚙️', 'Worker ' + esc(data.worker) + ' started (step ' + data.step + ')');
+      var data = parseSseData(e); if (!data) return;
+      addEventLine(taskId, '⚙️', 'Worker ' + esc(data.worker) + ' started (step ' + (Number(data.step) || 0) + ')');
     });
 
     evtSource.addEventListener('worker_progress', function(e) {
-      var data = JSON.parse(e.data);
-      addEventLine(taskId, '📝', esc(data.worker) + ': ' + (data.tokens || 0) + ' tokens');
+      var data = parseSseData(e); if (!data) return;
+      addEventLine(taskId, '📝', esc(data.worker) + ': ' + (Number(data.tokens) || 0) + ' tokens');
     });
 
     evtSource.addEventListener('worker_completed', function(e) {
-      var data = JSON.parse(e.data);
+      var data = parseSseData(e); if (!data) return;
       var icon = data.status === 'success' ? '✅' : '❌';
       addEventLine(taskId, icon, esc(data.worker) + ': ' + esc(data.status));
     });
 
     evtSource.addEventListener('checkpoint', function(e) {
-      var data = JSON.parse(e.data);
+      var data = parseSseData(e); if (!data) return;
       // HITL checkpoint (VAL-HITL-002)
       var cpEl = $('checkpoint-' + taskId);
       if (cpEl) {
@@ -632,7 +644,7 @@
     });
 
     evtSource.addEventListener('handoff', function(e) {
-      var data = JSON.parse(e.data);
+      var data = parseSseData(e); if (!data) return;
       // Handoff chain visualization (VAL-HAND-007)
       var hfEl = $('handoff-' + taskId);
       if (hfEl) {
@@ -642,7 +654,7 @@
     });
 
     evtSource.addEventListener('task_completed', function(e) {
-      var data = JSON.parse(e.data);
+      var data = parseSseData(e); if (!data) return;
       clearInterval(timerInterval);
       var statusEl = $('status-' + taskId);
       if (statusEl) {
@@ -680,8 +692,17 @@
       }, 5000);
     });
 
+    var sseErrorCount = 0;
     evtSource.onerror = function() {
-      // SSE reconnect is handled automatically by EventSource
+      sseErrorCount++;
+      if (sseErrorCount > 5) {
+        console.warn('SSE connection failed repeatedly, closing.');
+        evtSource.close();
+        clearInterval(timerInterval);
+        delete activeTasks[taskId];
+        var statusEl = $('status-' + taskId);
+        if (statusEl) statusEl.textContent = 'Disconnected';
+      }
     };
   }
 
@@ -869,7 +890,7 @@
       var statusColor = status === 'success' ? 'var(--success)' : status === 'failed' ? 'var(--danger)' : 'var(--warning)';
       var patternLabel = {dispatch:'🎯 Dispatch',broadcast:'📢 Broadcast',pipeline:'🔗 Pipeline',fan_out:'🌀 Fan-Out',consult:'💬 Consult',conditional:'🔀 Conditional'}[pattern] || pattern;
 
-      var html = '<div class="card result-card" data-pattern="' + pattern + '" style="margin-bottom:12px;cursor:pointer;" onclick="KazmaSwarm.viewTaskDetail(\'' + esc(r.task_id || r.id) + '\')">';
+      var html = '<div class="card result-card" data-pattern="' + esc(pattern) + '" data-task-id="' + esc(r.task_id || r.id) + '" style="margin-bottom:12px;cursor:pointer;">';
       html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
       html += '<div style="display:flex;align-items:center;gap:8px;">';
       html += '<span style="font-weight:600;font-size:0.85rem;">' + patternLabel + '</span>';
@@ -1197,7 +1218,7 @@
       var dur = t.duration_seconds ? t.duration_seconds.toFixed(1) + 's' : '—';
       var cost = t.total_cost ? '$' + t.total_cost.toFixed(4) : '—';
 
-      return '<tr style="cursor:pointer;border-bottom:1px solid var(--border-subtle);" onclick="KazmaSwarm.viewTaskDetail(\'' + esc(t.id) + '\')">' +
+      return '<tr data-task-id="' + esc(t.id) + '" style="cursor:pointer;border-bottom:1px solid var(--border-subtle);">' +
         '<td style="padding:8px 12px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-tertiary);">' + esc((t.id || '').slice(0, 16)) + '</td>' +
         '<td style="padding:8px 12px;">' + icon + ' ' + esc(t.type || '?') + '</td>' +
         '<td style="padding:8px 12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(prompt) + '</td>' +
@@ -1505,7 +1526,13 @@
         var activeIds = tasks.map(function(t) { return t.id; });
         container.querySelectorAll('[id^="active-task-"]').forEach(function(el) {
           var tid = el.id.replace('active-task-', '');
-          if (activeIds.indexOf(tid) === -1) el.remove();
+          if (activeIds.indexOf(tid) === -1) {
+            // Guard: Do not prune if it is an optimistic pending card or currently SSE-streaming
+            if (tid.indexOf('pending-') === 0 || activeTasks[tid]) {
+              return;
+            }
+            el.remove();
+          }
         });
         // Add/update cards for active tasks
         tasks.forEach(function(t) {
@@ -1910,7 +1937,7 @@
     var lines = ['graph TD'];
     pipelineStages.forEach(function(stage, index) {
       var stepNum = index + 1;
-      var label = 'Step ' + stepNum + ': ' + stage.worker;
+      var label = 'Step ' + stepNum + ': ' + escapeMermaidLabel(stage.worker);
       if (stage.hitl) {
         label = '⏸ ' + label;
       }
@@ -2107,25 +2134,25 @@
     });
 
     source.addEventListener('worker_started', function(e) {
-      var d = JSON.parse(e.data);
-      addPipelineTerminalLine('⚙️', 'Worker <strong style="color:var(--accent);">' + esc(d.worker) + '</strong> activated (Step ' + d.step + ')');
+      var d = parseSseData(e); if (!d) return;
+      addPipelineTerminalLine('⚙️', 'Worker <strong style="color:var(--accent);">' + esc(d.worker) + '</strong> activated (Step ' + (Number(d.step) || 0) + ')');
     });
 
     source.addEventListener('worker_progress', function(e) {
-      var d = JSON.parse(e.data);
-      var tokens = d.tokens || 0;
+      var d = parseSseData(e); if (!d) return;
+      var tokens = Number(d.tokens) || 0;
       addPipelineTerminalLine('📝', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> is working (Processed ' + tokens + ' tokens)');
     });
 
     source.addEventListener('worker_completed', function(e) {
-      var d = JSON.parse(e.data);
+      var d = parseSseData(e); if (!d) return;
       var icon = d.status === 'success' ? '✅' : '❌';
       var color = d.status === 'success' ? 'var(--success)' : 'var(--danger)';
       addPipelineTerminalLine(icon, 'Worker <strong style="color:' + color + ';">' + esc(d.worker) + '</strong> completed with status: ' + esc(d.status));
     });
 
     source.addEventListener('checkpoint', function(e) {
-      var d = JSON.parse(e.data);
+      var d = parseSseData(e); if (!d) return;
       addPipelineTerminalLine('⏸', 'Human-in-the-Loop checkpoint encountered (Step ' + d.step + '). Awaiting user confirmation...');
       
       var hitlGate = $('pipeline-hitl-gate');
@@ -2138,12 +2165,12 @@
     });
 
     source.addEventListener('handoff', function(e) {
-      var d = JSON.parse(e.data);
+      var d = parseSseData(e); if (!d) return;
       addPipelineTerminalLine('🔀', 'Swarm Handoff: <span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
     });
 
     source.addEventListener('task_completed', function(e) {
-      var d = JSON.parse(e.data);
+      var d = parseSseData(e); if (!d) return;
       addPipelineTerminalLine('🏁', 'Pipeline execution finalized.');
       
       var res = d.result || {};
@@ -2153,8 +2180,14 @@
       cleanupPipelineSession();
     });
 
+    var pipelineErrCount = 0;
     source.onerror = function() {
-      console.log("Pipeline SSE connection error.");
+      pipelineErrCount++;
+      if (pipelineErrCount > 5) {
+        console.warn("Pipeline SSE connection failed repeatedly, closing.");
+        source.close();
+        cleanupPipelineSession();
+      }
     };
   }
 
@@ -2377,13 +2410,13 @@
     });
 
     source.addEventListener('worker_started', function(e) {
-      var d = JSON.parse(e.data);
-      addTerminalLine('⚙️', 'Worker <strong style="color:var(--accent);">' + esc(d.worker) + '</strong> activated (Step ' + d.step + ')');
+      var d = parseSseData(e); if (!d) return;
+      addTerminalLine('⚙️', 'Worker <strong style="color:var(--accent);">' + esc(d.worker) + '</strong> activated (Step ' + (Number(d.step) || 0) + ')');
       setText('play-state-node', esc(d.worker));
     });
 
     source.addEventListener('worker_progress', function(e) {
-      var d = JSON.parse(e.data);
+      var d = parseSseData(e); if (!d) return;
       var tokens = d.tokens || 0;
       playgroundTotalTokens += tokens;
       setText('play-state-tokens', playgroundTotalTokens + ' tokens');
@@ -2395,14 +2428,14 @@
     });
 
     source.addEventListener('worker_completed', function(e) {
-      var d = JSON.parse(e.data);
+      var d = parseSseData(e); if (!d) return;
       var icon = d.status === 'success' ? '✅' : '❌';
       var color = d.status === 'success' ? 'var(--success)' : 'var(--danger)';
       addTerminalLine(icon, 'Worker <strong style="color:' + color + ';">' + esc(d.worker) + '</strong> completed with status: ' + esc(d.status));
     });
 
     source.addEventListener('checkpoint', function(e) {
-      var d = JSON.parse(e.data);
+      var d = parseSseData(e); if (!d) return;
       addTerminalLine('⏸', 'Human-in-the-Loop checkpoint encountered (Step ' + d.step + '). Awaiting user confirmation...');
       
       var hitlGate = $('play-hitl-gate');
@@ -2418,12 +2451,12 @@
     });
 
     source.addEventListener('handoff', function(e) {
-      var d = JSON.parse(e.data);
+      var d = parseSseData(e); if (!d) return;
       addTerminalLine('🔀', 'Swarm Handoff: <span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
     });
 
     source.addEventListener('task_completed', function(e) {
-      var d = JSON.parse(e.data);
+      var d = parseSseData(e); if (!d) return;
       addTerminalLine('🏁', 'Task finalized. Synthesis finished.');
       
       var res = d.result || {};
@@ -2447,8 +2480,14 @@
       cleanupPlaygroundSession();
     });
 
+    var playErrCount = 0;
     source.onerror = function() {
-      console.log("Playground SSE connection encountered an error.");
+      playErrCount++;
+      if (playErrCount > 5) {
+        console.warn("Playground SSE connection failed repeatedly, closing.");
+        source.close();
+        cleanupPlaygroundSession();
+      }
     };
   }
 

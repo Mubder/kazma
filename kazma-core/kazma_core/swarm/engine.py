@@ -265,7 +265,7 @@ class SwarmEngine:
         except asyncio.CancelledError:
             # Task was cancelled via cancel_task() — finalize as cancelled.
             self._tracing_emitter.end_span(task_span, status="cancelled")
-            return await self._finalize_task(
+            return self._finalize_task(
                 task,
                 worker_results=[],
                 status="cancelled",
@@ -705,11 +705,12 @@ class SwarmEngine:
             logger.info("[SwarmEngine] cancelled asyncio handle for task '%s'", task_id)
 
         # Finalize with cancelled status
-        await self._finalize_task(
+        self._finalize_task(
             task=task,
             status="cancelled",
             worker_results=[],
             error="Cancelled by user",
+            duration_seconds=0.0,
         )
         logger.info("[SwarmEngine] task '%s' cancelled", task_id)
         return True

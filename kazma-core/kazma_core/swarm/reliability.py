@@ -355,6 +355,7 @@ class CircuitBreaker:
         self._state = CircuitState.CLOSED
         self.consecutive_failures = 0
         self._opened_at = None
+        self._probe_in_flight = False
 
     # ------------------------------------------------------------------
     # Serialization

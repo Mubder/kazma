@@ -141,10 +141,14 @@ class UnifiedRouter:
                     scored_names.append(name)
 
         if not scored_names:
-             raise NoCapableWorkersError(
+            logger.warning(
+                "[RoutingEngine] No capable workers matched. Task prompt: '%s'; available workers: %s",
+                task.prompt[:100],
+                [w['name'] for w in available_workers],
+            )
+            raise NoCapableWorkersError(
                 "No capable workers matched the task requirements. "
-                f"Task prompt: '{task.prompt[:100]}'; "
-                f"available workers: {[w['name'] for w in available_workers]}"
+                "Please check worker capabilities and try again."
             )
 
         # ── 4. Apply Dialect Boosts & Final Sort ──

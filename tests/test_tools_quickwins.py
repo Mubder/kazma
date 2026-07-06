@@ -155,6 +155,7 @@ class TestTruncation:
     async def test_truncation_applied(self) -> None:
         """Results exceeding 4000 chars are truncated with a marker."""
         from kazma_core.agent.tool_registry import LocalToolRegistry
+        from kazma_core.agent.graph_builder import truncate_tool_result
 
         registry = LocalToolRegistry(include_builtins=False)
 
@@ -166,12 +167,8 @@ class TestTruncation:
         raw_content = result["content"]
         assert len(raw_content) == 5000  # registry doesn't truncate
 
-        # Now test through the graph builder truncation logic
-        TOOL_RESULT_MAX_CHARS = 4000
-        content = raw_content
-        if len(content) > TOOL_RESULT_MAX_CHARS:
-            original_len = len(content)
-            content = content[:TOOL_RESULT_MAX_CHARS] + f"\n[truncated {original_len - TOOL_RESULT_MAX_CHARS} chars]"
+        # Test through the actual production truncation function
+        content = truncate_tool_result(raw_content)
 
         assert len(content) < 5000
         assert "[truncated" in content
@@ -181,6 +178,7 @@ class TestTruncation:
     async def test_truncation_short_unchanged(self) -> None:
         """Results under 4000 chars pass through unchanged."""
         from kazma_core.agent.tool_registry import LocalToolRegistry
+        from kazma_core.agent.graph_builder import truncate_tool_result
 
         registry = LocalToolRegistry(include_builtins=False)
 
@@ -189,13 +187,7 @@ class TestTruncation:
             return "Hello, World!"
 
         result = await registry.execute("short_output", {})
-        content = result["content"]
-
-        TOOL_RESULT_MAX_CHARS = 4000
-        # Should NOT be truncated
-        if len(content) > TOOL_RESULT_MAX_CHARS:
-            original_len = len(content)
-            content = content[:TOOL_RESULT_MAX_CHARS] + f"\n[truncated {original_len - TOOL_RESULT_MAX_CHARS} chars]"
+        content = truncate_tool_result(result["content"])
 
         assert content == "Hello, World!"
         assert "[truncated" not in content
@@ -318,7 +310,7 @@ class TestExportSession:
         result = await export_session(format="markdown", messages=test_messages)
 
         # System should be skipped
-        assert "System" not in result.split("---")[1] if "---" in result else True
+        assert "You are helpful" not in result
         # Tool call should appear
         assert "web_search" in result
 

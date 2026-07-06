@@ -762,9 +762,9 @@
 
 {% block scripts %}
 <script>
-  window.KAZMA_WORKERS = {{ workers | tojson | safe if workers else '[]' }};
+  window.KAZMA_WORKERS = JSON.parse('{{ workers | tojson | replace("<", "\\u003c") | safe if workers else "[]" }}');
 </script>
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js" integrity="sha384-qX9VvWkP79m/O121ZE6sOYp0nf/pldQgtvWDbkpzi+3mUo4Wn4Ix4cFzNPay3VaB" crossorigin="anonymous"></script>
 <script src="/static/js/streaming.js"></script>
 <script src="/static/js/swarm.js"></script>
 {% endblock %}

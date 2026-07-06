@@ -458,6 +458,9 @@ class KazmaTUI(App[None]):
                     for item in pending_list:
                         thread_id = item.get("thread_id")
                         if thread_id and thread_id not in self._shown_approvals:
+                            # Don't stack multiple modals — skip if one is already open
+                            if isinstance(self.screen, HitlApprovalScreen):
+                                break
                             self._shown_approvals.add(thread_id)
                             tool_name = item.get("tool_name", "unknown")
                             arguments = item.get("arguments", {})

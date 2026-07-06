@@ -269,7 +269,7 @@ class InProcessWorker(SwarmWorker):
             final_output = ""
             executed_tools: dict[str, str] = {}  # Track "tool_name:sorted_json_args" -> result_content
             _circuit_breaker_tripped = False
-            self._consecutive_tool_failures = 0
+            _consecutive_tool_failures = 0
 
             for iteration in range(1, MAX_ITERATIONS + 1):
                 response = await provider.chat(
@@ -384,14 +384,14 @@ class InProcessWorker(SwarmWorker):
                         )
                         
                         if is_empty_or_denied:
-                            self._consecutive_tool_failures += 1
+                            _consecutive_tool_failures += 1
                         else:
-                            self._consecutive_tool_failures = 0
+                            _consecutive_tool_failures = 0
 
-                        if self._consecutive_tool_failures >= 2:
+                        if _consecutive_tool_failures >= 2:
                             logger.warning(
                                 "[InProcessWorker:%s] Circuit breaker tripped! %d consecutive tool failures for %s.",
-                                self.name, self._consecutive_tool_failures, tc.name
+                                self.name, _consecutive_tool_failures, tc.name
                             )
                             result["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
                             result["is_error"] = True

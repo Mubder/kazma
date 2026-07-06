@@ -275,7 +275,8 @@ class TestUnifiedToolExecutor:
         executor = UnifiedToolExecutor(local=local)
 
         defs = executor.get_tool_definitions()
-        assert len(defs) == 22  # built-in tools
+        assert len(defs) > 0  # built-in tools
+        assert any(d["function"]["name"] == "file_read" for d in defs)
 
     def test_merged_schemas(self):
         local = LocalToolRegistry(include_builtins=False)

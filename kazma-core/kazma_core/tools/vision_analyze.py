@@ -278,7 +278,8 @@ async def analyze_image(
     except ValueError as exc:
         return f"Error: {exc}"
     except Exception as exc:
-        return f"Error: Failed to load image — {exc}"
+        logger.debug("[vision_analyze] Failed to load image: %s", exc, exc_info=True)
+        return "Error: Failed to load image. Check the path and format."
 
     # ── Resize if needed ───────────────────────────────────────────
     if len(image_bytes) > MAX_IMAGE_BYTES:
@@ -310,11 +311,12 @@ async def analyze_image(
         exc_name = type(exc).__name__
         if "vision" in str(exc).lower() or "image" in str(exc).lower():
             return (
-                f"Error: The configured model does not appear to support vision. "
-                f"Switch to a vision-capable model (e.g. gpt-4o, gpt-4o-mini, "
-                f"claude-3.5-sonnet). Details: {exc}"
+                "Error: The configured model does not appear to support vision. "
+                "Switch to a vision-capable model (e.g. gpt-4o, gpt-4o-mini, "
+                "claude-3.5-sonnet)."
             )
-        return f"Error: LLM call failed — {exc}"
+        logger.debug("[vision_analyze] LLM call failed: %s", exc, exc_info=True)
+        return "Error: LLM call failed. Please check your model configuration."
     finally:
         await provider.close()
 
