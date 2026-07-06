@@ -43,7 +43,7 @@ def install_completion(shell: str = "bash") -> str:
             Path.home() / ".local" / "share" / "bash-completion" / "completions",
         ) / "kazma"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(script)
+        target.write_text(script, encoding="utf-8")
         return (
             f"Bash completion installed to {target}\n"
             f"   Source it with:  source {target}"
@@ -58,7 +58,7 @@ def install_completion(shell: str = "bash") -> str:
             Path.home() / ".zsh" / "completions",
         ) / "_kazma"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(script)
+        target.write_text(script, encoding="utf-8")
         return (
             f"Zsh completion installed to {target}\n"
             f"   Ensure {target.parent} is in your fpath."

@@ -273,7 +273,7 @@ class TestToolRegistryHitlFlag:
                 {"path": path, "content": "approved test", "_hitl_approved": True},
             )
             assert result["is_error"] is False
-            assert "chars" in result["content"]
+            assert "bytes" in result["content"]
         finally:
             Path(path).unlink(missing_ok=True)
 

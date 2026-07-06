@@ -127,12 +127,11 @@ class TestFileWrite:
         configure_workspace(workspace="/", allow_absolute=True)
 
         from kazma_core.tools.file_write import file_write
+        from unittest.mock import patch
 
-        result = await file_write("/root/kazma_test_no_permission.txt", "test")
+        with patch.object(Path, "write_text", side_effect=PermissionError("Permission denied")):
+            result = await file_write("/root/kazma_test_no_permission.txt", "test")
 
-        # Should get permission error (unless running as root)
-        if hasattr(os, "getuid") and os.getuid() == 0:
-            pytest.skip("Running as root — permission test not meaningful")
         assert "Error" in result
         assert "Permission" in result
 

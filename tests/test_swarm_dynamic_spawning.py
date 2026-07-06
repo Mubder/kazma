@@ -342,7 +342,7 @@ class TestSpawnedWorkerCapabilityRouting:
             workers=["auto"],
         )
         available = engine._build_available_workers_list()
-        routed = engine._capability_router.route(task, available)
+        routed = await engine._routing_engine.route(task, available)
 
         assert "python-expert" in routed
         # React expert may or may not match "api" depending on token overlap
@@ -372,7 +372,7 @@ class TestSpawnedWorkerCapabilityRouting:
             workers=["auto"],
         )
         available = engine._build_available_workers_list()
-        routed = engine._capability_router.route(task, available)
+        routed = await engine._routing_engine.route(task, available)
 
         assert "data-scientist" in routed
 

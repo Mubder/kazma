@@ -1134,6 +1134,23 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[Gateway] Error during shutdown: %s", e)
 
+        from starlette.exceptions import HTTPException as StarletteHTTPException
+
+        @self.app.exception_handler(StarletteHTTPException)
+        async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> Any:
+            path = request.url.path
+            if path.startswith("/api/") or request.headers.get("accept", "").startswith("application/json"):
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content={"detail": exc.detail},
+                )
+            return self.templates.TemplateResponse(
+                request,
+                "error.html",
+                {"code": exc.status_code, "message": exc.detail, "detail": ""},
+                status_code=exc.status_code,
+            )
+
         @self.app.exception_handler(Exception)
         async def catch_all(request: Request, exc: Any) -> Any:
             """Unified catch-all — returns JSON for API routes, HTML for pages."""

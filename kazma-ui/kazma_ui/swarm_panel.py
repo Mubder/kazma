@@ -846,6 +846,18 @@ class SwarmRouterBuilder:
                     if worker is not None:
                         worker.mark_completed(result.get("status", "error"))
                     results.append(result)
+                return JSONResponse(
+                    {
+                        "status": "ok",
+                        "message": f"Task delegated to SwarmManager for {len(dispatched)} worker(s)",
+                        "dispatched": dispatched,
+                        "missing": missing,
+                        "task": task,
+                        "results": results,
+                        "task_id": None,
+                        "result_status": "success" if any(r.get("status") == "success" for r in results) else "error",
+                    }
+                )
 
             swarm_task = SwarmTask(
                 prompt=task,
