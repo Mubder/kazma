@@ -981,9 +981,13 @@ class KazmaAppBuilder:
         async def approve_tool(thread_id: str, request: Request) -> _JSONResponse:
             if _KAZMA_SECRET:
                 import secrets as _secrets
+                from kazma_ui.auth import SECRET_COOKIE
 
                 provided = request.headers.get("X-Kazma-Secret", "")
-                if not _secrets.compare_digest(provided, _KAZMA_SECRET):
+                if not provided:
+                    provided = request.cookies.get(SECRET_COOKIE, "")
+
+                if not provided or not _secrets.compare_digest(provided, _KAZMA_SECRET):
                     return _JSONResponse({"error": "Unauthorized"}, status_code=401)
 
             try:
