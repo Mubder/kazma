@@ -1947,21 +1947,27 @@
     if (typeof mermaid !== 'undefined') {
       try {
         var uniqueId = 'mermaid-' + Math.floor(Math.random() * 1000000);
-        mermaid.render(uniqueId, mermaidCode).then(function(res) {
-          target.innerHTML = res.svg;
+        mermaid.render(uniqueId, mermaidCode, target).then(function(res) {
+          if (typeof res === 'string') {
+            target.innerHTML = res;
+          } else if (res && typeof res.svg === 'string') {
+            target.innerHTML = res.svg;
+            if (typeof res.bindFunctions === 'function') {
+              res.bindFunctions(target);
+            }
+          } else {
+            target.innerHTML = '<pre style="color:var(--danger);font-family:var(--font-mono);">' + esc(mermaidCode) + '</pre>';
+          }
         }).catch(function(err) {
-          console.error("Mermaid render failed, trying init fallback:", err);
-          target.textContent = mermaidCode;
-          mermaid.init(undefined, target);
+          console.error("Mermaid render failed:", err);
+          target.innerHTML = '<div style="color:var(--danger);font-family:var(--font-mono);font-size:0.75rem;padding:8px;border:1px dashed var(--border-subtle);border-radius:var(--radius);background:rgba(239,68,68,0.02);">' +
+            '<div style="font-weight:600;margin-bottom:4px;">⚠️ Mermaid Render Error:</div>' +
+            '<pre style="margin:0;font-family:inherit;white-space:pre-wrap;color:var(--text-secondary);">' + esc(err.message || err) + '</pre>' +
+            '</div>';
         });
       } catch (e) {
-        console.error("Mermaid error:", e);
-        try {
-          target.textContent = mermaidCode;
-          mermaid.init(undefined, target);
-        } catch (inner) {
-          target.innerHTML = '<pre style="color:var(--danger);font-family:var(--font-mono);">' + esc(mermaidCode) + '</pre>';
-        }
+        console.error("Mermaid sync error:", e);
+        target.innerHTML = '<pre style="color:var(--danger);font-family:var(--font-mono);">' + esc(mermaidCode) + '</pre>';
       }
     } else {
       target.innerHTML = '<pre style="color:var(--danger);font-family:var(--font-mono);">Mermaid library not loaded.</pre>';
