@@ -27,12 +27,30 @@ function HomepageHeader() {
 
 function Features() {
   const features = [
-    {title: 'Skill Marketplace', description: 'Discover, publish, and manage AI agent skills through Kazma Hub.'},
-    {title: 'Multi-Agent Delegation', description: 'Delegate tasks to specialized sub-agents with automatic capability matching.'},
-    {title: 'Arabic RTL Support', description: 'First-class Arabic dialect detection and right-to-left rendering.'},
-    {title: 'Security by Default', description: 'Sandboxing, permission checks, audit trails, and automated security auditing.'},
-    {title: 'Context Management', description: 'Automatic context compaction and checkpointing for long conversations.'},
-    {title: 'MCP Integration', description: 'Connect to Model Context Protocol servers for external tool access.'},
+    {
+      title: 'Skill Marketplace & Signatures',
+      description: 'Discover, publish, and manage skills. Features HMAC-SHA256 timing-safe checksum verification against supply-chain injection attacks.'
+    },
+    {
+      title: 'Triple-Wired Safety Gates',
+      description: 'Human-in-the-Loop (HITL) authorization gates for danger tools, integrated over real-time Web SSE, Telegram, Discord, and Slack.'
+    },
+    {
+      title: 'Corporate Command Console (TUI)',
+      description: 'Vim/Tmux-inspired TUI terminal with scrolling sparkline telemetry, ASCII topology maps, and interactive hitl approval screens.'
+    },
+    {
+      title: 'Sandbox-Isolated Web DAGs',
+      description: 'Crash-proof, isolated Mermaid.js visual pipelines rendering. Uses standard SVG attributes to completely eliminate syntax conflicts.'
+    },
+    {
+      title: 'Arabic RTL Mirroring',
+      description: 'First-class dialect detection, bi-directional text-wrapping, and complete RTL grid mirroring across Web and TUI interfaces.'
+    },
+    {
+      title: 'Enterprise Reliability',
+      description: 'SQLite WAL mode and ConfigStore singletons prevent database locking under high-concurrency swarm operations.'
+    },
   ];
 
   return (
@@ -76,6 +94,35 @@ function HubPreview() {
   );
 }
 
+function QuickStart() {
+  return (
+    <section style={{padding: '4rem 0'}}>
+      <div className="container" style={{maxWidth: '800px', margin: '0 auto'}}>
+        <h2 style={{textAlign: 'center', marginBottom: '2rem'}}>Quick Start</h2>
+        <div style={{
+          background: 'var(--ifm-pre-background)',
+          padding: '1.5rem',
+          borderRadius: '8px',
+          fontFamily: 'monospace',
+          fontSize: '0.9rem',
+          border: '1px solid var(--ifm-color-emphasis-200)',
+          color: 'var(--ifm-code-color)',
+          lineHeight: '1.6'
+        }}>
+          <div><span style={{color: 'var(--ifm-color-primary)'}}># Create a new secure Kazma project</span></div>
+          <div>npx -y create-kazma-app@latest ./my-swarm</div>
+          <br />
+          <div><span style={{color: 'var(--ifm-color-primary)'}}># Start the backend uvicorn coordinator</span></div>
+          <div>uv run python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8090</div>
+          <br />
+          <div><span style={{color: 'var(--ifm-color-primary)'}}># Launch the terminal dash dashboard</span></div>
+          <div>uv run kazma-tui</div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Home() {
   const {siteConfig} = useDocusaurusContext();
   return (
@@ -84,6 +131,7 @@ export default function Home() {
       <main>
         <Features />
         <HubPreview />
+        <QuickStart />
       </main>
     </Layout>
   );
