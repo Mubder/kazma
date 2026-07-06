@@ -439,30 +439,37 @@ class SwarmRouterBuilder:
             lines.append("    classDef router fill:#1e1e2e,stroke:#f5c2e7,stroke-width:2px,color:#cdd6f4;")
             lines.append("    classDef default fill:#15161e,stroke:#414868,stroke-width:1px,color:#a9b1d6;")
 
+            def _safe_id(name: str) -> str:
+                return "".join(c if c.isalnum() else "_" for c in name)
+
             # Add nodes
             for node_id, node in workflow.nodes.items():
                 node_type = getattr(node, "type", "dispatch")
                 prompt = getattr(node, "prompt_template", "")
                 prompt_preview = (prompt[:30] + "...") if len(prompt) > 30 else prompt
-                label = f'"{node_id}<br/><small style=\'color:#565f89;\'>{node_type}</small>"'
-                lines.append(f"    {node_id}[{label}]")
+                node_id_escaped = node_id.replace('"', "'")
+                label = f'"{node_id_escaped}<br/><small style=\'color:#565f89;\'>{node_type}</small>"'
+                safe_node_id = _safe_id(node_id)
+                lines.append(f"    {safe_node_id}[{label}]")
                 
                 # Apply style classes
                 if "router" in node_type.lower() or "dispatch" in node_type.lower() or "decision" in node_type.lower():
-                    lines.append(f"    class {node_id} router;")
+                    lines.append(f"    class {safe_node_id} router;")
                 else:
-                    lines.append(f"    class {node_id} agent;")
+                    lines.append(f"    class {safe_node_id} agent;")
 
             # Add edges with conditions
             for edge in workflow.edges:
                 src = edge.from_node
                 tgt = edge.to_node
+                safe_src = _safe_id(src)
+                safe_tgt = _safe_id(tgt)
                 cond = getattr(edge, "condition", "")
                 if cond:
                     cond_escaped = cond.replace('"', "'")
-                    lines.append(f'    {src} -->|"{cond_escaped}"| {tgt}')
+                    lines.append(f'    {safe_src} -->|"{cond_escaped}"| {safe_tgt}')
                 else:
-                    lines.append(f"    {src} --> {tgt}")
+                    lines.append(f"    {safe_src} --> {safe_tgt}")
 
             return "\n".join(lines)
 
