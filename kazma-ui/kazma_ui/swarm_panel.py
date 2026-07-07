@@ -734,6 +734,80 @@ class SwarmRouterBuilder:
         _current_engine = self._current_engine
         swarm_manager = self.swarm_manager
 
+        async def _maybe_send_to_output_target_fallback(text: str) -> bool:
+            """Send text to output target, resolving GatewayManager from ServiceContainer."""
+            try:
+                from kazma_core.service_container import get_container
+                from kazma_gateway import GatewayManager
+                from kazma_gateway.agent_handler import _maybe_send_to_output_target
+            except ImportError:
+                logger.debug("[Swarm] Gateway or Core modules not available for output target routing.")
+                return False
+
+            try:
+                container = get_container()
+                manager = container.get(GatewayManager) if container.has(GatewayManager) else None
+                return await _maybe_send_to_output_target(manager, text)
+            except Exception as exc:
+                logger.debug("[Swarm] Failed resolving/invoking output routing fallback: %s", exc)
+                return False
+
+        async def _route_task_result(result: Any) -> bool:
+            """Format and send the completed TaskResult to the output target."""
+            if result is None:
+                text = "⚠️ No result returned from swarm."
+            elif hasattr(result, "aggregated_output") and result.aggregated_output:
+                text = result.aggregated_output
+            elif hasattr(result, "worker_results") and result.worker_results:
+                lines = []
+                for wr in result.worker_results:
+                    status_icon = "✅" if getattr(wr, "status", "") == "success" else "❌"
+                    wr_worker = getattr(wr, "worker", "unknown")
+                    wr_output = getattr(wr, "output", "") or ""
+                    wr_error = getattr(wr, "error", "") or "no output"
+                    output = wr_output[:500] if wr_output else wr_error
+                    lines.append(f"{status_icon} **{wr_worker}**: {output}")
+                text = "\n\n".join(lines)
+            elif hasattr(result, "error") and result.error:
+                text = f"⚠️ Task failed: {result.error}"
+            elif isinstance(result, dict):
+                if result.get("aggregated_output"):
+                    text = result["aggregated_output"]
+                elif result.get("worker_results"):
+                    lines = []
+                    for wr in result["worker_results"]:
+                        status_icon = "✅" if wr.get("status") == "success" else "❌"
+                        output = (wr.get("output") or "")[:500] if wr.get("output") else wr.get("error") or "no output"
+                        lines.append(f"{status_icon} **{wr.get('worker', 'unknown')}**: {output}")
+                    text = "\n\n".join(lines)
+                elif result.get("error"):
+                    text = f"⚠️ Task failed: {result['error']}"
+                else:
+                    text = "⚠️ No result returned from swarm."
+            else:
+                text = "⚠️ No result returned from swarm."
+
+            return await _maybe_send_to_output_target_fallback(text)
+
+        async def _run_and_route_task(
+            engine: Any,
+            swarm_task: Any,
+            is_broadcast: bool = False,
+        ) -> Any:
+            """Execute dispatch/broadcast and automatically route the result on completion."""
+            try:
+                if is_broadcast:
+                    result = await engine.broadcast(swarm_task)
+                else:
+                    result = await engine.dispatch(swarm_task)
+                await _route_task_result(result)
+                return result
+            except Exception as exc:
+                logger.exception("[Swarm] Task execution failed under auto-routing wrapper")
+                error_msg = f"⚠️ Swarm task failed: {exc}"
+                await _maybe_send_to_output_target_fallback(error_msg)
+                raise exc
+
         @router.post("/api/swarm/dispatch")
         async def swarm_dispatch(payload: dict[str, Any]) -> JSONResponse:
             """Dispatch a task to one or more workers.
@@ -891,7 +965,7 @@ class SwarmRouterBuilder:
             )
             if task_type == TaskType.BROADCAST:
                 if background:
-                    _handle = asyncio.create_task(engine.broadcast(swarm_task))
+                    _handle = asyncio.create_task(_run_and_route_task(engine, swarm_task, is_broadcast=True))
                     engine._task_handles[swarm_task.id] = _handle
                     # Clean up handle on completion to prevent memory leak
                     _handle.add_done_callback(
@@ -904,10 +978,10 @@ class SwarmRouterBuilder:
                         "result_status": "running",
                         "dispatched": dispatched,
                     })
-                task_result = await engine.broadcast(swarm_task)
+                task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=True)
             else:
                 if background:
-                    _handle = asyncio.create_task(engine.dispatch(swarm_task))
+                    _handle = asyncio.create_task(_run_and_route_task(engine, swarm_task, is_broadcast=False))
                     engine._task_handles[swarm_task.id] = _handle
                     # Clean up handle on completion to prevent memory leak
                     _handle.add_done_callback(
@@ -920,7 +994,7 @@ class SwarmRouterBuilder:
                         "result_status": "running",
                         "dispatched": dispatched,
                     })
-                task_result = await engine.dispatch(swarm_task)
+                task_result = await _run_and_route_task(engine, swarm_task, is_broadcast=False)
             results = [item.to_dict() for item in task_result.worker_results]
 
             # Include checkpoint info for HITL paused pipelines.
@@ -1226,7 +1300,7 @@ class SwarmRouterBuilder:
                     status_code=404,
                 )
             # Dispatch in the background (non-blocking)
-            handle = asyncio.create_task(engine.dispatch(new_task))
+            handle = asyncio.create_task(_run_and_route_task(engine, new_task, is_broadcast=False))
             engine._task_handles[new_task.id] = handle
             handle.add_done_callback(
                 lambda h, tid=new_task.id: engine._task_handles.pop(tid, None)

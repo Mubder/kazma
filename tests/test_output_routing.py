@@ -377,3 +377,215 @@ class TestOutputTargetAPI:
         # Must be a string, not a number, to survive JSON.parse in JS
         assert isinstance(data["chat_id"], str)
         assert data["chat_id"] == str(big_id)
+
+
+# ---------------------------------------------------------------------------
+# Web UI Dispatch / Retry Output Routing
+# ---------------------------------------------------------------------------
+
+class TestWebUIDispatchOutputRouting:
+    """Tests for Output Routing triggered via Web UI/API dispatch and retry endpoints."""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_foreground_output_routing(self):
+        """Foreground dispatch with output routing enabled formats and delivers results to the gateway manager."""
+        import asyncio
+        from fastapi import FastAPI
+        from httpx import ASGITransport, AsyncClient
+        from kazma_core.service_container import get_container, reset_container
+        from kazma_gateway import GatewayManager
+        from kazma_core.swarm import SwarmTask, TaskResult, WorkerResult
+
+        reset_container()
+        container = get_container()
+
+        mock_gateway = MagicMock()
+        mock_gateway.send = AsyncMock()
+        container.register(GatewayManager, mock_gateway)
+
+        # Mock the engine
+        mock_engine = MagicMock()
+        mock_worker = MagicMock()
+        mock_engine.get_worker.return_value = mock_worker
+        
+        # Mock TaskResult
+        mock_result = TaskResult(
+            task_id="task-123",
+            status="success",
+            worker_results=[
+                WorkerResult(worker="worker1", task_id="task-123", status="success", output="Final analysis completed.")
+            ],
+            aggregated_output="Final analysis completed.",
+        )
+        mock_engine.dispatch = AsyncMock(return_value=mock_result)
+
+        from kazma_ui.swarm_panel import create_swarm_router
+        app = FastAPI()
+        app.include_router(create_swarm_router(templates=None))
+
+        config_target = {
+            "platform": "telegram",
+            "chat_id": -100999,
+            "enabled": True,
+        }
+
+        with patch("kazma_ui.swarm_panel._resolve_engine", return_value=mock_engine), \
+             patch("kazma_gateway.agent_handler._get_output_target_config", return_value=config_target):
+            
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post("/api/swarm/dispatch", json={
+                    "workers": ["worker1"],
+                    "task": "run analysis",
+                    "background": False,
+                })
+
+            assert resp.status_code == 200
+            # Gateway manager should have been called with the aggregated output!
+            mock_gateway.send.assert_awaited_once()
+            outbound = mock_gateway.send.call_args.args[0]
+            assert outbound.target_id == "telegram:-100999"
+            assert outbound.text == "Final analysis completed."
+
+    @pytest.mark.asyncio
+    async def test_dispatch_background_output_routing(self):
+        """Background dispatch formats and delivers results to the gateway manager asynchronously on completion."""
+        import asyncio
+        from fastapi import FastAPI
+        from httpx import ASGITransport, AsyncClient
+        from kazma_core.service_container import get_container, reset_container
+        from kazma_gateway import GatewayManager
+        from kazma_core.swarm import SwarmTask, TaskResult, WorkerResult
+
+        reset_container()
+        container = get_container()
+
+        mock_gateway = MagicMock()
+        mock_gateway.send = AsyncMock()
+        container.register(GatewayManager, mock_gateway)
+
+        # Mock the engine
+        mock_engine = MagicMock()
+        mock_worker = MagicMock()
+        mock_engine.get_worker.return_value = mock_worker
+        mock_engine._task_handles = {}
+
+        # Set up a future for mock_engine.dispatch so we can await it
+        fut = asyncio.Future()
+        mock_result = TaskResult(
+            task_id="task-456",
+            status="success",
+            worker_results=[
+                WorkerResult(worker="worker1", task_id="task-456", status="success", output="Background result")
+            ],
+            aggregated_output="Background result",
+        )
+        # Keep the future unresolved until background task is verified in mock_engine._task_handles
+        mock_engine.dispatch = MagicMock(return_value=fut)
+
+        from kazma_ui.swarm_panel import create_swarm_router
+        app = FastAPI()
+        app.include_router(create_swarm_router(templates=None))
+
+        config_target = {
+            "platform": "telegram",
+            "chat_id": -100999,
+            "enabled": True,
+        }
+
+        with patch("kazma_ui.swarm_panel._resolve_engine", return_value=mock_engine), \
+             patch("kazma_gateway.agent_handler._get_output_target_config", return_value=config_target):
+            
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post("/api/swarm/dispatch", json={
+                    "workers": ["worker1"],
+                    "task": "background task",
+                    "background": True,
+                })
+
+            assert resp.status_code == 200
+            # Await the created task handle in _task_handles to make sure the background task is fully executed
+            task_id = resp.json().get("task_id")
+            assert task_id is not None
+            handle = mock_engine._task_handles.get(task_id)
+            assert handle is not None
+            
+            # Now resolve the future to let the background task complete
+            fut.set_result(mock_result)
+            await handle
+
+            # Gateway manager should have been called with the aggregated output!
+            mock_gateway.send.assert_awaited_once()
+            outbound = mock_gateway.send.call_args.args[0]
+            assert outbound.target_id == "telegram:-100999"
+            assert outbound.text == "Background result"
+
+    @pytest.mark.asyncio
+    async def test_dispatch_retry_output_routing(self):
+        """Retrying a task also triggers background dispatch that routes its output on completion."""
+        import asyncio
+        from fastapi import FastAPI
+        from httpx import ASGITransport, AsyncClient
+        from kazma_core.service_container import get_container, reset_container
+        from kazma_gateway import GatewayManager
+        from kazma_core.swarm import SwarmTask, TaskResult, WorkerResult
+
+        reset_container()
+        container = get_container()
+
+        mock_gateway = MagicMock()
+        mock_gateway.send = AsyncMock()
+        container.register(GatewayManager, mock_gateway)
+
+        # Mock the engine
+        mock_engine = MagicMock()
+        mock_engine._task_handles = {}
+
+        # Mock engine.retry_task to return a new task
+        new_task = SwarmTask(id="task-new", prompt="retry prompt", workers=["worker1"])
+        mock_engine.retry_task = AsyncMock(return_value=new_task)
+
+        fut = asyncio.Future()
+        mock_result = TaskResult(
+            task_id="task-new",
+            status="success",
+            worker_results=[
+                WorkerResult(worker="worker1", task_id="task-new", status="success", output="Retry successful output")
+            ],
+            aggregated_output="Retry successful output",
+        )
+        # Keep the future unresolved until background task is verified in mock_engine._task_handles
+        mock_engine.dispatch = MagicMock(return_value=fut)
+
+        from kazma_ui.swarm_panel import create_swarm_router
+        app = FastAPI()
+        app.include_router(create_swarm_router(templates=None))
+
+        config_target = {
+            "platform": "telegram",
+            "chat_id": -100999,
+            "enabled": True,
+        }
+
+        with patch("kazma_ui.swarm_panel._resolve_engine", return_value=mock_engine), \
+             patch("kazma_gateway.agent_handler._get_output_target_config", return_value=config_target):
+            
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post("/api/swarm/tasks/task-old/retry")
+
+            assert resp.status_code == 200
+            # Await the created task handle in _task_handles to make sure the background task is fully executed
+            task_id = resp.json().get("new_task_id")
+            assert task_id == "task-new"
+            handle = mock_engine._task_handles.get(task_id)
+            assert handle is not None
+            
+            # Now resolve the future to let the background task complete
+            fut.set_result(mock_result)
+            await handle
+
+            # Gateway manager should have been called with the aggregated output!
+            mock_gateway.send.assert_awaited_once()
+            outbound = mock_gateway.send.call_args.args[0]
+            assert outbound.target_id == "telegram:-100999"
+            assert outbound.text == "Retry successful output"
+
