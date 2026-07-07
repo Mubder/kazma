@@ -189,6 +189,14 @@ class SwarmEngine:
         """Return all in-flight (running or paused) tasks."""
         return list(self._active_tasks.values())
 
+    def get_active_task(self, task_id: str) -> SwarmTask | None:
+        """Public accessor for a specific active task (avoids direct _active_tasks)."""
+        return self._active_tasks.get(task_id)
+
+    def get_task_handle(self, task_id: str) -> Any | None:
+        """Public accessor for task handle (avoids direct _task_handles access from UI)."""
+        return self._task_handles.get(task_id)
+
     def list_workers(self) -> list:
         """Public accessor returning worker objects. Preferred over direct _workers access from UI layers."""
         # Prefer phonebook when possible; fallback to internal for compatibility

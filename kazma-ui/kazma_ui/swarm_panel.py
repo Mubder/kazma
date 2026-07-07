@@ -127,7 +127,8 @@ def _swarm_started(engine: Any) -> bool:
     """Return whether any worker is running."""
     if engine is None:
         return False
-    return any(worker._running for worker in engine._workers.values())
+    workers = engine.list_workers() if hasattr(engine, "list_workers") else getattr(engine, "_workers", {}).values()
+    return any(getattr(worker, "_running", False) for worker in workers)
 
 
 def _worker_status(worker: Any) -> str:
@@ -243,7 +244,8 @@ def _worker_views(engine: Any) -> list[dict[str, Any]]:
     """Return serialized worker views for templates and APIs."""
     if engine is None:
         return []
-    return [_serialize_worker(worker, engine) for worker in engine._workers.values()]
+    workers = engine.list_workers() if hasattr(engine, "list_workers") else getattr(engine, "_workers", {}).values()
+    return [_serialize_worker(worker, engine) for worker in workers]
 
 
 def _build_worker_config(payload: dict[str, Any]) -> Any:
@@ -1349,7 +1351,7 @@ class SwarmRouterBuilder:
                     status_code=503,
                 )
             # Check the task is active
-            if task_id not in engine._active_tasks:
+            if engine.get_active_task(task_id) is None if hasattr(engine, "get_active_task") else task_id not in getattr(engine, "_active_tasks", {}):
                 return JSONResponse(
                     {"status": "error", "message": f"Task '{task_id}' is not active (already completed or not found)"},
                     status_code=404,
@@ -1655,7 +1657,7 @@ class SwarmRouterBuilder:
         async def swarm_start() -> JSONResponse:
             """Start all workers."""
             engine = _current_engine()
-            workers = [] if engine is None else list(engine._workers.values())
+            workers = [] if engine is None else engine.list_workers() if hasattr(engine, "list_workers") else list(getattr(engine, "_workers", {}).values())
             if not workers:
                 return JSONResponse(
                     {"status": "error", "message": "No workers registered — add workers first"},
@@ -1678,7 +1680,7 @@ class SwarmRouterBuilder:
         async def swarm_stop() -> JSONResponse:
             """Stop all workers."""
             engine = _current_engine()
-            workers = [] if engine is None else list(engine._workers.values())
+            workers = [] if engine is None else engine.list_workers() if hasattr(engine, "list_workers") else list(getattr(engine, "_workers", {}).values())
             if not _swarm_started(engine):
                 return JSONResponse({"status": "ok", "message": "Swarm already stopped"})
 
@@ -1696,7 +1698,7 @@ class SwarmRouterBuilder:
         async def worker_start(name: str) -> JSONResponse:
             """Start a single worker by name."""
             engine = _current_engine()
-            if engine is None or name not in engine._workers:
+            if engine is None or engine.get_worker(name) is None:
                 return JSONResponse(
                     {"status": "error", "message": f"Worker '{name}' not found"},
                     status_code=404,
@@ -1713,7 +1715,7 @@ class SwarmRouterBuilder:
         async def worker_stop(name: str) -> JSONResponse:
             """Stop a single worker by name."""
             engine = _current_engine()
-            if engine is None or name not in engine._workers:
+            if engine is None or engine.get_worker(name) is None:
                 return JSONResponse(
                     {"status": "error", "message": f"Worker '{name}' not found"},
                     status_code=404,
