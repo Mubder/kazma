@@ -2,7 +2,16 @@
 
 from __future__ import annotations
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="typing_extensions")
+
+import os
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+
 import logging
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+
 import sys
 
 from kazma_cli.banner import check_config, show_banner, show_help_brief, show_status

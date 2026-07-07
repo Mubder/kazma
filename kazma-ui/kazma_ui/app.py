@@ -6,9 +6,17 @@ WebSocket endpoints, static files, and template engine.
 
 from __future__ import annotations
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="typing_extensions")
+
+import os
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+
 import asyncio
 import logging
-import os
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+
 from pathlib import Path
 from typing import Any
 
