@@ -255,6 +255,33 @@ class DiscordAdapter(BaseAdapter):
         component_data = data.get("data", {})
         custom_id = component_data.get("custom_id", "")
 
+        if custom_id.startswith("install_dependency:"):
+            package_name = custom_id.split(":", 1)[1]
+            from kazma_core.system import asynchronous_install_package
+            asyncio.create_task(asynchronous_install_package(package_name))
+            
+            try:
+                if not self._http:
+                    self._http = httpx.AsyncClient(
+                        base_url=_DISCORD_API,
+                        timeout=15.0,
+                        headers={"Authorization": f"Bot {self._token}"},
+                    )
+                await self._http.post(
+                    f"/interactions/{interaction_id}/{interaction_token}/callback",
+                    json={
+                        "type": 7,
+                        "data": {
+                            "content": "⏳ Installing ML dependencies in the background...",
+                            "embeds": [],
+                            "components": []
+                        }
+                    },
+                )
+            except Exception as exc:
+                logger.warning("[discord] Failed to respond to dependency interaction: %s", exc)
+            return
+
         if not custom_id.startswith(("swarm_approve_", "swarm_reject_")):
             return  # not a swarm approval button
 

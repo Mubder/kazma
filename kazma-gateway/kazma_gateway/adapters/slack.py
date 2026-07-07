@@ -335,6 +335,63 @@ class SlackAdapter(BaseAdapter):
                             logger.info("[Slack] Socket Mode disconnect received — reconnecting")
                             break
 
+                        if msg_type == "interactive":
+                            envelope_id = msg.get("envelope_id", "")
+                            if envelope_id:
+                                try:
+                                    await ws.send(json.dumps({"envelope_id": envelope_id}))
+                                except Exception:
+                                    logger.debug("[Slack] Failed to ACK interactive envelope")
+
+                            payload = msg.get("payload", {})
+                            payload_type = payload.get("type", "")
+
+                            if payload_type == "block_actions":
+                                actions = payload.get("actions", [])
+                                for action in actions:
+                                    value = action.get("value", "")
+                                    action_id = action.get("action_id", "")
+                                    
+                                    if value.startswith("install_dependency:") or action_id.startswith("install_dependency:"):
+                                        val = value or action_id
+                                        package_name = val.split(":", 1)[1]
+                                        from kazma_core.system import asynchronous_install_package
+                                        await asynchronous_install_package(package_name)
+                                        
+                                        response_url = payload.get("response_url", "")
+                                        if response_url:
+                                            try:
+                                                updated_text = "⏳ *Installing ML dependencies in the background...*"
+                                                updated_blocks = [
+                                                    {
+                                                        "type": "section",
+                                                        "text": {"type": "mrkdwn", "text": updated_text}
+                                                    }
+                                                ]
+                                                async with httpx.AsyncClient() as client:
+                                                    await client.post(
+                                                        response_url,
+                                                        json={
+                                                            "text": "⏳ Installing ML dependencies in the background...",
+                                                            "blocks": updated_blocks,
+                                                            "replace_original": True
+                                                        }
+                                                    )
+                                            except Exception as exc:
+                                                logger.warning("[Slack] Failed to update interactive card: %s", exc)
+                                                
+                                    elif value.startswith(("swarm_approve_", "swarm_reject_")):
+                                        try:
+                                            from kazma_core.swarm.bus import get_message_bus
+                                            from kazma_gateway.adapters.slack_bus import SlackBusAdapter
+                                            
+                                            adapter = get_message_bus().adapter
+                                            if isinstance(adapter, SlackBusAdapter):
+                                                adapter.handle_callback(value)
+                                        except Exception as exc:
+                                            logger.warning("[Slack] Swarm approval callback failed: %s", exc)
+                            continue
+
                         if msg_type == "events_api":
                             envelope_id = msg.get("envelope_id", "")
                             # ACK the event immediately

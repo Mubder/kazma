@@ -842,6 +842,31 @@ class TelegramAdapter(BaseAdapter):
         elif data.startswith("model_select:"):
             model_id = data.split(":", 1)[1]
             text = f"/_models_select {model_id}"
+        elif data.startswith("install_dependency:"):
+            package_name = data.split(":", 1)[1]
+            from kazma_core.system import asynchronous_install_package
+            asyncio.create_task(asynchronous_install_package(package_name))
+            chat_id = message.get("chat", {}).get("id")
+            message_id = message.get("message_id")
+            if chat_id and message_id:
+                try:
+                    if not self._http:
+                        self._http = httpx.AsyncClient(
+                            base_url=self._api_base,
+                            timeout=httpx.Timeout(30.0, connect=5.0),
+                        )
+                    await self._http.post(
+                        "/editMessageText",
+                        json={
+                            "chat_id": chat_id,
+                            "message_id": message_id,
+                            "text": "⏳ Installing ML dependencies in the background...",
+                            "reply_markup": {"inline_keyboard": []}
+                        }
+                    )
+                except Exception as exc:
+                    logger.warning("[telegram] Failed to edit alert card: %s", exc)
+            return
 
         if not text:
             logger.debug("[telegram] Unknown callback_data: %s", data)

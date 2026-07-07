@@ -110,6 +110,45 @@ class DiscordBusAdapter(BusAdapter):
         )
         await self._post_message({"content": text[:2000]})
 
+    async def send_alert(
+        self,
+        title: str,
+        subsystem: str,
+        status: str,
+        reason: str,
+        callback_id: str,
+        button_text: str,
+    ) -> None:
+        """Deliver an alert card with Discord embed and buttons for dependency installation."""
+        description = (
+            f"**Subsystem:** {subsystem}\n"
+            f"**Status:** {status}\n"
+            f"**Reason:** {reason}\n\n"
+            "Click below to trigger the remote installation safely."
+        )
+
+        embed = {
+            "title": f"🚨 {title}",
+            "description": description[:2000],
+            "color": 0xFF5555,  # Red
+        }
+
+        components = [
+            {
+                "type": 1,  # ACTION_ROW
+                "components": [
+                    {
+                        "type": 2,  # BUTTON
+                        "style": 1,  # PRIMARY (blue)
+                        "label": button_text,
+                        "custom_id": f"install_dependency:{callback_id}",
+                    }
+                ],
+            }
+        ]
+
+        await self._post_message({"embeds": [embed], "components": components})
+
     async def request_approval(self, approval: ApprovalRequest) -> bool:
         """Post an approval card with buttons and await the response.
 

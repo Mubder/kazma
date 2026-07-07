@@ -86,6 +86,18 @@ class BusAdapter(ABC):
         """Request HITL approval. Returns True if approved, False if rejected or timed out."""
         ...
 
+    async def send_alert(
+        self,
+        title: str,
+        subsystem: str,
+        status: str,
+        reason: str,
+        callback_id: str,
+        button_text: str,
+    ) -> None:
+        """Deliver an alert card/message."""
+        pass
+
 
 # ── Null adapter (for headless / no-chat mode) ────────────────────────────
 
@@ -101,6 +113,17 @@ class NullBusAdapter(BusAdapter):
 
     async def request_approval(self, approval: ApprovalRequest) -> bool:
         return True  # auto-approve when no adapter is present
+
+    async def send_alert(
+        self,
+        title: str,
+        subsystem: str,
+        status: str,
+        reason: str,
+        callback_id: str,
+        button_text: str,
+    ) -> None:
+        pass
 
 
 # ── Message Bus ────────────────────────────────────────────────────────────
@@ -212,6 +235,44 @@ class SwarmMessageBus:
         except TimeoutError:
             logger.warning("HITL approval timed out after %.1fs for %s", timeout, worker_name)
             return False
+
+    async def send_alert(
+        self,
+        title: str,
+        subsystem: str,
+        status: str,
+        reason: str,
+        callback_id: str,
+        button_text: str,
+    ) -> None:
+        """Send an alert to the platform adapter."""
+        if hasattr(self._adapter, "send_alert"):
+            await self._adapter.send_alert(
+                title=title,
+                subsystem=subsystem,
+                status=status,
+                reason=reason,
+                callback_id=callback_id,
+                button_text=button_text,
+            )
+        else:
+            # Fallback to plain send if the adapter doesn't support send_alert yet
+            msg_content = f"ALERT: {title}\nSubsystem: {subsystem} is {status}\nReason: {reason}"
+            from kazma_core.swarm.bus import BusMessage
+            await self._adapter.send(BusMessage(
+                worker_name="System",
+                worker_role="Observability",
+                content=msg_content,
+                level="error"
+            ))
+        await self._notify_subscribers("alert", {
+            "title": title,
+            "subsystem": subsystem,
+            "status": status,
+            "reason": reason,
+            "callback_id": callback_id,
+            "button_text": button_text,
+        })
 
 
 # Module-level singleton for the bus.

@@ -115,6 +115,22 @@
     </div>
   </div>
 
+  <!-- ── Memory & Governance ── -->
+  <div id="memory-governance-section" class="chart-card" style="margin-bottom:1.5rem;">
+    <h3 class="chart-title" style="display:flex;align-items:center;justify-content:space-between;margin:0;">
+      <span>🧠 Memory &amp; Governance</span>
+      <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">ACTIVE</span>
+    </h3>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;">
+      <span style="font-size:0.85rem;color:var(--text-secondary);line-height:1.4;" id="memory-status-desc">
+        ChromaDB Vector Store and sentence-transformers models are fully operational.
+      </span>
+      <button id="install-ml-btn" class="btn btn-sm btn-primary" style="display:none;white-space:nowrap;padding:6px 14px;border-radius:6px;font-size:0.8rem;">
+        Install ML Dependencies
+      </button>
+    </div>
+  </div>
+
   <!-- ── Session Management ── -->
   <div class="card" style="padding:0;overflow:hidden;margin-bottom:1.5rem;">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-subtle);">
@@ -308,6 +324,59 @@
 
   document.getElementById('clear-all-btn').addEventListener('click', window._clearAllSessions);
   _loadSessions();
+
+  // Memory & Governance Polling
+  const memoryBadge = document.getElementById('memory-status-badge');
+  const memoryDesc = document.getElementById('memory-status-desc');
+  const installBtn = document.getElementById('install-ml-btn');
+
+  async function pollMemoryStatus() {
+    try {
+      const resp = await fetch('/api/system/status');
+      const data = await resp.json();
+      const status = data.status || 'ACTIVE';
+
+      if (status === 'ACTIVE') {
+        memoryBadge.textContent = 'ACTIVE';
+        memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(46, 213, 115, 0.15);color:#2ed573;border:1px solid rgba(46, 213, 115, 0.3);';
+        memoryDesc.textContent = 'ChromaDB Vector Store and sentence-transformers models are fully operational.';
+        installBtn.style.display = 'none';
+        installBtn.disabled = false;
+        installBtn.textContent = 'Install ML Dependencies';
+      } else {
+        memoryBadge.textContent = 'DEGRADED';
+        memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(255, 71, 87, 0.15);color:#ff4757;border:1px solid rgba(255, 71, 87, 0.3);';
+        memoryDesc.textContent = 'System is running in degraded mode using keyword-only FTS5 fallback. ML dependencies are missing.';
+        if (installBtn.textContent !== 'Installing...') {
+          installBtn.style.display = 'inline-block';
+        }
+      }
+    } catch (e) {
+      console.error('Failed to poll memory status:', e);
+    }
+  }
+
+  if (installBtn) {
+    installBtn.addEventListener('click', async function() {
+      installBtn.disabled = true;
+      installBtn.textContent = 'Installing...';
+      try {
+        await fetch('/api/system/install', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ package_name: 'sentence-transformers' })
+        });
+      } catch (e) {
+        alert('Failed to trigger installation.');
+        installBtn.disabled = false;
+        installBtn.textContent = 'Install ML Dependencies';
+      }
+    });
+  }
+
+  // Poll immediately and then every 5 seconds
+  pollMemoryStatus();
+  setInterval(pollMemoryStatus, 5000);
 })();
 </script>
 {% endblock %}

@@ -772,6 +772,21 @@ class KazmaAppBuilder:
             engine = _tt_mod.ReplayEngine()
             return await engine.replay_from(thread_id, iteration)
 
+        @self.app.get("/api/system/status")
+        async def _get_system_status():
+            from kazma_core.config_store import get_config_store
+            store = get_config_store()
+            status = store.get("system.memory.status", category="system") or "ACTIVE"
+            return {"status": status}
+
+        @self.app.post("/api/system/install")
+        async def _post_system_install(req: dict = None):
+            req = req or {}
+            package_name = req.get("package_name", "sentence-transformers")
+            from kazma_core.system import asynchronous_install_package
+            await asynchronous_install_package(package_name)
+            return {"status": "started", "package": package_name}
+
         @self.app.websocket("/ws/dashboard")
         async def ws_dashboard(websocket: WebSocket) -> None:
             from kazma_ui.auth import get_kazma_secret, SECRET_COOKIE

@@ -168,6 +168,47 @@ class TelegramBusAdapter(BusAdapter):
             "parse_mode": "MarkdownV2",
         })
 
+    async def send_alert(
+        self,
+        title: str,
+        subsystem: str,
+        status: str,
+        reason: str,
+        callback_id: str,
+        button_text: str,
+    ) -> None:
+        """Deliver an alert card with inline keyboard button for dependency installation."""
+        safe_title = _escape_md(title)
+        safe_subsystem = _escape_md(subsystem)
+        safe_status = _escape_md(status)
+        safe_reason = _escape_md(reason)
+
+        text = (
+            f"🚨 *{safe_title}*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"*Subsystem:* {safe_subsystem}\n"
+            f"*Status:* {safe_status}\n"
+            f"*Reason:* {safe_reason}\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Click below to trigger the remote installation safely\\."
+        )
+
+        reply_markup = {
+            "inline_keyboard": [[
+                {
+                    "text": button_text,
+                    "callback_data": f"install_dependency:{callback_id}",
+                }
+            ]]
+        }
+
+        await self._post({
+            "chat_id": self._chat_id,
+            "text": text[:4096],
+            "parse_mode": "MarkdownV2",
+            "reply_markup": reply_markup,
+        })
+
     async def request_approval(self, approval: ApprovalRequest) -> bool:
         """Post an approval card with inline keyboard buttons.
 

@@ -116,6 +116,45 @@ class SlackBusAdapter(BusAdapter):
         )
         await self._post_message({"text": text[:2900], "mrkdwn": True})
 
+    async def send_alert(
+        self,
+        title: str,
+        subsystem: str,
+        status: str,
+        reason: str,
+        callback_id: str,
+        button_text: str,
+    ) -> None:
+        """Deliver an alert card with Block Kit buttons for dependency installation."""
+        text = (
+            f"🚨 *{title}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"*Subsystem:* {subsystem}\n"
+            f"*Status:* {status}\n"
+            f"*Reason:* {reason}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            "Click below to trigger the remote installation safely."
+        )
+
+        blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": text[:2900]}},
+            {
+                "type": "actions",
+                "block_id": f"install_actions_{callback_id}",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": button_text},
+                        "style": "primary",
+                        "value": f"install_dependency:{callback_id}",
+                        "action_id": f"install_dependency:{callback_id}",
+                    }
+                ]
+            }
+        ]
+
+        await self._post_message({"text": f"ALERT: {title}", "blocks": blocks})
+
     async def request_approval(self, approval: ApprovalRequest) -> bool:
         """Post an approval card with Block Kit buttons and await the response.
 
