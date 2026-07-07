@@ -776,7 +776,7 @@ class KazmaAppBuilder:
         async def _get_system_status():
             from kazma_core.config_store import get_config_store
             store = get_config_store()
-            status = store.get("system.memory.status", category="system") or "ACTIVE"
+            status = store.get("system.memory.status") or "ACTIVE"
             return {"status": status}
 
         @self.app.post("/api/system/install")
