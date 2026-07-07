@@ -87,6 +87,11 @@ safety:
       - shell_exec
       - code_exec
       - python_exec
+      # Extended for swarm bus parity (spawn/schedule are danger in SafetyMiddleware too)
+      - spawn_agent
+      - spawn_agents
+      - schedule_task
+      - cancel_scheduled
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 

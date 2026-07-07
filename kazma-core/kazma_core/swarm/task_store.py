@@ -23,6 +23,8 @@ from kazma_core.swarm.task import (
     TaskType,
 )
 
+from kazma_core.config_store import apply_sqlite_pragmas
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/swarm_tasks.db"
@@ -96,12 +98,7 @@ class TaskStore:
         if self._conn is None:
             self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
-            # Enable WAL mode for better concurrent read/write performance
-            try:
-                self._conn.execute("PRAGMA journal_mode=WAL")
-                self._conn.execute("PRAGMA busy_timeout=5000")
-            except Exception:
-                pass  # Not critical if WAL isn't supported
+            apply_sqlite_pragmas(self._conn)
         return self._conn
 
     def _init_db(self) -> None:

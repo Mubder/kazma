@@ -7,6 +7,23 @@ Features are listed with their implementation PR/commit where available.
 
 ## Sprint 17 — Skill Checksums + Task Cancel/Retry + Config Reconcilation + Engine Refactor (July 2026)
 
+### Deep Audit Remediation (July 7, 2026)
+
+Follow-up fixes from re-audit of `AUDIT_DEEP_REPORT_2026-07-07.md` (canonical) and `DEEP_AUDIT_REPORT.md`. All changes applied directly on `main` (no feature branches). Validations: py_compile + targeted tests on active tree.
+
+| Status | Item | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **MCP IDE server hardening** | Require `KAZMA_SECRET` (via `_secret`) for danger tools + route through `SafetyMiddleware.check_sync()` | `mcp_server.py` |
+| ✅ | **SSE graph reference fix** | Mutable `_graph_holder` so `/api/chat/stream` uses post-startup checkpointed + HITL-wired graph (was stale closure) | `app.py`, `sse_chat.py` |
+| ✅ | **WebSocket path documentation** | Clear note that WS uses direct `stream_chat` + tools (only bus safety, bypasses graph `interrupt()`) | `chat.py` |
+| ✅ | **services.py claim removed** | Architecture docs no longer claim non-existent facade; added `list_workers()` public method + usage in metrics | `README.md`, `architecture.md`, `core-api.md`, `engine.py`, `metrics.py` |
+| ✅ | **Web approve ownership** | Basic context/ownership check added to `POST /api/approve/{thread_id}` (parity with gateway) | `app.py` |
+| ✅ | **Secret centralization** | New `get_kazma_secret()` in ConfigStore; Hub now uses it instead of raw `os.environ` | `config_store.py`, `hub/*.py` |
+| ✅ | **Danger tool list sync** | Added `spawn_agent*`, `schedule_task`, `cancel_scheduled` to `kazma.yaml` `require_approval_for` | `kazma.yaml` |
+| ✅ | **Docs accuracy** | Fixed test count (3,495), LOC numbers, API reference examples, services.py claim | `README.md`, `architecture.md`, `core-api.md` |
+| ✅ | **Error handling sample** | Replaced some silent `except Exception: pass` with `logger.debug` on hot paths | `app.py` |
+| ✅ | **SQLite pragma centralization** | Added `apply_sqlite_pragmas()` helper (WAL + busy_timeout=5000 + synchronous); rolled out to stores | `config_store.py` + callers |
+
 ### P1-3: Enforce Skill Checksums Unconditionally
 
 | Status | Feature | Description | Reference |

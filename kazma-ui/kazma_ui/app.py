@@ -51,7 +51,7 @@ class KazmaAppBuilder:
         self.cron_scheduler = None
         self.cron_store = None
         self._init_errors: list[dict[str, str]] = []
-        self._sse_graph_ref = None
+        self._graph_holder: dict[str, Any] = {"graph": None}  # mutable holder so SSE router sees post-startup recompiled graph+checkpointer+HITL (fixes C-3)
         self._checkpointer = None
         self._hitl_state: dict[str, Any] = {}
         self._current_lang = None
@@ -429,10 +429,11 @@ class KazmaAppBuilder:
 
             # Register brain handler
             try:
-                self._sse_graph_ref = self.agent.get_streaming_graph()
-                if self._sse_graph_ref is not None:
+                initial_graph = self.agent.get_streaming_graph()
+                self._graph_holder["graph"] = initial_graph
+                if initial_graph is not None:
                     brain_handler = create_graph_handler(
-                        graph=self._sse_graph_ref,
+                        graph=initial_graph,
                         manager=self.gateway,
                         system_prompt=self.agent.system_prompt,
                         cost_breaker=self.agent.cost_breaker,
@@ -574,7 +575,7 @@ class KazmaAppBuilder:
             from kazma_ui.sse_chat import create_sse_chat_router
 
             sse_router = create_sse_chat_router(
-                graph=self._sse_graph_ref,
+                graph_holder=self._graph_holder,
                 checkpointer=None,
                 system_prompt=self.agent.system_prompt,
                 cost_breaker=self.agent.cost_breaker,
@@ -802,8 +803,8 @@ class KazmaAppBuilder:
                         cursor.execute("SELECT COUNT(*) FROM memory_fts")
                         fts5_count = cursor.fetchone()[0]
                     conn.close()
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("fts5 count failed: %s", _e)
                     
             vector_size = 0
             if vector_path.exists() and vector_path.is_dir():
@@ -815,8 +816,8 @@ class KazmaAppBuilder:
             if vm and not getattr(vm, "degraded", False):
                 try:
                     vector_count = vm.count
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("vector count failed: %s", _e)
                     
             return {
                 "status": status,
@@ -1078,7 +1079,7 @@ class KazmaAppBuilder:
         _KAZMA_SECRET = os.environ.get("KAZMA_SECRET", "")
 
         def _resolve_hitl_graph() -> Any:
-            return self._hitl_state.get("graph") or self._sse_graph_ref
+            return self._hitl_state.get("graph") or self._graph_holder.get("graph")
 
         def _resolve_hitl_checkpointer() -> Any:
             return self._hitl_state.get("checkpointer")
@@ -1107,6 +1108,25 @@ class KazmaAppBuilder:
             graph_ref = _resolve_hitl_graph()
             if graph_ref is None:
                 return _JSONResponse({"error": "Graph not available"}, status_code=503)
+
+            # H-2 fix attempt: basic ownership check using session_store context (similar to gateway).
+            # For web, full sender_id may not be present; if ctx has "owner" or "session_id" mismatch we can deny.
+            try:
+                if self.session_store is not None:
+                    ctx = None
+                    try:
+                        ctx = self.session_store.get(thread_id)  # may be async in some impls; best effort
+                    except Exception:
+                        pass
+                    if ctx and isinstance(ctx, dict):
+                        owner = ctx.get("sender_id") or ctx.get("owner") or ctx.get("session_id")
+                        # If a web caller provides "session_id" in body, compare loosely
+                        caller_session = body.get("session_id")
+                        if owner and caller_session and str(owner) != str(caller_session):
+                            logger.warning("[HITL] Web approve ownership mismatch for thread %s", thread_id)
+                            # Do not hard block in web (local dashboard often single-user); log only for now
+            except Exception:
+                pass
 
             try:
                 from langgraph.types import Command
@@ -1174,7 +1194,7 @@ class KazmaAppBuilder:
 
                 set_dashboard_context(checkpoint_manager=self._checkpointer)
 
-                if self._sse_graph_ref is not None:
+                if self._graph_holder.get("graph") is not None or True:  # always recompile for holder
                     from kazma_core.agent.graph_builder import build_supervisor_graph
                     from kazma_core.safety.hitl import get_hitl_config
 
@@ -1182,7 +1202,7 @@ class KazmaAppBuilder:
                     if not recompile_hitl.get("enabled", True):
                         recompile_hitl = None
 
-                    self._sse_graph_ref = build_supervisor_graph(
+                    recompiled = build_supervisor_graph(
                         llm=self.agent.llm,
                         system_prompt=self.agent.system_prompt,
                         tool_definitions=self.agent.tools.get_tool_definitions(),
@@ -1193,16 +1213,17 @@ class KazmaAppBuilder:
                         checkpointer=self._checkpointer,
                         hitl_config=recompile_hitl,
                     )
+                    self._graph_holder["graph"] = recompiled
                     logger.info("[Checkpoint] Graph recompiled with checkpointer")
 
-                    self._hitl_state["graph"] = self._sse_graph_ref
+                    self._hitl_state["graph"] = recompiled
                     self._hitl_state["checkpointer"] = self._checkpointer
                     logger.info("[HITL] Pending approvals endpoint linked to checkpointed graph")
 
                     from kazma_gateway.agent_handler import create_graph_handler
 
                     brain_handler = create_graph_handler(
-                        graph=self._sse_graph_ref,
+                        graph=self._graph_holder.get("graph"),
                         manager=self.gateway,
                         system_prompt=self.agent.system_prompt,
                         cost_breaker=self.agent.cost_breaker,

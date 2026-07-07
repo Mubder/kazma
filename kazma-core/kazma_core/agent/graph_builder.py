@@ -46,6 +46,8 @@ from kazma_core.agent.state import (
 from kazma_core.llm_provider import LLMConfig, LLMProvider
 from kazma_core.time_travel import SnapshotRecorder
 
+from kazma_core.config_store import apply_sqlite_pragmas_async
+
 logger = logging.getLogger(__name__)
 
 
@@ -954,8 +956,7 @@ async def create_supervisor_app(
     # Checkpointer
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = await aiosqlite.connect(db_path)
-    await conn.execute("PRAGMA journal_mode=WAL")
-    await conn.execute("PRAGMA synchronous=NORMAL")
+    await apply_sqlite_pragmas_async(conn)
     checkpointer = AsyncSqliteSaver(conn)
     await checkpointer.setup()
 

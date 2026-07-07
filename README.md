@@ -4,7 +4,7 @@
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
 
-![Tests](https://img.shields.io/badge/tests-3655_passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3495_passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
 ![Version](https://img.shields.io/badge/version-0.2.0-blue)
@@ -27,7 +27,7 @@
 [langgraph-url]: https://www.langchain.com/langgraph
 [uv-shield]: https://img.shields.io/badge/uv-managed-purple.svg
 [uv-url]: https://github.com/astral-sh/uv
-[tests-shield]: https://img.shields.io/badge/tests-3655_passing-success.svg
+[tests-shield]: https://img.shields.io/badge/tests-3495_passing-success.svg
 [tests-url]: https://github.com/Mubder/kazma
 [license-shield]: https://img.shields.io/github/license/Mubder/kazma.svg
 [license-url]: https://github.com/Mubder/kazma/blob/main/LICENSE
@@ -571,8 +571,8 @@ kazma-core/              Agent graph, ReAct supervisor, sub-agents, model router
 ├── kazma-ui/             FastAPI + Jinja2 dashboard (Arabic RTL, bilingual EN/AR)
 │   └── kazma_ui/
 │       ├── app.py            FastAPI app, shutdown handler, SSE endpoints
-│       ├── services.py       Service facade layer — zero private attr access from UI
 │       ├── i18n.py           Internationalization (150+ AR translations, cookie locale)
+│       └── (no services.py facade; UI uses agent/engine public surface + limited internals)
 │       ├── gateway_monitor.py /api/gateway/status endpoint
 │       └── metrics.py        Prometheus /metrics endpoint
 ├── kazma-tui/            Textual TUI with English-only metrics/chat dashboard
@@ -679,7 +679,7 @@ For overrides, copy to `kazma.local.yaml` (git-ignored). Env vars take precedenc
 
 ## 🧪 Tests
 
-3,655 passing across `tests/`, `kazma-gateway/tests/`, and `kazma-tui/tests/` (13 skipped due to missing optional deps; 5 environmental failures — Windows `echo`/`sleep`/`/root/` paths, textual app context).
+3,495 tests collected across `tests/`, `kazma-gateway/tests/`, and `kazma-tui/tests/` (actual count verified via pytest --collect-only; some skips for optional deps). See tests/ for full suite.
 
 ```bash
 # Full suite

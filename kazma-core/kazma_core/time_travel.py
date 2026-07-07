@@ -35,6 +35,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from kazma_core.config_store import apply_sqlite_pragmas
+
 logger = logging.getLogger(__name__)
 
 # Default paths / limits
@@ -137,7 +139,7 @@ class SnapshotStore:
         self._db_path = db_path
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        apply_sqlite_pragmas(self._conn)
         self._conn.execute(_CREATE_TABLE_SQL)
         self._conn.execute(_CREATE_INDEX_SQL)
         self._conn.commit()

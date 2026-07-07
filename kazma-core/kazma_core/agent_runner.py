@@ -28,6 +28,8 @@ from kazma_core.mcp.manager import UnifiedToolExecutor
 from kazma_core.state import AgentState
 from kazma_core.tracing import create_tracer
 
+from kazma_core.config_store import apply_sqlite_pragmas_async
+
 # NOTE: kazma_core.agent.graph_builder / .state are imported lazily inside
 # run()/_ensure_graph() to avoid a circular import — the kazma_core.agent
 # package __init__ re-exports names from this module.
@@ -546,8 +548,7 @@ class KazmaAgent:
         db_path = self.config.raw.get("storage", {}).get("checkpoint_path", CHECKPOINT_DB)
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._checkpoint_conn = await aiosqlite.connect(db_path)
-        await self._checkpoint_conn.execute("PRAGMA journal_mode=WAL")
-        await self._checkpoint_conn.execute("PRAGMA synchronous=NORMAL")
+        await apply_sqlite_pragmas_async(self._checkpoint_conn)
         self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
         await self._checkpointer.setup()
 

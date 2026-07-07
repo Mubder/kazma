@@ -36,7 +36,7 @@ and an OpenAI-compatible LLM provider layer.
 
 ### 2. Swarm Engine (`kazma-core/kazma_core/swarm/`)
 
-**Engine** (`engine.py`, ~1727 lines):
+**Engine** (`engine.py`, ~1574 lines; refactored P2-1 with reliability_registry + phonebook + checkpoint_manager):
 - `SwarmEngine.dispatch()` — main entry point with catch-all error handling
 - `_dispatch_inner()` — auto-routing, pipeline/fanout/broadcast dispatch
 - `_dispatch_worker()` — per-worker dispatch with circuit breaker, retry, timeout
@@ -92,7 +92,7 @@ and an OpenAI-compatible LLM provider layer.
 
 ### 3. Gateway (`kazma-gateway/kazma_gateway/`)
 
-**Agent Handler** (`agent_handler.py`, ~1306 lines):
+**Agent Handler** (`agent_handler.py`, ~1589 lines):
 - `create_graph_handler()` — creates the async message handler closure
 - Platform isolation: graph state never sees chat_id/user_id (stored in SessionStore)
 - Slash command intercept: `/help`, `/reset`, `/model`, `/status`, `/cost`, etc.
@@ -118,11 +118,12 @@ and an OpenAI-compatible LLM provider layer.
 - GatewayManager wired with TelegramBusAdapter at startup
 - SubAgentManager for parallel child agent graphs
 
-**Swarm Panel** (`swarm_panel.py`, ~1451 lines):
+**Swarm Panel** (`swarm_panel.py`, ~1993 lines):
 - Full REST API: workers CRUD, dispatch, tasks, metrics, templates, export
 - SSE streaming for live task updates
 - Output routing config: `GET/PUT /api/swarm/output-target`
 - Server-side task search and CSV/JSON export
+- Note: No separate services.py facade (documented claim removed; direct but limited access to public surfaces)
 
 **Frontend** (`static/js/`):
 - `chat.js` — SSE chat with model dropdown, bidirectional sidebar sync

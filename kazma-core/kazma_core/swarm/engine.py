@@ -189,6 +189,16 @@ class SwarmEngine:
         """Return all in-flight (running or paused) tasks."""
         return list(self._active_tasks.values())
 
+    def list_workers(self) -> list:
+        """Public accessor returning worker objects. Preferred over direct _workers access from UI layers."""
+        # Prefer phonebook when possible; fallback to internal for compatibility
+        try:
+            if hasattr(self, "_phonebook") and self._phonebook:
+                return list(self._phonebook._entries.values())  # internal but stable for now
+        except Exception:
+            pass
+        return list(getattr(self, "_workers", {}).values())
+
     def list_tasks(self, task_type: TaskType | str | None = None) -> list[SwarmTask]:
         """Return completed task snapshots, optionally filtered by task type."""
         normalized_type = (

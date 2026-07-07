@@ -273,7 +273,8 @@ def _is_cloud_url(base_url: str) -> bool:
 
 
 def create_sse_chat_router(
-    graph: Any,
+    graph: Any = None,
+    graph_holder: dict[str, Any] | None = None,  # preferred: mutable holder updated after startup recompile with checkpointer + HITL
     checkpointer: Any = None,  # deprecated, kept for API compatibility
     system_prompt: str = "",
     cost_breaker: Any = None,
@@ -312,6 +313,13 @@ def create_sse_chat_router(
     # WebSocket session-list / message-history endpoints and vice versa.
     # See VAL-UX-007 for the contract this satisfies.
     _store = get_session_manager()
+
+    def _get_graph() -> Any:
+        """Resolve current graph from mutable holder (updated post-startup with checkpointer/HITL)
+        or fallback to the construction-time graph. This fixes the stale ref closure (C-3)."""
+        if graph_holder and graph_holder.get("graph"):
+            return graph_holder.get("graph")
+        return graph
 
     r = APIRouter(tags=["chat-sse"])
 
@@ -495,8 +503,9 @@ def create_sse_chat_router(
             content_acc = ""
 
             try:
+                current_graph = _get_graph()
                 async for frame in _stream_langgraph_events(
-                    graph=graph,
+                    graph=current_graph,
                     input_state=input_state,
                     config=graph_config,
                 ):
