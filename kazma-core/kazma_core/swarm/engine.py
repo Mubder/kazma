@@ -116,6 +116,7 @@ class SwarmEngine:
         # Register reject callback so the checkpoint timeout auto-reject
         # can call back into the engine without a circular reference.
         self._checkpoint_mgr.set_reject_callback(self.reject_checkpoint)
+        self._sse_bus: Any = None
         self._build_workers()
 
     def get_autoscaler(self):
@@ -215,6 +216,23 @@ class SwarmEngine:
             pass
         return list(getattr(self, "_workers", {}).values())
 
+    def set_sse_bus(self, bus: Any) -> None:
+        """Register an SSEEventBus for task/worker lifecycle events.
+
+        This is the clean replacement for previous monkey-patching of
+        dispatch/_finalize_task/_dispatch_worker.
+        """
+        self._sse_bus = bus
+
+    def _emit_sse(self, task_id: str, event: str, data: dict[str, Any]) -> None:
+        """Internal helper to emit via registered SSE bus (if any)."""
+        if self._sse_bus is None:
+            return
+        try:
+            self._sse_bus.emit(task_id, event, data)
+        except Exception:
+            logger.debug("[SwarmEngine] SSE emit failed for %s:%s", task_id, event)
+
     def list_tasks(self, task_type: TaskType | str | None = None) -> list[SwarmTask]:
         """Return completed task snapshots, optionally filtered by task type."""
         normalized_type = (
@@ -278,6 +296,11 @@ class SwarmEngine:
         task.started_at = task.started_at or _utc_now_iso()
         task.status = TaskStatus.RUNNING
         self._active_tasks[task.id] = task  # track in-flight
+
+        self._emit_sse(task.id, "task_started", {
+            "task_id": task.id,
+            "workers": list(task.workers) if task.workers else [],
+        })
 
         # Start a root tracing span for this task.
         task_span = self._tracing_emitter.start_task_span(
@@ -964,6 +987,14 @@ class SwarmEngine:
         # Execute with retry policy.
         started = perf_counter()
 
+        # Emit worker_started (for SSE / observers)
+        worker_name = worker.name if hasattr(worker, "name") else str(worker)
+        self._emit_sse(
+            getattr(self, "_active_task_id", "") or "",  # fallback for compatibility
+            "worker_started",
+            {"worker": worker_name, "step": 0},
+        )
+
         # Mutable container for handoff state captured inside _attempt.
         captured_handoff: dict[str, Any] = {}
 
@@ -1056,6 +1087,20 @@ class SwarmEngine:
             breaker.record_failure()
 
         worker.mark_completed(worker_result.status)
+
+        # Emit worker_completed for observers (SSE etc.)
+        output_preview = ""
+        if worker_result.output:
+            output_preview = str(worker_result.output)[:200]
+        self._emit_sse(
+            getattr(self, "_active_task_id", "") or "",
+            "worker_completed",
+            {
+                "worker": worker.name if hasattr(worker, "name") else str(worker),
+                "status": worker_result.status,
+                "output_preview": output_preview,
+            },
+        )
         return [worker_result]
 
     async def _handle_handoff(
@@ -1282,6 +1327,25 @@ class SwarmEngine:
             excess = len(self._task_history) - self._max_history
             for old_key in list(self._task_history.keys())[:excess]:
                 self._task_history.pop(old_key, None)
+
+        # Emit lifecycle event for observers (SSE etc.)
+        if status == "paused":
+            checkpoint_data = (metadata or {}).get("checkpoint", {})
+            self._emit_sse(
+                task.id,
+                "checkpoint",
+                {
+                    "step": checkpoint_data.get("step", 0),
+                    "needs_approval": True,
+                    "output_preview": checkpoint_data.get("output_preview", ""),
+                },
+            )
+        else:
+            self._emit_sse(
+                task.id,
+                "task_completed",
+                {"task_id": task.id, "result": result.to_dict()},
+            )
 
         # Persist to SQLite when a task store is configured.
         if self._task_store is not None:

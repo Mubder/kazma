@@ -268,7 +268,7 @@ class KazmaAppBuilder:
                 _reg = get_worker_registry()
                 _yaml_count = len(self.swarm_manager.worker_names)
                 for entry in _reg.list_all():
-                    if entry.name not in self.swarm_manager.engine._workers:
+                    if self.swarm_manager.engine.get_worker(entry.name) is None if hasattr(self.swarm_manager.engine, "get_worker") else entry.name not in getattr(self.swarm_manager.engine, "_workers", {}):
                         self.swarm_manager.engine.add_worker(
                             _WC(
                                 name=entry.name,

@@ -109,7 +109,8 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
                     failures = 0
                     if hasattr(engine, "_reliability"):
                         try:
-                            breaker = engine._reliability.get_circuit_breaker(worker.name)
+                            breaker = (engine.get_circuit_breaker(worker.name) if hasattr(engine, "get_circuit_breaker")
+                                       else getattr(engine, "_reliability", None).get_circuit_breaker(worker.name) if getattr(engine, "_reliability", None) else None)
                             failures = getattr(breaker, "consecutive_failures", 0)
                         except Exception:
                             pass
