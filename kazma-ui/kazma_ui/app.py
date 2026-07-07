@@ -576,6 +576,7 @@ class KazmaAppBuilder:
 
             sse_router = create_sse_chat_router(
                 graph_holder=self._graph_holder,
+                graph_getter=lambda: self._graph_holder.get("graph"),
                 checkpointer=None,
                 system_prompt=self.agent.system_prompt,
                 cost_breaker=self.agent.cost_breaker,

@@ -342,28 +342,36 @@ class MCPServer:
         if tool_name not in DISPATCH:
             return make_error(req_id, -32602, f"Unknown tool: {tool_name}")
 
-        # C-1 fix: Require KAZMA_SECRET (via _secret arg) for danger tools; route through SafetyMiddleware when possible.
-        # This provides auth + HITL bus gate for write_file / run_tests when secret configured.
+        # PHASE 1: Strict KAZMA_SECRET enforcement with hmac.compare_digest.
+        # Route danger tools (write_file, run_tests) through SafetyMiddleware.check_sync().
+        # Activation controlled by env KAZMA_MCP_IDE_ENABLED (maps to mcp.ide_server.enabled).
+        mcp_enabled = os.environ.get("KAZMA_MCP_IDE_ENABLED", "true").lower() in ("1", "true", "yes")
+        if not mcp_enabled:
+            return make_error(req_id, -32603, "MCP IDE server is disabled via configuration")
+
         DANGER_MCP_TOOLS = {"write_file", "run_tests"}
+        kazma_secret = os.environ.get("KAZMA_SECRET", "").strip()
+        if kazma_secret:
+            provided = ""
+            if isinstance(arguments, dict):
+                provided = arguments.pop("_secret", "") or ""
+            if not isinstance(provided, str):
+                provided = str(provided)
+            if not hmac.compare_digest(provided, kazma_secret):
+                return make_error(req_id, -32603, "KAZMA_SECRET required for this MCP tool (pass _secret in arguments)")
+
         if tool_name in DANGER_MCP_TOOLS:
-            kazma_secret = os.environ.get("KAZMA_SECRET", "").strip()
-            if kazma_secret:
-                provided = arguments.pop("_secret", "") if isinstance(arguments, dict) else ""
-                if not isinstance(provided, str):
-                    provided = str(provided)
-                if not hmac.compare_digest(provided, kazma_secret):
-                    return make_error(req_id, -32603, "KAZMA_SECRET required for this MCP tool (pass _secret in arguments)")
-            # Route danger via safety (bus gate if adapter present; fail-closed otherwise unless allow_headless)
             try:
                 from kazma_core.swarm.safety import get_safety
                 safety = get_safety()
                 if getattr(safety, "enabled", True) and safety.is_danger_tool(tool_name):
-                    # Use sync check (MCP handle is sync path); it fail-closes when no bus + !allow_headless
                     if not safety.check_sync(tool_name):
                         return make_error(req_id, -32603, f"MCP danger tool '{tool_name}' blocked by safety (HITL required)")
             except Exception as _safety_exc:
-                # If safety unavailable but secret passed (or not set), proceed (local IDE trust)
                 logger.debug("MCP safety gate unavailable: %s", _safety_exc)
+                # Fail closed if secret was required but safety unavailable
+                if kazma_secret:
+                    return make_error(req_id, -32603, "Safety gate unavailable for privileged MCP tool")
 
         try:
             result = DISPATCH[tool_name](self.root, arguments)

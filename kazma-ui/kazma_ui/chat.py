@@ -323,6 +323,9 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                                         "result": f"Safety: '{event.tool_call_name}' requires HITL approval. Tool blocked (fail-closed).",
                                     })
                                     continue
+                                # Tightly enforce _hitl_approved contract for downstream (even on WS path)
+                                args = args or {}
+                                args["_hitl_approved"] = True
                         except Exception as safety_exc:
                             # Fail-closed: block the tool on any safety check error
                             await websocket.send_json({
