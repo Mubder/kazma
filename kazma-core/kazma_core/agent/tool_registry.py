@@ -169,7 +169,8 @@ def _generate_schema(func: Callable[..., Any]) -> dict[str, Any]:
     sig = inspect.signature(func)
     try:
         hints = get_type_hints(func)
-    except Exception:
+    except Exception as _e:
+        logger.debug("get_type_hints failed for %s: %s", getattr(func, "__name__", func), _e)
         hints = {}
 
     # Parse docstring for param descriptions

@@ -77,7 +77,8 @@ def load_retry_config() -> dict[str, Any]:
             "min_wait": store.get("retry.min_wait", MIN_WAIT),
             "max_wait": store.get("retry.max_wait", MAX_WAIT),
         }
-    except Exception:
+    except Exception as _e:
+        logger.debug("retry config load failed, using defaults: %s", _e)
         return {
             "max_attempts": MAX_ATTEMPTS,
             "min_wait": MIN_WAIT,

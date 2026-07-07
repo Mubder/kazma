@@ -730,7 +730,8 @@ class SettingsManager:
                     if isinstance(frontmatter, dict):
                         meta.update(frontmatter)
             return meta
-        except Exception:
+        except Exception as _e:
+            logger.debug("Failed to parse skill frontmatter for %s: %s", path, _e)
             return {"name": path.parent.name, "description": ""}
 
     def install_skill(self, skill_id: str) -> dict[str, Any]:
@@ -1045,7 +1046,8 @@ class SettingsManager:
                 total, used, free = shutil.disk_usage("/")
                 result["disk_free_gb"] = round(free / 1024 / 1024 / 1024, 1)
                 result["disk_total_gb"] = round(total / 1024 / 1024 / 1024, 1)
-            except Exception:
+            except Exception as _e:
+                logger.debug("disk_usage fallback failed: %s", _e)
                 result["disk_free_gb"] = "N/A"
             result["cpu_percent"] = "N/A (install psutil)"
             result["memory_mb"] = "N/A (install psutil)"

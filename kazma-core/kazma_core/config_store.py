@@ -215,6 +215,7 @@ class ConfigStore:
                 conn.execute("COMMIT")
                 self._cache.clear()
             except Exception:
+                logger.debug("set() write failed, rolling back for key=%s", key)
                 conn.execute("ROLLBACK")
                 raise
         logger.info("Setting updated: %s = %s (category=%s)", key, value, category)

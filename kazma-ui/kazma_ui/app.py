@@ -914,7 +914,8 @@ class KazmaAppBuilder:
                         await asyncio.wait_for(websocket.receive_text(), timeout=2.0)
                     except TimeoutError:
                         continue
-                    except Exception:
+                    except Exception as _e:
+                        logger.debug("[WS] events receive error, closing: %s", _e)
                         break
             except Exception as exc:
                 logger.debug("WS events handler stopped: %s", exc)
@@ -1116,8 +1117,8 @@ class KazmaAppBuilder:
                     ctx = None
                     try:
                         ctx = self.session_store.get(thread_id)  # may be async in some impls; best effort
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        logger.debug("[HITL] Failed to fetch session context for ownership check: %s", _e)
                     if ctx and isinstance(ctx, dict):
                         owner = ctx.get("sender_id") or ctx.get("owner") or ctx.get("session_id")
                         # If a web caller provides "session_id" in body, compare loosely
@@ -1125,8 +1126,8 @@ class KazmaAppBuilder:
                         if owner and caller_session and str(owner) != str(caller_session):
                             logger.warning("[HITL] Web approve ownership mismatch for thread %s", thread_id)
                             # Do not hard block in web (local dashboard often single-user); log only for now
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("[HITL] Ownership check failed: %s", _e)
 
             try:
                 from langgraph.types import Command
@@ -1307,7 +1308,8 @@ class KazmaAppBuilder:
                         status_code=500,
                         content=_gef.to_json_error(exc),
                     )
-                except Exception:
+                except Exception as _e:
+                    logger.debug("[app] Fallback error handler itself failed: %s", _e)
                     is_prod = os.environ.get("KAZMA_ENV") == "production"
                     return JSONResponse(
                         status_code=500,

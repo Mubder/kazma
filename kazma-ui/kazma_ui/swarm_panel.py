@@ -500,7 +500,8 @@ class SwarmRouterBuilder:
 
             try:
                 body = await request.json()
-            except Exception:
+            except Exception as _e:
+                logger.debug("[Swarm] invalid JSON in DAG validate: %s", _e)
                 return JSONResponse(
                     content={"valid": False, "error": "Invalid request body; must be valid JSON"},
                     status_code=400,

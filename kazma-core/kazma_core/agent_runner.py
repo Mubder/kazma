@@ -319,8 +319,8 @@ class KazmaAgent:
                 for s in db_servers:
                     if isinstance(s, dict) and s.get("name") not in yaml_names:
                         yaml_servers.append(s)
-        except Exception:
-            pass  # ConfigStore not available — YAML-only is fine
+        except Exception as _e:
+            logger.debug("[Agent] ConfigStore MCP servers not available, using YAML only: %s", _e)  # fire-and-forget fallback is ok
 
         return yaml_servers
 
@@ -724,8 +724,8 @@ if __name__ == "__main__":
     finally:
         try:
             loop.run_until_complete(loop.shutdown_asyncgens())
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("[Agent] shutdown_asyncgens error (harmless on exit): %s", _e)
         loop.close()
     # Skip atexit/threading shutdown noise
     _os._exit(0)
