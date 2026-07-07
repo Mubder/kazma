@@ -417,13 +417,20 @@
         installBtn.style.display = 'none';
         installBtn.disabled = false;
         installBtn.textContent = 'Install ML Dependencies';
+      } else if (status === 'INSTALLING') {
+        memoryBadge.textContent = 'INSTALLING';
+        memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(245, 158, 11, 0.15);color:#f59e0b;border:1px solid rgba(245, 158, 11, 0.3);';
+        memoryDesc.textContent = 'Installing ML dependencies (ChromaDB & sentence-transformers) in the background. Please wait...';
+        installBtn.style.display = 'inline-block';
+        installBtn.disabled = true;
+        installBtn.textContent = 'Installing...';
       } else {
         memoryBadge.textContent = 'DEGRADED';
         memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(255, 71, 87, 0.15);color:#ff4757;border:1px solid rgba(255, 71, 87, 0.3);';
         memoryDesc.textContent = 'System is running in degraded mode using keyword-only FTS5 fallback. ML dependencies are missing.';
-        if (installBtn.textContent !== 'Installing...') {
-          installBtn.style.display = 'inline-block';
-        }
+        installBtn.style.display = 'inline-block';
+        installBtn.disabled = false;
+        installBtn.textContent = 'Install ML Dependencies';
       }
 
       // Update metrics inside collapsible deck

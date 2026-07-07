@@ -24,6 +24,14 @@ async def asynchronous_install_package(package_name: str) -> None:
         return
         
     _active_installations.add(package_name)
+    
+    # Set status to INSTALLING immediately to persist status across reloads
+    try:
+        store = get_config_store()
+        store.set("system.memory.status", "INSTALLING", category="system")
+    except Exception as e:
+        logger.error("[Installer] Failed to set status to INSTALLING: %s", e)
+        
     asyncio.create_task(_run_install_task(package_name))
 
 
@@ -68,9 +76,19 @@ async def _run_install_task(package_name: str) -> None:
         else:
             err_msg = stderr.decode(errors="replace")
             logger.error("[Installer] Package installation failed with code %d. Error: %s", proc.returncode, err_msg)
+            try:
+                store = get_config_store()
+                store.set("system.memory.status", "DEGRADED", category="system")
+            except Exception:
+                pass
             
     except Exception as e:
         logger.error("[Installer] Unexpected error in background installer: %s", e, exc_info=True)
+        try:
+            store = get_config_store()
+            store.set("system.memory.status", "DEGRADED", category="system")
+        except Exception:
+            pass
     finally:
         _active_installations.discard(package_name)
 
