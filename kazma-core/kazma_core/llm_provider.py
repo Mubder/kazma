@@ -257,8 +257,9 @@ class LLMProvider:
             detail = ""
             try:
                 detail = e.response.text
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("Failed to read error response body: %s", _e)
+                detail = ""
             status_code = e.response.status_code if e.response is not None else 0
 
             logger.error(
@@ -289,8 +290,9 @@ class LLMProvider:
                     retry_detail = ""
                     try:
                         retry_detail = retry_err.response.text
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        logger.debug("Failed to read retry error body: %s", _e)
+                        retry_detail = ""
                     raise LLMError(
                         f"LLM call failed (HTTP {retry_err.response.status_code}): {retry_detail[:300]}"
                     ) from retry_err

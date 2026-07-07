@@ -10,6 +10,8 @@ Concurrency model:
     connection and one ``threading.Lock``, so cross-component writes
     coordinate correctly. Multi-key writes should use ``batch_set()`` or
     the ``transaction()`` context manager for atomicity.
+
+    All stores should use ``apply_sqlite_pragmas(conn)`` for consistency.
 """
 
 from __future__ import annotations
@@ -24,7 +26,41 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import os
+
 logger = logging.getLogger(__name__)
+
+
+def get_kazma_secret() -> str:
+    """Central getter for KAZMA_SECRET (env-based shared secret for HITL/auth).
+
+    All components (Hub, UI, MCP, approve) should use this instead of direct os.environ
+    to allow future migration to ConfigStore persistence or other sources.
+    """
+    return os.environ.get("KAZMA_SECRET", "").strip()
+
+
+def apply_sqlite_pragmas(conn: sqlite3.Connection, *, busy_timeout: int = 5000) -> None:
+    """Apply standardized pragmas to a (sync) Kazma SQLite connection.
+
+    - WAL + busy_timeout + synchronous=NORMAL
+    """
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except Exception as exc:
+        logger.warning("[SQLite] Failed to apply pragmas: %s", exc)
+
+
+async def apply_sqlite_pragmas_async(conn: Any, *, busy_timeout: int = 5000) -> None:
+    """Async version for aiosqlite connections (agent_runner checkpoints, graph_builder, gateway stores)."""
+    try:
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
+        await conn.execute("PRAGMA synchronous=NORMAL")
+    except Exception as exc:
+        logger.warning("[SQLite] Failed to apply async pragmas: %s", exc)
 
 _DEFAULT_DB = "kazma-data/settings.db"
 
@@ -63,12 +99,7 @@ class ConfigStore:
                 isolation_level=None,
             )
             self._conn.row_factory = sqlite3.Row
-            # WAL + busy_timeout — matches every other SQLite store in Kazma
-            # (task_store, checkpoint, time_travel). WAL allows concurrent
-            # readers alongside a writer; busy_timeout makes writers wait
-            # up to 5s for a lock instead of raising immediately.
-            self._conn.execute("PRAGMA journal_mode=WAL")
-            self._conn.execute("PRAGMA busy_timeout=5000")
+            apply_sqlite_pragmas(self._conn)
         return self._conn
 
     def _init_db(self) -> None:
@@ -184,6 +215,7 @@ class ConfigStore:
                 conn.execute("COMMIT")
                 self._cache.clear()
             except Exception:
+                logger.debug("set() write failed, rolling back for key=%s", key)
                 conn.execute("ROLLBACK")
                 raise
         logger.info("Setting updated: %s = %s (category=%s)", key, value, category)

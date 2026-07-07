@@ -12,6 +12,8 @@ from typing import Any
 
 import yaml
 
+from kazma_core.config_store import get_kazma_secret
+
 logger = logging.getLogger(__name__)
 
 # ─── Custom Exceptions ────────────────────────────────────────────────────
@@ -231,7 +233,7 @@ class SkillLoader:
 
                     # ── HMAC signature: verify if present ───────────
                     if stored_sig:
-                        secret = os.environ.get("KAZMA_SECRET", "").strip()
+                        secret = get_kazma_secret()  # unified via config_store
                         if not secret:
                             raise SkillLoadError(
                                 f"Skill {skill_name} has a signature but KAZMA_SECRET "

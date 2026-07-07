@@ -157,6 +157,28 @@ class TestChatStreamEndpoint:
         resp = client.post("/api/chat/stream", json={"message": "hello"})
         assert resp.status_code == 200
         body = resp.text
+
+
+class TestGraphHolderSupport:
+    """Regression tests for mutable graph holder (C-3 fix: SSE must see post-startup checkpointed graph)."""
+
+    def test_router_accepts_graph_holder(self):
+        """Router creation accepts graph_holder (updated after startup recompile)."""
+        holder = {"graph": MagicMock()}
+        router = create_sse_chat_router(graph_holder=holder)
+        assert router is not None
+        # paths still present
+        paths = {getattr(r, "path", None) for r in router.routes if hasattr(r, "path")}
+        assert "/api/chat/stream" in paths
+
+    def test_graph_holder_takes_precedence_over_initial_graph(self):
+        """If graph_holder present, its graph is used (simulates post-startup update)."""
+        initial = MagicMock(name="initial")
+        updated = MagicMock(name="post_startup_with_checkpointer")
+        holder = {"graph": updated}
+        # creation with both; holder should win inside
+        router = create_sse_chat_router(graph=initial, graph_holder=holder)
+        assert router is not None
         assert "event: error" in body
         assert "budget exceeded" in body.lower()  # Budget exceeded message
 

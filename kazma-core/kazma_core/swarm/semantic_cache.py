@@ -13,6 +13,8 @@ from typing import Any
 
 from kazma_core.swarm.memory.vector import get_encoder
 
+from kazma_core.config_store import apply_sqlite_pragmas
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/semantic_cache.db"
@@ -42,11 +44,7 @@ class SemanticCache:
         if self._conn is None:
             self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
-            try:
-                self._conn.execute("PRAGMA journal_mode=WAL")
-                self._conn.execute("PRAGMA busy_timeout=5000")
-            except Exception:
-                pass
+            apply_sqlite_pragmas(self._conn)
         return self._conn
 
     def _init_db(self) -> None:

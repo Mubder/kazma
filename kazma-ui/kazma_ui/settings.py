@@ -467,7 +467,8 @@ class SettingsRouterBuilder:
             """
             try:
                 body = await req.json()
-            except Exception:
+            except Exception as _e:
+                logger.debug("Failed to parse model switch body: %s", _e)
                 body = {}
             model = (body.get("active_model") or body.get("model") or "").strip()
             if not model:

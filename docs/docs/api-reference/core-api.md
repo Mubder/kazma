@@ -15,11 +15,7 @@ response = await agent.run(message="Hello")
 await agent.shutdown()
 ```
 
-| Method | Description |
-|---|---|
-| `run(message)` | Process a message and return a response string |
-| `shutdown()` | Clean shutdown — close LLM client, checkpointer, MCP |
-| `connect_mcp_servers()` | Connect configured MCP servers, returns tool count |
+Public surface on KazmaAgent (see agent_runner.py). UI and gateway use it for streaming graph and tools.
 
 ## ModelRegistry
 
@@ -42,61 +38,35 @@ response = await provider.chat([{"role": "user", "content": "Hello"}])
 | `save_model_profile(name, data)` | Save a model profile |
 | `get_discovered_models(provider)` | List models auto-discovered from a provider |
 
-## WorkerRegistry (Swarm)
+## Worker Registry / Phonebook (Swarm)
+
+Use via `get_swarm_engine()` or `WorkerPhonebook` (internal; public surface via engine).
 
 ```python
-from kazma_core.swarm.registry import WorkerRegistry, WorkerEntry
+from kazma_core.swarm import get_swarm_engine
 
-registry = WorkerRegistry()
-registry.register(WorkerEntry(
-    name="core",
-    expertise=["code", "security"],
-    roles=["orchestrator"],
-    model="deepseek-v4-pro",
-    provider="deepseek",
-    system_prompt="You are the core engineer...",
-))
+engine = get_swarm_engine()
+# Workers registered via config / swarm panel or code
+workers = engine.list_workers()  # or equivalent public listing
 ```
 
-| Method | Description |
-|---|---|
-| `register(entry)` | Add a worker (persists to JSON) |
-| `update(name, **kwargs)` | Update worker fields (model, provider, expertise, etc.) |
-| `delete(name)` | Remove a worker |
-| `get(name)` | Get worker by name |
-| `list_all()` | List all workers |
-| `find_by_expertise(tag)` | Find workers matching an expertise tag |
-| `find_best(task_description)` | Smart routing: semantic → keyword → generalist fallback |
-| `find_generalists()` | Return all generalist workers (no expertise/Soul) |
+See `swarm/engine.py` (delegates to phonebook), `swarm/phonebook.py`, and `swarm_panel.py` for CRUD. Registry JSON persisted.
 
 ## SwarmEngine
 
 ```python
-from kazma_core.swarm.engine import get_swarm_engine
+from kazma_core.swarm import get_swarm_engine
 
 engine = get_swarm_engine()
-result = await engine.consult("code", "Fix auth bug")
+# See public methods: dispatch, consult, etc. (delegated)
 ```
 
-| Method | Description |
-|---|---|
-| `dispatch(task)` | Dispatch a task to a specific worker |
-| `broadcast(task)` | Broadcast to all workers |
-| `consult(expertise, task)` | Consult workers by expertise, aggregate results |
-| `summon(worker_name)` | Instantiate a worker from the Registry |
-| `pipeline(task, workers)` | Run sequential pipeline stages |
+Core orchestration in `swarm/engine.py` (post P2-1 refactor uses phonebook/reliability_registry/checkpoint_manager). Use swarm panel or `/swarm` commands for most usage. See tests for examples.
 
-## UnifiedMemoryAdapter (4-Layer RAG)
+## Memory (RAG layers)
 
-```python
-from kazma_core.swarm.memory import UnifiedMemoryAdapter, MemoryHit
-
-adapter = UnifiedMemoryAdapter(vector_store, graph, fts5_store, sqlite_vec)
-hits: list[MemoryHit] = await adapter.query("auth vulnerability", limit=10)
-# Each hit has: id, content, score, source_layer, metadata
-
-await adapter.index("task output here", metadata={"worker": "core"})
-```
+Memory access is via `kazma_core.swarm.memory` (vector + FTS5 + kg_adapter + sqlite_vec) or higher level tools.
+See `swarm/memory/adapter.py` and memory backends. RAG is optional (extras in pyproject).
 
 | Layer | Backend | Purpose |
 |---|---|---|

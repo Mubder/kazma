@@ -163,7 +163,8 @@ async def stream_chat(
         try:
             await e.response.aread()
             body = e.response.text[:500]
-        except Exception:
+        except Exception as _e:
+            logger.debug("Failed to read streaming error body: %s", _e)
             body = "<unreadable>"
         logger.error("Stream LLM API error: %d %s", e.response.status_code, body)
         yield StreamEvent(type="error", content=f"API error {e.response.status_code}")

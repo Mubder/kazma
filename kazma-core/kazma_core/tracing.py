@@ -87,7 +87,8 @@ class TraceStore:
         for ws in self._ws_clients:
             try:
                 await ws.send_text(payload)
-            except Exception:
+            except Exception as _e:
+                logger.debug("WS client send failed, removing: %s", _e)
                 dead.add(ws)
         self._ws_clients -= dead
 

@@ -91,7 +91,8 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
                 # 2. Worker status gauge
                 lines.append("# HELP kazma_worker_status Swarm worker status gauge")
                 lines.append("# TYPE kazma_worker_status gauge")
-                for worker in engine._workers.values():
+                workers = engine.list_workers() if hasattr(engine, "list_workers") else getattr(engine, "_workers", {}).values()
+                for worker in workers:
                     status = "offline"
                     if getattr(worker, "_running", False):
                         status = "busy" if getattr(worker, "busy", False) else "online"
@@ -104,11 +105,12 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
                 # 3. Circuit breaker failures
                 lines.append("# HELP kazma_circuit_breaker_failures_total Cumulative consecutive failures of worker circuit breakers")
                 lines.append("# TYPE kazma_circuit_breaker_failures_total counter")
-                for worker in engine._workers.values():
+                for worker in workers:
                     failures = 0
                     if hasattr(engine, "_reliability"):
                         try:
-                            breaker = engine._reliability.get_circuit_breaker(worker.name)
+                            breaker = (engine.get_circuit_breaker(worker.name) if hasattr(engine, "get_circuit_breaker")
+                                       else getattr(engine, "_reliability", None).get_circuit_breaker(worker.name) if getattr(engine, "_reliability", None) else None)
                             failures = getattr(breaker, "consecutive_failures", 0)
                         except Exception:
                             pass

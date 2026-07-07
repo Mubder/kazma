@@ -228,7 +228,8 @@ async def _try_swarm_command(
     try:
         from kazma_core.swarm.engine import get_swarm_engine
         engine = get_swarm_engine()
-    except Exception:
+    except Exception as _e:
+        logger.debug("[AgentHandler] Swarm engine not available: %s", _e)
         return False  # swarm not initialized, fall through to graph
 
     # ── Extract the command body (everything after the trigger) ──

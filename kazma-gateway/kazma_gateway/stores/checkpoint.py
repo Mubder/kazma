@@ -20,6 +20,7 @@ from typing import Any
 
 import aiosqlite
 from langchain_core.runnables import RunnableConfig
+from kazma_core.config_store import apply_sqlite_pragmas_async
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
     ChannelVersions,
@@ -292,8 +293,7 @@ async def create_checkpoint_manager(
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = await aiosqlite.connect(str(db_path))
-    await conn.execute("PRAGMA journal_mode=WAL")
-    await conn.execute("PRAGMA synchronous=NORMAL")
+    await apply_sqlite_pragmas_async(conn)
 
     saver = AsyncSqliteSaver(
         conn,

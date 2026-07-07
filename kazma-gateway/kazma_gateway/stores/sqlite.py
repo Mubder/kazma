@@ -22,6 +22,7 @@ from typing import Any
 
 import aiosqlite
 
+from kazma_core.config_store import apply_sqlite_pragmas_async
 from kazma_gateway.gateway import SessionStore
 from kazma_core.tenant_context import get_current_tenant_id
 
@@ -71,13 +72,7 @@ class SQLiteSessionStore(SessionStore):
                 Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
             self._db = await aiosqlite.connect(self._db_path)
-            # Set WAL mode + busy_timeout for concurrent access (matching
-            # ConfigStore and TaskStore patterns)
-            try:
-                await self._db.execute("PRAGMA journal_mode=WAL")
-                await self._db.execute("PRAGMA busy_timeout=5000")
-            except Exception:
-                pass  # Not critical if WAL isn't supported
+            await apply_sqlite_pragmas_async(self._db)
             await self._db.execute(_CREATE_TABLE)
             # Schema auto-migration: add tenant_id if not present
             try:

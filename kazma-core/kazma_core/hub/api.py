@@ -13,6 +13,8 @@ import uuid
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
+
+from kazma_core.config_store import get_kazma_secret
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -31,7 +33,7 @@ def _require_auth(request: Request) -> None:
     """
     import hmac
 
-    expected = _os_hub.environ.get("KAZMA_SECRET", "").strip()
+    expected = get_kazma_secret()  # unified via config_store (was direct os.environ)
     if not expected:
         raise HTTPException(
             status_code=401,

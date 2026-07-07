@@ -28,6 +28,8 @@ from kazma_core.mcp.manager import UnifiedToolExecutor
 from kazma_core.state import AgentState
 from kazma_core.tracing import create_tracer
 
+from kazma_core.config_store import apply_sqlite_pragmas_async
+
 # NOTE: kazma_core.agent.graph_builder / .state are imported lazily inside
 # run()/_ensure_graph() to avoid a circular import — the kazma_core.agent
 # package __init__ re-exports names from this module.
@@ -317,8 +319,8 @@ class KazmaAgent:
                 for s in db_servers:
                     if isinstance(s, dict) and s.get("name") not in yaml_names:
                         yaml_servers.append(s)
-        except Exception:
-            pass  # ConfigStore not available — YAML-only is fine
+        except Exception as _e:
+            logger.debug("[Agent] ConfigStore MCP servers not available, using YAML only: %s", _e)  # fire-and-forget fallback is ok
 
         return yaml_servers
 
@@ -546,8 +548,7 @@ class KazmaAgent:
         db_path = self.config.raw.get("storage", {}).get("checkpoint_path", CHECKPOINT_DB)
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._checkpoint_conn = await aiosqlite.connect(db_path)
-        await self._checkpoint_conn.execute("PRAGMA journal_mode=WAL")
-        await self._checkpoint_conn.execute("PRAGMA synchronous=NORMAL")
+        await apply_sqlite_pragmas_async(self._checkpoint_conn)
         self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
         await self._checkpointer.setup()
 
@@ -723,8 +724,8 @@ if __name__ == "__main__":
     finally:
         try:
             loop.run_until_complete(loop.shutdown_asyncgens())
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("[Agent] shutdown_asyncgens error (harmless on exit): %s", _e)
         loop.close()
     # Skip atexit/threading shutdown noise
     _os._exit(0)

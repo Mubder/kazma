@@ -285,148 +285,22 @@ async def _stream_events(
 
 
 def wire_engine_events(engine: Any, bus: SSEEventBus) -> None:
-    """Monkey-patch a SwarmEngine to emit SSE events through the bus.
+    """Wire a SwarmEngine to emit SSE events via the provided bus.
 
-    Patches the engine's ``dispatch``, ``_dispatch_worker``, and
-    ``_finalize_task`` methods so that task lifecycle events
-    (task_started, worker_started, worker_completed, task_completed)
-    are emitted automatically.
+    Uses the engine's public set_sse_bus API (no more monkey-patching of
+    private methods like _finalize_task or _dispatch_worker).
 
-    Safe to call multiple times; subsequent calls are no-ops. If the
-    engine is already wired with a different bus, the new bus takes over.
-
-    All dispatch paths (basic dispatch, pipeline, fan_out, broadcast,
-    consult, conditional) funnel through ``_dispatch_worker``, so
-    patching that single method ensures worker events are emitted for
-    every orchestration pattern.
+    Safe to call multiple times; subsequent calls are no-ops if already
+    wired with the same bus.
     """
     if getattr(engine, "_sse_wired", False) and getattr(engine, "_sse_bus", None) is bus:
         return
 
-    engine._sse_wired = False
-    engine._sse_bus = bus
+    if hasattr(engine, "set_sse_bus"):
+        engine.set_sse_bus(bus)
+    else:
+        # Fallback for older engines (should not happen after refactor)
+        engine._sse_bus = bus
 
-    original_dispatch = engine.dispatch
-    original_finalize = engine._finalize_task
-    original_dispatch_worker = engine._dispatch_worker
-
-    async def _patched_dispatch(task: Any) -> Any:
-        """Emit task_started, track active task id, then delegate."""
-        workers = list(task.workers) if task.workers else []
-        bus.emit(task.id, "task_started", {"task_id": task.id, "workers": workers})
-        # Store task_id so _dispatch_worker can resolve it.
-        engine._active_task_id = task.id
-        engine._sse_step_counter = 0
-        try:
-            return await original_dispatch(task)
-        except Exception as exc:
-            logger.exception("[SSE] dispatch failed for task '%s'", task.id)
-            bus.emit(
-                task.id,
-                "task_failed",
-                {
-                    "task_id": task.id,
-                    "error": str(exc)[:500],
-                },
-            )
-            raise
-        finally:
-            engine._active_task_id = ""
-            engine._sse_step_counter = 0
-
-    async def _patched_dispatch_worker(
-        worker: Any,
-        prompt: str,
-        context: Any,
-        *,
-        timeout: float | None = None,
-        validation_schema: dict[str, Any] | None = None,
-        trace_id: str | None = None,
-    ) -> Any:
-        """Emit worker_started and worker_completed around worker dispatch."""
-        task_id = getattr(engine, "_active_task_id", "") or ""
-        step = getattr(engine, "_sse_step_counter", 0)
-        engine._sse_step_counter = step + 1
-
-        worker_name = worker.name if hasattr(worker, "name") else str(worker)
-
-        bus.emit(
-            task_id,
-            "worker_started",
-            {"worker": worker_name, "step": step + 1},
-        )
-
-        results = await original_dispatch_worker(
-            worker,
-            prompt,
-            context,
-            timeout=timeout,
-            validation_schema=validation_schema,
-            trace_id=trace_id,
-        )
-
-        if results:
-            last_result = results[-1]
-            output_preview = ""
-            if hasattr(last_result, "output") and last_result.output:
-                output_preview = str(last_result.output)[:200]
-            bus.emit(
-                task_id,
-                "worker_completed",
-                {
-                    "worker": worker_name,
-                    "status": getattr(last_result, "status", "unknown"),
-                    "output_preview": output_preview,
-                },
-            )
-
-            # Emit handoff events if any.
-            if hasattr(last_result, "handoffs") and last_result.handoffs:
-                for handoff in last_result.handoffs:
-                    bus.emit(
-                        task_id,
-                        "handoff",
-                        {
-                            "from": getattr(handoff, "from_worker", ""),
-                            "to": getattr(handoff, "to_worker", ""),
-                        },
-                    )
-
-        return results
-
-    def _patched_finalize(
-        task: Any,
-        worker_results: Any,
-        status: str,
-        duration_seconds: float,
-        **kwargs: Any,
-    ) -> Any:
-        """Finalize the task, then emit task_completed (or checkpoint)."""
-        result = original_finalize(
-            task, worker_results, status, duration_seconds, **kwargs
-        )
-        if result is not None:
-            if result.status == "paused":
-                checkpoint_data = result.metadata.get("checkpoint", {})
-                bus.emit(
-                    result.task_id,
-                    "checkpoint",
-                    {
-                        "step": checkpoint_data.get("step", 0),
-                        "needs_approval": True,
-                        "output_preview": checkpoint_data.get("output_preview", ""),
-                    },
-                )
-            else:
-                bus.emit(
-                    result.task_id,
-                    "task_completed",
-                    {"task_id": result.task_id, "result": result.to_dict()},
-                )
-        return result
-
-    # Apply patches.
-    engine.dispatch = _patched_dispatch
-    engine._finalize_task = _patched_finalize
-    engine._dispatch_worker = _patched_dispatch_worker
     engine._sse_wired = True
+    engine._sse_bus = bus  # keep for compatibility checks

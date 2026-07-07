@@ -16,6 +16,10 @@ Config in kazma.yaml:
         enabled: true
         root: .               # project root (defaults to cwd)
         max_file_size: 1048576 # 1 MB read limit
+
+Security (post-audit): When KAZMA_SECRET is set in env, danger tools (write_file, run_tests)
+require "_secret" in the tool arguments. Danger tools are also routed through SafetyMiddleware
+(fail-closed bus gate). No full graph interrupt (stdio path); use bus adapters for HITL UX.
 """
 
 from __future__ import annotations
@@ -29,6 +33,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
+
+import hmac
 
 logger = logging.getLogger("kazma.mcp.ide_server")
 
@@ -335,6 +341,37 @@ class MCPServer:
 
         if tool_name not in DISPATCH:
             return make_error(req_id, -32602, f"Unknown tool: {tool_name}")
+
+        # PHASE 1: Strict KAZMA_SECRET enforcement with hmac.compare_digest.
+        # Route danger tools (write_file, run_tests) through SafetyMiddleware.check_sync().
+        # Activation controlled by env KAZMA_MCP_IDE_ENABLED (maps to mcp.ide_server.enabled).
+        mcp_enabled = os.environ.get("KAZMA_MCP_IDE_ENABLED", "true").lower() in ("1", "true", "yes")
+        if not mcp_enabled:
+            return make_error(req_id, -32603, "MCP IDE server is disabled via configuration")
+
+        DANGER_MCP_TOOLS = {"write_file", "run_tests"}
+        kazma_secret = os.environ.get("KAZMA_SECRET", "").strip()
+        if kazma_secret:
+            provided = ""
+            if isinstance(arguments, dict):
+                provided = arguments.pop("_secret", "") or ""
+            if not isinstance(provided, str):
+                provided = str(provided)
+            if not hmac.compare_digest(provided, kazma_secret):
+                return make_error(req_id, -32603, "KAZMA_SECRET required for this MCP tool (pass _secret in arguments)")
+
+        if tool_name in DANGER_MCP_TOOLS:
+            try:
+                from kazma_core.swarm.safety import get_safety
+                safety = get_safety()
+                if getattr(safety, "enabled", True) and safety.is_danger_tool(tool_name):
+                    if not safety.check_sync(tool_name):
+                        return make_error(req_id, -32603, f"MCP danger tool '{tool_name}' blocked by safety (HITL required)")
+            except Exception as _safety_exc:
+                logger.debug("MCP safety gate unavailable: %s", _safety_exc)
+                # Fail closed if secret was required but safety unavailable
+                if kazma_secret:
+                    return make_error(req_id, -32603, "Safety gate unavailable for privileged MCP tool")
 
         try:
             result = DISPATCH[tool_name](self.root, arguments)

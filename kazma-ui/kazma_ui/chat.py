@@ -281,6 +281,10 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                             }
                         )
 
+                        # NOTE (C-2 audit): WebSocket chat path uses direct stream_chat + agent.tools.execute.
+                        # It does NOT go through the LangGraph supervisor or graph.interrupt() HITL (mechanism A).
+                        # Only SafetyMiddleware / bus (mechanism B) applies, with 5s timeout fail-closed.
+                        # SSE /api/chat/stream is the graph-based path. WS tool exec is a legacy direct path.
                         # Execute the tool — gated by SafetyMiddleware
                         try:
                             args = json.loads(event.tool_call_args) if event.tool_call_args else {}
@@ -319,6 +323,9 @@ async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> Non
                                         "result": f"Safety: '{event.tool_call_name}' requires HITL approval. Tool blocked (fail-closed).",
                                     })
                                     continue
+                                # Tightly enforce _hitl_approved contract for downstream (even on WS path)
+                                args = args or {}
+                                args["_hitl_approved"] = True
                         except Exception as safety_exc:
                             # Fail-closed: block the tool on any safety check error
                             await websocket.send_json({

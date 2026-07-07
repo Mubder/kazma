@@ -714,7 +714,8 @@ class UnifiedToolExecutor:
                                         "content": f"MCP tool '{tool_name}' denied by HITL approval gate.",
                                         "is_error": True,
                                     }
-                        except Exception:
+                        except Exception as _e:
+                            logger.debug("Safety check failed for MCP tool %s: %s", tool_name, _e)
                             return {
                                 "content": f"MCP tool '{tool_name}' blocked — SafetyMiddleware unavailable.",
                                 "is_error": True,
