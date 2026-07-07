@@ -1351,7 +1351,8 @@ class SwarmRouterBuilder:
                     status_code=503,
                 )
             # Check the task is active
-            if engine.get_active_task(task_id) is None if hasattr(engine, "get_active_task") else task_id not in getattr(engine, "_active_tasks", {}):
+            active = engine.get_active_task(task_id) if hasattr(engine, "get_active_task") else getattr(engine, "_active_tasks", {}).get(task_id)
+            if active is None:
                 return JSONResponse(
                     {"status": "error", "message": f"Task '{task_id}' is not active (already completed or not found)"},
                     status_code=404,
