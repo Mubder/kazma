@@ -174,11 +174,22 @@ function workspaceApp() {
 
     init() {
       this.refreshAll();
-      // Load saved bookmarks
+      this.loadBookmarks();
+    },
+
+    async loadBookmarks() {
       try {
-        var saved = localStorage.getItem('kazma-bookmarks');
-        if (saved) this.bookmarks = JSON.parse(saved);
-      } catch(e) {}
+        var resp = await fetch('/api/bookmarks');
+        if (resp.ok) {
+          var data = await resp.json();
+          // API returns {id, name, type, target}; map to UI shape {id, path, label}
+          this.bookmarks = (data.bookmarks || []).map(function(bm) {
+            return { id: bm.id, path: bm.target, label: bm.name };
+          });
+        }
+      } catch(e) {
+        this.bookmarks = [];
+      }
     },
 
     fileIcon(name) {
@@ -330,17 +341,44 @@ function workspaceApp() {
         }.bind(this));
     },
 
-    addBookmark() {
-      var path = prompt('Enter file path to bookmark:');
+    async addBookmark() {
+      var path = prompt('Enter file or URL to bookmark:');
       if (!path) return;
-      this.bookmarks.push({ path: path, label: path.split('/').pop() });
-      try { localStorage.setItem('kazma-bookmarks', JSON.stringify(this.bookmarks)); } catch(e) {}
-      KazmaStream.toast('Bookmarked: ' + path, 'success', 2000);
+      var name = path.split('/').pop() || path;
+      var type = path.startsWith('http') ? 'url' : 'file';
+      try {
+        var resp = await fetch('/api/bookmarks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name, type: type, target: path })
+        });
+        if (resp.ok) {
+          await this.loadBookmarks();
+          KazmaStream.toast('Bookmarked: ' + name, 'success', 2000);
+        } else {
+          KazmaStream.toast('Failed to bookmark', 'error', 3000);
+        }
+      } catch(e) {
+        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+      }
     },
 
-    removeBookmark(bm) {
-      this.bookmarks = this.bookmarks.filter(function(b) { return b.path !== bm.path; });
-      try { localStorage.setItem('kazma-bookmarks', JSON.stringify(this.bookmarks)); } catch(e) {}
+    async removeBookmark(bm) {
+      if (!bm.id) {
+        // Fallback: optimistic remove if no id
+        this.bookmarks = this.bookmarks.filter(function(b) { return b.path !== bm.path; });
+        return;
+      }
+      try {
+        var resp = await fetch('/api/bookmarks/' + bm.id, { method: 'DELETE' });
+        if (resp.ok || resp.status === 204) {
+          this.bookmarks = this.bookmarks.filter(function(b) { return b.id !== bm.id; });
+        } else {
+          KazmaStream.toast('Failed to remove bookmark', 'error', 3000);
+        }
+      } catch(e) {
+        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+      }
     }
   };
 }

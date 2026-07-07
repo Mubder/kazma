@@ -525,3 +525,30 @@ def register_direct_routes(self: Any) -> None:
             "status": "degraded" if self._init_errors else "ok",
             "init_errors": self._init_errors,
         }
+
+    # ── Workspace selection + file-tree scanner ────────────────────────
+    try:
+        from kazma_gateway.routers.workspace import create_workspace_select_router
+
+        self.app.include_router(create_workspace_select_router())
+        logger.info("[routes_direct] Workspace select/tree router mounted at /api/workspace/select, /api/workspace/tree")
+    except Exception as _exc:
+        logger.warning("[routes_direct] Workspace select/tree router failed to mount: %s", _exc)
+
+    # ── Live Git status ────────────────────────────────────────────────
+    try:
+        from kazma_gateway.routers.git import create_git_router
+
+        self.app.include_router(create_git_router())
+        logger.info("[routes_direct] Git router mounted at /api/git/status")
+    except Exception as _exc:
+        logger.warning("[routes_direct] Git router failed to mount: %s", _exc)
+
+    # ── Bookmarks CRUD ─────────────────────────────────────────────────
+    try:
+        from kazma_gateway.routers.bookmarks import create_bookmarks_router
+
+        self.app.include_router(create_bookmarks_router())
+        logger.info("[routes_direct] Bookmarks router mounted at /api/bookmarks")
+    except Exception as _exc:
+        logger.warning("[routes_direct] Bookmarks router failed to mount: %s", _exc)
