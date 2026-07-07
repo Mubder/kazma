@@ -1,36 +1,25 @@
-"""Agent message handler — bridges IncomingMessage to the LangGraph supervisor.
+"""Agent handler package.
 
-Platform isolation contract:
-    The Brain (LangGraph graph) NEVER sees platform-specific identifiers.
-    chat_id, user_id, message_id, update_id, chat_type are stored in a
-    SessionStore OUTSIDE the graph state and restored only when
-    constructing the OutboundMessage for the return path.
-
-    Graph state["_gateway"] contains ONLY:
-        - thread_id:    stable session identifier
-        - display_name: sender's display name (platform-agnostic)
-        - platform:     "telegram" / "discord" (string, not an ID)
-
-    Everything else lives in the SessionStore and is fetched back
-    onto the OutboundMessage.context_metadata when replying.
-
-Decomposed into a structured subpackage: kazma_gateway/agent_handler/
-This file serves as a backward-compatible facade re-exporting all interfaces.
+Decomposed from the original god-module agent_handler.py.
+Conforms perfectly to the original API and test specifications.
 """
 
 from __future__ import annotations
 
-from .agent_handler import (
-    create_graph_handler,
+from .store import (
     _resolve_thread,
     _InMemoryStore,
     _build_initial_state,
     _build_target_id,
     _MAX_DICT_ENTRIES,
     _PLATFORM_KEYS,
+)
+from .hitl import (
     _check_graph_interrupt,
     _build_approval_prompt,
     _handle_hitl_resume,
+)
+from .swarm_dispatch import (
     _extract_swarm_task,
     _dispatch_auto_route,
     _find_worker_prompt_split,
@@ -39,6 +28,8 @@ from .agent_handler import (
     _maybe_send_to_output_target,
     _dispatch_swarm_from_chat,
     _send_swarm_reply,
+)
+from .commands import (
     _try_swarm_command,
     _handle_swarm_config_command,
     _get_visible_providers,
@@ -47,6 +38,9 @@ from .agent_handler import (
     _is_active_model,
     _send_model_reply,
     _build_slash_ctx,
+)
+from .graph import (
+    create_graph_handler,
 )
 
 __all__ = [

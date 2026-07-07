@@ -1,0 +1,338 @@
+"""Graph submodule — contains create_graph_handler which bridges messages with LangGraph."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from collections import OrderedDict
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
+from .store import (
+    _InMemoryStore,
+    _resolve_thread,
+    _build_target_id,
+    _build_initial_state,
+    _MAX_DICT_ENTRIES,
+)
+from .hitl import (
+    _check_graph_interrupt,
+    _build_approval_prompt,
+    _handle_hitl_resume,
+)
+from .commands import (
+    _try_model_command,
+    _try_swarm_command,
+    _build_slash_ctx,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def create_graph_handler(
+    graph: Any,
+    manager: Any,  # GatewayManager (avoid circular import)
+    system_prompt: str = "",
+    cost_breaker: Any = None,
+    store: SessionStore | None = None,
+) -> Callable[[IncomingMessage], Awaitable[None]]:
+    """Create an async handler that processes messages through LangGraph.
+
+    Args:
+        graph:          Compiled LangGraph supervisor graph.
+        manager:        GatewayManager instance (for send() routing).
+        system_prompt:  System prompt for the agent.
+        cost_breaker:   Optional CostCircuitBreaker for budget control.
+        store:          SessionStore for platform context persistence.
+                        Falls back to in-memory store if not provided.
+
+    Returns:
+        Async handler function compatible with manager.on_message().
+    """
+    # Use provided store or fall back to in-memory
+    _store = store or _InMemoryStore()
+
+    # Per-sender session tracking (sender_id → thread_id).
+    # Guarded by _sessions_lock because concurrent handler invocations for
+    # different senders read/write this shared dict.
+    #
+    # Bounded LRU: evicts the least-recently-used sender when the store
+    # exceeds _MAX_DICT_ENTRIES (default 10 000).
+    _sessions: OrderedDict[str, str] = OrderedDict()
+    _sessions_lock = asyncio.Lock()
+
+    # Per-thread_id serialization lock. Two concurrent messages for the same
+    # thread_id must not interleave graph.ainvoke() / checkpoint writes, or
+    # the LangGraph state and SQLite checkpoint will corrupt. Each distinct
+    # thread_id gets its own asyncio.Lock so unrelated threads stay parallel.
+    #
+    # Bounded LRU: evicts the least-recently-used lock when the store
+    # exceeds _MAX_DICT_ENTRIES (default 10 000).
+    _thread_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
+    _thread_locks_lock = asyncio.Lock()
+
+    # Session TTL: entries survive agent replies (for crash-recovery routing)
+    # and are evicted lazily by this many seconds of inactivity.
+    _session_ttl_seconds = 300  # 5 minutes
+
+    async def _get_thread_lock(thread_id: str) -> asyncio.Lock:
+        """Return (creating if needed) the serialization lock for a thread_id.
+
+        Uses LRU ordering: existing entries are moved to the end
+        (most-recently-used) and the oldest entry is evicted when the
+        bound is exceeded.
+        """
+        async with _thread_locks_lock:
+            lock = _thread_locks.get(thread_id)
+            if lock is not None:
+                _thread_locks.move_to_end(thread_id)
+                return lock
+            lock = asyncio.Lock()
+            _thread_locks[thread_id] = lock
+            # Evict oldest entries, but skip any that are currently held
+            while len(_thread_locks) > _MAX_DICT_ENTRIES:
+                # Find the oldest non-held lock to evict
+                evicted = False
+                for key in list(_thread_locks.keys()):
+                    if not _thread_locks[key].locked():
+                        _thread_locks.pop(key)
+                        evicted = True
+                        break
+                if not evicted:
+                    # All locks are held — keep growing rather than
+                    # breaking mutual exclusion
+                    break
+            return lock
+
+    async def handler(msg: IncomingMessage) -> None:
+        """Process a single IncomingMessage through the agent graph."""
+        sender = msg.sender_id
+
+        # Resolve thread_id using standardized resolver (synchronized)
+        async with _sessions_lock:
+            if sender in _sessions:
+                # LRU: mark as most-recently-used.
+                _sessions.move_to_end(sender)
+                thread_id = _sessions[sender]
+            else:
+                _sessions[sender] = _resolve_thread(msg)
+                while len(_sessions) > _MAX_DICT_ENTRIES:
+                    _sessions.popitem(last=False)
+                thread_id = _sessions[sender]
+
+        # Inject the resolved thread_id into context_metadata
+        # so _build_initial_state can pick it up
+        msg.context_metadata["thread_id"] = thread_id
+
+        # Cost breaker gate
+        if cost_breaker and cost_breaker.should_halt():
+            # Restore platform context for the reply
+            ctx = await _store.get(thread_id)
+            if not ctx:
+                ctx = msg.context_metadata
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text="⚠️ ميزانية الجلسة انتهت. (Budget exceeded)",
+                    context_metadata=ctx,
+                )
+            )
+            return
+
+        if cost_breaker:
+            cost_breaker.record_user_interaction()
+
+        # ── Build platform-agnostic state ──────────────────────────
+        state = await _build_initial_state(msg, _store)
+
+        config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+
+        # ── Interactive model selector (/models, /_models_provider, /_models_select) ──
+        model_handled = await _try_model_command(msg, _store, manager, thread_id)
+        if model_handled:
+            return
+
+        # ── HITL approval (hitl approve|deny <thread_id>) ──────────
+        # Resumes a graph paused at interrupt(). Synthetic messages are
+        # generated by the Telegram callback handler's hitl: vocabulary.
+        # Leading "/" is optional — Slack blocks slash-commands so the
+        # approval prompt uses "hitl" without the prefix.
+        if msg.text:
+            lower_text = msg.text.strip().lower()
+            if lower_text.startswith("/hitl ") or lower_text.startswith("hitl "):
+                hitl_handled = await _handle_hitl_resume(
+                    msg, graph, config, thread_id, _store, manager,
+                )
+                if hitl_handled:
+                    return
+
+        # ── /reset: Clear conversation for this thread ──────────────
+        # Send confirmation and skip graph so the next message starts fresh.
+        if msg.text and msg.text.strip().lower() == "/reset":
+            ctx_reset = await _store.get(thread_id)
+            if not ctx_reset:
+                ctx_reset = msg.context_metadata
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx_reset),
+                text="🔄 Conversation cleared. Starting fresh.",
+                context_metadata=ctx_reset,
+            ))
+            logger.info("[agent-handler] /reset for thread=%s", thread_id)
+            return
+
+        # ── Slash-command intercept (/model, /help, /reset, etc.) ──
+        # Resolve common commands without an LLM call. This keeps
+        # responses instant and saves tokens.
+        try:
+            from kazma_gateway.slash_commands import is_slash_command, resolve_slash_command
+
+            if is_slash_command(msg.text):
+                # Build context for the command resolver with real data
+                slash_ctx = await _build_slash_ctx(thread_id, msg, state, _store)
+
+                reply = resolve_slash_command(msg.text, context=slash_ctx)
+                if reply is not None:
+                    # Command was recognised — send the response and skip graph
+                    ctx = await _store.get(thread_id)
+                    if not ctx:
+                        ctx = msg.context_metadata
+                    await manager.send(
+                        OutboundMessage(
+                            target_id=_build_target_id(msg.platform, ctx),
+                            text=reply,
+                            context_metadata=ctx,
+                        )
+                    )
+                    logger.info(
+                        "[agent-handler] Slash command resolved (cmd=%s, thread=%s)",
+                        msg.text.strip().split()[0] if msg.text else "?",
+                        thread_id,
+                    )
+                    return
+        except ImportError:
+            pass  # slash_commands module not available
+
+        # ── Swarm slash-command intercept ──────────────────────────
+        # If the message starts with /swarm, dispatch to the swarm engine
+        # instead of the single-agent graph.
+        swarm_handled = await _try_swarm_command(
+            msg, state, _store, manager, thread_id,
+        )
+        if swarm_handled:
+            return  # swarm dispatched, skip graph
+
+        # ── Serialize per thread_id ────────────────────────────────
+        # Two concurrent messages for the same thread_id must NOT interleave
+        # graph.ainvoke() calls, or LangGraph checkpoints and messages will
+        # corrupt. Different thread_ids use different locks and stay parallel.
+        thread_lock = await _get_thread_lock(thread_id)
+
+        async with thread_lock:
+            # ── Invoke graph ───────────────────────────────────────
+            start = time.monotonic()
+            try:
+                result_state = await graph.ainvoke(state, config)
+                duration_ms = (time.monotonic() - start) * 1000
+
+                # ── HITL: detect interrupt() pause ──────────────────
+                # When tool_worker_node calls interrupt() for a danger
+                # tool, ainvoke returns a partial state and the graph is
+                # paused at the checkpoint. Surface an approval prompt so
+                # the user can resume via /hitl approve {thread_id}.
+                hitl_payload = await _check_graph_interrupt(graph, config)
+                if hitl_payload is not None:
+                    ctx = await _store.get(thread_id)
+                    if not ctx:
+                        ctx = msg.context_metadata
+                    prompt = _build_approval_prompt(hitl_payload, thread_id)
+                    # reply_markup travels inside context_metadata — the
+                    # Telegram adapter reads it from there.
+                    send_ctx = dict(ctx)
+                    if prompt.get("markup"):
+                        send_ctx["reply_markup"] = prompt["markup"]
+                    await manager.send(
+                        OutboundMessage(
+                            target_id=_build_target_id(msg.platform, ctx),
+                            text=prompt["text"],
+                            context_metadata=send_ctx,
+                        )
+                    )
+                    logger.info(
+                        "[agent-handler] HITL interrupt surfaced: thread=%s tool=%s",
+                        thread_id, hitl_payload.get("tool"),
+                    )
+                    return  # graph paused; resume on /hitl response
+
+                messages = result_state.get("messages", [])
+                assistant_text = ""
+                for m in reversed(messages):
+                    if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content"):
+                        assistant_text = m["content"]
+                        break
+
+                if not assistant_text:
+                    assistant_text = "(No response generated)"
+
+                logger.info(
+                    "[agent-handler] Graph completed in %.0fms (thread=%s, platform=%s)",
+                    duration_ms,
+                    thread_id,
+                    msg.platform,
+                )
+
+                # ── Restore platform IDs from SessionStore ─────────
+                # The entry is intentionally NOT deleted here. It must persist
+                # so crash-recovery routing can rehydrate the platform context
+                # (chat_id, user_id) on the next inbound message. Stale
+                # entries are evicted lazily by TTL below.
+                ctx = await _store.get(thread_id)
+
+                await manager.send(
+                    OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=assistant_text,
+                        context_metadata=ctx,
+                    )
+                )
+
+            except Exception:
+                logger.exception("[agent-handler] Graph invocation failed for %s", sender)
+                # Use msg.context_metadata directly instead of re-accessing
+                # the store (which may be the source of the original exception)
+                ctx = msg.context_metadata
+                await manager.send(
+                    OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text="⚠️ حدث خطأ أثناء معالجة رسالتك. (Processing error)",
+                        context_metadata=ctx,
+                    )
+                )
+
+        # ── Lazy TTL eviction ──────────────────────────────────────
+        # Opportunistically prune sessions that have been inactive longer than
+        # the TTL. This bounds the store size over time without deleting live
+        # entries that crash recovery still needs.
+        try:
+            await _store.evict_older_than(_session_ttl_seconds)
+        except Exception:
+            logger.debug("[agent-handler] TTL eviction skipped (store may not support it)", exc_info=True)
+
+    # ── Register telegram backend with core's send_message dispatcher ──
+    try:
+        from kazma_core.tools.send_message import register_message_backend
+
+        async def _telegram_backend_handler(target_id: str, text: str) -> str:
+            ctx = await _store.get(target_id)
+            if not ctx:
+                ctx = {"thread_id": target_id}
+            outbound = OutboundMessage(target_id=target_id, text=text, context_metadata=ctx)
+            await manager.send(outbound)
+            return f"sent:{target_id}"
+
+        register_message_backend("telegram", _telegram_backend_handler)
+    except ImportError:
+        logger.debug("[agent-handler] kazma_core not available — backend registration skipped")
+
+    return handler

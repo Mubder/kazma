@@ -92,12 +92,14 @@ and an OpenAI-compatible LLM provider layer.
 
 ### 3. Gateway (`kazma-gateway/kazma_gateway/`)
 
-**Agent Handler** (`agent_handler.py`, ~1589 lines):
-- `create_graph_handler()` — creates the async message handler closure
-- Platform isolation: graph state never sees chat_id/user_id (stored in SessionStore)
-- Slash command intercept: `/help`, `/reset`, `/model`, `/status`, `/cost`, etc.
-- Swarm dispatch: `/swarm <task>`, "use the swarm to...", auto-routing
-- Interactive model selector: `/models` with Telegram inline keyboards
+**Agent Handler** (`agent_handler/` package):
+- Decomposed package from the original 1,589 LOC god-module `agent_handler.py` to keep the code highly modular and clean.
+- `store.py` — thread resolver, in-memory store, and platform isolation (keeps `chat_id`/`user_id` strictly outside the graph state).
+- `hitl.py` — graph interrupt checks, approval prompt, and human-in-the-loop (HITL) resume.
+- `swarm_dispatch.py` — auto-routing, target configs, dispatches, and output routing (direct sending to Telegram/Discord as output target).
+- `commands.py` — swarm configuration commands, model replies, and slash commands interceptor (`/help`, `/reset`, `/model`, `/status`, `/cost`, `/models` with inline keyboards).
+- `graph.py` — main `create_graph_handler()` entry point, locks, and nested router handler.
+- `agent_handler.py` — clean, backward-compatible facade re-exporting all subpackage interfaces. Keeps `chromadb` entirely out of all imports in this file to satisfy AST parser checks.
 - Output routing: mirrors swarm results to Telegram group (Phase 5)
 
 **Telegram Adapter** (`adapters/telegram.py`):
@@ -113,10 +115,11 @@ and an OpenAI-compatible LLM provider layer.
 
 ### 4. Web UI (`kazma-ui/kazma_ui/`)
 
-**App** (`app.py`):
-- FastAPI factory with SSE chat, swarm panel, settings, providers, MCP, agents
-- GatewayManager wired with TelegramBusAdapter at startup
-- SubAgentManager for parallel child agent graphs
+**App** (`app.py` & `routes_direct.py`):
+- FastAPI factory with SSE chat, swarm panel, settings, providers, MCP, agents.
+- Decoupled by extracting over 500 lines of direct route registrations into `routes_direct.py` (`register_direct_routes()`).
+- GatewayManager wired with TelegramBusAdapter at startup.
+- SubAgentManager for parallel child agent graphs.
 
 **Swarm Panel** (`swarm_panel.py`, ~1993 lines):
 - Full REST API: workers CRUD, dispatch, tasks, metrics, templates, export

@@ -715,6 +715,32 @@ uv run pytest tests/ -f
 
 ---
 
+## 📚 Public APIs & Facades
+
+To maintain clean module boundaries and robust testing, Kazma utilizes backward-compatible facades and strictly-defined public API boundaries:
+
+1. **Agent Message Handler Facade** (`kazma_gateway/agent_handler.py`):
+   - Serves as the central API facade re-exporting all subpackage capabilities from the decomposed `kazma_gateway/agent_handler/` package.
+   - Strictly keeps `chromadb` imports completely out of its file scope to satisfy AST parsing and multi-tenant isolation tests.
+2. **Settings and Configuration Manager**:
+   - `get_config_store()`: Process-wide atomic SQLite-backed settings singleton with automatic WAL journaling. Avoid direct instantiation.
+3. **Swarm Engine Facade**:
+   - `SwarmEngine` public interface serves as the primary orchestration entry point, delegating complex subtasks to `reliability_registry`, `phonebook`, and `checkpoint_manager`.
+
+### 🗄️ Optional RAG Deployment
+
+Kazma's 4-Layer Memory system automatically degrades gracefully when Vector Databases (like ChromaDB) are not deployed or offline:
+- **Vector/Semantic Memory (RAG)** is fully optional. If `KAZMA_VECTOR_COLLECTION` or ChromaDB is unavailable, the `UnifiedRouter` and `UnifiedMemoryStore` fall back gracefully to a high-performance, local, thread-safe SQLite FTS5 BM25 search.
+- Development and local tests can be run fully headless and offline with zero vector database requirements.
+
+### 💻 Clear Workspace Setups
+
+To configure safe local workspaces for execution:
+1. Run `.\setup.ps1` (or `setup.sh` on POSIX systems) to automatically initialize dependencies, set up local configuration directories, and compile schemas.
+2. Portability is strictly enforced. No absolute paths or home directories are hardcoded. Workspace constraints can be defined dynamically under the `configure_workspace(workspace_dir)` API to lock execution down to specific project subdirectories.
+
+---
+
 ## 📚 Documentation
 
 - [CLI Reference](docs/docs/api-reference/cli-reference.md)

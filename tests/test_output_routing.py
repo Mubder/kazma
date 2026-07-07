@@ -170,7 +170,7 @@ class TestMaybeSendToOutputTarget:
         manager.send = AsyncMock()
 
         with patch(
-            "kazma_gateway.agent_handler._get_output_target_config",
+            "kazma_gateway.agent_handler.swarm_dispatch._get_output_target_config",
             return_value=None,
         ):
             result = await _maybe_send_to_output_target(manager, "hello", None)
@@ -205,7 +205,7 @@ class TestMaybeSendToOutputTarget:
         }
 
         with patch(
-            "kazma_gateway.agent_handler._get_output_target_config",
+            "kazma_gateway.agent_handler.swarm_dispatch._get_output_target_config",
             return_value=config_target,
         ):
             result = await _maybe_send_to_output_target(manager, "hi", None)
@@ -214,6 +214,92 @@ class TestMaybeSendToOutputTarget:
         call_args = manager.send.call_args
         outbound = call_args.args[0]
         assert outbound.target_id == "telegram:-100999"
+
+    @pytest.mark.asyncio
+    async def test_direct_send_success(self):
+        """If explicit bot_token is set, tries direct API call first and returns True if successful."""
+        from kazma_gateway.agent_handler import _maybe_send_to_output_target
+
+        manager = MagicMock()
+        manager.send = AsyncMock()
+        override = {
+            "platform": "telegram",
+            "chat_id": -100555,
+            "enabled": True,
+            "bot_token": "mock_dedicated_token",
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"ok": True}
+
+        # Mock httpx.AsyncClient
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await _maybe_send_to_output_target(manager, "hello direct", override)
+
+        assert result is True
+        mock_client.post.assert_awaited()
+        # Direct send succeeded, so manager should NOT have been called
+        manager.send.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_direct_send_fails_and_falls_back_to_manager(self):
+        """If direct send returns ok=False, falls back to gateway manager."""
+        from kazma_gateway.agent_handler import _maybe_send_to_output_target
+
+        manager = MagicMock()
+        manager.send = AsyncMock()
+        override = {
+            "platform": "telegram",
+            "chat_id": -100555,
+            "enabled": True,
+            "bot_token": "mock_dedicated_token",
+        }
+
+        mock_resp_fail = MagicMock()
+        mock_resp_fail.json.return_value = {"ok": False, "description": "Chat not found"}
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp_fail)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await _maybe_send_to_output_target(manager, "hello fallback", override)
+
+        # Direct send failed, so it fell back to manager.send and succeeded
+        assert result is True
+        mock_client.post.assert_awaited()
+        manager.send.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_no_explicit_bot_token_tries_manager_first(self):
+        """Without explicit token, tries gateway manager first, avoiding direct send if manager succeeds."""
+        from kazma_gateway.agent_handler import _maybe_send_to_output_target
+
+        manager = MagicMock()
+        manager.send = AsyncMock()
+        override = {
+            "platform": "telegram",
+            "chat_id": -100555,
+            "enabled": True,
+        }
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("httpx.AsyncClient", return_value=mock_client):
+            result = await _maybe_send_to_output_target(manager, "hello manager first", override)
+
+        assert result is True
+        manager.send.assert_awaited_once()
+        # Since manager succeeded, direct send should NOT occur
+        mock_client.post.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -429,8 +515,8 @@ class TestWebUIDispatchOutputRouting:
             "enabled": True,
         }
 
-        with patch("kazma_ui.swarm_panel._resolve_engine", return_value=mock_engine), \
-             patch("kazma_gateway.agent_handler._get_output_target_config", return_value=config_target):
+        with patch("kazma_ui.services.SwarmService.resolve_engine", return_value=mock_engine), \
+             patch("kazma_gateway.agent_handler.swarm_dispatch._get_output_target_config", return_value=config_target):
             
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 resp = await ac.post("/api/swarm/dispatch", json={
@@ -465,6 +551,10 @@ class TestWebUIDispatchOutputRouting:
 
         # Mock the engine
         mock_engine = MagicMock()
+        if hasattr(mock_engine, "register_task_handle"):
+            del mock_engine.register_task_handle
+        if hasattr(mock_engine, "get_task_handle"):
+            del mock_engine.get_task_handle
         mock_worker = MagicMock()
         mock_engine.get_worker.return_value = mock_worker
         mock_engine._task_handles = {}
@@ -492,8 +582,12 @@ class TestWebUIDispatchOutputRouting:
             "enabled": True,
         }
 
-        with patch("kazma_ui.swarm_panel._resolve_engine", return_value=mock_engine), \
-             patch("kazma_gateway.agent_handler._get_output_target_config", return_value=config_target):
+        from kazma_ui.services import get_swarm_service, reset_swarm_service
+        reset_swarm_service()
+        get_swarm_service()._engine = mock_engine
+
+        with patch("kazma_ui.services.SwarmService.resolve_engine", return_value=mock_engine), \
+             patch("kazma_gateway.agent_handler.swarm_dispatch._get_output_target_config", return_value=config_target):
             
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 resp = await ac.post("/api/swarm/dispatch", json={
@@ -538,6 +632,10 @@ class TestWebUIDispatchOutputRouting:
 
         # Mock the engine
         mock_engine = MagicMock()
+        if hasattr(mock_engine, "register_task_handle"):
+            del mock_engine.register_task_handle
+        if hasattr(mock_engine, "get_task_handle"):
+            del mock_engine.get_task_handle
         mock_engine._task_handles = {}
 
         # Mock engine.retry_task to return a new task
@@ -566,8 +664,12 @@ class TestWebUIDispatchOutputRouting:
             "enabled": True,
         }
 
-        with patch("kazma_ui.swarm_panel._resolve_engine", return_value=mock_engine), \
-             patch("kazma_gateway.agent_handler._get_output_target_config", return_value=config_target):
+        from kazma_ui.services import get_swarm_service, reset_swarm_service
+        reset_swarm_service()
+        get_swarm_service()._engine = mock_engine
+
+        with patch("kazma_ui.services.SwarmService.resolve_engine", return_value=mock_engine), \
+             patch("kazma_gateway.agent_handler.swarm_dispatch._get_output_target_config", return_value=config_target):
             
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 resp = await ac.post("/api/swarm/tasks/task-old/retry")

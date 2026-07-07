@@ -57,6 +57,102 @@ def _set_limits() -> None:
         pass
 
 
+def _assign_to_job_object(proc: Any) -> Any:
+    """Create a Windows Job Object, configure memory & kill limits, and assign the process.
+
+    Only called on Windows. Returns the job handle if successful, else None.
+    """
+    if sys.platform != "win32":
+        return None
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        # Define structures
+        class IO_COUNTERS(ctypes.Structure):
+            _fields_ = [
+                ("ReadOperationCount", ctypes.c_uint64),
+                ("WriteOperationCount", ctypes.c_uint64),
+                ("OtherOperationCount", ctypes.c_uint64),
+                ("ReadTransferCount", ctypes.c_uint64),
+                ("WriteTransferCount", ctypes.c_uint64),
+                ("OtherTransferCount", ctypes.c_uint64),
+            ]
+
+        class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("PerProcessUserTimeLimit", ctypes.c_int64),
+                ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", wintypes.DWORD),
+                ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t),
+                ("ActiveProcessLimit", wintypes.DWORD),
+                ("Affinity", ctypes.c_size_t),
+                ("PriorityClass", wintypes.DWORD),
+                ("SchedulingClass", wintypes.DWORD),
+            ]
+
+        class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+            _fields_ = [
+                ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                ("IoInfo", IO_COUNTERS),
+                ("ProcessMemoryLimit", ctypes.c_size_t),
+                ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                ("PeakJobMemoryUsed", ctypes.c_size_t),
+            ]
+
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+        JOB_OBJECT_LIMIT_JOB_MEMORY = 0x400
+        JobObjectExtendedLimitInformation = 9
+
+        kernel32 = ctypes.windll.kernel32
+
+        # Create job object
+        job_handle = kernel32.CreateJobObjectW(None, None)
+        if not job_handle:
+            logger.debug("[code_exec] CreateJobObjectW failed with error %s", kernel32.GetLastError())
+            return None
+
+        # Configure limits
+        limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_JOB_MEMORY
+        limits.JobMemoryLimit = MEMORY_LIMIT_MB * 1024 * 1024  # e.g., 512MB
+
+        res = kernel32.SetInformationJobObject(
+            job_handle,
+            JobObjectExtendedLimitInformation,
+            ctypes.byref(limits),
+            ctypes.sizeof(limits)
+        )
+        if not res:
+            logger.debug("[code_exec] SetInformationJobObject failed with error %s", kernel32.GetLastError())
+            kernel32.CloseHandle(job_handle)
+            return None
+
+        # Resolve process handle
+        proc_handle = None
+        if hasattr(proc, "_transport") and hasattr(proc._transport, "_proc") and hasattr(proc._transport._proc, "_handle"):
+            proc_handle = proc._transport._proc._handle
+
+        if proc_handle:
+            res = kernel32.AssignProcessToJobObject(job_handle, int(proc_handle))
+            if not res:
+                logger.debug("[code_exec] AssignProcessToJobObject failed with error %s", kernel32.GetLastError())
+                kernel32.CloseHandle(job_handle)
+                return None
+            return job_handle
+        else:
+            logger.debug("[code_exec] Process handle not found for assignment")
+            kernel32.CloseHandle(job_handle)
+            return None
+
+    except Exception as exc:
+        logger.debug("[code_exec] Failed to configure Windows Job Object: %s", exc, exc_info=True)
+        return None
+
+
 async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     """Execute Python code in a sandboxed subprocess.
 
@@ -73,9 +169,19 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     # Create isolated temp directory
     tmp_dir = tempfile.mkdtemp(prefix="kazma_exec_")
     code_file = Path(tmp_dir) / "snippet.py"
+    job_handle = None
 
     try:
         code_file.write_text(code, encoding="utf-8")
+
+        # Build restricted PATH environment for Windows
+        if sys.platform == "win32":
+            python_dir = os.path.dirname(sys.executable)
+            sys_root = os.environ.get("SystemRoot", "C:\\Windows")
+            sys32 = os.path.join(sys_root, "System32")
+            path_env = f"{python_dir};{sys32};{sys_root}"
+        else:
+            path_env = os.environ.get("PATH", "")
 
         # Build subprocess keyword arguments (preexec_fn is POSIX-only)
         subprocess_kwargs: dict[str, Any] = {
@@ -83,7 +189,7 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
             "stderr": asyncio.subprocess.PIPE,
             "cwd": tmp_dir,
             "env": {
-                "PATH": os.environ.get("PATH", ""),
+                "PATH": path_env,
                 "HOME": tmp_dir,
                 "LANG": os.environ.get("LANG", "C.UTF-8"),
             },
@@ -98,6 +204,9 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
             str(code_file),
             **subprocess_kwargs,
         )
+
+        if sys.platform == "win32":
+            job_handle = _assign_to_job_object(proc)
 
         try:
             stdout, stderr = await asyncio.wait_for(
@@ -131,6 +240,14 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
         return "\n".join(parts)
 
     finally:
+        # Clean up job object handle on Windows
+        if sys.platform == "win32" and job_handle:
+            try:
+                import ctypes
+                ctypes.windll.kernel32.CloseHandle(job_handle)
+            except Exception:
+                pass
+
         # Clean up temp directory
         try:
             shutil.rmtree(tmp_dir, ignore_errors=True)
