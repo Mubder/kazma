@@ -102,6 +102,12 @@ class AlertDispatcher:
         cls._recent_alerts.clear()
 
     @classmethod
+    def resolve_alerts_for_subsystem(cls, subsystem: str) -> None:
+        """Clear alerts for a specific subsystem once it is resolved."""
+        cls._init_default_channels()
+        cls._recent_alerts = [a for a in cls._recent_alerts if a["subsystem"].lower() != subsystem.lower()]
+
+    @classmethod
     async def trigger_system_alert(cls, subsystem: str = "Memory", status: str = "DEGRADED", message: str = "") -> None:
         """Trigger a system health alert and broadcast it to active adapters."""
         title = f"Permission Required: {subsystem} Subsystem" if status == "DEGRADED" else f"KAZMA SYSTEM HEALTH: {subsystem} Active"

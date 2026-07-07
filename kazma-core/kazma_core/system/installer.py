@@ -101,6 +101,14 @@ async def _hot_reload_memory() -> None:
         # Instantiate VectorMemory anew, which will now successfully import chromadb
         mem = VectorMemory()
         
+        # Update global vector memory reference
+        from kazma_core.agent.tool_registry import set_vector_memory
+        set_vector_memory(mem)
+        
+        # Clear the degraded alerts for VectorMemory
+        from kazma_core.observability.alerts import AlertDispatcher
+        AlertDispatcher.resolve_alerts_for_subsystem("VectorMemory")
+        
         # If there's any pending data in FTS5 fallback, we can migrate/re-index it into chromadb!
         from kazma_core.memory.fts5 import FTS5Memory
         fts = FTS5Memory()
