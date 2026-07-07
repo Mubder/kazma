@@ -842,6 +842,45 @@ class TelegramAdapter(BaseAdapter):
         elif data.startswith("model_select:"):
             model_id = data.split(":", 1)[1]
             text = f"/_models_select {model_id}"
+        elif data.startswith("sys_install:"):
+            import re
+            # Verify authorization (allowed_users acts as the admin whitelist in Kazma)
+            if self._allowed_users:
+                user_id = from_user.get("id", 0)
+                if user_id not in self._allowed_users:
+                    logger.warning("[telegram] Non-whitelisted user %d tried to trigger installation.", user_id)
+                    asyncio.create_task(self._answer_callback_query(cb_id, "Not authorized: Admin privilege required."))
+                    return
+
+            # Clear loading icon on Telegram client
+            asyncio.create_task(self._answer_callback_query(cb_id))
+
+            package_name = data.split(":", 1)[1]
+            # Use safe detached background installer
+            from kazma_core.system.runtime_manager import trigger_package_promotion
+            asyncio.create_task(trigger_package_promotion(package_name))
+
+            chat_id = message.get("chat", {}).get("id")
+            message_id = message.get("message_id")
+            if chat_id and message_id:
+                try:
+                    if not self._http:
+                        self._http = httpx.AsyncClient(
+                            base_url=self._api_base,
+                            timeout=httpx.Timeout(30.0, connect=5.0),
+                        )
+                    await self._http.post(
+                        "/editMessageText",
+                        json={
+                            "chat_id": chat_id,
+                            "message_id": message_id,
+                            "text": "[⏳ Installing package... please wait]",
+                            "reply_markup": {"inline_keyboard": []}
+                        }
+                    )
+                except Exception as exc:
+                    logger.warning("[telegram] Failed to edit alert card: %s", exc)
+            return
         elif data.startswith("install_dependency:"):
             package_name = data.split(":", 1)[1]
             from kazma_core.system import asynchronous_install_package

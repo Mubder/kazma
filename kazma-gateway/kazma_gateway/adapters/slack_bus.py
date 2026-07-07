@@ -126,19 +126,52 @@ class SlackBusAdapter(BusAdapter):
         button_text: str,
     ) -> None:
         """Deliver an alert card with Block Kit buttons for dependency installation."""
-        text = (
-            f"🚨 *{title}*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"*Subsystem:* {subsystem}\n"
-            f"*Status:* {status}\n"
-            f"*Reason:* {reason}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            "Click below to trigger the remote installation safely."
-        )
+        callback_data = callback_id
+        if callback_data and not (callback_data.startswith("sys_install:") or callback_data.startswith("install_dependency:")):
+            callback_data = f"sys_install:{callback_id}"
 
-        blocks = [
-            {"type": "section", "text": {"type": "mrkdwn", "text": text[:2900]}},
-            {
+        if callback_data and "sys_install:" in callback_data:
+            # Use interactive Block Kit layout containing warning accessory image and context section
+            blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"🚨 *{title}*\n━━━━━━━━━━━━━━━━━━━━━\n*Subsystem:* {subsystem}\n*Status:* `{status}`\n*Reason:* {reason}"
+                    },
+                    "accessory": {
+                        "type": "image",
+                        "image_url": "https://api.slack.com/img/blocks/b_labs/danger.png",
+                        "alt_text": "Warning Accessory"
+                    }
+                },
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": "Click below to trigger the remote installation safely."
+                        }
+                    ]
+                }
+            ]
+        else:
+            text = (
+                f"🚨 *{title}*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"*Subsystem:* {subsystem}\n"
+                f"*Status:* {status}\n"
+                f"*Reason:* {reason}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                "Click below to trigger the remote installation safely."
+            )
+            blocks = [
+                {"type": "section", "text": {"type": "mrkdwn", "text": text[:2900]}}
+            ]
+
+        # Include button actions ONLY if we have a callback_id and status is not ACTIVE
+        if callback_id and status != "ACTIVE":
+            blocks.append({
                 "type": "actions",
                 "block_id": f"install_actions_{callback_id}",
                 "elements": [
@@ -146,12 +179,11 @@ class SlackBusAdapter(BusAdapter):
                         "type": "button",
                         "text": {"type": "plain_text", "text": button_text},
                         "style": "primary",
-                        "value": f"install_dependency:{callback_id}",
-                        "action_id": f"install_dependency:{callback_id}",
+                        "value": callback_data,
+                        "action_id": callback_data,
                     }
                 ]
-            }
-        ]
+            })
 
         await self._post_message({"text": f"ALERT: {title}", "blocks": blocks})
 

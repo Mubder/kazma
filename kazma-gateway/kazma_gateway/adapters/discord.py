@@ -255,10 +255,10 @@ class DiscordAdapter(BaseAdapter):
         component_data = data.get("data", {})
         custom_id = component_data.get("custom_id", "")
 
-        if custom_id.startswith("install_dependency:"):
+        if custom_id.startswith("install_dependency:") or custom_id.startswith("sys_install:"):
             package_name = custom_id.split(":", 1)[1]
-            from kazma_core.system import asynchronous_install_package
-            asyncio.create_task(asynchronous_install_package(package_name))
+            from kazma_core.system.runtime_manager import trigger_package_promotion
+            asyncio.create_task(trigger_package_promotion(package_name))
             
             try:
                 if not self._http:
@@ -267,12 +267,15 @@ class DiscordAdapter(BaseAdapter):
                         timeout=15.0,
                         headers={"Authorization": f"Bot {self._token}"},
                     )
+                
+                content = "[⏳ Installing package... please wait]" if custom_id.startswith("sys_install:") else "⏳ Installing ML dependencies in the background..."
+                
                 await self._http.post(
                     f"/interactions/{interaction_id}/{interaction_token}/callback",
                     json={
                         "type": 7,
                         "data": {
-                            "content": "⏳ Installing ML dependencies in the background...",
+                            "content": content,
                             "embeds": [],
                             "components": []
                         }

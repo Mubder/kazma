@@ -120,34 +120,44 @@ class DiscordBusAdapter(BusAdapter):
         button_text: str,
     ) -> None:
         """Deliver an alert card with Discord embed and buttons for dependency installation."""
+        callback_data = callback_id
+        if callback_data and not (callback_data.startswith("sys_install:") or callback_data.startswith("install_dependency:")):
+            callback_data = f"sys_install:{callback_id}"
+
         description = (
             f"**Subsystem:** {subsystem}\n"
             f"**Status:** {status}\n"
             f"**Reason:** {reason}\n\n"
-            "Click below to trigger the remote installation safely."
         )
+        if callback_id and status != "ACTIVE":
+            description += "Click below to trigger the remote installation safely."
+
+        color = 0x55FF55 if status == "ACTIVE" else 0xFF5555
 
         embed = {
-            "title": f"🚨 {title}",
+            "title": f"🚨 {title}" if status != "ACTIVE" else f"✅ {title}",
             "description": description[:2000],
-            "color": 0xFF5555,  # Red
+            "color": color,
         }
 
-        components = [
-            {
-                "type": 1,  # ACTION_ROW
-                "components": [
-                    {
-                        "type": 2,  # BUTTON
-                        "style": 1,  # PRIMARY (blue)
-                        "label": button_text,
-                        "custom_id": f"install_dependency:{callback_id}",
-                    }
-                ],
-            }
-        ]
+        payload: dict[str, Any] = {"embeds": [embed]}
 
-        await self._post_message({"embeds": [embed], "components": components})
+        if callback_id and status != "ACTIVE":
+            payload["components"] = [
+                {
+                    "type": 1,  # ACTION_ROW
+                    "components": [
+                        {
+                            "type": 2,  # BUTTON
+                            "style": 1,  # PRIMARY (blue)
+                            "label": button_text,
+                            "custom_id": callback_data,
+                        }
+                    ],
+                }
+            ]
+
+        await self._post_message(payload)
 
     async def request_approval(self, approval: ApprovalRequest) -> bool:
         """Post an approval card with buttons and await the response.

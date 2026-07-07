@@ -352,16 +352,25 @@ class SlackAdapter(BaseAdapter):
                                     value = action.get("value", "")
                                     action_id = action.get("action_id", "")
                                     
-                                    if value.startswith("install_dependency:") or action_id.startswith("install_dependency:"):
+                                    if (
+                                        value.startswith("install_dependency:") or 
+                                        action_id.startswith("install_dependency:") or
+                                        value.startswith("sys_install:") or
+                                        action_id.startswith("sys_install:")
+                                    ):
                                         val = value or action_id
                                         package_name = val.split(":", 1)[1]
-                                        from kazma_core.system import asynchronous_install_package
-                                        await asynchronous_install_package(package_name)
+                                        from kazma_core.system.runtime_manager import trigger_package_promotion
+                                        await trigger_package_promotion(package_name)
                                         
                                         response_url = payload.get("response_url", "")
                                         if response_url:
                                             try:
-                                                updated_text = "⏳ *Installing ML dependencies in the background...*"
+                                                if val.startswith("sys_install:"):
+                                                    updated_text = "[⏳ Installing package... please wait]"
+                                                else:
+                                                    updated_text = "⏳ *Installing ML dependencies in the background...*"
+                                                    
                                                 updated_blocks = [
                                                     {
                                                         "type": "section",
@@ -372,7 +381,7 @@ class SlackAdapter(BaseAdapter):
                                                     await client.post(
                                                         response_url,
                                                         json={
-                                                            "text": "⏳ Installing ML dependencies in the background...",
+                                                            "text": updated_text,
                                                             "blocks": updated_blocks,
                                                             "replace_original": True
                                                         }

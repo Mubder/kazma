@@ -178,36 +178,56 @@ class TelegramBusAdapter(BusAdapter):
         button_text: str,
     ) -> None:
         """Deliver an alert card with inline keyboard button for dependency installation."""
-        safe_title = _escape_md(title)
-        safe_subsystem = _escape_md(subsystem)
-        safe_status = _escape_md(status)
-        safe_reason = _escape_md(reason)
+        callback_data = callback_id
+        if callback_data and not (callback_data.startswith("sys_install:") or callback_data.startswith("install_dependency:")):
+            callback_data = f"sys_install:{callback_id}"
 
-        text = (
-            f"🚨 *{safe_title}*\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"*Subsystem:* {safe_subsystem}\n"
-            f"*Status:* {safe_status}\n"
-            f"*Reason:* {safe_reason}\n"
-            "━━━━━━━━━━━━━━━━━━━━━\n"
-            "Click below to trigger the remote installation safely\\."
-        )
+        # If it's a sys_install callback data, use the requested HTML-formatted text block
+        if callback_data and "sys_install:" in callback_data:
+            text = (
+                f"🚨 <b>{title}</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                f"<b>Subsystem:</b> {subsystem}\n"
+                f"<b>Status:</b> {status}\n"
+                f"<b>Reason:</b> {reason}\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                "Click below to trigger the remote installation safely."
+            )
+            parse_mode = "HTML"
+        else:
+            safe_title = _escape_md(title)
+            safe_subsystem = _escape_md(subsystem)
+            safe_status = _escape_md(status)
+            safe_reason = _escape_md(reason)
+            text = (
+                f"🚨 *{safe_title}*\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                f"*Subsystem:* {safe_subsystem}\n"
+                f"*Status:* {safe_status}\n"
+                f"*Reason:* {safe_reason}\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                "Click below to trigger the remote installation safely\\."
+            )
+            parse_mode = "MarkdownV2"
 
-        reply_markup = {
-            "inline_keyboard": [[
-                {
-                    "text": button_text,
-                    "callback_data": f"install_dependency:{callback_id}",
-                }
-            ]]
-        }
-
-        await self._post({
+        payload: dict[str, Any] = {
             "chat_id": self._chat_id,
             "text": text[:4096],
-            "parse_mode": "MarkdownV2",
-            "reply_markup": reply_markup,
-        })
+            "parse_mode": parse_mode,
+        }
+
+        # Include inline keyboard ONLY if we have a callback_id and status is not ACTIVE
+        if callback_id and status != "ACTIVE":
+            payload["reply_markup"] = {
+                "inline_keyboard": [[
+                    {
+                        "text": button_text,
+                        "callback_data": callback_data,
+                    }
+                ]]
+            }
+
+        await self._post(payload)
 
     async def request_approval(self, approval: ApprovalRequest) -> bool:
         """Post an approval card with inline keyboard buttons.
