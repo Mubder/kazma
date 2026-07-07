@@ -1164,14 +1164,8 @@ class KazmaAppBuilder:
                 logger.exception("[HITL] Failed to list pending approvals")
                 return _JSONResponse({"pending": [], "count": 0, "error": "Internal error"}, status_code=500)
 
-        @self.app.get("/api/telemetry", deprecated=True)
-        async def get_telemetry() -> dict:
-            return {
-                "tokens": 0,
-                "vram_mb": 0,
-                "model": "deprecated",
-                "timestamp": __import__("time").time(),
-            }
+        # Deprecated /api/telemetry endpoint removed (per audit remediation).
+        # Use /api/telemetry/stream for live data if needed.
 
         @self.app.get("/api/status")
         async def get_status() -> dict[str, Any]:

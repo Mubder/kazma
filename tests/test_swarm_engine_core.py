@@ -392,3 +392,51 @@ def test_create_app_keeps_swarm_available_when_gateway_init_fails():
                 item["subsystem"] == "gateway"
                 for item in app_status.json()["init_errors"]
             )
+
+
+@pytest.mark.asyncio
+async def test_engine_public_facades_for_ui_and_sse(empty_config):
+    """Test new public methods added during audit remediation (list_workers, task handles, sse_bus)."""
+    from kazma_core.swarm.engine import SwarmEngine
+
+    engine = SwarmEngine(empty_config)
+
+    # list_workers
+    workers = engine.list_workers()
+    assert isinstance(workers, list)
+
+    # task handle registration
+    mock_handle = object()
+    engine.register_task_handle("task-123", mock_handle)
+    assert engine.get_task_handle("task-123") is mock_handle
+    engine.unregister_task_handle("task-123")
+    assert engine.get_task_handle("task-123") is None
+
+    # active task
+    assert engine.get_active_task("nonexistent") is None
+
+    # sse bus
+    mock_bus = object()
+    engine.set_sse_bus(mock_bus)
+    # no crash, and internal set
+    assert getattr(engine, "_sse_bus", None) is mock_bus
+
+
+def test_config_store_pragma_helper():
+    """Basic smoke for centralized pragma helper."""
+    from kazma_core.config_store import apply_sqlite_pragmas
+    import sqlite3
+    import tempfile
+    import os
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db = os.path.join(tmp, "test.db")
+        conn = sqlite3.connect(db)
+        try:
+            apply_sqlite_pragmas(conn)
+            # Should not raise, and pragmas applied
+            cur = conn.execute("PRAGMA journal_mode")
+            mode = cur.fetchone()[0].upper()
+            assert mode in ("WAL", "MEMORY")  # WAL preferred
+        finally:
+            conn.close()

@@ -89,7 +89,7 @@ class CompactionEngine:
                 cp_id = await self.checkpoint_manager.save(state)
                 logger.info("Saved checkpoint %s before compaction", cp_id)
             except Exception:
-                logger.exception("Failed to save checkpoint before compaction, continuing anyway")
+                logger.exception("Failed to save checkpoint before compaction, continuing anyway")  # non-fatal
 
         # Step 2: Summarize the conversation
         summary = await self.summarize(messages)

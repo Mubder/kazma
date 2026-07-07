@@ -1,4 +1,8 @@
-"""Swarm Panel, backed by the shared SwarmEngine registry."""
+"""Swarm Panel, backed by the shared SwarmEngine registry.
+
+TODO (audit): Small split started. See architecture docs.
+Next steps: extract worker CRUD, task dispatch, metrics into submodules.
+"""
 
 from __future__ import annotations
 

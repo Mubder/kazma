@@ -437,7 +437,8 @@ class ModelRegistry:
         except SSRFError as exc:
             logger.warning("discover_models: SSRF blocked %r for %r: %s", url, clean_name, exc)
             return []
-        except Exception:
+        except Exception as _e:
+            logger.debug("discover_models SSRF guard issue: %s", _e)
             logger.warning("discover_models: SSRF validation unavailable — blocking request for safety")
             return []
 
