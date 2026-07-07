@@ -197,6 +197,14 @@ class SwarmEngine:
         """Public accessor for task handle (avoids direct _task_handles access from UI)."""
         return self._task_handles.get(task_id)
 
+    def register_task_handle(self, task_id: str, handle: Any) -> None:
+        """Register a task handle publicly (used by swarm panel for SSE task tracking)."""
+        self._task_handles[task_id] = handle
+
+    def unregister_task_handle(self, task_id: str) -> None:
+        """Remove a task handle publicly."""
+        self._task_handles.pop(task_id, None)
+
     def list_workers(self) -> list:
         """Public accessor returning worker objects. Preferred over direct _workers access from UI layers."""
         # Prefer phonebook when possible; fallback to internal for compatibility

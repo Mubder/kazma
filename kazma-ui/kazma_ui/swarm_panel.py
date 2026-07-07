@@ -1048,10 +1048,13 @@ class SwarmRouterBuilder:
             if task_type == TaskType.BROADCAST:
                 if background:
                     _handle = asyncio.create_task(_run_and_route_task(engine, swarm_task, is_broadcast=True))
-                    engine._task_handles[swarm_task.id] = _handle
+                    if hasattr(engine, "register_task_handle"):
+                        engine.register_task_handle(swarm_task.id, _handle)
+                    else:
+                        engine._task_handles[swarm_task.id] = _handle
                     # Clean up handle on completion to prevent memory leak
                     _handle.add_done_callback(
-                        lambda h, tid=swarm_task.id: engine._task_handles.pop(tid, None)
+                        lambda h, tid=swarm_task.id: engine.unregister_task_handle(tid) if hasattr(engine, "unregister_task_handle") else engine._task_handles.pop(tid, None)
                     )
                     return JSONResponse({
                         "status": "ok",
@@ -1064,10 +1067,13 @@ class SwarmRouterBuilder:
             else:
                 if background:
                     _handle = asyncio.create_task(_run_and_route_task(engine, swarm_task, is_broadcast=False))
-                    engine._task_handles[swarm_task.id] = _handle
+                    if hasattr(engine, "register_task_handle"):
+                        engine.register_task_handle(swarm_task.id, _handle)
+                    else:
+                        engine._task_handles[swarm_task.id] = _handle
                     # Clean up handle on completion to prevent memory leak
                     _handle.add_done_callback(
-                        lambda h, tid=swarm_task.id: engine._task_handles.pop(tid, None)
+                        lambda h, tid=swarm_task.id: engine.unregister_task_handle(tid) if hasattr(engine, "unregister_task_handle") else engine._task_handles.pop(tid, None)
                     )
                     return JSONResponse({
                         "status": "ok",
@@ -1384,9 +1390,12 @@ class SwarmRouterBuilder:
                 )
             # Dispatch in the background (non-blocking)
             handle = asyncio.create_task(_run_and_route_task(engine, new_task, is_broadcast=False))
-            engine._task_handles[new_task.id] = handle
+            if hasattr(engine, "register_task_handle"):
+                engine.register_task_handle(new_task.id, handle)
+            else:
+                engine._task_handles[new_task.id] = handle
             handle.add_done_callback(
-                lambda h, tid=new_task.id: engine._task_handles.pop(tid, None)
+                lambda h, tid=new_task.id: engine.unregister_task_handle(tid) if hasattr(engine, "unregister_task_handle") else engine._task_handles.pop(tid, None)
             )
             return JSONResponse(
                 {
