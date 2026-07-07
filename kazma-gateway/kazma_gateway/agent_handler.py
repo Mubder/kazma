@@ -945,8 +945,9 @@ async def _try_model_command(
                     context_metadata=reply_ctx,
                 ))
                 return True
-            except Exception:
-                pass  # fall through to text
+            except Exception as exc:
+                logger.debug("Interactive provider selection failed: %s", exc, exc_info=True)
+                # fall through to text
 
         # Text fallback (non-Telegram or keyboard build failed)
         lines = ["Available providers:\n"]
@@ -1020,7 +1021,8 @@ def _get_provider_models(provider_name: str) -> list[str]:
         from kazma_core.model_registry import get_model_registry
         reg = get_model_registry()
         return reg.get_visible_models(provider_name)
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed to get provider models for %s: %s", provider_name, exc, exc_info=True)
         return []
 
 
@@ -1030,7 +1032,8 @@ def _is_active_model(model_id: str) -> bool:
         from kazma_core.model_registry import get_model_registry
         reg = get_model_registry()
         return reg._active_model == model_id
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed to check if model %s is active: %s", model_id, exc, exc_info=True)
         return False
 
 
@@ -1069,7 +1072,8 @@ async def _build_slash_ctx(
         from kazma_core.model_registry import get_model_registry
         reg = get_model_registry()
         ctx["model"] = reg._active_model or "default"
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed to get active model for slash context: %s", exc, exc_info=True)
         ctx["model"] = "default"
 
     # Token / cost data from checkpoint state
@@ -1080,7 +1084,8 @@ async def _build_slash_ctx(
             for m in messages
             if isinstance(m, dict)
         )
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed to calculate token count for slash context: %s", exc, exc_info=True)
         ctx["token_count"] = 0
 
     # Memory count
@@ -1391,7 +1396,7 @@ def create_graph_handler(
         try:
             await _store.evict_older_than(_session_ttl_seconds)
         except Exception:
-            logger.debug("[agent-handler] TTL eviction skipped (store may not support it)")
+            logger.debug("[agent-handler] TTL eviction skipped (store may not support it)", exc_info=True)
 
     # ── Register telegram backend with core's send_message dispatcher ──
     try:
@@ -1482,8 +1487,9 @@ def _build_approval_prompt(payload: dict[str, Any], thread_id: str) -> dict[str,
         from kazma_gateway.adapters.telegram import TelegramAdapter
 
         markup = TelegramAdapter.build_approval_keyboard(thread_id)
-    except Exception:
-        pass  # non-Telegram platforms — plain text fallback
+    except Exception as exc:
+        logger.debug("TelegramAdapter approval keyboard build skipped or failed: %s", exc, exc_info=True)
+        # non-Telegram platforms — plain text fallback
     return {"text": text, "markup": markup}
 
 

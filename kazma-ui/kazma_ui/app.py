@@ -986,7 +986,7 @@ class KazmaAppBuilder:
                 try:
                     await old_adapter.stop()
                 except Exception:
-                    logger.warning("[Gateway] Error stopping adapter %s during refresh", old_adapter.name)
+                    logger.warning("[Gateway] Error stopping adapter %s during refresh", old_adapter.name, exc_info=True)
 
             self.gateway.adapters.clear()
 
@@ -1035,7 +1035,7 @@ class KazmaAppBuilder:
                     await new_adapter.start(self.gateway.queue, self.gateway._shutdown)
                     logger.info("[Gateway] Adapter %s started via refresh", new_adapter.name)
                 except Exception:
-                    logger.warning("[Gateway] Failed to start adapter %s during refresh", new_adapter.name)
+                    logger.warning("[Gateway] Failed to start adapter %s during refresh", new_adapter.name, exc_info=True)
 
             logger.info("[Gateway] Adapter refresh complete — %d adapter(s) running", len(self.gateway.adapters))
             return {
@@ -1102,6 +1102,7 @@ class KazmaAppBuilder:
             try:
                 body = await request.json()
             except Exception:
+                logger.debug("[HITL] Malformed or missing JSON body in approval request", exc_info=True)
                 return _JSONResponse({"error": "Invalid JSON"}, status_code=400)
 
             action = body.get("action", "deny")
@@ -1143,7 +1144,7 @@ class KazmaAppBuilder:
                     "status": "approved" if approved else "denied",
                     "thread_id": thread_id,
                 }, status_code=202)
-            except Exception as e:
+            except Exception:
                 logger.exception("[HITL] Failed to resume graph for thread=%s", thread_id)
                 return _JSONResponse({"error": "Internal error"}, status_code=500)
 
@@ -1161,7 +1162,7 @@ class KazmaAppBuilder:
             try:
                 pending = await _get_pending_approvals(graph, checkpointer)
                 return _JSONResponse({"pending": pending, "count": len(pending)})
-            except Exception as exc:
+            except Exception:
                 logger.exception("[HITL] Failed to list pending approvals")
                 return _JSONResponse({"pending": [], "count": 0, "error": "Internal error"}, status_code=500)
 

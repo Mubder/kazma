@@ -266,14 +266,236 @@ def register_workers_routes(
         logger.info("[Swarm] Worker removed: %s", name)
         return JSONResponse({"status": "ok", "message": f"Worker '{name}' removed"})
 
-    # Additional worker routes (update, logs, start/stop, circuit breakers) would be here.
-    # For brevity in this step, the key ones are extracted; full migration follows the same pattern.
-    # In practice, the remaining worker routes from _build_workers_routes are moved here using the service.
+    @router.put("/api/swarm/workers/{name}")
+    async def swarm_update_worker(name: str, payload: dict[str, Any]) -> JSONResponse:
+        """Update worker configuration (model, provider, expertise, etc.)."""
+        svc = get_swarm_service()
+        engine = svc._get_engine()
+        if engine is None or engine.get_worker(name) is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
 
-    # For full compliance, the start/stop and circuit routes are also worker related.
-    # (truncated for response length; in real execution all would be ported)
+        # Update in-engine worker
+        worker = engine.get_worker(name)
+        if "model" in payload:
+            worker.model = payload["model"]
+        if "provider" in payload:
+            worker.provider = payload["provider"]
+        if "role" in payload:
+            worker.role = payload["role"]
+
+        # Sync to persistent WorkerRegistry
+        try:
+            from kazma_core.swarm.registry import get_worker_registry
+            registry = get_worker_registry()
+            update_kwargs = {}
+            if "model" in payload:
+                update_kwargs["model"] = payload["model"]
+            if "provider" in payload:
+                update_kwargs["provider"] = payload["provider"]
+            if "role" in payload:
+                update_kwargs["roles"] = [payload["role"]]
+            if "system_prompt" in payload:
+                update_kwargs["system_prompt"] = payload["system_prompt"]
+            if "expertise" in payload:
+                update_kwargs["expertise"] = payload["expertise"]
+            if update_kwargs:
+                registry.update(name, **update_kwargs)
+                logger.info("[Swarm] WorkerRegistry updated: %s", name)
+        except Exception as exc:
+            logger.warning("[Swarm] WorkerRegistry sync failed: %s", exc)
+
+        logger.info("[Swarm] Worker updated: %s", name)
+        return JSONResponse({"status": "ok", "worker": _serialize_worker(worker)})
+
+    @router.get("/api/swarm/workers/{name}/logs")
+    async def swarm_worker_logs(name: str) -> JSONResponse:
+        """Return log lines for a worker."""
+        svc = get_swarm_service()
+        engine = svc._get_engine()
+        worker = None if engine is None else engine.get_worker(name)
+        if worker is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+
+        logs = list(worker.logs)
+        if not logs:
+            logs = [
+                f"[{getattr(worker, 'added_at', '')}] Worker '{name}' registered "
+                f"(model={worker.model or '?'}, provider={worker.provider or '?'})",
+            ]
+            last_task = getattr(worker, 'last_task', None)
+            if last_task:
+                logs.append(
+                    f"[{getattr(worker, 'last_heartbeat', None) or getattr(worker, 'added_at', '')}] Last task: {last_task}"
+                )
+            logs.append(f"Current status: {_worker_status(worker)}")
+
+        return JSONResponse({"logs": logs, "count": len(logs)})
+
+    @router.post("/api/swarm/start")
+    async def swarm_start() -> JSONResponse:
+        """Start all workers."""
+        svc = get_swarm_service()
+        engine = svc._get_engine()
+        workers = [] if engine is None else engine.list_workers() if hasattr(engine, "list_workers") else list(getattr(engine, "_workers", {}).values())
+        if not workers:
+            return JSONResponse(
+                {"status": "error", "message": "No workers registered — add workers first"},
+                status_code=400,
+            )
+        if svc.is_started():
+            return JSONResponse({"status": "ok", "message": "Swarm already started"})
+
+        await engine.start_all()
+        logger.info("[Swarm] Started, %d workers online", len(workers))
+        return JSONResponse(
+            {
+                "status": "ok",
+                "message": f"Swarm started — {len(workers)} worker(s) online",
+                "worker_count": len(workers),
+            }
+        )
+
+    @router.post("/api/swarm/stop")
+    async def swarm_stop() -> JSONResponse:
+        """Stop all workers."""
+        svc = get_swarm_service()
+        engine = svc._get_engine()
+        workers = [] if engine is None else engine.list_workers() if hasattr(engine, "list_workers") else list(getattr(engine, "_workers", {}).values())
+        if not svc.is_started():
+            return JSONResponse({"status": "ok", "message": "Swarm already stopped"})
+
+        await engine.stop_all()
+        logger.info("[Swarm] Stopped, %d workers offline", len(workers))
+        return JSONResponse(
+            {
+                "status": "ok",
+                "message": f"Swarm stopped — {len(workers)} worker(s) offline",
+                "worker_count": len(workers),
+            }
+        )
+
+    @router.post("/api/swarm/workers/{name}/start")
+    async def worker_start(name: str) -> JSONResponse:
+        """Start a single worker by name."""
+        svc = get_swarm_service()
+        engine = svc._get_engine()
+        if engine is None or engine.get_worker(name) is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+        ok = await engine.start_worker(name)
+        if ok:
+            return JSONResponse({"status": "ok", "message": f"Worker '{name}' started"})
+        return JSONResponse(
+            {"status": "error", "message": f"Failed to start worker '{name}'"},
+            status_code=500,
+        )
+
+    @router.post("/api/swarm/workers/{name}/stop")
+    async def worker_stop(name: str) -> JSONResponse:
+        """Stop a single worker by name."""
+        svc = get_swarm_service()
+        engine = svc._get_engine()
+        if engine is None or engine.get_worker(name) is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+        ok = await engine.stop_worker(name)
+        if ok:
+            return JSONResponse({"status": "ok", "message": f"Worker '{name}' stopped"})
+        return JSONResponse(
+            {"status": "error", "message": f"Failed to stop worker '{name}'"},
+            status_code=500,
+        )
+
+    @router.get("/api/swarm/circuit-breakers")
+    async def swarm_circuit_breakers() -> JSONResponse:
+        """Return circuit breaker status for all workers."""
+        svc = get_swarm_service()
+        engine = svc._get_engine()
+        if not svc.has_swarm_core() or engine is None:
+            return JSONResponse({"breakers": {}, "count": 0})
+        breakers = engine.get_all_circuit_breaker_status()
+        return JSONResponse({"breakers": breakers, "count": len(breakers)})
+
+    @router.get("/api/swarm/workers/{name}/circuit-breaker")
+    async def swarm_worker_circuit_breaker(name: str) -> JSONResponse:
+        """Return circuit breaker status for a single worker."""
+        svc = get_swarm_service()
+        engine = svc._get_engine()
+        if not svc.has_swarm_core() or engine is None:
+            return JSONResponse(
+                {"status": "error", "message": "Swarm core is not available"},
+                status_code=503,
+            )
+        if engine.get_worker(name) is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+        breaker_status = engine.get_circuit_breaker_status(name)
+        return JSONResponse({"worker": name, "circuit_breaker": breaker_status})
+
+    @router.post("/api/swarm/workers/{name}/circuit-breaker/reset")
+    async def swarm_reset_circuit_breaker(name: str) -> JSONResponse:
+        """Manually reset a worker's circuit breaker to closed state."""
+        svc = get_swarm_service()
+        engine = svc._get_engine()
+        if not svc.has_swarm_core() or engine is None:
+            return JSONResponse(
+                {"status": "error", "message": "Swarm core is not available"},
+                status_code=503,
+            )
+        if engine.get_worker(name) is None:
+            return JSONResponse(
+                {"status": "error", "message": f"Worker '{name}' not found"},
+                status_code=404,
+            )
+        breaker = engine.reset_circuit_breaker(name)
+        logger.info("[Swarm] Circuit breaker reset for worker '%s'", name)
+        return JSONResponse({
+            "status": "ok",
+            "message": f"Circuit breaker reset for worker '{name}'",
+            "worker": name,
+            "circuit_breaker": breaker.to_dict() if hasattr(breaker, "to_dict") else str(breaker),
+        })
 
 def _build_worker_config(payload: dict[str, Any]) -> Any:
-    """Stub - in full extract this would be moved or kept in main."""
-    # This is a helper; in full refactor it can stay or move to services.
-    return payload  # simplified
+    """Create a WorkerConfig from a UI payload."""
+    try:
+        from kazma_core.swarm import WorkerConfig
+    except ImportError:
+        return payload
+
+    worker_type = {"in-process": "in_process", "telegram": "telegram_bot"}.get(
+        payload.get("type", "in-process"),
+        "in_process",
+    )
+    # Build capabilities from the payload so workers are routable
+    caps_data = payload.get("capabilities") or {}
+    capabilities = None
+    if caps_data:
+        try:
+            from kazma_core.swarm.config import WorkerCapabilities
+            capabilities = WorkerCapabilities.from_dict(caps_data)
+        except Exception as exc:
+            logger.debug("WorkerCapabilities parse failed: %s", exc)
+            capabilities = None
+
+    return WorkerConfig(
+        name=(payload.get("name") or "").strip(),
+        type=worker_type,
+        model=payload.get("model", "deepseek-chat"),
+        provider=payload.get("provider", "deepseek"),
+        role=payload.get("role", ""),
+        system_prompt=payload.get("system_prompt", ""),
+        capabilities=capabilities,
+    )

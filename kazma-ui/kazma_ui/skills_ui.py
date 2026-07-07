@@ -133,7 +133,7 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             path = await hub.install(req.skill_id)
             await hub.close()
             return {"status": "ok", "path": str(path)}
-        except Exception as e:
+        except Exception:
             return {"status": "error", "error": "Internal error"}
 
     @router.post("/api/skills/uninstall")
@@ -146,7 +146,7 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             removed = await hub.unregister(req.skill_id)
             await hub.close()
             return {"status": "ok" if removed else "not_found"}
-        except Exception as e:
+        except Exception:
             return {"status": "error", "error": "Internal error"}
 
     @router.post("/api/skills/toggle")
@@ -190,7 +190,7 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                 "errors": result.errors,
                 "warnings": result.warnings,
             }
-        except Exception as e:
+        except Exception:
             return {"error": "Internal error"}
 
     return router

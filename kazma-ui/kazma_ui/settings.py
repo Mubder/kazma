@@ -140,7 +140,7 @@ class SettingsRouterBuilder:
                 )
             except Exception as e:
                 logger.error("Failed to export: %s", e)
-                return Response(content=f"Error: {e}", media_type="text/plain", status_code=500)
+                return Response(content="Error: Unable to export settings", media_type="text/plain", status_code=500)
 
         @router.put("/api/settings")
         async def api_update_settings(updates: list[SettingsUpdate]) -> dict[str, str]:

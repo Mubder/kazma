@@ -273,7 +273,7 @@ async def list_sessions(limit: int = 50) -> JSONResponse:
             })
 
         return JSONResponse({"sessions": sessions, "count": len(sessions)})
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to list sessions")
         return JSONResponse({"sessions": [], "error": "Internal error"}, status_code=500)
 
@@ -322,7 +322,7 @@ async def delete_session(thread_id: str) -> JSONResponse:
             "thread_id": thread_id,
             "message": f"Session {thread_id} deleted successfully",
         })
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to delete session %s", thread_id)
         return JSONResponse({"deleted": False, "error": "Internal error"}, status_code=500)
 
@@ -361,6 +361,6 @@ async def clear_all_sessions() -> JSONResponse:
             "count": count,
             "message": f"Cleared {count} checkpoint(s)",
         })
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to clear all sessions")
         return JSONResponse({"deleted": False, "error": "Internal error"}, status_code=500)

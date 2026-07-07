@@ -339,7 +339,7 @@ class LLMProvider:
             logger.error("LLM call failed (network): %s", e)
             raise LLMError(f"LLM call failed (network): {e}") from e
         except Exception as e:
-            logger.error("LLM call failed: %s", e)
+            logger.error("LLM call failed: %s", e, exc_info=True)
             raise LLMError(f"LLM call failed: {e}") from e
 
         duration_ms = (time.monotonic() - start) * 1000
