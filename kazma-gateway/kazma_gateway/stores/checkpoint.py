@@ -27,6 +27,8 @@ from langgraph.checkpoint.base import (
     CheckpointMetadata,
 )
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
+from langgraph.checkpoint.serde._msgpack import SAFE_MSGPACK_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +295,14 @@ async def create_checkpoint_manager(
     await conn.execute("PRAGMA journal_mode=WAL")
     await conn.execute("PRAGMA synchronous=NORMAL")
 
-    saver = AsyncSqliteSaver(conn)
+    saver = AsyncSqliteSaver(
+        conn,
+        serde=JsonPlusSerializer(
+            allowed_msgpack_modules=list(SAFE_MSGPACK_TYPES) + [
+                ("kazma_core.agent.state", "NodeName"),
+            ]
+        ),
+    )
     await saver.setup()
 
     manager = CheckpointManager(saver)
