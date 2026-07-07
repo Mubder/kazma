@@ -6,6 +6,62 @@
 {% block content %}
 <div class="workspace-container" x-data="workspaceApp()" x-init="init()" style="max-width:1400px;margin:0 auto;">
 
+  <!-- ── Workspace Selector Bar ── -->
+  <div class="card" style="margin-bottom:16px;padding:12px 16px;background:linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-elevated) 100%);border:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="font-size:1.5rem;">🏗️</div>
+      <div>
+        <h2 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);letter-spacing:-0.02em;">Multi-Workspace Engine</h2>
+        <p style="margin:0;font-size:0.75rem;color:var(--text-muted);">Manage separate project environments and contexts dynamically.</p>
+      </div>
+    </div>
+    
+    <div style="display:flex;align-items:center;gap:12px;margin-left:auto;">
+      <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);">Active Environment:</span>
+      <select 
+        class="form-input" 
+        style="width:240px;padding:6px 12px;border-radius:var(--radius-sm);font-weight:500;" 
+        :value="activeWorkspaceId" 
+        @change="switchWorkspace($event.target.value)"
+      >
+        <template x-for="ws in workspaces" :key="ws.id">
+          <option :value="ws.id" x-text="ws.name" :selected="ws.id === activeWorkspaceId"></option>
+        </template>
+      </select>
+      
+      <button class="btn btn-sm btn-primary" @click="showCreateModal = true" style="display:flex;align-items:center;gap:6px;">
+        <span>➕</span> Create Workspace
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Create Workspace Modal ── -->
+  <div x-show="showCreateModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition>
+    <div class="card" style="width:480px;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;">➕ Create New Project Workspace</h3>
+        <button class="btn-icon" @click="showCreateModal = false" style="font-size:1rem;">✕</button>
+      </div>
+      
+      <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
+        <div>
+          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Workspace Name</label>
+          <input type="text" class="form-input" placeholder="e.g., My New Project" x-model="newWorkspaceName" style="width:100%;">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Absolute Directory Path</label>
+          <input type="text" class="form-input" placeholder="e.g., C:/Users/balfa/my-project" x-model="newWorkspacePath" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;">
+          <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">Folder will be automatically created on the filesystem if it doesn't exist.</p>
+        </div>
+      </div>
+      
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
+        <button class="btn btn-secondary" @click="showCreateModal = false">Cancel</button>
+        <button class="btn btn-primary" @click="createWorkspace()" :disabled="!newWorkspaceName.trim() || !newWorkspacePath.trim()">Create & Switch</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Quick Actions Bar ── -->
   <div class="quick-actions-bar">
     <button class="btn btn-sm btn-primary" @click="runTests()">
