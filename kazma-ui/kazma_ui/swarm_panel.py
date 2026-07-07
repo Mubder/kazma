@@ -754,40 +754,120 @@ class SwarmRouterBuilder:
 
         async def _route_task_result(result: Any) -> bool:
             """Format and send the completed TaskResult to the output target."""
-            if result is None:
-                text = "⚠️ No result returned from swarm."
-            elif hasattr(result, "aggregated_output") and result.aggregated_output:
-                text = result.aggregated_output
-            elif hasattr(result, "worker_results") and result.worker_results:
-                lines = []
-                for wr in result.worker_results:
-                    status_icon = "✅" if getattr(wr, "status", "") == "success" else "❌"
-                    wr_worker = getattr(wr, "worker", "unknown")
-                    wr_output = getattr(wr, "output", "") or ""
-                    wr_error = getattr(wr, "error", "") or "no output"
-                    output = wr_output[:500] if wr_output else wr_error
-                    lines.append(f"{status_icon} **{wr_worker}**: {output}")
-                text = "\n\n".join(lines)
-            elif hasattr(result, "error") and result.error:
-                text = f"⚠️ Task failed: {result.error}"
-            elif isinstance(result, dict):
-                if result.get("aggregated_output"):
-                    text = result["aggregated_output"]
-                elif result.get("worker_results"):
-                    lines = []
-                    for wr in result["worker_results"]:
-                        status_icon = "✅" if wr.get("status") == "success" else "❌"
-                        output = (wr.get("output") or "")[:500] if wr.get("output") else wr.get("error") or "no output"
-                        lines.append(f"{status_icon} **{wr.get('worker', 'unknown')}**: {output}")
-                    text = "\n\n".join(lines)
-                elif result.get("error"):
-                    text = f"⚠️ Task failed: {result['error']}"
-                else:
-                    text = "⚠️ No result returned from swarm."
-            else:
-                text = "⚠️ No result returned from swarm."
+            task_id = ""
+            status = ""
+            aggregated_output = ""
+            error = ""
+            duration = 0.0
+            tokens = 0
+            worker_results = []
 
+            if result is None:
+                status = "failed"
+                error = "No result returned from swarm."
+            elif hasattr(result, "task_id"):
+                task_id = getattr(result, "task_id", "") or ""
+                status = getattr(result, "status", "") or ""
+                aggregated_output = getattr(result, "aggregated_output", "") or ""
+                error = getattr(result, "error", "") or ""
+                duration = getattr(result, "duration_seconds", 0.0) or 0.0
+                tokens = getattr(result, "total_tokens", 0) or 0
+                worker_results = getattr(result, "worker_results", []) or []
+            elif isinstance(result, dict):
+                task_id = result.get("task_id", "") or ""
+                status = result.get("status", "") or ""
+                aggregated_output = result.get("aggregated_output", "") or ""
+                error = result.get("error", "") or ""
+                duration = result.get("duration_seconds", 0.0) or 0.0
+                tokens = result.get("total_tokens", 0) or 0
+                worker_results = result.get("worker_results", []) or []
+            else:
+                status = "failed"
+                error = "No result returned from swarm."
+
+            status_lower = str(status).lower()
+            if status_lower == "success":
+                status_icon = "✅"
+                status_text = "SUCCESS"
+            elif status_lower == "partial_success":
+                status_icon = "⚠️"
+                status_text = "PARTIAL SUCCESS"
+            else:
+                status_icon = "❌"
+                status_text = "FAILED" if status_lower else "UNKNOWN"
+
+            lines = []
+            lines.append("🚀 *Swarm Task Execution Report*")
+            lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            if task_id:
+                lines.append(f"🆔 *Task ID:* `{task_id}`")
+            lines.append(f"📊 *Status:* {status_icon} *{status_text}*")
+            if duration > 0:
+                lines.append(f"⏱️ *Duration:* `{duration:.2f}s`" + (f" | 🪙 *Tokens:* `{tokens}`" if tokens > 0 else ""))
+            lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+            if error:
+                lines.append("⚠️ *Error Details:*")
+                lines.append(f"> {error}")
+                lines.append("")
+
+            if aggregated_output:
+                lines.append("✨ *Final Aggregated Output:*")
+                lines.append(aggregated_output)
+                lines.append("")
+
+            if worker_results:
+                lines.append("👥 *Worker Breakdowns:*")
+                for wr in worker_results:
+                    wr_name = ""
+                    wr_status = ""
+                    wr_output = ""
+                    wr_error = ""
+                    wr_duration = 0.0
+                    wr_tokens = 0
+
+                    if hasattr(wr, "worker"):
+                        wr_name = getattr(wr, "worker", "unknown") or "unknown"
+                        wr_status = getattr(wr, "status", "") or ""
+                        wr_output = getattr(wr, "output", "") or ""
+                        wr_error = getattr(wr, "error", "") or ""
+                        wr_duration = getattr(wr, "duration_seconds", 0.0) or 0.0
+                        wr_tokens = getattr(wr, "tokens_used", 0) or 0
+                    elif isinstance(wr, dict):
+                        wr_name = wr.get("worker", "unknown") or "unknown"
+                        wr_status = wr.get("status", "") or ""
+                        wr_output = wr.get("output", "") or ""
+                        wr_error = wr.get("error", "") or ""
+                        wr_duration = wr.get("duration_seconds", 0.0) or 0.0
+                        wr_tokens = wr.get("tokens_used", 0) or 0
+
+                    wr_status_lower = str(wr_status).lower()
+                    wr_icon = "✅" if wr_status_lower == "success" else "❌"
+                    
+                    # Output or error snippet
+                    raw_content = wr_output if wr_output else (wr_error or "no output")
+                    content_snippet = raw_content.strip()
+                    if len(content_snippet) > 500:
+                        content_snippet = content_snippet[:500] + "..."
+
+                    # Indented blockquote for clean visual nesting
+                    lines.append(f"• *{wr_name}* ({wr_icon} {wr_status_lower.upper()})")
+                    meta_parts = []
+                    if wr_duration > 0:
+                        meta_parts.append(f"`{wr_duration:.2f}s`")
+                    if wr_tokens > 0:
+                        meta_parts.append(f"`{wr_tokens}` tokens")
+                    if meta_parts:
+                        lines.append(f"  ⏱️ " + " | ".join(meta_parts))
+                    
+                    # Indent the content
+                    indented_content = "\n".join(f"  > {line}" for line in content_snippet.splitlines())
+                    lines.append(indented_content)
+                    lines.append("")
+
+            text = "\n".join(lines).strip()
             return await _maybe_send_to_output_target_fallback(text)
+
 
         async def _run_and_route_task(
             engine: Any,

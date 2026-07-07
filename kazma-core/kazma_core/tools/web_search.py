@@ -9,6 +9,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import warnings
+
+# Overrides the invasive warnings.simplefilter("always") in duckduckgo_search library
+_original_warn = warnings.warn
+def _custom_warn(message, category=None, stacklevel=1, *args, **kwargs):
+    msg_str = str(message)
+    if "duckduckgo_search" in msg_str or "ddgs" in msg_str:
+        return
+    return _original_warn(message, category, stacklevel, *args, **kwargs)
+warnings.warn = _custom_warn
 
 logger = logging.getLogger(__name__)
 

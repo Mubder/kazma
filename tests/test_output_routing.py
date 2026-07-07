@@ -444,7 +444,7 @@ class TestWebUIDispatchOutputRouting:
             mock_gateway.send.assert_awaited_once()
             outbound = mock_gateway.send.call_args.args[0]
             assert outbound.target_id == "telegram:-100999"
-            assert outbound.text == "Final analysis completed."
+            assert "Final analysis completed." in outbound.text
 
     @pytest.mark.asyncio
     async def test_dispatch_background_output_routing(self):
@@ -517,7 +517,7 @@ class TestWebUIDispatchOutputRouting:
             mock_gateway.send.assert_awaited_once()
             outbound = mock_gateway.send.call_args.args[0]
             assert outbound.target_id == "telegram:-100999"
-            assert outbound.text == "Background result"
+            assert "Background result" in outbound.text
 
     @pytest.mark.asyncio
     async def test_dispatch_retry_output_routing(self):
@@ -587,5 +587,5 @@ class TestWebUIDispatchOutputRouting:
             mock_gateway.send.assert_awaited_once()
             outbound = mock_gateway.send.call_args.args[0]
             assert outbound.target_id == "telegram:-100999"
-            assert outbound.text == "Retry successful output"
+            assert "Retry successful output" in outbound.text
 

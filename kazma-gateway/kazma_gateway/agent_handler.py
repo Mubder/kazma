@@ -707,15 +707,30 @@ async def _maybe_send_to_output_target(
                 # Telegram messages are limited to 4096 chars.
                 for i in range(0, len(text), 4096):
                     chunk = text[i:i + 4096]
+                    # Try sending with Markdown parsing first
+                    payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "Markdown"}
                     resp = await client.post(
                         f"https://api.telegram.org/bot{bot_token}/sendMessage",
-                        json={"chat_id": chat_id, "text": chunk},
+                        json=payload,
                     )
-                    if not resp.json().get("ok"):
+                    resp_json = resp.json()
+                    if not resp_json.get("ok"):
+                        desc = resp_json.get("description", "")
                         logger.warning(
-                            "[agent-handler] Swarm bot send failed: %s",
-                            resp.json().get("description", "unknown"),
+                            "[agent-handler] Swarm bot Markdown send failed: %s. Retrying in plain text...",
+                            desc or "unknown",
                         )
+                        # Fallback to plain text
+                        payload_plain = {"chat_id": chat_id, "text": chunk}
+                        resp_plain = await client.post(
+                            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                            json=payload_plain,
+                        )
+                        if not resp_plain.json().get("ok"):
+                            logger.warning(
+                                "[agent-handler] Swarm bot fallback plain send failed: %s",
+                                resp_plain.json().get("description", "unknown"),
+                            )
             logger.info(
                 "[agent-handler] Swarm output routed via dedicated bot to %s",
                 chat_id,
