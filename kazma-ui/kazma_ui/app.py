@@ -775,9 +775,48 @@ class KazmaAppBuilder:
         @self.app.get("/api/system/status")
         async def _get_system_status():
             from kazma_core.config_store import get_config_store
+            from kazma_core.system.maintenance import get_memory_paths
+            import sqlite3
+            
             store = get_config_store()
             status = store.get("system.memory.status") or "ACTIVE"
-            return {"status": status}
+            
+            fts5_path, vector_path, _ = get_memory_paths()
+            
+            fts5_size = fts5_path.stat().st_size if fts5_path.exists() else 0
+            fts5_count = 0
+            if fts5_path.exists():
+                try:
+                    conn = sqlite3.connect(fts5_path)
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'")
+                    if cursor.fetchone():
+                        cursor.execute("SELECT COUNT(*) FROM memory_fts")
+                        fts5_count = cursor.fetchone()[0]
+                    conn.close()
+                except Exception:
+                    pass
+                    
+            vector_size = 0
+            if vector_path.exists() and vector_path.is_dir():
+                vector_size = sum(f.stat().st_size for f in vector_path.glob("**/*") if f.is_file())
+                
+            vector_count = 0
+            from kazma_core.agent.tool_registry import get_vector_memory
+            vm = get_vector_memory()
+            if vm and not getattr(vm, "degraded", False):
+                try:
+                    vector_count = vm.count
+                except Exception:
+                    pass
+                    
+            return {
+                "status": status,
+                "fts5_size": fts5_size,
+                "fts5_count": fts5_count,
+                "vector_size": vector_size,
+                "vector_count": vector_count
+            }
 
         @self.app.post("/api/system/install")
         async def _post_system_install(req: dict = None):
@@ -786,6 +825,50 @@ class KazmaAppBuilder:
             from kazma_core.system import asynchronous_install_package
             await asynchronous_install_package(package_name)
             return {"status": "started", "package": package_name}
+
+        @self.app.get("/api/system/memory/backups")
+        async def _list_memory_backups():
+            from kazma_core.system.maintenance import list_memory_backups
+            try:
+                backups = list_memory_backups()
+                return {"backups": backups}
+            except Exception as e:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.post("/api/system/memory/backup")
+        async def _create_memory_backup():
+            from kazma_core.system.maintenance import create_memory_backup
+            try:
+                manifest = create_memory_backup()
+                return {"status": "success", "manifest": manifest}
+            except Exception as e:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.post("/api/system/memory/restore")
+        async def _restore_memory_backup(req: dict):
+            backup_name = req.get("backup_name", "")
+            if not backup_name:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=400, detail="backup_name is required")
+            from kazma_core.system.maintenance import restore_memory_backup
+            try:
+                res = await restore_memory_backup(backup_name)
+                return res
+            except Exception as e:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.post("/api/system/memory/maintenance")
+        async def _run_memory_maintenance():
+            from kazma_core.system.maintenance import run_memory_maintenance
+            try:
+                res = run_memory_maintenance()
+                return {"status": "success", "details": res}
+            except Exception as e:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=500, detail=str(e))
 
         @self.app.websocket("/ws/dashboard")
         async def ws_dashboard(websocket: WebSocket) -> None:

@@ -121,13 +121,78 @@
       <span>🧠 Memory &amp; Governance</span>
       <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">ACTIVE</span>
     </h3>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border-subtle);padding-bottom:14px;">
       <span style="font-size:0.85rem;color:var(--text-secondary);line-height:1.4;" id="memory-status-desc">
         ChromaDB Vector Store and sentence-transformers models are fully operational.
       </span>
       <button id="install-ml-btn" class="btn btn-sm btn-primary" style="display:none;white-space:nowrap;padding:6px 14px;border-radius:6px;font-size:0.8rem;">
         Install ML Dependencies
       </button>
+    </div>
+
+    <!-- Expansion Deck Toggle -->
+    <div style="margin-top:12px;">
+      <button id="toggle-maintenance-deck" style="background:transparent;border:none;color:var(--text-link);font-size:0.85rem;font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px;outline:none;">
+        <span id="deck-toggle-arrow">▶</span> Backup &amp; Database Maintenance
+      </button>
+    </div>
+
+    <!-- Collapsible Maintenance Deck -->
+    <div id="maintenance-deck" style="display:none;margin-top:14px;padding-top:10px;animation: fadeIn 0.3s ease;">
+      
+      <!-- Metrics & Actions Grid -->
+      <div style="display:grid;grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:16px;">
+        <!-- FTS5 Metrics Card -->
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
+          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">FTS5 Keyword DB</h4>
+          <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="fts5-size-metric">–</div>
+          <span style="font-size:0.75rem;color:var(--text-muted);" id="fts5-count-metric">0 records</span>
+        </div>
+
+        <!-- Vector Metrics Card -->
+        <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
+          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">Vector Store</h4>
+          <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="vector-size-metric">–</div>
+          <span style="font-size:0.75rem;color:var(--text-muted);" id="vector-count-metric">0 vectors</span>
+        </div>
+
+        <!-- Dynamic Actions Card -->
+        <div style="display:flex;flex-direction:column;justify-content:center;gap:10px;background:rgba(255,255,255,0.01);border:1px dashed var(--border-subtle);border-radius:8px;padding:12px 16px;">
+          <button id="trigger-backup-btn" class="btn btn-sm btn-success" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <span class="spinner" id="backup-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+            💾 Create Hot Backup
+          </button>
+          <button id="trigger-optimize-btn" class="btn btn-sm btn-primary" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
+            <span class="spinner" id="optimize-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
+            ⚡ Optimize Database
+          </button>
+        </div>
+      </div>
+
+      <!-- Backups List Table Container -->
+      <div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden;background:rgba(0,0,0,0.15);">
+        <div style="padding:10px 16px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--border-subtle);font-weight:600;font-size:0.8rem;color:var(--text-secondary);">
+          Available Backups
+        </div>
+        <div style="max-height:220px;overflow-y:auto;">
+          <table style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:left;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border-subtle);background:rgba(255,255,255,0.01);">
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">Backup Name</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">Keyword Size</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">Vector Size</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">Date Created</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;text-align:center;">Action</th>
+              </tr>
+            </thead>
+            <tbody id="backups-tbody">
+              <tr>
+                <td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">Loading backups...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -330,6 +395,15 @@
   const memoryDesc = document.getElementById('memory-status-desc');
   const installBtn = document.getElementById('install-ml-btn');
 
+  function formatBytes(bytes, decimals = 2) {
+    if (bytes === null || bytes === undefined || bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+  }
+
   async function pollMemoryStatus() {
     try {
       const resp = await fetch('/api/system/status');
@@ -351,6 +425,22 @@
           installBtn.style.display = 'inline-block';
         }
       }
+
+      // Update metrics inside collapsible deck
+      const ftsSizeEl = document.getElementById('fts5-size-metric');
+      const ftsCountEl = document.getElementById('fts5-count-metric');
+      if (ftsSizeEl && data.fts5_size !== undefined) {
+        ftsSizeEl.textContent = formatBytes(data.fts5_size);
+        ftsCountEl.textContent = `${data.fts5_count || 0} records`;
+      }
+
+      const vecSizeEl = document.getElementById('vector-size-metric');
+      const vecCountEl = document.getElementById('vector-count-metric');
+      if (vecSizeEl && data.vector_size !== undefined) {
+        vecSizeEl.textContent = formatBytes(data.vector_size);
+        vecCountEl.textContent = `${data.vector_count || 0} vectors`;
+      }
+
     } catch (e) {
       console.error('Failed to poll memory status:', e);
     }
@@ -373,6 +463,144 @@
       }
     });
   }
+
+  // Backup & Maintenance Collapsible Deck Interaction
+  const toggleBtn = document.getElementById('toggle-maintenance-deck');
+  const deck = document.getElementById('maintenance-deck');
+  const arrow = document.getElementById('deck-toggle-arrow');
+
+  async function loadBackups() {
+    const tbody = document.getElementById('backups-tbody');
+    try {
+      const resp = await fetch('/api/system/memory/backups');
+      const data = await resp.json();
+      const backups = data.backups || [];
+      
+      if (backups.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">No backups found. Create one above!</td></tr>`;
+        return;
+      }
+      
+      tbody.innerHTML = backups.map(backup => {
+        const ftsSize = backup.fts5_size ? formatBytes(backup.fts5_size) : 'None';
+        const vecSize = backup.vector_size ? formatBytes(backup.vector_size) : 'None';
+        const created = new Date(backup.timestamp).toLocaleString();
+        return `
+          <tr style="border-bottom:1px solid var(--border-subtle);transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
+            <td style="padding:10px 16px;font-family:var(--font-mono);">${backup.name}</td>
+            <td style="padding:10px 16px;">${ftsSize} (${backup.fts5_count || 0} docs)</td>
+            <td style="padding:10px 16px;">${vecSize}</td>
+            <td style="padding:10px 16px;color:var(--text-tertiary);">${created}</td>
+            <td style="padding:10px 16px;text-align:center;">
+              <button class="btn btn-sm btn-primary restore-btn" data-name="${backup.name}" style="padding:2px 8px;font-size:0.75rem;border-radius:4px;">
+                Restore
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+      
+      // Bind restore button action
+      document.querySelectorAll('.restore-btn').forEach(btn => {
+        btn.addEventListener('click', async function() {
+          const name = this.getAttribute('data-name');
+          if (confirm(`Are you absolutely sure you want to restore backup "${name}"? This will overwrite the current memory database state.`)) {
+            this.disabled = true;
+            this.textContent = 'Restoring...';
+            try {
+              const r = await fetch('/api/system/memory/restore', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ backup_name: name })
+              });
+              const res = await r.json();
+              if (res.status === 'success') {
+                alert('Successfully restored and hot-reloaded memory stores!');
+                pollMemoryStatus();
+                loadBackups();
+              } else {
+                alert('Restoration error: ' + (res.detail || 'unknown error'));
+              }
+            } catch (e) {
+              alert('Restoration failed: ' + e);
+            } finally {
+              this.disabled = false;
+              this.textContent = 'Restore';
+            }
+          }
+        });
+      });
+      
+    } catch (e) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:#ff4757;">Failed to load backups.</td></tr>`;
+    }
+  }
+
+  toggleBtn.addEventListener('click', () => {
+    if (deck.style.display === 'none') {
+      deck.style.display = 'block';
+      arrow.textContent = '▼';
+      loadBackups();
+    } else {
+      deck.style.display = 'none';
+      arrow.textContent = '▶';
+    }
+  });
+
+  // Action Buttons Triggers
+  const backupBtn = document.getElementById('trigger-backup-btn');
+  const backupSpinner = document.getElementById('backup-spinner');
+
+  backupBtn.addEventListener('click', async () => {
+    backupBtn.disabled = true;
+    backupSpinner.style.display = 'inline-block';
+    try {
+      const resp = await fetch('/api/system/memory/backup', { method: 'POST' });
+      const res = await resp.json();
+      if (res.status === 'success') {
+        alert(`Backup completed successfully: ${res.manifest.name}`);
+        loadBackups();
+        pollMemoryStatus();
+      } else {
+        alert('Backup failed: ' + (res.detail || 'unknown error'));
+      }
+    } catch (e) {
+      alert('Backup failed: ' + e);
+    } finally {
+      backupBtn.disabled = false;
+      backupSpinner.style.display = 'none';
+    }
+  });
+
+  const optimizeBtn = document.getElementById('trigger-optimize-btn');
+  const optimizeSpinner = document.getElementById('optimize-spinner');
+
+  optimizeBtn.addEventListener('click', async () => {
+    optimizeBtn.disabled = true;
+    optimizeSpinner.style.display = 'inline-block';
+    try {
+      const resp = await fetch('/api/system/memory/maintenance', { method: 'POST' });
+      const res = await resp.json();
+      if (res.status === 'success') {
+        let msg = 'Optimization run completed successfully!\n\n';
+        if (res.details.fts5) {
+          msg += `• FTS5 keyword index optimized (VACUUM & ANALYZE completed).\n  Reclaimed space: ${formatBytes(res.details.fts5.reclaimed_bytes)}\n\n`;
+        }
+        if (res.details.vector) {
+          msg += `• Vector index optimized.\n  Reclaimed space: ${formatBytes(res.details.vector.reclaimed_bytes)}\n`;
+        }
+        alert(msg);
+        pollMemoryStatus();
+      } else {
+        alert('Optimization failed: ' + (res.detail || 'unknown error'));
+      }
+    } catch (e) {
+      alert('Optimization failed: ' + e);
+    } finally {
+      optimizeBtn.disabled = false;
+      optimizeSpinner.style.display = 'none';
+    }
+  });
 
   // Poll immediately and then every 5 seconds
   pollMemoryStatus();
