@@ -527,3 +527,82 @@ function sidebarModel() {
         }
     };
 }
+
+// ── 12. Global System Alerts Banner Component ─────────────────────
+function systemAlertsBanner() {
+    return {
+        activeAlert: null,
+        installing: false,
+        pollInterval: null,
+        dismissedAlerts: new Set(),
+
+        init() {
+            this.fetchAlerts();
+            // Poll every 10 seconds
+            this.pollInterval = setInterval(() => {
+                this.fetchAlerts();
+            }, 10000);
+        },
+
+        destroy() {
+            if (this.pollInterval) {
+                clearInterval(this.pollInterval);
+            }
+        },
+
+        async fetchAlerts() {
+            try {
+                const res = await fetch('/api/alerts/recent');
+                if (!res.ok) return;
+                const alerts = await res.json();
+                if (Array.isArray(alerts) && alerts.length > 0) {
+                    // Find the most recent active alert that has not been dismissed
+                    const validAlerts = alerts.filter(a => !this.dismissedAlerts.has(a.id));
+                    if (validAlerts.length > 0) {
+                        // Sort by timestamp desc to show the newest alert first
+                        validAlerts.sort((a, b) => b.timestamp - a.timestamp);
+                        this.activeAlert = validAlerts[0];
+                    } else {
+                        this.activeAlert = null;
+                    }
+                } else {
+                    this.activeAlert = null;
+                }
+            } catch (err) {
+                console.error('[SystemAlertsBanner] Failed to fetch alerts:', err);
+            }
+        },
+
+        dismissAlert() {
+            if (this.activeAlert) {
+                this.dismissedAlerts.add(this.activeAlert.id);
+                this.activeAlert = null;
+            }
+        },
+
+        async installMl() {
+            if (this.installing) return;
+            this.installing = true;
+            try {
+                const res = await fetch('/api/system/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ package_name: 'sentence-transformers' }),
+                });
+                if (res.ok) {
+                    showToast('Installation of sentence-transformers started asynchronously', 'success');
+                    // Poll again immediately
+                    setTimeout(() => this.fetchAlerts(), 3000);
+                } else {
+                    showToast('Failed to start installation', 'error');
+                }
+            } catch (err) {
+                console.error('[SystemAlertsBanner] Install failed:', err);
+                showToast('Failed to start installation', 'error');
+            } finally {
+                this.installing = false;
+            }
+        }
+    };
+}
+

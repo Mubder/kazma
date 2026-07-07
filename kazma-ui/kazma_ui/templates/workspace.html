@@ -68,28 +68,81 @@
 
     <!-- Git Status -->
     <div class="card" style="padding:0;overflow:hidden;">
-      <div class="card-header">
-        <h3>🔀 Git Status</h3>
-        <span :style="{ color: gitDirty ? 'var(--warning)' : 'var(--success)', fontSize:'0.75rem' }"
-              x-text="gitDirty ? '● Uncommitted changes' : '● Clean'"></span>
-      </div>
-      <div style="padding:16px;">
-        <div style="margin-bottom:12px;">
-          <span style="font-size:0.8rem;color:var(--text-tertiary);display:block;">Current Branch</span>
-          <code style="font-family:var(--font-mono);font-size:0.9rem;" x-text="gitBranch"></code>
+      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:12px 16px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:1.1rem;">🔀</span>
+          <h3 style="margin:0;font-size:1rem;font-weight:600;">Git Status</h3>
         </div>
-        <div x-show="gitStatus.length > 0">
-          <span style="font-size:0.8rem;color:var(--text-tertiary);display:block;margin-bottom:4px;">Changes</span>
-          <template x-for="line in gitStatus.slice(0, 10)" :key="line">
-            <div x-text="line" style="font-family:var(--font-mono);font-size:0.75rem;padding:2px 0;color:var(--text-secondary);"></div>
-          </template>
-          <div x-show="gitStatus.length > 10" style="font-size:0.75rem;color:var(--text-muted);">
-            + <span x-text="gitStatus.length - 10"></span> more lines
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span :style="{ color: gitDirty ? 'var(--warning)' : 'var(--success)', fontSize:'0.75rem', fontWeight:'500' }"
+                x-text="gitDirty ? '● Uncommitted' : '● Clean'"></span>
+          <span style="color:var(--border-strong);font-size:0.8rem;" x-show="gitIsGit">|</span>
+          <code style="font-family:var(--font-mono);font-size:0.8rem;background:var(--bg-elevated);padding:2px 6px;border-radius:var(--radius-xs);color:var(--accent);" x-show="gitIsGit" x-text="gitBranch"></code>
+        </div>
+      </div>
+
+      <div style="padding:16px;display:flex;flex-direction:column;gap:16px;background:var(--bg-surface);" x-show="gitIsGit">
+        <!-- Staged Files -->
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Staged Files</span>
+            <span class="badge" :style="{ background: gitStaged.length ? 'var(--success-subtle)' : 'var(--tint-strong)', color: gitStaged.length ? 'var(--success)' : 'var(--text-muted)', fontSize:'0.7rem', padding:'1px 6px', borderRadius:'10px' }" x-text="gitStaged.length"></span>
+          </div>
+          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:120px;overflow-y:auto;padding:6px 10px;">
+            <template x-for="line in gitStaged" :key="line">
+              <div style="font-family:var(--font-mono);font-size:0.75rem;padding:4px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
+                <span style="color:var(--success);font-weight:bold;font-size:0.7rem;background:var(--success-subtle);padding:1px 4px;border-radius:3px;min-width:18px;text-align:center;">S</span>
+                <span x-text="line.slice(3)" style="word-break:break-all;"></span>
+              </div>
+            </template>
+            <div x-show="gitStaged.length === 0" style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.75rem;">
+              No staged changes
+            </div>
           </div>
         </div>
-        <div x-show="gitStatus.length === 0 && !loading" style="padding:20px 0;text-align:center;color:var(--text-muted);">
-          <p style="font-size:0.85rem;">Working tree clean</p>
+
+        <!-- Modified Files -->
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Modified Files</span>
+            <span class="badge" :style="{ background: gitModified.length ? 'var(--warning-subtle)' : 'var(--tint-strong)', color: gitModified.length ? 'var(--warning)' : 'var(--text-muted)', fontSize:'0.7rem', padding:'1px 6px', borderRadius:'10px' }" x-text="gitModified.length"></span>
+          </div>
+          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:120px;overflow-y:auto;padding:6px 10px;">
+            <template x-for="line in gitModified" :key="line">
+              <div style="font-family:var(--font-mono);font-size:0.75rem;padding:4px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
+                <span style="color:var(--warning);font-weight:bold;font-size:0.7rem;background:var(--warning-subtle);padding:1px 4px;border-radius:3px;min-width:18px;text-align:center;">M</span>
+                <span x-text="line.slice(3)" style="word-break:break-all;"></span>
+              </div>
+            </template>
+            <div x-show="gitModified.length === 0" style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.75rem;">
+              No unstaged changes
+            </div>
+          </div>
         </div>
+
+        <!-- Untracked Files -->
+        <div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <span style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Untracked Files</span>
+            <span class="badge" :style="{ background: gitUntracked.length ? 'var(--secondary-subtle)' : 'var(--tint-strong)', color: gitUntracked.length ? 'var(--secondary-light)' : 'var(--text-muted)', fontSize:'0.7rem', padding:'1px 6px', borderRadius:'10px' }" x-text="gitUntracked.length"></span>
+          </div>
+          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:120px;overflow-y:auto;padding:6px 10px;">
+            <template x-for="line in gitUntracked" :key="line">
+              <div style="font-family:var(--font-mono);font-size:0.75rem;padding:4px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
+                <span style="color:var(--secondary-light);font-weight:bold;font-size:0.7rem;background:var(--secondary-subtle);padding:1px 4px;border-radius:3px;min-width:18px;text-align:center;">U</span>
+                <span x-text="line.slice(3)" style="word-break:break-all;"></span>
+              </div>
+            </template>
+            <div x-show="gitUntracked.length === 0" style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.75rem;">
+              No untracked files
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div x-show="!gitIsGit && !loading" style="padding:32px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);">
+        <div style="font-size:1.5rem;margin-bottom:8px;">⚠️</div>
+        <p style="font-size:0.85rem;margin:0;">Not a Git repository</p>
       </div>
     </div>
 
@@ -163,9 +216,12 @@ function workspaceApp() {
     currentPath: '/',
     parentPath: '',
     loading: true,
+    gitIsGit: false,
     gitBranch: '—',
     gitDirty: false,
-    gitStatus: [],
+    gitStaged: [],
+    gitModified: [],
+    gitUntracked: [],
     recentFiles: [],
     bookmarks: [],
     showTerminal: false,
@@ -175,6 +231,10 @@ function workspaceApp() {
     init() {
       this.refreshAll();
       this.loadBookmarks();
+      // Poll Git status every 10 seconds to keep UI alive and fresh
+      setInterval(() => {
+        this.loadGitStatus();
+      }, 10000);
     },
 
     async loadBookmarks() {
@@ -259,17 +319,25 @@ function workspaceApp() {
 
     async loadGitStatus() {
       try {
-        var resp = await fetch('/api/workspace/git');
+        var resp = await fetch('/api/git/status');
         if (resp.ok) {
           var data = await resp.json();
+          this.gitIsGit = data.is_git || false;
           this.gitBranch = data.branch || 'main';
           this.gitDirty = data.dirty || false;
-          this.gitStatus = (data.status || '').split('\n').filter(function(l) { return l.trim(); });
+          this.gitStaged = data.staged || [];
+          this.gitModified = data.modified || [];
+          this.gitUntracked = data.untracked || [];
+        } else {
+          this.gitIsGit = false;
         }
       } catch(e) {
+        this.gitIsGit = false;
         this.gitBranch = '—';
         this.gitDirty = false;
-        this.gitStatus = [];
+        this.gitStaged = [];
+        this.gitModified = [];
+        this.gitUntracked = [];
       }
     },
 

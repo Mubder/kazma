@@ -128,6 +128,17 @@ class SwarmEngine:
                 self._autoscaler.load_templates()
             except Exception as exc:
                 logger.warning("[SwarmEngine] AutoScaler initialization failed: %s", exc)
+                try:
+                    from kazma_core.observability import AlertDispatcher
+                    import asyncio
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(AlertDispatcher.trigger_system_alert(
+                        subsystem="AutoScaler",
+                        status="DEGRADED",
+                        message=f"AutoScaler initialization failed: {exc}"
+                    ))
+                except Exception:
+                    pass
         return self._autoscaler
 
     def _build_workers(self) -> None:

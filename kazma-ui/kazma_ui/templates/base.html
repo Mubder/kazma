@@ -23,6 +23,35 @@
             {# Header #}
             {% include "components/header.html" %}
 
+            {# Global System Alerts Banner #}
+            <div x-data="systemAlertsBanner()" x-show="activeAlert" class="system-alerts-banner" style="display: none; background: rgba(245, 158, 11, 0.1); border-left: 4px solid var(--warning); padding: 12px 24px; margin: 16px 24px 0 24px; border-radius: 6px; display: flex; align-items: center; justify-content: space-between; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); transition: all 0.3s ease;">
+                <div style="display: flex; align-items: center; gap: 12px; color: var(--text-primary);">
+                    <!-- Warning SVG Icon -->
+                    <svg style="color: var(--warning); flex-shrink: 0;" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                    <div>
+                        <strong x-text="activeAlert ? activeAlert.title : ''" style="font-weight: 600; display: block; margin-bottom: 2px;"></strong>
+                        <span x-text="activeAlert ? activeAlert.reason : ''" style="font-size: 0.85rem; color: var(--text-secondary);"></span>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <!-- Action Button -->
+                    <template x-if="activeAlert && activeAlert.callback_id === 'sentence-transformers'">
+                        <button @click="installMl()" :disabled="installing" class="btn btn-sm" style="background: var(--warning); border-color: var(--warning); color: #000; font-weight: 600; padding: 6px 12px; font-size: 0.8rem; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+                            <span x-show="installing" class="spinner-inline animate-spin" style="width:12px; height:12px; border:2px solid #000; border-top-color:transparent; border-radius:50%; display:inline-block;"></span>
+                            <span x-text="installing ? 'Installing...' : (activeAlert ? activeAlert.button_text : 'Resolve')"></span>
+                        </button>
+                    </template>
+                    <!-- Close button -->
+                    <button @click="dismissAlert()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 4px;" title="Dismiss">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
             {# Page Body #}
             <div class="page-body">
                 {% block content %}{% endblock %}

@@ -191,7 +191,7 @@ class TestWorkspaceFilesEndpoint:
 
 
 class TestWorkspaceGitEndpoint:
-    """GET /api/workspace/git must return git status (best-effort)."""
+    """GET /api/git/status must return git status."""
 
     @pytest.fixture
     def client(self, tmp_path: Path) -> TestClient:
@@ -205,15 +205,19 @@ class TestWorkspaceGitEndpoint:
                 yield c
 
     def test_git_returns_200(self, client: TestClient) -> None:
-        resp = client.get("/api/workspace/git")
+        resp = client.get("/api/git/status")
         assert resp.status_code == 200
 
     def test_git_returns_expected_keys(self, client: TestClient) -> None:
-        resp = client.get("/api/workspace/git")
+        resp = client.get("/api/git/status")
         data = resp.json()
+        assert "is_git" in data
         assert "branch" in data
         assert "dirty" in data
-        assert "status" in data
+        assert "staged" in data
+        assert "modified" in data
+        assert "untracked" in data
+        assert "raw_status" in data
 
 
 class TestWorkspaceRecentEndpoint:

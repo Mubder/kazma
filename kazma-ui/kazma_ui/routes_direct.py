@@ -193,6 +193,11 @@ def register_direct_routes(self: Any) -> None:
         await asynchronous_install_package(package_name)
         return {"status": "started", "package": package_name}
 
+    @self.app.get("/api/alerts/recent")
+    async def _get_recent_alerts():
+        from kazma_core.observability.alerts import AlertDispatcher
+        return AlertDispatcher.get_recent_alerts()
+
     @self.app.get("/api/system/memory/backups")
     async def _list_memory_backups():
         from kazma_core.system.maintenance import list_memory_backups
@@ -552,3 +557,12 @@ def register_direct_routes(self: Any) -> None:
         logger.info("[routes_direct] Bookmarks router mounted at /api/bookmarks")
     except Exception as _exc:
         logger.warning("[routes_direct] Bookmarks router failed to mount: %s", _exc)
+
+    # ── Visual Pipeline Sandbox ────────────────────────────────────────
+    try:
+        from kazma_gateway.routers.pipeline import create_pipeline_router
+
+        self.app.include_router(create_pipeline_router())
+        logger.info("[routes_direct] Visual pipeline router mounted at /api/pipelines")
+    except Exception as _exc:
+        logger.warning("[routes_direct] Visual pipeline router failed to mount: %s", _exc)

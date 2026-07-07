@@ -175,43 +175,6 @@ def create_workspace_router() -> APIRouter:
             "parent": parent_rel,
         }
 
-    # ------------------------------------------------------------------
-    # GET /api/workspace/git — best-effort git status
-    # ------------------------------------------------------------------
-
-    @router.get("/git")
-    async def git_status() -> dict[str, Any]:
-        """Return best-effort git status for the workspace directory.
-
-        If the workspace is not inside a git repo (or git is unavailable),
-        a graceful empty result is returned.
-        """
-        root = _resolve_workspace_root()
-
-        def _run_git(args: list[str]) -> str:
-            try:
-                result = subprocess.run(  # noqa: S603 — args are fixed
-                    args,
-                    cwd=str(root),
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                return result.stdout.strip() if result.returncode == 0 else ""
-            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-                return ""
-
-        branch = _run_git(["git", "rev-parse", "--abbrev-ref", "HEAD"])
-        if not branch:
-            return {"branch": "", "dirty": False, "status": ""}
-
-        porcelain = _run_git(["git", "status", "--porcelain"])
-        status_lines = [line for line in porcelain.split("\n") if line.strip()] if porcelain else []
-        return {
-            "branch": branch,
-            "dirty": len(status_lines) > 0,
-            "status": porcelain,
-        }
 
     # ------------------------------------------------------------------
     # GET /api/workspace/recent — recently modified files
