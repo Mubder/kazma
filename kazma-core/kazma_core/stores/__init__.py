@@ -17,9 +17,18 @@ from kazma_core.stores.bookmarks import (
     get_bookmark_store,
     reset_bookmark_store,
 )
+from kazma_core.stores.workspaces import (
+    WorkspaceStore,
+    get_workspace_store,
+    reset_workspace_store,
+)
 
 __all__ = [
     "BookmarkStore",
     "get_bookmark_store",
     "reset_bookmark_store",
+    "WorkspaceStore",
+    "get_workspace_store",
+    "reset_workspace_store",
 ]
+

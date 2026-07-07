@@ -132,6 +132,18 @@ class KazmaAppBuilder:
         # Register as process-wide singleton
         set_config_store(self.config_store)
         self.config_store.reconcile_from_yaml()
+
+        # Initialize WorkspaceStore and align active workspace configurations on boot
+        try:
+            from kazma_core.stores import get_workspace_store
+            ws_store = get_workspace_store()
+            active_ws = ws_store.get_active_workspace()
+            if active_ws:
+                self.config_store.set("workspace.selected_path", active_ws["root_path"], category="workspace")
+                self.config_store.reload_from_root(active_ws["root_path"])
+                logger.info("[App] Aligned ConfigStore with active workspace root: %s", active_ws["root_path"])
+        except Exception as e:
+            logger.warning("[App] Failed to align active workspace on boot: %s", e)
         
         self.registry = initialize_model_registry(self.config_store)
         self.agent = KazmaAgent(self.config)

@@ -213,11 +213,16 @@ def create_workspace_select_router() -> APIRouter:
         max_depth = min(max(1, max_depth), 8)
 
         try:
-            from kazma_core.config_store import get_config_store
-            raw_root = get_config_store().get("workspace.selected_path")
+            from kazma_core.stores import get_workspace_store
+            active_ws = get_workspace_store().get_active_workspace()
+            if active_ws:
+                raw_root = active_ws["root_path"]
+            else:
+                from kazma_core.config_store import get_config_store
+                raw_root = get_config_store().get("workspace.selected_path")
         except Exception as exc:
-            logger.error("[workspace/tree] ConfigStore unavailable: %s", exc)
-            raise HTTPException(status_code=500, detail="ConfigStore unavailable.") from exc
+            logger.error("[workspace/tree] WorkspaceStore/ConfigStore unavailable: %s", exc)
+            raise HTTPException(status_code=500, detail="Store unavailable.") from exc
 
         if not raw_root:
             raise HTTPException(

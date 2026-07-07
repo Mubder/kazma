@@ -126,6 +126,12 @@ class ConfigStore:
         with self._lock:
             self._cache.clear()
 
+    def reload_from_root(self, root_path: str | Path) -> None:
+        """Update the yaml_path to the new workspace root and invalidate cache."""
+        self._yaml_path = Path(root_path) / "kazma.yaml"
+        self.invalidate_yaml_cache()
+        logger.info("[ConfigStore] Hot-reloaded configurations from new root: %s", root_path)
+
     # ── Public API ────────────────────────────────────────────────────
 
     def _collect_prefixed(self, conn: sqlite3.Connection, prefix: str) -> dict[str, Any]:

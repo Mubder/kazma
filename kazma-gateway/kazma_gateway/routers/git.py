@@ -110,8 +110,13 @@ def create_git_router() -> APIRouter:
         """
         # Resolve the active workspace root
         try:
-            from kazma_core.config_store import get_config_store
-            raw_root = get_config_store().get("workspace.selected_path")
+            from kazma_core.stores import get_workspace_store
+            active_ws = get_workspace_store().get_active_workspace()
+            if active_ws:
+                raw_root = active_ws["root_path"]
+            else:
+                from kazma_core.config_store import get_config_store
+                raw_root = get_config_store().get("workspace.selected_path")
         except Exception:
             raw_root = None
 

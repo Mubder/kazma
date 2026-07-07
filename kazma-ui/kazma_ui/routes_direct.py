@@ -540,6 +540,15 @@ def register_direct_routes(self: Any) -> None:
     except Exception as _exc:
         logger.warning("[routes_direct] Workspace select/tree router failed to mount: %s", _exc)
 
+    # ── Workspaces Multi-Project Router ────────────────────────────────
+    try:
+        from kazma_gateway.routers.workspaces import create_workspaces_router
+
+        self.app.include_router(create_workspaces_router())
+        logger.info("[routes_direct] Workspaces router mounted at /api/workspaces")
+    except Exception as _exc:
+        logger.warning("[routes_direct] Workspaces router failed to mount: %s", _exc)
+
     # ── Live Git status ────────────────────────────────────────────────
     try:
         from kazma_gateway.routers.git import create_git_router
