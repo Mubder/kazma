@@ -173,6 +173,7 @@
         providerModelMap = [];
         if (Array.isArray(providers)) {
           providers.forEach(function(p) {
+            if (!p.enabled) return;
             var models = [];
             var visible = p.visible_models || [];
             var disc = p.discovered_models || [];

@@ -143,12 +143,14 @@ document.addEventListener('alpine:init', () => {
                 if (!res.ok) return;
                 const providers = await res.json();
                 if (!Array.isArray(providers)) return;
-                this._modelOptions = providers.map(p => {
-                    const disc = p.discovered_models || [];
-                    const manual = p.models || [];
-                    const models = [...new Set([...disc, ...manual])].filter(Boolean);
-                    return { label: p.display_name || p.name, models };
-                }).filter(g => g.models.length > 0);
+                this._modelOptions = providers
+                    .filter(p => p.enabled)
+                    .map(p => {
+                        const disc = p.discovered_models || [];
+                        const manual = p.models || [];
+                        const models = [...new Set([...disc, ...manual])].filter(Boolean);
+                        return { label: p.display_name || p.name, models };
+                    }).filter(g => g.models.length > 0);
             } catch (e) { /* keep empty */ }
         },
     });
@@ -324,20 +326,22 @@ function sidebarComponent() {
                 if (!res.ok) return;
                 const providers = await res.json();
                 if (!Array.isArray(providers)) return;
-                this.modelOptions = providers.map(p => {
-                    // Use visible_models (user-selected subset or all if none selected)
-                    const visible = p.visible_models || p.selected_models || [];
-                    const disc = p.discovered_models || [];
-                    const manual = p.models || [];
-                    // Prefer visible_models; fall back to discovered+manual
-                    let models;
-                    if (visible && visible.length) {
-                        models = visible;
-                    } else {
-                        models = [...new Set([...disc, ...manual])].filter(Boolean);
-                    }
-                    return { label: p.display_name || p.name, models };
-                }).filter(g => g.models.length > 0);
+                this.modelOptions = providers
+                    .filter(p => p.enabled)
+                    .map(p => {
+                        // Use visible_models (user-selected subset or all if none selected)
+                        const visible = p.visible_models || p.selected_models || [];
+                        const disc = p.discovered_models || [];
+                        const manual = p.models || [];
+                        // Prefer visible_models; fall back to discovered+manual
+                        let models;
+                        if (visible && visible.length) {
+                            models = visible;
+                        } else {
+                            models = [...new Set([...disc, ...manual])].filter(Boolean);
+                        }
+                        return { label: p.display_name || p.name, models };
+                    }).filter(g => g.models.length > 0);
             } catch (e) { /* keep empty */ }
         },
 

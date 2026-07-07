@@ -713,12 +713,22 @@ class ModelRegistry:
     def get_visible_models(self, provider_name: str) -> list[str]:
         """Return models that should appear in dropdowns.
 
-        If the user has explicitly selected models, returns only those.
+        If the user has explicitly selected models, returns only those (even if empty).
         Otherwise returns all discovered + manual models (backward-compatible).
         """
-        selected = self.get_selected_models(provider_name)
-        if selected:
-            return selected
+        clean = (provider_name or "").strip()
+        if clean:
+            raw = self._config_store.get(f"providers.{clean}.selected_models", None)
+            if raw is not None:
+                if isinstance(raw, str):
+                    try:
+                        raw = json.loads(raw)
+                    except (json.JSONDecodeError, TypeError):
+                        raw = []
+                if isinstance(raw, list):
+                    return [str(m) for m in raw]
+                return []
+
         discovered = self.get_discovered_models(provider_name)
         provider = self.get_provider(provider_name)
         manual = self._normalize_models(provider.get("models", [])) if provider else []
@@ -786,10 +796,12 @@ class ModelRegistry:
         provider_models: dict[str, list[str]] = {}
 
         for provider in provider_entries:
+            if not provider.get("enabled", True):
+                continue
             name = str(provider.get("name") or "").strip()
             if name:
                 provider_names.add(name)
-            p_models = self._normalize_models(provider.get("models", []))
+            p_models = self.get_visible_models(name)
             if p_models and name:
                 provider_models[name] = p_models
             models.update(p_models)
