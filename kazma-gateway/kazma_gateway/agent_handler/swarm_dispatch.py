@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 from typing import Any
 
+from kazma_core.constants import (
+    SWARM_DISPATCH_TIMEOUT_SECONDS,
+    SWARM_TASK_PREVIEW_MAX_CHARS,
+    TELEGRAM_MIN_CHAT_ID,
+    TELEGRAM_MAX_CHAT_ID,
+    VALID_OUTPUT_PLATFORMS,
+)
+from kazma_core.exceptions import sanitize_error
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
 from .store import _build_target_id
 
@@ -176,8 +186,6 @@ def _parse_output_target_suffix(task: str) -> tuple[str, dict[str, Any] | None]:
     dict shaped like the ConfigStore entry when the suffix is a concrete
     ``platform:chat_id``, or ``None`` when no override was present.
     """
-    import re
-
     match = re.search(r"\s*->\s*(\S+)\s*$", task)
     if not match:
         return task, None
@@ -187,6 +195,16 @@ def _parse_output_target_suffix(task: str) -> tuple[str, dict[str, Any] | None]:
 
     if ":" in raw:
         platform, _, chat_id_str = raw.partition(":")
+        platform = platform.lower()
+        
+        # Validate platform
+        if platform not in VALID_OUTPUT_PLATFORMS:
+            logger.info(
+                "[agent-handler] Invalid output platform %r in suffix; "
+                "valid: %s; task left untouched", platform, VALID_OUTPUT_PLATFORMS
+            )
+            return task, None
+        
         try:
             chat_id = int(chat_id_str)
         except ValueError:
@@ -195,6 +213,17 @@ def _parse_output_target_suffix(task: str) -> tuple[str, dict[str, Any] | None]:
                 "(chat_id not an integer); task left untouched", raw,
             )
             return task, None  # malformed — leave prompt untouched
+        
+        # Validate chat_id for known platforms
+        if platform == "telegram":
+            if not (TELEGRAM_MIN_CHAT_ID <= chat_id <= TELEGRAM_MAX_CHAT_ID or chat_id > 0):
+                logger.warning(
+                    "[agent-handler] Telegram chat_id %d out of valid range "
+                    "[%d, %d] or positive; task left untouched",
+                    chat_id, TELEGRAM_MIN_CHAT_ID, TELEGRAM_MAX_CHAT_ID
+                )
+                return task, None
+        
         return clean, {"platform": platform, "chat_id": chat_id, "enabled": True}
 
     # Unrecognized suffix format (e.g. "@GroupName") — log so the user
@@ -414,7 +443,10 @@ async def _dispatch_swarm_from_chat(
 
     # Dispatch synchronously (the engine handles concurrency internally)
     try:
-        result = await engine.dispatch(swarm_task)
+        result = await asyncio.wait_for(
+            engine.dispatch(swarm_task),
+            timeout=SWARM_DISPATCH_TIMEOUT_SECONDS
+        )
 
         # Format result for chat
         if result and result.aggregated_output:
@@ -436,9 +468,15 @@ async def _dispatch_swarm_from_chat(
         # …and mirror the same output to the configured Telegram group.
         await _maybe_send_to_output_target(manager, reply, target_override)
 
+    except asyncio.TimeoutError:
+        logger.error("[agent-handler] Swarm dispatch timed out after %ds for thread %s",
+                     SWARM_DISPATCH_TIMEOUT_SECONDS, thread_id)
+        error_reply = "⚠️ Swarm task timed out after 5 minutes. The task may still be running in background."
+        await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
+        await _maybe_send_to_output_target(manager, error_reply, target_override)
     except Exception as exc:
         logger.exception("[agent-handler] Swarm dispatch failed for thread %s", thread_id)
-        error_reply = f"⚠️ Swarm dispatch failed: {exc}"
+        error_reply = sanitize_error(exc)
         await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
         # Mirror the failure to the group too, consistent with the success path.
         await _maybe_send_to_output_target(manager, error_reply, target_override)

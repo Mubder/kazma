@@ -104,7 +104,30 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
 
 
 async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> None:
-    """Handle WebSocket chat connections with streaming responses."""
+    """Handle WebSocket chat connections with streaming responses.
+    
+    ⚠️ DEPRECATED: This WebSocket path bypasses the LangGraph supervisor
+    and its interrupt()-based HITL (Human-in-the-Loop) safety gates.
+    
+    Only Swarm Message Bus safety (Mechanism B) applies with a 5-second
+    timeout and fail-closed behavior. Dangerous tools (file_write, shell_exec,
+    code_exec, python_exec) will be blocked without approval.
+    
+    For full HITL support with graph interrupt(), use the SSE endpoint:
+    → /api/chat/stream
+    """
+    import warnings
+    warnings.warn(
+        "WebSocket /chat is deprecated. Use SSE /api/chat/stream for full HITL safety.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    
+    # Reject with 410 Gone and redirect to SSE endpoint
+    await websocket.close(code=4100, reason="Deprecated: Use /api/chat/stream for full HITL support")
+    return
+    
+    # Original implementation preserved below (unreachable due to early return)
     from kazma_core.streaming import stream_chat
 
     # Use the agent's facade method to get LLM config as a plain dict,

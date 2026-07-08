@@ -227,6 +227,37 @@ class ToolRegistry:
         except ImportError:
             logger.debug("[ToolRegistry] built-in '%s' not available", tool_name)
 
+    @property
+    def shell(self) -> ShellTool:
+        return self._tools["shell"]  # type: ignore[return-value]
+
+    def register(self, tool: BaseTool) -> None:
+        self._tools[tool.name] = tool
+        logger.info("[ToolRegistry] Tool '%s' registered (permission=%s)", tool.name, tool.permission)
+
+    def get(self, name: str) -> BaseTool | None:
+        return self._tools.get(name)
+
+    def can_use(self, worker_role: str, tool_name: str) -> bool:
+        """Check if a worker role can use a tool."""
+        tool = self._tools.get(tool_name)
+        if tool is None:
+            return False
+        # Orchestrator and root roles get full access
+        if worker_role in ("orchestrator", "root"):
+            return True
+        # Researcher/analyst roles: read-only only
+        if worker_role in ("researcher", "analyst", "bridge"):
+            return tool.permission == PermissionLevel.READ_ONLY
+        # Builder/developer roles: up to system_exec
+        if worker_role in ("builder", "developer"):
+            return tool.permission in (PermissionLevel.READ_ONLY, PermissionLevel.SYSTEM_EXEC)
+        return False
+
+    def list_available(self, worker_role: str) -> list[str]:
+        """Return tool names available to a worker role."""
+        return [name for name in self._tools if self.can_use(worker_role, name)]
+
     def list_tools(self) -> list[dict[str, Any]]:
         """Return all registered tools as a JSON-safe list."""
         return [
@@ -270,37 +301,6 @@ def _make_tool_class(name: str, fn, perm: PermissionLevel, desc: str) -> type[Ba
     _Wrapped.permission = perm
     _Wrapped.description = desc
     return _Wrapped
-
-    @property
-    def shell(self) -> ShellTool:
-        return self._tools["shell"]  # type: ignore[return-value]
-
-    def register(self, tool: BaseTool) -> None:
-        self._tools[tool.name] = tool
-        logger.info("[ToolRegistry] Tool '%s' registered (permission=%s)", tool.name, tool.permission)
-
-    def get(self, name: str) -> BaseTool | None:
-        return self._tools.get(name)
-
-    def can_use(self, worker_role: str, tool_name: str) -> bool:
-        """Check if a worker role can use a tool."""
-        tool = self._tools.get(tool_name)
-        if tool is None:
-            return False
-        # Orchestrator and root roles get full access
-        if worker_role in ("orchestrator", "root"):
-            return True
-        # Researcher/analyst roles: read-only only
-        if worker_role in ("researcher", "analyst", "bridge"):
-            return tool.permission == PermissionLevel.READ_ONLY
-        # Builder/developer roles: up to system_exec
-        if worker_role in ("builder", "developer"):
-            return tool.permission in (PermissionLevel.READ_ONLY, PermissionLevel.SYSTEM_EXEC)
-        return False
-
-    def list_available(self, worker_role: str) -> list[str]:
-        """Return tool names available to a worker role."""
-        return [name for name in self._tools if self.can_use(worker_role, name)]
 
 
 # ── Singleton access ───────────────────────────────────────────────────

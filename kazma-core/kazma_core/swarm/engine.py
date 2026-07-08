@@ -1014,8 +1014,11 @@ class SwarmEngine:
 
         # Emit worker_started (for SSE / observers)
         worker_name = worker.name if hasattr(worker, "name") else str(worker)
+        task_id_for_sse = ""
+        if isinstance(context, SwarmDispatchContext):
+            task_id_for_sse = context.task_id or ""
         self._emit_sse(
-            getattr(self, "_active_task_id", "") or "",  # fallback for compatibility
+            task_id_for_sse,
             "worker_started",
             {"worker": worker_name, "step": 0},
         )
@@ -1115,10 +1118,13 @@ class SwarmEngine:
 
         # Emit worker_completed for observers (SSE etc.)
         output_preview = ""
+        task_id_for_sse = ""
+        if isinstance(context, SwarmDispatchContext):
+            task_id_for_sse = context.task_id or ""
         if worker_result.output:
             output_preview = str(worker_result.output)[:200]
         self._emit_sse(
-            getattr(self, "_active_task_id", "") or "",
+            task_id_for_sse,
             "worker_completed",
             {
                 "worker": worker.name if hasattr(worker, "name") else str(worker),

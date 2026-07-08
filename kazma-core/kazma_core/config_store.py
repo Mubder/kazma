@@ -20,11 +20,12 @@ import json
 import logging
 import sqlite3
 import threading
+import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import os
 
@@ -78,6 +79,246 @@ CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
 _MISSING = object()
 
 
+# ─── Migration Framework ────────────────────────────────────────────────
+
+class Migration:
+    """A single database migration."""
+    
+    def __init__(self, version: int, name: str, sql: str) -> None:
+        self.version = version
+        self.name = name
+        self.sql = sql
+    
+    def __repr__(self) -> str:
+        return f"Migration(v={self.version}, name={self.name})"
+
+
+# ConfigStore schema migrations
+CONFIG_STORE_MIGRATIONS: list[Migration] = [
+    Migration(
+        version=1,
+        name="initial_schema",
+        sql="""
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'general',
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
+        """,
+    ),
+    Migration(
+        version=2,
+        name="add_scope_column",
+        sql="""
+        ALTER TABLE settings ADD COLUMN scope TEXT DEFAULT 'global';
+        CREATE INDEX IF NOT EXISTS idx_settings_scope ON settings(scope);
+        """,
+    ),
+]
+
+
+class MigrationRunner:
+    """Runs database migrations for a store."""
+    
+    def __init__(self, db_path: str, migrations: list[Migration]) -> None:
+        self.db_path = db_path
+        self.migrations = sorted(migrations, key=lambda m: m.version)
+        self._migration_table = "schema_migrations"
+    
+    def _ensure_migration_table(self, conn: sqlite3.Connection) -> None:
+        conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {self._migration_table} (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+        """)
+    
+    def get_applied_versions(self, conn: sqlite3.Connection) -> set[int]:
+        self._ensure_migration_table(conn)
+        cursor = conn.execute(f"SELECT version FROM {self._migration_table}")
+        return {row[0] for row in cursor.fetchall()}
+    
+    def run(self) -> list[Migration]:
+        """Run all pending migrations. Returns list of applied migrations."""
+        import sqlite3
+        from datetime import UTC, datetime
+        
+        applied = []
+        conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        apply_sqlite_pragmas(conn)
+        
+        try:
+            applied_versions = self.get_applied_versions(conn)
+            
+            for migration in self.migrations:
+                if migration.version in applied_versions:
+                    continue
+                
+                logger.info(f"[Migration] Applying {migration} to {self.db_path}")
+                conn.execute("BEGIN")
+                try:
+                    conn.executescript(migration.sql)
+                    conn.execute(
+                        f"INSERT INTO {self._migration_table} (version, name, applied_at) VALUES (?, ?, ?)",
+                        (migration.version, migration.name, datetime.now(UTC).isoformat()),
+                    )
+                    conn.execute("COMMIT")
+                    applied.append(migration)
+                    logger.info(f"[Migration] Applied {migration} successfully")
+                except Exception as e:
+                    conn.execute("ROLLBACK")
+                    logger.error(f"[Migration] Failed to apply {migration}: {e}")
+                    raise
+        finally:
+            conn.close()
+        
+        return applied
+
+
+def run_config_store_migrations(db_path: str) -> list[Migration]:
+    """Run ConfigStore migrations. Returns list of applied migrations."""
+    runner = MigrationRunner(db_path, CONFIG_STORE_MIGRATIONS)
+    return runner.run()
+
+
+class ConfigStoreProtocol(Protocol):
+    """Protocol defining the ConfigStore interface for type safety."""
+    
+    def get(self, key: str, default: Any = None) -> Any: ...
+    def set(self, key: str, value: Any) -> None: ...
+    def batch_set(self, items: list[tuple[str, Any, str]]) -> int: ...
+    def transaction(self): ...
+    def get_category(self, category: str) -> dict[str, Any]: ...
+    def get_all(self) -> dict[str, dict[str, Any]]: ...
+    def delete(self, key: str) -> bool: ...
+    def export_yaml(self) -> str: ...
+    def import_yaml(self, yaml_str: str) -> int: ...
+    def reconcile_from_yaml(self) -> int: ...
+    def reset_all(self) -> int: ...
+    def close(self) -> None: ...
+
+
+class _InMemoryStore:
+    """Thread-safe in-memory fallback with TTL eviction.
+    
+    Implements ConfigStoreProtocol for use when SQLite is unavailable.
+    Uses threading.Lock for thread safety (not asyncio.Lock) to match
+    ConfigStore's synchronous interface.
+    """
+    
+    def __init__(self, max_entries: int = 10_000, ttl_seconds: int = 3600) -> None:
+        self._data: dict[str, Any] = {}
+        self._timestamps: dict[str, float] = {}
+        self._max_entries = max_entries
+        self._ttl = ttl_seconds
+        self._lock = threading.Lock()
+    
+    def get(self, key: str, default: Any = None) -> Any:
+        with self._lock:
+            self._evict_expired()
+            return self._data.get(key, default)
+    
+    def set(self, key: str, value: Any, category: str = "general") -> None:
+        with self._lock:
+            self._evict_expired()
+            if len(self._data) >= self._max_entries:
+                self._evict_oldest()
+            self._data[key] = value
+            self._timestamps[key] = time.monotonic()
+    
+    def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
+        with self._lock:
+            self._evict_expired()
+            for key, value, _category in items:
+                if len(self._data) >= self._max_entries:
+                    self._evict_oldest()
+                self._data[key] = value
+                self._timestamps[key] = time.monotonic()
+            return len(items)
+    
+    def _evict_oldest(self) -> None:
+        """Evict the oldest 10% of entries."""
+        if not self._timestamps:
+            return
+        oldest = sorted(self._timestamps.items(), key=lambda x: x[1])[:max(1, self._max_entries // 10)]
+        for k, _ in oldest:
+            self._data.pop(k, None)
+            self._timestamps.pop(k, None)
+    
+    def _evict_expired(self) -> None:
+        """Remove expired entries. Must be called with lock held."""
+        now = time.monotonic()
+        expired = [k for k, ts in self._timestamps.items() if now - ts > self._ttl]
+        for k in expired:
+            self._data.pop(k, None)
+            self._timestamps.pop(k, None)
+    
+    def get_category(self, category: str) -> dict[str, Any]:
+        with self._lock:
+            self._evict_expired()
+            return {k: v for k, v in self._data.items() if k.startswith(category + ".")}
+    
+    def get_all(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            self._evict_expired()
+            return {"general": dict(self._data)}
+    
+    def delete(self, key: str) -> bool:
+        with self._lock:
+            if key in self._data:
+                self._data.pop(key)
+                self._timestamps.pop(key, None)
+                return True
+            return False
+    
+    def export_yaml(self) -> str:
+        with self._lock:
+            self._evict_expired()
+            import yaml
+            return yaml.dump(self._data, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    
+    def import_yaml(self, yaml_str: str) -> int:
+        import yaml
+        data = yaml.safe_load(yaml_str)
+        if not isinstance(data, dict):
+            return 0
+        items = []
+        def _flatten(d: dict, prefix: str = "") -> None:
+            for k, v in d.items():
+                full_key = f"{prefix}.{k}" if prefix else k
+                if isinstance(v, dict):
+                    _flatten(v, full_key)
+                else:
+                    items.append((full_key, v, "general"))
+        _flatten(data)
+        return self.batch_set(items)
+    
+    def reconcile_from_yaml(self) -> int:
+        return 0
+    
+    def reset_all(self) -> int:
+        with self._lock:
+            count = len(self._data)
+            self._data.clear()
+            self._timestamps.clear()
+            return count
+    
+    def close(self) -> None:
+        with self._lock:
+            self._data.clear()
+            self._timestamps.clear()
+            return count
+    
+    async def close(self) -> None:
+        async with self._lock:
+            self._data.clear()
+            self._timestamps.clear()
+
+
 class ConfigStore:
     """SQLite-backed runtime configuration with YAML fallback."""
 
@@ -103,9 +344,11 @@ class ConfigStore:
         return self._conn
 
     def _init_db(self) -> None:
+        """Initialize database schema and run migrations."""
         with self._lock:
             conn = self._get_conn()
-            conn.executescript(_SCHEMA)
+            # Run migrations instead of simple schema creation
+            run_config_store_migrations(str(self._db_path))
 
     def _load_yaml(self) -> dict[str, Any]:
         """Load and cache the base YAML config."""
@@ -461,10 +704,17 @@ def get_config_store() -> ConfigStore:
     use this instead of constructing ``ConfigStore()`` directly, so they
     share one SQLite connection and one ``threading.Lock`` for write
     coordination.
+
+    On SQLite initialization failure, falls back to an in-memory store
+    rather than returning None, preventing downstream AttributeError.
     """
     global _config_store
     if _config_store is None:
-        _config_store = ConfigStore()
+        try:
+            _config_store = ConfigStore()
+        except Exception as e:
+            logger.error(f"Failed to initialize ConfigStore (SQLite): {e}. Using in-memory fallback.")
+            _config_store = _InMemoryStore()  # type: ignore[assignment]
     return _config_store
 
 
@@ -480,3 +730,31 @@ def reset_config_store() -> None:
     if _config_store is not None:
         _config_store.close()
     _config_store = None
+
+
+def get_validated_config() -> KazmaConfig:
+    """Get fully validated configuration from ConfigStore.
+    
+    Reads all settings from the store (DB + YAML) and validates
+    against the KazmaConfig Pydantic model. Raises ValidationError
+    if configuration is inconsistent.
+    
+    Returns:
+        KazmaConfig: Validated configuration object.
+    """
+    from kazma_core.config_schema import KazmaConfig
+    
+    store = get_config_store()
+    flat = {}
+    
+    # Get all settings from store
+    if hasattr(store, 'get_all'):
+        all_settings = store.get_all()
+        for category, settings in all_settings.items():
+            for key, value in settings.items():
+                flat[key] = value
+    else:
+        # Fallback for in-memory store
+        flat = dict(store._data) if hasattr(store, '_data') else {}
+    
+    return KazmaConfig.from_flat_dict(flat)

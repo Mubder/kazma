@@ -565,6 +565,7 @@ class KazmaAppBuilder:
         from kazma_ui.providers import create_providers_router
         from kazma_ui.settings import create_settings_router
         from kazma_ui.skills_ui import create_skills_router
+        from kazma_ui.health import router as health_router
 
         chat_router = create_chat_router(self.agent, self.templates)
         settings_router = create_settings_router(self.agent, self.config_store, self.templates)
@@ -572,6 +573,9 @@ class KazmaAppBuilder:
         mcp_router = create_mcp_router(self.agent, self.templates)
         agents_router = create_agents_router(self.agent, self.templates)
         providers_router = create_providers_router(self.config_store)
+
+        # Health router (no auth, for load balancer probes)
+        self.app.include_router(health_router)
 
         # Mount routers
         self.app.include_router(chat_router)
