@@ -1,489 +1,259 @@
-# Kazma — Post-Audit Remediation Plan
+# FULL REMEDIATION & MAINTENANCE PLAN
 
-**Status**: Phase 0-5 Complete (Critical fixes, tests, quality improvements)
-**Next**: Phase 6+ — CI stabilization, integration, observability, tech debt
-
----
-
-## 📋 Phase Overview
-
-| Phase | Focus | Timeline | Status |
-|-------|-------|----------|--------|
-| **0-5** | Critical fixes, tests, quality | **DONE** | ✅ Complete |
-| **6** | CI Stabilization | 1-2 days | 🔄 Ready to start |
-| **7** | Integration Testing | 3-5 days | 📅 Planned |
-| **8** | Observability (OpenTelemetry) | 2-3 days | 📅 Planned |
-| **9** | Tech Debt & Hardening | 2-3 weeks | 📅 Planned |
+**Source:** Consolidated from Phase 0-5 Remediation + AUDIT_REAUDIT_2026-07-08.md  
+**Status:** Phases 0-5 Complete | Sprints A-C Ready | Ongoing Debt Tracked  
+**Last Updated:** 2026-07-08 (commit c46ae9b)
 
 ---
 
-## 🔴 Phase 6: CI Stabilization (1-2 Days)
+## 📊 EXECUTIVE SUMMARY
 
-### 6.1 Fix Gateway Test Failures
-**Files**: `kazma-gateway/tests/test_gateway_ux.py`
-**Issue**: 2 failing tests in `TestSlashCommands`:
-- `test_reset_command_clears_state` — `assert None is not None`
-- `test_model_command` — `assert None is not None`
-
-**Action**:
-```bash
-# Debug first
-cd G:/GitHubRepos/kazma && python -m pytest kazma-gateway/tests/test_gateway_ux.py::TestSlashCommands -v -s
-```
-
-**Likely fixes**:
-- Update mock return values in test fixtures
-- Check `KazmaAgent` slash command handler return values
-- Ensure `reset_command` and `model_command` return proper response dicts
-
-### 6.2 Add UI Test Infrastructure
-**New Files**:
-```
-kazma-ui/tests/conftest.py          # Shared fixtures
-kazma-ui/tests/unit/__init__.py
-kazma-ui/tests/integration/__init__.py
-```
-
-**conftest.py content**:
-```python
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-
-@pytest.fixture
-def mock_agent():
-    agent = MagicMock()
-    agent.config = MagicMock()
-    agent.config.raw = {}
-    agent.llm = AsyncMock()
-    agent.tools = AsyncMock()
-    agent.tools.get_tool_definitions = MagicMock(return_value=[])
-    agent.tools.execute = AsyncMock(return_value={"content": "ok"})
-    agent.cost_breaker = MagicMock()
-    agent.cost_breaker.should_halt = MagicMock(return_value=False)
-    agent.system_prompt = "Test prompt"
-    return agent
-
-@pytest.fixture
-def mock_config_store():
-    from unittest.mock import MagicMock
-    store = MagicMock()
-    store.get = MagicMock(return_value=None)
-    store.set = MagicMock()
-    return store
-```
-
-### 6.3 CI Pipeline Verification
-**GitHub Actions**: `.github/workflows/ci.yml`
-```yaml
-name: CI
-on: [push, pull_request]
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install -e .[test]
-      - run: python -m pytest kazma-core/tests kazma-gateway/tests -v
-      - run: python scripts/check_docs_sync.py
-```
-
----
-
-## 🟡 Phase 7: Integration Testing (3-5 Days)
-
-### 7.1 Multi-Platform Flow Tests
-**New File**: `kazma-gateway/tests/integration/test_multi_platform.py`
-
-```python
-"""End-to-end tests across Telegram, Discord, Slack adapters."""
-
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-
-class TestMultiPlatformDispatch:
-    """Test swarm dispatch works identically across platforms."""
-    
-    @pytest.fixture
-    def mock_gateway_manager(self):
-        manager = MagicMock()
-        manager.send = AsyncMock()
-        return manager
-    
-    @pytest.mark.parametrize("platform", ["telegram", "discord", "slack"])
-    async def test_swarm_dispatch_routes_correctly(self, platform, mock_gateway_manager):
-        from kazma_gateway.agent_handler.swarm_dispatch import _dispatch_swarm_from_chat
-        from kazma_gateway.gateway import IncomingMessage
-        
-        msg = IncomingMessage(
-            platform=platform,
-            sender_id=f"{platform}:12345",
-            text="swarm test task",
-            context_metadata={"chat_id": "-100123", "username": "testuser"}
-        )
-        
-        with patch("kazma_core.swarm.get_swarm_engine") as mock_engine:
-            mock_engine.return_value.dispatch = AsyncMock(
-                return_value=MagicMock(aggregated_output="Done")
-            )
-            await _dispatch_swarm_from_chat(mock_gateway_manager, mock_engine.return_value, msg, "thread-1")
-            
-            mock_gateway_manager.send.assert_called_once()
-            call_args = mock_gateway_manager.send.call_args[0][0]
-            assert call_args.target_id.startswith(f"gw-{platform}-")
-```
-
-### 7.2 HITL End-to-End Tests
-**New File**: `kazma-core/tests/integration/test_hitl_e2e.py`
-
-```python
-"""Full HITL flow tests: interrupt → approve → resume."""
-
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-
-class TestHITLE2E:
-    async def test_graph_interrupt_approve_resume(self):
-        """Graph path: tool call → interrupt → approve → resume."""
-        from kazma_core.agent.graph_builder import build_supervisor_graph
-        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-        
-        async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-            graph = build_supervisor_graph(
-                llm=MagicMock(),
-                system_prompt="Test",
-                tool_definitions=[{"name": "file_write", ...}],
-                tool_executor=AsyncMock(),
-                hitl_config={"enabled": True, "require_approval_for": ["file_write"]},
-                checkpointer=checkpointer,
-            )
-            
-            config = {"configurable": {"thread_id": "test-1"}}
-            # 1. Invoke with danger tool → should interrupt
-            # 2. Resume with approval → should execute
-            # 3. Verify tool was called
-```
-
-### 7.3 Swarm Pattern Integration Tests
-**New File**: `kazma-core/tests/integration/test_swarm_patterns.py`
-
-```python
-"""Test all 5 swarm patterns with real workers."""
-
-class TestSwarmPatterns:
-    @pytest.mark.parametrize("pattern", ["dispatch", "pipeline", "consult", "fan_out", "broadcast"])
-    async def test_pattern_execution(self, pattern):
-        from kazma_core.swarm.engine import SwarmEngine, SwarmConfig, WorkerConfig
-        from kazma_core.swarm.task import SwarmTask, TaskType
-        
-        engine = SwarmEngine(config=SwarmConfig(enabled=True, workers=[
-            WorkerConfig(name="worker1", type="in_process", role="coder", model="gpt-4o-mini"),
-        ]))
-        
-        task = SwarmTask(
-            type=TaskType(pattern.upper()),
-            payload="Test task",
-            workers=["worker1"] if pattern != "broadcast" else [],
-        )
-        
-        result = await engine.dispatch(task)
-        assert result is not None
-        assert len(result.worker_results) > 0
-```
-
----
-
-## 🟢 Phase 8: Observability — OpenTelemetry (2-3 Days)
-
-### 8.1 Tracing Module
-**New File**: `kazma-core/kazma_core/tracing.py`
-
-```python
-"""OpenTelemetry tracing setup for Kazma."""
-
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-import os
-
-def setup_tracing(service_name: str = "kazma") -> trace.Tracer:
-    """Initialize OpenTelemetry tracing."""
-    
-    # Only enable if endpoint configured
-    otlp_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
-    if not otlp_endpoint:
-        return trace.get_tracer(service_name)  # No-op tracer
-    
-    provider = TracerProvider()
-    exporter = OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
-    provider.add_span_processor(BatchSpanProcessor(exporter))
-    trace.set_tracer_provider(provider)
-    
-    # Auto-instrument
-    FastAPIInstrumentor.instrument()
-    HTTPXClientInstrumentor.instrument()
-    
-    return trace.get_tracer(service_name)
-
-# Convenience
-def get_tracer(name: str = "kazma") -> trace.Tracer:
-    return trace.get_tracer(name)
-```
-
-### 8.2 Instrument Critical Paths
-
-**Swarm Engine** (`engine.py`):
-```python
-from kazma_core.tracing import get_tracer
-tracer = get_tracer("kazma.swarm")
-
-async def dispatch(self, task: SwarmTask) -> SwarmTaskResult:
-    with tracer.start_as_current_span(f"swarm.dispatch.{task.pattern.value}") as span:
-        span.set_attribute("task.id", task.id)
-        span.set_attribute("task.pattern", task.pattern.value)
-        span.set_attribute("workers.count", len(task.workers))
-        # ... existing code
-```
-
-**Gateway** (`gateway.py`):
-```python
-from kazma_core.tracing import get_tracer
-tracer = get_tracer("kazma.gateway")
-
-async def _consume_loop(self):
-    while not self._shutdown.is_set():
-        with tracer.start_as_current_span("gateway.consume") as span:
-            span.set_attribute("queue.depth", self.queue.qsize())
-            # ... existing code
-```
-
-### 8.3 Metrics Export
-**New File**: `kazma-ui/kazma_ui/metrics.py` (already exists — verify Prometheus)
-
-```python
-# Add to health.py
-from prometheus_client import Counter, Histogram, Gauge
-
-SWARM_DISPATCH_TOTAL = Counter("kazma_swarm_dispatch_total", "Total dispatches", ["pattern", "status"])
-SWARM_DISPATCH_DURATION = Histogram("kazma_swarm_dispatch_duration_seconds", "Dispatch latency")
-GATEWAY_QUEUE_DEPTH = Gauge("kazma_gateway_queue_depth", "Message queue depth")
-```
-
----
-
-## 🔵 Phase 9: Tech Debt & Hardening (2-3 Weeks)
-
-### 9.1 Circuit Breaker Unit Tests
-**New File**: `kazma-core/tests/unit/test_circuit_breaker.py`
-
-```python
-import pytest
-from kazma_core.swarm.reliability import CircuitBreaker, CircuitState, CircuitBreakerOpenError
-
-class TestCircuitBreaker:
-    def test_opens_after_threshold(self):
-        cb = CircuitBreaker(failure_threshold=3, recovery_timeout=0.1)
-        for _ in range(3):
-            with pytest.raises(Exception):
-                await cb.call(lambda: (_ for _ in ()).throw(Exception("fail")))
-        assert cb.state == CircuitState.OPEN
-    
-    def test_half_open_probe_single(self):
-        cb = CircuitBreaker(failure_threshold=2, recovery_timeout=0.1)
-        await cb.call(lambda: (_ for _ in ()).throw(Exception("fail")))
-        await cb.call(lambda: (_ for _ in ()).throw(Exception("fail")))
-        assert cb.state == CircuitState.OPEN
-        
-        # Wait for recovery
-        import asyncio
-        await asyncio.sleep(0.15)
-        
-        # First call enters half-open
-        await cb.call(lambda: "success")
-        assert cb.state == CircuitState.CLOSED
-    
-    def test_probe_in_flight_flag(self):
-        """AGENTS.md §5: _probe_in_flight prevents concurrent probes."""
-        cb = CircuitBreaker(failure_threshold=1, recovery_timeout=0.1)
-        await cb.call(lambda: (_ for _ in ()).throw(Exception("fail")))
-        
-        import asyncio
-        await asyncio.sleep(0.15)
-        
-        # Concurrent calls in half-open should be rejected
-        async def probe():
-            try:
-                await cb.call(lambda: "success")
-            except CircuitBreakerOpenError:
-                return "rejected"
-            return "ok"
-        
-        results = await asyncio.gather(probe(), probe(), probe())
-        # Only one should succeed, others rejected
-        assert results.count("ok") == 1
-        assert results.count("rejected") == 2
-```
-
-### 9.2 Adapter Extraction
-**Current**: `swarm_dispatch.py` has `_maybe_send_to_output_target()` with Telegram logic inline.
-
-**Target Structure**:
-```
-kazma-gateway/kazma_gateway/adapters/
-├── __init__.py
-├── output/
-│   ├── __init__.py
-│   ├── base.py          # OutputAdapter protocol
-│   ├── telegram.py      # TelegramOutputAdapter
-│   ├── discord.py       # DiscordOutputAdapter
-│   └── slack.py         # SlackOutputAdapter
-└── output_factory.py    # get_output_adapter(config)
-```
-
-**Protocol**:
-```python
-# base.py
-from typing import Protocol, Any
-
-class OutputAdapter(Protocol):
-    async def send(self, chat_id: str, text: str, parse_mode: str = "Markdown") -> bool: ...
-    async def __aenter__(self) -> "OutputAdapter": ...
-    async def __aexit__(self, *args) -> None: ...
-```
-
-### 9.3 SSE Replacement for WebSocket (Full HITL)
-**New File**: `kazma-ui/kazma_ui/sse_chat_v2.py`
-
-```python
-"""Enhanced SSE chat with full feature parity to deprecated WebSocket."""
-
-async def chat_sse_stream_v2(request: Request, agent: KazmaAgent):
-    """SSE endpoint with all WebSocket features + HITL."""
-    # - Session management (shared with WebSocket)
-    # - Model override via query param
-    # - Tool call visualization
-    # - Full HITL interrupt() support
-    # - Cost tracking
-    # - Context compaction
-```
-
-### 9.4 Config Migration UI
-**New File**: `kazma-ui/kazma_ui/migrations_ui.py`
-
-```python
-"""Admin UI for viewing/running database migrations."""
-
-@router.get("/admin/migrations")
-async def list_migrations():
-    from kazma_core.migrations import get_runner
-    runner = get_runner("kazma-data/settings.db", "config")
-    return runner.status()
-
-@router.post("/admin/migrations/run")
-async def run_migrations(target_version: int | None = None):
-    from kazma_core.migrations import run_startup_migrations
-    applied = run_startup_migrations({
-        "config": "kazma-data/settings.db",
-        "task": "kazma-data/swarm_tasks.db",
-        "session": "kazma-data/sessions.db",
-    })
-    return {"applied": {k: [m.name for m in v] for k, v in applied.items()}}
-```
-
-### 9.5 Chaos Testing Framework
-**New File**: `tests/chaos/test_chaos.py`
-
-```python
-"""Chaos engineering: inject failures at critical paths."""
-
-import pytest
-from unittest.mock import patch, AsyncMock
-
-class TestChaos:
-    @pytest.mark.chaos
-    async def test_swarm_dispatch_timeout_handling(self):
-        """Simulate engine.dispatch() hanging."""
-        with patch("kazma_core.swarm.engine.SwarmEngine.dispatch", 
-                   new_callable=AsyncMock) as mock:
-            mock.side_effect = asyncio.TimeoutError()
-            # Verify graceful handling in swarm_dispatch.py
-    
-    @pytest.mark.chaos
-    async def test_config_store_sqlite_corruption(self):
-        """Simulate SQLite disk full / corruption."""
-        with patch("sqlite3.connect", side_effect=sqlite3.DatabaseError("disk full")):
-            # Verify in-memory fallback activates
-    
-    @pytest.mark.chaos
-    async def test_hitl_approval_timeout(self):
-        """Simulate operator never responding to approval."""
-        # Verify fail-closed after timeout
-```
-
-### 9.6 Architecture Docs Sync
-**Update**: `architecture.md`
-
-| Section | Additions |
-|---------|-----------|
-| **Configuration** | `config_schema.py` validation, `migrations.py` framework |
-| **Error Handling** | `exceptions.py` hierarchy, `sanitize_error()` |
-| **Observability** | OpenTelemetry tracing, Prometheus metrics |
-| **Testing** | HITL gate verification, Sprint 14 regression, integration tests |
-| **WebSocket** | Deprecated → SSE with 410 Gone |
-
----
-
-## 📅 Detailed Timeline
-
-| Week | Phase | Deliverables |
-|------|-------|--------------|
-| **Week 1** | Phase 6 | ✅ CI green, UI test infra |
-| **Week 2** | Phase 7 | ✅ Multi-platform + HITL E2E tests |
-| **Week 3** | Phase 8 | ✅ OpenTelemetry tracing + metrics |
-| **Week 4** | Phase 9.1-9.2 | ✅ Circuit breaker tests + Adapter extraction |
-| **Week 5** | Phase 9.3-9.4 | ✅ SSE replacement + Migration UI |
-| **Week 6** | Phase 9.5-9.6 | ✅ Chaos tests + Docs sync |
-
----
-
-## 🎯 Success Criteria
-
-| Metric | Target |
+| Metric | Status |
 |--------|--------|
-| **CI Pass Rate** | 100% (all tests + docs sync) |
-| **Test Coverage** | ≥80% core modules |
-| **HITL Gate Verification** | Runs in CI on every PR |
-| **OpenTelemetry** | Traces traces exported to collector (when OTEL_ENDPOINT set) |
-| **Circuit Breaker** | `_probe_in_flight` tested under concurrency |
-| **Zero Critical Bugs** | No silent failures, no leaked internals |
+| **Critical Fixes (P0)** | ✅ 5/5 Complete |
+| **Core Tests Passing** | ✅ 14/14 HITL gates, 37/37 gateway, 21/21 UI |
+| **Docs Sync** | ✅ 10/10 checks pass |
+| **CI/CD** | ✅ GitHub Actions pipeline active |
+| **Integration Tests** | ⚠️ 11/16 failing (mock API mismatches) |
+| **Reliability Tests** | ⚠️ 3/6 FallbackChain failing (API drift) |
+| **Conftest Collision** | ❌ Blocks monorepo test collection |
+
+**Residual Risk:** Moderate-low for localhost single-operator; High for LAN/public without reverse-proxy auth until P0-1/P0-2 resolved.
 
 ---
 
-## 📝 Quick Start Commands
+## 🎯 PHASES 0-5: COMPLETED (Audit Remediation)
 
+### Phase 0: Test Infrastructure ✅
+- Created `kazma-core/tests/`, `kazma-gateway/tests/`, `kazma-ui/tests/`
+- Added `pyproject.toml` test config with coverage, markers
+- Shared fixtures in `conftest.py` per package
+
+### Phase 1: Critical Fixes ✅
+| Fix | File | Impact |
+|-----|------|--------|
+| ConfigStore silent failure → in-memory fallback | `kazma-core/kazma_core/config_store.py` | Prevents AttributeError downstream |
+| `engine.dispatch()` 5-min timeout | `kazma-gateway/kazma_gateway/agent_handler/swarm_dispatch.py` | Prevents indefinite hangs |
+| `_InMemoryStore` thread-safe locking | `kazma-core/kazma_core/config_store.py` | Prevents dict corruption under concurrency |
+| Error message sanitization | `kazma-gateway/kazma_gateway/agent_handler/swarm_dispatch.py` | No internal details leaked to users |
+| Input validation `_parse_output_target_suffix` | `kazma-gateway/kazma_gateway/agent_handler/swarm_dispatch.py` | Validates platform + Telegram chat_id ranges |
+| WebSocket `/chat` deprecated (410 Gone) | `kazma-ui/kazma_ui/chat.py` | Redirects to SSE `/api/chat/stream` for full HITL |
+
+### Phase 2: Test Coverage ✅
+| Test File | Scope | Tests |
+|-----------|-------|-------|
+| `kazma-core/tests/test_hitl_gates_wired.py` | 3 HITL mechanisms verified at runtime | 14 |
+| `kazma-gateway/tests/test_swarm_approval_callbacks.py` | Sprint 14 regression (dead seam fix) | 13 |
+| `kazma-ui/tests/test_unit.py` | Unit tests for UI components | 21 |
+| `kazma-core/tests/unit/test_reliability.py` | Circuit breaker, retry, timeout, concurrency | 16/19 pass |
+
+### Phase 3: Code Quality ✅
+| Module | Purpose |
+|--------|---------|
+| `kazma-core/kazma_core/constants.py` | 50+ centralized constants (timeouts, limits, IDs) |
+| `kazma-core/kazma_core/exceptions.py` | `KazmaError` hierarchy + `sanitize_error()` |
+| `kazma-core/kazma_core/config_schema.py` | Pydantic models with cross-section validation |
+| `kazma-core/kazma_core/migrations.py` | Versioned SQLite migration runner |
+| `kazma-core/kazma_core/tracing.py` | OpenTelemetry setup (env-gated) |
+
+### Phase 4: Config & Reliability ✅
+| Feature | File |
+|---------|------|
+| Pydantic config schema with cross-validation | `config_schema.py` |
+| Health endpoints `/health/live`, `/health/ready` | `kazma-ui/kazma_ui/health.py` |
+| SQLite migration framework | `migrations.py` + `config_store.py` integration |
+
+### Phase 5: WebSocket Deprecation ✅
+- `/chat` WebSocket returns 410 Gone with redirect to SSE
+- Explicit security warning in docstring about missing HITL Mechanism A
+
+### Infrastructure ✅
+| Item | Status |
+|------|--------|
+| `.github/workflows/ci.yml` | Multi-job pipeline (lint, typecheck, test, coverage, security, docker) |
+| `scripts/check_docs_sync.py` | 10/10 checks pass (CI gate) |
+| `FULL_REMEDIATION_PLAN.md` | This document |
+
+---
+
+## 🚨 SPRINT A: SECURITY (½–1 DAY) — From Re-audit
+
+### NEW-P0-1: MCP IDE Danger Tool Gate
+**File:** `kazma-gateway/kazma_gateway/mcp_ide_server.py` (or similar)
+**Issue:** MCP IDE server allows danger tools without proper secret validation
+**Fix:** Force-gate `DANGER_MCP_TOOLS` env var; require `KAZMA_SECRET` for any danger tool execution; disable if secret not set
+
+### NEW-P0-2: Web Approve Ownership Check
+**File:** `kazma-ui/kazma_ui/routes_direct.py` (or `/api/approve/`)
+**Issue:** Approval endpoint doesn't verify requester owns the thread
+**Fix:** Hard 403 on ownership mismatch; verify `thread_id` belongs to requesting session/user
+
+### DISC-01: Disclosure Key Generation
+**File:** `kazma-core/kazma_core/config_store.py` or auth module
+**Issue:** No persistent disclosure key when unset
+**Fix:** Generate `secrets.token_hex(32)` on first run; persist in ConfigStore under `security.disclosure_key`
+
+### MCP Tool Name Alignment
+**File:** `kazma-core/kazma_core/swarm/safety.py` + `kazma-gateway/kazma_gateway/mcp_ide_server.py`
+**Issue:** MCP tool names don't match bus danger list (`_EXTENDED_DANGER`)
+**Fix:** Add alias table or normalize names before `is_danger_tool()` check
+
+---
+
+## 🧪 SPRINT B: TEST / CI HYGIENE (½ DAY) — From Re-audit
+
+### B1: Conftest Collision Fix
+**Problem:** `kazma-core/tests/conftest.py` and `kazma-gateway/tests/conftest.py` both define `tests` package → collection blocked
+**Fix Options:**
+1. Rename to `kazma_core_tests/conftest.py`, `kazma_gateway_tests/conftest.py` + update `pyproject.toml` `testpaths`
+2. Use `pytest.ini` `importmode=importlib` + explicit `pythonpath`
+3. Single root `tests/conftest.py` with package-scoped fixtures
+
+**Recommended:** Option 1 — minimal change, explicit namespaces
+
+### B2: Fix `TestFallbackChain` API Mismatches
+**File:** `kazma-core/tests/unit/test_reliability.py`
+**Current API (real):**
+```python
+chain = FallbackChain(fallback_workers=["worker2", "worker3"])
+result = await chain.execute(primary_result, dispatch_worker=dispatch_fn)
+```
+**Fix:** Update 3 failing tests to match real constructor + `execute()` signature
+
+### B3: Fix `TestNoPrivateAccessInUI`
+**File:** `kazma-ui/tests/test_service_facade.py` (or similar)
+**Problem:** Health check uses private `SwarmEngine._workers`
+**Fix:** Route through `list_workers()` public method on registry
+
+### B4: Enable CI Integration Job
+**File:** `.github/workflows/ci.yml`
+**Action:** Change `test-integration: if: false` → `if: always()` once B1-B3 pass
+
+### B5: Badge Refresh
+**Files:** `README.md`, `STATUS.md`
+**Update:** Dynamic badges showing per-package test counts + coverage
+
+---
+
+## 🏗 SPRINT C: TECH DEBT (ONGOING)
+
+| ID | Area | Description | Effort |
+|----|------|-------------|--------|
+| **C1** | `engine.py` | Acquire `_task_lock` on ALL `_task_history` mutations (race residual) | S |
+| **C2** | WebSocket | Delete dead WS implementation after 410 deprecation period | S |
+| **C3** | `engine.py` | Further split: `dispatch.py`, `handoff.py`, `patterns.py` | M |
+| **C4** | `telegram.py` | Split: `polling.py`, `callback.py`, `send.py` | M |
+| **C5** | Secrets | Unify `get_kazma_secret()` — single impl with documented auto-gen policy | S |
+| **C6** | Silent fails | Audit ~31 remaining `except Exception: pass` sites; add logging or narrow | M |
+| **C3** | RACE-ENG | Verify `_task_lock` acquired on all `_task_history` writes (dispatch, complete, cancel) | S |
+| **DISC-01** | Auth | Persist disclosure key in ConfigStore (see Sprint A) | S |
+| **ORCH** | Delegation | Re-verify delegation chain items not fully re-verified | M |
+
+---
+
+## 📋 INTEGRATION TEST FIXES (Post Sprint B)
+
+### Multi-Platform Integration Tests
+**File:** `kazma-core/tests/integration/test_multi_platform.py`
+
+| Failure | Failure | Root Cause | Fix |
+|--------|------------|-----|
+| `test_swarm_dispatch_routes_correctly` | `target_override` param not in signature | Match actual `_dispatch_swarm_from_chat(manager, engine, msg, thread_id, store)` |
+| `test_swarm_dispatch_timeout_handling` | Same + mock engine dispatch | Align mock to real signature |
+| `test_graph_interrupt_approve_resume` | Graph interrupt check logic | Use proper LangGraph `interrupt()` detection |
+| `test_swarm_bus_approval_flow` | Safety check expectation | Align to real `safety.check()` return semantics |
+| `test_pattern_execution` | `TaskType.DISPATCH` vs `TaskType.dispatch` | Use enum values from `TaskType` |
+| `SwarmTaskResult` import | Class is `TaskResult` in `task.py` | Fix import |
+
+### Reliability Test Fixes
+**File:** `kazma-core/tests/unit/test_reliability.py`
+
+| Test | Real API | Fix |
+|------|----------|-----|
+| `TestFallbackChain` | `FallbackChain(fallback_workers=[...])` + `execute(primary_result, dispatch_worker=fn)` | Update 3 tests |
+| `_is_retryable_exception` | Uses `_NON_RETRYABLE_PATTERNS` tuple | Test against actual patterns |
+
+---
+
+## 🔧 CONFTES COLLISION FIX — DETAILED
+
+### Option 1: Package-Specific Conftest (Recommended)
 ```bash
-# Phase 6: Fix CI
-cd G:/GitHubRepos/kazma
-python -m pytest kazma-gateway/tests/test_gateway_ux.py::TestSlashCommands -v
+# 1. Rename directories
+mv kazma-core/tests/conftest.py kazma-core/kazma_core_tests/conftest.py
+mv kazma-gateway/tests/conftest.py kazma-gateway/kazma_gateway_tests/conftest.py
 
-# Phase 7: Run new integration tests
-python -m pytest kazma-gateway/tests/integration/ kazma-core/tests/integration/ -v
+# 2. Update pyproject.toml
+[tool.pytest.ini_options]
+testpaths = [
+    "kazma-core/kazma_core_tests",
+    "kazma-gateway/kazma_gateway_tests",
+    "kazma-ui/tests",
+    "kazma-tui/tests"
+]
+python_files = ["test_*.py"]
+```
 
-# Phase 8: Test tracing (set OTEL endpoint)
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-python -m pytest kazma-core/tests/ -v
-
-# Phase 9: Run chaos tests (manual)
-python -m pytest tests/chaos/ -v -m chaos
-
-# Docs sync
-python scripts/check_docs_sync.py
+### Option 2: Importlib Mode (If Pytest 7+)
+```ini
+[tool.pytest.ini_options]
+importmode = "importlib"
+pythonpath = ["kazma-core", "kazma-gateway", "kazma-ui", "kazma-tui"]
 ```
 
 ---
 
-This plan is executable as-is. Each phase has specific files, code snippets, and verification steps. Shall I start with **Phase 6.1** (fixing the 2 gateway test failures)?
+## 📦 ARCHITECTURE MAP (Reference)
+
+| Package | Role | Key Modules |
+|---------|------|-------------|
+| `kazma-core` | Agent, LLM, swarm, config, hub, security, tools | `agent/`, `swarm/`, `config_store.py`, `model_registry.py` |
+| `kazma-gateway` | Telegram/Discord/Slack, agent_handler, MCP IDE server | `adapters/`, `agent_handler/`, `mcp_ide_server.py` |
+| `kazma-ui` | FastAPI, SSE chat, swarm panel, auth, workspace | `app.py`, `sse_chat.py`, `chat.py`, `auth.py` |
+| `kazma-tui` | Textual dashboard (read-mostly registry) | `app.py` |
+| `kazma-cli` | CLI entrypoints | `main.py` |
+| `kazma-skills` / `kazma-memory` | Skills + memory helpers | — |
+
+---
+
+## 📋 QUICK COMMANDS
+
+```bash
+# Run all tests (after conftest fix)
+python -m pytest kazma-core/kazma_core_tests kazma-gateway/kazma_gateway_tests kazma-ui/tests -v
+
+# Core only
+python -m pytest kazma-core/kazma_core_tests -v
+
+# Gateway only
+python -m pytest kazma-gateway/kazma_gateway_tests -v
+
+# UI only
+python -m pytest kazma-ui/tests -v
+
+# Docs sync check
+python scripts/check_docs_sync.py
+
+# Lint + typecheck
+ruff check .
+mypy kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui --ignore-missing-imports
+
+# Security scan
+bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui -f json -o bandit-report.json || true
+```
+
+---
+
+## 📈 TRACKING
+
+| Sprint | Target Date | Owner | Status |
+|--------|-------------|-------|--------|
+| A (Security) | 2026-07-10 | — | ⏳ Ready |
+| B (Test/CI) | 2026-07-12 | — | ⏳ Ready |
+| C (Debt) | Ongoing | — | 📋 Backlog |
+
+---
+
+**Generated:** 2026-07-08  
+**Base Commit:** `c46ae9b`  
+**Next Review:** After Sprint A complete
