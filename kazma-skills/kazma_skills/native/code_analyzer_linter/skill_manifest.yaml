@@ -1,0 +1,25 @@
+name: code-analyzer-linter
+version: 0.1.0
+description: Static code analysis, security linting, ruff auto-formatting, and pytest test suite execution
+author: Kazma Team
+license: MIT
+
+tools:
+  lint_code:
+    arabic_name: "فحص جودة الكود"
+    description: "Execute static checks on Python files using ruff linter to detect errors and unused imports."
+    category: "code"
+    prompt_chain:
+      - "قم بفحص جودة الكود البرمجي وعرض المشاكل البرمجية"
+  format_code:
+    arabic_name: "تنسيق الكود"
+    description: "Format source code files using ruff format to maintain styling guidelines."
+    category: "code"
+    prompt_chain:
+      - "قم بتنسيق ملفات الكود البرمجي تلقائياً"
+  run_unit_tests:
+    arabic_name: "تشغيل الاختبارات البرمجية"
+    description: "Execute tests in the test path using pytest and return a structured summary of successes or traceback errors."
+    category: "code"
+    prompt_chain:
+      - "قم بتشغيل اختبارات الكود وتحقق من صحته"

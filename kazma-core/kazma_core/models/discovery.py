@@ -140,8 +140,9 @@ async def discover_lm_studio_models(
     except SSRFError as exc:
         logger.warning("discover_lm_studio_models: SSRF blocked %r: %s", models_url, exc)
         return info
-    except Exception:
-        logger.warning("discover_lm_studio_models: SSRF validation unavailable — blocking request for safety")
+    except Exception as exc:
+        logger.warning("discover_lm_studio_models: SSRF validation unavailable — blocking request for safety: %s", exc)
+        logger.debug("SSRF validation exception details:", exc_info=True)
         return info
 
     try:
@@ -197,8 +198,9 @@ async def discover_custom_models(base_url: str) -> ProviderInfo:
     except SSRFError as exc:
         logger.warning("discover_custom_models: SSRF blocked %r: %s", models_url, exc)
         return info
-    except Exception:
-        logger.warning("discover_custom_models: SSRF validation unavailable — blocking request for safety")
+    except Exception as exc:
+        logger.warning("discover_custom_models: SSRF validation unavailable — blocking request for safety: %s", exc)
+        logger.debug("SSRF validation exception details:", exc_info=True)
         return info
 
     try:

@@ -225,83 +225,80 @@ class WorkerRegistry:
     def find_best(self, task_description: str) -> list[WorkerEntry]:
         """Route a task to the best workers by expertise match.
 
-        1. Try semantic routing via sentence-transformers embeddings.
-        2. Fall back to keyword matching if embeddings unavailable.
-        3. If no specialist found, fall back to any generalist worker.
-        4. If no generalist, return ALL enabled workers as last resort.
+        1. Try unified routing via UnifiedRouter (semantic, dialect-aware, and keyword).
+        2. If no specialist found, fall back to any generalist worker.
+        3. If no generalist, return ALL enabled workers as last resort.
 
         This guarantees zero dispatch failures.
         """
-        desc_lower = task_description.lower()
-
-        # 1 — Semantic routing (if available)
         try:
-            from kazma_core.swarm.semantic_router import get_semantic_router
+            from kazma_core.routing_engine import UnifiedRouter
+            from kazma_core.swarm.task import SwarmTask, WorkerCapabilities
 
-            router = get_semantic_router()
-            worker_dicts = [
-                {
-                    "name": e.name,
-                    "expertise": e.expertise,
-                    "system_prompt": e.system_prompt,
-                    "roles": e.roles,
-                }
-                for e in self._entries.values()
-                if e.enabled
-            ]
-            if worker_dicts:
-                selected = router.route(task_description, worker_dicts, top_n=5)
-                result: list[WorkerEntry] = []
-                for name in selected:
+            router = UnifiedRouter()
+            task = SwarmTask(prompt=task_description, workers=["auto"])
+
+            available_workers = []
+            for e in self._entries.values():
+                if e.enabled:
+                    caps = WorkerCapabilities(
+                        role=e.roles[0] if e.roles else "leaf",
+                        expertise=e.expertise,
+                        tools=e.tools,
+                        model_specialty=e.model
+                    )
+                    # Support system_prompt check in UnifiedRouter._build_worker_profiles
+                    caps.system_prompt = e.system_prompt
+                    available_workers.append({
+                        "name": e.name,
+                        "capabilities": caps
+                    })
+
+            if available_workers:
+                from concurrent.futures import ThreadPoolExecutor
+                import asyncio
+
+                def run_sync(coro):
+                    with ThreadPoolExecutor(max_workers=1) as executor:
+                        def _run():
+                            loop = asyncio.new_event_loop()
+                            try:
+                                asyncio.set_event_loop(loop)
+                                return loop.run_until_complete(coro)
+                            finally:
+                                loop.close()
+                        return executor.submit(_run).result()
+
+                selected_names = run_sync(router.route(task, available_workers))
+                result = []
+                for name in selected_names:
                     entry = self._entries.get(name)
                     if entry and entry.enabled:
                         result.append(entry)
                 if result:
                     logger.info(
-                        "[WorkerRegistry] Semantic routing: %s → %s",
+                        "[WorkerRegistry] Unified routing: %s → %s",
                         task_description[:60],
                         [e.name for e in result],
                     )
                     return result
         except Exception as exc:
-            logger.debug("[WorkerRegistry] Semantic routing failed: %s", exc)
+            logger.debug("[WorkerRegistry] Unified routing failed: %s", exc)
 
-        # 2 — Keyword fallback
-        logger.info("[WorkerRegistry] Semantic routing unavailable — using keyword fallback")
-        scored: list[tuple[int, WorkerEntry]] = []
-        for entry in self._entries.values():
-            if not entry.enabled:
-                continue
-            score = 0
-            for tag in entry.expertise:
-                if tag.lower() in desc_lower:
-                    score += 10
-            for kw in desc_lower.split():
-                for ex in entry.expertise:
-                    if kw in ex.lower() or ex.lower() in kw:
-                        score += 2
-            scored.append((score, entry))
-        scored.sort(key=lambda x: x[0], reverse=True)
-
-        # 3 — Only return workers with actual keyword hits (score > 0)
-        keyword_hits = [e for score, e in scored if score > 0]
-        if keyword_hits:
-            return keyword_hits
-
-        # 4 — Smart-fallback: no specialist matched → use generalists
+        # Fallback to generalists
         generalists = self.find_generalists()
         if generalists:
             logger.info(
-                "[WorkerRegistry] No specialist for '%s' — falling back to generalists: %s",
+                "[WorkerRegistry] No specialist via unified routing — falling back to generalists: %s",
                 task_description[:60],
                 [g.name for g in generalists],
             )
             return generalists
 
-        # 5 — Last resort: return ALL enabled workers
+        # Last resort fallback: return ALL enabled workers
         all_enabled = [e for e in self._entries.values() if e.enabled]
         if all_enabled:
-            logger.info("[WorkerRegistry] No generalist — returning all %d workers", len(all_enabled))
+            logger.info("[WorkerRegistry] No generalist — returning all %d workers as last resort", len(all_enabled))
             return all_enabled
 
         return []

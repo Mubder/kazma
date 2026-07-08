@@ -313,7 +313,8 @@ def create_sse_chat_router(
     # A session created via the SSE transport is therefore visible to the
     # WebSocket session-list / message-history endpoints and vice versa.
     # See VAL-UX-007 for the contract this satisfies.
-    _store = get_session_manager()
+    def _get_store():
+        return get_session_manager()
 
     def _get_graph() -> Any:
         """Resolve current graph from mutable holder, dynamic getter, or fallback.
@@ -332,29 +333,17 @@ def create_sse_chat_router(
 
     r = APIRouter(tags=["chat-sse"])
 
-    # SSE-only mapping: session_id -> thread_id used for LangGraph
-    # checkpointing.  This is orthogonal to the shared message-history
-    # store and therefore lives here rather than in SessionManager.
-    # Bounded: capped at 10 000 entries (matching SessionManager's LRU).
-    _thread_ids: dict[str, str] = {}
-    _THREAD_IDS_MAX = 10_000
-
     def _resolve_session(session_id: str) -> tuple[Any, str]:
         """Return (ChatSession, thread_id) for ``session_id``.
 
         Creates the ChatSession in the shared store on first use so the
         WebSocket transport can see it immediately.
         """
-        session = _store.get_or_create(session_id)
-        thread_id = _thread_ids.get(session_id)
-        if thread_id is None:
-            thread_id = str(uuid.uuid4())
-            _thread_ids[session_id] = thread_id
-            # Enforce bound: remove oldest entries when exceeding the cap
-            if len(_thread_ids) > _THREAD_IDS_MAX:
-                oldest = next(iter(_thread_ids))
-                _thread_ids.pop(oldest, None)
-        return session, thread_id
+        session = _get_store().get_or_create(session_id)
+        if not session.thread_id:
+            session.thread_id = str(uuid.uuid4())
+            _get_store().put(session)
+        return session, session.thread_id
 
     # ── Provider profile management ───────────────────────────────
 
@@ -560,14 +549,13 @@ def create_sse_chat_router(
         """List all active chat sessions (shared store)."""
         return [
             s.to_summary()
-            for s in _store.list_all()
+            for s in _get_store().list_all()
         ]
 
     @r.delete("/api/chat/sessions/{session_id}")
     async def delete_session(session_id: str) -> dict[str, str]:
         """Delete a chat session (shared store)."""
-        _store.delete(session_id)
-        _thread_ids.pop(session_id, None)
+        _get_store().delete(session_id)
         return {"status": "ok"}
 
     @r.get("/api/chat/sessions/{session_id}/messages")
@@ -578,7 +566,7 @@ def create_sse_chat_router(
         Returns an empty list if the session does not exist (e.g. it was
         created on a different transport or has already been deleted).
         """
-        session = _store.get(session_id)
+        session = _get_store().get(session_id)
         if not session:
             return []
         # Return only role/content pairs so we don't leak internal keys

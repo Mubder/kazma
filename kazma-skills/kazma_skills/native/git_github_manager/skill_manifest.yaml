@@ -1,0 +1,39 @@
+name: git-github-manager
+version: 0.1.0
+description: Manage local git repositories and integrate with GitHub APIs
+author: Kazma Team
+license: MIT
+
+tools:
+  git_status:
+    arabic_name: "حالة جيت"
+    description: "Get the current git repository status, branch, and staged/unstaged changes."
+    category: "git"
+    prompt_chain:
+      - "احصل على حالة المستودع الحالي"
+      - "اعرض التغييرات في صيغة واضحة ومرتبة"
+  git_commit:
+    arabic_name: "تأكيد التغييرات"
+    description: "Commit modified or untracked files with a detailed commit message."
+    category: "git"
+    prompt_chain:
+      - "أضف الملفات المعدلة"
+      - "قم بتأكيد التغييرات مع رسالة مناسبة بالعربية أو الإنجليزية"
+  git_push_pull:
+    arabic_name: "مزامنة التغييرات"
+    description: "Synchronize local branch changes by executing git pull or git push."
+    category: "git"
+    prompt_chain:
+      - "قم بمزامنة الفرع المحلي مع الفرع البعيد"
+  github_create_pr:
+    arabic_name: "إنشاء طلب سحب"
+    description: "Create a new Pull Request on the GitHub repository using GitHub APIs."
+    category: "git"
+    prompt_chain:
+      - "أنشئ طلب سحب جديد في جيت هاب"
+  github_list_issues:
+    arabic_name: "عرض مشاكل جيت هاب"
+    description: "Retrieve and view list of issues currently open on the remote repository."
+    category: "git"
+    prompt_chain:
+      - "اعرض قائمة المشاكل المفتوحة لمتابعتها"

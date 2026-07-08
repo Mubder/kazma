@@ -610,6 +610,7 @@ class UnifiedToolExecutor:
         self,
         local: Any = None,
         mcp: AsyncMCPManager | None = None,
+        rbac: Any = None,
     ) -> None:
         if mcp is None:
             # Always carry an MCP manager so callers can connect servers
@@ -617,6 +618,11 @@ class UnifiedToolExecutor:
             mcp = AsyncMCPManager()
         self._local = local
         self._mcp = mcp
+
+        if rbac is None:
+            from kazma_core.rbac import RBACEngine
+            rbac = RBACEngine()
+        self._rbac = rbac
 
     # ── MCP server lifecycle (delegates to AsyncMCPManager) ─────────
 
@@ -674,9 +680,32 @@ class UnifiedToolExecutor:
         Returns:
             Dict with ``content`` (str) and ``is_error`` (bool).
         """
-        # ── Try local first ────────────────────────────────────────
         if arguments is None:
             arguments = {}
+
+        # Extract and pop RBAC context keys to prevent signature mismatch downstream
+        user_id = arguments.pop("user_id", arguments.pop("_user_id", None))
+        division = arguments.pop("division", arguments.pop("_division", None))
+        resource = arguments.pop("resource", arguments.pop("_resource", None))
+        action = arguments.pop("action", arguments.pop("_action", None))
+
+        if user_id:
+            resolved_div = division or "general_trading"
+            resolved_res = resource or tool_name
+            resolved_act = action or "execute"
+            perm = await self._rbac.check_permission(
+                user_id=user_id,
+                division=resolved_div,
+                resource=resolved_res,
+                action=resolved_act,
+            )
+            if not perm.allowed:
+                return {
+                    "content": f"Access Denied: {perm.reason}",
+                    "is_error": True,
+                }
+
+        # ── Try local first ────────────────────────────────────────
         if self._local is not None:
             local_tool = self._local.get_tool(tool_name)
             if local_tool is not None:

@@ -1,0 +1,19 @@
+name: visual-interpreter-generator
+version: 0.1.0
+description: Multi-modal screenshot and wireframe analyzer, and dynamic UI mockup/image generator
+author: Kazma Team
+license: MIT
+
+tools:
+  analyze_local_image:
+    arabic_name: "تحليل الصور البصرية"
+    description: "Analyze a local screenshot, diagram, or chart and answer visual/structural questions."
+    category: "media"
+    prompt_chain:
+      - "حلل الصورة أو المخطط المرفق برؤية الذكاء الاصطناعي"
+  generate_ui_mockup:
+    arabic_name: "توليد تصاميم الواجهات"
+    description: "Generate a beautiful wireframe UI design or illustration based on text description prompts."
+    category: "media"
+    prompt_chain:
+      - "قم بتوليد تصميم واجهة مستخدم مبتكرة أو صورة معبرة"

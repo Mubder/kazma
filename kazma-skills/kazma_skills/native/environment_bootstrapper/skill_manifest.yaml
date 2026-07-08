@@ -1,0 +1,25 @@
+name: environment-bootstrapper
+version: 0.1.0
+description: Self-healing runtime checks, environment diagnostic profiling, and dynamic package installer (pip, npm)
+author: Kazma Team
+license: MIT
+
+tools:
+  install_python_packages:
+    arabic_name: "تثبيت حزم بايثون"
+    description: "Install Python packages safely inside the runtime virtual environment using uv or pip."
+    category: "system"
+    prompt_chain:
+      - "قم بتثبيت حزم بايثون اللازمة لتشغيل الكود"
+  install_npm_packages:
+    arabic_name: "تثبيت حزم npm"
+    description: "Install Node/npm packages inside the active workspace."
+    category: "system"
+    prompt_chain:
+      - "قم بتثبيت حزم npm البرمجية في مجلد المشروع"
+  check_environment:
+    arabic_name: "فحص البيئة البرمجية"
+    description: "Diagnose system binaries, active Python interpreter, PATH variables, and compile resources."
+    category: "system"
+    prompt_chain:
+      - "افحص بيئة النظام البرمجية وقدم تقريراً مفصلاً"

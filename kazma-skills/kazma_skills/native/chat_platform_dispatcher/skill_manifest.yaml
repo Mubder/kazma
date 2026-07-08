@@ -1,0 +1,26 @@
+name: chat-platform-dispatcher
+version: 0.1.0
+description: Multi-channel notifications and interactive human-in-the-loop action card dispatchers for Slack, Discord, and Telegram
+author: Kazma Team
+license: MIT
+
+tools:
+  dispatch_notification:
+    arabic_name: "إرسال تنبيه للمنصات"
+    description: "Send a notification message to a specific recipient or channel on Telegram, Discord, or Slack."
+    category: "communication"
+    prompt_chain:
+      - "أرسل إشعاراً أو تنبيهاً فورياً إلى القناة المحددة"
+  send_approval_request:
+    arabic_name: "إرسال طلب موافقة تفاعلي"
+    description: "Dispatch an interactive approval card with actions/buttons for human verification (HITL)."
+    category: "communication"
+    prompt_chain:
+      - "أرسل طلب موافقة تفاعلي للمستخدم وأعطه خيارات للموافقة أو الرفض"
+  send_message:
+    arabic_name: "إرسال رسالة"
+    description: "Send a text message to the current conversation thread. Use this to reply to the user. The platform and delivery channel are handled automatically."
+    category: "communication"
+    prompt_chain:
+      - "أرسل رسالة نصية إلى المستخدم أو القناة الحالية"
+

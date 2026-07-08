@@ -196,7 +196,10 @@ def register_direct_routes(self: Any) -> None:
     @self.app.get("/api/alerts/recent")
     async def _get_recent_alerts():
         from kazma_core.observability.alerts import AlertDispatcher
-        return AlertDispatcher.get_recent_alerts()
+        return [
+            a.to_dict() if hasattr(a, "to_dict") else a
+            for a in AlertDispatcher.get_recent_alerts()
+        ]
 
     @self.app.get("/api/system/memory/backups")
     async def _list_memory_backups():

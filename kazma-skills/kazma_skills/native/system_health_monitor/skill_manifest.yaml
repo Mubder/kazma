@@ -1,0 +1,25 @@
+name: system-health-monitor
+version: 0.1.0
+description: Host Resource Profiler, process inspector, and secure log streaming diagnostics for the parent server and gateway
+author: Kazma Team
+license: MIT
+
+tools:
+  get_system_stats:
+    arabic_name: "الحصول على إحصائيات النظام"
+    description: "Fetches CPU, RAM, and Disk space utilization metrics of the host system."
+    category: "diagnostics"
+    prompt_chain:
+      - "اعرض إحصائيات النظام الحالية مثل استهلاك المعالج والذاكرة ومساحة القرص"
+  list_active_processes:
+    arabic_name: "عرض العمليات النشطة"
+    description: "Lists active subprocesses spawned under the parent Kazma process."
+    category: "diagnostics"
+    prompt_chain:
+      - "افحص العمليات النشطة والعمليات الفرعية التابعة لنظام كاظمه"
+  read_system_logs:
+    arabic_name: "قراءة سجلات النظام"
+    description: "Safely streams recent lines of the Kazma gateway and server logs, with filters to mask API tokens and secrets."
+    category: "diagnostics"
+    prompt_chain:
+      - "اقرأ السطور الأخيرة من سجلات النظام مع حجب الرموز السرية ومفاتيح الربط"

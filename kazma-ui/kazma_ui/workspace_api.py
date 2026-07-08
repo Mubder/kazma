@@ -6,7 +6,6 @@ data.
 
 Endpoints:
   GET /api/workspace/files?path=<subdir>  — list files/dirs in workspace
-  GET /api/workspace/git                  — git status (best-effort)
   GET /api/workspace/recent               — recently modified files
 
 Security:

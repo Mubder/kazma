@@ -1744,19 +1744,23 @@
   }
 
   function loadPipelineExample() {
-    pipelineStages = [
-      { id: 1, worker: "ResearchWorker", hitl: false, timeout: 300 },
-      { id: 2, worker: "ReviewWorker", hitl: true, timeout: 300 },
-      { id: 3, worker: "SynthesizeWorker", hitl: false, timeout: 300 }
-    ];
-    
-    if (window.KAZMA_WORKERS && window.KAZMA_WORKERS.length) {
-      var availableNames = window.KAZMA_WORKERS.map(function(w) { return w.name; });
-      pipelineStages.forEach(function(stage, idx) {
-        if (availableNames.indexOf(stage.worker) === -1) {
-          stage.worker = availableNames[idx % availableNames.length];
-        }
-      });
+    function useFallback() {
+      pipelineStages = [
+        { id: 1, worker: "ResearchWorker", hitl: false, timeout: 300 },
+        { id: 2, worker: "ReviewWorker", hitl: true, timeout: 300 },
+        { id: 3, worker: "SynthesizeWorker", hitl: false, timeout: 300 }
+      ];
+      
+      if (window.KAZMA_WORKERS && window.KAZMA_WORKERS.length) {
+        var availableNames = window.KAZMA_WORKERS.map(function(w) { return w.name; });
+        pipelineStages.forEach(function(stage, idx) {
+          if (availableNames.indexOf(stage.worker) === -1) {
+            stage.worker = availableNames[idx % availableNames.length];
+          }
+        });
+      }
+      renderPipelineStages();
+      updatePipelineDiagram();
     }
 
     var promptEl = $('pipeline-prompt');
@@ -1764,8 +1768,98 @@
       promptEl.value = "Compile and analyze market reports, review for policy guidelines, and draft executive summary.";
     }
 
-    renderPipelineStages();
-    updatePipelineDiagram();
+    fetch('/api/pipelines/scaffold')
+      .then(function(res) {
+        if (!res.ok) throw new Error('Status ' + res.status);
+        return res.json();
+      })
+      .then(function(data) {
+        if (data && data.nodes && data.nodes.length) {
+          pipelineStages = data.nodes.map(function(node, idx) {
+            return {
+              id: node.id || (idx + 1),
+              worker: node.worker_name || "auto",
+              hitl: idx === 1,
+              timeout: 300
+            };
+          });
+          if (window.KAZMA_WORKERS && window.KAZMA_WORKERS.length) {
+            var availableNames = window.KAZMA_WORKERS.map(function(w) { return w.name; });
+            pipelineStages.forEach(function(stage, idx) {
+              if (stage.worker !== "auto" && availableNames.indexOf(stage.worker) === -1) {
+                stage.worker = availableNames[idx % availableNames.length];
+              }
+            });
+          }
+          renderPipelineStages();
+          updatePipelineDiagram();
+        } else {
+          useFallback();
+        }
+      })
+      .catch(function(err) {
+        console.warn("Failed to load pipeline scaffold, using static fallback:", err);
+        useFallback();
+      });
+  }
+
+  function validateCurrentPipeline() {
+    var panel = $('pipeline-validation-status');
+    if (!panel) return;
+
+    if (pipelineStages.length === 0) {
+      panel.style.display = 'none';
+      panel.innerHTML = '';
+      return;
+    }
+
+    var nodes = pipelineStages.map(function(stage, index) {
+      return {
+        id: "Step" + (index + 1),
+        worker_name: stage.worker || "auto",
+        task_description: "Step " + (index + 1) + " of pipeline sequence.",
+        dependencies: index > 0 ? ["Step" + index] : []
+      };
+    });
+
+    fetch('/api/pipelines/validate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ nodes: nodes })
+    })
+    .then(function(res) {
+      return res.json().then(function(data) {
+        return { ok: res.ok, data: data };
+      });
+    })
+    .then(function(result) {
+      var valid = result.ok && result.data && result.data.valid;
+      var errors = (result.data && result.data.errors) || [];
+      panel.style.display = 'block';
+      panel.innerHTML = 
+        '<div style="padding: 10px 14px; border-radius: var(--radius); border: 1px solid ' + (valid ? 'var(--success)' : 'var(--danger)') + '; background: ' + (valid ? 'var(--success-subtle)' : 'var(--danger-subtle)') + '; box-shadow: 0 0 12px ' + (valid ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)') + '; transition: all 0.3s ease;">' +
+          '<div style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.8rem; color: ' + (valid ? 'var(--success)' : 'var(--danger)') + ';">' +
+            '<span>' + (valid ? '✅ Pipeline Verified' : '❌ Validation Issues') + '</span>' +
+          '</div>' +
+          (errors.length > 0 ? 
+            '<ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">' +
+              errors.map(function(err) { return '<li>' + esc(err) + '</li>'; }).join('') +
+            '</ul>' : 
+            '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">Structure and worker definitions are verified.</div>'
+          ) +
+        '</div>';
+    })
+    .catch(function(err) {
+      console.warn("Validation request failed:", err);
+      panel.style.display = 'block';
+      panel.innerHTML = 
+        '<div style="padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--danger); background: var(--danger-subtle);">' +
+          '<div style="font-weight: 600; font-size: 0.8rem; color: var(--danger);">⚠️ Validation API Error</div>' +
+          '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">' + esc(err.message || err) + '</div>' +
+        '</div>';
+    });
   }
 
   function renderPipelineStages() {
@@ -1902,6 +1996,7 @@
 
       container.appendChild(card);
     });
+    validateCurrentPipeline();
   }
 
   function handleDragStart(e) {

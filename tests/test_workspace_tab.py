@@ -3,7 +3,7 @@
 Validates that:
   - GET /workspace returns 200 with workspace content (not a redirect)
   - GET /api/workspace/files returns a JSON file listing
-  - GET /api/workspace/git returns best-effort git status
+  - GET /api/git/status returns live git status
   - GET /api/workspace/recent returns recently modified files
   - Path traversal is blocked (cannot escape workspace root)
   - The workspace API router is registered in the app

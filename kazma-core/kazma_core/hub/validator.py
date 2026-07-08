@@ -108,7 +108,13 @@ class SkillValidator:
         try:
             with open(manifest_path) as f:
                 data = yaml.safe_load(f)
-        except Exception:
+        except (OSError, yaml.YAMLError) as exc:
+            logger.debug(
+                "[Validator] Failed to parse skill manifest at %s: %s",
+                manifest_path,
+                exc,
+                exc_info=True,
+            )
             return _ok()
 
         entry_point = data.get("entry_point") if isinstance(data, dict) else None
@@ -132,7 +138,13 @@ class SkillValidator:
         try:
             with open(manifest_path) as f:
                 data = yaml.safe_load(f)
-        except Exception:
+        except (OSError, yaml.YAMLError) as exc:
+            logger.debug(
+                "[Validator] Failed to parse skill manifest at %s: %s",
+                manifest_path,
+                exc,
+                exc_info=True,
+            )
             return _ok()
 
         permissions = data.get("permissions") if isinstance(data, dict) else None
@@ -157,7 +169,13 @@ class SkillValidator:
         try:
             with open(manifest_path) as f:
                 data = yaml.safe_load(f)
-        except Exception:
+        except (OSError, yaml.YAMLError) as exc:
+            logger.debug(
+                "[Validator] Failed to parse skill manifest at %s: %s",
+                manifest_path,
+                exc,
+                exc_info=True,
+            )
             return _ok()
 
         mcp_servers = data.get("mcp_servers") if isinstance(data, dict) else None
@@ -192,7 +210,13 @@ class SkillValidator:
         for py_file in py_files:
             try:
                 content = py_file.read_text(encoding="utf-8", errors="replace")
-            except Exception:
+            except OSError as read_err:
+                logger.debug(
+                    "[Validator] Failed to read python file %s for security scanning: %s",
+                    py_file,
+                    read_err,
+                    exc_info=True,
+                )
                 continue
 
             # eval(

@@ -93,8 +93,12 @@ class WorkspaceStore:
             except Exception as exc:
                 try:
                     conn.execute("ROLLBACK")
-                except Exception:
-                    pass
+                except sqlite3.Error as rollback_exc:
+                    logger.debug(
+                        "[WorkspaceStore] Failed to rollback transaction during workspace initialization: %s",
+                        rollback_exc,
+                        exc_info=True,
+                    )
                 logger.error("[WorkspaceStore] Failed to initialize Default Workspace: %s", exc)
                 raise exc
 

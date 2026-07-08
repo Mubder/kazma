@@ -251,8 +251,6 @@ async def supervisor_node(
                         await asyncio.sleep(wait_time)
                     else:
                         raise
-                except Exception:
-                    raise  # Non-retryable — re-raise immediately
             raise last_exc  # type: ignore[misc]
 
         response = await _call_llm_with_retry()
@@ -897,6 +895,7 @@ async def create_supervisor_app(
         logger.info("Personality loaded: %s (%s)", profile.name, profile.emoji)
     except Exception as exc:
         logger.warning("Personality loading failed, continuing without: %s", exc)
+        logger.debug("Personality loading failure details:", exc_info=True)
 
     # Normalize LLM config URLs
     if "base_url" in llm_cfg:
@@ -930,6 +929,7 @@ async def create_supervisor_app(
                 logger.info("MCP manager connected %d tools from %d servers", count, len(mcp_servers))
             except Exception as exc:
                 logger.warning("MCP manager failed to connect: %s", exc)
+                logger.debug("MCP manager connection failure details:", exc_info=True)
 
     # Wrap local + MCP into a unified executor
     from kazma_core.mcp.manager import UnifiedToolExecutor

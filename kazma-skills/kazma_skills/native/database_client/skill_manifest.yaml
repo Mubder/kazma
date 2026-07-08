@@ -1,0 +1,26 @@
+name: database-client
+version: 0.1.0
+description: Relational database manager with schema extraction and secured read-only SQLite/database query executions
+author: Kazma Team
+license: MIT
+
+tools:
+  inspect_db_schema:
+    arabic_name: "فحص مخطط قاعدة البيانات"
+    description: "Extract list of tables, column names, data types, primary/foreign keys, and indexes from SQLite databases."
+    category: "database"
+    prompt_chain:
+      - "افحص هيكل ومخطط قاعدة البيانات لعرض الجداول والحقول"
+  execute_db_query:
+    arabic_name: "تنفيذ استعلام قاعدة البيانات"
+    description: "Execute a read-only SQL SELECT query against a local SQLite database file."
+    category: "database"
+    prompt_chain:
+      - "قم بتنفيذ استعلام القراءة (SELECT) من قاعدة البيانات"
+  sqlite_query:
+    arabic_name: "استعلام إس كيو لايت"
+    description: "Execute a read-only SQL query against the local SQLite database. SELECT queries only. Returns rows as JSON."
+    category: "database"
+    prompt_chain:
+      - "قم بتنفيذ استعلام القراءة (SELECT) من قاعدة بيانات إس كيو لايت المحلية"
+

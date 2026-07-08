@@ -21,6 +21,7 @@ from typing import Any
 import aiosqlite
 from langchain_core.runnables import RunnableConfig
 from kazma_core.config_store import apply_sqlite_pragmas_async
+from kazma_core.tenant_context import get_current_tenant_id
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
     ChannelVersions,
@@ -59,6 +60,42 @@ class CheckpointManager(BaseCheckpointSaver):
         self._saver = saver
         self._locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
         self._max_locks = max_locks
+        self._tenant_savers: dict[str, AsyncSqliteSaver] = {}
+        self._saver_lock = asyncio.Lock()
+
+    async def _get_saver(self) -> AsyncSqliteSaver:
+        """Resolve the appropriate AsyncSqliteSaver for the current tenant.
+
+        If the tenant is "default" (or None), we use the default self._saver.
+        Otherwise, we dynamically load or create an AsyncSqliteSaver for
+        the tenant's own database checkpoints_{tenant_id}.db.
+        """
+        tenant_id = get_current_tenant_id() or "default"
+        if tenant_id == "default":
+            return self._saver
+
+        async with self._saver_lock:
+            if tenant_id not in self._tenant_savers:
+                db_path = Path("kazma-data") / f"checkpoints_{tenant_id}.db"
+                db_path.parent.mkdir(parents=True, exist_ok=True)
+                conn = await aiosqlite.connect(str(db_path))
+                await apply_sqlite_pragmas_async(conn)
+                
+                # Copy the serde from self._saver or use JsonPlusSerializer with custom settings
+                serde = getattr(self._saver, "serde", None)
+                if serde is None:
+                    serde = JsonPlusSerializer(
+                        allowed_msgpack_modules=list(SAFE_MSGPACK_TYPES) + [
+                            ("kazma_core.agent.state", "NodeName"),
+                        ]
+                    )
+                
+                saver = AsyncSqliteSaver(conn, serde=serde)
+                await saver.setup()
+                self._tenant_savers[tenant_id] = saver
+                logger.info("[Checkpoint] Dynamic CheckpointManager created for tenant %s at %s", tenant_id, db_path)
+            
+            return self._tenant_savers[tenant_id]
 
     def _get_lock(self, thread_id: str) -> asyncio.Lock:
         """Get or create a lock for a specific thread_id.
@@ -102,7 +139,8 @@ class CheckpointManager(BaseCheckpointSaver):
         lock = self._get_lock(thread_id)
 
         async with lock:
-            return await self._saver.aput(config, checkpoint, metadata, new_versions)
+            saver = await self._get_saver()
+            return await saver.aput(config, checkpoint, metadata, new_versions)
 
     async def aput_writes(
         self,
@@ -116,22 +154,26 @@ class CheckpointManager(BaseCheckpointSaver):
         lock = self._get_lock(thread_id)
 
         async with lock:
-            await self._saver.aput_writes(config, writes, task_id, task_path)
+            saver = await self._get_saver()
+            await saver.aput_writes(config, writes, task_id, task_path)
 
     async def aget(self, config: dict[str, Any]) -> Any:
         """Retrieve a checkpoint (read-only, no lock needed)."""
-        return await self._saver.aget(config)
+        saver = await self._get_saver()
+        return await saver.aget(config)
 
     async def aget_tuple(self, config: dict[str, Any]) -> Any:
         """Retrieve a checkpoint tuple."""
-        return await self._saver.aget_tuple(config)
+        saver = await self._get_saver()
+        return await saver.aget_tuple(config)
 
     async def adelete_thread(self, thread_id: str) -> None:
         """Delete all checkpoints for a thread."""
         lock = self._get_lock(thread_id)
         async with lock:
-            if hasattr(self._saver, "adelete_thread"):
-                await self._saver.adelete_thread(thread_id)
+            saver = await self._get_saver()
+            if hasattr(saver, "adelete_thread"):
+                await saver.adelete_thread(thread_id)
 
     async def setup(self) -> None:
         """Initialize the underlying saver."""
@@ -140,12 +182,23 @@ class CheckpointManager(BaseCheckpointSaver):
     @property
     def conn(self) -> Any:
         """Expose the underlying connection."""
-        return self._saver.conn if hasattr(self._saver, "conn") else None
+        tenant_id = get_current_tenant_id() or "default"
+        if tenant_id == "default":
+            return self._saver.conn if hasattr(self._saver, "conn") else None
+        saver = self._tenant_savers.get(tenant_id)
+        return saver.conn if saver and hasattr(saver, "conn") else None
 
     async def close(self) -> None:
         """Close the underlying database connection."""
         if hasattr(self._saver, "conn") and self._saver.conn:
             await self._saver.conn.close()
+        for saver in self._tenant_savers.values():
+            if hasattr(saver, "conn") and saver.conn:
+                try:
+                    await saver.conn.close()
+                except Exception:
+                    pass
+        self._tenant_savers.clear()
 
     async def list_checkpoints(self, limit: int = 50) -> list[dict[str, Any]]:
         """List checkpointed threads with their latest checkpoint metadata.
@@ -160,7 +213,8 @@ class CheckpointManager(BaseCheckpointSaver):
             List of dicts with keys: thread_id, checkpoint_id, created_at,
             message_count, context_tokens.
         """
-        conn = self.conn
+        saver = await self._get_saver()
+        conn = saver.conn if hasattr(saver, "conn") else None
         if conn is None:
             return []
         try:

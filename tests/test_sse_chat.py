@@ -159,7 +159,7 @@ class TestChatStreamEndpoint:
         body = resp.text
 
 
-class TestGraphHolderSupport:
+class TestGraphHolderSupport(TestChatStreamEndpoint):
     """Regression tests for mutable graph holder (C-3 fix: SSE must see post-startup checkpointed graph)."""
 
     def test_router_accepts_graph_holder(self):
@@ -179,8 +179,6 @@ class TestGraphHolderSupport:
         # creation with both; holder should win inside
         router = create_sse_chat_router(graph=initial, graph_holder=holder)
         assert router is not None
-        assert "event: error" in body
-        assert "budget exceeded" in body.lower()  # Budget exceeded message
 
     def test_session_listing_empty(self):
         app, _ = self._make_app()

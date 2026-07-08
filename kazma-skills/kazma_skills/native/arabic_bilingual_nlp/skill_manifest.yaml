@@ -1,0 +1,25 @@
+name: arabic-bilingual-nlp
+version: 0.1.0
+description: Bilingual processing, context-preserving translation, Hijri-Gregorian date converter, and Tashkeel/vocalisation injector
+author: Kazma Team
+license: MIT
+
+tools:
+  arabic_translate:
+    arabic_name: "الترجمة الثنائية اللغوية"
+    description: "Translate context-preserving between Arabic and English."
+    category: "nlp"
+    prompt_chain:
+      - "ترجم النص بدقة مع الحفاظ على المعنى الثقافي والسياق"
+  hijri_convert:
+    arabic_name: "تحويل التاريخ الهجري"
+    description: "Convert dates between Gregorian calendar (YYYY-MM-DD) and Hijri calendar."
+    category: "nlp"
+    prompt_chain:
+      - "حول التاريخ المحدد بين التقويمين الهجري والميلادي"
+  insert_diacritics:
+    arabic_name: "تشكيل النصوص العربية"
+    description: "Apply correct vowel diacritics (tashkeel/harakat) to Arabic text based on semantic grammar."
+    category: "nlp"
+    prompt_chain:
+      - "أضف حركات التشكيل (الضمة، الفتحة، الكسرة) إلى النص العربي المقروء"

@@ -1,0 +1,25 @@
+name: task-scheduler-cron
+version: 0.1.0
+description: Schedule and manage background recurring tasks and one-shot triggers
+author: Kazma Team
+license: MIT
+
+tools:
+  schedule_task:
+    arabic_name: "جدولة مهمة"
+    description: "Schedule a task to run autonomously at a future time. Timing: '5m', '1h', 'daily at 9am'."
+    category: "automation"
+    prompt_chain:
+      - "قم بجدولة مهمة للتشغيل الذاتي في المستقبل"
+  list_scheduled:
+    arabic_name: "عرض المهام المجدولة"
+    description: "List all scheduled background tasks and their current status."
+    category: "automation"
+    prompt_chain:
+      - "اعرض جميع المهام المجدولة النشطة"
+  cancel_scheduled:
+    arabic_name: "إلغاء مهمة جدولة"
+    description: "Cancel a scheduled background task using its job ID."
+    category: "automation"
+    prompt_chain:
+      - "قم بإلغاء المهمة المجدولة المحددة بالمعرف"

@@ -586,114 +586,7 @@ class LocalToolRegistry:
 
             return "\n".join(results) if results else f"No matches for '{pattern}' in {path}/{glob}"
 
-        @self.register(
-            description=(
-                "Execute a read-only SQL query against the local SQLite database. "
-                "SELECT queries only. Returns rows as JSON."
-            ),
-            category="database",
-        )
-        async def sqlite_query(
-            query: str,
-            db_path: str = "kazma-data/checkpoints.db",
-            params: list[Any] | None = None,
-            limit: int = 100,
-        ) -> str:
-            # Safety: only allow SELECT or WITH
-            def strip_leading_comments(sql: str) -> str:
-                while True:
-                    sql = sql.strip()
-                    if sql.startswith("--"):
-                        nl = sql.find("\n")
-                        if nl == -1:
-                            return ""
-                        sql = sql[nl:]
-                    elif sql.startswith("/*"):
-                        end = sql.find("*/")
-                        if end == -1:
-                            break
-                        sql = sql[end+2:]
-                    else:
-                        break
-                return sql.strip()
 
-            sql_clean = strip_leading_comments(query)
-            normalized = sql_clean.upper()
-            if not (normalized.startswith("SELECT") or normalized.startswith("WITH")):
-                return "Error: Only SELECT and WITH read-only queries are allowed for safety."
-            # Block multi-statement queries
-            if ";" in query.strip().rstrip(";"):
-                return "Error: Multi-statement queries are not allowed."
-
-            # Double-layer AST/word-boundary safety check
-            import re
-            forbidden_keywords = re.compile(
-                r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|RENAME|PRAGMA|ATTACH|DETACH|VACUUM)\b",
-                re.IGNORECASE,
-            )
-            if forbidden_keywords.search(query):
-                return "Error: Write operations or administrative commands are not allowed."
-
-            if db_path == ":memory:":
-                allowed = True
-                path_exists = True
-                conn_target = ":memory:"
-            else:
-                path = Path(db_path).expanduser().resolve()
-                path_str = str(path).lower()
-                
-                # Security: restrict to known Kazma data directories + active workspace
-                from kazma_core.tools.file_write import _get_workspace
-                workspace = _get_workspace()
-                _ALLOWED_DB_ROOTS = [
-                    Path("kazma-data").resolve(),
-                    Path.home() / ".kazma",
-                    Path("/tmp").resolve(),  # for tests
-                    workspace.resolve(),
-                ]
-                allowed = any(
-                    path_str.startswith(str(root).lower()) or path == root
-                    for root in _ALLOWED_DB_ROOTS
-                )
-                path_exists = path.exists()
-                conn_target = str(path)
-
-            if not allowed:
-                return (
-                    f"Error: Access denied. Database path must be under "
-                    f"kazma-data/, ~/.kazma/, or the active workspace. Got: {db_path}"
-                )
-
-            if not path_exists:
-                return f"Error: Database not found: {db_path}"
-
-            try:
-                conn = sqlite3.connect(conn_target)
-                conn.row_factory = sqlite3.Row
-                
-                # Set database-level read-only authorizer
-                def authorizer_callback(action, arg1, arg2, dbname, trigger_name):
-                    allowed_actions = {
-                        sqlite3.SQLITE_SELECT,
-                        sqlite3.SQLITE_READ,
-                    }
-                    if action in allowed_actions:
-                        return sqlite3.SQLITE_OK
-                    return sqlite3.SQLITE_DENY
-                
-                conn.set_authorizer(authorizer_callback)
-                
-                cursor = conn.execute(query, params or [])
-                rows = cursor.fetchmany(limit)
-                conn.close()
-
-                if not rows:
-                    return "[]"
-
-                result = [dict(row) for row in rows]
-                return json.dumps(result, ensure_ascii=False, indent=2)
-            except Exception as exc:
-                return "SQL Error: Query execution failed. Check syntax and permissions."
 
         @self.register(
             description=(
@@ -838,23 +731,7 @@ class LocalToolRegistry:
             except Exception as exc:
                 return "Error: Shell command execution failed."
 
-        # ── Generic send_message tool ─────────────────────────────
-        @self.register(
-            description=(
-                "Send a text message to the current conversation thread. "
-                "Use this to reply to the user. The platform and delivery "
-                "channel are handled automatically."
-            ),
-            category="communication",
-        )
-        async def send_message(
-            target_id: str,
-            text: str,
-            backend: str = "telegram",
-        ) -> str:
-            from kazma_core.tools.send_message import send_message as _send
 
-            return await _send(target_id=target_id, text=text, backend=backend)
 
         # ── Sub-agent spawning tools ─────────────────────────────
         @self.register(
@@ -919,58 +796,7 @@ class LocalToolRegistry:
                 indent=2,
             )
 
-        # ── Cron scheduling tools ─────────────────────────────────
-        @self.register(
-            description=(
-                "Schedule a task to run at a future time. The task runs autonomously "
-                "without you needing to be present. Results are delivered to this conversation.\n\n"
-                "Timing: '5m' (5 minutes), '1h' (1 hour), 'daily at 9am', '2026-06-25T09:00:00'"
-            ),
-            category="automation",
-        )
-        async def schedule_task(timing: str, prompt: str) -> str:
-            import json as _json
 
-            from kazma_core.cron.scheduler import get_cron_scheduler
-
-            scheduler = get_cron_scheduler()
-            if scheduler is None:
-                return "Error: Cron scheduler not initialized."
-
-            result = await scheduler.schedule(timing=timing, prompt=prompt)
-            return _json.dumps(result, ensure_ascii=False, indent=2)
-
-        @self.register(
-            description="List all scheduled tasks and their status.",
-            category="automation",
-        )
-        async def list_scheduled() -> str:
-            import json as _json
-
-            from kazma_core.cron.scheduler import get_cron_scheduler
-
-            scheduler = get_cron_scheduler()
-            if scheduler is None:
-                return "Error: Cron scheduler not initialized."
-
-            jobs = await scheduler.list_jobs()
-            return _json.dumps(jobs, ensure_ascii=False, indent=2)
-
-        @self.register(
-            description="Cancel a scheduled task by job ID.",
-            category="automation",
-        )
-        async def cancel_scheduled(job_id: str) -> str:
-            import json as _json
-
-            from kazma_core.cron.scheduler import get_cron_scheduler
-
-            scheduler = get_cron_scheduler()
-            if scheduler is None:
-                return "Error: Cron scheduler not initialized."
-
-            result = await scheduler.cancel(job_id)
-            return _json.dumps(result, ensure_ascii=False, indent=2)
 
         # ── Code execution tool ───────────────────────────────────
         @self.register(
@@ -1044,6 +870,14 @@ class LocalToolRegistry:
                 category="utility")
         except ImportError:
             logger.debug("export_session not available")
+
+        # Load and register Top 10 Native Skills
+        try:
+            from kazma_skills.native_loader import NativeSkillLoader
+            loader = NativeSkillLoader(self)
+            loader.register_all()
+        except Exception as e:
+            logger.error("Failed to load native skills: %s", e, exc_info=True)
 
         logger.info("Registered %d built-in tools", len(self._tools))
 

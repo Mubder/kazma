@@ -1,0 +1,25 @@
+name: advanced-web-crawler
+version: 0.1.0
+description: Crawl websites, search DuckDuckGo, and parse local PDFs, CSVs, and Excel files
+author: Kazma Team
+license: MIT
+
+tools:
+  web_search_duckduckgo:
+    arabic_name: "بحث الويب المتقدم"
+    description: "Search DuckDuckGo or Bing fallback and return markdown results."
+    category: "web"
+    prompt_chain:
+      - "ابحث في الويب عن معلومات حديثة ودقيقة"
+  crawl_page:
+    arabic_name: "زحف لصفحة ويب"
+    description: "Fetch and extract clean markdown content from a public URL."
+    category: "web"
+    prompt_chain:
+      - "اقرأ محتويات الصفحة الإلكترونية واستخرج النص الصافي"
+  parse_document:
+    arabic_name: "تحليل المستندات المحلية"
+    description: "Parse structured text from local files including CSV, JSON, XLS, or PDF."
+    category: "filesystem"
+    prompt_chain:
+      - "اقرأ وحلل المستند المحلي واستخرج بياناته بشكل منظم"

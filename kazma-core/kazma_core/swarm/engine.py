@@ -137,8 +137,12 @@ class SwarmEngine:
                         status="DEGRADED",
                         message=f"AutoScaler initialization failed: {exc}"
                     ))
-                except Exception:
-                    pass
+                except Exception as alert_exc:
+                    logger.debug(
+                        "[SwarmEngine] Failed to dispatch degraded alert for AutoScaler: %s",
+                        alert_exc,
+                        exc_info=True,
+                    )
         return self._autoscaler
 
     def _build_workers(self) -> None:
@@ -223,8 +227,12 @@ class SwarmEngine:
         try:
             if hasattr(self, "_phonebook") and self._phonebook:
                 return list(self._phonebook._entries.values())  # internal but stable for now
-        except Exception:
-            pass
+        except AttributeError as attr_exc:
+            logger.debug(
+                "[SwarmEngine] Phonebook attribute lookup failed: %s",
+                attr_exc,
+                exc_info=True,
+            )
         return list(getattr(self, "_workers", {}).values())
 
     def set_sse_bus(self, bus: Any) -> None:
@@ -241,8 +249,14 @@ class SwarmEngine:
             return
         try:
             self._sse_bus.emit(task_id, event, data)
-        except Exception:
-            logger.debug("[SwarmEngine] SSE emit failed for %s:%s", task_id, event)
+        except Exception as sse_exc:
+            logger.debug(
+                "[SwarmEngine] SSE emit failed for %s:%s: %s",
+                task_id,
+                event,
+                sse_exc,
+                exc_info=True,
+            )
 
     def list_tasks(self, task_type: TaskType | str | None = None) -> list[SwarmTask]:
         """Return completed task snapshots, optionally filtered by task type."""
