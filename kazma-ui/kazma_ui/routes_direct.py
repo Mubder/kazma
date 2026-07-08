@@ -558,6 +558,15 @@ def register_direct_routes(self: Any) -> None:
     except Exception as _exc:
         logger.warning("[routes_direct] Git router failed to mount: %s", _exc)
 
+    # ── Live GitHub integration ────────────────────────────────────────
+    try:
+        from kazma_gateway.routers.github import create_github_router
+
+        self.app.include_router(create_github_router())
+        logger.info("[routes_direct] GitHub router mounted at /api/github")
+    except Exception as _exc:
+        logger.warning("[routes_direct] GitHub router failed to mount: %s", _exc)
+
     # ── Bookmarks CRUD ─────────────────────────────────────────────────
     try:
         from kazma_gateway.routers.bookmarks import create_bookmarks_router

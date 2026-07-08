@@ -35,8 +35,18 @@
     </div>
   </div>
 
+  <!-- ── Custom Styles ── -->
+  <style>
+    @keyframes pulse {
+      0% { opacity: 0.4; }
+      50% { opacity: 1; }
+      100% { opacity: 0.4; }
+    }
+    [x-cloak] { display: none !important; }
+  </style>
+
   <!-- ── Create Workspace Modal ── -->
-  <div x-show="showCreateModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition>
+  <div x-show="showCreateModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
     <div class="card" style="width:480px;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;">➕ Create New Project Workspace</h3>
@@ -58,6 +68,54 @@
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
         <button class="btn btn-secondary" @click="showCreateModal = false">Cancel</button>
         <button class="btn btn-primary" @click="createWorkspace()" :disabled="!newWorkspaceName.trim() || !newWorkspacePath.trim()">Create & Switch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Select Folder Modal ── -->
+  <div x-show="showFolderModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
+    <div class="card" style="width:480px;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;">📂 Open Local Folder as Workspace</h3>
+        <button class="btn-icon" @click="showFolderModal = false" style="font-size:1rem;">✕</button>
+      </div>
+      
+      <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
+        <div>
+          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Absolute Folder Path</label>
+          <input type="text" class="form-input" placeholder="e.g., C:/Projects/my-app" x-model="selectedFolderPath" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;">
+          <p style="margin:4px 0 0 0;font-size:0.75rem;color:var(--text-muted);">This folder will be opened and registered as a new workspace environment in Kazma.</p>
+        </div>
+      </div>
+      
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
+        <button class="btn btn-secondary" @click="showFolderModal = false">Cancel</button>
+        <button class="btn btn-primary" @click="selectFolder()" :disabled="!selectedFolderPath.trim()">Open Folder</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GitHub Token Config Modal ── -->
+  <div x-show="showPatModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
+    <div class="card" style="width:480px;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🔑 Configure GitHub Token</h3>
+        <button class="btn-icon" @click="showPatModal = false" style="font-size:1rem;">✕</button>
+      </div>
+      
+      <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
+        <div>
+          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Personal Access Token (PAT)</label>
+          <input type="password" class="form-input" placeholder="ghp_..." x-model="githubPat" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;letter-spacing:0.1em;">
+          <p style="margin:6px 0 0 0;font-size:0.75rem;color:var(--text-muted);line-height:1.4;">
+            Providing a PAT raises API rate limits (unauthenticated limits are 60/hr) and enables secure access to private repository metadata. The token is saved in your local SQLite settings and synced directly to your <code>.env</code> file.
+          </p>
+        </div>
+      </div>
+      
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
+        <button class="btn btn-secondary" @click="showPatModal = false">Cancel</button>
+        <button class="btn btn-primary" @click="saveGitHubToken()" :disabled="!githubPat.trim()">Save & Verify</button>
       </div>
     </div>
   </div>
@@ -88,10 +146,23 @@
   <!-- ── Main Grid ── -->
   <div class="workspace-grid">
     <!-- File Browser -->
-    <div class="card" style="padding:0;overflow:hidden;">
-      <div class="card-header">
-        <h3>📁 Project Files</h3>
-        <span style="font-size:0.75rem;color:var(--text-muted);" x-text="currentPath"></span>
+    <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
+      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:12px 16px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:1.1rem;">📁</span>
+          <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">Project Files</h3>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <code style="font-family:var(--font-mono);font-size:0.75rem;background:var(--bg-elevated);padding:3px 8px;border-radius:var(--radius-sm);color:var(--text-secondary);border:1px solid var(--border-subtle);" x-text="absoluteRoot || 'Loading...'"></code>
+          <button class="btn btn-xs btn-secondary" @click="triggerSelectFolder()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+            <span>📂</span> Select Folder
+          </button>
+        </div>
+      </div>
+      
+      <div style="background:var(--bg-elevated);padding:8px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:6px;font-size:0.8rem;color:var(--text-secondary);">
+        <span style="font-weight:600;">Location:</span>
+        <code style="font-family:var(--font-mono);color:var(--accent);" x-text="currentPath"></code>
       </div>
       <div class="file-list" style="max-height:400px;overflow-y:auto;">
         <div x-show="currentPath && currentPath !== '/'" @click="goUp()"
@@ -202,6 +273,156 @@
       </div>
     </div>
 
+    <!-- GitHub Integration -->
+    <div class="card" style="padding:0;overflow:hidden;background:linear-gradient(135deg, var(--bg-surface) 0%, rgba(110, 84, 251, 0.03) 100%);border:1px solid var(--border-subtle);position:relative;">
+      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:12px 16px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <svg class="github-icon" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" style="color:var(--text-primary);display:block;">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+          </svg>
+          <h3 style="margin:0;font-size:1rem;font-weight:600;letter-spacing:-0.01em;">GitHub Telemetry</h3>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <!-- Status indicator badge -->
+          <template x-if="ghIsGitHub && ghHasToken && ghTokenValid">
+            <span class="badge" style="background:rgba(16, 185, 129, 0.1);color:#10b981;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(16, 185, 129, 0.2);display:inline-flex;align-items:center;gap:4px;">
+              <span style="display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;box-shadow:0 0 8px #10b981;animation:pulse 2s infinite;"></span>
+              Connected
+            </span>
+          </template>
+          <template x-if="ghIsGitHub && (!ghHasToken || !ghTokenValid)">
+            <span class="badge" style="background:rgba(245, 158, 11, 0.1);color:#f59e0b;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(245, 158, 11, 0.2);display:inline-flex;align-items:center;gap:4px;">
+              <span style="display:inline-block;width:6px;height:6px;background:#f59e0b;border-radius:50%;"></span>
+              Token Missing
+            </span>
+          </template>
+          <template x-if="ghRateLimited">
+            <span class="badge" style="background:rgba(239, 68, 68, 0.1);color:#ef4444;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(239, 68, 68, 0.2);display:inline-flex;align-items:center;gap:4px;">
+              Rate Limited
+            </span>
+          </template>
+          <button class="btn btn-xs btn-secondary" @click="showPatModal = true" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+            🔑 Set Token
+          </button>
+        </div>
+      </div>
+
+      <!-- Main GitHub Card Body -->
+      <div style="padding:16px;background:var(--bg-surface);" x-show="ghIsGitHub" x-cloak>
+        <!-- Repository Info Banner -->
+        <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:16px;">
+          <div>
+            <a :href="ghHtmlUrl" target="_blank" style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:6px;transition:opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+              <span x-text="ghOwner + '/' + ghRepo"></span>
+              <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
+              </svg>
+            </a>
+            <p style="margin:4px 0 0 0;font-size:0.8rem;color:var(--text-secondary);line-height:1.4;" x-text="ghDescription || 'No repository description set.'"></p>
+          </div>
+          <span class="badge" :style="{ background: ghPrivate ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)', color: ghPrivate ? '#ef4444' : '#10b981', borderColor: ghPrivate ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)' }" style="font-size:0.7rem;font-weight:600;padding:2px 6px;border-radius:4px;border:1px solid;text-transform:uppercase;" x-text="ghPrivate ? 'Private' : 'Public'"></span>
+        </div>
+
+        <!-- Telemetry Stats Grid -->
+        <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;margin-bottom:20px;">
+          <!-- Stars -->
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
+            <div style="font-size:1.2rem;margin-bottom:4px;">⭐</div>
+            <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;color:var(--text-primary);" x-text="ghStars">0</div>
+            <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:2px;">Stars</div>
+          </div>
+          <!-- Forks -->
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
+            <div style="font-size:1.2rem;margin-bottom:4px;">🍴</div>
+            <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;color:var(--text-primary);" x-text="ghForks">0</div>
+            <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:2px;">Forks</div>
+          </div>
+          <!-- Open Issues -->
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
+            <div style="font-size:1.2rem;margin-bottom:4px;">🐛</div>
+            <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenIssues">0</div>
+            <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:2px;">Issues</div>
+          </div>
+          <!-- Pull Requests -->
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
+            <div style="font-size:1.2rem;margin-bottom:4px;">📈</div>
+            <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenPrs">0</div>
+            <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:2px;">PRs</div>
+          </div>
+        </div>
+
+        <!-- GitHub Action / CI/CD Live Workflows -->
+        <div style="border-top:1px solid var(--border-subtle);padding-top:16px;">
+          <h4 style="margin:0 0 10px 0;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;display:flex;align-items:center;gap:6px;">
+            <span>🤖</span> GitHub Actions — Workflow Automation
+          </h4>
+          
+          <template x-if="ghLatestWorkflow">
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <span style="font-weight:600;font-size:0.85rem;color:var(--text-primary);" x-text="ghLatestWorkflow.name"></span>
+                  <code style="font-family:var(--font-mono);font-size:0.7rem;background:var(--bg-deep);padding:2px 6px;border-radius:var(--radius-xs);color:var(--accent);" x-text="ghLatestWorkflow.branch"></code>
+                </div>
+                <div style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+                  <span x-text="'Triggered by ' + ghLatestWorkflow.event"></span>
+                  <span>•</span>
+                  <span x-text="'ID: ' + ghLatestWorkflow.id"></span>
+                </div>
+              </div>
+              
+              <div style="display:flex;align-items:center;gap:12px;">
+                <!-- Run status badge -->
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <!-- Success -->
+                  <template x-if="ghLatestWorkflow.conclusion === 'success'">
+                    <span style="background:rgba(16,185,129,0.1);color:#10b981;font-size:0.75rem;font-weight:600;padding:4px 10px;border-radius:4px;border:1px solid rgba(16,185,129,0.2);display:inline-flex;align-items:center;gap:6px;">
+                      <span style="color:#10b981;font-size:0.9rem;">✓</span> Passed
+                    </span>
+                  </template>
+                  <!-- Failure -->
+                  <template x-if="ghLatestWorkflow.conclusion === 'failure' || ghLatestWorkflow.conclusion === 'cancelled'">
+                    <span style="background:rgba(239,68,68,0.1);color:#ef4444;font-size:0.75rem;font-weight:600;padding:4px 10px;border-radius:4px;border:1px solid rgba(239,68,68,0.2);display:inline-flex;align-items:center;gap:6px;">
+                      <span style="color:#ef4444;font-size:0.9rem;">✕</span> Failed
+                    </span>
+                  </template>
+                  <!-- In progress -->
+                  <template x-if="ghLatestWorkflow.status === 'in_progress' || ghLatestWorkflow.status === 'queued' || !ghLatestWorkflow.conclusion">
+                    <span style="background:rgba(59,130,246,0.1);color:#3b82f6;font-size:0.75rem;font-weight:600;padding:4px 10px;border-radius:4px;border:1px solid rgba(59,130,246,0.2);display:inline-flex;align-items:center;gap:6px;">
+                      <span style="display:inline-block;width:6px;height:6px;background:#3b82f6;border-radius:50%;box-shadow:0 0 6px #3b82f6;animation:pulse 1.5s infinite;"></span> Running
+                    </span>
+                  </template>
+                </div>
+                
+                <!-- Action link -->
+                <a :href="ghLatestWorkflow.html_url" target="_blank" class="btn btn-xs btn-primary" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;text-decoration:none;">
+                  View Run
+                </a>
+              </div>
+            </div>
+          </template>
+          
+          <template x-if="!ghLatestWorkflow">
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:16px;text-align:center;color:var(--text-muted);font-size:0.8rem;">
+              No workflow runs detected for this repository.
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- No GitHub repository configuration detected -->
+      <div x-show="!ghIsGitHub && !loading" style="padding:48px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
+        <div style="font-size:2rem;margin-bottom:12px;">☁️</div>
+        <h4 style="margin:0 0 6px 0;font-size:0.95rem;font-weight:600;color:var(--text-primary);">GitHub Integration Offline</h4>
+        <p style="font-size:0.8rem;max-width:320px;margin:0 auto 16px auto;line-height:1.4;" x-text="ghError || 'No remote GitHub repository has been configured for this active workspace directory.'"></p>
+        <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
+          <button class="btn btn-xs btn-secondary" @click="showPatModal = true">
+            🔑 Configure PAT Token
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Recent Files -->
     <div class="card" style="padding:0;overflow:hidden;">
       <div class="card-header">
@@ -268,59 +489,168 @@
 <script>
 function workspaceApp() {
   return {
+    // Workspaces
+    workspaces: [],
+    activeWorkspaceId: '',
+    showCreateModal: false,
+    newWorkspaceName: '',
+    newWorkspacePath: '',
+    absoluteRoot: '',
+    showFolderModal: false,
+    selectedFolderPath: '',
+
+    // Files
     files: [],
     currentPath: '/',
     parentPath: '',
     loading: true,
+
+    // Git Status
     gitIsGit: false,
     gitBranch: '—',
     gitDirty: false,
     gitStaged: [],
     gitModified: [],
     gitUntracked: [],
+
+    // Bookmarks
     recentFiles: [],
     bookmarks: [],
+
+    // Terminal
     showTerminal: false,
     termCommand: '',
     termOutput: [],
 
-    init() {
-      this.refreshAll();
-      this.loadBookmarks();
-      // Poll Git status every 10 seconds to keep UI alive and fresh
+    // GitHub Integration
+    ghIsGitHub: false,
+    ghOwner: '—',
+    ghRepo: '—',
+    ghHasToken: false,
+    ghTokenValid: true,
+    ghPrivate: false,
+    ghStars: 0,
+    ghForks: 0,
+    ghOpenIssues: 0,
+    ghOpenPrs: 0,
+    ghDescription: '',
+    ghHtmlUrl: '',
+    ghLatestWorkflow: null,
+    ghRateLimited: false,
+    ghError: '',
+    showPatModal: false,
+    githubPat: '',
+
+    async init() {
+      await this.loadWorkspaces();
+      await this.refreshAll();
+      await this.loadBookmarks();
+      
+      // Poll Git & GitHub status every 10 seconds to keep UI live and fresh
       setInterval(() => {
         this.loadGitStatus();
+        this.loadGitHubStatus();
       }, 10000);
     },
 
-    async loadBookmarks() {
+    async loadWorkspaces() {
       try {
-        var resp = await fetch('/api/bookmarks');
+        const resp = await fetch('/api/workspaces');
         if (resp.ok) {
-          var data = await resp.json();
-          // API returns {id, name, type, target}; map to UI shape {id, path, label}
-          this.bookmarks = (data.bookmarks || []).map(function(bm) {
-            return { id: bm.id, path: bm.target, label: bm.name };
-          });
+          const data = await resp.json();
+          this.workspaces = data.workspaces || [];
+          this.activeWorkspaceId = data.active_workspace_id || '';
         }
-      } catch(e) {
-        this.bookmarks = [];
+      } catch (e) {
+        console.error('[workspaceApp] loadWorkspaces failed:', e);
       }
     },
 
-    fileIcon(name) {
-      if (!name) return '📄';
-      var ext = name.split('.').pop().toLowerCase();
-      var icons = {
-        py: '🐍', js: '🟨', ts: '🔷', tsx: '⚛️', jsx: '⚛️',
-        html: '🌐', css: '🎨', json: '📋', yaml: '⚙️', yml: '⚙️',
-        md: '📝', txt: '📄', log: '📋', csv: '📊',
-        toml: '⚙️', ini: '⚙️', cfg: '⚙️', env: '🔒',
-        sh: '💻', bash: '💻', zsh: '💻',
-        gitignore: '🙈', lock: '🔒', dockerfile: '🐳',
-        png: '🖼', jpg: '🖼', svg: '🎯', ico: '🎯',
-      };
-      return icons[ext] || '📄';
+    async switchWorkspace(id) {
+      if (!id) return;
+      try {
+        const resp = await fetch('/api/workspaces/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspace_id: id })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          this.activeWorkspaceId = id;
+          if (data.active_workspace) {
+            this.absoluteRoot = data.active_workspace.root_path;
+          }
+          KazmaStream.toast('Switched workspace successfully', 'success', 2000);
+          await this.refreshAll();
+        } else {
+          KazmaStream.toast('Failed to switch workspace', 'error', 3000);
+        }
+      } catch (e) {
+        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+      }
+    },
+
+    async createWorkspace() {
+      const name = this.newWorkspaceName.trim();
+      const path = this.newWorkspacePath.trim();
+      if (!name || !path) return;
+
+      try {
+        const resp = await fetch('/api/workspaces/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, path })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          const ws = data.workspace;
+          KazmaStream.toast('Workspace created: ' + ws.name, 'success', 2000);
+          this.showCreateModal = false;
+          this.newWorkspaceName = '';
+          this.newWorkspacePath = '';
+          await this.switchWorkspace(ws.id);
+        } else {
+          const err = await resp.json();
+          KazmaStream.toast('Error: ' + (err.detail || 'Failed to create workspace'), 'error', 3000);
+        }
+      } catch (e) {
+        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+      }
+    },
+
+    triggerSelectFolder() {
+      this.selectedFolderPath = this.absoluteRoot || '';
+      this.showFolderModal = true;
+    },
+
+    async selectFolder() {
+      const rawPath = this.selectedFolderPath.trim();
+      if (!rawPath) return;
+
+      // Extract folder name from path
+      const parts = rawPath.replace(/\\/g, '/').split('/');
+      const folderName = parts.pop() || parts.pop() || 'Selected Folder';
+
+      try {
+        const resp = await fetch('/api/workspaces/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: folderName, path: rawPath })
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          const ws = data.workspace;
+          KazmaStream.toast('Folder registered: ' + ws.name, 'success', 2000);
+          this.showFolderModal = false;
+          this.selectedFolderPath = '';
+          await this.switchWorkspace(ws.id);
+        } else {
+          const err = await resp.json();
+          KazmaStream.toast('Error: ' + (err.detail || 'Failed to register folder'), 'error', 3000);
+        }
+      } catch (e) {
+        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+      }
     },
 
     async refreshAll() {
@@ -328,6 +658,7 @@ function workspaceApp() {
       await Promise.all([
         this.loadFiles(),
         this.loadGitStatus(),
+        this.loadGitHubStatus(),
         this.loadRecentFiles()
       ]);
       this.loading = false;
@@ -336,16 +667,19 @@ function workspaceApp() {
     async loadFiles(path) {
       path = path || '';
       try {
-        var resp = await fetch('/api/workspace/files?path=' + encodeURIComponent(path));
+        const resp = await fetch('/api/workspace/files?path=' + encodeURIComponent(path));
         if (resp.ok) {
-          var data = await resp.json();
+          const data = await resp.json();
           this.files = data.files || [];
           this.currentPath = path || '/';
           this.parentPath = data.parent || '';
+          if (data.root) {
+            this.absoluteRoot = data.root;
+          }
         } else {
           this.files = fallbackFiles();
         }
-      } catch(e) {
+      } catch (e) {
         this.files = fallbackFiles();
       }
     },
@@ -375,9 +709,9 @@ function workspaceApp() {
 
     async loadGitStatus() {
       try {
-        var resp = await fetch('/api/git/status');
+        const resp = await fetch('/api/git/status');
         if (resp.ok) {
-          var data = await resp.json();
+          const data = await resp.json();
           this.gitIsGit = data.is_git || false;
           this.gitBranch = data.branch || 'main';
           this.gitDirty = data.dirty || false;
@@ -387,7 +721,7 @@ function workspaceApp() {
         } else {
           this.gitIsGit = false;
         }
-      } catch(e) {
+      } catch (e) {
         this.gitIsGit = false;
         this.gitBranch = '—';
         this.gitDirty = false;
@@ -397,16 +731,88 @@ function workspaceApp() {
       }
     },
 
-    async loadRecentFiles() {
+    async loadGitHubStatus() {
       try {
-        var resp = await fetch('/api/workspace/recent');
+        const resp = await fetch('/api/github/status');
         if (resp.ok) {
-          var data = await resp.json();
-          this.recentFiles = data.files || [];
+          const data = await resp.json();
+          this.ghIsGitHub = data.is_github || false;
+          this.ghOwner = data.owner || '—';
+          this.ghRepo = data.repo || '—';
+          this.ghHasToken = data.has_token || false;
+          this.ghTokenValid = (data.token_valid !== false);
+          this.ghPrivate = data.private || false;
+          this.ghStars = data.stars || 0;
+          this.ghForks = data.forks || 0;
+          this.ghOpenIssues = data.open_issues || 0;
+          this.ghOpenPrs = data.open_prs || 0;
+          this.ghDescription = data.description || '';
+          this.ghHtmlUrl = data.html_url || '';
+          this.ghLatestWorkflow = data.latest_workflow || null;
+          this.ghRateLimited = data.rate_limited || false;
+          this.ghError = data.error || '';
+        } else {
+          this.ghIsGitHub = false;
+          this.ghError = 'Failed to load GitHub integration status.';
+        }
+      } catch (e) {
+        this.ghIsGitHub = false;
+        this.ghError = 'Connection error: ' + e.message;
+      }
+    },
+
+    async saveGitHubToken() {
+      const token = this.githubPat.trim();
+      if (!token) return;
+
+      try {
+        const resp = await fetch('/api/github/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: token })
+        });
+        if (resp.ok) {
+          KazmaStream.toast('GitHub Personal Access Token saved and synced.', 'success', 2500);
+          this.showPatModal = false;
+          this.githubPat = '';
+          await this.loadGitHubStatus();
+        } else {
+          const err = await resp.json();
+          KazmaStream.toast('Error saving token: ' + (err.detail || 'Request failed'), 'error', 3000);
+        }
+      } catch (e) {
+        KazmaStream.toast('Error saving token: ' + e.message, 'error', 3000);
+      }
+    },
+
+    async loadBookmarks() {
+      try {
+        const resp = await fetch('/api/bookmarks');
+        if (resp.ok) {
+          const data = await resp.json();
+          // API returns {id, name, type, target}; map to UI shape {id, path, label}
+          this.bookmarks = (data.bookmarks || []).map(function(bm) {
+            return { id: bm.id, path: bm.target, label: bm.name };
+          });
         }
       } catch(e) {
-        this.recentFiles = [];
+        this.bookmarks = [];
       }
+    },
+
+    fileIcon(name) {
+      if (!name) return '📄';
+      const ext = name.split('.').pop().toLowerCase();
+      const icons = {
+        py: '🐍', js: '🟨', ts: '🔷', tsx: '⚛️', jsx: '⚛️',
+        html: '🌐', css: '🎨', json: '📋', yaml: '⚙️', yml: '⚙️',
+        md: '📝', txt: '📄', log: '📋', csv: '📊',
+        toml: '⚙️', ini: '⚙️', cfg: '⚙️', env: '🔒',
+        sh: '💻', bash: '💻', zsh: '💻',
+        gitignore: '🙈', lock: '🔒', dockerfile: '🐳',
+        png: '🖼', jpg: '🖼', svg: '🎯', ico: '🎯',
+      };
+      return icons[ext] || '📄';
     },
 
     runTests() {
@@ -419,7 +825,7 @@ function workspaceApp() {
         body: JSON.stringify({ command: 'pytest tests/ -q --tb=line' })
       }).then(function(r) { return r.json(); })
         .then(function(data) {
-          var lines = (data.output || '').split('\n');
+          const lines = (data.output || '').split('\n');
           lines.forEach(function(l) { this.termOutput.push(l); }.bind(this));
         }.bind(this))
         .catch(function(e) {
@@ -446,7 +852,7 @@ function workspaceApp() {
     },
 
     runTermCommand() {
-      var cmd = this.termCommand.trim();
+      const cmd = this.termCommand.trim();
       if (!cmd) return;
       this.termOutput.push('$ ' + cmd);
       this.termCommand = '';
@@ -457,7 +863,7 @@ function workspaceApp() {
         body: JSON.stringify({ command: cmd })
       }).then(function(r) { return r.json(); })
         .then(function(data) {
-          var lines = (data.output || '').split('\n');
+          const lines = (data.output || '').split('\n');
           lines.forEach(function(l) { this.termOutput.push(l); }.bind(this));
         }.bind(this))
         .catch(function(e) {
@@ -466,12 +872,12 @@ function workspaceApp() {
     },
 
     async addBookmark() {
-      var path = prompt('Enter file or URL to bookmark:');
+      const path = prompt('Enter file or URL to bookmark:');
       if (!path) return;
-      var name = path.split('/').pop() || path;
-      var type = path.startsWith('http') ? 'url' : 'file';
+      const name = path.split('/').pop() || path;
+      const type = path.startsWith('http') ? 'url' : 'file';
       try {
-        var resp = await fetch('/api/bookmarks', {
+        const resp = await fetch('/api/bookmarks', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: name, type: type, target: path })
@@ -494,7 +900,7 @@ function workspaceApp() {
         return;
       }
       try {
-        var resp = await fetch('/api/bookmarks/' + bm.id, { method: 'DELETE' });
+        const resp = await fetch('/api/bookmarks/' + bm.id, { method: 'DELETE' });
         if (resp.ok || resp.status === 204) {
           this.bookmarks = this.bookmarks.filter(function(b) { return b.id !== bm.id; });
         } else {
