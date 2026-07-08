@@ -145,57 +145,9 @@
 
   <!-- ── Main Grid ── -->
   <div class="workspace-grid">
-    <!-- File Browser -->
-    <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
-      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:12px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-size:1.1rem;">📁</span>
-          <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">Project Files</h3>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;">
-          <code style="font-family:var(--font-mono);font-size:0.75rem;background:var(--bg-elevated);padding:3px 8px;border-radius:var(--radius-sm);color:var(--text-secondary);border:1px solid var(--border-subtle);" x-text="absoluteRoot || 'Loading...'"></code>
-          <button class="btn btn-xs btn-secondary" @click="triggerSelectFolder()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
-            <span>📂</span> Select Folder
-          </button>
-        </div>
-      </div>
-      
-      <div style="background:var(--bg-elevated);padding:8px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:6px;font-size:0.8rem;color:var(--text-secondary);">
-        <span style="font-weight:600;">Location:</span>
-        <code style="font-family:var(--font-mono);color:var(--accent);" x-text="currentPath"></code>
-      </div>
-      <div class="file-list" style="max-height:400px;overflow-y:auto;">
-        <div x-show="currentPath && currentPath !== '/'" @click="goUp()"
-             style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;color:var(--text-secondary);">
-          <span style="width:20px;">⬆️</span>
-          <span style="flex:1;">..</span>
-          <span style="font-size:0.75rem;color:var(--text-muted);">Up one level</span>
-        </div>
-        <template x-for="item in files" :key="item.path">
-          <div class="file-row"
-               :class="{ 'is-directory': item.is_dir }"
-               @click="navigate(item)"
-               style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;">
-            <span x-text="item.is_dir ? '📁' : fileIcon(item.name)" style="width:20px;"></span>
-            <span x-text="item.name" style="flex:1;" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
-            <span x-text="item.size || ''" style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
-          </div>
-        </template>
-        <div x-show="files.length === 0 && !loading" style="padding:40px 20px;text-align:center;color:var(--text-muted);">
-          <div style="font-size:2rem;margin-bottom:8px;">📭</div>
-          <p>No files found</p>
-        </div>
-        <div x-show="loading" style="padding:20px;text-align:center;color:var(--text-muted);">
-          <div class="skeleton" style="height:36px;margin-bottom:6px;"></div>
-          <div class="skeleton" style="height:36px;margin-bottom:6px;"></div>
-          <div class="skeleton" style="height:36px;"></div>
-        </div>
-      </div>
-    </div>
-
     <!-- Git Status -->
-    <div class="card" style="padding:0;overflow:hidden;">
-      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:12px 16px;">
+    <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
+      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:10px 16px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:1.1rem;">🔀</span>
           <h3 style="margin:0;font-size:1rem;font-weight:600;">Git Status</h3>
@@ -208,21 +160,21 @@
         </div>
       </div>
 
-      <div style="padding:16px;display:flex;flex-direction:column;gap:16px;background:var(--bg-surface);" x-show="gitIsGit">
+      <div style="padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--bg-surface);" x-show="gitIsGit">
         <!-- Staged Files -->
         <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <span style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Staged Files</span>
-            <span class="badge" :style="{ background: gitStaged.length ? 'var(--success-subtle)' : 'var(--tint-strong)', color: gitStaged.length ? 'var(--success)' : 'var(--text-muted)', fontSize:'0.7rem', padding:'1px 6px', borderRadius:'10px' }" x-text="gitStaged.length"></span>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Staged Files</span>
+            <span class="badge" :style="{ background: gitStaged.length ? 'var(--success-subtle)' : 'var(--tint-strong)', color: gitStaged.length ? 'var(--success)' : 'var(--text-muted)', fontSize:'0.65rem', padding:'1px 5px', borderRadius:'10px' }" x-text="gitStaged.length"></span>
           </div>
-          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:120px;overflow-y:auto;padding:6px 10px;">
+          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:65px;overflow-y:auto;padding:4px 8px;">
             <template x-for="line in gitStaged" :key="line">
-              <div style="font-family:var(--font-mono);font-size:0.75rem;padding:4px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-                <span style="color:var(--success);font-weight:bold;font-size:0.7rem;background:var(--success-subtle);padding:1px 4px;border-radius:3px;min-width:18px;text-align:center;">S</span>
+              <div style="font-family:var(--font-mono);font-size:0.72rem;padding:3px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
+                <span style="color:var(--success);font-weight:bold;font-size:0.65rem;background:var(--success-subtle);padding:1px 3px;border-radius:3px;min-width:16px;text-align:center;">S</span>
                 <span x-text="line.slice(3)" style="word-break:break-all;"></span>
               </div>
             </template>
-            <div x-show="gitStaged.length === 0" style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.75rem;">
+            <div x-show="gitStaged.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;">
               No staged changes
             </div>
           </div>
@@ -230,18 +182,18 @@
 
         <!-- Modified Files -->
         <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <span style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Modified Files</span>
-            <span class="badge" :style="{ background: gitModified.length ? 'var(--warning-subtle)' : 'var(--tint-strong)', color: gitModified.length ? 'var(--warning)' : 'var(--text-muted)', fontSize:'0.7rem', padding:'1px 6px', borderRadius:'10px' }" x-text="gitModified.length"></span>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Modified Files</span>
+            <span class="badge" :style="{ background: gitModified.length ? 'var(--warning-subtle)' : 'var(--tint-strong)', color: gitModified.length ? 'var(--warning)' : 'var(--text-muted)', fontSize:'0.65rem', padding:'1px 5px', borderRadius:'10px' }" x-text="gitModified.length"></span>
           </div>
-          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:120px;overflow-y:auto;padding:6px 10px;">
+          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:65px;overflow-y:auto;padding:4px 8px;">
             <template x-for="line in gitModified" :key="line">
-              <div style="font-family:var(--font-mono);font-size:0.75rem;padding:4px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-                <span style="color:var(--warning);font-weight:bold;font-size:0.7rem;background:var(--warning-subtle);padding:1px 4px;border-radius:3px;min-width:18px;text-align:center;">M</span>
+              <div style="font-family:var(--font-mono);font-size:0.72rem;padding:3px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
+                <span style="color:var(--warning);font-weight:bold;font-size:0.65rem;background:var(--warning-subtle);padding:1px 3px;border-radius:3px;min-width:16px;text-align:center;">M</span>
                 <span x-text="line.slice(3)" style="word-break:break-all;"></span>
               </div>
             </template>
-            <div x-show="gitModified.length === 0" style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.75rem;">
+            <div x-show="gitModified.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;">
               No unstaged changes
             </div>
           </div>
@@ -249,25 +201,25 @@
 
         <!-- Untracked Files -->
         <div>
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <span style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Untracked Files</span>
-            <span class="badge" :style="{ background: gitUntracked.length ? 'var(--secondary-subtle)' : 'var(--tint-strong)', color: gitUntracked.length ? 'var(--secondary-light)' : 'var(--text-muted)', fontSize:'0.7rem', padding:'1px 6px', borderRadius:'10px' }" x-text="gitUntracked.length"></span>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Untracked Files</span>
+            <span class="badge" :style="{ background: gitUntracked.length ? 'var(--secondary-subtle)' : 'var(--tint-strong)', color: gitUntracked.length ? 'var(--secondary-light)' : 'var(--text-muted)', fontSize:'0.65rem', padding:'1px 5px', borderRadius:'10px' }" x-text="gitUntracked.length"></span>
           </div>
-          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:120px;overflow-y:auto;padding:6px 10px;">
+          <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:65px;overflow-y:auto;padding:4px 8px;">
             <template x-for="line in gitUntracked" :key="line">
-              <div style="font-family:var(--font-mono);font-size:0.75rem;padding:4px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-                <span style="color:var(--secondary-light);font-weight:bold;font-size:0.7rem;background:var(--secondary-subtle);padding:1px 4px;border-radius:3px;min-width:18px;text-align:center;">U</span>
+              <div style="font-family:var(--font-mono);font-size:0.72rem;padding:3px 0;display:flex;align-items:center;gap:6px;color:var(--text-secondary);border-bottom:1px solid var(--tint);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
+                <span style="color:var(--secondary-light);font-weight:bold;font-size:0.65rem;background:var(--secondary-subtle);padding:1px 3px;border-radius:3px;min-width:16px;text-align:center;">U</span>
                 <span x-text="line.slice(3)" style="word-break:break-all;"></span>
               </div>
             </template>
-            <div x-show="gitUntracked.length === 0" style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.75rem;">
+            <div x-show="gitUntracked.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;">
               No untracked files
             </div>
           </div>
         </div>
       </div>
 
-      <div x-show="!gitIsGit && !loading" style="padding:32px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);">
+      <div x-show="!gitIsGit && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);">
         <div style="font-size:1.5rem;margin-bottom:8px;">⚠️</div>
         <p style="font-size:0.85rem;margin:0;">Not a Git repository</p>
       </div>
@@ -275,7 +227,7 @@
 
     <!-- GitHub Integration -->
     <div class="card" style="padding:0;overflow:hidden;background:linear-gradient(135deg, var(--bg-surface) 0%, rgba(110, 84, 251, 0.03) 100%);border:1px solid var(--border-subtle);position:relative;">
-      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:12px 16px;">
+      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:10px 16px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <svg class="github-icon" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" style="color:var(--text-primary);display:block;">
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
@@ -308,94 +260,94 @@
       </div>
 
       <!-- Main GitHub Card Body -->
-      <div style="padding:16px;background:var(--bg-surface);" x-show="ghIsGitHub" x-cloak>
+      <div style="padding:12px;background:var(--bg-surface);" x-show="ghIsGitHub" x-cloak>
         <!-- Repository Info Banner -->
-        <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:16px;">
+        <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:10px;">
           <div>
-            <a :href="ghHtmlUrl" target="_blank" style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:6px;transition:opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
+            <a :href="ghHtmlUrl" target="_blank" style="font-family:var(--font-mono);font-size:0.95rem;font-weight:700;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:6px;transition:opacity 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">
               <span x-text="ghOwner + '/' + ghRepo"></span>
               <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
               </svg>
             </a>
-            <p style="margin:4px 0 0 0;font-size:0.8rem;color:var(--text-secondary);line-height:1.4;" x-text="ghDescription || 'No repository description set.'"></p>
+            <p style="margin:2px 0 0 0;font-size:0.75rem;color:var(--text-secondary);line-height:1.4;" x-text="ghDescription || 'No repository description set.'"></p>
           </div>
-          <span class="badge" :style="{ background: ghPrivate ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)', color: ghPrivate ? '#ef4444' : '#10b981', borderColor: ghPrivate ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)' }" style="font-size:0.7rem;font-weight:600;padding:2px 6px;border-radius:4px;border:1px solid;text-transform:uppercase;" x-text="ghPrivate ? 'Private' : 'Public'"></span>
+          <span class="badge" :style="{ background: ghPrivate ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)', color: ghPrivate ? '#ef4444' : '#10b981', borderColor: ghPrivate ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)' }" style="font-size:0.65rem;font-weight:600;padding:2px 6px;border-radius:4px;border:1px solid;text-transform:uppercase;" x-text="ghPrivate ? 'Private' : 'Public'"></span>
         </div>
 
         <!-- Telemetry Stats Grid -->
-        <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:12px;margin-bottom:20px;">
+        <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:8px;margin-bottom:10px;">
           <!-- Stars -->
-          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="font-size:1.2rem;margin-bottom:4px;">⭐</div>
-            <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;color:var(--text-primary);" x-text="ghStars">0</div>
-            <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:2px;">Stars</div>
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
+            <div style="font-size:1.1rem;margin-bottom:2px;">⭐</div>
+            <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghStars">0</div>
+            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">Stars</div>
           </div>
           <!-- Forks -->
-          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="font-size:1.2rem;margin-bottom:4px;">🍴</div>
-            <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;color:var(--text-primary);" x-text="ghForks">0</div>
-            <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:2px;">Forks</div>
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
+            <div style="font-size:1.1rem;margin-bottom:2px;">🍴</div>
+            <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghForks">0</div>
+            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">Forks</div>
           </div>
           <!-- Open Issues -->
-          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="font-size:1.2rem;margin-bottom:4px;">🐛</div>
-            <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenIssues">0</div>
-            <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:2px;">Issues</div>
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
+            <div style="font-size:1.1rem;margin-bottom:2px;">🐛</div>
+            <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenIssues">0</div>
+            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">Issues</div>
           </div>
           <!-- Pull Requests -->
-          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="font-size:1.2rem;margin-bottom:4px;">📈</div>
-            <div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenPrs">0</div>
-            <div style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:2px;">PRs</div>
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
+            <div style="font-size:1.1rem;margin-bottom:2px;">📈</div>
+            <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenPrs">0</div>
+            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">PRs</div>
           </div>
         </div>
 
         <!-- GitHub Action / CI/CD Live Workflows -->
-        <div style="border-top:1px solid var(--border-subtle);padding-top:16px;">
-          <h4 style="margin:0 0 10px 0;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;display:flex;align-items:center;gap:6px;">
+        <div style="border-top:1px solid var(--border-subtle);padding-top:10px;">
+          <h4 style="margin:0 0 6px 0;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;display:flex;align-items:center;gap:6px;">
             <span>🤖</span> GitHub Actions — Workflow Automation
           </h4>
           
           <template x-if="ghLatestWorkflow">
-            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:12px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
-              <div style="display:flex;flex-direction:column;gap:4px;">
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+              <div style="display:flex;flex-direction:column;gap:2px;">
                 <div style="display:flex;align-items:center;gap:8px;">
-                  <span style="font-weight:600;font-size:0.85rem;color:var(--text-primary);" x-text="ghLatestWorkflow.name"></span>
-                  <code style="font-family:var(--font-mono);font-size:0.7rem;background:var(--bg-deep);padding:2px 6px;border-radius:var(--radius-xs);color:var(--accent);" x-text="ghLatestWorkflow.branch"></code>
+                  <span style="font-weight:600;font-size:0.8rem;color:var(--text-primary);" x-text="ghLatestWorkflow.name"></span>
+                  <code style="font-family:var(--font-mono);font-size:0.65rem;background:var(--bg-deep);padding:1px 4px;border-radius:var(--radius-xs);color:var(--accent);" x-text="ghLatestWorkflow.branch"></code>
                 </div>
-                <div style="font-size:0.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+                <div style="font-size:0.7rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
                   <span x-text="'Triggered by ' + ghLatestWorkflow.event"></span>
                   <span>•</span>
                   <span x-text="'ID: ' + ghLatestWorkflow.id"></span>
                 </div>
               </div>
               
-              <div style="display:flex;align-items:center;gap:12px;">
+              <div style="display:flex;align-items:center;gap:8px;">
                 <!-- Run status badge -->
                 <div style="display:flex;align-items:center;gap:6px;">
                   <!-- Success -->
                   <template x-if="ghLatestWorkflow.conclusion === 'success'">
-                    <span style="background:rgba(16,185,129,0.1);color:#10b981;font-size:0.75rem;font-weight:600;padding:4px 10px;border-radius:4px;border:1px solid rgba(16,185,129,0.2);display:inline-flex;align-items:center;gap:6px;">
-                      <span style="color:#10b981;font-size:0.9rem;">✓</span> Passed
+                    <span style="background:rgba(16,185,129,0.1);color:#10b981;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(16,185,129,0.2);display:inline-flex;align-items:center;gap:4px;">
+                      <span style="color:#10b981;font-size:0.8rem;">✓</span> Passed
                     </span>
                   </template>
                   <!-- Failure -->
                   <template x-if="ghLatestWorkflow.conclusion === 'failure' || ghLatestWorkflow.conclusion === 'cancelled'">
-                    <span style="background:rgba(239,68,68,0.1);color:#ef4444;font-size:0.75rem;font-weight:600;padding:4px 10px;border-radius:4px;border:1px solid rgba(239,68,68,0.2);display:inline-flex;align-items:center;gap:6px;">
-                      <span style="color:#ef4444;font-size:0.9rem;">✕</span> Failed
+                    <span style="background:rgba(239,68,68,0.1);color:#ef4444;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(239,68,68,0.2);display:inline-flex;align-items:center;gap:4px;">
+                      <span style="color:#ef4444;font-size:0.8rem;">✕</span> Failed
                     </span>
                   </template>
                   <!-- In progress -->
                   <template x-if="ghLatestWorkflow.status === 'in_progress' || ghLatestWorkflow.status === 'queued' || !ghLatestWorkflow.conclusion">
-                    <span style="background:rgba(59,130,246,0.1);color:#3b82f6;font-size:0.75rem;font-weight:600;padding:4px 10px;border-radius:4px;border:1px solid rgba(59,130,246,0.2);display:inline-flex;align-items:center;gap:6px;">
-                      <span style="display:inline-block;width:6px;height:6px;background:#3b82f6;border-radius:50%;box-shadow:0 0 6px #3b82f6;animation:pulse 1.5s infinite;"></span> Running
+                    <span style="background:rgba(59,130,246,0.1);color:#3b82f6;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(59,130,246,0.2);display:inline-flex;align-items:center;gap:4px;">
+                      <span style="display:inline-block;width:5px;height:6px;background:#3b82f6;border-radius:50%;box-shadow:0 0 6px #3b82f6;animation:pulse 1.5s infinite;"></span> Running
                     </span>
                   </template>
                 </div>
                 
                 <!-- Action link -->
-                <a :href="ghLatestWorkflow.html_url" target="_blank" class="btn btn-xs btn-primary" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;text-decoration:none;">
+                <a :href="ghLatestWorkflow.html_url" target="_blank" class="btn btn-xs btn-primary" style="display:inline-flex;align-items:center;gap:4px;font-size:0.7rem;padding:2px 6px;text-decoration:none;">
                   View Run
                 </a>
               </div>
@@ -403,7 +355,7 @@
           </template>
           
           <template x-if="!ghLatestWorkflow">
-            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:16px;text-align:center;color:var(--text-muted);font-size:0.8rem;">
+            <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;color:var(--text-muted);font-size:0.75rem;">
               No workflow runs detected for this repository.
             </div>
           </template>
@@ -411,10 +363,10 @@
       </div>
 
       <!-- No GitHub repository configuration detected -->
-      <div x-show="!ghIsGitHub && !loading" style="padding:48px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
-        <div style="font-size:2rem;margin-bottom:12px;">☁️</div>
-        <h4 style="margin:0 0 6px 0;font-size:0.95rem;font-weight:600;color:var(--text-primary);">GitHub Integration Offline</h4>
-        <p style="font-size:0.8rem;max-width:320px;margin:0 auto 16px auto;line-height:1.4;" x-text="ghError || 'No remote GitHub repository has been configured for this active workspace directory.'"></p>
+      <div x-show="!ghIsGitHub && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
+        <div style="font-size:1.5rem;margin-bottom:8px;">☁️</div>
+        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">GitHub Integration Offline</h4>
+        <p style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || 'No remote GitHub repository has been configured for this active workspace directory.'"></p>
         <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
           <button class="btn btn-xs btn-secondary" @click="showPatModal = true">
             🔑 Configure PAT Token
@@ -423,44 +375,70 @@
       </div>
     </div>
 
-    <!-- Recent Files -->
-    <div class="card" style="padding:0;overflow:hidden;">
-      <div class="card-header">
-        <h3>🕐 Recent Files</h3>
+    <!-- File Browser -->
+    <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
+      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:10px 16px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:1.1rem;">📁</span>
+          <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">Project Files</h3>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <code style="font-family:var(--font-mono);font-size:0.75rem;background:var(--bg-elevated);padding:3px 8px;border-radius:var(--radius-sm);color:var(--text-secondary);border:1px solid var(--border-subtle);" x-text="absoluteRoot || 'Loading...'"></code>
+          <button class="btn btn-xs btn-secondary" @click="triggerSelectFolder()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+            <span>📂</span> Select Folder
+          </button>
+        </div>
       </div>
-      <div class="file-list" style="max-height:200px;overflow-y:auto;">
+      
+      <div style="background:var(--bg-elevated);padding:6px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--text-secondary);">
+        <span style="font-weight:600;">Location:</span>
+        <code style="font-family:var(--font-mono);color:var(--accent);" x-text="currentPath"></code>
+      </div>
+      <div class="file-list" style="max-height:180px;overflow-y:auto;">
+        <div x-show="currentPath && currentPath !== '/'" @click="goUp()"
+             style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;color:var(--text-secondary);font-size:0.8rem;">
+          <span style="width:20px;">⬆️</span>
+          <span style="flex:1;">..</span>
+          <span style="font-size:0.75rem;color:var(--text-muted);">Up one level</span>
+        </div>
+        <template x-for="item in files" :key="item.path">
+          <div class="file-row"
+               :class="{ 'is-directory': item.is_dir }"
+               @click="navigate(item)"
+               style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;font-size:0.8rem;">
+            <span x-text="item.is_dir ? '📁' : fileIcon(item.name)" style="width:20px;"></span>
+            <span x-text="item.name" style="flex:1;" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
+            <span x-text="item.size || ''" style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
+          </div>
+        </template>
+        <div x-show="files.length === 0 && !loading" style="padding:20px;text-align:center;color:var(--text-muted);">
+          <div style="font-size:1.5rem;margin-bottom:4px;">📭</div>
+          <p style="margin:0;font-size:0.8rem;">No files found</p>
+        </div>
+        <div x-show="loading" style="padding:15px;text-align:center;color:var(--text-muted);">
+          <div class="skeleton" style="height:28px;margin-bottom:6px;"></div>
+          <div class="skeleton" style="height:28px;margin-bottom:6px;"></div>
+          <div class="skeleton" style="height:28px;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Files -->
+    <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
+      <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);">
+        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">🕐 Recent Files</h3>
+      </div>
+      <div class="file-list" style="max-height:180px;overflow-y:auto;">
         <template x-for="rf in recentFiles" :key="rf.path">
           <div class="file-row" @click="openFile(rf.path)"
-               style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;">
+               style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;font-size:0.8rem;">
             <span x-text="fileIcon(rf.name)" style="width:20px;"></span>
             <span x-text="rf.name" style="flex:1;"></span>
             <span x-text="rf.time" style="font-size:0.75rem;color:var(--text-muted);"></span>
           </div>
         </template>
-        <div x-show="recentFiles.length === 0 && !loading" style="padding:40px 20px;text-align:center;color:var(--text-muted);">
-          <p>No recent files</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Bookmarks -->
-    <div class="card" style="padding:0;overflow:hidden;">
-      <div class="card-header">
-        <h3>⭐ Bookmarks</h3>
-        <button class="btn btn-sm btn-secondary" @click="addBookmark()">+ Add</button>
-      </div>
-      <div class="file-list" style="max-height:200px;overflow-y:auto;">
-        <template x-for="bm in bookmarks" :key="bm.path">
-          <div class="file-row" @click="openFile(bm.path)"
-               style="display:flex;align-items:center;gap:8px;padding:8px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;">
-            <span>⭐</span>
-            <span x-text="bm.label || bm.path" style="flex:1;"></span>
-            <button class="btn-icon" @click.stop="removeBookmark(bm)" title="Remove">✕</button>
-          </div>
-        </template>
-        <div x-show="bookmarks.length === 0" style="padding:40px 20px;text-align:center;color:var(--text-muted);">
-          <p>No bookmarks yet</p>
-          <p style="font-size:0.8rem;color:var(--text-tertiary);">Right-click a file to bookmark it</p>
+        <div x-show="recentFiles.length === 0 && !loading" style="padding:30px 20px;text-align:center;color:var(--text-muted);">
+          <p style="margin:0;font-size:0.8rem;">No recent files</p>
         </div>
       </div>
     </div>
