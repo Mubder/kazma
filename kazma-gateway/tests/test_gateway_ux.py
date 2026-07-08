@@ -40,11 +40,9 @@ class TestSlashCommands:
         assert "/status" in result
 
     def test_reset_command_clears_state(self):
-        """/reset returns a confirmation message."""
+        """/reset returns None (handled by agent_handler directly)."""
         result = resolve_slash_command("/reset")
-        assert result is not None
-        assert "reset" in result.lower()
-        assert "🔄" in result
+        assert result is None  # Handled by agent_handler
 
     def test_status_returns_health(self):
         """/status returns gateway health with adapter info."""
@@ -56,11 +54,10 @@ class TestSlashCommands:
         assert "5" in result
 
     def test_model_command(self):
-        """/model returns the active model name."""
+        """/model returns None (handled by agent_handler - interactive selector)."""
         ctx = _mock_context(model="claude-sonnet-4")
         result = resolve_slash_command("/model", ctx)
-        assert result is not None
-        assert "claude-sonnet-4" in result
+        assert result is None  # Handled by agent_handler
 
     def test_cost_command(self):
         """/cost returns token spend."""
