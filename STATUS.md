@@ -6,19 +6,12 @@ Generated: 2026-07-09
 
 | Metric | Value |
 |---|---|
-| Total Tests Passing | 138 (core packages) |
-| Total Tests Collected | 138 |
-| Skipped (missing optional deps) | 0 |
-| Environmental Failures | 0 |
-| engine.py Lines | 1,573 (down from 1,878; 3 modules extracted) |
+| Root suite collected (`tests/`) | ~3,544 |
+| Package tests (core+gateway+ui) | ~108 |
+| TUI tests (`kazma_tui_tests`) | ~216 |
 | Python Version | 3.11+ |
-| Project Version | 0.2.0 |
+| Project Version | 0.3.0 |
 | Status | active_development |
-
-## Namespace Audit
-
-All project references use the current `kazma` namespace (`kazma`, `Kazma`, `.kazma/`,
-`KAZMA_`). No legacy namespace artifacts remain.
 
 ## Entry Points
 
@@ -30,23 +23,15 @@ All project references use the current `kazma` namespace (`kazma`, `Kazma`, `.ka
 | Gateway | `kazma gateway start` | Active |
 | Swarm | `kazma swarm ...` | Active |
 
-## Recent Milestones
+## Recent milestones
 
-- **Sprint 17** — Engine refactored (1,878→1,573 lines, 3 modules extracted). Config reconciliation on startup.
-- **Sprint 16** — Skill checksums (fail-closed + HMAC). Task cancel/retry from UI. Circuit breaker badges + per-worker start/stop.
-- **Sprint 15** — ConfigStore atomicity (WAL, batch transactions, singleton). MCP server auth + HITL gate + tool classification.
-- **Sprint 14** — HITL approval gates on ALL platforms (Web, Telegram, Discord, Slack). Fail-closed danger-tool gating. Test isolation (28→3 failures).
-- **Sprint 13** — Active Tasks tab, provider/model resolution fixes, swarm output routing, security quick wins.
+- **Sprint S0/S1 (2026-07-09)** — Auth prefixes for chaos/migrate/workspaces; chaos kill-switch; HITL ownership harden; disclosure key; Gemini close; task history lock; WS dead code removed; root CI job.
+- **Sprint 19 / Phase 3** — Chaos framework, config migration UI, loadtests, swarm output adapters, OTel.
+- **Sprint 17** — Engine refactor, skill checksums, config reconcile.
+- **Sprint 14–15** — HITL all platforms; ConfigStore atomicity; MCP auth/HITL.
 
-## Sprint B Completion (2026-07-09)
+## Security notes
 
-- **B1**: Fixed conftest ImportPathMismatch by renaming test dirs to package-specific names
-- **B2**: Fixed FallbackChain test API mismatches (3 tests)
-- **B3**: Fixed TestNoPrivateAccessInUI - route through public API
-- **B4**: Enabled CI integration job (flipped if: false)
-- **B5**: Refreshed README/STATUS badges
-
-## Notes
-
-- The TUI is intentionally English-only and does not support Arabic/RTL.
-- TelegramWorker was removed (commit 94205bb); swarm dispatch uses InProcessWorker.
+- Set `KAZMA_SECRET` in production.
+- Chaos APIs require `KAZMA_CHAOS_ENABLED=true` (default off) **and** auth prefix.
+- Prefer SSE `/api/chat/stream` over WebSocket chat (410 Gone).

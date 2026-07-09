@@ -569,7 +569,7 @@ Running `kazma-tui` or `python -m kazma_tui` raises an import error, `RuntimeErr
 4. If the error is inside a Textual widget, run the TUI tests to isolate the widget:
 
    ```bash
-   uv run pytest kazma-tui/tests/ -v
+   uv run pytest kazma-tui/kazma_tui_tests/ -v
    ```
 
 ---

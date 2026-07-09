@@ -1,6 +1,6 @@
 [project]
 name = "kazma"
-version = "0.2.0"
+version = "0.3.0"
 description = "Kazma — Autonomous AI agent framework with LangGraph, ChromaDB RAG, and Arabic RTL dashboard"
 readme = "README.md"
 license = { text = "MIT" }
@@ -83,11 +83,13 @@ build-backend = "hatchling.build"
 packages = ["kazma-core/kazma_core", "kazma-memory/kazma_memory", "kazma-skills/kazma_skills", "kazma-ui/kazma_ui", "kazma-cli/kazma_cli", "kazma-tui/kazma_tui", "kazma-gateway/kazma_gateway"]
 
 [tool.pytest.ini_options]
-# Package suites + root regression corpus (run separately if conftest name collides)
+# Package suites + root regression corpus. TUI uses kazma_tui_tests to avoid
+# ImportPathMismatch with root tests/conftest.py.
 testpaths = [
     "kazma-core/kazma_core_tests",
     "kazma-gateway/kazma_gateway_tests",
     "kazma-ui/kazma_ui_tests",
+    "kazma-tui/kazma_tui_tests",
     "tests",
 ]
 python_files = ["test_*.py"]

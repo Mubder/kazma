@@ -65,7 +65,7 @@ kazma-tui/kazma_tui/
 
 ```bash
 # Run tests
-python -m pytest kazma-tui/tests/ -v
+python -m pytest kazma-tui/kazma_tui_tests/ -v
 
 # Lint
 python -m ruff check kazma-tui/

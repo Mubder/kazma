@@ -231,8 +231,8 @@ assert is_sensitive_path("/api/workspaces")
 | Sprint A/B (old) | MCP/HITL/conftest/reliability | ✅ Mostly complete |
 | **S0** | Auth prefixes, chaos, ownership, disclosure | ✅ **Done 2026-07-09** |
 | **S1** | Gemini close, yaml, task_lock, dead WS, HITL test | ✅ **Done 2026-07-09** |
-| **S2** | CI root suite job + pyproject testpaths | ✅ Partial (TUI rename / badges still open) |
-| **S3** | Dual registries, shell alias, large-file splits | 🟡 shell_exec alias done; splits open |
+| **S2** | CI root suite, TUI rename, badges/version | ✅ **Done 2026-07-09** |
+| **S3** | Dual registries, shell alias, routes split | ✅ Partial (chaos/migrate extracted; engine still large) |
 | **S4** | Coverage gaps list | 🟡 Planned |
 | **S5** | Debt / polish | 📋 Backlog |
 

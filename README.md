@@ -4,7 +4,7 @@
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
 
-![Tests](https://img.shields.io/badge/tests-108_passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-3500+_suite-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
 ![Version](https://img.shields.io/badge/version-0.3.0-blue)
@@ -29,7 +29,7 @@
 [langgraph-url]: https://www.langchain.com/langgraph
 [uv-shield]: https://img.shields.io/badge/uv-managed-purple.svg
 [uv-url]: https://github.com/astral-sh/uv
-[tests-shield]: https://img.shields.io/badge/tests-3495_passing-success.svg
+[tests-shield]: https://img.shields.io/badge/tests-3500+_suite-success.svg
 [tests-url]: https://github.com/Mubder/kazma
 [license-shield]: https://img.shields.io/github/license/Mubder/kazma.svg
 [license-url]: https://github.com/Mubder/kazma/blob/main/LICENSE
