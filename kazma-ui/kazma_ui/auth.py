@@ -89,6 +89,14 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/api/telemetry",
 })
 
+#: Path prefixes that are always open (browser-redirect targets that
+#  cannot carry the X-Kazma-Secret header, e.g. the GitHub OAuth callback
+#  which GitHub redirects to with only a ?code= query param).
+ALWAYS_OPEN_PREFIXES: tuple[str, ...] = (
+    "/api/github/oauth/callback",
+    "/api/github/oauth/start",
+)
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -134,8 +142,10 @@ def is_sensitive_path(path: str) -> bool:
 
 
 def is_always_open(path: str) -> bool:
-    """Return *True* for read-only and page routes that bypass auth."""
-    return path in ALWAYS_OPEN_PATHS
+    """Return *True* for read-only/page/redirect routes that bypass auth."""
+    if path in ALWAYS_OPEN_PATHS:
+        return True
+    return any(path == p or path.startswith(p + "/") for p in ALWAYS_OPEN_PREFIXES)
 
 
 def verify_secret(provided: str, expected: str) -> bool:
