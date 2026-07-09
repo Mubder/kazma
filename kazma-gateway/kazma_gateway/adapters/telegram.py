@@ -948,99 +948,43 @@ class TelegramAdapter(BaseAdapter):
                     chat_id,
                 )
 
-    # ── Inline keyboard builders ──────────────────────────────────
+    # ── Inline keyboard builders (delegates to telegram_keyboards) ──
 
     @staticmethod
     def build_approval_keyboard(request_id: str) -> dict[str, Any]:
-        """Build an inline keyboard for HITL approval prompts.
+        """Build an inline keyboard for HITL approval prompts."""
+        from kazma_gateway.adapters.telegram_keyboards import (
+            build_approval_keyboard as _build,
+        )
 
-        Args:
-            request_id: Unique identifier for the approval request.
-
-        Returns:
-            Telegram InlineKeyboardMarkup dict.
-        """
-        return {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "✅ Approve",
-                        "callback_data": f"hitl:approve:{request_id}",
-                    },
-                    {
-                        "text": "❌ Deny",
-                        "callback_data": f"hitl:deny:{request_id}",
-                    },
-                ]
-            ]
-        }
+        return _build(request_id)
 
     @staticmethod
-    def build_personality_keyboard(
-        personalities: list[str],
-    ) -> dict[str, Any]:
-        """Build an inline keyboard for personality selection (top 3).
+    def build_personality_keyboard(personalities: list[str]) -> dict[str, Any]:
+        """Build an inline keyboard for personality selection (top 3)."""
+        from kazma_gateway.adapters.telegram_keyboards import (
+            build_personality_keyboard as _build,
+        )
 
-        Args:
-            personalities: List of personality names.
-
-        Returns:
-            Telegram InlineKeyboardMarkup dict with up to 3 buttons.
-        """
-        return {
-            "inline_keyboard": [
-                [{"text": name, "callback_data": f"personality:{name}"}]
-                for name in personalities[:3]
-            ]
-        }
+        return _build(personalities)
 
     @staticmethod
     def build_provider_keyboard(providers: list[dict[str, Any]]) -> dict[str, Any]:
-        """Build inline keyboard for model provider selection.
+        """Build inline keyboard for model provider selection."""
+        from kazma_gateway.adapters.telegram_keyboards import (
+            build_provider_keyboard as _build,
+        )
 
-        Args:
-            providers: List of provider dicts with 'name' and 'display_name'.
-
-        Returns:
-            Telegram InlineKeyboardMarkup dict (2 buttons per row).
-        """
-        buttons: list[list[dict[str, str]]] = []
-        row: list[dict[str, str]] = []
-        for p in providers:
-            name = p.get("name", p.get("display_name", "?"))
-            display = p.get("display_name", name)
-            row.append({"text": display, "callback_data": f"model_provider:{name}"})
-            if len(row) == 2:
-                buttons.append(row)
-                row = []
-        if row:
-            buttons.append(row)
-        return {"inline_keyboard": buttons}
+        return _build(providers)
 
     @staticmethod
-    def build_model_keyboard(
-        provider_name: str,
-        models: list[str],
-    ) -> dict[str, Any]:
-        """Build inline keyboard for model selection within a provider.
+    def build_model_keyboard(provider_name: str, models: list[str]) -> dict[str, Any]:
+        """Build inline keyboard for model selection within a provider."""
+        from kazma_gateway.adapters.telegram_keyboards import (
+            build_model_keyboard as _build,
+        )
 
-        Args:
-            provider_name: The provider name (for callback identification).
-            models: List of model IDs.
-
-        Returns:
-            Telegram InlineKeyboardMarkup dict (1 button per row).
-        """
-        buttons: list[list[dict[str, str]]] = []
-        for model_id in models:
-            # Shorten display name for the button text
-            display = model_id
-            if "/" in display:
-                display = display.split("/")[-1]
-            buttons.append([
-                {"text": display, "callback_data": f"model_select:{model_id}"}
-            ])
-        return {"inline_keyboard": buttons}
+        return _build(provider_name, models)
 
     async def send(self, outbound: OutboundMessage) -> bool:
         """Send a message back to Telegram with 429 retry.
