@@ -345,6 +345,15 @@ async def send_swarm_output(
     Returns:
         True if a message was sent (or attempted), False if no target configured.
     """
+    # Never send real swarm output under pytest: tests call create_app() with
+    # the real kazma.yaml, so the configured output target (a live Telegram
+    # bot + chat) would otherwise receive real messages from every test
+    # dispatch. This is the single chokepoint for all output-target sends.
+    import sys
+    if "pytest" in sys.modules:
+        logger.debug("[swarm-output] pytest detected — skipping real output send")
+        return False
+
     if not target_config:
         # Try to get from ConfigStore
         try:
