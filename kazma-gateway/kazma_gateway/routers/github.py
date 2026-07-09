@@ -430,9 +430,17 @@ def _oauth_result_page(success: bool, message: str) -> HTMLResponseType:
   <div class="hint">You can close this tab and return to Kazma.</div>
 </div>
 <script>
-  // Try to signal the opener (the Kazma tab) so it refreshes, then close.
+  // Try to signal the opener (the Kazma tab) so it refreshes immediately.
   if (window.opener) {{ try {{ window.opener.postMessage({{ type: 'github-oauth-done', success: {str(success).lower()} }}, '*'); }} catch(e) {{}} }}
-  setTimeout(function() {{ try {{ window.close(); }} catch(e) {{}} }}, 2500);
+  // Reliable fallback: redirect THIS tab back to the workspace page after
+  // a short delay. On success the user lands on Kazma (which re-checks
+  // OAuth status on load); we can't always window.close() a non-script
+  // opened tab, so redirecting is more robust than a stuck success page.
+  setTimeout(function() {{
+    try {{ window.close(); }} catch(e) {{}}
+    // If the tab didn't close (common for non-script-opened tabs), redirect.
+    window.location.href = '/workspace';
+  }}, 2000);
 </script>
 </body></html>"""
     return HTMLResponse(html)

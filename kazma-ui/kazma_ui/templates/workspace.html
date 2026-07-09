@@ -886,9 +886,26 @@ function workspaceApp() {
     },
 
     connectGitHub() {
-      // Opens the GitHub OAuth flow in a new tab; the callback page
-      // postMessage's back here so we refresh.
+      // Open the GitHub OAuth flow in a new tab.
       window.open('/api/github/oauth/start', '_blank');
+      // Poll for connection — the callback tab may not be able to
+      // postMessage back (popup blockers / opener restrictions), so we
+      // poll /oauth/status until connected or ~2 min elapse.
+      if (this._ghPoll) clearInterval(this._ghPoll);
+      let attempts = 0;
+      this._ghPoll = setInterval(async () => {
+        attempts++;
+        await this.loadOAuthStatus();
+        if (this.ghOAuthConnected) {
+          clearInterval(this._ghPoll);
+          this._ghPoll = null;
+          KazmaStream.toast('GitHub connected.', 'success', 2500);
+          await this.loadGitHubStatus();
+        } else if (attempts > 24) { // ~2 min at 5s
+          clearInterval(this._ghPoll);
+          this._ghPoll = null;
+        }
+      }, 5000);
     },
 
     async disconnectGitHub() {
