@@ -51,6 +51,9 @@ from kazma_core.swarm.task import (
     WorkerCapabilities,
     WorkerResult,
 )
+from kazma_core.swarm.task_lifecycle import get_task as _hist_get_task
+from kazma_core.swarm.task_lifecycle import record_task as _hist_record_task
+from kazma_core.swarm.task_lifecycle import update_task as _hist_update_task
 from kazma_core.swarm.task_store import TaskStore
 from kazma_core.swarm.tracing import TracingEmitter
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
@@ -201,7 +204,7 @@ class SwarmEngine:
 
     def get_task(self, task_id: str) -> SwarmTask | None:
         """Return a task by id from the history."""
-        return self._task_history.get(task_id)
+        return _hist_get_task(self._task_history, self._task_lock, task_id)
 
     def list_active_tasks(self) -> list[SwarmTask]:
         """Return all in-flight (running or paused) tasks."""
@@ -1355,12 +1358,12 @@ class SwarmEngine:
             metadata=dict(metadata or {}),
         )
         task.result = result
-        with self._task_lock:
-            self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
-            if len(self._task_history) > self._max_history:
-                excess = len(self._task_history) - self._max_history
-                for old_key in list(self._task_history.keys())[:excess]:
-                    self._task_history.pop(old_key, None)
+        _hist_record_task(
+            self._task_history,
+            self._task_lock,
+            task,
+            max_history=self._max_history,
+        )
 
         # Emit lifecycle event for observers (SSE etc.)
         if status == "paused":
@@ -1604,24 +1607,29 @@ class SwarmEngine:
         result = await self._checkpoint_handler.reject(task_id, reason=reason)
         if result is not None:
             # Update task history with the failed result.
-            with self._task_lock:
-                task = self._task_history.get(task_id)
-                if task is not None:
-                    task.status = TaskStatus.FAILED
-                    task.result = result
-                    self._task_history[task_id] = SwarmTask.from_dict(task.to_dict())
-                    # Persist to SQLite.
-                    if self._task_store is not None:
-                        try:
-                            self._task_store.persist_task(task)
-                        except Exception:
-                            logger.exception(
-                                "[SwarmEngine] failed to persist rejected task '%s'",
-                                task_id,
-                            )
-                else:
-                    # If task not in history, store the result directly.
-                    self._checkpoint_mgr.complete_pipeline(task_id, result)
+            def _mark_failed(task: SwarmTask) -> None:
+                task.status = TaskStatus.FAILED
+                task.result = result
+
+            updated = _hist_update_task(
+                self._task_history,
+                self._task_lock,
+                task_id,
+                _mark_failed,
+                max_history=self._max_history,
+            )
+            if updated is not None:
+                if self._task_store is not None:
+                    try:
+                        self._task_store.persist_task(updated)
+                    except Exception:
+                        logger.exception(
+                            "[SwarmEngine] failed to persist rejected task '%s'",
+                            task_id,
+                        )
+            else:
+                # If task not in history, store the result directly.
+                self._checkpoint_mgr.complete_pipeline(task_id, result)
         return result
 
     # ------------------------------------------------------------------
