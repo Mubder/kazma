@@ -69,6 +69,7 @@ from kazma_core.swarm.sse_bridge import SseBridge
 from kazma_core.swarm.task_control import build_retry_task as _build_retry_task
 from kazma_core.swarm.task_control import cancel_active_task as _cancel_active_task
 from kazma_core.swarm.task_lifecycle import get_task as _hist_get_task
+from kazma_core.swarm.task_lifecycle import list_tasks as _hist_list_tasks
 from kazma_core.swarm.task_lifecycle import record_task as _hist_record_task
 from kazma_core.swarm.task_lifecycle import update_task as _hist_update_task
 from kazma_core.swarm.task_store import TaskStore
@@ -268,7 +269,7 @@ class SwarmEngine:
             if task_type
             else None
         )
-        tasks = list(self._task_history.values())
+        tasks = _hist_list_tasks(self._task_history, self._task_lock)
         if normalized_type:
             tasks = [task for task in tasks if task.type.value == normalized_type]
         return sorted(

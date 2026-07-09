@@ -64,6 +64,20 @@ def get_task(
         return history.get(task_id)
 
 
+def list_tasks(
+    history: dict[str, SwarmTask],
+    lock: threading.Lock,
+) -> list[SwarmTask]:
+    """Snapshot all history entries under lock.
+
+    Returns a shallow list copy so callers can iterate/sort freely without
+    racing a concurrent writer (which could otherwise raise
+    ``RuntimeError: dictionary changed size during iteration``).
+    """
+    with lock:
+        return list(history.values())
+
+
 def _trim_history(history: dict[str, SwarmTask], max_history: int) -> None:
     if max_history <= 0:
         return
