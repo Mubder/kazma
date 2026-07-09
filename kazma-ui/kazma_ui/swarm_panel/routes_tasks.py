@@ -102,8 +102,16 @@ def register_tasks_routes(
         svc = get_swarm_service()
         return svc.resolve_engine(swarm_manager)
 
-    async def _maybe_send_to_output_target_fallback(text: str) -> bool:
-        """Send text to output target, resolving GatewayManager from ServiceContainer."""
+    async def _maybe_send_to_output_target_fallback(
+        text: str, *, is_html: bool = False
+    ) -> bool:
+        """Send text to output target, resolving GatewayManager from ServiceContainer.
+
+        When ``is_html`` is True the text is already Telegram HTML (built by
+        ``_route_task_result``) and must NOT be re-converted — passing it
+        through ``md_to_tg_html`` would double-escape the tags (``<b>`` →
+        ``&lt;b&gt;``) so Telegram renders them as literal text.
+        """
         try:
             from kazma_core.service_container import get_container
             from kazma_gateway import GatewayManager
@@ -115,7 +123,7 @@ def register_tasks_routes(
         try:
             container = get_container()
             manager = container.get(GatewayManager) if container.has(GatewayManager) else None
-            return await _maybe_send_to_output_target(manager, text)
+            return await _maybe_send_to_output_target(manager, text, is_html=is_html)
         except Exception as exc:
             logger.debug("[Swarm] Failed resolving/invoking output routing fallback: %s", exc)
             return False
@@ -236,7 +244,9 @@ def register_tasks_routes(
                 lines.append("")
 
         text = "\n".join(lines).strip()
-        return await _maybe_send_to_output_target_fallback(text)
+        # text is already Telegram HTML (tg_heading/tg_quote) — flag it so the
+        # routing layer skips md_to_tg_html and avoids double-escaping the tags.
+        return await _maybe_send_to_output_target_fallback(text, is_html=True)
 
     async def _run_and_route_task(
         engine: Any,
