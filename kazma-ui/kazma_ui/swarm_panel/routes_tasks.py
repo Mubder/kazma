@@ -237,10 +237,9 @@ def register_tasks_routes(
                     lines.append("⏱️ " + " | ".join(meta_parts))
 
                 raw_content = wr_output if wr_output else (wr_error or "no output")
-                content_snippet = raw_content.strip()
-                if len(content_snippet) > 500:
-                    content_snippet = content_snippet[:500] + "..."
-                lines.append(tg_quote(content_snippet))
+                # Full worker output for complete reference — long messages are
+                # split into multiple Telegram chunks by chunk_html_message.
+                lines.append(tg_quote(raw_content.strip() or "no output"))
                 lines.append("")
 
         text = "\n".join(lines).strip()

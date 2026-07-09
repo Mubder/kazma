@@ -321,7 +321,8 @@ async def _dispatch_swarm_from_chat(
             lines = []
             for wr in result.worker_results:
                 status_icon = "✅" if wr.status == "success" else "❌"
-                output = (wr.output or "")[:500] if wr.output else wr.error or "no output"
+                # Full worker output for complete reference.
+                output = wr.output if wr.output else (wr.error or "no output")
                 lines.append(f"{status_icon} **{wr.worker}**: {output}")
             reply = "\n\n".join(lines)
         elif result and result.error:
