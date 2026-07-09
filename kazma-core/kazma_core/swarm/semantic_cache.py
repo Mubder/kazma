@@ -58,16 +58,28 @@ class SemanticCache:
                     tools_json TEXT,
                     response_json TEXT NOT NULL,
                     embedding TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    scope TEXT NOT NULL DEFAULT '_global_'
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_prompt_hash ON semantic_cache(prompt_hash)")
+            # Migration: add scope column on existing DBs (idempotent).
+            try:
+                conn.execute("ALTER TABLE semantic_cache ADD COLUMN scope TEXT NOT NULL DEFAULT '_global_'")
+            except sqlite3.OperationalError:
+                pass  # Column already exists.
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_scope ON semantic_cache(scope)")
             conn.commit()
 
-    def _compute_hash(self, prompt: str, tools: list[dict[str, Any]] | None) -> str:
-        """Compute SHA256 of prompt + tools_json for exact hash fallback."""
+    def _compute_hash(self, prompt: str, tools: list[dict[str, Any]] | None, scope: str = "_global_") -> str:
+        """Compute SHA256 of scope + prompt + tools_json for exact hash fallback.
+
+        ``scope`` isolates cache entries by caller context (e.g. a user or
+        session id). The default ``_global_`` scope is shared across all
+        callers — only safe for prompts with no user-specific content.
+        """
         tools_str = json.dumps(tools, sort_keys=True) if tools else ""
-        payload = f"{prompt}||{tools_str}"
+        payload = f"{scope}||{prompt}||{tools_str}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def _cosine_similarity(self, v1: list[float], v2: list[float]) -> float:
@@ -82,15 +94,20 @@ class SemanticCache:
         return dot_product / (norm_v1 * norm_v2)
 
     def lookup(
-        self, prompt: str, tools: list[dict[str, Any]] | None = None, threshold: float = 0.95
+        self, prompt: str, tools: list[dict[str, Any]] | None = None, threshold: float = 0.95,
+        scope: str = "_global_",
     ) -> dict[str, Any] | None:
         """Look up prompt in the cache.
 
         First attempts semantic embedding match. Falls back to exact hash if
         embeddings fail or are unavailable.
+
+        ``scope`` isolates entries by caller context (user/session id). The
+        default ``_global_`` is shared across callers — only safe for prompts
+        with no user-specific content.
         """
         # 1. Exact hash fast lookup (always available)
-        prompt_hash = self._compute_hash(prompt, tools)
+        prompt_hash = self._compute_hash(prompt, tools, scope)
         with self._lock:
             conn = self._get_conn()
             row = conn.execute(
@@ -115,13 +132,16 @@ class SemanticCache:
             logger.warning("[SemanticCache] Failed to encode query prompt: %s", exc)
             return None
 
-        # Fetch all candidate entries with embeddings
+        # Fetch all candidate entries with embeddings — scoped so a
+        # semantically-similar prompt from a different caller cannot return
+        # another caller's cached response.
         tools_json = json.dumps(tools, sort_keys=True) if tools else "{}"
         with self._lock:
             conn = self._get_conn()
             cursor = conn.execute(
-                "SELECT response_json, embedding FROM semantic_cache WHERE tools_json = ? AND embedding IS NOT NULL",
-                (tools_json,),
+                "SELECT response_json, embedding FROM semantic_cache "
+                "WHERE tools_json = ? AND embedding IS NOT NULL AND scope = ?",
+                (tools_json, scope),
             )
             rows = cursor.fetchall()
 
@@ -146,10 +166,14 @@ class SemanticCache:
         return None
 
     def store(
-        self, prompt: str, response: dict[str, Any], tools: list[dict[str, Any]] | None = None
+        self, prompt: str, response: dict[str, Any], tools: list[dict[str, Any]] | None = None,
+        scope: str = "_global_",
     ) -> None:
-        """Store the prompt and response in the cache."""
-        prompt_hash = self._compute_hash(prompt, tools)
+        """Store the prompt and response in the cache.
+
+        ``scope`` isolates the entry by caller context (user/session id).
+        """
+        prompt_hash = self._compute_hash(prompt, tools, scope)
         tools_json = json.dumps(tools, sort_keys=True) if tools else "{}"
         response_json = json.dumps(response)
 
@@ -169,10 +193,10 @@ class SemanticCache:
             try:
                 conn.execute(
                     """
-                    INSERT INTO semantic_cache (prompt_hash, prompt, tools_json, response_json, embedding)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO semantic_cache (prompt_hash, prompt, tools_json, response_json, embedding, scope)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
-                    (prompt_hash, prompt, tools_json, response_json, embedding_json),
+                    (prompt_hash, prompt, tools_json, response_json, embedding_json, scope),
                 )
                 conn.commit()
                 logger.debug("[SemanticCache] Successfully cached response")

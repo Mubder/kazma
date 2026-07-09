@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -123,7 +124,7 @@ class DelegationOrchestrator:
         """
         start = time.time()
         result = OrchestrationResult(
-            task_id=f"orch-{int(start * 1000)}",
+            task_id=f"orch-{uuid.uuid4().hex}",
             status=RequestStatus.EXECUTING,
         )
 

@@ -254,6 +254,9 @@ class DelegationProtocol:
                 result.duration_seconds = time.time() - start
                 self._completed_requests[request.request_id] = result
                 self._track_cost(request.request_id, result.cost_incurred)
+                # Remove from pending now that it reached a terminal state.
+                # (report_completion also removes; pop safely in case both run.)
+                self._pending_requests.pop(request.request_id, None)
                 return result
             except Exception as e:
                 logger.error(
@@ -269,6 +272,7 @@ class DelegationProtocol:
                     duration_seconds=time.time() - start,
                 )
                 self._completed_requests[request.request_id] = result
+                self._pending_requests.pop(request.request_id, None)
                 return result
         else:
             # No executor — mark as pending execution

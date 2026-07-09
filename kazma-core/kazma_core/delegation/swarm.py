@@ -266,12 +266,17 @@ class SwarmIntelligence:
                     result.all_succeeded = False
                     result.failed_stage = i
                     stage_info["error"] = exec_result.error
+                    # Record the failing stage BEFORE breaking, otherwise the
+                    # stage that caused the failure is omitted from the report.
+                    result.pipeline_stages.append(stage_info)
                     break
 
             except TimeoutError:
                 result.all_succeeded = False
                 result.failed_stage = i
                 stage_info["status"] = "timed_out"
+                # Same: record the timed-out stage before breaking.
+                result.pipeline_stages.append(stage_info)
                 break
 
             result.pipeline_stages.append(stage_info)

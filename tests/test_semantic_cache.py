@@ -39,6 +39,22 @@ class TestSemanticCache(unittest.TestCase):
         self.assertEqual(h1, h2)
         self.assertNotEqual(h1, h3)
 
+    def test_scope_isolates_entries(self) -> None:
+        """Regression guard: different scopes must not share cache entries.
+
+        Without scope isolation, a user-specific prompt served to one caller
+        could be returned to another (cross-user data leak). The scope token
+        is part of the hash and the SQL filter.
+        """
+        cache = SemanticCache(self.db_path)
+        self.caches_to_close.append(cache)
+        # Same prompt + tools, different scope → different hash.
+        h_alice = cache._compute_hash("my balance", None, scope="user-alice")
+        h_bob = cache._compute_hash("my balance", None, scope="user-bob")
+        h_global = cache._compute_hash("my balance", None)
+        self.assertNotEqual(h_alice, h_bob)
+        self.assertNotEqual(h_alice, h_global)
+
     def test_cosine_similarity(self) -> None:
         cache = SemanticCache(self.db_path)
         self.caches_to_close.append(cache)

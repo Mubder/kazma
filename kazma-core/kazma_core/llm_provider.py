@@ -204,8 +204,12 @@ class LLMProvider:
         Returns:
             LLMResponse with content, tool_calls, usage, and cost.
         """
-        # Check semantic cache if enabled
-        cache_enabled = os.environ.get("KAZMA_SEMANTIC_CACHE", "true").lower() == "true"
+        # Check semantic cache if enabled. Defaults to OFF: the LLM layer has
+        # no user/session identity (AGENTS.md platform isolation), so a shared
+        # global cache can return one user's response to another for identical
+        # or semantically-similar prompts. Enable KAZMA_SEMANTIC_CACHE=true
+        # only for single-operator deployments or all-global-prompt workloads.
+        cache_enabled = os.environ.get("KAZMA_SEMANTIC_CACHE", "false").lower() == "true"
         prompt_str = json.dumps(messages, sort_keys=True)
         if cache_enabled:
             try:
