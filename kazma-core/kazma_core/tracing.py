@@ -141,6 +141,9 @@ class TracingBackend(StrEnum):
     CONSOLE = "console"  # fallback for testing / no-dashboard mode
 
 
+from kazma_core.config_schema import TracingConfig
+
+
 class KazmaTracer:
     """Traces all agent operations.
 
@@ -153,9 +156,9 @@ class KazmaTracer:
     local dashboard at /dashboard.
     """
 
-    def __init__(self, backend: str | None = None, config: dict[str, Any] | None = None) -> None:
-        self.backend = TracingBackend(backend or os.getenv("KAZMA_TRACING_BACKEND", "console"))
-        self._config = config or {}
+    def __init__(self, config: TracingConfig | None = None) -> None:
+        self.config = config or TracingConfig()
+        self.backend = TracingBackend(self.config.backend)
         self._client: Any = None
         self._otel_tracer: Any = None
         self._init_backend()
@@ -170,13 +173,13 @@ class KazmaTracer:
             logger.info("Tracing backend: console (stdout logging only)")
 
     def _init_langfuse(self) -> None:
-        """Initialize Langfuse client from config dict or environment variables."""
+        """Initialize Langfuse client from config."""
         try:
             from langfuse import Langfuse
 
-            public_key = self._config.get("public_key") or os.getenv("LANGFUSE_PUBLIC_KEY", "")
-            secret_key = self._config.get("secret_key") or os.getenv("LANGFUSE_SECRET_KEY", "")
-            host = self._config.get("host") or os.getenv("LANGFUSE_HOST", "http://localhost:3000")
+            public_key = self.config.langfuse_public_key or os.getenv("LANGFUSE_PUBLIC_KEY", "")
+            secret_key = self.config.langfuse_secret_key or os.getenv("LANGFUSE_SECRET_KEY", "")
+            host = self.config.langfuse_host or os.getenv("LANGFUSE_HOST", "http://localhost:3000")
 
             self._client = Langfuse(
                 public_key=public_key,
@@ -207,8 +210,9 @@ class KazmaTracer:
                     OTLPSpanExporter,
                 )
 
+                endpoint = self.config.otlp_endpoint or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
                 exporter = OTLPSpanExporter(
-                    endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
+                    endpoint=endpoint,
                 )
             except ImportError:
                 from opentelemetry.sdk.trace.export import ConsoleSpanExporter
@@ -591,13 +595,11 @@ class KazmaTracer:
         logger.info("Tracer shut down (backend=%s)", self.backend.value)
 
 
-def create_tracer(backend: str | None = None, config: dict[str, Any] | None = None) -> KazmaTracer:
+def create_tracer(config: TracingConfig | None = None) -> KazmaTracer:
     """Factory to create a KazmaTracer with the configured backend.
 
     Args:
-        backend: Tracing backend ("langfuse", "opentelemetry", "console").
-                 Defaults to KAZMA_TRACING_BACKEND env var or "console".
-        config: Optional config dict (e.g., from kazma.yaml logging.langfuse).
-                Keys like public_key/secret_key are used with env var fallback.
+        config: TracingConfig object (from kazma.yaml tracing section).
+                If None, uses default TracingConfig with env var fallbacks.
     """
-    return KazmaTracer(backend=backend, config=config)
+    return KazmaTracer(config=config)

@@ -46,7 +46,8 @@ from kazma_core.agent.state import (
 from kazma_core.llm_provider import LLMConfig, LLMProvider
 from kazma_core.time_travel import SnapshotRecorder
 
-from kazma_core.config_store import apply_sqlite_pragmas_async
+from kazma_core.tracing import KazmaTracer
+from kazma_core.config_schema import TracingConfig
 
 logger = logging.getLogger(__name__)
 
@@ -948,10 +949,16 @@ async def create_supervisor_app(
 
     # Tracer
     tracing_cfg = config.get("logging", {})
-    tracer = KazmaTracer(
-        backend="langfuse" if tracing_cfg.get("langfuse", {}).get("enabled") else "console",
-        config=tracing_cfg.get("langfuse", {}),
+    langfuse_cfg = tracing_cfg.get("langfuse", {})
+    
+    tracing_config = TracingConfig(
+        enabled=langfuse_cfg.get("enabled", False),
+        backend="langfuse" if langfuse_cfg.get("enabled") else "console",
+        langfuse_public_key=langfuse_cfg.get("public_key"),
+        langfuse_secret_key=langfuse_cfg.get("secret_key"),
+        langfuse_host=langfuse_cfg.get("host", "http://localhost:3000"),
     )
+    tracer = KazmaTracer(config=tracing_config)
 
     # Checkpointer
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)

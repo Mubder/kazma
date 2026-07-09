@@ -89,6 +89,28 @@ class ModelRegistryConfig(BaseModel):
     fallback_models: list[str] = Field(default_factory=list)
 
 
+class TracingConfig(BaseModel):
+    """OpenTelemetry tracing configuration."""
+    
+    enabled: bool = Field(default=False)
+    backend: str = Field(default="opentelemetry", description="Tracing backend: opentelemetry, langfuse, console")
+    otlp_endpoint: str = Field(default="http://localhost:4317", description="OTLP gRPC endpoint")
+    service_name: str = Field(default="kazma-agent", description="Service name for traces")
+    sample_rate: float = Field(default=1.0, ge=0.0, le=1.0, description="Trace sampling rate")
+    # Langfuse specific (if backend=langfuse)
+    langfuse_public_key: str | None = Field(default=None)
+    langfuse_secret_key: str | None = Field(default=None)
+    langfuse_host: str = Field(default="http://localhost:3000")
+    
+    @field_validator("backend")
+    @classmethod
+    def validate_backend(cls, v: str) -> str:
+        valid = {"opentelemetry", "langfuse", "console"}
+        if v not in valid:
+            raise ValueError(f"backend must be one of {valid}")
+        return v
+
+
 class SwarmConfig(BaseModel):
     """Swarm orchestration configuration."""
     
@@ -123,6 +145,7 @@ class KazmaConfig(BaseModel):
     connectors: ConnectorsConfig = Field(default_factory=ConnectorsConfig)
     safety: SafetyConfig = Field(default_factory=SafetyConfig)
     model_registry: ModelRegistryConfig = Field(default_factory=ModelRegistryConfig)
+    tracing: TracingConfig = Field(default_factory=TracingConfig)
     
     # Pydantic config
     model_config = {
@@ -137,6 +160,7 @@ class KazmaConfig(BaseModel):
         "connectors",
         "safety",
         "model_registry",
+        "tracing",
     ]
     
     @model_validator(mode="after")

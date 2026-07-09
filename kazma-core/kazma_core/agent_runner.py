@@ -26,7 +26,8 @@ from kazma_core.cost_breaker import create_cost_breaker
 from kazma_core.llm_provider import LLMProvider
 from kazma_core.mcp.manager import UnifiedToolExecutor
 from kazma_core.state import AgentState
-from kazma_core.tracing import create_tracer
+from kazma_core.tracing import KazmaTracer
+from kazma_core.config_schema import TracingConfig
 
 from kazma_core.config_store import apply_sqlite_pragmas_async
 
@@ -144,10 +145,18 @@ class KazmaAgent:
 
         # Tracer
         tracing_cfg = self.config.raw.get("logging", {})
-        self.tracer = create_tracer(
+        # Create TracingConfig from the raw config
+        tracing_config = TracingConfig(
+            enabled=tracing_cfg.get("langfuse", {}).get("enabled", False),
             backend="langfuse" if tracing_cfg.get("langfuse", {}).get("enabled") else "console",
-            config=tracing_cfg.get("langfuse", {}),
+            otlp_endpoint=tracing_cfg.get("otlp_endpoint", "http://localhost:4317"),
+            service_name="kazma-agent",
+            sample_rate=1.0,
+            langfuse_public_key=tracing_cfg.get("langfuse", {}).get("public_key"),
+            langfuse_secret_key=tracing_cfg.get("langfuse", {}).get("secret_key"),
+            langfuse_host=tracing_cfg.get("langfuse", {}).get("host", "http://localhost:3000"),
         )
+        self.tracer = KazmaTracer(config=tracing_config)
 
         # Context Authority (80% compaction)
         self.authority: ContextAuthority = create_authority(
