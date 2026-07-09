@@ -293,7 +293,7 @@ jobs:
 
   notify:
     name: Notify on Failure
-    needs: [lint-and-typecheck, test-core, test-gateway, test-ui, coverage, security, load-test]
+    needs: [lint-and-typecheck, test-core, test-gateway, test-ui, test-tui, test-integration, test-root-suite, coverage, security, load-test]
     if: failure()
     runs-on: ubuntu-latest
     steps:

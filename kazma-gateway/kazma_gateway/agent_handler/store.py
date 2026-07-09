@@ -131,6 +131,15 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     # Attach the user message
     state["messages"] = [{"role": "user", "content": msg.text}]
 
+    # Defense-in-depth: strip any platform-specific identifiers that might
+    # have leaked into the top-level state. ``_PLATFORM_KEYS`` is the
+    # authoritative list of keys that must never enter the graph; the state
+    # is built from scratch above, so this is a safety net against future
+    # refactors that copy ``ctx`` wholesale.
+    leaked = _PLATFORM_KEYS.intersection(state)
+    for key in leaked:
+        state.pop(key, None)
+
     return state
 
 

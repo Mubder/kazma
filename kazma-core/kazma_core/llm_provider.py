@@ -271,14 +271,28 @@ class LLMProvider:
                 len(tools) if tools else 0,
             )
 
-            # ── NVIDIA NIM / some providers reject tool-calling with a
+            # ── Tool-definition fallback ────────────────────────────────
+            # NVIDIA NIM / some providers reject tool-calling with a
             # 404 "Function not found for account" for models that don't
-            # support function calling. Retry without tools so the user
-            # still gets a text response.
-            if status_code == 404 and "function" in detail.lower() and tools:
+            # support function calling. OpenAI-compatible providers may
+            # also reject malformed tool schemas with 400/422. Retry
+            # without tools so the user still gets a text response.
+            detail_lower = detail.lower()
+            # NOTE: the 404 "function not found" branch must stay (AGENTS.md).
+            nim_function_not_found = (
+                status_code == 404 and "function" in detail_lower
+            )
+            # 400/422 with tool/function validation language indicates a
+            # tool-definition problem rather than a request-shape problem.
+            tool_schema_error = (
+                status_code in (400, 422)
+                and any(tok in detail_lower for tok in ("tool", "function"))
+            )
+            if tools and (nim_function_not_found or tool_schema_error):
                 logger.warning(
-                    "Provider returned 404 for function calling — retrying "
-                    "without tools (model may not support tool use)."
+                    "Provider rejected tool definitions (HTTP %s) — retrying "
+                    "without tools (model may not support tool use).",
+                    status_code,
                 )
                 payload.pop("tools", None)
                 payload.pop("tool_choice", None)
@@ -451,7 +465,7 @@ class LLMProvider:
                 "LLMProvider reconfigured: base_url=%s model=%s api_key=%s",
                 self.config.base_url,
                 self.config.model,
-                self.config.api_key[:10] + "..." if self.config.api_key else "(empty)",
+                "(set)" if self.config.api_key else "(empty)",
             )
 
 

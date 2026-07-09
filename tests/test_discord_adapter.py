@@ -95,6 +95,34 @@ class TestDiscordAdapter:
 
         await store.close()
 
+    async def test_no_platform_keys_leak_into_top_level_state(self) -> None:
+        """Defense-in-depth: no _PLATFORM_KEYS may appear at the top level
+        of the graph state (regression guard for the strip guard in
+        _build_initial_state)."""
+        store = SQLiteSessionStore(":memory:")
+        msg = IncomingMessage(
+            platform="telegram",
+            sender_id="telegram:999",
+            text="test",
+            context_metadata={
+                "chat_id": 999,
+                "user_id": 111,
+                "message_id": "m1",
+                "update_id": 7,
+                "chat_type": "private",
+                "channel_id": "222",
+                "guild_id": "333",
+                "team_id": "T1",
+                "thread_ts": "1.2",
+                "username": "bob",
+            },
+        )
+        state = await agent_handler._build_initial_state(msg, store)
+        for forbidden in agent_handler._PLATFORM_KEYS:
+            assert forbidden not in state, f"{forbidden} leaked into graph state"
+
+        await store.close()
+
     def test_discord_backend_registered(self) -> None:
         """Test 4: "discord" in registered backends."""
         # The discord backend is registered by agent_handler.create_graph_handler
