@@ -177,7 +177,23 @@ class DelegationProtocol:
             DelegationResponse indicating acceptance or rejection.
         """
         # Step 1: Verify signature
-        if self.security is not None and request.signature:
+        # Fail-safe: when a security layer is configured, an unsigned request
+        # is rejected rather than silently accepted. Previously an empty
+        # signature string skipped verification entirely (auth bypass).
+        if self.security is not None:
+            if not request.signature:
+                logger.warning(
+                    "Rejecting unsigned delegation request %s from %s "
+                    "(security configured but no signature provided)",
+                    request.request_id,
+                    request.requester_id,
+                )
+                return DelegationResponse(
+                    request_id=request.request_id,
+                    responder_id=self.agent_id,
+                    status=RequestStatus.REJECTED,
+                    reason="Missing signature (security requires signed requests)",
+                )
             valid = self.security.verify_request(request.to_dict(), request.signature)
             if not valid:
                 logger.warning(

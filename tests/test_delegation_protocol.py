@@ -160,6 +160,26 @@ class TestReceiveDelegationRequest:
         assert resp.status == RequestStatus.REJECTED
         assert "signature" in resp.reason.lower()
 
+    async def test_reject_unsigned_request_when_security_configured(self):
+        """Fail-safe: when security is configured, an unsigned request is
+        rejected rather than silently accepted (regression guard for the
+        empty-signature auth bypass)."""
+        sec = DelegationSecurity(agent_id="agent-2")
+        proto = DelegationProtocol(agent_id="agent-2", security=sec)
+        req = DelegationRequest(
+            request_id="req-6",
+            requester_id="agent-1",
+            task_description="Task",
+            required_capabilities=[],
+            max_budget=0.10,
+            timeout_seconds=300,
+            created_at=time.time(),
+            signature="",  # unsigned
+        )
+        resp = await proto.receive_delegation_request(req)
+        assert resp.status == RequestStatus.REJECTED
+        assert "signature" in resp.reason.lower()
+
 
 class TestExecuteDelegatedTask:
     """Test task execution."""
