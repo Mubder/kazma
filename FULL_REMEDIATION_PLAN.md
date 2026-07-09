@@ -233,7 +233,7 @@ assert is_sensitive_path("/api/workspaces")
 | **S1** | Gemini close, yaml, task_lock, dead WS, HITL test | ✅ **Done 2026-07-09** |
 | **S2** | CI root suite, TUI rename, badges/version | ✅ **Done 2026-07-09** |
 | **S3** | Dual registries, shell alias, routes split | ✅ Partial (chaos/migrate extracted; engine still large) |
-| **S4** | Coverage gaps list | 🟡 Planned |
+| **S4** | Coverage gaps (agent_runner, mcp auth, gateway, compaction, settings, tracing) | ✅ Wave-1 done (`tests/test_s4_coverage_gaps.py` + mcp_client auth fix) |
 | **S5** | Debt / polish | 📋 Backlog |
 
 ---

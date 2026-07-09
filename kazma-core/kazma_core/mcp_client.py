@@ -257,9 +257,17 @@ class MCPClient:
         if not cfg.url:
             raise MCPConnectionError("SSE transport requires a URL")
 
+        # Merge first-class auth into headers (parity with mcp/manager.py)
+        headers = dict(cfg.headers or {})
+        auth = cfg.auth or {}
+        if auth.get("type") == "bearer" and auth.get("token"):
+            headers["Authorization"] = f"Bearer {auth['token']}"
+        elif auth.get("type") == "header" and auth.get("name") and auth.get("value") is not None:
+            headers[str(auth["name"])] = str(auth["value"])
+
         self._http = httpx.AsyncClient(
             base_url=cfg.url,
-            headers=cfg.headers,
+            headers=headers,
             timeout=cfg.timeout,
         )
         logger.debug("Created SSE HTTP client for %s", cfg.url)
