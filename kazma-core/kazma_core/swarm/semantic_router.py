@@ -120,9 +120,14 @@ class SemanticRouter:
             try:
                 self._collection = client.get_collection(self._collection_name)
             except Exception:
+                # hnsw:space=cosine so distances are cosine distances — the
+                # scoring path (1.0 - dist) assumes cosine, not the default L2.
                 self._collection = client.create_collection(
                     name=self._collection_name,
-                    metadata={"description": "Swarm worker expertise profiles"},
+                    metadata={
+                        "description": "Swarm worker expertise profiles",
+                        "hnsw:space": "cosine",
+                    },
                 )
             logger.info("[SemanticRouter] ChromaDB collection ready: %s", self._collection_name)
             return True

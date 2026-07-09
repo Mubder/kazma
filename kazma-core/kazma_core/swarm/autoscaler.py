@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -143,6 +144,11 @@ class AutoScaler:
         # Track spawned instances: name -> (template_name, spawned_at, last_active)
         self._instances: dict[str, tuple[str, float, float]] = {}
         self._counter: dict[str, int] = {}  # template_name -> next instance number
+        # Guards _instances / _counter against concurrent maybe_scale spawns
+        # (called from async dispatch) and record_activity/reap (concurrent).
+        # Without it, two maybe_scale calls can both pass the capacity check
+        # and over-scale beyond max_instances.
+        self._lock = threading.Lock()
 
     # ── Template management ───────────────────────────────────────────
 
@@ -197,23 +203,31 @@ class AutoScaler:
         Returns the spawned SwarmWorker if a matching template has
         capacity, or ``None`` if no template matches or all are at max.
         """
-        for template in self._templates.values():
-            if not template.matches_task(task_prompt):
-                continue
+        # Opportunistically reap idle workers before considering a spawn.
+        # This runs on the dispatch hot path so idle pool workers don't
+        # accumulate indefinitely (reap_idle is otherwise only invoked by a
+        # manual API endpoint). Cheap: a no-op when there's nothing to reap.
+        self.reap_idle()
+        # Hold the lock across the capacity-check + spawn so two concurrent
+        # maybe_scale calls can't both pass the check and over-scale.
+        with self._lock:
+            for template in self._templates.values():
+                if not template.matches_task(task_prompt):
+                    continue
 
-            # Check capacity
-            active = self._count_active_instances(template.name)
-            if active >= template.max_instances:
-                logger.debug("[AutoScaler] Template '%s' at max capacity (%d/%d)",
-                             template.name, active, template.max_instances)
-                continue
+                # Check capacity
+                active = self._count_active_instances(template.name)
+                if active >= template.max_instances:
+                    logger.debug("[AutoScaler] Template '%s' at max capacity (%d/%d)",
+                                 template.name, active, template.max_instances)
+                    continue
 
-            # Spawn an instance
-            worker = self._instantiate(template)
-            if worker is not None:
-                logger.info("[AutoScaler] Auto-spawned '%s' from template '%s' for task",
-                            worker.name, template.name)
-                return worker
+                # Spawn an instance
+                worker = self._instantiate(template)
+                if worker is not None:
+                    logger.info("[AutoScaler] Auto-spawned '%s' from template '%s' for task",
+                                worker.name, template.name)
+                    return worker
 
         return None
 
@@ -247,14 +261,15 @@ class AutoScaler:
             return None
 
     def _count_active_instances(self, template_name: str) -> int:
-        """Count active instances of a template."""
+        """Count active instances of a template (caller must hold _lock)."""
         return sum(1 for _, (tmpl, _, _) in self._instances.items() if tmpl == template_name)
 
     def record_activity(self, worker_name: str) -> None:
         """Update last-activity timestamp for a spawned worker."""
-        if worker_name in self._instances:
-            tmpl, spawned, _ = self._instances[worker_name]
-            self._instances[worker_name] = (tmpl, spawned, time.monotonic())
+        with self._lock:
+            if worker_name in self._instances:
+                tmpl, spawned, _ = self._instances[worker_name]
+                self._instances[worker_name] = (tmpl, spawned, time.monotonic())
 
     # ── Reaping ───────────────────────────────────────────────────────
 
@@ -263,14 +278,17 @@ class AutoScaler:
 
         Returns the number of workers reaped.
         """
-        if not self._instances:
-            return 0
-
-        now = time.monotonic()
-        to_reap = [
-            name for name, (_, _, last_active) in self._instances.items()
-            if (now - last_active) > self._idle_ttl
-        ]
+        # Collect idle names under lock, then reap WITHOUT the lock held —
+        # _reap_instance calls engine.remove_worker (an external call) and we
+        # don't want to hold the autoscaler lock across engine mutation.
+        with self._lock:
+            if not self._instances:
+                return 0
+            now = time.monotonic()
+            to_reap = [
+                name for name, (_, _, last_active) in self._instances.items()
+                if (now - last_active) > self._idle_ttl
+            ]
 
         for name in to_reap:
             self._reap_instance(name)
@@ -285,7 +303,8 @@ class AutoScaler:
             self._engine.remove_worker(name)
         except Exception as exc:
             logger.debug("Failed to remove worker %s: %s", name, exc)
-        self._instances.pop(name, None)
+        with self._lock:
+            self._instances.pop(name, None)
         logger.debug("[AutoScaler] Reaped idle worker: %s", name)
 
     # ── Queries ───────────────────────────────────────────────────────
