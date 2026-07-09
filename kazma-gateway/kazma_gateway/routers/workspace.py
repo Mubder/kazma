@@ -235,23 +235,37 @@ def create_workspace_select_router() -> APIRouter:
 
     @router.get("/suggest")
     async def suggest_dirs(path: str = "") -> JSONResponse:
-        """Return up to 10 child directories of the given path prefix.
+        """Return up to 15 child directories matching the typed path prefix.
 
         Used by the "Select Folder" input for click-to-navigate autocomplete
         (browsers can't open a native OS folder dialog from a web page).
         Respects the optional ``KAZMA_WORKSPACE_ROOT`` confinement.
+
+        Filtering: the last path segment the user is typing becomes a
+        prefix filter — e.g. typing ``G:/Git`` resolves the parent ``G:/``
+        and filters children starting with ``Git``.
         """
         raw = (path or "").strip()
         if not raw:
             return JSONResponse({"suggestions": []})
+
+        # Split into the existing parent dir + the partial segment being typed.
+        p = Path(raw)
+        typed_segment = p.name.lower()  # the part the user is currently typing
         try:
-            base = Path(raw).resolve()
+            resolved = p.resolve()
         except Exception:
             return JSONResponse({"suggestions": []})
 
-        # If the typed path is a file or doesn't exist, suggest from its parent.
-        if not base.is_dir():
-            base = base.parent
+        # If the full typed path is an existing dir, list its children (no
+        # prefix filter — the user completed a valid dir). Otherwise list the
+        # parent's children filtered by the typed segment.
+        if resolved.is_dir():
+            base = resolved
+            prefix = ""
+        else:
+            base = resolved.parent
+            prefix = typed_segment
 
         # Confinement check.
         allow_root = os.environ.get("KAZMA_WORKSPACE_ROOT", "").strip()
@@ -264,10 +278,14 @@ def create_workspace_select_router() -> APIRouter:
         suggestions: list[dict[str, str]] = []
         try:
             for child in sorted(base.iterdir(), key=lambda c: c.name.lower()):
-                if len(suggestions) >= 10:
+                if len(suggestions) >= 15:
                     break
-                if child.is_dir() and not child.name.startswith("."):
-                    suggestions.append({"name": child.name, "path": str(child)})
+                if not child.is_dir() or child.name.startswith("."):
+                    continue
+                # Prefix-filter on the typed segment (case-insensitive).
+                if prefix and not child.name.lower().startswith(prefix):
+                    continue
+                suggestions.append({"name": child.name, "path": str(child)})
         except (PermissionError, OSError):
             pass
         return JSONResponse({"suggestions": suggestions})

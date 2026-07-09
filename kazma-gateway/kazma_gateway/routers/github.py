@@ -872,6 +872,9 @@ async def repo_activity(limit: int = 30) -> JSONResponse:
         return owner_repo
     owner, repo = owner_repo
     limit = max(1, min(limit, 50))
+    # Per-type cap so high-volume types (commits/CI) don't crowd out PRs/
+    # issues after the merge+sort+truncate. Each type gets up to `per_type`.
+    per_type = max(5, limit // 4)
 
     # GraphQL: fetch recent commits, PRs, and issues in one round-trip.
     query = """
@@ -887,12 +890,12 @@ async def repo_activity(limit: int = 30) -> JSONResponse:
     }"""
     try:
         async with GitHubClient() as gh:
-            data = await gh.graphql(query, {"owner": owner, "repo": repo, "lim": limit})
+            data = await gh.graphql(query, {"owner": owner, "repo": repo, "lim": per_type})
         items: list[dict[str, Any]] = []
         repo_node = data.get("repository") or {}
 
-        # Commits
-        for c in (((((repo_node.get("defaultBranchRef") or {}).get("target") or {}).get("history") or {}).get("nodes")) or []):
+        # Commits (capped per-type)
+        for c in (((((repo_node.get("defaultBranchRef") or {}).get("target") or {}).get("history") or {}).get("nodes")) or [])[:per_type]:
             author = c.get("author") or {}
             items.append({
                 "type": "commit", "descriptor": (c.get("oid", "") or "")[:7] + " " + (c.get("messageHeadline") or "")[:100],
@@ -900,14 +903,14 @@ async def repo_activity(limit: int = 30) -> JSONResponse:
                 "timestamp": c.get("committedDate") or "", "html_url": c.get("url") or "",
             })
         # PRs
-        for p in (((repo_node.get("pullRequests") or {}).get("nodes")) or []):
+        for p in (((repo_node.get("pullRequests") or {}).get("nodes")) or [])[:per_type]:
             items.append({
                 "type": "pr", "descriptor": f"#{p.get('number')} {p.get('title', '')[:100]}",
                 "actor": (p.get("author") or {}).get("login") or "", "timestamp": p.get("updatedAt") or "",
                 "html_url": p.get("url") or "", "state": p.get("state") or "",
             })
         # Issues
-        for i in (((repo_node.get("issues") or {}).get("nodes")) or []):
+        for i in (((repo_node.get("issues") or {}).get("nodes")) or [])[:per_type]:
             items.append({
                 "type": "issue", "descriptor": f"#{i.get('number')} {i.get('title', '')[:100]}",
                 "actor": (i.get("author") or {}).get("login") or "", "timestamp": i.get("updatedAt") or "",
@@ -915,11 +918,11 @@ async def repo_activity(limit: int = 30) -> JSONResponse:
             })
 
         # CI runs — separate REST call (actions has no GraphQL equivalent
-        # in the public schema); bounded to `limit` runs, single call.
+        # in the public schema); bounded per-type so CI doesn't dominate.
         try:
             async with GitHubClient() as gh:
-                runs = await gh.get(f"/repos/{owner}/{repo}/actions/runs", params={"per_page": limit})
-            for r in ((runs or {}).get("workflow_runs") or [])[:limit]:
+                runs = await gh.get(f"/repos/{owner}/{repo}/actions/runs", params={"per_page": per_type})
+            for r in ((runs or {}).get("workflow_runs") or [])[:per_type]:
                 items.append({
                     "type": "ci", "descriptor": f"{r.get('name', 'workflow')} ({r.get('conclusion') or r.get('status', '')})",
                     "actor": (r.get("actor") or {}).get("login", ""),
