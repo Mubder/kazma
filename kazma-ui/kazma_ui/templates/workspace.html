@@ -263,8 +263,8 @@
         </div>
       </div>
 
-      <!-- OAuth not connected state -->
-      <div x-show="ghIsGitHub && !ghOAuthConnected" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
+      <!-- OAuth not connected state (only after status has been checked) -->
+      <div x-show="ghIsGitHub && ghOAuthChecked && !ghOAuthConnected" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
         <div style="font-size:1.5rem;margin-bottom:8px;">🔒</div>
         <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">Connect to GitHub</h4>
         <p style="font-size:0.75rem;max-width:340px;margin:0 auto 12px auto;line-height:1.5;">Authorize Kazma (read-only) to see live pull requests, issues, commits, and workflow runs for <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span>.</p>
@@ -623,6 +623,7 @@ function workspaceApp() {
     githubPat: '',
     // OAuth + tabbed read-only views
     ghOAuthConnected: false,
+    ghOAuthChecked: false,
     ghOAuthConfigured: false,
     ghActiveTab: 'overview',
     ghPrs: [],
@@ -632,10 +633,15 @@ function workspaceApp() {
     ghReleases: [],
 
     async init() {
+      // OAuth status is a cheap local ConfigStore read — resolve it FIRST
+      // (non-blocking) so the GitHub card shows the correct connected /
+      // disconnected state immediately, before the slower external loads
+      // finish. Without this the card flashes "Connect to GitHub" on a
+      // hard refresh while refreshAll() blocks on GitHub API calls.
+      this.loadOAuthStatus();
       await this.loadWorkspaces();
       await this.refreshAll();
       await this.loadBookmarks();
-      await this.loadOAuthStatus();
 
       // Listen for the OAuth callback tab signaling completion.
       window.addEventListener('message', (e) => {
@@ -877,6 +883,7 @@ function workspaceApp() {
           const data = await resp.json();
           this.ghOAuthConfigured = data.configured || false;
           this.ghOAuthConnected = data.connected || false;
+          this.ghOAuthChecked = true;
           // If just connected, refresh the overview + first tab.
           if (this.ghOAuthConnected) {
             await this.loadGitHubStatus();
