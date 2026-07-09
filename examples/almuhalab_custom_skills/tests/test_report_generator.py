@@ -47,7 +47,7 @@ def sample_correlation():
             direction=CorrelationDirection.POSITIVE,
             severity=ImpactSeverity.MEDIUM,
             description="Brent at $90 — favorable for contracts",
-            description_ar="برنت عند 90$ — م有利 للتعهدات",
+            description_ar="برنت عند 90$ — مفيد للتعهدات",
             confidence=0.9,
         ),
         CorrelatedFactor(

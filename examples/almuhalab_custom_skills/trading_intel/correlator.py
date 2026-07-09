@@ -194,7 +194,7 @@ class TradeDataCorrelator:
                     direction=CorrelationDirection.POSITIVE,
                     severity=ImpactSeverity.MEDIUM,
                     description=f"Brent crude at ${oil_price:.1f} — favorable for contract pricing",
-                    description_ar=f"برنت عند ${oil_price:.1f} — م有利 لتعهدات الأسعار",
+                    description_ar=f"برنت عند ${oil_price:.1f} — مفيد لتعهدات الأسعار",
                     confidence=0.9,
                 ))
             elif oil_price <= OIL_LOW_THRESHOLD:

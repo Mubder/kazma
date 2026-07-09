@@ -218,7 +218,8 @@ class KazmaAppBuilder:
 
         # i18n
         import contextvars
-        from kazma_ui.i18n import make_translator as _make_translator
+        import json as _json
+        from kazma_ui.i18n import make_translator as _make_translator, TRANSLATIONS
 
         _startup_lang = _lang
         self._current_lang = contextvars.ContextVar("_current_lang", default=_startup_lang)
@@ -226,9 +227,13 @@ class KazmaAppBuilder:
         def _dynamic_translate(key: str, **kwargs) -> str:
             return _make_translator(self._current_lang.get())(key, **kwargs)
 
+        # Inject the full translation dict as JSON so Alpine.js expressions
+        # can call a client-side t() — server-side t() only covers Jinja2.
+        _translations_json = _json.dumps(TRANSLATIONS, ensure_ascii=False)
         self.templates.env.globals["t"] = _dynamic_translate
         self.templates.env.globals["lang"] = _startup_lang
         self.templates.env.globals["dir"] = "rtl" if _startup_lang == "ar" else "ltr"
+        self.templates.env.globals["translations_json"] = _translations_json
 
         @self.app.middleware("http")
         async def language_middleware(request: Request, call_next):

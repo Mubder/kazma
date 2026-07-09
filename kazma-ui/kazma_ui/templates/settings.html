@@ -506,10 +506,10 @@
 
         <div style="margin-top:16px;padding:12px 16px;background:rgba(94,106,210,0.06);border:1px solid var(--border);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
             <div>
-                <strong>Gateway Adapters</strong>
-                <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">Connector changes are auto-applied on save. Use this button to manually reload all adapters without restarting the server.</p>
+                <strong>{{ t('settings.gateway_adapters') }}</strong>
+                <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">{{ t('settings.gateway_adapters_desc') }}</p>
             </div>
-            <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving" x-text="saving ? 'Refreshing...' : '🔄 Refresh Gateway'"></button>
+            <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving" x-text="saving ? t('settings.refreshing') : t('settings.refresh_gateway')"></button>
         </div>
     </div>
 
@@ -703,7 +703,7 @@
             <div x-show="shortcutConflicts.length > 0" style="padding:12px;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:var(--radius);margin-bottom:16px">
                 <div style="color:var(--warning);font-weight:600;margin-bottom:4px">{{ t('settings.conflicts_detected') }}</div>
                 <template x-for="c in shortcutConflicts" :key="c.action1 + c.action2">
-                    <div style="font-size:0.85rem;color:var(--text-secondary)" x-text="`"${c.action1}" and "${c.action2}" both use ${c.keys}`"></div>
+                    <div style="font-size:0.85rem;color:var(--text-secondary)" x-text="`"${c.action1}" ` + t('settings.kb_and') + ` "${c.action2}" ` + t('settings.kb_both_use') + ` ${c.keys}`"></div>
                 </template>
             </div>
 
@@ -716,7 +716,7 @@
                            @keydown.prevent="captureShortcut(action, $event)"
                            @blur="clearCaptureHint(action)"
                            style="width:180px;text-align:center;font-family:var(--font-mono);cursor:pointer"
-                           :placeholder="capturingAction === action ? 'Press keys...' : 'Click & press keys'">
+                           :placeholder="capturingAction === action ? t('settings.kb_press_keys') : t('settings.kb_click_press')">
                 </div>
             </template>
         </div>
@@ -797,7 +797,7 @@
                                 <span class="toggle-slider"></span>
                             </label>
                             <span class="tool-name" x-text="tool.name"></span>
-                            <span class="badge badge-basic" x-text="tool.category || 'general'" style="font-size:0.7rem"></span>
+                            <span class="badge badge-basic" x-text="tool.category || t('settings.category_general')" style="font-size:0.7rem"></span>
                             <span style="flex:1"></span>
                             <span style="font-size:0.8rem;color:var(--text-muted)" x-text="tool.description || ''" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
                         </div>

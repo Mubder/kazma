@@ -11,7 +11,7 @@
             <a href="/" class="breadcrumb-link">{{ t('header.home') }}</a>
             {% if active_page and active_page != 'workspace' %}
             <span class="breadcrumb-sep">/</span>
-            <span class="breadcrumb-current">{{ active_page|title }}</span>
+            <span class="breadcrumb-current">{{ t('nav.' ~ active_page) }}</span>
             {% endif %}
         </nav>
         {% endblock %}

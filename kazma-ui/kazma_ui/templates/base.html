@@ -65,6 +65,26 @@
     {# Modal Container #}
     {% include "components/modal.html" %}
 
+    {# i18n: inject translations + language for client-side (Alpine) use #}
+    <script>
+        window.KAZMA_I18N = {{ translations_json|safe }};
+        window.KAZMA_LANG = '{{ lang|default("en") }}';
+        // Client-side t() — mirrors the Python t() for Alpine x-text expressions.
+        window.t = function(key) {
+            var entry = window.KAZMA_I18N ? window.KAZMA_I18N[key] : null;
+            if (!entry) return key;
+            var lang = window.KAZMA_LANG || 'en';
+            var text = entry[lang] || entry['en'] || key;
+            // Simple {var} interpolation: t('key', {count: 3}) → replaces {count}
+            if (arguments.length > 1 && typeof arguments[1] === 'object') {
+                for (var k in arguments[1]) {
+                    text = text.split('{' + k + '}').join(arguments[1][k]);
+                }
+            }
+            return text;
+        };
+    </script>
+
     {# Core JS #}
     <script src="/static/js/app.js"></script>
 

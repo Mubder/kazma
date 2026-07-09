@@ -120,7 +120,7 @@ class TestKeyUIStrings:
         assert t("chat.send", lang="ar") == "إرسال"
 
     def test_thinking_arabic(self) -> None:
-        assert "كاظمة" in t("chat.thinking", lang="ar")
+        assert "كاظمه" in t("chat.thinking", lang="ar")
 
 
 # ═══════════════════════════════════════════════════════════════════

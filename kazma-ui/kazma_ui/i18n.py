@@ -60,9 +60,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.loading_sessions": {"en": "Loading sessions…", "ar": "جاري تحميل الجلسات…"},
     "chat.search": {"en": "Search", "ar": "بحث"},
     "chat.new": {"en": "New", "ar": "جديد"},
-    "chat.welcome_title": {"en": "Kazma", "ar": "كاظمة"},
+    "chat.welcome_title": {"en": "Kazma", "ar": "كاظمه"},
     "chat.welcome_subtitle": {"en": "How can I help you today?", "ar": "كيف يمكنني مساعدتك اليوم؟"},
-    "chat.thinking": {"en": "Kazma is thinking…", "ar": "كاظمة تفكر…"},
+    "chat.thinking": {"en": "Kazma is thinking…", "ar": "كاظمه تفكر…"},
     "chat.placeholder": {
         "en": "Type your message… (Enter to send, Shift+Enter for newline)",
         "ar": "اكتب رسالتك… (Enter للإرسال، Shift+Enter لسطر جديد)",
@@ -123,7 +123,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.col_duration": {"en": "Duration", "ar": "المدة"},
     "dashboard.col_cost": {"en": "Cost", "ar": "التكلفة"},
     "dashboard.no_traces": {"en": "No traces yet", "ar": "لا توجد تتبعات بعد"},
-    "dashboard.no_traces_hint": {"en": "Traces appear when Kazma processes requests", "ar": "تظهر التتبعات عندما تعالج كاظمة الطلبات"},
+    "dashboard.no_traces_hint": {"en": "Traces appear when Kazma processes requests", "ar": "تظهر التتبعات عندما تعالج كاظمه الطلبات"},
     "dashboard.na": {"en": "N/A", "ar": "غير متوفر"},
 
     # ── Settings ──────────────────────────────────────────────────────
@@ -269,7 +269,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.command_space_separated": {"en": "Command (space-separated)", "ar": "الأمر (مفصول بمسافات)"},
     "settings.url": {"en": "URL", "ar": "العنوان"},
     "settings.env_vars_json": {"en": "Environment Variables (JSON)", "ar": "متغيرات البيئة (JSON)"},
-    "settings.no_mcp_servers": {"en": "No MCP servers configured. Add one to extend Kazma's tool capabilities.", "ar": "لا توجد خوادم MCP مُعدة. أضف واحداً لتوسيع قدرات أدوات كاظمة."},
+    "settings.no_mcp_servers": {"en": "No MCP servers configured. Add one to extend Kazma's tool capabilities.", "ar": "لا توجد خوادم MCP مُعدة. أضف واحداً لتوسيع قدرات أدوات كاظمه."},
     "settings.tools_count": {"en": "tools", "ar": "أدوات"},
 
     # Settings — Skills tab
@@ -340,7 +340,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # Settings — Import/Export tab
     "settings.export_config": {"en": "Export Configuration", "ar": "تصدير الإعدادات"},
-    "settings.download_complete_config": {"en": "Download your complete Kazma configuration.", "ar": "نزّل إعدادات كاظمة الكاملة."},
+    "settings.download_complete_config": {"en": "Download your complete Kazma configuration.", "ar": "نزّل إعدادات كاظمه الكاملة."},
     "settings.download_config": {"en": "Download Config", "ar": "تنزيل الإعدادات"},
     "settings.import_config": {"en": "Import Configuration", "ar": "استيراد الإعدادات"},
     "settings.upload_or_paste": {"en": "Upload or paste a configuration file to import settings.", "ar": "ارفع أو الصق ملف إعدادات لاستيراد البيانات."},
@@ -531,6 +531,143 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "common.type": {"en": "Type", "ar": "النوع"},
     "common.enabled": {"en": "Enabled", "ar": "مفعّل"},
     "common.disabled": {"en": "Disabled", "ar": "معطّل"},
+
+    # ── Chat: missing key ──────────────────────────────────────────
+    "chat.model": {"en": "Model", "ar": "النموذج"},
+
+    # ── Agents: expanded keys ──────────────────────────────────────
+    "agents.ready": {"en": "Ready — waiting for messages", "ar": "جاهز — بانتظار الرسائل"},
+    "agents.thinking": {"en": "Thinking...", "ar": "يفكر..."},
+    "agents.acting": {"en": "Acting...", "ar": "ينفذ..."},
+    "agents.stopped": {"en": "Stopped", "ar": "متوقف"},
+    "agents.start": {"en": "Start", "ar": "تشغيل"},
+    "agents.stop": {"en": "Stop", "ar": "إيقاف"},
+    "agents.refresh": {"en": "Refresh now", "ar": "تحديث الآن"},
+    "agents.tool_calls": {"en": "Tool Calls", "ar": "استدعاءات الأدوات"},
+    "agents.llm_calls": {"en": "LLM Calls", "ar": "استدعاءات النموذج"},
+    "agents.sessions": {"en": "Sessions", "ar": "الجلسات"},
+    "agents.tool_executions": {"en": "Tool Execution History", "ar": "سجل تنفيذ الأدوات"},
+    "agents.reasoning_steps": {"en": "Reasoning Steps", "ar": "خطوات التفكير"},
+    "agents.no_executions": {"en": "No tool executions yet", "ar": "لا توجد عمليات تنفيذ بعد"},
+    "agents.no_traces": {"en": "No reasoning traces yet", "ar": "لا توجد آثار تفكير بعد"},
+    "agents.config_title": {"en": "Configuration", "ar": "الإعدادات"},
+    "agents.name": {"en": "Name", "ar": "الاسم"},
+    "agents.version": {"en": "Version", "ar": "الإصدار"},
+    "agents.base_url": {"en": "Base URL", "ar": "عنوان الخدمة"},
+    "agents.max_tokens": {"en": "Max Tokens", "ar": "الحد الأقصى للرموز"},
+    "agents.temperature": {"en": "Temperature", "ar": "درجة الحرارة"},
+    "agents.language": {"en": "Language", "ar": "اللغة"},
+    "agents.registered_tools": {"en": "Registered Tools", "ar": "الأدوات المسجّلة"},
+    "agents.no_tools": {"en": "No tools registered", "ar": "لا توجد أدوات مسجّلة"},
+    "agents.calls": {"en": "calls", "ar": "استدعاء"},
+    "agents.steps": {"en": "steps", "ar": "خطوة"},
+    "agents.tokens": {"en": "tokens", "ar": "رمز"},
+    "agents.executions_hint": {"en": "Tool calls appear here when the agent runs", "ar": "تظهر استدعاءات الأدوات هنا عند تشغيل الوكيل"},
+    "agents.traces_hint": {"en": "LLM reasoning steps from LangGraph appear here", "ar": "تظهر خطوات تفكير النموذج من LangGraph هنا"},
+    "agents.state_label": {"en": "State", "ar": "الحالة"},
+    "agents.state_hint": {"en": "idle / thinking / acting", "ar": "خامل / يفكر / ينفذ"},
+    "agents.waiting": {"en": "waiting for messages", "ar": "بانتظار الرسائل"},
+    "agents.idle": {"en": "idle", "ar": "خامل"},
+    "agents.executions": {"en": "executions", "ar": "تنفيذ"},
+    "agents.inferences": {"en": "inferences", "ar": "استدلال"},
+    "agents.trace_entries": {"en": "trace entries", "ar": "مدخلات التتبع"},
+    "agents.available": {"en": "available", "ar": "متاح"},
+
+    # ── Swarm: workflow editor ─────────────────────────────────────
+    "swarm.example": {"en": "📋 Example", "ar": "📋 مثال"},
+    "swarm.clear_all": {"en": "🗑️ Clear All", "ar": "🗑️ مسح الكل"},
+    "swarm.master_task_prompt": {"en": "📝 Master Task Prompt", "ar": "📝 المهمة الرئيسية"},
+    "swarm.master_task_ph": {"en": "What should the sequential pipeline process?", "ar": "ما الذي يجب أن تعالجه السلسلة المتسلسلة؟"},
+    "swarm.step_timeout": {"en": "⏱️ Step Timeout (sec)", "ar": "⏱️ مهلة الخطوة (ثانية)"},
+    "swarm.fallback_worker": {"en": "🛡️ Fallback Worker", "ar": "🛡️ العامل البديل"},
+    "swarm.none_fail_closed": {"en": "None (Fail Closed)", "ar": "لا شيء (فشل مغلق)"},
+    "swarm.pipeline_stages": {"en": "🔗 Pipeline Sequence Stages", "ar": "🔗 مراحل السلسلة المتسلسلة"},
+    "swarm.add_step": {"en": "➕ Add Step", "ar": "➕ إضافة مرحلة"},
+    "swarm.run_pipeline": {"en": "🚀 Run Visual Pipeline", "ar": "🚀 تشغيل السلسلة المرئية"},
+    "swarm.pipeline_gated": {"en": "⏸️ Pipeline Gated: Awaiting Approval", "ar": "⏸️ السلسلة متوقفة: بانتظار الموافقة"},
+    "swarm.approve": {"en": "Approve", "ar": "موافقة"},
+    "swarm.reject": {"en": "Reject", "ar": "رفض"},
+    "swarm.pipeline_logs": {"en": "🖥️ Pipeline Run Logs", "ar": "🖥️ سجلات تشغيل السلسلة"},
+    "swarm.rerendering": {"en": "🔄 Re-rendering...", "ar": "🔄 إعادة الرسم..."},
+
+    # ── Swarm: pattern dropdowns ───────────────────────────────────
+    "swarm.pattern.dispatch": {"en": "🎯 Dispatch — Single worker execution", "ar": "🎯 إرسال — تنفيذ عامل واحد"},
+    "swarm.pattern.broadcast": {"en": "📢 Broadcast — All workers in parallel", "ar": "📢 بث — جميع العمال بالتوازي"},
+    "swarm.pattern.pipeline": {"en": "🔗 Pipeline — Sequential chain (A → B → C)", "ar": "🔗 سلسلة — تسلسل متتالي (أ ← ب ← ج)"},
+    "swarm.pattern.fan_out": {"en": "🌀 Fan-Out — Parallel execution + aggregation", "ar": "🌀 توزيع — تنفيذ متوازي + تجميع"},
+    "swarm.pattern.consult": {"en": "💬 Consult — Multi-opinion + synthesis", "ar": "💬 استشارة — آراء متعددة + توليف"},
+    "swarm.pattern.conditional": {"en": "🔀 Conditional — Route based on evaluation", "ar": "🔀 شرطي — توجيه بناءً على التقييم"},
+
+    # ── Swarm: aggregation strategies ──────────────────────────────
+    "swarm.agg.collect": {"en": "Collect — Return all results", "ar": "تجميع — إرجاع كل النتائج"},
+    "swarm.agg.first_valid": {"en": "First Valid — Earliest non-error", "ar": "الأول الصالح — أقدم نتيجة بدون خطأ"},
+    "swarm.agg.merge_all": {"en": "Merge All — Combine outputs", "ar": "دمج الكل — جمع المخرجات"},
+    "swarm.agg.vote": {"en": "Vote — Majority agreement", "ar": "تصويت — أغلبية"},
+    "swarm.agg.synthesize": {"en": "Synthesize — LLM-powered consolidation", "ar": "توليف — دمج مدعوم بالنموذج"},
+
+    # ── Swarm: results sub-tabs ────────────────────────────────────
+    "swarm.results.pipeline": {"en": "🔗 Pipeline", "ar": "🔗 سلسلة"},
+    "swarm.results.fan_out": {"en": "🌀 Fan-Out", "ar": "🌀 توزيع"},
+    "swarm.results.consult": {"en": "💬 Consult", "ar": "💬 استشارة"},
+    "swarm.results.conditional": {"en": "🔀 Conditional", "ar": "🔀 شرطي"},
+    "swarm.results.dispatch": {"en": "🎯 Dispatch", "ar": "🎯 إرسال"},
+
+    # ── Swarm: worker metrics ──────────────────────────────────────
+    "swarm.success": {"en": "Success", "ar": "النجاح"},
+    "swarm.avg_latency": {"en": "Avg Latency", "ar": "متوسط الاستجابة"},
+    "swarm.cost": {"en": "Cost", "ar": "التكلفة"},
+    "swarm.start_worker": {"en": "Start worker", "ar": "تشغيل العامل"},
+    "swarm.stop_worker": {"en": "Stop worker", "ar": "إيقاف العامل"},
+    "swarm.edit_worker": {"en": "Edit worker", "ar": "تعديل العامل"},
+    "swarm.remove_worker": {"en": "Remove worker", "ar": "إزالة العامل"},
+    "swarm.view_logs": {"en": "View logs", "ar": "عرض السجلات"},
+
+    # ── Swarm: system prompt + output routing ──────────────────────
+    "swarm.system_prompt_desc": {"en": "— worker personality/instructions (optional)", "ar": "— شخصية/تعليمات العامل (اختياري)"},
+    "swarm.system_prompt_ph": {"en": "You are a senior backend engineer who writes clean, tested code...", "ar": "أنت مهندس خلفية خبير تكتب كوداً نظيفاً ومختبراً..."},
+    "swarm.output_routing": {"en": "📤 Output Routing", "ar": "📤 توجيه المخرجات"},
+    "swarm.output_routing_desc": {"en": "Mirror swarm results to a Telegram chat (in addition to the originating chat). Use a dedicated swarm bot for DM routing, or the main bot for group routing.", "ar": "إرسال نتائج السرب إلى محادثة تيليجرام (بالإضافة للمحادثة الأصلية). استخدم بوت سرب مخصص للتوجيه المباشر، أو البوت الرئيسي للمجموعات."},
+    "swarm.enable_routing": {"en": "Enable output routing", "ar": "تفعيل توجيه المخرجات"},
+    "swarm.swarm_bot_token": {"en": "Dedicated Swarm Bot Token", "ar": "رمز بوت السرب المخصص"},
+    "swarm.swarm_bot_token_hint": {"en": "(optional — for separate bot DM)", "ar": "(اختياري — لبوت منفصل مباشر)"},
+    "swarm.swarm_bot_token_desc": {"en": "Create a separate bot via @BotFather, send it /start, then paste the token here. Output will be sent via this bot directly (bypasses group membership issues).", "ar": "أنشئ بوتاً منفصلاً عبر @BotFather، أرسل /start، ثم الصق الرمز هنا. ستُرسل المخرجات عبر هذا البوت مباشرة."},
+    "swarm.target_chat_id": {"en": "Target Chat ID", "ar": "معرّف المحادثة المستهدفة"},
+    "swarm.target_chat_id_desc": {"en": "Your DM chat_id (positive number from the dedicated bot) or a group chat_id (negative).", "ar": "معرّف المحادثة المباشرة (رقم موجب من البوت المخصص) أو معرّف المجموعة (سالب)."},
+    "swarm.save": {"en": "Save", "ar": "حفظ"},
+    "swarm.clear": {"en": "Clear", "ar": "مسح"},
+
+    # ── Swarm: task history filters ────────────────────────────────
+    "swarm.filter_type": {"en": "Filter by type", "ar": "تصفية حسب النوع"},
+    "swarm.filter_status": {"en": "Filter by status", "ar": "تصفية حسب الحالة"},
+    "swarm.status_completed": {"en": "Completed", "ar": "مكتمل"},
+    "swarm.status_failed": {"en": "Failed", "ar": "فشل"},
+    "swarm.status_timeout": {"en": "Timeout", "ar": "انتهت المهلة"},
+    "swarm.status_cancelled": {"en": "Cancelled", "ar": "ملغى"},
+    "swarm.status_partial": {"en": "Partial", "ar": "جزئي"},
+    "swarm.tasks_count": {"en": "tasks", "ar": "مهمة"},
+    "swarm.prev": {"en": "← Prev", "ar": "→ السابق"},
+    "swarm.next": {"en": "Next →", "ar": "التالي ←"},
+    "swarm.page": {"en": "Page", "ar": "صفحة"},
+
+    # ── Swarm: playground ──────────────────────────────────────────
+    "swarm.select_worker": {"en": "Select a single worker for dispatch", "ar": "اختر عاملاً واحداً للإرسال"},
+    "swarm.metadata_json": {"en": "Metadata JSON", "ar": "بيانات وصفية JSON"},
+    "swarm.playground_idle": {"en": "Playground terminal idle. Set your inputs and click \"Run Task\" to observe live trace logs...", "ar": "الطرفية خاملة. اضبط المدخلات واضغط \"تشغيل المهمة\" لمراقبة السجلات المباشرة..."},
+
+    # ── Settings: gateway adapters ─────────────────────────────────
+    "settings.gateway_adapters": {"en": "Gateway Adapters", "ar": "محولات البوابة"},
+    "settings.gateway_adapters_desc": {"en": "Connector changes are auto-applied on save. Use this button to manually reload all adapters without restarting the server.", "ar": "تُطبّق تغييرات المحولات تلقائياً عند الحفظ. استخدم هذا الزر لإعادة تحميل جميع المحولات يدوياً دون إعادة تشغيل الخادم."},
+    "settings.refresh_gateway": {"en": "🔄 Refresh Gateway", "ar": "🔄 تحديث البوابة"},
+    "settings.refreshing": {"en": "Refreshing...", "ar": "جارٍ التحديث..."},
+
+    # ── Settings: keyboard shortcuts ───────────────────────────────
+    "settings.kb_and": {"en": "and", "ar": "و"},
+    "settings.kb_both_use": {"en": "both use", "ar": "كلاهما يستخدم"},
+    "settings.kb_press_keys": {"en": "Press keys...", "ar": "اضغط المفاتيح..."},
+    "settings.kb_click_press": {"en": "Click & press keys", "ar": "انقر واضغط المفاتيح"},
+
+    # ── Settings: tool registry ────────────────────────────────────
+    "settings.category_general": {"en": "general", "ar": "عام"},
 }
 
 

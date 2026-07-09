@@ -47,7 +47,7 @@ CREATE INDEX IF NOT EXISTS idx_user_roles_division ON user_roles(division);
 DIVISIONS: dict[str, dict[str, Any]] = {
     "gas_oil": {
         "name": "Gas & Oil Trading",
-        "name_ar": "تتجارة الغاز والنفط",
+        "name_ar": "تجارة الغاز والنفط",
         "roles": ["admin", "trader", "analyst", "viewer"],
         "sensitive_data": ["contracts", "pricing", "suppliers"],
     },
@@ -59,7 +59,7 @@ DIVISIONS: dict[str, dict[str, Any]] = {
     },
     "general_trading": {
         "name": "General Trading",
-        "name_ar": "التجارة العاملة",
+        "name_ar": "التجارة العامة",
         "roles": ["admin", "buyer", "seller", "viewer"],
         "sensitive_data": ["inventory", "suppliers", "pricing"],
     },

@@ -562,9 +562,9 @@ class KazmaTUI(App[None]):
                     profile = registry.get_active_profile() if registry else {}
                     model = profile.get("model", "?")
                     provider = profile.get("provider", "?")
-                    header_text = f"╭─ [bold $primary]كازما[/] ─╮  [dim]{provider} / {model}[/]"
+                    header_text = f"╭─ [bold $primary]كاظمه[/] ─╮  [dim]{provider} / {model}[/]"
                 except Exception:
-                    header_text = "╭─ [bold $primary]كازما[/] ─╮  [dim]تكوين نشط[/]"
+                    header_text = "╭─ [bold $primary]كاظمه[/] ─╮  [dim]تكوين نشط[/]"
                 header.update(header_text)
             else:
                 if hasattr(header, "_build_header_text"):
