@@ -234,7 +234,7 @@ assert is_sensitive_path("/api/workspaces")
 | **S2** | CI root suite, TUI rename, badges/version | ✅ **Done 2026-07-09** |
 | **S3** | Dual registries, routes, task_lifecycle, sse_bridge | ✅ Partial (history + SSE extracted; dispatch still large) |
 | **S4** | Coverage gaps | ✅ Wave-1–3 (+ providers, sse_bridge tests) |
-| **S5** | Debt / polish | 🟡 Lifespan migration + task_control done; telegram/settings splits remain |
+| **S5** | Debt / polish | 🟡 worker_factory + settings_mcp + lifespan/task_control; telegram/model_registry remain |
 
 ---
 

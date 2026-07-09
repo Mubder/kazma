@@ -59,7 +59,10 @@ from kazma_core.swarm.task_lifecycle import record_task as _hist_record_task
 from kazma_core.swarm.task_lifecycle import update_task as _hist_update_task
 from kazma_core.swarm.task_store import TaskStore
 from kazma_core.swarm.tracing import TracingEmitter
-from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
+from kazma_core.swarm.worker import SwarmWorker
+from kazma_core.swarm.worker_factory import create_worker as _create_worker_impl
+from kazma_core.swarm.worker_factory import register_worker as _register_worker
+from kazma_core.swarm.worker_factory import unregister_worker as _unregister_worker
 
 logger = logging.getLogger(__name__)
 
@@ -168,47 +171,24 @@ class SwarmEngine:
             self.add_worker(worker_config)
 
     def _create_worker(self, worker_config: WorkerConfig) -> SwarmWorker:
-        """Instantiate a concrete worker from its config.
-
-        ``telegram_bot`` is accepted for backward compatibility with
-        persisted configs but now resolves to an :class:`InProcessWorker`
-        (the legacy ``TelegramWorker`` subprocess path was vestigial and is
-        removed).
-        """
-        if worker_config.type in ("in_process", "telegram_bot"):
-            return InProcessWorker(
-                name=worker_config.name,
-                role=worker_config.role,
-                model=worker_config.model,
-                provider=worker_config.provider,
-                capabilities=worker_config.capabilities,
-                system_prompt=getattr(worker_config, "system_prompt", ""),
-            )
-        raise ValueError(f"Unknown worker type: '{worker_config.type}'")
+        """Instantiate a concrete worker from its config (delegates to worker_factory)."""
+        return _create_worker_impl(worker_config)
 
     def add_worker(self, worker_config: WorkerConfig) -> SwarmWorker:
         """Register a worker in the unified registry."""
-        if worker_config.name in self._workers:
-            raise ValueError(f"Worker '{worker_config.name}' already registered.")
-
-        worker = self._create_worker(worker_config)
-        self._workers[worker_config.name] = worker
-        logger.info(
-            "[SwarmEngine] registered worker '%s' (type=%s)",
-            worker_config.name,
-            worker_config.type,
+        return _register_worker(
+            self._workers,
+            worker_config,
+            factory=self._create_worker,
         )
-        return worker
 
     def remove_worker(self, name: str) -> SwarmWorker:
         """Unregister a worker by name and clean up reliability state."""
-        if name not in self._workers:
-            raise KeyError(f"Worker '{name}' not found.")
-        worker = self._workers.pop(name)
-        # Clean up reliability-layer state to prevent memory leaks.
-        self._reliability.cleanup_worker(name)
-        logger.info("[SwarmEngine] removed worker '%s'", name)
-        return worker
+        return _unregister_worker(
+            self._workers,
+            name,
+            on_removed=self._reliability.cleanup_worker,
+        )
 
     def get_worker(self, name: str) -> SwarmWorker | None:
         """Return a worker by name."""
