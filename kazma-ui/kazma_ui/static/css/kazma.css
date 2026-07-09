@@ -112,9 +112,26 @@
 /* ── 2. Reset ───────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 14px; -webkit-font-smoothing: antialiased; }
-/* Arabic mode: bump the base font-size up — Arabic glyphs need slightly
-   larger rendering for readability at the same em values. */
-html[dir="rtl"] { font-size: 15px; }
+/* Arabic mode: bump the base font-size up — Arabic glyphs need larger
+   rendering for readability. 16px base makes 0.7rem ≈ 11.2px (readable)
+   vs 9.8px at the 14px default. */
+html[dir="rtl"] { font-size: 16px; }
+/* Arabic mode: enforce a minimum readable font-size on the elements
+   that commonly use tiny inline 0.6–0.7rem values (badges, hints,
+   metric labels/sub-text, breadcrumbs, page-specific spans). Arabic
+   script is illegible below ~11px. Code blocks/terminals are excluded. */
+html[dir="rtl"] .badge,
+html[dir="rtl"] .metric-label,
+html[dir="rtl"] .metric-sub,
+html[dir="rtl"] .breadcrumb-current,
+html[dir="rtl"] .breadcrumb-link,
+html[dir="rtl"] .text-muted,
+html[dir="rtl"] .text-tertiary,
+html[dir="rtl"] .session-meta,
+html[dir="rtl"] .message-meta,
+html[dir="rtl"] .text-xs {
+  font-size: 0.82rem !important;
+}
 /* MCP modal — constrain width */
 .modal-body form {
   max-width: 640px;
