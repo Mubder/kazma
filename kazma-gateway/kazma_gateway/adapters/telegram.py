@@ -974,25 +974,13 @@ class TelegramAdapter(BaseAdapter):
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             )
 
-        # Resolve chat_id
-        chat_id = outbound.context_metadata.get("chat_id")
-        if not chat_id:
-            if ":" in outbound.target_id:
-                try:
-                    chat_id = int(outbound.target_id.split(":", 1)[1])
-                except (ValueError, IndexError):
-                    logger.error(
-                        "[telegram] Cannot parse chat_id from target_id: %s",
-                        outbound.target_id,
-                    )
-                    return False
-            else:
-                logger.error("[telegram] No chat_id available for send()")
-                return False
+        from kazma_gateway.adapters.telegram_send import chunk_message, resolve_chat_id
 
-        # Split long messages into chunks (Telegram limit: 4096 chars)
-        text = outbound.text
-        chunks = [text[i:i + 4096] for i in range(0, len(text), 4096)] if text else [""]
+        chat_id = resolve_chat_id(outbound.context_metadata, outbound.target_id)
+        if chat_id is None:
+            return False
+
+        chunks = chunk_message(outbound.text)
 
         # Include inline keyboard only on the last chunk
         reply_markup = outbound.context_metadata.get("reply_markup")
