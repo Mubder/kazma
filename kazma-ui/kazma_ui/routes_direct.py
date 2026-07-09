@@ -476,7 +476,7 @@ def register_direct_routes(self: Any) -> None:
         if graph_ref is None:
             return _JSONResponse({"error": "Graph not available"}, status_code=503)
 
-        # H-2 fix attempt: basic ownership check using session_store context (similar to gateway).
+        # H-2 fix: enforce ownership check - block if ownership mismatch
         try:
             if self.session_store is not None:
                 ctx = None
@@ -488,7 +488,8 @@ def register_direct_routes(self: Any) -> None:
                     owner = ctx.get("sender_id") or ctx.get("owner") or ctx.get("session_id")
                     caller_session = body.get("session_id")
                     if owner and caller_session and str(owner) != str(caller_session):
-                        logger.warning("[HITL] Web approve ownership mismatch for thread %s", thread_id)
+                        logger.warning("[HITL] Web approve ownership mismatch for thread %s: owner=%s caller=%s", thread_id, owner, caller_session)
+                        return _JSONResponse({"error": "Ownership mismatch: you cannot approve another user's request"}, status_code=403)
         except Exception as _e:
             logger.debug("[HITL] Ownership check failed: %s", _e)
 

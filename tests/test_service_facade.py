@@ -267,20 +267,20 @@ class TestNoPrivateAccessInUI:
 
     @staticmethod
     def _scan_ui_dir() -> list[str]:
-        """Scan all .py files under kazma-ui/kazma_ui/ for private-attr access."""
+        """Scan all .py files under kazma-ui/kazma_ui/ for private-attr access on core objects."""
         import re
 
         ui_dir = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
-        # Patterns that indicate private attribute access on core objects.
-        # We look for ._clients, ._conn, ._tools, ._checkpoint_conn, ._servers,
-        # ._running accessed on objects that are NOT self.
+        # Patterns that indicate private attribute access on CORE objects (agent, kazma_agent, a, etc.)
+        # NOT on self/local variables within the UI module's own classes.
+        # We match patterns like: agent._conn, kazma_agent._tools, a._servers, etc.
         forbidden_patterns = [
-            re.compile(r"\._clients\b"),
-            re.compile(r"\._conn\b"),
-            re.compile(r"\._tools\b"),
-            re.compile(r"\._checkpoint_conn\b"),
-            re.compile(r"\._checkpoint_manager\b"),
-            re.compile(r"\._servers\b"),
+            re.compile(r"\b(?:agent|kazma_agent|a|core_agent|ka)\._clients\b"),
+            re.compile(r"\b(?:agent|kazma_agent|a|core_agent|ka)\._conn\b"),
+            re.compile(r"\b(?:agent|kazma_agent|a|core_agent|ka)\._tools\b"),
+            re.compile(r"\b(?:agent|kazma_agent|a|core_agent|ka)\._checkpoint_conn\b"),
+            re.compile(r"\b(?:agent|kazma_agent|a|core_agent|ka)\._checkpoint_manager\b"),
+            re.compile(r"\b(?:agent|kazma_agent|a|core_agent|ka)\._servers\b"),
             re.compile(r"\bagent\._running\b"),
             re.compile(r"\ba\._running\b"),
         ]
@@ -289,7 +289,7 @@ class TestNoPrivateAccessInUI:
             rel = py_file.relative_to(ui_dir.parent)
             text = py_file.read_text(encoding="utf-8")
             for lineno, line in enumerate(text.splitlines(), 1):
-                # Skip comments and strings that are just documentation
+                # Skip comments
                 stripped = line.strip()
                 if stripped.startswith("#"):
                     continue

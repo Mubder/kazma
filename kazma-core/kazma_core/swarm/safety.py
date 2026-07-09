@@ -27,6 +27,7 @@ _EXTENDED_DANGER = DEFAULT_DANGER_TOOLS + [
     "spawn_agents",
     "schedule_task",
     "cancel_scheduled",
+    "run_tests",  # MCP IDE test runner tool
 ]
 
 # Tools classified as "sensitive reads" — allowed but logged.

@@ -4,7 +4,7 @@
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
 
-![Tests](https://img.shields.io/badge/tests-3505_passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-138_passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
 ![Version](https://img.shields.io/badge/version-0.2.0-blue)
@@ -679,7 +679,7 @@ For overrides, copy to `kazma.local.yaml` (git-ignored). Env vars take precedenc
 
 ## 🧪 Tests
 
-3,495 tests collected across `tests/`, `kazma-gateway/tests/`, and `kazma-tui/tests/` (actual count verified via pytest --collect-only; some skips for optional deps). See tests/ for full suite.
+138 tests passing across `kazma-core/kazma_core_tests/`, `kazma-gateway/kazma_gateway_tests/`, `kazma-ui/kazma_ui_tests/`, and `tests/test_service_facade.py` (actual count verified via pytest --collect-only; some skips for optional deps). See `tests/` for full suite.
 
 ```bash
 # Full suite

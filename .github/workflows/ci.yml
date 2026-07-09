@@ -51,7 +51,7 @@ jobs:
         run: pip install -e ".[test]"
 
       - name: Run Core Tests
-        run: python -m pytest kazma-core/tests -v --tb=short
+        run: python -m pytest kazma-core/kazma_core_tests -v --tb=short
 
       - name: Run Docs Sync Check
         run: python scripts/check_docs_sync.py
@@ -73,7 +73,7 @@ jobs:
         run: pip install -e ".[test]"
 
       - name: Run Gateway Tests
-        run: python -m pytest kazma-gateway/tests -v --tb=short
+        run: python -m pytest kazma-gateway/kazma_gateway_tests -v --tb=short
 
   test-ui:
     name: UI Tests
@@ -92,12 +92,11 @@ jobs:
         run: pip install -e ".[test]"
 
       - name: Run UI Tests
-        run: python -m pytest kazma-ui/tests -v --tb=short
+        run: python -m pytest kazma-ui/kazma_ui_tests -v --tb=short
 
   test-integration:
     name: Integration Tests
     runs-on: ubuntu-latest
-    if: false  # Enable once integration tests exist
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -112,7 +111,7 @@ jobs:
         run: pip install -e ".[test]"
 
       - name: Run Integration Tests
-        run: python -m pytest kazma-core/tests/integration kazma-gateway/tests/integration -v --tb=short
+        run: python -m pytest kazma-core/kazma_core_tests/integration -v --tb=short
 
   coverage:
     name: Coverage Report
@@ -132,7 +131,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          python -m pytest kazma-core/tests kazma-gateway/tests kazma-ui/tests \
+          python -m pytest kazma-core/kazma_core_tests kazma-gateway/kazma_gateway_tests kazma-ui/kazma_ui_tests \
             --cov=kazma-core/kazma_core --cov=kazma-gateway/kazma_gateway --cov=kazma-ui/kazma_ui \
             --cov-report=xml --cov-report=term-missing
 

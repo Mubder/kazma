@@ -41,6 +41,41 @@ def get_kazma_secret() -> str:
     return os.environ.get("KAZMA_SECRET", "").strip()
 
 
+def get_or_create_disclosure_key(store: "ConfigStore" | None = None) -> str:
+    """Get or create the disclosure HMAC key.
+    
+    If KAZMA_DISCLOSURE_KEY is set in environment, use it.
+    Otherwise, generate a secure random key and persist it in ConfigStore.
+    
+    Args:
+        store: ConfigStore instance (uses global singleton if None)
+        
+    Returns:
+        The disclosure key (32 bytes hex = 64 chars)
+    """
+    import secrets
+    
+    # Check environment first
+    env_key = os.environ.get("KAZMA_DISCLOSURE_KEY", "").strip()
+    if env_key:
+        return env_key
+    
+    # Use global store if not provided
+    if store is None:
+        store = get_config_store()
+    
+    # Try to get from store
+    key = store.get("security.disclosure_key")
+    if key:
+        return key
+    
+    # Generate new key and persist
+    new_key = secrets.token_hex(32)  # 32 bytes = 64 hex chars
+    store.set("security.disclosure_key", new_key)
+    logger.info("[ConfigStore] Generated new disclosure key")
+    return new_key
+
+
 def apply_sqlite_pragmas(conn: sqlite3.Connection, *, busy_timeout: int = 5000) -> None:
     """Apply standardized pragmas to a (sync) Kazma SQLite connection.
 

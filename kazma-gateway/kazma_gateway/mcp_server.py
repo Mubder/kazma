@@ -126,6 +126,12 @@ TOOLS: list[dict[str, Any]] = [
 
 TOOL_MAP = {t["name"]: t for t in TOOLS}
 
+# Map MCP tool names to safety danger tool names for HITL gating
+MCP_TOOL_TO_SAFETY = {
+    "write_file": "file_write",
+    "run_tests": "run_tests",  # Added to safety danger list in safety.py
+}
+
 # ═══════════════════════════════════════════════════════════════════
 # Tool implementations
 # ═══════════════════════════════════════════════════════════════════
@@ -349,29 +355,36 @@ class MCPServer:
         if not mcp_enabled:
             return make_error(req_id, -32603, "MCP IDE server is disabled via configuration")
 
-        DANGER_MCP_TOOLS = {"write_file", "run_tests"}
+        # Map MCP tool names to safety danger tool names
+        safety_tool_name = MCP_TOOL_TO_SAFETY.get(tool_name, tool_name)
+        is_danger_tool = safety_tool_name in {"file_write", "run_tests", "file_delete", "shell_exec", "python_exec", "code_exec", "spawn_agent", "spawn_agents", "schedule_task", "cancel_scheduled"}
+
+        # Strict KAZMA_SECRET enforcement: require secret for ALL danger tools
         kazma_secret = os.environ.get("KAZMA_SECRET", "").strip()
-        if kazma_secret:
+        if is_danger_tool:
+            # Fail-closed: require secret for danger tools
+            if not kazma_secret:
+                return make_error(req_id, -32603, "KAZMA_SECRET required for danger tool (set env KAZMA_SECRET)")
             provided = ""
             if isinstance(arguments, dict):
                 provided = arguments.pop("_secret", "") or ""
             if not isinstance(provided, str):
                 provided = str(provided)
             if not hmac.compare_digest(provided, kazma_secret):
-                return make_error(req_id, -32603, "KAZMA_SECRET required for this MCP tool (pass _secret in arguments)")
+                return make_error(req_id, -32603, "Invalid KAZMA_SECRET for danger tool")
 
-        if tool_name in DANGER_MCP_TOOLS:
+        # Safety middleware gate (fail-closed bus gate)
+        if is_danger_tool:
             try:
                 from kazma_core.swarm.safety import get_safety
                 safety = get_safety()
-                if getattr(safety, "enabled", True) and safety.is_danger_tool(tool_name):
-                    if not safety.check_sync(tool_name):
+                if getattr(safety, "enabled", True) and safety.is_danger_tool(safety_tool_name):
+                    if not safety.check_sync(safety_tool_name):
                         return make_error(req_id, -32603, f"MCP danger tool '{tool_name}' blocked by safety (HITL required)")
             except Exception as _safety_exc:
                 logger.debug("MCP safety gate unavailable: %s", _safety_exc)
                 # Fail closed if secret was required but safety unavailable
-                if kazma_secret:
-                    return make_error(req_id, -32603, "Safety gate unavailable for privileged MCP tool")
+                return make_error(req_id, -32603, "Safety gate unavailable for privileged MCP tool")
 
         try:
             result = DISPATCH[tool_name](self.root, arguments)

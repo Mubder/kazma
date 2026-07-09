@@ -356,48 +356,110 @@ class TestFallbackChain:
     @pytest.mark.asyncio
     async def test_uses_first_successful(self):
         """Returns result from multiple functions, returns first successful result."""
-        chain = FallbackChain()
+        from kazma_core.swarm.task import WorkerResult
         
-        async def fail1():
-            raise Exception("fail1")
+        chain = FallbackChain(fallback_workers=["fallback1", "fallback2"])
         
-        async def fail2():
-            raise Exception("fail2")
+        primary_result = WorkerResult(
+            worker="primary",
+            task_id="task-1",
+            status="error",
+            output="",
+            error="primary failed",
+        )
         
-        async def succeed3():
-            return "success"
+        fallback1_result = WorkerResult(
+            worker="fallback1",
+            task_id="task-1",
+            status="error",
+            output="",
+            error="fallback1 failed",
+        )
         
-        chain.add(fail1)
-        chain.add(fail2)
-        chain.add(succeed3)
+        fallback2_result = WorkerResult(
+            worker="fallback2",
+            task_id="task-1",
+            status="success",
+            output="success from fallback2",
+            error=None,
+        )
         
-        result = await chain.execute()
-        assert result == "success"
+        call_count = {"count": 0}
+        
+        async def dispatch_worker(worker_name: str) -> WorkerResult:
+            call_count["count"] += 1
+            if worker_name == "fallback1":
+                return fallback1_result
+            elif worker_name == "fallback2":
+                return fallback2_result
+            raise ValueError(f"Unknown worker: {worker_name}")
+        
+        result = await chain.execute(primary_result, dispatch_worker=dispatch_worker)
+        assert result.status == "success"
+        assert result.output == "success from fallback2"
+        assert call_count["count"] == 2  # fallback1 then fallback2
 
     @pytest.mark.asyncio
     async def test_raises_last_exception_if_all_fail(self):
-        """Raises last exception if all functions fail."""
-        chain = FallbackChain()
+        """Returns last error if all fallbacks fail."""
+        from kazma_core.swarm.task import WorkerResult
         
-        async def fail1():
-            raise Exception("fail1")
+        chain = FallbackChain(fallback_workers=["fallback1", "fallback2"])
         
-        async def fail2():
-            raise Exception("fail2")
+        primary_result = WorkerResult(
+            worker="primary",
+            task_id="task-1",
+            status="error",
+            output="",
+            error="primary failed",
+        )
         
-        chain.add(fail1)
-        chain.add(fail2)
+        fallback1_result = WorkerResult(
+            worker="fallback1",
+            task_id="task-1",
+            status="error",
+            output="",
+            error="fallback1 failed",
+        )
         
-        with pytest.raises(Exception, match="fail2"):
-            await chain.execute()
+        fallback2_result = WorkerResult(
+            worker="fallback2",
+            task_id="task-1",
+            status="error",
+            output="",
+            error="fallback2 failed",
+        )
+        
+        async def dispatch_worker(worker_name: str) -> WorkerResult:
+            if worker_name == "fallback1":
+                return fallback1_result
+            elif worker_name == "fallback2":
+                return fallback2_result
+            raise ValueError(f"Unknown worker: {worker_name}")
+        
+        result = await chain.execute(primary_result, dispatch_worker=dispatch_worker)
+        assert result.status == "error"
+        assert "fallback2 failed" in result.error
+        assert "All fallback workers exhausted" in result.error
 
     @pytest.mark.asyncio
     async def test_empty_chain_raises(self):
-        """Empty chain raises error."""
-        chain = FallbackChain()
+        """Empty chain returns primary result."""
+        from kazma_core.swarm.task import WorkerResult
         
-        with pytest.raises(RuntimeError, match="empty"):
-            await chain.execute()
+        chain = FallbackChain(fallback_workers=[])
+        
+        primary_result = WorkerResult(
+            worker="primary",
+            task_id="task-1",
+            status="success",
+            output="primary success",
+            error=None,
+        )
+        
+        result = await chain.execute(primary_result, dispatch_worker=lambda w: (_ for _ in ()).throw(ValueError("should not be called")))
+        assert result.status == "success"
+        assert result.output == "primary success"
 
 
 if __name__ == "__main__":

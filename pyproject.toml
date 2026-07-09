@@ -82,7 +82,7 @@ build-backend = "hatchling.build"
 packages = ["kazma-core/kazma_core", "kazma-memory/kazma_memory", "kazma-skills/kazma_skills", "kazma-ui/kazma_ui", "kazma-cli/kazma_cli", "kazma-tui/kazma_tui", "kazma-gateway/kazma_gateway"]
 
 [tool.pytest.ini_options]
-testpaths = ["kazma-core/tests", "kazma-gateway/tests", "kazma-ui/tests", "kazma-tui/tests"]
+testpaths = ["kazma-core/kazma_core_tests", "kazma-gateway/kazma_gateway_tests", "kazma-ui/kazma_ui_tests", "kazma-tui/tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
