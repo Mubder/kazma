@@ -260,6 +260,27 @@ async def _maybe_send_to_output_target(
     return await send_swarm_output(manager, text, override, is_html=is_html)
 
 
+def _output_target_is_origin(msg: IncomingMessage, override: dict[str, Any] | None) -> bool:
+    """Return True if the resolved output target is the same chat the message
+    originated from.
+
+    Used to avoid sending the same swarm report twice (once via the direct
+    reply and once via the output-target mirror) when the operator dispatches
+    from the very group configured as the output target.
+    """
+    cfg = override if override is not None else _get_output_target_config()
+    if not cfg or not isinstance(cfg, dict):
+        return False
+    target_platform = str(cfg.get("platform", "telegram")).lower()
+    target_chat = str(cfg.get("chat_id", "")).strip()
+    if not target_chat:
+        return False
+    if target_platform != msg.platform:
+        return False
+    origin_chat = str(msg.context_metadata.get("chat_id", "")).strip()
+    return bool(origin_chat) and origin_chat == target_chat
+
+
 async def _dispatch_swarm_from_chat(
     msg: IncomingMessage,
     store: SessionStore,
@@ -352,25 +373,31 @@ async def _dispatch_swarm_from_chat(
             )
             # Mirror the SAME rich HTML report to the output target so the
             # Telegram group sees the formatted report, not raw markdown.
-            await _maybe_send_to_output_target(
-                manager, telegram_reply, target_override, is_html=True
-            )
+            # Skip when the output target IS the originating chat — otherwise
+            # the operator gets the report twice.
+            if not _output_target_is_origin(msg, target_override):
+                await _maybe_send_to_output_target(
+                    manager, telegram_reply, target_override, is_html=True
+                )
         else:
             await _send_swarm_reply(msg, store, manager, thread_id, reply)
-            await _maybe_send_to_output_target(manager, reply, target_override)
+            if not _output_target_is_origin(msg, target_override):
+                await _maybe_send_to_output_target(manager, reply, target_override)
 
     except asyncio.TimeoutError:
         logger.error("[agent-handler] Swarm dispatch timed out after %ds for thread %s",
                      SWARM_DISPATCH_TIMEOUT_SECONDS, thread_id)
         error_reply = "⚠️ Swarm task timed out after 5 minutes. The task may still be running in background."
         await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
-        await _maybe_send_to_output_target(manager, error_reply, target_override)
+        if not _output_target_is_origin(msg, target_override):
+            await _maybe_send_to_output_target(manager, error_reply, target_override)
     except Exception as exc:
         logger.exception("[agent-handler] Swarm dispatch failed for thread %s", thread_id)
         error_reply = sanitize_error(exc)
         await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
         # Mirror the failure to the output target too, consistent with the success path.
-        await _maybe_send_to_output_target(manager, error_reply, target_override)
+        if not _output_target_is_origin(msg, target_override):
+            await _maybe_send_to_output_target(manager, error_reply, target_override)
 
     return True
 

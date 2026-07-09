@@ -490,9 +490,16 @@ class KazmaAppBuilder:
 
                     bus = get_message_bus()
                     _bus_wired = False
+                    # Never wire real platform adapters under pytest: tests
+                    # call create_app() with the real kazma.yaml, which would
+                    # wire a live TelegramBusAdapter and cause test dispatches
+                    # to send real messages to the operator's chat. NullBusAdapter
+                    # (the bus default) keeps swarm events in-process for tests.
+                    import sys as _sys
+                    _skip_real_adapters = "pytest" in _sys.modules
 
                     # TelegramBusAdapter
-                    if tg_adapter is not None and telegram_token:
+                    if not _skip_real_adapters and tg_adapter is not None and telegram_token:
                         try:
                             from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
 
@@ -512,7 +519,7 @@ class KazmaAppBuilder:
                     if not _bus_wired:
                         _discord_tok = self.config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
                         _discord_chan = self.config_store.get("connectors.discord.swarm_channel_id", "")
-                        if _discord_tok and _discord_chan:
+                        if not _skip_real_adapters and _discord_tok and _discord_chan:
                             try:
                                 from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
 
@@ -528,7 +535,7 @@ class KazmaAppBuilder:
                     if not _bus_wired:
                         _slack_tok = self.config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
                         _slack_chan = self.config_store.get("connectors.slack.swarm_channel_id", "")
-                        if _slack_tok and _slack_chan:
+                        if not _skip_real_adapters and _slack_tok and _slack_chan:
                             try:
                                 from kazma_gateway.adapters.slack_bus import SlackBusAdapter
 
