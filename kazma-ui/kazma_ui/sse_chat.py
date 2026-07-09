@@ -325,8 +325,8 @@ def create_sse_chat_router(
                 g = graph_getter()
                 if g:
                     return g
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("[SSE] graph_getter failed: %s", exc)
         if graph_holder and graph_holder.get("graph"):
             return graph_holder.get("graph")
         return graph

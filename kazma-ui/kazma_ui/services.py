@@ -239,8 +239,8 @@ class SwarmService:
         if hasattr(worker, "to_dict"):
             try:
                 return worker.to_dict()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("worker.to_dict failed: %s", exc)
         name = getattr(worker, "name", str(worker))
         status = "offline"
         if getattr(worker, "_running", False):

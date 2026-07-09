@@ -313,8 +313,8 @@ async def delete_session(thread_id: str) -> JSONResponse:
             store = get_session_store()
             if store is not None:
                 await store.delete(thread_id)
-        except Exception:
-            pass  # session store may not be initialized
+        except Exception as exc:
+            logger.debug("session store delete skipped (may be uninitialized): %s", exc)
 
         logger.info("Deleted session: %s (checkpoints + session store)", thread_id)
         return JSONResponse({

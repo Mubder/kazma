@@ -21,8 +21,8 @@
 | Secret resolution unified via `config_store.get_kazma_secret` | ✅ Done |
 | SwarmService public-API only (no private fallbacks) | ✅ Done |
 | FastAPI lifespan (no `on_event`) | ✅ Done |
-| Large-module splits | 🟡 Ongoing (see below) |
-| Broad `except Exception` sweep | 🟡 Partial (hot paths improved; not global) |
+| Large-module splits | 🟡 engine ~1k (dispatch_inner extracted); more optional |
+| Broad `except Exception` sweep | 🟡 Hot paths logged (telegram typing, UI to_dict, SSE getter, …) |
 | Chaos wired into LLM/engine hot paths | ❌ Optional product work |
 | Full UnifiedToolSurface facade | ❌ Optional |
 
@@ -34,7 +34,7 @@
 
 | Module | Approx LOC | Extracted pieces |
 |--------|----------:|------------------|
-| `swarm/engine.py` | ~1250–1400 | lifecycle, control, SSE, factory, dispatch helpers, handoff guards, **worker_dispatch** |
+| `swarm/engine.py` | ~**1020** | + **dispatch_inner**, worker_dispatch, lifecycle, SSE, factory, handoff guards |
 | `adapters/telegram.py` | ~950–1000 | keyboards, stt, send, parse, **callbacks** |
 | `settings_manager.py` | ~830 | mcp + providers services |
 | `model_registry.py` | ~770 | model_registry_store |

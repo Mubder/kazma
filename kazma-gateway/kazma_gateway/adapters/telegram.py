@@ -181,8 +181,8 @@ class TelegramAdapter(BaseAdapter):
                     "[telegram] deleteWebhook called (status=%d)",
                     dw_resp.status_code,
                 )
-            except Exception:
-                logger.warning("[telegram] deleteWebhook failed — continuing anyway")
+            except Exception as exc:
+                logger.warning("[telegram] deleteWebhook failed — continuing: %s", exc)
 
             # ── Validate bot token via getMe ──────────────────────────────
             # If the token is wrong/expired/revoked, every getUpdates returns
@@ -619,8 +619,8 @@ class TelegramAdapter(BaseAdapter):
                     timeout=httpx.Timeout(30.0, connect=5.0),
                 )
             await self._http.post("/sendChatAction", json={"chat_id": chat_id, "action": "typing"})
-        except Exception:
-            pass  # fire-and-forget — never block
+        except Exception as exc:
+            logger.debug("[telegram] typing indicator failed (fire-and-forget): %s", exc)
 
     # ── Emoji reactions ────────────────────────────────────────────
 

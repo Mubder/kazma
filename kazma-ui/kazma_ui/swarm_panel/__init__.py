@@ -67,8 +67,9 @@ def _reset_swarm_state() -> None:
         # Create a clean engine
         new_engine = SwarmEngine(SwarmConfig(enabled=True, workers=[]), task_store=TaskStore())
         set_swarm_engine(new_engine)
-    except Exception:
-        pass
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).debug("_reset_swarm_state failed: %s", exc)
 
 
 class SwarmRouterBuilder:

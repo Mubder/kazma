@@ -27,8 +27,9 @@ def _serialize_worker(worker: Any) -> dict[str, Any]:
     if hasattr(worker, "to_dict"):
         try:
             return worker.to_dict()
-        except Exception:
-            pass
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).debug("worker.to_dict failed: %s", exc)
     name = getattr(worker, "name", str(worker))
     status = "offline"
     if getattr(worker, "_running", False):
