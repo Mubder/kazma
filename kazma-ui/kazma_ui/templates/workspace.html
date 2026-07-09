@@ -29,7 +29,7 @@
         </template>
       </select>
       
-      <button class="btn btn-sm btn-primary" @click="showCreateModal = true" style="display:flex;align-items:center;gap:6px;">
+      <button class="btn btn-sm btn-secondary" @click="showCreateModal = true" style="display:flex;align-items:center;gap:6px;">
         <span>➕</span> Create Workspace
       </button>
       <button x-show="ghOAuthConnected" class="btn btn-sm btn-secondary" @click="openRepoPicker()" style="display:flex;align-items:center;gap:6px;" x-cloak>
@@ -49,14 +49,14 @@
   </style>
 
   <!-- ── Create Workspace Modal ── -->
-  <div x-show="showCreateModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
-    <div class="card" style="width:480px;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;">➕ Create New Project Workspace</h3>
+  <div x-show="showCreateModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showCreateModal = false">
+    <div class="card" style="width:520px;padding:0;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);display:flex;flex-direction:column;">
+      <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">➕ Create New Project Workspace</h3>
         <button class="btn-icon" @click="showCreateModal = false" style="font-size:1rem;">✕</button>
       </div>
       
-      <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
+      <div style="display:flex;flex-direction:column;gap:16px;padding:16px 24px;">
         <div>
           <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Workspace Name</label>
           <input type="text" class="form-input" placeholder="e.g., My New Project" x-model="newWorkspaceName" style="width:100%;">
@@ -67,8 +67,8 @@
           <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">Folder will be automatically created on the filesystem if it doesn't exist.</p>
         </div>
       </div>
-      
-      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
+
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:12px 24px 16px;border-top:1px solid var(--border-subtle);">
         <button class="btn btn-secondary" @click="showCreateModal = false">Cancel</button>
         <button class="btn btn-primary" @click="createWorkspace()" :disabled="!newWorkspaceName.trim() || !newWorkspacePath.trim()">Create & Switch</button>
       </div>
@@ -109,7 +109,7 @@
 
   <!-- ── GitHub Repo Picker Modal ── -->
   <div x-show="showRepoPicker" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showRepoPicker = false">
-    <div class="card" style="width:560px;max-height:80vh;display:flex;flex-direction:column;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
+    <div class="card" style="width:520px;max-height:80vh;display:flex;flex-direction:column;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🐙 Switch GitHub Repo</h3>
         <button class="btn-icon" @click="showRepoPicker = false" style="font-size:1rem;">✕</button>
