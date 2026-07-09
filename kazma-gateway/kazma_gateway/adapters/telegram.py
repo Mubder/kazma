@@ -389,61 +389,16 @@ class TelegramAdapter(BaseAdapter):
 
         updates = data.get("result", [])
 
-        # Advance offset to avoid re-processing
-        if updates:
-            self._offset = max(u["update_id"] for u in updates) + 1
+        from kazma_gateway.adapters.telegram_parse import advance_offset
 
+        self._offset = advance_offset(updates, self._offset)
         return updates
 
     def _parse_update(self, update: dict[str, Any]) -> IncomingMessage | None:
-        """Parse a Telegram Update into an IncomingMessage.
+        """Parse a Telegram Update into an IncomingMessage (text/caption)."""
+        from kazma_gateway.adapters.telegram_parse import parse_text_update
 
-        Extracts the message from various update types (message,
-        channel_post, edited_message) and normalizes into IncomingMessage
-        with all raw platform data in context_metadata.
-
-        Args:
-            update: Raw Telegram Update object.
-
-        Returns:
-            IncomingMessage or None if not a text message.
-        """
-        # Extract message from various update shapes
-        message = update.get("message") or update.get("channel_post") or update.get("edited_message")
-        if not message:
-            return None
-
-        chat_id = message.get("chat", {}).get("id")
-        if not chat_id:
-            return None
-
-        # Extract text (prefer text, fall back to caption for media)
-        text = (message.get("text") or message.get("caption") or "").strip()
-        if not text:
-            return None
-
-        # Build sender info
-        from_user = message.get("from", {})
-        user_id = from_user.get("id", 0)
-        username = from_user.get("username", "") or from_user.get("first_name", "") or f"tg_{user_id}"
-
-        # sender_id uses user_id for unique per-user sessions.
-        # Fallback to chat_id for channel posts (no 'from' field).
-        sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
-
-        return IncomingMessage(
-            platform="telegram",
-            sender_id=sender_id,
-            text=text,
-            context_metadata={
-                "chat_id": chat_id,
-                "user_id": user_id,
-                "username": username,
-                "message_id": message.get("message_id", 0),
-                "chat_type": message.get("chat", {}).get("type", "private"),
-                "update_id": update.get("update_id", 0),
-            },
-        )
+        return parse_text_update(update)
 
     def create_webhook_router(self) -> Any:
         """Create a FastAPI router for optional webhook ingress.

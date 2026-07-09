@@ -60,6 +60,11 @@ from kazma_core.swarm.dispatch_helpers import (
     overall_status as _overall_status_impl,
     resolve_max_concurrent as _resolve_max_concurrent_impl,
 )
+from kazma_core.swarm.handoff_guards import (
+    build_available_workers_list as _build_available_workers_list_impl,
+    handoff_guard_error as _handoff_guard_error,
+    register_visit as _register_handoff_visit,
+)
 from kazma_core.swarm.sse_bridge import SseBridge
 from kazma_core.swarm.task_control import build_retry_task as _build_retry_task
 from kazma_core.swarm.task_control import cancel_active_task as _cancel_active_task
@@ -1111,44 +1116,19 @@ class SwarmEngine:
         handoffs A->B->A) before the handoff is aborted. The depth limit
         is the hard backstop against infinite recursion.
         """
-        # ── Cycle detection ──────────────────────────────────────
-        _MAX_HANDOFF_DEPTH = 5
-        _MAX_VISITS = 2  # allows A->B->A return handoff, blocks ping-pong
+        # ── Cycle detection (handoff_guards) ─────────────────────
         if _visited is None:
             _visited = {}
-        _visited[source_worker.name] = _visited.get(source_worker.name, 0) + 1
-
-        if _depth >= _MAX_HANDOFF_DEPTH:
-            logger.error(
-                "[SwarmEngine] Handoff chain too deep (%d) — aborting to prevent infinite recursion",
-                _depth,
-            )
-            return [WorkerResult(
-                worker=source_worker.name,
-                task_id="",
-                status="error",
-                output="",
-                error=f"Handoff chain exceeded max depth ({_MAX_HANDOFF_DEPTH}). Possible cycle.",
-                duration_seconds=perf_counter() - started,
-            )]
-
-        target_visits = _visited.get(handoff_req.target_worker, 0)
-        if target_visits >= _MAX_VISITS:
-            logger.error(
-                "[SwarmEngine] Handoff cycle detected: %s -> %s (visited %dx, max %d)",
-                source_worker.name,
-                handoff_req.target_worker,
-                target_visits,
-                _MAX_VISITS,
-            )
-            return [WorkerResult(
-                worker=source_worker.name,
-                task_id="",
-                status="error",
-                output="",
-                error=f"Handoff cycle detected: {source_worker.name} -> {handoff_req.target_worker}",
-                duration_seconds=perf_counter() - started,
-            )]
+        _register_handoff_visit(_visited, source_worker.name)
+        guard_err = _handoff_guard_error(
+            source_worker=source_worker.name,
+            target_worker=handoff_req.target_worker,
+            visited=_visited,
+            depth=_depth,
+            started=started,
+        )
+        if guard_err is not None:
+            return [guard_err]
 
         logger.info(
             "[SwarmEngine] worker '%s' handoff to '%s'",
@@ -1368,14 +1348,7 @@ class SwarmEngine:
 
     def _build_available_workers_list(self) -> list[dict[str, Any]]:
         """Build worker info dicts for the capability router."""
-        return [
-            {
-                "name": worker.name,
-                "role": worker.role,
-                "capabilities": worker.capabilities,
-            }
-            for worker in self._workers.values()
-        ]
+        return _build_available_workers_list_impl(self._workers)
 
     # ------------------------------------------------------------------
     # HITL Checkpoint management — state delegated to CheckpointManager
