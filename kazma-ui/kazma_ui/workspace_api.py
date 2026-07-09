@@ -56,18 +56,20 @@ def _resolve_workspace_root() -> Path:
         root.mkdir(parents=True, exist_ok=True)
         return root
 
-    # 2. Try WorkspaceStore
+    # 2. Try WorkspaceStore — the active workspace is the single source of
+    # truth. Use it even if its dir is momentarily missing, so all 3 cards
+    # (Files / Git Status / GitHub) consistently point at the same root
+    # rather than silently falling through to a drifted selected_path.
     try:
         from kazma_core.stores import get_workspace_store
         active_ws = get_workspace_store().get_active_workspace()
         if active_ws and active_ws.get("root_path"):
-            root = Path(active_ws["root_path"]).resolve()
-            if root.exists() and root.is_dir():
-                return root
+            return Path(active_ws["root_path"]).resolve()
     except Exception as exc:
         logger.debug("[workspace_api] WorkspaceStore lookup failed: %s", exc)
 
-    # 3. Try ConfigStore selected path
+    # 3. ConfigStore selected_path — only used when there is NO active
+    # workspace at all (e.g. a fresh install before any workspace switch).
     try:
         from kazma_core.config_store import get_config_store
         cs_path = get_config_store().get("workspace.selected_path")

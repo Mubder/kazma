@@ -153,17 +153,19 @@ def create_workspace_select_router() -> APIRouter:
 
     @router.post("/select")
     async def select_workspace(body: WorkspaceSelectRequest) -> dict[str, Any]:
-        """Persist the selected project folder path into ConfigStore.
+        """Select a project folder as the active workspace.
 
-        The path must be an absolute, existing directory.  On success the
-        key ``workspace.selected_path`` is updated in the singleton
-        ConfigStore.
+        The path must be an absolute, existing directory. The folder is
+        registered as a workspace (if not already) and **activated** so
+        Project Files, Git Status, and GitHub Telemetry all follow it
+        atomically (same code path as ``/api/workspaces/switch``).
 
         Returns:
-            ``{"status": "ok", "path": "<resolved absolute path>"}``
+            ``{"status": "ok", "path": "<resolved absolute path>", "workspace_id": "..."}``
 
         Raises:
             422: If the path is not absolute or does not exist.
+            403: If the path is outside KAZMA_WORKSPACE_ROOT (when set).
         """
         raw = body.path.strip()
         if not raw:
@@ -192,15 +194,83 @@ def create_workspace_select_router() -> APIRouter:
                     detail="Path is outside the allowed workspace root.",
                 ) from None
 
-        try:
-            from kazma_core.config_store import get_config_store
-            get_config_store().set("workspace.selected_path", str(resolved), category="workspace")
-        except Exception as exc:
-            logger.error("[workspace/select] Failed to persist path: %s", exc)
-            raise HTTPException(status_code=500, detail="Failed to save workspace path.") from exc
+        from kazma_core.config_store import get_config_store
+        from kazma_core.stores import get_workspace_store
 
-        logger.info("[workspace/select] Workspace set to: %s", resolved)
-        return {"status": "ok", "path": str(resolved)}
+        try:
+            store = get_workspace_store()
+            config_store = get_config_store()
+
+            # Reuse an existing workspace whose root matches, else register it.
+            ws_id = None
+            for ws in store.list_workspaces():
+                if Path(str(ws.get("root_path", ""))).resolve() == resolved:
+                    ws_id = ws["id"]
+                    break
+            if ws_id is None:
+                name = resolved.name or "workspace"
+                record = store.create_workspace(name, str(resolved))
+                ws_id = record["id"]
+
+            # Activate it — this flips is_active, sets selected_path, and
+            # reloads config from the new root. All 3 cards follow this.
+            store.set_active_workspace(ws_id)
+            config_store.set("workspace.selected_path", str(resolved), category="workspace")
+            try:
+                config_store.reload_from_root(str(resolved))
+            except Exception:
+                logger.debug("[workspace/select] reload_from_root failed", exc_info=True)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("[workspace/select] Failed to activate workspace: %s", exc)
+            raise HTTPException(status_code=500, detail="Failed to set workspace.") from exc
+
+        logger.info("[workspace/select] Active workspace set to: %s (id=%s)", resolved, ws_id)
+        return {"status": "ok", "path": str(resolved), "workspace_id": ws_id}
+
+    # ------------------------------------------------------------------
+    # GET /api/workspace/suggest — filesystem autocomplete for the path input
+    # ------------------------------------------------------------------
+
+    @router.get("/suggest")
+    async def suggest_dirs(path: str = "") -> JSONResponse:
+        """Return up to 10 child directories of the given path prefix.
+
+        Used by the "Select Folder" input for click-to-navigate autocomplete
+        (browsers can't open a native OS folder dialog from a web page).
+        Respects the optional ``KAZMA_WORKSPACE_ROOT`` confinement.
+        """
+        raw = (path or "").strip()
+        if not raw:
+            return JSONResponse({"suggestions": []})
+        try:
+            base = Path(raw).resolve()
+        except Exception:
+            return JSONResponse({"suggestions": []})
+
+        # If the typed path is a file or doesn't exist, suggest from its parent.
+        if not base.is_dir():
+            base = base.parent
+
+        # Confinement check.
+        allow_root = os.environ.get("KAZMA_WORKSPACE_ROOT", "").strip()
+        if allow_root:
+            try:
+                base.relative_to(Path(allow_root).resolve())
+            except ValueError:
+                return JSONResponse({"suggestions": []})
+
+        suggestions: list[dict[str, str]] = []
+        try:
+            for child in sorted(base.iterdir(), key=lambda c: c.name.lower()):
+                if len(suggestions) >= 10:
+                    break
+                if child.is_dir() and not child.name.startswith("."):
+                    suggestions.append({"name": child.name, "path": str(child)})
+        except (PermissionError, OSError):
+            pass
+        return JSONResponse({"suggestions": suggestions})
 
     # ------------------------------------------------------------------
     # GET /api/workspace/tree

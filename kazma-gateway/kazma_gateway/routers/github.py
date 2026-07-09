@@ -727,6 +727,238 @@ async def list_releases(limit: int = 10) -> JSONResponse:
         return _gh_error_response(exc)
 
 
+# ── Repo picker (list + clone) ───────────────────────────────────────
+
+
+@router.get("/repos")
+async def list_user_repos(limit: int = 50) -> JSONResponse:
+    """List the authenticated user's repos for the picker dropdown."""
+    from kazma_gateway.routers.github_client import GitHubClient
+
+    try:
+        async with GitHubClient() as gh:
+            raw = await gh.get("/user/repos", params={
+                "affiliation": "owner,collaborator",
+                "sort": "updated",
+                "per_page": max(1, min(limit, 100)),
+            })
+        items = [
+            {
+                "full_name": r.get("full_name", ""),
+                "name": r.get("name", ""),
+                "private": r.get("private", False),
+                "default_branch": r.get("default_branch", "main"),
+                "html_url": r.get("html_url", ""),
+                "clone_url": r.get("clone_url", ""),
+                "ssh_url": r.get("ssh_url", ""),
+                "updated_at": r.get("updated_at", ""),
+            }
+            for r in (raw or [])
+        ]
+        return JSONResponse({"repos": items, "count": len(items)})
+    except Exception as exc:
+        logger.warning("[github/repos] failed: %s", exc)
+        return _gh_error_response(exc)
+
+
+class CloneRepoRequest(BaseModel):
+    full_name: str
+    use_ssh: bool = False
+    clone_url: str = ""
+    ssh_url: str = ""
+
+
+@router.post("/repos/clone", status_code=201)
+async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
+    """Clone a GitHub repo and activate it as the workspace.
+
+    If the repo is already open locally (a workspace root with a matching
+    remote), just activates that workspace. Otherwise clones into
+    ``$KAZMA_CLONE_DIR`` (default ``~/kazma-repos``) and registers it.
+    """
+    import subprocess
+    from kazma_gateway.routers.github_client import GitHubClient
+
+    full_name = body.full_name.strip()
+    if not full_name or "/" not in full_name:
+        return JSONResponse({"error": "Invalid full_name (expected 'owner/repo')."}, status_code=422)
+
+    # Resolve the clone URL.
+    if body.clone_url and not body.use_ssh:
+        url = body.clone_url
+    elif body.use_ssh and body.ssh_url:
+        url = body.ssh_url
+    else:
+        # Fetch from the API if not provided.
+        try:
+            async with GitHubClient() as gh:
+                repo_info = await gh.get(f"/repos/{full_name}")
+            url = (repo_info.get("ssh_url") if body.use_ssh else repo_info.get("clone_url")) or ""
+        except Exception as exc:
+            return JSONResponse({"error": f"Could not resolve clone URL: {exc}"}, status_code=502)
+    if not url:
+        return JSONResponse({"error": "Could not determine clone URL."}, status_code=422)
+
+    # Check if already open locally — match by remote.origin.url.
+    from kazma_core.stores import get_workspace_store
+
+    store = get_workspace_store()
+    try:
+        for ws in store.list_workspaces():
+            root = str(ws.get("root_path", ""))
+            if not Path(root).joinpath(".git").exists():
+                continue
+            res = subprocess.run(
+                ["git", "config", "--get", "remote.origin.url"],
+                cwd=root, capture_output=True, text=True, timeout=5,
+            )
+            if res.returncode == 0 and full_name in res.stdout:
+                store.set_active_workspace(ws["id"])
+                return JSONResponse({"status": "ok", "message": "Already open locally.", "path": root, "workspace_id": ws["id"]}, status_code=200)
+    except Exception as exc:
+        logger.debug("[github/repos/clone] local-check failed: %s", exc)
+
+    # Clone into the base dir.
+    base_dir = os.environ.get("KAZMA_CLONE_DIR", "").strip() or str(Path.home() / "kazma-repos")
+    Path(base_dir).mkdir(parents=True, exist_ok=True)
+    repo_dir = Path(base_dir) / full_name.split("/")[-1]
+    if repo_dir.exists():
+        # Append a counter to avoid clobbering an existing dir.
+        i = 1
+        while Path(f"{repo_dir}-{i}").exists():
+            i += 1
+        repo_dir = Path(f"{repo_dir}-{i}")
+
+    try:
+        subprocess.run(["git", "clone", "--depth", "1", url, str(repo_dir)], check=True, capture_output=True, text=True, timeout=120)
+    except subprocess.CalledProcessError as exc:
+        return JSONResponse({"error": f"git clone failed: {(exc.stderr or '')[:300]}"}, status_code=502)
+    except subprocess.TimeoutExpired:
+        return JSONResponse({"error": "git clone timed out."}, status_code=504)
+    except Exception as exc:
+        return JSONResponse({"error": f"git clone failed: {exc}"}, status_code=502)
+
+    # Register + activate the cloned repo as a workspace.
+    from kazma_core.config_store import get_config_store
+
+    name = full_name.split("/")[-1]
+    record = store.create_workspace(name, str(repo_dir))
+    store.set_active_workspace(record["id"])
+    cs = get_config_store()
+    cs.set("workspace.selected_path", str(repo_dir), category="workspace")
+    try:
+        cs.reload_from_root(str(repo_dir))
+    except Exception:
+        pass
+
+    logger.info("[github/repos/clone] cloned %s → %s", full_name, repo_dir)
+    return JSONResponse({"status": "ok", "path": str(repo_dir), "workspace_id": record["id"]}, status_code=201)
+
+
+# ── Activity timeline (GraphQL, single call) ─────────────────────────
+
+
+@router.get("/activity")
+async def repo_activity(limit: int = 30) -> JSONResponse:
+    """Unified recent-activity feed: commits + PRs + issues + CI runs.
+
+    Uses a single GraphQL query (1 API call) to avoid the rate-limit cost
+    of merging 4 REST endpoints. Falls back to a small REST merge on error.
+    """
+    from kazma_gateway.routers.github_client import GitHubClient
+
+    owner_repo = await _resolve_owner_repo()
+    if isinstance(owner_repo, JSONResponse):
+        return owner_repo
+    owner, repo = owner_repo
+    limit = max(1, min(limit, 50))
+
+    # GraphQL: fetch recent commits, PRs, and issues in one round-trip.
+    query = """
+    query($owner: String!, $repo: String!, $lim: Int!) {
+      repository(owner: $owner, name: $repo) {
+        defaultBranchRef { target { ... on Commit { history(first: $lim) {
+          nodes { oid messageHeadline author { user { login } name } committedDate url } } } } }
+        pullRequests(first: $lim, orderBy: {field: UPDATED_AT, direction: DESC}) {
+          nodes { number title author { login } updatedAt url state } }
+        issues(first: $lim, orderBy: {field: UPDATED_AT, direction: DESC}) {
+          nodes { number title author { login } updatedAt url state } }
+      }
+    }"""
+    try:
+        async with GitHubClient() as gh:
+            data = await gh.graphql(query, {"owner": owner, "repo": repo, "lim": limit})
+        items: list[dict[str, Any]] = []
+        repo_node = data.get("repository") or {}
+
+        # Commits
+        for c in (((((repo_node.get("defaultBranchRef") or {}).get("target") or {}).get("history") or {}).get("nodes")) or []):
+            author = c.get("author") or {}
+            items.append({
+                "type": "commit", "descriptor": (c.get("oid", "") or "")[:7] + " " + (c.get("messageHeadline") or "")[:100],
+                "actor": (author.get("user") or {}).get("login") or author.get("name") or "",
+                "timestamp": c.get("committedDate") or "", "html_url": c.get("url") or "",
+            })
+        # PRs
+        for p in (((repo_node.get("pullRequests") or {}).get("nodes")) or []):
+            items.append({
+                "type": "pr", "descriptor": f"#{p.get('number')} {p.get('title', '')[:100]}",
+                "actor": (p.get("author") or {}).get("login") or "", "timestamp": p.get("updatedAt") or "",
+                "html_url": p.get("url") or "", "state": p.get("state") or "",
+            })
+        # Issues
+        for i in (((repo_node.get("issues") or {}).get("nodes")) or []):
+            items.append({
+                "type": "issue", "descriptor": f"#{i.get('number')} {i.get('title', '')[:100]}",
+                "actor": (i.get("author") or {}).get("login") or "", "timestamp": i.get("updatedAt") or "",
+                "html_url": i.get("url") or "", "state": i.get("state") or "",
+            })
+
+        # CI runs — separate REST call (actions has no GraphQL equivalent
+        # in the public schema); bounded to `limit` runs, single call.
+        try:
+            async with GitHubClient() as gh:
+                runs = await gh.get(f"/repos/{owner}/{repo}/actions/runs", params={"per_page": limit})
+            for r in ((runs or {}).get("workflow_runs") or [])[:limit]:
+                items.append({
+                    "type": "ci", "descriptor": f"{r.get('name', 'workflow')} ({r.get('conclusion') or r.get('status', '')})",
+                    "actor": (r.get("actor") or {}).get("login", ""),
+                    "timestamp": r.get("created_at") or "", "html_url": r.get("html_url") or "",
+                })
+        except Exception:
+            pass  # CI is best-effort; don't fail the whole feed.
+
+        items.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
+        return JSONResponse({"activity": items[:limit], "count": len(items[:limit])})
+    except Exception as exc:
+        logger.warning("[github/activity] GraphQL failed: %s — trying REST fallback", exc)
+        return await _activity_rest_fallback(owner, repo, limit)
+
+
+async def _activity_rest_fallback(owner: str, repo: str, limit: int) -> JSONResponse:
+    """Merge small slices of commits/pulls/issues/workflows via REST."""
+    from kazma_gateway.routers.github_client import GitHubClient
+
+    items: list[dict[str, Any]] = []
+    try:
+        async with GitHubClient() as gh:
+            commits = await gh.get(f"/repos/{owner}/{repo}/commits", params={"per_page": min(limit, 10)})
+            pulls = await gh.get(f"/repos/{owner}/{repo}/pulls", params={"state": "all", "per_page": min(limit, 10)})
+            issues = await gh.get(f"/repos/{owner}/{repo}/issues", params={"state": "all", "per_page": min(limit, 10)})
+        for c in (commits or []):
+            items.append({"type": "commit", "descriptor": (c.get("sha") or "")[:7] + " " + ((c.get("commit") or {}).get("message") or "").split("\n")[0][:100], "actor": (c.get("author") or {}).get("login", ""), "timestamp": ((c.get("commit") or {}).get("author") or {}).get("date", ""), "html_url": c.get("html_url", "")})
+        for p in (pulls or []):
+            items.append({"type": "pr", "descriptor": f"#{p.get('number')} {p.get('title', '')[:100]}", "actor": (p.get("user") or {}).get("login", ""), "timestamp": p.get("updated_at", ""), "html_url": p.get("html_url", "")})
+        for i in (issues or []):
+            if "pull_request" in i:
+                continue
+            items.append({"type": "issue", "descriptor": f"#{i.get('number')} {i.get('title', '')[:100]}", "actor": (i.get("user") or {}).get("login", ""), "timestamp": i.get("updated_at", ""), "html_url": i.get("html_url", "")})
+    except Exception as exc:
+        return _gh_error_response(exc)
+    items.sort(key=lambda x: x.get("timestamp") or "", reverse=True)
+    return JSONResponse({"activity": items[:limit], "count": len(items[:limit])})
+
+
 def create_github_router() -> APIRouter:
     """Helper method to return the APIRouter instance."""
     return router

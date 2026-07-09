@@ -32,6 +32,9 @@
       <button class="btn btn-sm btn-primary" @click="showCreateModal = true" style="display:flex;align-items:center;gap:6px;">
         <span>➕</span> Create Workspace
       </button>
+      <button x-show="ghOAuthConnected" class="btn btn-sm btn-secondary" @click="openRepoPicker()" style="display:flex;align-items:center;gap:6px;" x-cloak>
+        <span>🐙</span> Switch Repo
+      </button>
     </div>
   </div>
 
@@ -81,16 +84,56 @@
       </div>
       
       <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
-        <div>
+        <div style="position:relative;">
           <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Absolute Folder Path</label>
-          <input type="text" class="form-input" placeholder="e.g., C:/Projects/my-app" x-model="selectedFolderPath" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;">
-          <p style="margin:4px 0 0 0;font-size:0.75rem;color:var(--text-muted);">This folder will be opened and registered as a new workspace environment in Kazma.</p>
+          <input type="text" class="form-input" placeholder="e.g., C:/Projects/my-app" x-model="selectedFolderPath" @input.debounce.300ms="fetchSuggestions()" @blur="setTimeout(() => suggestList = [], 200)" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;">
+          <!-- Autocomplete dropdown -->
+          <div x-show="suggestList.length > 0" x-cloak style="position:absolute;top:100%;left:0;right:0;max-height:180px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:0 0 var(--radius-sm) var(--radius-sm);z-index:100;box-shadow:var(--shadow-md);">
+            <template x-for="s in suggestList" :key="s.path">
+              <div @click="pickSuggestion(s.path)" @mousedown.prevent style="padding:6px 12px;font-size:0.78rem;font-family:var(--font-mono);cursor:pointer;border-bottom:1px solid var(--tint);display:flex;align-items:center;gap:6px;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
+                <span style="color:var(--text-muted);">📁</span>
+                <span style="color:var(--text-primary);" x-text="s.name"></span>
+              </div>
+            </template>
+          </div>
+          <p style="margin:4px 0 0 0;font-size:0.75rem;color:var(--text-muted);">Type a path to autocomplete, or use "Switch Repo" to pick from GitHub.</p>
         </div>
       </div>
       
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
         <button class="btn btn-secondary" @click="showFolderModal = false">Cancel</button>
         <button class="btn btn-primary" @click="selectFolder()" :disabled="!selectedFolderPath.trim()">Open Folder</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── GitHub Repo Picker Modal ── -->
+  <div x-show="showRepoPicker" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showRepoPicker = false">
+    <div class="card" style="width:560px;max-height:80vh;display:flex;flex-direction:column;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🐙 Switch GitHub Repo</h3>
+        <button class="btn-icon" @click="showRepoPicker = false" style="font-size:1rem;">✕</button>
+      </div>
+      <div style="padding:0 24px 12px;">
+        <input type="text" class="form-input" placeholder="Search repos..." x-model="ghRepoSearch" style="width:100%;font-size:0.85rem;">
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:0 24px 16px;min-height:200px;">
+        <template x-for="r in ghRepoFiltered" :key="r.full_name">
+          <div @click="pickRepo(r)" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-bottom:1px solid var(--tint);cursor:pointer;border-radius:var(--radius-xs);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+              <span style="font-size:0.9rem;">📦</span>
+              <span style="font-size:0.82rem;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="r.full_name"></span>
+            </div>
+            <span x-show="r.private" style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 6px;border-radius:3px;flex-shrink:0;" x-cloak>private</span>
+          </div>
+        </template>
+        <div x-show="ghRepoFiltered.length === 0" style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.8rem;">
+          <span x-show="!ghCloning">No repos found.</span>
+          <span x-show="ghCloning">Cloning... please wait.</span>
+        </div>
+      </div>
+      <div x-show="ghCloning" style="padding:12px 24px;border-top:1px solid var(--border-subtle);text-align:center;font-size:0.8rem;color:var(--accent);" x-cloak>
+        ⏳ Cloning repository...
       </div>
     </div>
   </div>
@@ -526,22 +569,30 @@
       </div>
     </div>
 
-    <!-- Recent Files -->
+    <!-- Recent Activity (replaces Recent Files) -->
     <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
-      <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);">
-        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">🕐 Recent Files</h3>
+      <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
+        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">⚡ Recent Activity</h3>
+        <!-- Filter chips -->
+        <div style="display:flex;gap:4px;" x-show="ghOAuthConnected" x-cloak>
+          <template x-for="chip in [['all','All'],['commit','Commits'],['pr','PRs'],['issue','Issues'],['ci','CI']]" :key="chip[0]">
+            <button @click="ghActivityFilter = chip[0]" :style="{ background: ghActivityFilter === chip[0] ? 'var(--accent)' : 'var(--bg-elevated)', color: ghActivityFilter === chip[0] ? '#fff' : 'var(--text-muted)', border: ghActivityFilter === chip[0] ? '1px solid var(--accent)' : '1px solid var(--border-subtle)' }" style="font-size:0.62rem;font-weight:600;padding:2px 7px;border-radius:10px;cursor:pointer;" x-text="chip[1]"></button>
+          </template>
+        </div>
       </div>
-      <div class="file-list" style="max-height:180px;overflow-y:auto;">
-        <template x-for="rf in recentFiles" :key="rf.path">
-          <div class="file-row" @click="openFile(rf.path)"
-               style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;font-size:0.8rem;">
-            <span x-text="fileIcon(rf.name)" style="width:20px;"></span>
-            <span x-text="rf.name" style="flex:1;"></span>
-            <span x-text="rf.time" style="font-size:0.75rem;color:var(--text-muted);"></span>
+      <div class="file-list" style="max-height:240px;overflow-y:auto;">
+        <template x-for="a in ghActivityFiltered" :key="a.type + a.descriptor + a.timestamp">
+          <div @click="a.html_url && window.open(a.html_url, '_blank')"
+               style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--tint);font-size:0.78rem;cursor:pointer;transition:background 0.15s;"
+               onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
+            <span style="width:18px;font-size:0.85rem;" x-text="{commit:'📦',pr:'🔀',issue:'🐛',ci:'🤖'}[a.type] || '•'"></span>
+            <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-primary);" x-text="a.descriptor"></span>
+            <span style="font-size:0.65rem;color:var(--text-muted);flex-shrink:0;" x-text="a.actor"></span>
+            <span style="font-size:0.6rem;color:var(--text-tertiary);flex-shrink:0;" x-text="ghRelativeTime(a.timestamp)"></span>
           </div>
         </template>
-        <div x-show="recentFiles.length === 0 && !loading" style="padding:30px 20px;text-align:center;color:var(--text-muted);">
-          <p style="margin:0;font-size:0.8rem;">No recent files</p>
+        <div x-show="ghActivity.length === 0 && !loading" style="padding:30px 20px;text-align:center;color:var(--text-muted);">
+          <p style="margin:0;font-size:0.8rem;" x-text="ghOAuthConnected ? 'No recent activity.' : 'Connect GitHub to see activity.'"></p>
         </div>
       </div>
     </div>
@@ -631,6 +682,15 @@ function workspaceApp() {
     ghCommits: [],
     ghWorkflows: [],
     ghReleases: [],
+    // Activity card + repo picker + autocomplete
+    ghActivity: [],
+    ghActivityFilter: 'all',
+    ghRepoList: [],
+    ghRepoSearch: '',
+    showRepoPicker: false,
+    ghCloning: false,
+    suggestList: [],
+    suggestLoading: false,
 
     async init() {
       // OAuth status is a cheap local ConfigStore read — resolve it FIRST
@@ -666,6 +726,11 @@ function workspaceApp() {
       setInterval(() => {
         if (this.ghOAuthConnected && this.ghActiveTab !== 'overview') this.ghLoadTab(this.ghActiveTab);
       }, 30000);
+      // Activity card refreshes every 60s (deliberately slower — protects
+      // the rate budget since /activity is a GraphQL + 1 REST call).
+      setInterval(() => {
+        if (this.ghOAuthConnected) this.loadActivity();
+      }, 60000);
     },
 
     async loadWorkspaces() {
@@ -774,7 +839,7 @@ function workspaceApp() {
         this.loadFiles(),
         this.loadGitStatus(),
         this.loadGitHubStatus(),
-        this.loadRecentFiles()
+        this.loadActivity(),
       ]);
       this.loading = false;
     },
@@ -958,6 +1023,99 @@ function workspaceApp() {
         if (pr.reviews && pr.reviews.length) lines.push('Reviews: ' + pr.reviews.map(r => `${r.user}=${r.state}`).join(', '));
         showModal({ title: 'Pull Request #' + number, body: '<pre style="white-space:pre-wrap;font-family:var(--font-mono);font-size:0.78rem;line-height:1.6;color:var(--text-secondary);">' + (pr.body || '(no description)').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).slice(0, 1200) + '</pre><p style="margin-top:12px;font-size:0.72rem;color:var(--text-muted);">' + lines.join('<br>') + '</p>', size: 'lg', actions: [{ label: 'Open on GitHub', variant: 'btn-primary', handler: () => window.open(pr.html_url, '_blank') }, { label: 'Close', variant: 'btn-secondary' }] });
       } catch (e) { /* non-fatal */ }
+    },
+
+    // Computed: activity filtered by the active chip (client-side, no refetch).
+    get ghActivityFiltered() {
+      if (this.ghActivityFilter === 'all') return this.ghActivity;
+      return this.ghActivity.filter(a => a.type === this.ghActivityFilter);
+    },
+
+    async loadActivity() {
+      if (!this.ghOAuthConnected) return;
+      try {
+        const resp = await fetch('/api/github/activity?limit=30');
+        if (resp.ok) {
+          const data = await resp.json();
+          if (!data.error) this.ghActivity = data.activity || [];
+        }
+      } catch (e) { /* non-fatal */ }
+    },
+
+    ghRelativeTime(iso) {
+      if (!iso) return '';
+      const diff = Date.now() - new Date(iso).getTime();
+      const m = Math.floor(diff / 60000);
+      if (m < 1) return 'now';
+      if (m < 60) return m + 'm';
+      const h = Math.floor(m / 60);
+      if (h < 24) return h + 'h';
+      return Math.floor(h / 24) + 'd';
+    },
+
+    // ── GitHub repo picker ──────────────────────────────────────────
+    async openRepoPicker() {
+      this.showRepoPicker = true;
+      this.ghRepoSearch = '';
+      if (this.ghRepoList.length === 0) {
+        try {
+          const resp = await fetch('/api/github/repos?limit=50');
+          if (resp.ok) {
+            const data = await resp.json();
+            this.ghRepoList = data.repos || [];
+          }
+        } catch (e) { /* non-fatal */ }
+      }
+    },
+
+    get ghRepoFiltered() {
+      if (!this.ghRepoSearch.trim()) return this.ghRepoList;
+      const q = this.ghRepoSearch.toLowerCase();
+      return this.ghRepoList.filter(r => (r.full_name || '').toLowerCase().includes(q));
+    },
+
+    async pickRepo(repo) {
+      // Clone + activate in one shot; the backend handles already-local.
+      this.ghCloning = true;
+      try {
+        const resp = await fetch('/api/github/repos/clone', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ full_name: repo.full_name, clone_url: repo.clone_url, ssh_url: repo.ssh_url }),
+        });
+        const data = await resp.json();
+        if (resp.ok && !data.error) {
+          this.showRepoPicker = false;
+          KazmaStream.toast('Opened ' + repo.full_name + '.', 'success', 2500);
+          await this.loadWorkspaces();
+          await this.refreshAll();
+          await this.loadActivity();
+        } else {
+          KazmaStream.toast(data.error || 'Failed to open repo.', 'error', 3000);
+        }
+      } catch (e) {
+        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+      } finally {
+        this.ghCloning = false;
+      }
+    },
+
+    // ── Filesystem autocomplete on the Select Folder input ─────────
+    async fetchSuggestions() {
+      const val = this.selectedFolderPath.trim();
+      if (!val || val.length < 2) { this.suggestList = []; return; }
+      this.suggestLoading = true;
+      try {
+        const resp = await fetch('/api/workspace/suggest?path=' + encodeURIComponent(val));
+        if (resp.ok) { const data = await resp.json(); this.suggestList = data.suggestions || []; }
+      } catch (e) { /* non-fatal */ }
+      this.suggestLoading = false;
+    },
+
+    pickSuggestion(path) {
+      this.selectedFolderPath = path;
+      this.suggestList = [];
+      // Recurse: show children of the picked dir.
+      this.fetchSuggestions();
     },
 
     async saveGitHubToken() {
