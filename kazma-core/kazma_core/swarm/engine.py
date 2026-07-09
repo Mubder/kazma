@@ -364,72 +364,9 @@ class SwarmEngine:
 
     async def broadcast(self, task: SwarmTask) -> TaskResult:
         """Dispatch a task to all registered workers or the targeted subset."""
-        started = perf_counter()
-        task.started_at = task.started_at or _utc_now_iso()
-        task.status = TaskStatus.RUNNING
-        self._active_tasks[task.id] = task  # track in-flight
+        from kazma_core.swarm.broadcast import broadcast_task
 
-        # Start a root tracing span for this broadcast task.
-        task_span = self._tracing_emitter.start_task_span(
-            task_id=task.id,
-            task_type=task.type.value,
-            workers=list(task.workers),
-        )
-
-        blackboard = BlackboardStore()
-        dispatch_context = self._build_dispatch_context(task, blackboard=blackboard)
-
-        target_names = list(task.workers) if task.workers else list(self._workers.keys())
-        if not target_names:
-            self._tracing_emitter.end_span(task_span, status="ok")
-            return self._finalize_task(
-                task,
-                worker_results=[],
-                status="success",
-                aggregated_output=None,
-                duration_seconds=perf_counter() - started,
-                metadata=await self._build_result_metadata(blackboard),
-            )
-
-        max_concurrent = self._resolve_max_concurrent(task)
-        concurrency = BoundedConcurrency(max_concurrent=max_concurrent)
-
-        async def _dispatch_with_concurrency(name: str) -> WorkerResult:
-            async with concurrency:
-                return await self._dispatch_worker_by_name(
-                    name,
-                    task.prompt,
-                    dispatch_context,
-                    timeout=task.timeout,
-                    validation_schema=task.validation_schema,
-                )
-
-        worker_results = await asyncio.gather(
-            *(_dispatch_with_concurrency(name) for name in target_names)
-        )
-        result_status = self._overall_status(worker_results)
-        aggregated_output = self._aggregate_outputs(worker_results)
-        error = None
-        if result_status != "success":
-            error_messages = [
-                result.error
-                for result in worker_results
-                if result.error
-            ]
-            error = "; ".join(error_messages) if error_messages else None
-
-        span_status = "ok" if result_status in ("success", "partial") else "error"
-        self._tracing_emitter.end_span(task_span, status=span_status)
-
-        return self._finalize_task(
-            task,
-            worker_results=worker_results,
-            status=result_status,
-            aggregated_output=aggregated_output,
-            error=error,
-            duration_seconds=perf_counter() - started,
-            metadata=await self._build_result_metadata(blackboard),
-        )
+        return await broadcast_task(self, task)
 
     async def start_all(self) -> None:
         """Start all registered workers."""

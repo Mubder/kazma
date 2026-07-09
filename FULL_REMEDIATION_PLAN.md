@@ -34,8 +34,8 @@
 
 | Module | Approx LOC | Extracted pieces |
 |--------|----------:|------------------|
-| `swarm/engine.py` | ~**1020** | + **dispatch_inner**, worker_dispatch, lifecycle, SSE, factory, handoff guards |
-| `adapters/telegram.py` | ~950–1000 | keyboards, stt, send, parse, **callbacks** |
+| `swarm/engine.py` | ~**970** | + **broadcast**, dispatch_inner, worker_dispatch, lifecycle, SSE, factory |
+| `adapters/telegram.py` | ~**890** | + **send_chunks_with_retry**, keyboards, stt, parse, callbacks |
 | `settings_manager.py` | ~830 | mcp + providers services |
 | `model_registry.py` | ~770 | model_registry_store |
 

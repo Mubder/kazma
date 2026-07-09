@@ -377,8 +377,8 @@ def reset_session_manager() -> SessionManager:
     if _session_manager is not None and hasattr(_session_manager, "_conn"):
         try:
             _session_manager._conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).debug("session manager close: %s", exc)
 
     db_path = "kazma-data/chat_sessions.db"
     if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
@@ -386,8 +386,8 @@ def reset_session_manager() -> SessionManager:
         if os.path.exists(db_path):
             try:
                 os.remove(db_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                logging.getLogger(__name__).debug("test session db remove: %s", exc)
 
     _session_manager = SessionManager(db_path=db_path)
     if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
@@ -395,6 +395,6 @@ def reset_session_manager() -> SessionManager:
             with _session_manager._conn:
                 _session_manager._conn.execute("DELETE FROM sessions")
             _session_manager._sessions.clear()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.getLogger(__name__).debug("test session clear: %s", exc)
     return _session_manager

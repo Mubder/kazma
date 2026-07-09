@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from kazma_gateway.adapters.telegram_send import chunk_message, resolve_chat_id
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from kazma_gateway.adapters.telegram_send import (
+    chunk_message,
+    resolve_chat_id,
+    send_chunks_with_retry,
+)
 
 
 def test_resolve_chat_id_from_metadata():
@@ -24,3 +32,23 @@ def test_chunk_message():
     assert len(chunks) == 2
     assert len(chunks[0]) == 4096
     assert len(chunks[1]) == 5000 - 4096
+
+
+@pytest.mark.asyncio
+async def test_send_chunks_success():
+    http = MagicMock()
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.json.return_value = {"ok": True}
+    resp.raise_for_status = MagicMock()
+    http.post = AsyncMock(return_value=resp)
+    ok = await send_chunks_with_retry(
+        http=http,
+        chat_id=1,
+        chunks=["hi"],
+        parse_mode="Markdown",
+        reply_markup=None,
+        rate_acquire=AsyncMock(),
+    )
+    assert ok is True
+    http.post.assert_awaited()

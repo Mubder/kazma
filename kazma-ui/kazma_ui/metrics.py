@@ -112,8 +112,8 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
                             breaker = (engine.get_circuit_breaker(worker.name) if hasattr(engine, "get_circuit_breaker")
                                        else getattr(engine, "_reliability", None).get_circuit_breaker(worker.name) if getattr(engine, "_reliability", None) else None)
                             failures = getattr(breaker, "consecutive_failures", 0)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("breaker metric for %s: %s", worker.name, exc)
                     lines.append(f'kazma_circuit_breaker_failures_total{{worker="{worker.name}"}} {failures}')
         except Exception as exc:
             logger.debug("Failed to append Swarm metrics: %s", exc)

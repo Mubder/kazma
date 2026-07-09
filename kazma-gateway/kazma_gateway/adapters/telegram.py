@@ -914,115 +914,28 @@ class TelegramAdapter(BaseAdapter):
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             )
 
-        from kazma_gateway.adapters.telegram_send import chunk_message, resolve_chat_id
+        from kazma_gateway.adapters.telegram_send import (
+            chunk_message,
+            resolve_chat_id,
+            send_chunks_with_retry,
+        )
 
         chat_id = resolve_chat_id(outbound.context_metadata, outbound.target_id)
         if chat_id is None:
             return False
 
         chunks = chunk_message(outbound.text)
-
-        # Include inline keyboard only on the last chunk
         reply_markup = outbound.context_metadata.get("reply_markup")
-
-        all_sent = True
-        for chunk_idx, chunk in enumerate(chunks):
-            is_last = chunk_idx == len(chunks) - 1
-            payload: dict[str, Any] = {
-                "chat_id": chat_id,
-                "text": chunk,
-            }
-            if self._parse_mode:
-                payload["parse_mode"] = self._parse_mode
-
-            # Include inline keyboard only on the last chunk
-            if is_last and reply_markup:
-                payload["reply_markup"] = reply_markup
-
-            # One-time fallback flag: if sendMessage returns 400 (e.g. Markdown
-            # parse errors from unescaped _, *, `, [ in agent responses), retry
-            # once without parse_mode so the message still reaches the user.
-            parse_mode_fallback_done = False
-            chunk_sent = False
-
-            for attempt in range(_SEND_MAX_RETRIES):
-                try:
-                    await self._rate_limiter.acquire()
-                    resp = await self._http.post(
-                        "/sendMessage",
-                        json=payload,
-                    )
-
-                    if resp.status_code == 429:
-                        # Rate-limited — extract retry_after or use backoff
-                        try:
-                            body = resp.json()
-                            retry_after = body.get("parameters", {}).get(
-                                "retry_after",
-                                _SEND_BASE_DELAY * (2**attempt),
-                            )
-                        except Exception:
-                            retry_after = _SEND_BASE_DELAY * (2**attempt)
-
-                        jitter = random.uniform(0.5, 1.5)
-                        wait = retry_after + jitter
-                        logger.warning(
-                            "[telegram] Rate-limited (429) on send to %d — retrying in %.1fs (attempt %d/%d)",
-                            chat_id,
-                            wait,
-                            attempt + 1,
-                            _SEND_MAX_RETRIES,
-                        )
-                        await asyncio.sleep(wait)
-                        continue
-
-                    resp.raise_for_status()
-                    result = resp.json()
-
-                    if result.get("ok"):
-                        chunk_sent = True
-                        break
-                    else:
-                        logger.error("[telegram] sendMessage not ok: %s", result)
-                        chunk_sent = False
-                        break
-
-                except httpx.HTTPStatusError as exc:
-                    # Retry once without parse_mode on 400 (Markdown parse errors
-                    # from unescaped _, *, `, [ characters in agent responses)
-                    if (
-                        exc.response.status_code == 400
-                        and "parse_mode" in payload
-                        and not parse_mode_fallback_done
-                    ):
-                        logger.debug(
-                            "[telegram] sendMessage returned 400 — retrying "
-                            "without parse_mode (Markdown fallback)"
-                        )
-                        payload.pop("parse_mode", None)
-                        parse_mode_fallback_done = True
-                        continue
-                    # Sanitize: exc string contains URL with bot token
-                    try:
-                        err_body = exc.response.text[:300]
-                    except Exception:
-                        err_body = "<unreadable>"
-                    logger.error(
-                        "[telegram] HTTP %d on send to %d: %s",
-                        exc.response.status_code,
-                        chat_id,
-                        err_body,
-                    )
-                    chunk_sent = False
-                    break
-                except Exception:
-                    logger.exception("[telegram] Failed to send to %d", chat_id)
-                    chunk_sent = False
-                    break
-
-            if not chunk_sent:
-                all_sent = False
-                break
+        all_sent = await send_chunks_with_retry(
+            http=self._http,
+            chat_id=chat_id,
+            chunks=chunks,
+            parse_mode=self._parse_mode,
+            reply_markup=reply_markup,
+            rate_acquire=self._rate_limiter.acquire,
+            max_retries=_SEND_MAX_RETRIES,
+            base_delay=_SEND_BASE_DELAY,
+        )
 
         if all_sent:
             logger.debug("[telegram] Sent %d chunk(s) to %d: %.80s", len(chunks), chat_id, outbound.text)
