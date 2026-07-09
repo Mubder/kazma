@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from typing import Any
 
 from fastapi import Request, WebSocket
@@ -588,3 +589,299 @@ def register_direct_routes(self: Any) -> None:
         logger.info("[routes_direct] Visual pipeline router mounted at /api/pipelines")
     except Exception as _exc:
         logger.warning("[routes_direct] Visual pipeline router failed to mount: %s", _exc)
+
+    # ── Config Migration UI ───────────────────────────────────────────
+    try:
+        from kazma_core.migrations import (
+            MigrationRunner,
+            get_runner,
+            run_startup_migrations,
+            CONFIG_STORE_MIGRATIONS,
+            TASK_STORE_MIGRATIONS,
+            SESSION_STORE_MIGRATIONS,
+        )
+        from kazma_core.config_store import get_config_store
+
+        @self.app.get("/api/config/migrate/status")
+        async def get_migration_status():
+            """Get migration status for all stores."""
+            stores = {
+                "config": {
+                    "db_path": "kazma-data/settings.db",
+                    "migrations": CONFIG_STORE_MIGRATIONS,
+                },
+                "task": {
+                    "db_path": "kazma-data/tasks.db",
+                    "migrations": TASK_STORE_MIGRATIONS,
+                },
+                "session": {
+                    "db_path": "kazma-data/sessions.db",
+                    "migrations": SESSION_STORE_MIGRATIONS,
+                },
+            }
+            
+            result = {}
+            for store_name, store_info in stores.items():
+                try:
+                    runner = get_runner(store_info["db_path"], store_name)
+                    status = runner.status()
+                    result[store_name] = {
+                        "db_path": store_info["db_path"],
+                        "applied_count": status["applied_count"],
+                        "pending_count": status["pending_count"],
+                        "latest_applied": status["latest_applied"],
+                        "pending_versions": status["pending_versions"],
+                        "history": status["history"],
+                    }
+                except Exception as e:
+                    logger.warning(f"[Migration] Failed to get status for {store_name}: {e}")
+                    result[store_name] = {
+                        "db_path": store_info["db_path"],
+                        "error": str(e),
+                    }
+            
+            return {"stores": result, "timestamp": time.time()}
+        
+        @self.app.post("/api/config/migrate/run")
+        async def run_migrations(request: Request):
+            """Run pending migrations for all stores or specific store."""
+            import json
+            from pathlib import Path
+            
+            try:
+                body = await request.json()
+            except Exception:
+                body = {}
+            
+            store_filter = body.get("store")  # Optional: "config", "task", "session"
+            target_version = body.get("target_version")  # Optional: migrate up to specific version
+            
+            db_paths = {}
+            if store_filter:
+                if store_filter == "config":
+                    db_paths["config"] = "kazma-data/settings.db"
+                elif store_filter == "task":
+                    db_paths["task"] = "kazma-data/tasks.db"
+                elif store_filter == "session":
+                    db_paths["session"] = "kazma-data/sessions.db"
+                else:
+                    from fastapi import HTTPException
+                    raise HTTPException(status_code=400, detail=f"Unknown store: {store_filter}")
+            else:
+                db_paths = {
+                    "config": "kazma-data/settings.db",
+                    "task": "kazma-data/tasks.db",
+                    "session": "kazma-data/sessions.db",
+                }
+            
+            # Ensure parent directories exist
+            for path in db_paths.values():
+                Path(path).parent.mkdir(parents=True, exist_ok=True)
+            
+            results = {}
+            try:
+                applied = run_startup_migrations(db_paths)
+                for store_name, migrations in applied.items():
+                    results[store_name] = {
+                        "applied_count": len(migrations),
+                        "migrations": [
+                            {"version": m.version, "name": m.name}
+                            for m in migrations
+                        ],
+                    }
+            except Exception as e:
+                logger.error(f"[Migration] Failed to run migrations: {e}")
+                from fastapi import HTTPException
+                raise HTTPException(status_code=500, detail=str(e))
+            
+            return {
+                "status": "completed",
+                "results": results,
+                "timestamp": time.time(),
+            }
+        
+        @self.app.post("/api/config/migrate/rollback")
+        async def rollback_migrations(request: Request):
+            """Rollback migrations for a specific store down to target_version (exclusive)."""
+            from fastapi import HTTPException
+            
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid JSON")
+            
+            store_name = body.get("store")
+            target_version = body.get("target_version")
+            
+            if not store_name or store_name not in ("config", "task", "session"):
+                raise HTTPException(status_code=400, detail="store must be one of: config, task, session")
+            if target_version is None or not isinstance(target_version, int):
+                raise HTTPException(status_code=400, detail="target_version (int) is required")
+            
+            db_paths = {
+                "config": "kazma-data/settings.db",
+                "task": "kazma-data/tasks.db",
+                "session": "kazma-data/sessions.db",
+            }
+            
+            db_path = db_paths[store_name]
+            
+            try:
+                runner = get_runner(db_path, store_name)
+                rolled_back = runner.rollback(target_version)
+                return {
+                    "status": "completed",
+                    "store": store_name,
+                    "rolled_back_count": len(rolled_back),
+                    "migrations": [
+                        {"version": m.version, "name": m.name}
+                        for m in rolled_back
+                    ],
+                    "timestamp": time.time(),
+                }
+            except Exception as e:
+                logger.error(f"[Migration] Rollback failed for {store_name}: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+        
+        @self.app.post("/api/config/migrate/export")
+        async def export_config_with_migrations():
+            """Export current config including migration status as YAML."""
+            from kazma_core.config_store import get_config_store
+            
+            store = get_config_store()
+            config_yaml = store.export_yaml()
+            
+            # Also include migration status
+            status_resp = await get_migration_status()
+            
+            import yaml
+            full_export = {
+                "config": yaml.safe_load(config_yaml),
+                "migrations": status_resp["stores"],
+            }
+            
+            return yaml.dump(full_export, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        
+        logger.info("[routes_direct] Config migration endpoints mounted at /api/config/migrate/*")
+    except Exception as _exc:
+        logger.warning("[routes_direct] Config migration endpoints failed to mount: %s", _exc)
+
+    # ── Chaos Testing UI ────────────────────────────────────────────────
+    try:
+        from kazma_core.chaos import (
+            get_injector,
+            list_active_injections,
+            list_predefined_experiments,
+            run_predefined_experiment,
+            PREDEFINED_EXPERIMENTS,
+        )
+
+        @self.app.get("/api/chaos/experiments")
+        async def get_predefined_experiments():
+            """List all predefined chaos experiments."""
+            return await list_predefined_experiments()
+
+        @self.app.post("/api/chaos/experiments/{experiment_name}/run")
+        async def run_experiment(experiment_name: str):
+            """Run a predefined chaos experiment."""
+            try:
+                injection_id = await run_predefined_experiment(experiment_name)
+                return {"status": "started", "injection_id": injection_id, "experiment": experiment_name}
+            except ValueError as e:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail=str(e))
+            except Exception as e:
+                logger.error(f"[Chaos] Failed to run experiment {experiment_name}: {e}")
+                from fastapi import HTTPException
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.get("/api/chaos/injections")
+        async def get_active_injections():
+            """Get all currently active fault injections."""
+            injections = await list_active_injections()
+            return {"injections": injections, "count": len(injections)}
+
+        @self.app.delete("/api/chaos/injections/{injection_id}")
+        async def stop_injection(injection_id: str):
+            """Stop a specific fault injection."""
+            injector = get_injector()
+            try:
+                await injector.remove_injection(injection_id)
+                return {"status": "stopped", "injection_id": injection_id}
+            except KeyError:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail=f"Injection not found: {injection_id}")
+            except Exception as e:
+                logger.error(f"[Chaos] Failed to stop injection {injection_id}: {e}")
+                from fastapi import HTTPException
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.delete("/api/chaos/injections")
+        async def stop_all_injections():
+            """Stop all active fault injections."""
+            injector = get_injector()
+            try:
+                await injector.stop_all()
+                return {"status": "all_stopped"}
+            except Exception as e:
+                logger.error(f"[Chaos] Failed to stop all injections: {e}")
+                from fastapi import HTTPException
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.post("/api/chaos/injections/custom")
+        async def create_custom_injection(request: Request):
+            """Create a custom fault injection.
+            
+            Request body:
+            {
+                "failure_type": "latency|error|exception|timeout|network_partition|...",
+                "target": "llm_provider|database|tool_executor|swarm_engine|gateway_adapter|message_bus",
+                "probability": 0.1,
+                "duration_seconds": 60,
+                "params": {"latency_ms": 2000}  // optional params
+            }
+            """
+            from kazma_core.chaos import FailureInjection, FailureType, InjectionTarget
+            from fastapi import HTTPException
+            
+            try:
+                body = await request.json()
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid JSON")
+            
+            # Validate required fields
+            required = ["failure_type", "target", "probability", "duration_seconds"]
+            for field in required:
+                if field not in body:
+                    raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
+            
+            try:
+                failure_type = FailureType(body["failure_type"])
+                target = InjectionTarget(body["target"])
+                probability = float(body["probability"])
+                duration_seconds = int(body["duration_seconds"])
+                params = body.get("params", {})
+                
+                if not 0 <= probability <= 1:
+                    raise HTTPException(status_code=400, detail="probability must be between 0 and 1")
+                if duration_seconds <= 0:
+                    raise HTTPException(status_code=400, detail="duration_seconds must be positive")
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid value: {e}")
+            
+            injection = FailureInjection(
+                failure_type=failure_type,
+                target=target,
+                probability=probability,
+                duration_seconds=duration_seconds,
+                **params,
+            )
+            
+            injector = get_injector()
+            injection_id = await injector.add_injection(injection)
+            
+            return {"status": "created", "injection_id": injection_id}
+
+        logger.info("[routes_direct] Chaos testing endpoints mounted at /api/chaos/*")
+    except Exception as _exc:
+        logger.warning("[routes_direct] Chaos testing endpoints failed to mount: %s", _exc)

@@ -190,3 +190,44 @@ All runtime config is stored in SQLite via `ConfigStore`:
 - `providers.<name>.selected_models` — user-selected models per provider
 - `swarm.output_target` — Telegram group routing config
 - `connectors.telegram.token` / `connectors.telegram.enabled`
+
+## New Features (Phase 3)
+
+### Config Migration UI (`/api/config/migrate/*`)
+- **GET `/api/config/migrate/status`** — Returns migration status for all stores (config, task, session)
+- **POST `/api/config/migrate/run`** — Runs pending migrations (optionally for specific store, up to target version)
+- **POST `/api/config/migrate/rollback`** — Rolls back migrations for a store to a target version
+- **POST `/api/config/migrate/export`** — Exports current config + migration status as YAML
+
+### Chaos Testing Framework (`kazma-core/kazma_core/chaos/`)
+- **Failure Injection** — Inject latency, errors, timeouts, circuit breaker opens, network partitions
+- **Target Components** — LLM provider, database, message bus, tool executor, swarm engine, gateway adapter
+- **Predefined Experiments** — LLM high latency, intermittent errors, timeouts; database slow queries; message bus partitions; tool executor failures; swarm degradation; gateway adapter errors; circuit breaker force-open; resource exhaustion
+- **UI Endpoints** (`/api/chaos/*`):
+  - GET `/api/chaos/experiments` — List predefined experiments
+  - POST `/api/chaos/experiments/{name}/run` — Run a predefined experiment
+  - GET `/api/chaos/injections` — List active injections
+  - DELETE `/api/chaos/injections/{id}` — Stop specific injection
+  - DELETE `/api/chaos/injections` — Stop all injections
+  - POST `/api/chaos/injections/custom` — Create custom injection
+
+### Load Testing Infrastructure (`loadtests/`)
+- **Locust Tests** — Swarm dispatch, WebSocket/SSE/HITL, mixed workloads
+- **k6 Tests** — Advanced scenarios with custom metrics and thresholds
+- **Runner Script** — `python loadtests/run_loadtests.py` for CI integration
+- **CI Integration** — GitHub Actions workflow runs load tests on main branch pushes
+- **Reports** — HTML, CSV, JSON, JUnit XML output formats
+
+### Adapter Extraction (`kazma-gateway/kazma_gateway/agent_handler/swarm_output.py`)
+- **SwarmOutputTarget** — Abstract base class for platform output adapters
+- **TelegramSwarmOutputTarget** — Direct Bot API + Gateway fallback modes
+- **DiscordSwarmOutputTarget** — Gateway adapter routing
+- **SlackSwarmOutputTarget** — Gateway adapter routing
+- **Factory Pattern** — `send_swarm_output()` high-level dispatch function
+- Removed 150+ lines of routing logic from `swarm_dispatch.py`
+
+### WebSocket SSE Replacement with HITL
+- **Deprecated** — WebSocket `/ws/chat` (returns 410 Gone, redirects to SSE)
+- **Active** — SSE `/api/chat/stream` with full HITL (graph interrupt) support
+- **HITL Flow** — SSE emits `approval_required` event → frontend prompts → POST `/api/approve/{thread_id}` → graph resumes via `Command(resume=...)`
+- **Platform-agnostic** — Same SSE contract works across Web/Telegram/Discord/Slack

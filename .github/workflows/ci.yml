@@ -182,9 +182,79 @@ jobs:
         run: |
           docker run --rm kazma:latest python -c "import kazma_core; import kazma_gateway; import kazma_ui; print('OK')"
 
+  load-test:
+    name: Load Test (Locust)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Start Kazma server (background)
+        run: |
+          cd ${{ github.workspace }}
+          # Start server in background
+          nohup .venv/bin/python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8090 > server.log 2>&1 &
+          SERVER_PID=$!
+          echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+          # Wait for server to be ready
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:8090/health > /dev/null; then
+              echo "Server ready"
+              break
+            fi
+            sleep 1
+          done
+          cat server.log
+
+      - name: Run Load Test (Swarm Dispatch)
+        run: |
+          cd ${{ github.workspace }}
+          .venv/bin/locust -f loadtests/locustfile_swarm.py \
+            --host=http://127.0.0.1:8090 \
+            --users=20 --spawn-rate=5 --run-time=60s \
+            --headless --html=loadtest-report.html --csv=loadtest-results
+
+      - name: Run Load Test (SSE/HITL)
+        run: |
+          cd ${{ github.workspace }}
+          .venv/bin/locust -f loadtests/locustfile_websocket.py \
+            --host=http://127.0.0.1:8090 \
+            --users=10 --spawn-rate=2 --run-time=30s \
+            --headless --html=loadtest-sse-report.html --csv=loadtest-sse-results
+
+      - name: Stop Kazma server
+        if: always()
+        run: |
+          if [ -n "$SERVER_PID" ]; then
+            kill $SERVER_PID 2>/dev/null || true
+          fi
+
+      - name: Upload Load Test Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loadtest-reports
+          path: |
+            loadtest-report.html
+            loadtest-results*.csv
+            loadtest-sse-report.html
+            loadtest-sse-results*.csv
+            server.log
+
   notify:
     name: Notify on Failure
-    needs: [lint-and-typecheck, test-core, test-gateway, test-ui, coverage, security]
+    needs: [lint-and-typecheck, test-core, test-gateway, test-ui, coverage, security, load-test]
     if: failure()
     runs-on: ubuntu-latest
     steps:

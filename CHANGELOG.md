@@ -5,6 +5,50 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## Sprint 19 — Chaos Testing + Config Migration UI + Load Testing + Adapter Extraction (July 2026)
+
+### Chaos Testing Framework (`kazma-core/kazma_core/chaos/`)
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Failure Injection Engine** | Central registry for latency, errors, timeouts, circuit breaker opens, network partitions, resource exhaustion | `chaos/__init__.py` |
+| ✅ | **Predefined Experiments** | 10 experiments: LLM latency/errors/timeouts, DB slow/errors, message bus partition, tool executor failures, swarm degradation, gateway adapter errors, circuit breaker force-open, resource exhaustion | `chaos/__init__.py` |
+| ✅ | **Chaos UI Endpoints** | GET/POST/DELETE `/api/chaos/*` for experiment management | `routes_direct.py` |
+| ✅ | **Scoped Experiments** | `chaos_experiment()` context manager for test-time injections | `chaos/__init__.py` |
+
+### Config Migration UI (`/api/config/migrate/*`)
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Migration Status** | GET `/api/config/migrate/status` — status for config, task, session stores | `routes_direct.py` |
+| ✅ | **Run Migrations** | POST `/api/config/migrate/run` — run pending (optionally filtered by store/target version) | `routes_direct.py` |
+| ✅ | **Rollback** | POST `/api/config/migrate/rollback` — rollback to target version | `routes_direct.py` |
+| ✅ | **Export** | POST `/api/config/migrate/export` — config + migrations as YAML | `routes_direct.py` |
+
+### Load Testing Infrastructure (`loadtests/`)
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Locust Test Suite** | Swarm dispatch, WebSocket/SSE/HITL, mixed workloads | `loadtests/locustfile_swarm.py`, `locustfile_websocket.py` |
+| ✅ | **k6 Test Suite** | Advanced scenarios with custom metrics/thresholds | `loadtests/k6_swarm.js` |
+| ✅ | **Test Runner** | `python loadtests/run_loadtests.py` for CI/local runs | `loadtests/run_loadtests.py` |
+| ✅ | **CI Integration** | GitHub Actions runs load tests on main branch pushes | `.github/workflows/ci.yml` |
+
+### Adapter Extraction (`swarm_output.py`)
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **SwarmOutputTarget ABC** | Abstract base for platform output adapters | `swarm_output.py` |
+| ✅ | **Telegram Adapter** | Direct Bot API + Gateway fallback (dedicated bot token support) | `swarm_output.py` |
+| ✅ | **Discord/Slack Adapters** | Gateway adapter routing | `swarm_output.py` |
+| ✅ | **Factory & High-level API** | `send_swarm_output()` function | `swarm_output.py` |
+| ✅ | **swarm_dispatch.py Refactor** | Removed 150+ lines of inline routing logic | `swarm_dispatch.py` |
+
+### WebSocket → SSE HITL Migration
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **WS Deprecated** | `/ws/chat` returns 410 Gone, redirects to SSE | `chat.py` |
+| ✅ | **SSE + HITL** | `/api/chat/stream` with `approval_required` event + `/api/approve/{thread_id}` | `sse_chat.py`, `routes_direct.py` |
+| ✅ | **Platform-agnostic** | Same SSE contract works across Web/Telegram/Discord/Slack | `sse_chat.py` |
+
+---
+
 ## Sprint 17 — Skill Checksums + Task Cancel/Retry + Config Reconcilation + Engine Refactor (July 2026)
 
 ### Deep Audit Remediation (July 7, 2026)
