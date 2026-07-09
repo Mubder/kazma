@@ -924,13 +924,15 @@ class TelegramAdapter(BaseAdapter):
         if chat_id is None:
             return False
 
-        chunks = chunk_message(outbound.text)
+        # Per-message override (e.g. swarm Output Routing HTML quotes)
+        parse_mode = outbound.context_metadata.get("parse_mode", self._parse_mode)
+        chunks = chunk_message(outbound.text, parse_mode=parse_mode)
         reply_markup = outbound.context_metadata.get("reply_markup")
         all_sent = await send_chunks_with_retry(
             http=self._http,
             chat_id=chat_id,
             chunks=chunks,
-            parse_mode=self._parse_mode,
+            parse_mode=parse_mode,
             reply_markup=reply_markup,
             rate_acquire=self._rate_limiter.acquire,
             max_retries=_SEND_MAX_RETRIES,

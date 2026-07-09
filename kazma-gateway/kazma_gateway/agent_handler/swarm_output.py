@@ -82,12 +82,18 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
         async def try_mode1_direct_send(token: str) -> bool:
             try:
                 import httpx
+                from kazma_gateway.adapters.telegram_send import (
+                    chunk_html_message,
+                    strip_telegram_html,
+                )
+
+                chunks = chunk_html_message(text)
                 async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
                     all_chunks_ok = True
-                    for i in range(0, len(text), 4096):
-                        chunk = text[i:i + 4096]
+                    for chunk in chunks:
                         chunk_ok = False
-                        payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "Markdown"}
+                        # HTML enables real Telegram Quote (<blockquote>) + bold headings
+                        payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "HTML"}
                         resp = await client.post(
                             f"https://api.telegram.org/bot{token}/sendMessage",
                             json=payload,
@@ -98,10 +104,14 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
                         else:
                             desc = resp_json.get("description", "")
                             logger.warning(
-                                "[swarm-output] Telegram Markdown send failed: %s. Retrying in plain text...",
+                                "[swarm-output] Telegram HTML send failed: %s. Retrying in plain text...",
                                 desc or "unknown",
                             )
-                            payload_plain = {"chat_id": chat_id, "text": chunk}
+                            # Strip tags so raw <b>/<blockquote> never reach the user
+                            payload_plain = {
+                                "chat_id": chat_id,
+                                "text": strip_telegram_html(chunk),
+                            }
                             resp_plain = await client.post(
                                 f"https://api.telegram.org/bot{token}/sendMessage",
                                 json=payload_plain,
@@ -141,7 +151,10 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
                 await manager.send(OutboundMessage(
                     target_id=f"{platform}:{chat_id}",
                     text=text,
-                    context_metadata={"chat_id": chat_id},
+                    context_metadata={
+                        "chat_id": chat_id,
+                        "parse_mode": "HTML",  # match direct Bot API path
+                    },
                 ))
                 logger.info(
                     "[swarm-output] Swarm output routed to %s:%s via gateway manager",

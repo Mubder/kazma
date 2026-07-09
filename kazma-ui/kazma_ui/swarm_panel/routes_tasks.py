@@ -6,6 +6,7 @@ Extracted for maintainability.
 from __future__ import annotations
 
 import asyncio
+import html
 import logging
 from typing import Any
 
@@ -15,6 +16,25 @@ from fastapi.responses import JSONResponse, Response
 from kazma_ui.services import get_swarm_service
 
 logger = logging.getLogger(__name__)
+
+# Telegram HTML helpers for Output Routing (parse_mode=HTML → real blockquotes)
+_HEADING_RULE = "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+
+def _tg_escape(text: str) -> str:
+    """Escape user content for Telegram HTML parse mode."""
+    return html.escape(str(text), quote=False)
+
+
+def _tg_quote(text: str) -> str:
+    """Wrap text in a Telegram HTML blockquote (Quote UI)."""
+    body = _tg_escape(text).strip() or "—"
+    return f"<blockquote>{body}</blockquote>"
+
+
+def _tg_heading(label: str) -> str:
+    """Bold section heading so users can spot section starts."""
+    return f"<b>{_tg_escape(label)}</b>"
 
 try:
     from kazma_core.swarm import (
@@ -158,28 +178,32 @@ def register_tasks_routes(
             status_icon = "❌"
             status_text = "FAILED" if status_lower else "UNKNOWN"
 
-        lines = []
-        lines.append("🚀 *Swarm Task Execution Report*")
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        # Telegram HTML: bold headings + plain worker labels + Quote blockquotes
+        lines: list[str] = []
+        lines.append(f"🚀 {_tg_heading('Swarm Task Execution Report')}")
+        lines.append(_HEADING_RULE)
         if task_id:
-            lines.append(f"🆔 *Task ID:* `{task_id}`")
-        lines.append(f"📊 *Status:* {status_icon} *{status_text}*")
+            lines.append(f"🆔 {_tg_heading('Task ID:')} <code>{_tg_escape(task_id)}</code>")
+        lines.append(f"📊 {_tg_heading('Status:')} {status_icon} {_tg_heading(status_text)}")
         if duration > 0:
-            lines.append(f"⏱️ *Duration:* `{duration:.2f}s`" + (f" | 🪙 *Tokens:* `{tokens}`" if tokens > 0 else ""))
-        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            dur = f"<code>{duration:.2f}s</code>"
+            tok = f" | 🪙 {_tg_heading('Tokens:')} <code>{tokens}</code>" if tokens > 0 else ""
+            lines.append(f"⏱️ {_tg_heading('Duration:')} {dur}{tok}")
+        lines.append(_HEADING_RULE)
 
         if error:
-            lines.append("⚠️ *Error Details:*")
-            lines.append(f"> {error}")
+            lines.append(f"⚠️ {_tg_heading('Error Details:')}")
+            lines.append(_tg_quote(error))
             lines.append("")
 
         if aggregated_output:
-            lines.append("✨ *Final Aggregated Output:*")
-            lines.append(aggregated_output)
+            lines.append(f"✨ {_tg_heading('Final Aggregated Output:')}")
+            lines.append(_tg_quote(aggregated_output))
             lines.append("")
 
         if worker_results:
-            lines.append("👥 *Worker Breakdowns:*")
+            lines.append(f"👥 {_tg_heading('Worker Breakdowns:')}")
+            lines.append("")
             for wr in worker_results:
                 wr_name = ""
                 wr_status = ""
@@ -205,26 +229,24 @@ def register_tasks_routes(
 
                 wr_status_lower = str(wr_status).lower()
                 wr_icon = "✅" if wr_status_lower == "success" else "❌"
-                
-                # Output or error snippet
+
+                # Plain worker line — no bold/italic (user preference)
+                lines.append(
+                    f"• {_tg_escape(wr_name)} ({wr_icon} {wr_status_lower.upper() or 'UNKNOWN'})"
+                )
+                meta_parts = []
+                if wr_duration > 0:
+                    meta_parts.append(f"<code>{wr_duration:.2f}s</code>")
+                if wr_tokens > 0:
+                    meta_parts.append(f"<code>{wr_tokens}</code> tokens")
+                if meta_parts:
+                    lines.append("⏱️ " + " | ".join(meta_parts))
+
                 raw_content = wr_output if wr_output else (wr_error or "no output")
                 content_snippet = raw_content.strip()
                 if len(content_snippet) > 500:
                     content_snippet = content_snippet[:500] + "..."
-
-                # Indented blockquote for clean visual nesting
-                lines.append(f"• *{wr_name}* ({wr_icon} {wr_status_lower.upper()})")
-                meta_parts = []
-                if wr_duration > 0:
-                    meta_parts.append(f"`{wr_duration:.2f}s`")
-                if wr_tokens > 0:
-                    meta_parts.append(f"`{wr_tokens}` tokens")
-                if meta_parts:
-                    lines.append(f"  ⏱️ " + " | ".join(meta_parts))
-                
-                # Indent the content
-                indented_content = "\n".join(f"  > {line}" for line in content_snippet.splitlines())
-                lines.append(indented_content)
+                lines.append(_tg_quote(content_snippet))
                 lines.append("")
 
         text = "\n".join(lines).strip()
