@@ -17,6 +17,7 @@ import asyncio
 import logging
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -681,63 +682,60 @@ class KazmaAppBuilder:
 
         register_direct_routes(self)
 
-    def _setup_lifecycle_and_errors(self) -> None:
-        """Register application startup, shutdown events, and global exception handlers."""
+    async def _on_startup(self) -> None:
+        """Application startup: checkpointer, HITL graph, gateway, cron."""
+        try:
+            from kazma_gateway.stores.checkpoint import create_checkpointer
 
-        @self.app.on_event("startup")
-        async def _start_gateway() -> None:
-            try:
-                from kazma_gateway.stores.checkpoint import create_checkpointer
+            self._checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
+            logger.info("[Checkpoint] SQLite checkpointer initialized")
 
-                self._checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
-                logger.info("[Checkpoint] SQLite checkpointer initialized")
+            from kazma_ui.dashboard import set_dashboard_context
 
-                from kazma_ui.dashboard import set_dashboard_context
+            set_dashboard_context(checkpoint_manager=self._checkpointer)
 
-                set_dashboard_context(checkpoint_manager=self._checkpointer)
+            # Always recompile graph with checkpointer + HITL for SSE holder
+            from kazma_core.agent.graph_builder import build_supervisor_graph
+            from kazma_core.safety.hitl import get_hitl_config
 
-                if self._graph_holder.get("graph") is not None or True:  # always recompile for holder
-                    from kazma_core.agent.graph_builder import build_supervisor_graph
-                    from kazma_core.safety.hitl import get_hitl_config
+            recompile_hitl = get_hitl_config(self.config.raw)
+            if not recompile_hitl.get("enabled", True):
+                recompile_hitl = None
 
-                    recompile_hitl = get_hitl_config(self.config.raw)
-                    if not recompile_hitl.get("enabled", True):
-                        recompile_hitl = None
+            recompiled = build_supervisor_graph(
+                llm=self.agent.llm,
+                system_prompt=self.agent.system_prompt,
+                tool_definitions=self.agent.tools.get_tool_definitions(),
+                tool_executor=self.agent.tools,
+                cost_breaker=self.agent.cost_breaker,
+                authority=self.agent.authority,
+                tracer=self.agent.tracer,
+                checkpointer=self._checkpointer,
+                hitl_config=recompile_hitl,
+            )
+            self._graph_holder["graph"] = recompiled
+            logger.info("[Checkpoint] Graph recompiled with checkpointer")
 
-                    recompiled = build_supervisor_graph(
-                        llm=self.agent.llm,
-                        system_prompt=self.agent.system_prompt,
-                        tool_definitions=self.agent.tools.get_tool_definitions(),
-                        tool_executor=self.agent.tools,
-                        cost_breaker=self.agent.cost_breaker,
-                        authority=self.agent.authority,
-                        tracer=self.agent.tracer,
-                        checkpointer=self._checkpointer,
-                        hitl_config=recompile_hitl,
-                    )
-                    self._graph_holder["graph"] = recompiled
-                    logger.info("[Checkpoint] Graph recompiled with checkpointer")
+            self._hitl_state["graph"] = recompiled
+            self._hitl_state["checkpointer"] = self._checkpointer
+            logger.info("[HITL] Pending approvals endpoint linked to checkpointed graph")
 
-                    self._hitl_state["graph"] = recompiled
-                    self._hitl_state["checkpointer"] = self._checkpointer
-                    logger.info("[HITL] Pending approvals endpoint linked to checkpointed graph")
+            if self.gateway is not None:
+                from kazma_gateway.agent_handler import create_graph_handler
 
-                    from kazma_gateway.agent_handler import create_graph_handler
+                brain_handler = create_graph_handler(
+                    graph=self._graph_holder.get("graph"),
+                    manager=self.gateway,
+                    system_prompt=self.agent.system_prompt,
+                    cost_breaker=self.agent.cost_breaker,
+                    store=self.session_store,
+                )
+                self.gateway.on_message(brain_handler)
+                logger.info("[Checkpoint] Brain handler re-registered with checkpointed graph")
+        except Exception as e:
+            logger.warning("[Checkpoint] Checkpointer not available: %s", e)
 
-                    brain_handler = create_graph_handler(
-                        graph=self._graph_holder.get("graph"),
-                        manager=self.gateway,
-                        system_prompt=self.agent.system_prompt,
-                        cost_breaker=self.agent.cost_breaker,
-                        store=self.session_store,
-                    )
-                    self.gateway.on_message(brain_handler)
-                    logger.info("[Checkpoint] Brain handler re-registered with checkpointed graph")
-            except Exception as e:
-                logger.warning("[Checkpoint] Checkpointer not available: %s", e)
-
-            if self.gateway is None:
-                return
+        if self.gateway is not None:
             try:
                 await self.gateway.start()
                 logger.info(
@@ -748,35 +746,49 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[Gateway] Failed to start: %s", e)
 
-            # Initialize cron store and start scheduler
-            if self.cron_store is not None:
-                try:
-                    await self.cron_store.init()
-                    from kazma_core.cron.scheduler import get_cron_scheduler
-
-                    cron_sched = get_cron_scheduler()
-                    if cron_sched:
-                        await cron_sched.start()
-                        logger.info("[Cron] Scheduler started")
-                except Exception as e:
-                    logger.warning("[Cron] Failed to start: %s", e)
-
-        @self.app.on_event("shutdown")
-        async def _stop_gateway() -> None:
-            # Close HTTP connection pool
+        if self.cron_store is not None:
             try:
-                from kazma_core.http_pool import close_http_client
-                await close_http_client()
-            except Exception as e:
-                logger.warning("[app] Error closing http client during shutdown: %s", e)
+                await self.cron_store.init()
+                from kazma_core.cron.scheduler import get_cron_scheduler
 
-            if self.gateway is None:
-                return
-            try:
-                await self.gateway.stop()
-                logger.info("[Gateway] Stopped cleanly")
+                cron_sched = get_cron_scheduler()
+                if cron_sched:
+                    await cron_sched.start()
+                    logger.info("[Cron] Scheduler started")
             except Exception as e:
-                logger.warning("[Gateway] Error during shutdown: %s", e)
+                logger.warning("[Cron] Failed to start: %s", e)
+
+    async def _on_shutdown(self) -> None:
+        """Application shutdown: HTTP pool + gateway."""
+        try:
+            from kazma_core.http_pool import close_http_client
+
+            await close_http_client()
+        except Exception as e:
+            logger.warning("[app] Error closing http client during shutdown: %s", e)
+
+        if self.gateway is None:
+            return
+        try:
+            await self.gateway.stop()
+            logger.info("[Gateway] Stopped cleanly")
+        except Exception as e:
+            logger.warning("[Gateway] Error during shutdown: %s", e)
+
+    def _setup_lifecycle_and_errors(self) -> None:
+        """Register lifespan (replaces deprecated on_event) and exception handlers."""
+        builder = self
+
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            await builder._on_startup()
+            try:
+                yield
+            finally:
+                await builder._on_shutdown()
+
+        # Attach lifespan after app construction (Starlette/FastAPI)
+        self.app.router.lifespan_context = lifespan
 
         from starlette.exceptions import HTTPException as StarletteHTTPException
 

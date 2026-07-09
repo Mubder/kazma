@@ -52,6 +52,8 @@ from kazma_core.swarm.task import (
     WorkerResult,
 )
 from kazma_core.swarm.sse_bridge import SseBridge
+from kazma_core.swarm.task_control import build_retry_task as _build_retry_task
+from kazma_core.swarm.task_control import cancel_active_task as _cancel_active_task
 from kazma_core.swarm.task_lifecycle import get_task as _hist_get_task
 from kazma_core.swarm.task_lifecycle import record_task as _hist_record_task
 from kazma_core.swarm.task_lifecycle import update_task as _hist_update_task
@@ -769,29 +771,12 @@ class SwarmEngine:
         Returns True if the task was found and cancelled, False if not
         found or already terminal.
         """
-        # Check if the task is active
-        if task_id not in self._active_tasks:
-            logger.warning("[SwarmEngine] cancel_task: '%s' not in active tasks", task_id)
-            return False
-
-        task = self._active_tasks[task_id]
-
-        # Cancel the asyncio handle if we have one
-        handle = self._task_handles.get(task_id)
-        if handle is not None and not handle.done():
-            handle.cancel()
-            logger.info("[SwarmEngine] cancelled asyncio handle for task '%s'", task_id)
-
-        # Finalize with cancelled status
-        self._finalize_task(
-            task=task,
-            status="cancelled",
-            worker_results=[],
-            error="Cancelled by user",
-            duration_seconds=0.0,
+        return _cancel_active_task(
+            task_id=task_id,
+            active_tasks=self._active_tasks,
+            task_handles=self._task_handles,
+            finalize=self._finalize_task,
         )
-        logger.info("[SwarmEngine] task '%s' cancelled", task_id)
-        return True
 
     async def retry_task(self, task_id: str) -> SwarmTask | None:
         """Retry a failed/timeout/cancelled task by creating a fresh dispatch.
@@ -802,33 +787,12 @@ class SwarmEngine:
 
         Returns the new SwarmTask, or None if the original was not found.
         """
-        # Find the original task — check history first, then active
-        original = self._task_history.get(task_id)
-        if original is None:
-            original = self._active_tasks.get(task_id)
-        if original is None:
-            # Check the TaskStore
-            if self._task_store is not None:
-                original = self._task_store.get_task(task_id)
-        if original is None:
-            logger.warning("[SwarmEngine] retry_task: '%s' not found", task_id)
-            return None
-
-        # Build a fresh task from the original's core fields
-        new_metadata = dict(original.metadata or {})
-        new_metadata["retry_of"] = task_id
-
-        new_task = SwarmTask(
-            prompt=original.prompt,
-            type=original.type,
-            context=original.context,
-            workers=list(original.workers),
-            timeout=original.timeout,
-            fallback_chain=list(original.fallback_chain) if original.fallback_chain else None,
-            metadata=new_metadata,
+        return _build_retry_task(
+            task_id=task_id,
+            history=self._task_history,
+            active_tasks=self._active_tasks,
+            task_store=self._task_store,
         )
-        logger.info("[SwarmEngine] retrying task '%s' as '%s'", task_id, new_task.id)
-        return new_task
 
     async def status(self) -> list[dict[str, Any]]:
         """Return status for all registered workers."""
