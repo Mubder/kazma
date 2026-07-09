@@ -199,7 +199,12 @@ class ToolRegistry:
         return cls._instance
 
     def _init_defaults(self) -> None:
+        # Register under both "shell" (legacy) and "shell_exec" (HITL danger name)
+        # so SafetyMiddleware._EXTENDED_DANGER and swarm workers agree.
         self._tools["shell"] = ShellTool()
+        shell_exec = ShellTool()
+        shell_exec.name = "shell_exec"
+        self._tools["shell_exec"] = shell_exec
         self._register_builtin_tools()
 
     def _register_builtin_tools(self) -> None:

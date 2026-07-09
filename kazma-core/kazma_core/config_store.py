@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -27,7 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-import os
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -313,11 +314,9 @@ class _InMemoryStore:
     def export_yaml(self) -> str:
         with self._lock:
             self._evict_expired()
-            import yaml
             return yaml.dump(self._data, default_flow_style=False, allow_unicode=True, sort_keys=False)
     
     def import_yaml(self, yaml_str: str) -> int:
-        import yaml
         data = yaml.safe_load(yaml_str)
         if not isinstance(data, dict):
             return 0
@@ -346,7 +345,6 @@ class _InMemoryStore:
         with self._lock:
             self._data.clear()
             self._timestamps.clear()
-            return count
     
     async def close(self) -> None:
         async with self._lock:
@@ -390,8 +388,6 @@ class ConfigStore:
         if self._yaml_cache is not None:
             return self._yaml_cache
         if self._yaml_path.exists():
-            import yaml
-
             with open(self._yaml_path) as f:
                 self._yaml_cache = yaml.safe_load(f) or {}
         else:
@@ -600,8 +596,6 @@ class ConfigStore:
 
     def export_yaml(self) -> str:
         """Export current settings as YAML, merging DB overrides with base YAML."""
-        import yaml
-
         base = self._load_yaml()
         db_settings = self.get_all()
 
@@ -628,8 +622,6 @@ class ConfigStore:
         The import is **atomic** — all keys are written in a single
         transaction via ``batch_set()``. A crash mid-import rolls back.
         """
-        import yaml
-
         data = yaml.safe_load(yaml_str)
         if not isinstance(data, dict):
             return 0
@@ -659,8 +651,6 @@ class ConfigStore:
 
         Returns the number of new keys seeded.
         """
-        import yaml
-
         if not self._yaml_path.exists():
             return 0
 

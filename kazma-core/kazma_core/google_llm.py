@@ -271,6 +271,14 @@ class GeminiProvider(LLMProvider):
 
         return self._http
 
+    async def close(self) -> None:
+        """Close the Vertex/Gemini HTTP client (ADC-authenticated).
+
+        Explicit override so long-lived Gemini sessions always release the
+        httpx.AsyncClient via aclose(); inherits parent lifecycle semantics.
+        """
+        await super().close()
+
     # ── Helpers ──────────────────────────────────────────────────
 
     def _resolve_project(self) -> str:

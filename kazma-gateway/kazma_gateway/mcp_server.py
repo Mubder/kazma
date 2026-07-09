@@ -17,9 +17,13 @@ Config in kazma.yaml:
         root: .               # project root (defaults to cwd)
         max_file_size: 1048576 # 1 MB read limit
 
-Security (post-audit): When KAZMA_SECRET is set in env, danger tools (write_file, run_tests)
-require "_secret" in the tool arguments. Danger tools are also routed through SafetyMiddleware
-(fail-closed bus gate). No full graph interrupt (stdio path); use bus adapters for HITL UX.
+Security (post-audit / S0):
+  - Danger tools (write_file, run_tests) ALWAYS require KAZMA_SECRET in env and
+    matching ``_secret`` in tool arguments (fail-closed when secret unset).
+  - Names map via MCP_TOOL_TO_SAFETY (write_file → file_write) before SafetyMiddleware.
+  - Danger tools also route through SafetyMiddleware.check_sync() (fail-closed bus).
+  - No full graph interrupt on stdio; use bus adapters for HITL UX.
+  - Disable server with KAZMA_MCP_IDE_ENABLED=false.
 """
 
 from __future__ import annotations

@@ -477,7 +477,7 @@ def register_direct_routes(self: Any) -> None:
         if graph_ref is None:
             return _JSONResponse({"error": "Graph not available"}, status_code=503)
 
-        # H-2 fix: enforce ownership check - block if ownership mismatch
+        # H-2 / S0-3: enforce ownership — require session_id when owner is known
         try:
             if self.session_store is not None:
                 ctx = None
@@ -487,10 +487,28 @@ def register_direct_routes(self: Any) -> None:
                     logger.debug("[HITL] Failed to fetch session context for ownership check: %s", _e)
                 if ctx and isinstance(ctx, dict):
                     owner = ctx.get("sender_id") or ctx.get("owner") or ctx.get("session_id")
-                    caller_session = body.get("session_id")
-                    if owner and caller_session and str(owner) != str(caller_session):
-                        logger.warning("[HITL] Web approve ownership mismatch for thread %s: owner=%s caller=%s", thread_id, owner, caller_session)
-                        return _JSONResponse({"error": "Ownership mismatch: you cannot approve another user's request"}, status_code=403)
+                    if owner:
+                        caller_session = body.get("session_id")
+                        if not caller_session:
+                            logger.warning(
+                                "[HITL] Web approve missing session_id for owned thread %s",
+                                thread_id,
+                            )
+                            return _JSONResponse(
+                                {"error": "session_id required to approve this request"},
+                                status_code=403,
+                            )
+                        if str(owner) != str(caller_session):
+                            logger.warning(
+                                "[HITL] Web approve ownership mismatch for thread %s: owner=%s caller=%s",
+                                thread_id,
+                                owner,
+                                caller_session,
+                            )
+                            return _JSONResponse(
+                                {"error": "Ownership mismatch: you cannot approve another user's request"},
+                                status_code=403,
+                            )
         except Exception as _e:
             logger.debug("[HITL] Ownership check failed: %s", _e)
 
@@ -690,9 +708,9 @@ def register_direct_routes(self: Any) -> None:
                         ],
                     }
             except Exception as e:
-                logger.error(f"[Migration] Failed to run migrations: {e}")
+                logger.error("[Migration] Failed to run migrations: %s", e, exc_info=True)
                 from fastapi import HTTPException
-                raise HTTPException(status_code=500, detail=str(e))
+                raise HTTPException(status_code=500, detail="Migration failed")
             
             return {
                 "status": "completed",
@@ -740,8 +758,10 @@ def register_direct_routes(self: Any) -> None:
                     "timestamp": time.time(),
                 }
             except Exception as e:
-                logger.error(f"[Migration] Rollback failed for {store_name}: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                logger.error(
+                    "[Migration] Rollback failed for %s: %s", store_name, e, exc_info=True
+                )
+                raise HTTPException(status_code=500, detail="Migration rollback failed")
         
         @self.app.post("/api/config/migrate/export")
         async def export_config_with_migrations():
@@ -766,122 +786,165 @@ def register_direct_routes(self: Any) -> None:
     except Exception as _exc:
         logger.warning("[routes_direct] Config migration endpoints failed to mount: %s", _exc)
 
-    # ── Chaos Testing UI ────────────────────────────────────────────────
-    try:
-        from kazma_core.chaos import (
-            get_injector,
-            list_active_injections,
-            list_predefined_experiments,
-            run_predefined_experiment,
-            PREDEFINED_EXPERIMENTS,
+    # ── Chaos Testing UI (opt-in via KAZMA_CHAOS_ENABLED) ───────────────
+    # S0-2: default OFF — never expose fault injection in production.
+    import os as _os_chaos
+
+    _chaos_enabled = _os_chaos.environ.get("KAZMA_CHAOS_ENABLED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if not _chaos_enabled:
+        logger.info(
+            "[routes_direct] Chaos endpoints disabled "
+            "(set KAZMA_CHAOS_ENABLED=true to enable)"
         )
-
-        @self.app.get("/api/chaos/experiments")
-        async def get_predefined_experiments():
-            """List all predefined chaos experiments."""
-            return await list_predefined_experiments()
-
-        @self.app.post("/api/chaos/experiments/{experiment_name}/run")
-        async def run_experiment(experiment_name: str):
-            """Run a predefined chaos experiment."""
-            try:
-                injection_id = await run_predefined_experiment(experiment_name)
-                return {"status": "started", "injection_id": injection_id, "experiment": experiment_name}
-            except ValueError as e:
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404, detail=str(e))
-            except Exception as e:
-                logger.error(f"[Chaos] Failed to run experiment {experiment_name}: {e}")
-                from fastapi import HTTPException
-                raise HTTPException(status_code=500, detail=str(e))
-
-        @self.app.get("/api/chaos/injections")
-        async def get_active_injections():
-            """Get all currently active fault injections."""
-            injections = await list_active_injections()
-            return {"injections": injections, "count": len(injections)}
-
-        @self.app.delete("/api/chaos/injections/{injection_id}")
-        async def stop_injection(injection_id: str):
-            """Stop a specific fault injection."""
-            injector = get_injector()
-            try:
-                await injector.remove_injection(injection_id)
-                return {"status": "stopped", "injection_id": injection_id}
-            except KeyError:
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404, detail=f"Injection not found: {injection_id}")
-            except Exception as e:
-                logger.error(f"[Chaos] Failed to stop injection {injection_id}: {e}")
-                from fastapi import HTTPException
-                raise HTTPException(status_code=500, detail=str(e))
-
-        @self.app.delete("/api/chaos/injections")
-        async def stop_all_injections():
-            """Stop all active fault injections."""
-            injector = get_injector()
-            try:
-                await injector.stop_all()
-                return {"status": "all_stopped"}
-            except Exception as e:
-                logger.error(f"[Chaos] Failed to stop all injections: {e}")
-                from fastapi import HTTPException
-                raise HTTPException(status_code=500, detail=str(e))
-
-        @self.app.post("/api/chaos/injections/custom")
-        async def create_custom_injection(request: Request):
-            """Create a custom fault injection.
-            
-            Request body:
-            {
-                "failure_type": "latency|error|exception|timeout|network_partition|...",
-                "target": "llm_provider|database|tool_executor|swarm_engine|gateway_adapter|message_bus",
-                "probability": 0.1,
-                "duration_seconds": 60,
-                "params": {"latency_ms": 2000}  // optional params
-            }
-            """
-            from kazma_core.chaos import FailureInjection, FailureType, InjectionTarget
-            from fastapi import HTTPException
-            
-            try:
-                body = await request.json()
-            except Exception:
-                raise HTTPException(status_code=400, detail="Invalid JSON")
-            
-            # Validate required fields
-            required = ["failure_type", "target", "probability", "duration_seconds"]
-            for field in required:
-                if field not in body:
-                    raise HTTPException(status_code=400, detail=f"Missing required field: {field}")
-            
-            try:
-                failure_type = FailureType(body["failure_type"])
-                target = InjectionTarget(body["target"])
-                probability = float(body["probability"])
-                duration_seconds = int(body["duration_seconds"])
-                params = body.get("params", {})
-                
-                if not 0 <= probability <= 1:
-                    raise HTTPException(status_code=400, detail="probability must be between 0 and 1")
-                if duration_seconds <= 0:
-                    raise HTTPException(status_code=400, detail="duration_seconds must be positive")
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=f"Invalid value: {e}")
-            
-            injection = FailureInjection(
-                failure_type=failure_type,
-                target=target,
-                probability=probability,
-                duration_seconds=duration_seconds,
-                **params,
+    else:
+        try:
+            from kazma_core.chaos import (
+                get_injector,
+                list_active_injections,
+                list_predefined_experiments,
+                run_predefined_experiment,
             )
-            
-            injector = get_injector()
-            injection_id = await injector.add_injection(injection)
-            
-            return {"status": "created", "injection_id": injection_id}
 
-        logger.info("[routes_direct] Chaos testing endpoints mounted at /api/chaos/*")
-    except Exception as _exc:
-        logger.warning("[routes_direct] Chaos testing endpoints failed to mount: %s", _exc)
+            @self.app.get("/api/chaos/experiments")
+            async def get_predefined_experiments():
+                """List all predefined chaos experiments."""
+                return await list_predefined_experiments()
+
+            @self.app.post("/api/chaos/experiments/{experiment_name}/run")
+            async def run_experiment(experiment_name: str):
+                """Run a predefined chaos experiment."""
+                try:
+                    injection_id = await run_predefined_experiment(experiment_name)
+                    return {
+                        "status": "started",
+                        "injection_id": injection_id,
+                        "experiment": experiment_name,
+                    }
+                except ValueError as e:
+                    from fastapi import HTTPException
+
+                    raise HTTPException(status_code=404, detail=str(e))
+                except Exception as e:
+                    logger.error(
+                        "[Chaos] Failed to run experiment %s: %s",
+                        experiment_name,
+                        e,
+                        exc_info=True,
+                    )
+                    from fastapi import HTTPException
+
+                    raise HTTPException(status_code=500, detail="Chaos experiment failed")
+
+            @self.app.get("/api/chaos/injections")
+            async def get_active_injections():
+                """Get all currently active fault injections."""
+                injections = await list_active_injections()
+                return {"injections": injections, "count": len(injections)}
+
+            @self.app.delete("/api/chaos/injections/{injection_id}")
+            async def stop_injection(injection_id: str):
+                """Stop a specific fault injection."""
+                injector = get_injector()
+                try:
+                    await injector.remove_injection(injection_id)
+                    return {"status": "stopped", "injection_id": injection_id}
+                except KeyError:
+                    from fastapi import HTTPException
+
+                    raise HTTPException(
+                        status_code=404, detail=f"Injection not found: {injection_id}"
+                    )
+                except Exception as e:
+                    logger.error(
+                        "[Chaos] Failed to stop injection %s: %s",
+                        injection_id,
+                        e,
+                        exc_info=True,
+                    )
+                    from fastapi import HTTPException
+
+                    raise HTTPException(status_code=500, detail="Failed to stop injection")
+
+            @self.app.delete("/api/chaos/injections")
+            async def stop_all_injections():
+                """Stop all active fault injections."""
+                injector = get_injector()
+                try:
+                    await injector.stop_all()
+                    return {"status": "all_stopped"}
+                except Exception as e:
+                    logger.error("[Chaos] Failed to stop all injections: %s", e, exc_info=True)
+                    from fastapi import HTTPException
+
+                    raise HTTPException(status_code=500, detail="Failed to stop injections")
+
+            @self.app.post("/api/chaos/injections/custom")
+            async def create_custom_injection(request: Request):
+                """Create a custom fault injection.
+
+                Request body:
+                {
+                    "failure_type": "latency|error|timeout|...",
+                    "target": "llm_provider|database|tool_executor|...",
+                    "probability": 0.1,
+                    "duration_seconds": 60,
+                    "params": {"latency_ms": 2000}
+                }
+                """
+                from kazma_core.chaos import FailureInjection, FailureType, InjectionTarget
+                from fastapi import HTTPException
+
+                try:
+                    body = await request.json()
+                except Exception:
+                    raise HTTPException(status_code=400, detail="Invalid JSON")
+
+                required = ["failure_type", "target", "probability", "duration_seconds"]
+                for field in required:
+                    if field not in body:
+                        raise HTTPException(
+                            status_code=400, detail=f"Missing required field: {field}"
+                        )
+
+                try:
+                    failure_type = FailureType(body["failure_type"])
+                    target = InjectionTarget(body["target"])
+                    probability = float(body["probability"])
+                    duration_seconds = int(body["duration_seconds"])
+                    params = body.get("params", {})
+
+                    if not 0 <= probability <= 1:
+                        raise HTTPException(
+                            status_code=400, detail="probability must be between 0 and 1"
+                        )
+                    if duration_seconds <= 0:
+                        raise HTTPException(
+                            status_code=400, detail="duration_seconds must be positive"
+                        )
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=f"Invalid value: {e}")
+
+                injection = FailureInjection(
+                    failure_type=failure_type,
+                    target=target,
+                    probability=probability,
+                    duration_seconds=duration_seconds,
+                    **params,
+                )
+
+                injector = get_injector()
+                injection_id = await injector.add_injection(injection)
+
+                return {"status": "created", "injection_id": injection_id}
+
+            logger.info(
+                "[routes_direct] Chaos testing endpoints mounted at /api/chaos/* "
+                "(KAZMA_CHAOS_ENABLED=true)"
+            )
+        except Exception as _exc:
+            logger.warning("[routes_direct] Chaos testing endpoints failed to mount: %s", _exc)

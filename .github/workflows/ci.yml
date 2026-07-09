@@ -113,6 +113,26 @@ jobs:
       - name: Run Integration Tests
         run: python -m pytest kazma-core/kazma_core_tests/integration -v --tb=short
 
+  test-root-suite:
+    name: Root Regression Suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e ".[test]"
+
+      # Main corpus (~3.5k tests) — not covered by package-only jobs
+      - name: Run root tests/
+        run: python -m pytest tests/ -q --tb=line
+
   coverage:
     name: Coverage Report
     runs-on: ubuntu-latest

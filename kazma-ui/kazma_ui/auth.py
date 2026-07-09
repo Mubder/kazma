@@ -66,9 +66,16 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     # other endpoints are open (sessions, HITL approval, system ops).
     "/api/sessions", "/api/session",
     "/api/approve", "/api/system",
-    "/api/workspace", "/api/memory",
+    "/api/workspace", "/api/workspaces", "/api/memory",
     "/api/pending-approvals", "/api/metrics",
     "/api/telemetry/stream", "/api/telemetry/snapshot",
+    # Sprint 19 / Phase 3 surfaces (chaos, migrations, workspace tooling)
+    "/api/chaos",
+    "/api/config",
+    "/api/git",
+    "/api/github",
+    "/api/bookmarks",
+    "/api/pipelines",
     "/v1/models",
 )
 

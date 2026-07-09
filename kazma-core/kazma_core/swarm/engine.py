@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import UTC, datetime
 from time import perf_counter
 from typing import Any
@@ -92,7 +93,8 @@ class SwarmEngine:
         self._task_history: dict[str, SwarmTask] = {}
         self._active_tasks: dict[str, SwarmTask] = {}  # in-flight tasks
         self._task_handles: dict[str, asyncio.Task] = {}  # asyncio handles for cancel
-        self._task_lock = asyncio.Lock()  # protects _task_history mutations
+        # threading.Lock: usable from both sync (_finalize_task) and async paths
+        self._task_lock = threading.Lock()  # protects _task_history mutations
         self._max_history = 500  # LRU cap to prevent unbounded memory growth
         self._result_aggregator = result_aggregator or ResultAggregator()
         from kazma_core.routing_engine import UnifiedRouter
@@ -1353,11 +1355,12 @@ class SwarmEngine:
             metadata=dict(metadata or {}),
         )
         task.result = result
-        self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
-        if len(self._task_history) > self._max_history:
-            excess = len(self._task_history) - self._max_history
-            for old_key in list(self._task_history.keys())[:excess]:
-                self._task_history.pop(old_key, None)
+        with self._task_lock:
+            self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
+            if len(self._task_history) > self._max_history:
+                excess = len(self._task_history) - self._max_history
+                for old_key in list(self._task_history.keys())[:excess]:
+                    self._task_history.pop(old_key, None)
 
         # Emit lifecycle event for observers (SSE etc.)
         if status == "paused":
@@ -1601,7 +1604,7 @@ class SwarmEngine:
         result = await self._checkpoint_handler.reject(task_id, reason=reason)
         if result is not None:
             # Update task history with the failed result.
-            async with self._task_lock:
+            with self._task_lock:
                 task = self._task_history.get(task_id)
                 if task is not None:
                     task.status = TaskStatus.FAILED

@@ -56,27 +56,26 @@ def check_swarm_engine() -> dict[str, Any]:
         engine = get_swarm_engine()
         if engine is None:
             return {"status": "not_initialized", "component": "swarm_engine"}
-        # Check basic attributes
-        _ = len(engine._workers)
-        return {"status": "ok", "component": "swarm_engine", "workers": len(engine._workers)}
+        # Public API only (no private _workers access)
+        workers = engine.list_workers() if hasattr(engine, "list_workers") else []
+        return {"status": "ok", "component": "swarm_engine", "workers": len(workers)}
     except Exception as e:
         logger.error("SwarmEngine health check failed: %s", e)
-        return {"status": "failed", "component": "swarm_engine", "error": str(e)}
+        return {"status": "failed", "component": "swarm_engine", "error": "check failed"}
 
 
 def check_model_registry() -> dict[str, Any]:
     """Check ModelRegistry availability."""
     try:
-        from kazma_core.model_registry import get_registry
-        registry = get_registry()
+        from kazma_core.model_registry import get_model_registry
+        registry = get_model_registry()
         if registry is None:
             return {"status": "not_initialized", "component": "model_registry"}
-        # Check basic attributes
-        _ = len(registry._providers)
-        return {"status": "ok", "component": "model_registry", "providers": len(registry._providers)}
+        providers = registry.list_providers() if hasattr(registry, "list_providers") else []
+        return {"status": "ok", "component": "model_registry", "providers": len(providers)}
     except Exception as e:
         logger.error("ModelRegistry health check failed: %s", e)
-        return {"status": "failed", "component": "model_registry", "error": str(e)}
+        return {"status": "failed", "component": "model_registry", "error": "check failed"}
 
 
 def check_agent_runner() -> dict[str, Any]:

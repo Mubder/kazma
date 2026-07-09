@@ -233,7 +233,8 @@ class TestApprovalPrompt:
         prompt = _build_approval_prompt(payload, "thread-123")
         assert "shell_exec" in prompt["text"]
         assert "thread-123" in prompt["text"]
-        assert "/hitl" in prompt["text"]
+        # Slash-less form for Slack (leading / would trigger slash-command interception)
+        assert "hitl approve" in prompt["text"] or "/hitl" in prompt["text"]
 
     def test_prompt_markup_is_keyboard(self):
         """When TelegramAdapter is available, markup should be a keyboard dict."""
