@@ -46,6 +46,9 @@ class MigrationRunner:
     def _get_connection(self):
         import sqlite3
         conn = sqlite3.connect(str(self.db_path))
+        from kazma_core.config_store import apply_sqlite_pragmas
+
+        apply_sqlite_pragmas(conn)
         conn.row_factory = sqlite3.Row
         return conn
     

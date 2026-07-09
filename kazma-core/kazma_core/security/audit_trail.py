@@ -73,6 +73,9 @@ class SecurityAuditTrail:
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._conn = sqlite3.connect(str(self._db_path))
+            from kazma_core.config_store import apply_sqlite_pragmas
+
+            apply_sqlite_pragmas(self._conn)
             self._conn.row_factory = sqlite3.Row
         return self._conn
 

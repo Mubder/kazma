@@ -167,6 +167,9 @@ class SQLiteCronStore:
 
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._db = await aiosqlite.connect(self._db_path)
+        from kazma_core.config_store import apply_sqlite_pragmas_async
+
+        await apply_sqlite_pragmas_async(self._db)
         await self._db.execute(_CREATE_TABLE)
         await self._db.commit()
         logger.info("[CronStore] Initialized at %s", self._db_path)

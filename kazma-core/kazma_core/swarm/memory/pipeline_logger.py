@@ -28,7 +28,9 @@ def _get_conn(db_path: str = _DEFAULT_DB) -> sqlite3.Connection:
         return _conn
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     _conn = sqlite3.connect(db_path)
-    _conn.execute("PRAGMA journal_mode=WAL")
+    from kazma_core.config_store import apply_sqlite_pragmas
+
+    apply_sqlite_pragmas(_conn)
     _conn.execute("""
         CREATE TABLE IF NOT EXISTS pipeline_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

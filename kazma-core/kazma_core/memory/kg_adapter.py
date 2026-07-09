@@ -75,6 +75,9 @@ class KnowledgeGraphAdapter:
             db_path = Path(persist_path).expanduser().resolve()
             db_path.parent.mkdir(parents=True, exist_ok=True)
             self._db = sqlite3.connect(str(db_path))
+            from kazma_core.config_store import apply_sqlite_pragmas
+
+            apply_sqlite_pragmas(self._db)
             self._db.execute(
                 """CREATE TABLE IF NOT EXISTS entities (
                     id TEXT PRIMARY KEY,

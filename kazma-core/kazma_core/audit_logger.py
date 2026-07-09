@@ -76,6 +76,9 @@ class AuditLogger:
         if self._db is None:
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
             self._db = await aiosqlite.connect(self.db_path)
+            from kazma_core.config_store import apply_sqlite_pragmas_async
+
+            await apply_sqlite_pragmas_async(self._db)
             self._db.row_factory = aiosqlite.Row
             await self._db.executescript(_SCHEMA)
             await self._db.commit()

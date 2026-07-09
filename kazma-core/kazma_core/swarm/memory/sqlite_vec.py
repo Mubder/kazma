@@ -51,7 +51,9 @@ class SQLiteVectorStore:
         try:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
             self._conn = sqlite3.connect(str(self._db_path))
-            self._conn.execute("PRAGMA journal_mode=WAL")
+            from kazma_core.config_store import apply_sqlite_pragmas
+
+            apply_sqlite_pragmas(self._conn)
             return self._conn
         except Exception as exc:
             logger.warning("[SQLiteVector] Connection failed: %s", exc)

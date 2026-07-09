@@ -94,12 +94,18 @@ class CertificationBadgeSystem:
         self.db_path = str(Path(db_path).expanduser())
         # Ensure the badges table exists
         conn = sqlite3.connect(self.db_path)
+        from kazma_core.config_store import apply_sqlite_pragmas
+
+        apply_sqlite_pragmas(conn)
         conn.executescript(_CREATE_BADGES)
         conn.close()
 
     def _get_conn(self) -> sqlite3.Connection:
         """Return a synchronous SQLite connection."""
         conn = sqlite3.connect(self.db_path)
+        from kazma_core.config_store import apply_sqlite_pragmas
+
+        apply_sqlite_pragmas(conn)
         conn.row_factory = sqlite3.Row
         return conn
 

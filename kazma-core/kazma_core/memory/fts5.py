@@ -39,6 +39,9 @@ class FTS5Memory:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._table_name = table_name
         self._conn = sqlite3.connect(self._db_path)
+        from kazma_core.config_store import apply_sqlite_pragmas
+
+        apply_sqlite_pragmas(self._conn)
         self._conn.row_factory = sqlite3.Row
         self._create_table()
         logger.info("[FTS5Memory] Initialized at %s (table=%s)", self._db_path, table_name)

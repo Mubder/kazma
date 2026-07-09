@@ -107,6 +107,9 @@ class KazmaHub:
     async def _get_conn(self) -> aiosqlite.Connection:
         if self._conn is None:
             self._conn = await aiosqlite.connect(str(self.db_path))
+            from kazma_core.config_store import apply_sqlite_pragmas_async
+
+            await apply_sqlite_pragmas_async(self._conn)
             self._conn.row_factory = aiosqlite.Row
             await self._conn.execute("PRAGMA foreign_keys = ON")
         if not self._initialized:
