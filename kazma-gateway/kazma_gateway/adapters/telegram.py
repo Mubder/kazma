@@ -535,7 +535,9 @@ class TelegramAdapter(BaseAdapter):
     @staticmethod
     def detect_voice_message(message: dict[str, Any]) -> bool:
         """Check if a Telegram message contains a voice or audio file."""
-        return "voice" in message or "audio" in message
+        from kazma_gateway.adapters.telegram_stt import detect_voice_message as _detect
+
+        return _detect(message)
 
     async def download_voice_file(self, file_id: str) -> bytes | None:
         """Download a voice/audio file from Telegram using getFile."""
@@ -608,53 +610,15 @@ class TelegramAdapter(BaseAdapter):
 
     async def _transcribe_openai(self, audio_bytes: bytes) -> str | None:
         """Transcribe via OpenAI Whisper API."""
-        import os
-        api_key = self._stt_api_key or os.environ.get("OPENAI_API_KEY")
-        if not api_key:
-            logger.error("[telegram] No OpenAI API key for STT")
-            return None
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    "https://api.openai.com/v1/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    files={"file": ("voice.ogg", audio_bytes, "audio/ogg")},
-                    data={"model": "whisper-1"},
-                )
-                resp.raise_for_status()
-                result = resp.json()
-                text = result.get("text", "").strip()
-                if text:
-                    logger.info("[telegram] OpenAI STT transcription: %.100s", text)
-                return text or None
-        except Exception:
-            logger.exception("[telegram] OpenAI STT transcription failed")
-            return None
+        from kazma_gateway.adapters.telegram_stt import transcribe_openai
+
+        return await transcribe_openai(audio_bytes, self._stt_api_key)
 
     async def _transcribe_groq(self, audio_bytes: bytes) -> str | None:
         """Transcribe via Groq Whisper API."""
-        import os
-        api_key = self._stt_api_key or os.environ.get("GROQ_API_KEY")
-        if not api_key:
-            logger.error("[telegram] No Groq API key for STT")
-            return None
-        try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                resp = await client.post(
-                    "https://api.groq.com/openai/v1/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    files={"file": ("voice.ogg", audio_bytes, "audio/ogg")},
-                    data={"model": "whisper-large-v3"},
-                )
-                resp.raise_for_status()
-                result = resp.json()
-                text = result.get("text", "").strip()
-                if text:
-                    logger.info("[telegram] Groq STT transcription: %.100s", text)
-                return text or None
-        except Exception:
-            logger.exception("[telegram] Groq STT transcription failed")
-            return None
+        from kazma_gateway.adapters.telegram_stt import transcribe_groq
+
+        return await transcribe_groq(audio_bytes, self._stt_api_key)
 
     async def _handle_voice_message(self, message: dict[str, Any]) -> str | None:
         """Full voice pipeline: detect -> download -> transcribe -> return text."""

@@ -844,183 +844,39 @@ class ModelRegistry:
     # ── Internal helpers ───────────────────────────────────────────
 
     def _load_providers(self) -> list[dict[str, Any]]:
-        """Load the provider list from ConfigStore.
+        """Load the provider list from ConfigStore (read-only; never writes)."""
+        from kazma_core.model_registry_store import load_providers
 
-        Handles both the current format (a list stored directly) and a
-        legacy double-encoded JSON string (from the previous _save_providers
-        that pre-encoded with json.dumps).
-
-        **This is a pure read operation — it NEVER writes.** The previous
-        version had a migration step that called ``_save_providers()``
-        during load; if parsing failed, it wrote an empty list over the
-        real data, destroying it permanently. That will never happen again.
-        """
-        raw = self._config_store.get("providers.list", [])
-        # Legacy: ConfigStore.get returns a JSON-parsed value, but the
-        # old _save_providers stored json.dumps(list) — so after one
-        # json.loads inside ConfigStore.get we may still have a string.
-        if isinstance(raw, str):
-            try:
-                raw = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
-                logger.warning(
-                    "[ModelRegistry] providers.list is a string but could "
-                    "not be parsed — returning empty list (data NOT overwritten)"
-                )
-                return []
-            if not isinstance(raw, list):
-                return []
-            # NOTE: We do NOT migrate (write) here. The data is parsed
-            # correctly in-memory on every load. Migration happens only
-            # on the next explicit _save_providers() call (upsert, etc.).
-            logger.debug(
-                "[ModelRegistry] Loaded providers from legacy double-encoded "
-                "format (in-memory only; will migrate on next save)"
-            )
-        if not isinstance(raw, list):
-            return []
-        return [self._normalize_provider_entry(item) for item in raw if isinstance(item, dict)]
+        return load_providers(self._config_store)
 
     def _save_providers(self, providers: list[dict[str, Any]]) -> None:
-        # ConfigStore.set() already JSON-serializes the value — do not
-        # pre-encode, or the stored string gets double-JSON-encoded
-        # (str of a str).  The previous json.dumps here caused every
-        # read to need two json.loads calls to recover the list.
-        self._config_store.set("providers.list", providers, category="providers")
+        from kazma_core.model_registry_store import save_providers
+
+        save_providers(self._config_store, providers)
 
     def _default_provider_entries(self) -> list[dict[str, Any]]:
-        providers: list[dict[str, Any]] = []
-        for key, preset in PROVIDER_PRESETS.items():
-            if key == "custom":
-                continue
-            enabled = key == "google"  # Google auto-enabled (ADC, no key needed)
-            models: list[str] = []
-            project_id = ""
-            location = "us-central1"
-            if key == "google":
-                from kazma_core.providers import GEMINI_MODELS
-                models = list(GEMINI_MODELS)
-                # Try to auto-detect project from ADC credentials or gcloud config
-                try:
-                    import json, os
-                    from pathlib import Path
-                    # Check ADC credentials file
-                    adc_path = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
-                    if not adc_path.exists():
-                        adc_path = Path(os.environ.get("APPDATA", "")) / "gcloud" / "application_default_credentials.json"
-                    if adc_path.exists():
-                        data = json.loads(adc_path.read_text(encoding="utf-8"))
-                        project_id = data.get("quota_project_id") or data.get("project_id") or ""
-                    # Check gcloud config_default file
-                    if not project_id:
-                        config_path = Path.home() / ".config" / "gcloud" / "configurations" / "config_default"
-                        if not config_path.exists():
-                            config_path = Path(os.environ.get("APPDATA", "")) / "gcloud" / "configurations" / "config_default"
-                        if config_path.exists():
-                            for line in config_path.read_text(encoding="utf-8").splitlines():
-                                if line.strip().startswith("project"):
-                                    project_id = line.partition("=")[2].strip()
-                                    break
-                except Exception as exc:
-                    logger.debug("gcloud project auto-detection failed: %s", exc)
-            providers.append(
-                {
-                    "name": key,
-                    "display_name": preset.get("name", key),
-                    "base_url": preset.get("base_url", ""),
-                    "api_key": "",
-                    "models": models,
-                    "enabled": enabled,
-                    "health": "unknown",
-                    "project_id": project_id,
-                    "location": location,
-                }
-            )
-        return providers
+        from kazma_core.model_registry_store import default_provider_entries
+
+        return default_provider_entries()
 
     def _seed_missing_presets(self) -> None:
-        """Ensure every preset provider exists in the stored list.
+        """Ensure every preset provider exists in the stored list."""
+        from kazma_core.model_registry_store import seed_missing_presets
 
-        New providers (e.g. Google Gemini) added in a code update will
-        automatically appear in the UI without requiring manual setup.
-        Existing customisations (api_key, enabled status) are preserved.
-        """
         stored = self._load_providers()
-        stored_by_name = {p.get("name", ""): p for p in stored} if stored else {}
-        changed = False
-
-        for key, preset in PROVIDER_PRESETS.items():
-            if key == "custom":
-                continue
-            if key in stored_by_name:
-                continue  # already exists — don't overwrite user changes
-
-            # Build a new entry from the preset
-            entry: dict[str, Any] = {
-                "name": key,
-                "display_name": preset.get("name", key),
-                "base_url": preset.get("base_url", ""),
-                "api_key": "",
-                "models": [],
-                "enabled": key == "google",  # auto-enable Google (ADC, no key needed)
-                "health": "unknown",
-            }
-
-            # Pre-populate models for providers that hardcode them
-            if key == "google":
-                from kazma_core.providers import GEMINI_MODELS
-                entry["models"] = list(GEMINI_MODELS)
-                # Auto-detect project from ADC credentials or gcloud config
-                entry["project_id"] = ""
-                entry["location"] = "us-central1"
-                try:
-                    import json, os
-                    from pathlib import Path
-                    # Check ADC credentials file
-                    adc_path = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
-                    if not adc_path.exists():
-                        adc_path = Path(os.environ.get("APPDATA", "")) / "gcloud" / "application_default_credentials.json"
-                    if adc_path.exists():
-                        data = json.loads(adc_path.read_text(encoding="utf-8"))
-                        entry["project_id"] = data.get("quota_project_id") or data.get("project_id") or ""
-                    # Check gcloud config_default file
-                    if not entry["project_id"]:
-                        config_path = Path.home() / ".config" / "gcloud" / "configurations" / "config_default"
-                        if not config_path.exists():
-                            config_path = Path(os.environ.get("APPDATA", "")) / "gcloud" / "configurations" / "config_default"
-                        if config_path.exists():
-                            for line in config_path.read_text(encoding="utf-8").splitlines():
-                                if line.strip().startswith("project"):
-                                    entry["project_id"] = line.partition("=")[2].strip()
-                                    break
-                except Exception as exc:
-                    logger.debug("gcloud project auto-detection failed: %s", exc)
-
-            stored.append(entry)
-            changed = True
-            logger.info("[ModelRegistry] Seeded new preset provider: %s", key)
-
+        stored, changed = seed_missing_presets(stored)
         if changed:
             self._save_providers(stored)
 
     def _normalize_provider_entry(self, provider: dict[str, Any]) -> dict[str, Any]:
-        name = str(provider.get("name") or "").strip()
-        return {
-            "name": name,
-            "display_name": str(provider.get("display_name") or name),
-            "base_url": str(provider.get("base_url") or ""),
-            "api_key": str(provider.get("api_key") or ""),
-            "models": self._normalize_models(provider.get("models", [])),
-            "enabled": bool(provider.get("enabled", True)),
-            "health": str(provider.get("health") or "unknown"),
-            "project_id": str(provider.get("project_id") or ""),
-            "location": str(provider.get("location") or "us-central1"),
-        }
+        from kazma_core.model_registry_store import normalize_provider_entry
+
+        return normalize_provider_entry(provider)
 
     def _normalize_models(self, models: Any) -> list[str]:
-        if isinstance(models, list):
-            return sorted({str(model).strip() for model in models if str(model).strip()})
-        return []
+        from kazma_core.model_registry_store import normalize_models
+
+        return normalize_models(models)
 
     def _mask_profile(self, profile: dict[str, Any]) -> dict[str, Any]:
         safe = dict(profile)
