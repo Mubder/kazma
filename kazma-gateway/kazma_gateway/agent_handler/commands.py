@@ -494,14 +494,26 @@ async def _send_model_reply(
     thread_id: str,
     text: str,
 ) -> None:
-    """Send a model command reply through the gateway."""
+    """Send a model command reply through the gateway.
+
+    For Telegram, converts Markdown to HTML so command output (e.g. /help,
+    /models) renders bold/code instead of showing literal markers.
+    """
     ctx = await store.get(thread_id)
     if not ctx:
         ctx = msg.context_metadata
+    if msg.platform == "telegram":
+        from kazma_gateway.telegram_format import md_to_tg_html
+
+        out_ctx = dict(ctx)
+        out_ctx["parse_mode"] = "HTML"
+        out_text: str = md_to_tg_html(text)
+    else:
+        out_ctx, out_text = ctx, text
     await manager.send(OutboundMessage(
         target_id=_build_target_id(msg.platform, ctx),
-        text=text,
-        context_metadata=ctx,
+        text=out_text,
+        context_metadata=out_ctx,
     ))
 
 

@@ -181,6 +181,214 @@ class TestMultiPlatformSwarmDispatch:
         call_args = mock_gateway_manager.send.call_args[0][0]
         assert "timed out" in call_args.text.lower()
 
+    async def test_telegram_mirror_receives_rich_html_report(
+        self, mock_gateway_manager, mock_swarm_engine
+    ):
+        """Telegram mirror must receive the same rich HTML report as the reply.
+
+        Previously the mirror got raw markdown (Bug 2) so the Telegram group
+        saw unformatted text. Now both reply + mirror use the HTML report,
+        and is_html=True tells the output adapter to skip re-conversion.
+        """
+        from kazma_core.swarm.task import TaskResult
+        from kazma_gateway.agent_handler.swarm_dispatch import _dispatch_swarm_from_chat
+        from kazma_gateway.gateway import IncomingMessage
+
+        markdown_output = "Final **bold** result"
+        mock_swarm_engine.dispatch.return_value = TaskResult(
+            task_id="test-task-raw-md",
+            status="completed",
+            aggregated_output=markdown_output,
+            worker_results=[],
+        )
+
+        msg = IncomingMessage(
+            platform="telegram",
+            sender_id="telegram:12345",
+            text="swarm summarize",
+            context_metadata={"chat_id": "-1001234567890", "username": "testuser"},
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get.return_value = msg.context_metadata
+
+        with patch(
+            "kazma_gateway.agent_handler.swarm_dispatch._maybe_send_to_output_target",
+            new=AsyncMock(return_value=True),
+        ) as mirror_mock:
+            await _dispatch_swarm_from_chat(
+                msg=msg,
+                store=mock_store,
+                manager=mock_gateway_manager,
+                thread_id="gw-telegram-12345",
+                engine=mock_swarm_engine,
+                workers=["coder-agent"],
+                task="summarize",
+                pattern="dispatch",
+            )
+
+        # Mirror receives the rich HTML report (not raw markdown), flagged
+        # is_html=True so the adapter doesn't double-convert it.
+        assert mirror_mock.await_count == 1
+        mirrored_text = mirror_mock.await_args.args[1]
+        assert "<blockquote>" in mirrored_text
+        assert "<b>bold</b>" in mirrored_text  # markdown was converted to HTML
+        assert "**" not in mirrored_text  # no leftover raw markdown markers
+        assert mirror_mock.await_args.kwargs.get("is_html") is True
+
+    async def test_telegram_final_reply_uses_quoted_html_report(
+        self, mock_gateway_manager, mock_swarm_engine
+    ):
+        """Telegram final swarm output should use HTML report with blockquotes."""
+        from kazma_core.swarm.task import TaskResult, WorkerResult
+        from kazma_gateway.agent_handler.swarm_dispatch import _dispatch_swarm_from_chat
+        from kazma_gateway.gateway import IncomingMessage
+
+        mock_swarm_engine.dispatch.return_value = TaskResult(
+            task_id="test-task-html-report",
+            status="completed",
+            aggregated_output="Final **bold** result",
+            worker_results=[
+                WorkerResult(
+                    worker="coder-agent",
+                    task_id="test-task-html-report",
+                    status="success",
+                    output="Implemented **feature**",
+                )
+            ],
+            total_tokens=42,
+            duration_seconds=1.2,
+        )
+
+        msg = IncomingMessage(
+            platform="telegram",
+            sender_id="telegram:12345",
+            text="/swarm summarize",
+            context_metadata={"chat_id": "-1001234567890", "username": "testuser"},
+        )
+
+        mock_store = AsyncMock()
+        mock_store.get.return_value = msg.context_metadata
+
+        with patch(
+            "kazma_gateway.agent_handler.swarm_dispatch._maybe_send_to_output_target",
+            new=AsyncMock(return_value=True),
+        ):
+            await _dispatch_swarm_from_chat(
+                msg=msg,
+                store=mock_store,
+                manager=mock_gateway_manager,
+                thread_id="gw-telegram-12345",
+                engine=mock_swarm_engine,
+                workers=["coder-agent"],
+                task="summarize",
+                pattern="dispatch",
+            )
+
+        # First send is dispatch notice; second send is final formatted report.
+        assert mock_gateway_manager.send.await_count >= 2
+        final_outbound = mock_gateway_manager.send.await_args_list[1].args[0]
+        assert "<blockquote>" in final_outbound.text
+        assert "Swarm Task Execution Report" in final_outbound.text
+        assert final_outbound.context_metadata.get("parse_mode") == "HTML"
+
+
+class TestTelegramFormat:
+    """Unit tests for the shared telegram_format module (status mapping + HTML)."""
+
+    def test_status_completed_maps_to_success(self):
+        """Bug 1 regression: TaskResult.status='completed' must show ✅, not ❌."""
+        from kazma_gateway.telegram_format import format_swarm_task_result
+
+        out = format_swarm_task_result(
+            task_id="t1", status="completed", aggregated_output="done"
+        )
+        assert "✅" in out
+        assert "SUCCESS" in out
+        assert "FAILED" not in out
+
+    def test_status_failed_maps_to_failed(self):
+        from kazma_gateway.telegram_format import format_swarm_task_result
+
+        out = format_swarm_task_result(
+            task_id="t1", status="failed", aggregated_output="", error="boom"
+        )
+        assert "❌" in out
+        assert "FAILED" in out
+
+    def test_status_timeout_maps_to_timeout(self):
+        from kazma_gateway.telegram_format import format_swarm_task_result
+
+        out = format_swarm_task_result(task_id="t1", status="timeout")
+        assert "⏱️" in out
+        assert "TIMEOUT" in out
+
+    def test_worker_status_completed_maps_to_success_icon(self):
+        """Worker rows must also honor the completed→✅ mapping."""
+        from kazma_gateway.telegram_format import format_swarm_task_result
+
+        out = format_swarm_task_result(
+            task_id="t1",
+            status="completed",
+            worker_results=[
+                {"worker": "agent", "status": "completed", "output": "ok"}
+            ],
+        )
+        assert "✅" in out
+
+    def test_md_to_tg_html_escapes_special_chars(self):
+        """Raw HTML/markup from the model must be escaped, not injected."""
+        from kazma_gateway.telegram_format import md_to_tg_html
+
+        out = md_to_tg_html("5 < 10 & 20 > 15")
+        assert "&lt;" in out
+        assert "&amp;" in out
+        assert "&gt;" in out
+        # No raw angle brackets survive (they become entities)
+        assert "< 1" not in out
+
+    def test_md_to_tg_html_bold_and_code(self):
+        from kazma_gateway.telegram_format import md_to_tg_html
+
+        out = md_to_tg_html("See **bold** and `code`")
+        assert "<b>bold</b>" in out
+        assert "<code>code</code>" in out
+        assert "**" not in out
+
+    def test_format_output_is_valid_blockquote_html(self):
+        """Aggregated output with markdown renders inside <blockquote>."""
+        from kazma_gateway.telegram_format import format_swarm_task_result
+
+        out = format_swarm_task_result(
+            task_id="t1",
+            status="completed",
+            aggregated_output="**Final** answer",
+        )
+        assert "<blockquote>" in out
+        assert "<b>Final</b> answer</blockquote>" in out
+
+    async def test_send_swarm_output_is_html_flag_skips_conversion(self):
+        """is_html=True must pass text through without md_to_tg_html re-escaping."""
+        from kazma_gateway.agent_handler.swarm_output import (
+            TelegramSwarmOutputTarget,
+        )
+
+        adapter = TelegramSwarmOutputTarget()
+        # Pre-converted HTML; if re-converted, <b> would become &lt;b&gt;
+        already_html = "<blockquote><b>bold</b></blockquote>"
+        manager = MagicMock()
+        manager.send = AsyncMock()
+
+        await adapter.send(
+            manager=manager,
+            text=already_html,
+            target_config={"platform": "telegram", "chat_id": 123},
+            is_html=True,
+        )
+        sent_text = manager.send.await_args.args[0].text
+        assert sent_text == already_html  # unchanged — no double conversion
+        assert "&lt;b&gt;" not in sent_text
+
 
 class TestHITLE2E:
     """End-to-end HITL approval flow tests."""

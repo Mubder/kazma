@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
+from kazma_gateway.telegram_format import md_to_tg_html
 from .store import (
     _InMemoryStore,
     _resolve_thread,
@@ -29,6 +30,25 @@ from .commands import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _prepare_tg_outbound(
+    msg: IncomingMessage,
+    text: str,
+    ctx: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """Prepare text + context for a Telegram-bound OutboundMessage.
+
+    Converts Markdown to Telegram HTML and tags ``parse_mode`` so the adapter
+    renders ``<b>/<i>/<code>`` instead of showing literal markers. Non-Telegram
+    platforms get the text unchanged. The returned context is a shallow copy so
+    the caller's ``ctx`` is not mutated.
+    """
+    if msg.platform != "telegram":
+        return text, ctx
+    out_ctx = dict(ctx)
+    out_ctx["parse_mode"] = "HTML"
+    return md_to_tg_html(text), out_ctx
 
 
 def create_graph_handler(
@@ -132,11 +152,14 @@ def create_graph_handler(
             ctx = await _store.get(thread_id)
             if not ctx:
                 ctx = msg.context_metadata
+            budget_text, budget_ctx = _prepare_tg_outbound(
+                msg, "⚠️ ميزانية الجلسة انتهت. (Budget exceeded)", ctx
+            )
             await manager.send(
                 OutboundMessage(
                     target_id=_build_target_id(msg.platform, ctx),
-                    text="⚠️ ميزانية الجلسة انتهت. (Budget exceeded)",
-                    context_metadata=ctx,
+                    text=budget_text,
+                    context_metadata=budget_ctx,
                 )
             )
             return
@@ -174,10 +197,13 @@ def create_graph_handler(
             ctx_reset = await _store.get(thread_id)
             if not ctx_reset:
                 ctx_reset = msg.context_metadata
+            reset_text, reset_ctx = _prepare_tg_outbound(
+                msg, "🔄 Conversation cleared. Starting fresh.", ctx_reset
+            )
             await manager.send(OutboundMessage(
                 target_id=_build_target_id(msg.platform, ctx_reset),
-                text="🔄 Conversation cleared. Starting fresh.",
-                context_metadata=ctx_reset,
+                text=reset_text,
+                context_metadata=reset_ctx,
             ))
             logger.info("[agent-handler] /reset for thread=%s", thread_id)
             return
@@ -249,13 +275,13 @@ def create_graph_handler(
                     prompt = _build_approval_prompt(hitl_payload, thread_id)
                     # reply_markup travels inside context_metadata — the
                     # Telegram adapter reads it from there.
-                    send_ctx = dict(ctx)
+                    prompt_text, send_ctx = _prepare_tg_outbound(msg, prompt["text"], ctx)
                     if prompt.get("markup"):
                         send_ctx["reply_markup"] = prompt["markup"]
                     await manager.send(
                         OutboundMessage(
                             target_id=_build_target_id(msg.platform, ctx),
-                            text=prompt["text"],
+                            text=prompt_text,
                             context_metadata=send_ctx,
                         )
                     )
@@ -289,11 +315,15 @@ def create_graph_handler(
                 # entries are evicted lazily by TTL below.
                 ctx = await _store.get(thread_id)
 
+                # Convert Markdown → Telegram HTML so bold/code/etc. render
+                # instead of showing literal ** markers (which legacy Markdown
+                # parse_mode would 400-reject and strip to plain text).
+                tg_text, tg_ctx = _prepare_tg_outbound(msg, assistant_text, ctx)
                 await manager.send(
                     OutboundMessage(
                         target_id=_build_target_id(msg.platform, ctx),
-                        text=assistant_text,
-                        context_metadata=ctx,
+                        text=tg_text,
+                        context_metadata=tg_ctx,
                     )
                 )
 
@@ -302,11 +332,14 @@ def create_graph_handler(
                 # Use msg.context_metadata directly instead of re-accessing
                 # the store (which may be the source of the original exception)
                 ctx = msg.context_metadata
+                err_text, err_ctx = _prepare_tg_outbound(
+                    msg, "⚠️ حدث خطأ أثناء معالجة رسالتك. (Processing error)", ctx
+                )
                 await manager.send(
                     OutboundMessage(
                         target_id=_build_target_id(msg.platform, ctx),
-                        text="⚠️ حدث خطأ أثناء معالجة رسالتك. (Processing error)",
-                        context_metadata=ctx,
+                        text=err_text,
+                        context_metadata=err_ctx,
                     )
                 )
 
@@ -327,7 +360,17 @@ def create_graph_handler(
             ctx = await _store.get(target_id)
             if not ctx:
                 ctx = {"thread_id": target_id}
-            outbound = OutboundMessage(target_id=target_id, text=text, context_metadata=ctx)
+            # target_id is prefixed "telegram:..." — convert markdown to HTML
+            # so worker output renders instead of showing literal markers.
+            if str(target_id).startswith("telegram:"):
+                out_ctx = dict(ctx)
+                out_ctx["parse_mode"] = "HTML"
+                out_text: str = md_to_tg_html(text)
+            else:
+                out_ctx, out_text = ctx, text
+            outbound = OutboundMessage(
+                target_id=target_id, text=out_text, context_metadata=out_ctx
+            )
             await manager.send(outbound)
             return f"sent:{target_id}"
 

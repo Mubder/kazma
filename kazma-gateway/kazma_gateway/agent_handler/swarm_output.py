@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 from kazma_gateway.gateway import OutboundMessage
+from kazma_gateway.telegram_format import md_to_tg_html, tg_escape
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ class SwarmOutputTarget(abc.ABC):
         manager: Any,
         text: str,
         target_config: dict[str, Any],
+        *,
+        is_html: bool = False,
     ) -> bool:
         """Send swarm output to the target.
 
@@ -33,6 +36,8 @@ class SwarmOutputTarget(abc.ABC):
             manager: GatewayManager instance for platform-agnostic sending.
             text: The message text to send.
             target_config: Configuration dict with platform, chat_id, etc.
+            is_html: When True, ``text`` is already Telegram HTML and must
+                not be re-converted (avoids double-escaping).
 
         Returns:
             True if sent (or attempted), False if no target available.
@@ -70,6 +75,8 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
         manager: Any,
         text: str,
         target_config: dict[str, Any],
+        *,
+        is_html: bool = False,
     ) -> bool:
         platform = target_config.get("platform", "telegram")
         chat_id = target_config.get("chat_id")
@@ -77,6 +84,10 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
 
         if not chat_id:
             return False
+
+        # When is_html=True the text is already Telegram HTML; skip the
+        # markdown→HTML conversion to avoid double-escaping (e.g. <b> → &lt;b&gt;).
+        html_text = text if is_html else md_to_tg_html(text)
 
         # Helper: Mode 1 - Direct Bot API send
         async def try_mode1_direct_send(token: str) -> bool:
@@ -87,7 +98,7 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
                     strip_telegram_html,
                 )
 
-                chunks = chunk_html_message(text)
+                chunks = chunk_html_message(html_text)
                 async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
                     all_chunks_ok = True
                     for chunk in chunks:
@@ -150,7 +161,7 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
             try:
                 await manager.send(OutboundMessage(
                     target_id=f"{platform}:{chat_id}",
-                    text=text,
+                    text=html_text,
                     context_metadata={
                         "chat_id": chat_id,
                         "parse_mode": "HTML",  # match direct Bot API path
@@ -224,6 +235,8 @@ class DiscordSwarmOutputTarget(SwarmOutputTarget):
         manager: Any,
         text: str,
         target_config: dict[str, Any],
+        *,
+        is_html: bool = False,
     ) -> bool:
         platform = target_config.get("platform", "discord")
         chat_id = target_config.get("chat_id")
@@ -271,6 +284,8 @@ class SlackSwarmOutputTarget(SwarmOutputTarget):
         manager: Any,
         text: str,
         target_config: dict[str, Any],
+        *,
+        is_html: bool = False,
     ) -> bool:
         platform = target_config.get("platform", "slack")
         chat_id = target_config.get("chat_id")
@@ -314,6 +329,8 @@ async def send_swarm_output(
     manager: Any,
     text: str,
     target_config: dict[str, Any] | None = None,
+    *,
+    is_html: bool = False,
 ) -> bool:
     """High-level function to send swarm output using the appropriate adapter.
 
@@ -323,6 +340,7 @@ async def send_swarm_output(
         manager: GatewayManager instance.
         text: Message text to send.
         target_config: Optional per-dispatch override (platform, chat_id, bot_token, enabled).
+        is_html: When True, ``text`` is already Telegram HTML (skip conversion).
 
     Returns:
         True if a message was sent (or attempted), False if no target configured.
@@ -354,4 +372,4 @@ async def send_swarm_output(
         logger.warning("[swarm-output] Invalid config for platform %r: %s", platform, target_config)
         return False
 
-    return await adapter.send(manager, text, target_config)
+    return await adapter.send(manager, text, target_config, is_html=is_html)

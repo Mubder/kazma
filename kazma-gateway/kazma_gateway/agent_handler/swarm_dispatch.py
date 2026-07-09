@@ -16,6 +16,7 @@ from kazma_core.constants import (
 )
 from kazma_core.exceptions import sanitize_error
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
+from kazma_gateway.telegram_format import format_swarm_task_result, md_to_tg_html
 from .store import _build_target_id
 from .swarm_output import send_swarm_output
 
@@ -241,16 +242,22 @@ async def _maybe_send_to_output_target(
     manager: Any,
     text: str,
     override: dict[str, Any] | None = None,
+    *,
+    is_html: bool = False,
 ) -> bool:
     """Send ``text`` to the configured output target (e.g. a Telegram group).
 
     Resolution order: per-dispatch ``override`` dict → ConfigStore entry.
 
+    When ``is_html`` is True the text is already Telegram HTML (e.g. from
+    :func:`format_swarm_task_result`) and must NOT be re-converted by the
+    adapter — passing it through ``md_to_tg_html`` would double-escape it.
+
     Delegates to the platform-specific adapter in ``swarm_output``.
 
     Returns True if a message was sent (or attempted), False if no target.
     """
-    return await send_swarm_output(manager, text, override)
+    return await send_swarm_output(manager, text, override, is_html=is_html)
 
 
 async def _dispatch_swarm_from_chat(
@@ -322,10 +329,34 @@ async def _dispatch_swarm_from_chat(
         else:
             reply = "⚠️ No result returned from swarm."
 
-        # Send to the originating chat…
-        await _send_swarm_reply(msg, store, manager, thread_id, reply)
-        # …and mirror the same output to the configured Telegram group.
-        await _maybe_send_to_output_target(manager, reply, target_override)
+        # Telegram gets rich quoted report formatting; other platforms use plain text.
+        if msg.platform == "telegram" and result is not None:
+            worker_rows = [wr.to_dict() for wr in getattr(result, "worker_results", [])]
+            telegram_reply = format_swarm_task_result(
+                task_id=getattr(result, "task_id", "") or "",
+                status=getattr(result, "status", "") or "",
+                aggregated_output=getattr(result, "aggregated_output", "") or "",
+                error=getattr(result, "error", "") or "",
+                duration=float(getattr(result, "duration_seconds", 0.0) or 0.0),
+                tokens=int(getattr(result, "total_tokens", 0) or 0),
+                worker_results=worker_rows,
+            )
+            await _send_swarm_reply(
+                msg,
+                store,
+                manager,
+                thread_id,
+                telegram_reply,
+                text_is_html=True,
+            )
+            # Mirror the SAME rich HTML report to the output target so the
+            # Telegram group sees the formatted report, not raw markdown.
+            await _maybe_send_to_output_target(
+                manager, telegram_reply, target_override, is_html=True
+            )
+        else:
+            await _send_swarm_reply(msg, store, manager, thread_id, reply)
+            await _maybe_send_to_output_target(manager, reply, target_override)
 
     except asyncio.TimeoutError:
         logger.error("[agent-handler] Swarm dispatch timed out after %ds for thread %s",
@@ -337,7 +368,7 @@ async def _dispatch_swarm_from_chat(
         logger.exception("[agent-handler] Swarm dispatch failed for thread %s", thread_id)
         error_reply = sanitize_error(exc)
         await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
-        # Mirror the failure to the group too, consistent with the success path.
+        # Mirror the failure to the output target too, consistent with the success path.
         await _maybe_send_to_output_target(manager, error_reply, target_override)
 
     return True
@@ -349,15 +380,28 @@ async def _send_swarm_reply(
     manager: Any,
     thread_id: str,
     text: str,
+    text_is_html: bool = False,
 ) -> None:
-    """Send a reply through the gateway manager (platform-agnostic)."""
+    """Send a reply through the gateway manager (platform-agnostic).
+    
+    For Telegram, applies markdown-to-HTML conversion so **bold** renders
+    inside blockquotes instead of showing literal asterisks.
+    """
     ctx = await store.get(thread_id)
     if not ctx:
         ctx = msg.context_metadata
+    
+    # Apply markdown-to-HTML conversion for Telegram platform.
+    # If text_is_html=True, preserve trusted preformatted Telegram HTML.
+    final_text = text
+    if msg.platform == "telegram":
+        final_text = text if text_is_html else md_to_tg_html(text)
+        ctx.setdefault("parse_mode", "HTML")
+    
     await manager.send(
         OutboundMessage(
             target_id=_build_target_id(msg.platform, ctx),
-            text=text,
+            text=final_text,
             context_metadata=ctx,
         )
     )

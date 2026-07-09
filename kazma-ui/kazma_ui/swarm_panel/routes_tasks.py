@@ -6,35 +6,21 @@ Extracted for maintainability.
 from __future__ import annotations
 
 import asyncio
-import html
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, Response
-
+from kazma_gateway.telegram_format import (
+    tg_escape,
+    md_to_tg_html,
+    tg_quote,
+    tg_heading,
+    HEADING_RULE,
+)
 from kazma_ui.services import get_swarm_service
 
 logger = logging.getLogger(__name__)
-
-# Telegram HTML helpers for Output Routing (parse_mode=HTML → real blockquotes)
-_HEADING_RULE = "━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-
-def _tg_escape(text: str) -> str:
-    """Escape user content for Telegram HTML parse mode."""
-    return html.escape(str(text), quote=False)
-
-
-def _tg_quote(text: str) -> str:
-    """Wrap text in a Telegram HTML blockquote (Quote UI)."""
-    body = _tg_escape(text).strip() or "—"
-    return f"<blockquote>{body}</blockquote>"
-
-
-def _tg_heading(label: str) -> str:
-    """Bold section heading so users can spot section starts."""
-    return f"<b>{_tg_escape(label)}</b>"
 
 try:
     from kazma_core.swarm import (
@@ -180,29 +166,29 @@ def register_tasks_routes(
 
         # Telegram HTML: bold headings + plain worker labels + Quote blockquotes
         lines: list[str] = []
-        lines.append(f"🚀 {_tg_heading('Swarm Task Execution Report')}")
-        lines.append(_HEADING_RULE)
+        lines.append(f"🚀 {tg_heading('Swarm Task Execution Report')}")
+        lines.append(HEADING_RULE)
         if task_id:
-            lines.append(f"🆔 {_tg_heading('Task ID:')} <code>{_tg_escape(task_id)}</code>")
-        lines.append(f"📊 {_tg_heading('Status:')} {status_icon} {_tg_heading(status_text)}")
+            lines.append(f"🆔 {tg_heading('Task ID:')} <code>{tg_escape(task_id)}</code>")
+        lines.append(f"📊 {tg_heading('Status:')} {status_icon} {tg_heading(status_text)}")
         if duration > 0:
             dur = f"<code>{duration:.2f}s</code>"
-            tok = f" | 🪙 {_tg_heading('Tokens:')} <code>{tokens}</code>" if tokens > 0 else ""
-            lines.append(f"⏱️ {_tg_heading('Duration:')} {dur}{tok}")
-        lines.append(_HEADING_RULE)
+            tok = f" | 🪙 {tg_heading('Tokens:')} <code>{tokens}</code>" if tokens > 0 else ""
+            lines.append(f"⏱️ {tg_heading('Duration:')} {dur}{tok}")
+        lines.append(HEADING_RULE)
 
         if error:
-            lines.append(f"⚠️ {_tg_heading('Error Details:')}")
-            lines.append(_tg_quote(error))
+            lines.append(f"⚠️ {tg_heading('Error Details:')}")
+            lines.append(tg_quote(error))
             lines.append("")
 
         if aggregated_output:
-            lines.append(f"✨ {_tg_heading('Final Aggregated Output:')}")
-            lines.append(_tg_quote(aggregated_output))
+            lines.append(f"✨ {tg_heading('Final Aggregated Output:')}")
+            lines.append(tg_quote(aggregated_output))
             lines.append("")
 
         if worker_results:
-            lines.append(f"👥 {_tg_heading('Worker Breakdowns:')}")
+            lines.append(f"👥 {tg_heading('Worker Breakdowns:')}")
             lines.append("")
             for wr in worker_results:
                 wr_name = ""
@@ -232,7 +218,7 @@ def register_tasks_routes(
 
                 # Plain worker line — no bold/italic (user preference)
                 lines.append(
-                    f"• {_tg_escape(wr_name)} ({wr_icon} {wr_status_lower.upper() or 'UNKNOWN'})"
+                    f"• {tg_escape(wr_name)} ({wr_icon} {wr_status_lower.upper() or 'UNKNOWN'})"
                 )
                 meta_parts = []
                 if wr_duration > 0:
@@ -246,7 +232,7 @@ def register_tasks_routes(
                 content_snippet = raw_content.strip()
                 if len(content_snippet) > 500:
                     content_snippet = content_snippet[:500] + "..."
-                lines.append(_tg_quote(content_snippet))
+                lines.append(tg_quote(content_snippet))
                 lines.append("")
 
         text = "\n".join(lines).strip()
