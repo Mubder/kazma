@@ -17,6 +17,7 @@ from kazma_core.constants import (
 from kazma_core.exceptions import sanitize_error
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
 from .store import _build_target_id
+from .swarm_output import send_swarm_output
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +227,7 @@ def _parse_output_target_suffix(task: str) -> tuple[str, dict[str, Any] | None]:
         
         return clean, {"platform": platform, "chat_id": chat_id, "enabled": True}
 
-    # Unrecognized suffix format (e.g. "@GroupName") — log so the user
+# Unrecognized suffix format (e.g. "@GroupName") — log so the user
     # knows the override was seen but not applied, then leave prompt untouched.
     logger.info(
         "[agent-handler] Unrecognized output-target suffix %r "
@@ -245,153 +246,11 @@ async def _maybe_send_to_output_target(
 
     Resolution order: per-dispatch ``override`` dict → ConfigStore entry.
 
-    Two delivery modes:
-        1. **Dedicated bot**: if ``bot_token`` is set in the config, sends
-           directly via the Telegram Bot API using that token. This is the
-           "separate swarm bot" mode — output goes to a DM with a different
-           bot, avoiding group-membership requirements.
-        2. **Gateway adapter**: falls back to ``manager.send()`` which routes
-           through the gateway's primary adapter (e.g. @KazmaAIBot). This is
-           the original group-routing mode. If ``manager`` is None or doesn't
-           have the necessary adapters, tries to fall back to the primary bot token
-           and send directly as well.
-
-    Sends the *same* output that went to the originating chat. Errors are
-    logged but never raised — group routing is best-effort.
+    Delegates to the platform-specific adapter in ``swarm_output``.
 
     Returns True if a message was sent (or attempted), False if no target.
     """
-    target = override if isinstance(override, dict) and override.get("chat_id") else _get_output_target_config()
-    if not target:
-        return False
-
-    platform = target.get("platform", "telegram")
-    chat_id = target.get("chat_id")
-    explicit_bot_token = target.get("bot_token", "")
-
-    # Helper function to do Mode 1 direct Telegram send
-    async def try_mode1_direct_send(token: str) -> bool:
-        if platform != "telegram" or not token:
-            return False
-        try:
-            import httpx
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(30.0, connect=10.0)
-            ) as client:
-                all_chunks_ok = True
-                for i in range(0, len(text), 4096):
-                    chunk = text[i:i + 4096]
-                    chunk_ok = False
-                    payload = {"chat_id": chat_id, "text": chunk, "parse_mode": "Markdown"}
-                    resp = await client.post(
-                        f"https://api.telegram.org/bot{token}/sendMessage",
-                        json=payload,
-                    )
-                    resp_json = resp.json()
-                    if resp_json.get("ok"):
-                        chunk_ok = True
-                    else:
-                        desc = resp_json.get("description", "")
-                        logger.warning(
-                            "[agent-handler] Swarm bot Markdown send failed: %s. Retrying in plain text...",
-                            desc or "unknown",
-                        )
-                        payload_plain = {"chat_id": chat_id, "text": chunk}
-                        resp_plain = await client.post(
-                            f"https://api.telegram.org/bot{token}/sendMessage",
-                            json=payload_plain,
-                        )
-                        resp_plain_json = resp_plain.json()
-                        if resp_plain_json.get("ok"):
-                            chunk_ok = True
-                        else:
-                            logger.warning(
-                                "[agent-handler] Swarm bot fallback plain send failed: %s",
-                                resp_plain_json.get("description", "unknown"),
-                            )
-                    
-                    if not chunk_ok:
-                        all_chunks_ok = False
-                        break
-                
-                if all_chunks_ok:
-                    logger.info(
-                        "[agent-handler] Swarm output routed via direct bot to %s",
-                        chat_id,
-                    )
-                    return True
-                return False
-        except Exception:
-            logger.warning(
-                "[agent-handler] Failed routing swarm output via direct bot to %s",
-                chat_id, exc_info=True,
-            )
-            return False
-
-    # Helper function to do Mode 2 Gateway adapter send
-    async def try_mode2_gateway_send() -> bool:
-        if manager is None:
-            return False
-        try:
-            await manager.send(OutboundMessage(
-                target_id=f"{platform}:{chat_id}",
-                text=text,
-                context_metadata={"chat_id": chat_id},
-            ))
-            logger.info(
-                "[agent-handler] Swarm output routed to %s:%s via gateway manager",
-                platform, chat_id,
-            )
-            return True
-        except Exception:
-            logger.warning(
-                "[agent-handler] Failed routing swarm output to %s:%s via gateway manager",
-                platform, chat_id, exc_info=True,
-            )
-            return False
-
-    # Helper function to resolve primary bot token as fallback
-    def resolve_primary_token() -> str:
-        if platform != "telegram":
-            return ""
-        try:
-            from kazma_core.config_store import get_config_store
-            import os
-            cs = get_config_store()
-            token = ""
-            if cs:
-                token = cs.get("connectors.telegram.token", "")
-            if not token:
-                token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-            return token
-        except Exception:
-            return ""
-
-    # Execute resolution logic:
-    if explicit_bot_token:
-        # Scenario A: User explicitly configured a separate dedicated swarm bot token
-        if await try_mode1_direct_send(explicit_bot_token):
-            return True
-        # If dedicated direct send fails, fall back to gateway manager if available
-        if await try_mode2_gateway_send():
-            return True
-        return False
-    else:
-        # Scenario B: User wants standard gateway adapter routing
-        if await try_mode2_gateway_send():
-            return True
-        # If manager is None or failed, resolve the primary token and fallback to direct send
-        primary_token = resolve_primary_token()
-        if primary_token:
-            if await try_mode1_direct_send(primary_token):
-                return True
-        return False
-
-    logger.warning(
-        "[agent-handler] Failed routing swarm output to %s:%s: GatewayManager not available.",
-        platform, chat_id,
-    )
-    return False
+    return await send_swarm_output(manager, text, override)
 
 
 async def _dispatch_swarm_from_chat(
