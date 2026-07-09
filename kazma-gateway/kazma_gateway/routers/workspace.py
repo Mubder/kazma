@@ -175,9 +175,22 @@ def create_workspace_select_router() -> APIRouter:
 
         resolved = p.resolve()
         if not resolved.exists():
-            raise HTTPException(status_code=422, detail=f"Path does not exist: {resolved}")
+            raise HTTPException(status_code=422, detail="Path does not exist.")
         if not resolved.is_dir():
-            raise HTTPException(status_code=422, detail=f"Path is not a directory: {resolved}")
+            raise HTTPException(status_code=422, detail="Path is not a directory.")
+
+        # Optional confinement: if KAZMA_WORKSPACE_ROOT is set, the selected
+        # path must live beneath it. Opt-in hardening for multi-project setups.
+        allow_root = os.environ.get("KAZMA_WORKSPACE_ROOT", "").strip()
+        if allow_root:
+            allow_resolved = Path(allow_root).resolve()
+            try:
+                resolved.relative_to(allow_resolved)
+            except ValueError:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Path is outside the allowed workspace root.",
+                ) from None
 
         try:
             from kazma_core.config_store import get_config_store

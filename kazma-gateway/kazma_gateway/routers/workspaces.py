@@ -92,9 +92,28 @@ def create_workspaces_router() -> APIRouter:
 
         resolved_path = p.resolve()
 
-        # Prevent path-traversal exploits or suspicious references
-        if ".." in raw_path or ".." in str(resolved_path) or resolved_path == Path("/"):
+        # Prevent path-traversal exploits or suspicious references.
+        # Block POSIX root and bare Windows drive roots (C:\, D:\, …).
+        if (
+            ".." in raw_path
+            or ".." in str(resolved_path)
+            or resolved_path == Path("/")
+            or (len(str(resolved_path)) <= 3 and str(resolved_path)[1:3] == ":\\")
+        ):
             raise HTTPException(status_code=403, detail="Suspicious path traversal attempt blocked.")
+
+        # Optional confinement: if KAZMA_WORKSPACE_ROOT is set, the workspace
+        # path must live beneath it. Opt-in hardening for multi-project setups.
+        allow_root = os.environ.get("KAZMA_WORKSPACE_ROOT", "").strip()
+        if allow_root:
+            allow_resolved = Path(allow_root).resolve()
+            try:
+                resolved_path.relative_to(allow_resolved)
+            except ValueError:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Workspace path is outside the allowed workspace root.",
+                ) from None
 
         try:
             # Safely generate the directory structure
@@ -102,7 +121,7 @@ def create_workspaces_router() -> APIRouter:
             logger.info("[workspaces] Safely created or confirmed folder: %s", resolved_path)
         except Exception as exc:
             logger.error("[workspaces] Failed to create workspace directory: %s", exc)
-            raise HTTPException(status_code=500, detail=f"Failed to create workspace directory: {exc}") from exc
+            raise HTTPException(status_code=500, detail="Failed to create workspace directory.") from exc
 
         from kazma_core.stores import get_workspace_store
         try:
@@ -159,7 +178,7 @@ def create_workspaces_router() -> APIRouter:
             raise
         except Exception as exc:
             logger.error("[workspaces] Failed to switch workspace: %s", exc)
-            raise HTTPException(status_code=500, detail=f"Failed to switch workspace: {exc}") from exc
+            raise HTTPException(status_code=500, detail="Failed to switch workspace.") from exc
 
         return JSONResponse({
             "status": "ok",

@@ -278,7 +278,7 @@ async def github_status() -> JSONResponse:
                 "is_github": True,
                 "owner": owner,
                 "repo": repo,
-                "error": f"Failed to reach GitHub API: {exc}"
+                "error": "Failed to reach GitHub API."
             })
 
 
