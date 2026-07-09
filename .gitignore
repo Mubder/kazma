@@ -80,3 +80,6 @@ swarm_registry.json
 
 # Kubernetes secrets (never commit credentials)
 kubernetes/*secrets*.yaml
+
+# ZCode internal artifacts
+.zcode/
