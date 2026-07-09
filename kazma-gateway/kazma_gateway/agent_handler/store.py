@@ -15,11 +15,18 @@ _MAX_DICT_ENTRIES = 10_000
 
 _PLATFORM_KEYS = frozenset(
     {
+        # Telegram
         "chat_id",
         "user_id",
         "message_id",
         "update_id",
         "chat_type",
+        # Discord / Slack
+        "channel_id",
+        "guild_id",
+        "team_id",
+        "thread_ts",
+        "message_ts",
     }
 )
 
@@ -135,12 +142,16 @@ def _build_target_id(platform: str, ctx: dict[str, Any]) -> str:
         ctx: The restored context_metadata (may be empty on error).
 
     Returns:
-        e.g. "telegram:12345" or "telegram:unknown"
+        e.g. "telegram:12345", "discord:98765", or "telegram:unknown"
     """
     # Telegram uses chat_id
     chat_id = ctx.get("chat_id")
     if chat_id is not None:
         return f"{platform}:{chat_id}"
 
-    # Discord would use channel_id, etc.
+    # Discord / Slack route on channel_id
+    channel_id = ctx.get("channel_id")
+    if channel_id is not None:
+        return f"{platform}:{channel_id}"
+
     return f"{platform}:unknown"

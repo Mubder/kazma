@@ -141,15 +141,25 @@ class TestCallbackRoutingIntegration:
     """Test that platform adapters route callbacks to bus adapters."""
     
     def test_telegram_adapter_routes_swarm_callbacks(self):
-        """TelegramAdapter._handle_callback_query routes to bus."""
+        """TelegramAdapter._handle_callback_query routes swarm approvals to bus.
+
+        The literal ``swarm_approve_``/``swarm_reject_`` prefixes live in the
+        extracted ``parse_callback_data`` helper now, so we verify the wiring
+        (parse -> get_message_bus -> handle_callback) plus the parser
+        recognizing the prefixes, rather than grepping the adapter method.
+        """
         from kazma_gateway.adapters.telegram import TelegramAdapter
+        from kazma_gateway.adapters.telegram_callbacks import parse_callback_data
         import inspect
-        
+
         src = inspect.getsource(TelegramAdapter._handle_callback_query)
-        assert "swarm_approve_" in src
-        assert "swarm_reject_" in src
+        assert "parse_callback_data" in src
         assert "get_message_bus" in src
         assert "handle_callback" in src
+
+        # The extracted parser recognizes the swarm approval prefixes.
+        assert parse_callback_data("swarm_approve_task-1").kind == "swarm"
+        assert parse_callback_data("swarm_reject_task-1").kind == "swarm"
     
     def test_discord_adapter_routes_swarm_callbacks(self):
         """DiscordAdapter._handle_interaction routes to bus."""

@@ -368,6 +368,13 @@ class KazmaAppBuilder:
                 from kazma_gateway.adapters.discord import DiscordAdapter
 
                 discord_adapter = DiscordAdapter(token=discord_token)
+                # User-level allowlist (mirrors Telegram). Stored in ConfigStore
+                # as a comma-separated string of Discord user IDs.
+                discord_allowed = self.config_store.get("connectors.discord.allowed_users", "")
+                if discord_allowed:
+                    discord_ids = [uid.strip() for uid in discord_allowed.split(",") if uid.strip()]
+                    discord_adapter.set_allowed_users(discord_ids)
+                    logger.info("[Gateway] Discord allowed users: %d IDs", len(discord_ids))
                 self.gateway.add_adapter(discord_adapter)
                 logger.info("[Gateway] Discord adapter registered")
             else:
@@ -385,12 +392,29 @@ class KazmaAppBuilder:
             if slack_bot_token:
                 from kazma_gateway.adapters.slack import SlackAdapter
 
-                slack_adapter = SlackAdapter(bot_token=slack_bot_token, app_token=slack_app_token or None)
+                # Team/channel allowlists — empty = allow all. Stored in
+                # ConfigStore as comma-separated strings. Without these the
+                # adapter accepts messages from any team/channel.
+                def _split_ids(raw: str) -> list[str]:
+                    return [s.strip() for s in raw.split(",") if s.strip()]
+
+                slack_teams = _split_ids(self.config_store.get("connectors.slack.allowed_teams", ""))
+                slack_channels = _split_ids(self.config_store.get("connectors.slack.allowed_channels", ""))
+                slack_adapter = SlackAdapter(
+                    bot_token=slack_bot_token,
+                    app_token=slack_app_token or None,
+                    allowed_teams=slack_teams or None,
+                    allowed_channels=slack_channels or None,
+                )
                 self.gateway.add_adapter(slack_adapter)
                 if slack_app_token:
                     logger.info("[Gateway] Slack adapter registered (Socket Mode)")
                 else:
                     logger.info("[Gateway] Slack adapter registered (polling mode — no app token)")
+                if slack_teams:
+                    logger.info("[Gateway] Slack allowed teams: %d", len(slack_teams))
+                if slack_channels:
+                    logger.info("[Gateway] Slack allowed channels: %d", len(slack_channels))
             else:
                 logger.info("[Gateway] No SLACK_BOT_TOKEN — Slack adapter skipped")
 

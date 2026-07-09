@@ -56,6 +56,9 @@ class DiscordAdapter(BaseAdapter):
     Args:
         token:           Discord bot token.
         allowed_guilds:  Optional whitelist of guild IDs (empty = allow all).
+        allowed_users:   Optional whitelist of Discord user IDs (empty = allow
+                         all). Stored as strings to match how Discord snowflake
+                         IDs are parsed. Mirrors Telegram's allowed_users gate.
 
     context_metadata keys (carried in every IncomingMessage):
         channel_id:  str
@@ -72,16 +75,26 @@ class DiscordAdapter(BaseAdapter):
         self,
         token: str,
         allowed_guilds: list[str] | None = None,
+        allowed_users: list[str] | None = None,
     ) -> None:
         super().__init__()
         self._token = token
         self._allowed_guilds = set(allowed_guilds or [])
+        self._allowed_users = set(allowed_users or [])
         self._http: httpx.AsyncClient | None = None
         self._rate_limiter = RateLimiter(max_per_second=5)
         self._ws = None
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._sequence: int | None = None
         self._session_id: str | None = None
+
+    def set_allowed_users(self, user_ids: list[str] | set[str]) -> None:
+        """Replace the user allowlist at runtime (mirrors Telegram).
+
+        This replaces direct assignment to the private ``_allowed_users``
+        attribute so callers don't reach into internals.
+        """
+        self._allowed_users = {str(uid) for uid in user_ids}
 
     async def listen(
         self,
@@ -192,6 +205,17 @@ class DiscordAdapter(BaseAdapter):
                             if self._allowed_guilds:
                                 gid = parsed.context_metadata.get("guild_id")
                                 if gid and gid not in self._allowed_guilds:
+                                    continue
+
+                            # User-level allowlist (mirrors Telegram). Empty
+                            # list = allow all; populated = drop non-listed.
+                            if self._allowed_users:
+                                uid = parsed.context_metadata.get("user_id")
+                                if not uid or uid not in self._allowed_users:
+                                    logger.info(
+                                        "[discord] Dropping message from "
+                                        "non-allowed user %s", uid,
+                                    )
                                     continue
 
                             try:

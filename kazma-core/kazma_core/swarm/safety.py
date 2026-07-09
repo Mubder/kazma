@@ -117,6 +117,12 @@ class SafetyMiddleware:
 
         For danger-tier tools, this will post an approval request to
         the bus and wait for the operator's response.
+
+        Fail-closed: when no real bus adapter is wired (``NullBusAdapter``),
+        danger tools are rejected unless ``allow_headless_danger`` is set
+        (test/dev escape hatch).  This mirrors :meth:`check_sync` so the
+        async and sync paths enforce consistently — previously the async
+        path silently auto-approved via ``NullBusAdapter.request_approval``.
         """
         if not self.enabled:
             return True  # development mode
@@ -132,9 +138,27 @@ class SafetyMiddleware:
         logger.warning("[Safety] Danger tool blocked pending approval: %s", tool_name)
         self._blocked_count += 1
 
-        from kazma_core.swarm.bus import get_message_bus
+        from kazma_core.swarm.bus import NullBusAdapter, get_message_bus
 
         bus = get_message_bus()
+        # Fail-closed when no real adapter is wired (mirror check_sync).
+        # NullBusAdapter.request_approval() returns True (auto-approve), which
+        # would silently bypass HITL for danger tools in headless deployments.
+        if isinstance(bus.adapter, NullBusAdapter):
+            if self.allow_headless_danger:
+                self._approved_count += 1
+                logger.info(
+                    "[Safety] Danger tool APPROVED (headless; allow_headless_danger=True): "
+                    "%s (task=%s)", tool_name, task_id,
+                )
+                return True
+            self._rejected_count += 1
+            logger.warning(
+                "[Safety] Danger tool '%s' BLOCKED (no approval bus; "
+                "allow_headless_danger=False) (task=%s)", tool_name, task_id,
+            )
+            return False
+
         approved = await bus.request_approval(
             worker_name=worker_name,
             task_description=f"Tool: {tool_name}" + (f" — {tool_args[:100]}" if tool_args else ""),

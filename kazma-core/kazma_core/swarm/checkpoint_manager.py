@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from time import perf_counter
 from typing import Any
 
@@ -32,6 +33,10 @@ class CheckpointManager:
         task_store: Optional TaskStore for persistence.
         task_history: Shared task history dict (owned by the engine).
         max_history: LRU cap for task history.
+        task_lock: Shared ``threading.Lock`` (owned by the engine) that
+            protects ``task_history`` mutations. Must be the same lock the
+            engine uses; otherwise history writes from this manager race
+            with engine reads/writes.
     """
 
     def __init__(
@@ -40,11 +45,16 @@ class CheckpointManager:
         task_store: Any | None = None,
         task_history: dict[str, SwarmTask] | None = None,
         max_history: int = 500,
+        task_lock: threading.Lock | None = None,
     ) -> None:
         self._checkpoint_handler = checkpoint_handler
         self._task_store = task_store
         self._task_history = task_history if task_history is not None else {}
         self._max_history = max_history
+        # Engine owns the lock; we borrow it so history mutations are
+        # consistent with _finalize_task / list_tasks. If not supplied we
+        # fall back to a private lock (degraded but never unlocked).
+        self._task_lock = task_lock if task_lock is not None else threading.Lock()
 
     def handle_pipeline_checkpoint(
         self,
@@ -109,11 +119,14 @@ class CheckpointManager:
             metadata=pattern_result.metadata,
         )
         task.result = result
-        self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
-        if len(self._task_history) > self._max_history:
-            excess = len(self._task_history) - self._max_history
-            for old_key in list(self._task_history.keys())[:excess]:
-                self._task_history.pop(old_key, None)
+        # Record into shared history under the engine's lock so concurrent
+        # list_tasks / _finalize_task can't observe a torn dict.
+        with self._task_lock:
+            self._task_history[task.id] = SwarmTask.from_dict(task.to_dict())
+            if len(self._task_history) > self._max_history:
+                excess = len(self._task_history) - self._max_history
+                for old_key in list(self._task_history.keys())[:excess]:
+                    self._task_history.pop(old_key, None)
 
         # Persist paused state to SQLite so it survives restart.
         if self._task_store is not None:
@@ -177,7 +190,10 @@ class CheckpointManager:
             return []
         paused_tasks = self._task_store.get_paused_tasks()
         for task in paused_tasks:
-            self._task_history[task.id] = task
+            # Restore into shared history under the engine lock (avoids racing
+            # a concurrent list_tasks / _finalize_task).
+            with self._task_lock:
+                self._task_history[task.id] = task
             # Restore the checkpoint handler state if metadata is present.
             checkpoint_meta = task.metadata.get("hitl_checkpoint", {})
             if checkpoint_meta:
@@ -199,6 +215,19 @@ class CheckpointManager:
                     worker_results=worker_results,
                     blackboard_data=blackboard_data,
                 )
+                # Re-arm the auto-reject timeout. Previously this was only
+                # armed on first pause (handle_pipeline_checkpoint); after a
+                # restart the paused task would hang forever (never auto-
+                # rejected, never resumed) until manual action.
+                timeout_seconds = task.metadata.get("checkpoint_timeout")
+                if timeout_seconds and float(timeout_seconds) > 0:
+                    timeout_task = asyncio.create_task(
+                        self._checkpoint_timeout_reject(
+                            task.id,
+                            float(timeout_seconds),
+                        )
+                    )
+                    self._checkpoint_handler.set_timeout_task(task.id, timeout_task)
                 logger.info(
                     "[CheckpointManager] restored paused pipeline '%s' at step %d",
                     task.id,

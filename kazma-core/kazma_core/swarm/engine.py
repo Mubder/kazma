@@ -137,6 +137,7 @@ class SwarmEngine:
             task_store=task_store,
             task_history=self._task_history,
             max_history=self._max_history,
+            task_lock=self._task_lock,
         )
         # Register reject callback so the checkpoint timeout auto-reject
         # can call back into the engine without a circular reference.

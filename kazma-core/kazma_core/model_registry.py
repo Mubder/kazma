@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from typing import Any, TYPE_CHECKING
 
 import httpx
@@ -91,6 +92,13 @@ class ModelRegistry:
         self._active_provider: str = ""
         self._active_model: str = ""
         self._discovered_models: dict[str, list[str]] = {}
+        # Reentrant lock guards read-modify-write of the active
+        # provider/model and the client cache. This registry is a
+        # process-wide singleton consumed concurrently by the swarm engine
+        # and gateway; without a lock, concurrent get_client() calls can
+        # interleave the provider auto-correction path. RLock because some
+        # methods (e.g. set_active_* -> get_active_profile) re-enter.
+        self._lock = threading.RLock()
 
     # ── Active profile management ──────────────────────────────────
 
@@ -152,42 +160,63 @@ class ModelRegistry:
 
         Persists to ConfigStore and invalidates any cached client for this
         provider.  Returns the normalized profile (api_key masked).
+
+        If *model* is omitted, the active model is re-validated against the
+        new provider: when the current model is NOT owned by the new
+        provider it is cleared (rather than silently left pointing at a
+        model the new provider cannot serve). This closes the
+        "change-one-without-the-other" desync where the persisted profile
+        recorded a provider/model mismatch.
         """
         clean_provider = (provider or "").strip()
         if not clean_provider:
             return {"error": "Provider name is required"}
 
-        self._active_provider = clean_provider
+        with self._lock:
+            self._active_provider = clean_provider
 
-        # If explicit base_url/api_key provided, store them in the provider list
-        if base_url or api_key:
-            existing = self.get_provider(clean_provider)
-            if existing:
-                upsert_data: dict[str, Any] = {"name": clean_provider}
-                if base_url:
-                    upsert_data["base_url"] = base_url
-                if api_key:
-                    upsert_data["api_key"] = api_key
-                self.upsert_provider(upsert_data)
+            # If explicit base_url/api_key provided, store them in the provider list
+            if base_url or api_key:
+                existing = self.get_provider(clean_provider)
+                if existing:
+                    upsert_data: dict[str, Any] = {"name": clean_provider}
+                    if base_url:
+                        upsert_data["base_url"] = base_url
+                    if api_key:
+                        upsert_data["api_key"] = api_key
+                    self.upsert_provider(upsert_data)
+                else:
+                    self.upsert_provider({
+                        "name": clean_provider,
+                        "base_url": base_url,
+                        "api_key": api_key,
+                    })
+
+            if model:
+                self._active_model = model
             else:
-                self.upsert_provider({
-                    "name": clean_provider,
-                    "base_url": base_url,
-                    "api_key": api_key,
-                })
+                # Re-validate the active model against the new provider so
+                # we don't leave a model the new provider doesn't serve.
+                owner = self.find_provider_for_model(self._active_model)
+                if owner:
+                    owner_name = owner.get("name", "")
+                    if owner_name and owner_name.lower() != clean_provider.lower():
+                        logger.info(
+                            "Active model '%s' not served by new provider '%s' "
+                            "(owned by '%s') — clearing active model.",
+                            self._active_model, clean_provider, owner_name,
+                        )
+                        self._active_model = ""
 
-        if model:
-            self._active_model = model
+            # Persist
+            self._config_store.set("registry.active_provider", clean_provider, category="registry")
+            if self._active_model:
+                self._config_store.set("registry.active_model", self._active_model, category="registry")
 
-        # Persist
-        self._config_store.set("registry.active_provider", clean_provider, category="registry")
-        if self._active_model:
-            self._config_store.set("registry.active_model", self._active_model, category="registry")
+            # Invalidate cached client
+            self._clients.pop(clean_provider, None)
 
-        # Invalidate cached client
-        self._clients.pop(clean_provider, None)
-
-        return self.get_active_profile()
+            return self.get_active_profile()
 
     def set_active_model(self, model: str) -> None:
         """Change the active model, auto-switching provider if needed.
@@ -197,25 +226,26 @@ class ModelRegistry:
         points to the correct API endpoint.
         """
         clean_model = (model or "").strip()
-        self._active_model = clean_model
-        self._config_store.set("registry.active_model", self._active_model, category="registry")
+        with self._lock:
+            self._active_model = clean_model
+            self._config_store.set("registry.active_model", self._active_model, category="registry")
 
-        # Auto-switch provider if this model belongs to a different one
-        owner = self.find_provider_for_model(clean_model)
-        if owner:
-            owner_name = owner.get("name", "")
-            if owner_name and owner_name != self._active_provider:
-                logger.info(
-                    "Auto-switching active provider '%s' -> '%s' (model=%s)",
-                    self._active_provider,
-                    owner_name,
-                    clean_model,
-                )
-                self._active_provider = owner_name
-                self._config_store.set("registry.active_provider", owner_name, category="registry")
+            # Auto-switch provider if this model belongs to a different one
+            owner = self.find_provider_for_model(clean_model)
+            if owner:
+                owner_name = owner.get("name", "")
+                if owner_name and owner_name != self._active_provider:
+                    logger.info(
+                        "Auto-switching active provider '%s' -> '%s' (model=%s)",
+                        self._active_provider,
+                        owner_name,
+                        clean_model,
+                    )
+                    self._active_provider = owner_name
+                    self._config_store.set("registry.active_provider", owner_name, category="registry")
 
-        # Invalidate ALL cached clients so they rebuild with correct URL+model
-        self._clients.clear()
+            # Invalidate ALL cached clients so they rebuild with correct URL+model
+            self._clients.clear()
 
     # ── LLM client management ──────────────────────────────────────
 
@@ -232,84 +262,85 @@ class ModelRegistry:
         *model* is None (using the active model) and when it is passed
         as an override.
         """
-        provider_name = self._active_provider or "custom"
-        effective_model = model or self._active_model
+        with self._lock:
+            provider_name = self._active_provider or "custom"
+            effective_model = model or self._active_model
 
-        # Safety: if the model belongs to a DIFFERENT provider,
-        # auto-correct the provider so we don't send cross-provider
-        # model names (e.g. NVIDIA model to DeepSeek's API).
-        # This runs regardless of whether *model* was passed — the
-        # previous `not model` guard defeated this safety net exactly
-        # when the swarm path (which always passes model=) needed it.
-        if effective_model:
-            owner = self.find_provider_for_model(effective_model)
-            if owner:
-                owner_name = owner.get("name", "")
-                if owner_name and owner_name.lower() != provider_name.lower():
+            # Safety: if the model belongs to a DIFFERENT provider,
+            # auto-correct the provider so we don't send cross-provider
+            # model names (e.g. NVIDIA model to DeepSeek's API).
+            # This runs regardless of whether *model* was passed — the
+            # previous `not model` guard defeated this safety net exactly
+            # when the swarm path (which always passes model=) needed it.
+            if effective_model:
+                owner = self.find_provider_for_model(effective_model)
+                if owner:
+                    owner_name = owner.get("name", "")
+                    if owner_name and owner_name.lower() != provider_name.lower():
+                        logger.warning(
+                            "Model '%s' belongs to provider '%s' but active provider is '%s'. "
+                            "Auto-correcting to the owning provider.",
+                            effective_model,
+                            owner_name,
+                            provider_name,
+                        )
+                        provider_name = owner_name
+                        # Only persist the active-provider change when the
+                        # caller did not explicitly pass a model override —
+                        # otherwise we'd hijack the global active provider
+                        # for every per-call model request.
+                        if model is None:
+                            self._active_provider = owner_name
+                            self._config_store.set("registry.active_provider", owner_name, category="registry")
+                else:
+                    # Model not found in any provider — warn so misconfigs
+                    # are visible instead of silently routing to a random
+                    # active provider's endpoint.
                     logger.warning(
-                        "Model '%s' belongs to provider '%s' but active provider is '%s'. "
-                        "Auto-correcting to the owning provider.",
-                        effective_model,
-                        owner_name,
-                        provider_name,
+                        "Model '%s' not found in any configured provider. "
+                        "Falling back to active provider '%s'.",
+                        effective_model, provider_name,
                     )
-                    provider_name = owner_name
-                    # Only persist the active-provider change when the
-                    # caller did not explicitly pass a model override —
-                    # otherwise we'd hijack the global active provider
-                    # for every per-call model request.
-                    if model is None:
-                        self._active_provider = owner_name
-                        self._config_store.set("registry.active_provider", owner_name, category="registry")
-            else:
-                # Model not found in any provider — warn so misconfigs
-                # are visible instead of silently routing to a random
-                # active provider's endpoint.
-                logger.warning(
-                    "Model '%s' not found in any configured provider. "
-                    "Falling back to active provider '%s'.",
-                    effective_model, provider_name,
-                )
 
-        if model is None and provider_name in self._clients:
-            return self._clients[provider_name]
+            if model is None and provider_name in self._clients:
+                return self._clients[provider_name]
 
-        # Resolve provider config (shared with get_active_profile)
-        _, base_url, api_key, effective_model = self._resolve_provider_config(
-            provider_name, effective_model,
-        )
-
-        # Fallback model if still empty
-        if not effective_model:
-            effective_model = str(self._config_store.get("llm.model", "") or "gpt-4o-mini")
-
-        config = LLMConfig.from_dict({
-            "base_url": base_url,
-            "api_key": api_key,
-            "model": effective_model,
-        })
-
-        # ── Google Vertex AI → use GeminiProvider with ADC auth ──
-        if provider_name.lower() == "google":
-            from kazma_core.google_llm import GeminiProvider
-
-            google_entry = self.get_provider(provider_name)
-            location = str(
-                google_entry.get("location", "")
-                if google_entry else ""
-            ) or "us-central1"
-            project_id = str(
-                google_entry.get("project_id", "")
-                if google_entry else ""
+            # Resolve provider config (shared with get_active_profile)
+            _, base_url, api_key, effective_model = self._resolve_provider_config(
+                provider_name, effective_model,
             )
-            client = GeminiProvider(config, project_id=project_id, location=location)
-        else:
-            client = LLMProvider(config)
 
-        if model is None:
-            self._clients[provider_name] = client
+            # Fallback model if still empty
+            if not effective_model:
+                effective_model = str(self._config_store.get("llm.model", "") or "gpt-4o-mini")
 
-        return client
+            config = LLMConfig.from_dict({
+                "base_url": base_url,
+                "api_key": api_key,
+                "model": effective_model,
+            })
+
+            # ── Google Vertex AI → use GeminiProvider with ADC auth ──
+            if provider_name.lower() == "google":
+                from kazma_core.google_llm import GeminiProvider
+
+                google_entry = self.get_provider(provider_name)
+                location = str(
+                    google_entry.get("location", "")
+                    if google_entry else ""
+                ) or "us-central1"
+                project_id = str(
+                    google_entry.get("project_id", "")
+                    if google_entry else ""
+                )
+                client = GeminiProvider(config, project_id=project_id, location=location)
+            else:
+                client = LLMProvider(config)
+
+            if model is None:
+                self._clients[provider_name] = client
+
+            return client
 
     def get_model(self, model_id: str) -> LLMProvider:
         """Return a pre-configured ``LLMProvider`` for a specific model ID.

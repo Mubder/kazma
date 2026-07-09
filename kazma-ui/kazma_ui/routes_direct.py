@@ -486,7 +486,16 @@ def register_direct_routes(self: Any) -> None:
                 except Exception as _e:
                     logger.debug("[HITL] Failed to fetch session context for ownership check: %s", _e)
                 if ctx and isinstance(ctx, dict):
-                    owner = ctx.get("sender_id") or ctx.get("owner") or ctx.get("session_id")
+                    # Resolve the owning identity across platforms:
+                    #   - Telegram: sender_id ("telegram:<chat_id>")
+                    #   - Discord/Slack: user_id
+                    #   - Web/SSE: session_id
+                    owner = (
+                        ctx.get("sender_id")
+                        or ctx.get("owner")
+                        or ctx.get("session_id")
+                        or ctx.get("user_id")
+                    )
                     if owner:
                         caller_session = body.get("session_id")
                         if not caller_session:

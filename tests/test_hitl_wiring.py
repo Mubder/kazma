@@ -61,6 +61,55 @@ class TestSafetyFailClosed:
         assert safety.stats()["rejected_count"] >= 2
 
 
+class TestSafetyFailClosedAsync:
+    """check (async) must mirror check_sync and block danger tools when no
+    real bus adapter is wired.
+
+    Regression guard: the async path used to call
+    ``NullBusAdapter.request_approval()`` which returns ``True``,
+    silently auto-approving every danger tool in headless / web-only
+    deployments. Both paths must now fail-closed consistently.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_bus(self):
+        """Ensure each test starts with a fresh NullBusAdapter on the singleton."""
+        from kazma_core.swarm.bus import NullBusAdapter, SwarmMessageBus, get_message_bus
+        bus = get_message_bus()
+        original = bus.adapter
+        bus._adapter = NullBusAdapter()  # no real platform adapter
+        yield
+        bus._adapter = original
+
+    @pytest.mark.asyncio
+    async def test_async_danger_tool_blocked_without_bus(self):
+        """Async path blocks danger tools when no real bus is present."""
+        safety = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        assert await safety.check("shell_exec") is False
+        assert await safety.check("file_write") is False
+        assert await safety.check("file_delete") is False
+        assert safety.stats()["rejected_count"] >= 3
+
+    @pytest.mark.asyncio
+    async def test_async_safe_tool_allowed_without_bus(self):
+        """Async path still lets non-danger tools through with no bus."""
+        safety = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        assert await safety.check("file_read") is True
+        assert await safety.check("send_message") is True
+
+    @pytest.mark.asyncio
+    async def test_async_disabled_safety_allows_all(self):
+        """Disabled safety short-circuits the async path too."""
+        safety = SafetyMiddleware(enabled=False)
+        assert await safety.check("shell_exec") is True
+
+    @pytest.mark.asyncio
+    async def test_async_headless_escape_hatch_allows_danger(self):
+        """allow_headless_danger=True still permits danger tools (test/dev)."""
+        safety = SafetyMiddleware(enabled=True, allow_headless_danger=True)
+        assert await safety.check("shell_exec") is True
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Phase 2: HITL config helpers
 # ══════════════════════════════════════════════════════════════════════════

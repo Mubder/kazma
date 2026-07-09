@@ -99,22 +99,42 @@ class TestHITLGateB_SwarmMessageBus:
             assert len(sig.parameters) >= 2  # self + callback_data/custom_id/action_value
     
     def test_adapter_callback_routing_wired(self):
-        """Each platform adapter routes swarm_approve_/swarm_reject_ to bus."""
-        # Telegram
-        from kazma_gateway.adapters.telegram import TelegramAdapter
+        """Each platform adapter routes swarm_approve_/swarm_reject_ to bus.
+
+        The swarm-approval callback parsing was extracted into
+        ``parse_callback_data`` (telegram_callbacks.py / discord_bus /
+        slack_bus), so the routing is verified there plus the adapter's
+        in-process handling, rather than by grepping the adapter method
+        source for the literal prefix.
+        """
         import inspect
+
+        # Telegram: _handle_callback_query delegates swarm callbacks to the
+        # bus via get_message_bus() + TelegramBusAdapter.handle_callback.
+        from kazma_gateway.adapters.telegram import TelegramAdapter
         src = inspect.getsource(TelegramAdapter._handle_callback_query)
-        assert "swarm_approve_" in src or "swarm_reject_" in src
-        
-        # Discord
+        assert "parse_callback_data" in src
+        assert "get_message_bus" in src
+        assert "handle_callback" in src
+
+        # Discord: _handle_interaction routes swarm callbacks to the bus.
         from kazma_gateway.adapters.discord import DiscordAdapter
         src = inspect.getsource(DiscordAdapter._handle_interaction)
         assert "swarm_approve_" in src or "swarm_reject_" in src
-        
-        # Slack
+
+        # Slack: swarm callback handling is present on the adapter/bus.
         from kazma_gateway.adapters.slack import SlackAdapter
         src = inspect.getsource(SlackAdapter)
         assert "swarm_approve_" in src or "swarm_reject_" in src
+
+        # The extracted Telegram parser must recognize the swarm prefixes.
+        from kazma_gateway.adapters.telegram_callbacks import parse_callback_data
+        approve_action = parse_callback_data("swarm_approve_task-123")
+        reject_action = parse_callback_data("swarm_reject_task-123")
+        assert approve_action.kind == "swarm"
+        assert approve_action.swarm_data == "swarm_approve_task-123"
+        assert reject_action.kind == "swarm"
+        assert reject_action.swarm_data == "swarm_reject_task-123"
 
 
 class TestHITLGateC_PipelineCheckpoints:

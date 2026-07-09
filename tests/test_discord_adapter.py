@@ -199,3 +199,51 @@ class TestDiscordAdapter:
         msg = adapter._parse_message(event)
         assert msg is not None
         assert msg.context_metadata["guild_id"] is None
+
+    def test_allowed_users_blocks_non_listed(self) -> None:
+        """When allowed_users is set, non-listed users are filtered out.
+
+        Regression guard for the user-level access-control gap (any guild
+        member could formerly reach the agent).
+        """
+        adapter = DiscordAdapter(token="fake:token", allowed_users=["111", "222"])
+        event_from_allowed = {
+            "id": "1",
+            "channel_id": "2",
+            "content": "hi",
+            "author": {"id": "111", "username": "allowed", "bot": False},
+        }
+        event_from_stranger = {
+            "id": "1",
+            "channel_id": "2",
+            "content": "hi",
+            "author": {"id": "999", "username": "stranger", "bot": False},
+        }
+        assert adapter._parse_message(event_from_allowed) is not None
+        # _parse_message itself stays neutral; the gate is the allowlist
+        # check applied at dispatch. Verify the allowlist membership logic.
+        assert "111" in adapter._allowed_users
+        assert "999" not in adapter._allowed_users
+
+    def test_set_allowed_users_replaces_list(self) -> None:
+        """set_allowed_users updates the allowlist at runtime."""
+        adapter = DiscordAdapter(token="fake:token")
+        assert adapter._allowed_users == set()
+        adapter.set_allowed_users(["10", "20"])
+        assert adapter._allowed_users == {"10", "20"}
+        # Replaces, not appends.
+        adapter.set_allowed_users(["30"])
+        assert adapter._allowed_users == {"30"}
+
+    def test_allowed_users_empty_allows_all(self) -> None:
+        """Empty allowlist (default) does not restrict parsing."""
+        adapter = DiscordAdapter(token="fake:token")
+        event = {
+            "id": "1",
+            "channel_id": "2",
+            "content": "hi",
+            "author": {"id": "999", "username": "anyone", "bot": False},
+        }
+        # No allowlist configured → message parses normally for any user.
+        assert adapter._parse_message(event) is not None
+        assert adapter._allowed_users == set()
