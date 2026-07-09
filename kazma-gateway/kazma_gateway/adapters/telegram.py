@@ -724,19 +724,13 @@ class TelegramAdapter(BaseAdapter):
         # Dismiss loading indicator
         asyncio.create_task(self._answer_callback_query(cb_id))
 
-        # Parse callback_data into a synthetic command text
-        text = ""
-        if data.startswith("hitl:"):
-            parts = data.split(":", 2)
-            if len(parts) == 3:
-                action, request_id = parts[1], parts[2]
-                text = f"/hitl {action} {request_id}"
-        elif data.startswith(("swarm_approve_", "swarm_reject_")):
-            # Swarm HITL approval button — route to the TelegramBusAdapter
-            # so it resolves the pending asyncio.Event and the paused
-            # worker can proceed (or be denied). This is the seam that was
-            # previously missing: the adapter's handle_callback() existed
-            # but was never called from the inbound polling path.
+        from kazma_gateway.adapters.telegram_callbacks import parse_callback_data
+
+        action = parse_callback_data(data)
+        text = action.text
+
+        if action.kind == "swarm":
+            # Swarm HITL approval — resolve bus Event in-process
             task_id = None
             try:
                 from kazma_core.swarm.bus import get_message_bus
@@ -745,40 +739,30 @@ class TelegramAdapter(BaseAdapter):
 
                 adapter = get_message_bus().adapter
                 if isinstance(adapter, TelegramBusAdapter):
-                    task_id = adapter.handle_callback(data)
+                    task_id = adapter.handle_callback(action.swarm_data or data)
             except Exception as exc:
                 logger.warning("[telegram] Swarm approval callback failed: %s", exc)
             if task_id is not None:
                 logger.info("[telegram] Swarm approval resolved: %s", task_id)
-            # These are resolved in-process; no synthetic message needed.
             return
-        elif data.startswith("personality:"):
-            name = data.split(":", 1)[1]
-            text = f"/personality {name}"
-        elif data.startswith("model_provider:"):
-            provider_name = data.split(":", 1)[1]
-            text = f"/_models_provider {provider_name}"
-        elif data.startswith("model_select:"):
-            model_id = data.split(":", 1)[1]
-            text = f"/_models_select {model_id}"
-        elif data.startswith("sys_install:"):
-            import re
-            # Verify authorization (allowed_users acts as the admin whitelist in Kazma)
+
+        if action.kind == "sys_install":
             if self._allowed_users:
                 user_id = from_user.get("id", 0)
                 if user_id not in self._allowed_users:
-                    logger.warning("[telegram] Non-whitelisted user %d tried to trigger installation.", user_id)
-                    asyncio.create_task(self._answer_callback_query(cb_id, "Not authorized: Admin privilege required."))
+                    logger.warning(
+                        "[telegram] Non-whitelisted user %d tried to trigger installation.",
+                        user_id,
+                    )
+                    asyncio.create_task(
+                        self._answer_callback_query(
+                            cb_id, "Not authorized: Admin privilege required."
+                        )
+                    )
                     return
-
-            # Clear loading icon on Telegram client
-            asyncio.create_task(self._answer_callback_query(cb_id))
-
-            package_name = data.split(":", 1)[1]
-            # Use safe detached background installer
             from kazma_core.system.runtime_manager import trigger_package_promotion
-            asyncio.create_task(trigger_package_promotion(package_name))
 
+            asyncio.create_task(trigger_package_promotion(action.package_name))
             chat_id = message.get("chat", {}).get("id")
             message_id = message.get("message_id")
             if chat_id and message_id:
@@ -794,14 +778,15 @@ class TelegramAdapter(BaseAdapter):
                             "chat_id": chat_id,
                             "message_id": message_id,
                             "text": "[⏳ Installing package... please wait]",
-                            "reply_markup": {"inline_keyboard": []}
-                        }
+                            "reply_markup": {"inline_keyboard": []},
+                        },
                     )
                 except Exception as exc:
                     logger.warning("[telegram] Failed to edit alert card: %s", exc)
             return
-        elif data.startswith("install_dependency:"):
-            package_name = data.split(":", 1)[1]
+
+        if action.kind == "install_dep":
+            package_name = action.package_name
             from kazma_core.system import asynchronous_install_package
             asyncio.create_task(asynchronous_install_package(package_name))
             chat_id = message.get("chat", {}).get("id")

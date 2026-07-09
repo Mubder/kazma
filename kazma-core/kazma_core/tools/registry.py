@@ -1,12 +1,14 @@
-"""Dynamic Tool Registry — permission-gated tool execution.
+"""Dynamic Tool Registry — permission-gated tool execution for **swarm workers**.
 
-Tools are registered with a ``PermissionLevel`` (READ_ONLY, SYSTEM_EXEC,
-FULL_ACCESS).  The Orchestrator checks the worker's role before granting
-access.
+Canonical split (do not confuse with the agent path):
 
-ShellTool wraps ``subprocess.run`` with safety scanning (AST-based
-detection of dangerous patterns), structured ``ToolResult`` output,
-and automatic pipeline logging.
+* **Agent / LangGraph** — ``kazma_core.agent.tool_registry.LocalToolRegistry``
+  (builtins: ``shell_exec``, file tools, etc.).
+* **Swarm workers** — this module (``ToolRegistry`` / ``get_tool_registry``).
+  Shell is registered as both ``shell`` and ``shell_exec`` for HITL name parity.
+
+Tools use ``PermissionLevel`` (READ_ONLY, SYSTEM_EXEC, FULL_ACCESS).
+The Orchestrator checks the worker role before granting access.
 """
 
 from __future__ import annotations

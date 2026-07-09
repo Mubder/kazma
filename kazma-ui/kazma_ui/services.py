@@ -37,104 +37,64 @@ class SwarmService:
             return None
 
     def list_workers(self) -> list[dict[str, Any]]:
-        """Return list of workers using public API if available."""
+        """Return list of workers via public ``list_workers()`` only."""
         engine = self._get_engine()
-        if engine is None:
+        if engine is None or not hasattr(engine, "list_workers"):
             return []
-        if hasattr(engine, "list_workers"):
-            try:
-                workers = engine.list_workers()
-                return [
-                    self._serialize_worker(w) for w in workers
-                ]
-            except Exception as exc:
-                logger.debug("list_workers failed: %s", exc)
-                return []
-        # Fallback only if no public method (should not happen after refactor)
         try:
-            raw = getattr(engine, "_workers", {}) or {}
-            return [self._serialize_worker(w) for w in raw.values()]
+            workers = engine.list_workers()
+            return [self._serialize_worker(w) for w in workers]
         except Exception as exc:
-            logger.debug("fallback list_workers failed: %s", exc)
+            logger.debug("list_workers failed: %s", exc)
             return []
 
     def get_worker(self, name: str) -> Optional[dict[str, Any]]:
         engine = self._get_engine()
-        if engine is None:
+        if engine is None or not hasattr(engine, "get_worker"):
             return None
-        if hasattr(engine, "get_worker"):
-            try:
-                w = engine.get_worker(name)
-                return self._serialize_worker(w) if w else None
-            except Exception as exc:
-                logger.debug("get_worker failed: %s", exc)
-                return None
-        raw = getattr(engine, "_workers", {}) or {}
-        w = raw.get(name)
-        return self._serialize_worker(w) if w else None
+        try:
+            w = engine.get_worker(name)
+            return self._serialize_worker(w) if w else None
+        except Exception as exc:
+            logger.debug("get_worker failed: %s", exc)
+            return None
 
     def register_task_handle(self, task_id: str, handle: Any) -> None:
         engine = self._get_engine()
-        if engine is None:
+        if engine is None or not hasattr(engine, "register_task_handle"):
             return
-        if hasattr(engine, "register_task_handle"):
-            try:
-                engine.register_task_handle(task_id, handle)
-                return
-            except Exception as exc:
-                logger.debug("register_task_handle failed: %s", exc)
-        # last resort
         try:
-            if not hasattr(engine, "_task_handles"):
-                engine._task_handles = {}
-            engine._task_handles[task_id] = handle
-        except Exception:
-            pass
+            engine.register_task_handle(task_id, handle)
+        except Exception as exc:
+            logger.debug("register_task_handle failed: %s", exc)
 
     def unregister_task_handle(self, task_id: str) -> None:
         engine = self._get_engine()
-        if engine is None:
+        if engine is None or not hasattr(engine, "unregister_task_handle"):
             return
-        if hasattr(engine, "unregister_task_handle"):
-            try:
-                engine.unregister_task_handle(task_id)
-                return
-            except Exception as exc:
-                logger.debug("unregister_task_handle failed: %s", exc)
         try:
-            handles = getattr(engine, "_task_handles", {})
-            handles.pop(task_id, None)
-        except Exception:
-            pass
+            engine.unregister_task_handle(task_id)
+        except Exception as exc:
+            logger.debug("unregister_task_handle failed: %s", exc)
 
     def get_task_handle(self, task_id: str) -> Any | None:
         engine = self._get_engine()
-        if engine is None:
+        if engine is None or not hasattr(engine, "get_task_handle"):
             return None
-        if hasattr(engine, "get_task_handle"):
-            try:
-                return engine.get_task_handle(task_id)
-            except Exception as exc:
-                logger.debug("get_task_handle failed: %s", exc)
-                return None
         try:
-            return getattr(engine, "_task_handles", {}).get(task_id)
-        except Exception:
+            return engine.get_task_handle(task_id)
+        except Exception as exc:
+            logger.debug("get_task_handle failed: %s", exc)
             return None
 
     def get_active_task(self, task_id: str) -> Any | None:
         engine = self._get_engine()
-        if engine is None:
+        if engine is None or not hasattr(engine, "get_active_task"):
             return None
-        if hasattr(engine, "get_active_task"):
-            try:
-                return engine.get_active_task(task_id)
-            except Exception as exc:
-                logger.debug("get_active_task failed: %s", exc)
-                return None
         try:
-            return getattr(engine, "_active_tasks", {}).get(task_id)
-        except Exception:
+            return engine.get_active_task(task_id)
+        except Exception as exc:
+            logger.debug("get_active_task failed: %s", exc)
             return None
 
     def set_sse_bus(self, bus: Any) -> None:

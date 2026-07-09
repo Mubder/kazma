@@ -47,8 +47,9 @@ async def stream_chat(
     """Stream a chat completion, yielding tokens as they arrive.
 
     Uses the OpenAI streaming API (stream=true) with SSE parsing.
-    If base_url is provided, creates a dedicated client for that endpoint.
-    If api_key is provided (for custom endpoints), uses it for auth.
+    If base_url is provided, creates a dedicated client for that endpoint
+    (closed when the stream ends). Callers must not hold that client past
+    the generator. Prefer the shared *client* when reusing connections.
     """
     payload: dict[str, Any] = {
         "model": model,
