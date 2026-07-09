@@ -253,14 +253,36 @@
               Rate Limited
             </span>
           </template>
-          <button class="btn btn-xs btn-secondary" @click="showPatModal = true" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
-            🔑 Set Token
+          <!-- Connect / Disconnect (OAuth) -->
+          <button x-show="!ghOAuthConnected" class="btn btn-xs btn-primary" @click="connectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 10px;">
+            🔑 Connect GitHub
+          </button>
+          <button x-show="ghOAuthConnected" class="btn btn-xs btn-secondary" @click="disconnectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
+            Disconnect
           </button>
         </div>
       </div>
 
+      <!-- OAuth not connected state -->
+      <div x-show="ghIsGitHub && !ghOAuthConnected" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
+        <div style="font-size:1.5rem;margin-bottom:8px;">🔒</div>
+        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">Connect to GitHub</h4>
+        <p style="font-size:0.75rem;max-width:340px;margin:0 auto 12px auto;line-height:1.5;">Authorize Kazma (read-only) to see live pull requests, issues, commits, and workflow runs for <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span>.</p>
+        <button class="btn btn-sm btn-primary" @click="connectGitHub()" style="font-size:0.8rem;">🔑 Connect with GitHub</button>
+        <p style="font-size:0.65rem;color:var(--text-tertiary);margin-top:10px;">Secure OAuth — no password or token to paste. Read-only access.</p>
+      </div>
+
       <!-- Main GitHub Card Body -->
-      <div style="padding:12px;background:var(--bg-surface);" x-show="ghIsGitHub" x-cloak>
+      <div style="padding:12px;background:var(--bg-surface);" x-show="ghIsGitHub && ghOAuthConnected" x-cloak>
+        <!-- Tab navigation -->
+        <div style="display:flex;gap:2px;border-bottom:1px solid var(--border-subtle);margin-bottom:10px;overflow-x:auto;">
+          <template x-for="tab in [['overview','Overview'],['pulls','PRs'],['issues','Issues'],['commits','Commits'],['workflows','Actions'],['releases','Releases']]" :key="tab[0]">
+            <button @click="ghActiveTab = tab[0]; ghLoadTab(tab[0])" :style="{ background: ghActiveTab === tab[0] ? 'var(--bg-elevated)' : 'transparent', color: ghActiveTab === tab[0] ? 'var(--accent)' : 'var(--text-muted)', borderBottom: ghActiveTab === tab[0] ? '2px solid var(--accent)' : '2px solid transparent' }" style="border:none;padding:6px 10px;font-size:0.72rem;font-weight:600;cursor:pointer;white-space:nowrap;border-radius:var(--radius-xs) var(--radius-xs) 0 0;" x-text="tab[1]"></button>
+          </template>
+        </div>
+
+        <!-- OVERVIEW TAB -->
+        <div x-show="ghActiveTab === 'overview'">
         <!-- Repository Info Banner -->
         <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:10px;">
           <div>
@@ -360,7 +382,88 @@
             </div>
           </template>
         </div>
-      </div>
+        </div><!-- /OVERVIEW TAB -->
+
+        <!-- PULL REQUESTS TAB -->
+        <div x-show="ghActiveTab === 'pulls'" style="max-height:340px;overflow-y:auto;">
+          <template x-for="pr in ghPrs" :key="pr.number">
+            <div @click="ghOpenPr(pr.number)" style="padding:7px 8px;border-bottom:1px solid var(--tint);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
+              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                <span style="color:var(--accent);font-weight:700;font-size:0.72rem;font-family:var(--font-mono);flex-shrink:0;" x-text="'#' + pr.number"></span>
+                <span style="font-size:0.78rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="pr.title"></span>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                <template x-if="pr.draft"><span style="font-size:0.6rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;">DRAFT</span></template>
+                <span style="font-size:0.65rem;color:var(--text-muted);" x-text="pr.author"></span>
+              </div>
+            </div>
+          </template>
+          <div x-show="ghPrs.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;">No open pull requests.</div>
+        </div>
+
+        <!-- ISSUES TAB -->
+        <div x-show="ghActiveTab === 'issues'" style="max-height:340px;overflow-y:auto;">
+          <template x-for="iss in ghIssues" :key="iss.number">
+            <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                <span style="color:var(--text-tertiary);font-weight:700;font-size:0.72rem;font-family:var(--font-mono);flex-shrink:0;" x-text="'#' + iss.number"></span>
+                <span style="font-size:0.78rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="iss.title"></span>
+              </div>
+              <div style="display:flex;gap:3px;flex-shrink:0;">
+                <template x-for="lab in iss.labels.slice(0,2)" :key="lab">
+                  <span style="font-size:0.58rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;" x-text="lab"></span>
+                </template>
+              </div>
+            </div>
+          </template>
+          <div x-show="ghIssues.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;">No open issues.</div>
+        </div>
+
+        <!-- COMMITS TAB -->
+        <div x-show="ghActiveTab === 'commits'" style="max-height:340px;overflow-y:auto;">
+          <template x-for="c in ghCommits" :key="c.sha">
+            <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;gap:8px;">
+              <code style="font-family:var(--font-mono);font-size:0.65rem;background:var(--bg-deep);padding:1px 5px;border-radius:var(--radius-xs);color:var(--accent);flex-shrink:0;" x-text="c.sha"></code>
+              <span style="font-size:0.75rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;" x-text="c.message"></span>
+              <span style="font-size:0.62rem;color:var(--text-muted);flex-shrink:0;margin-left:auto;" x-text="c.author"></span>
+            </div>
+          </template>
+          <div x-show="ghCommits.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;">No recent commits.</div>
+        </div>
+
+        <!-- WORKFLOWS TAB -->
+        <div x-show="ghActiveTab === 'workflows'" style="max-height:340px;overflow-y:auto;">
+          <template x-for="wf in ghWorkflows" :key="wf.id">
+            <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                <span style="font-size:0.75rem;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="wf.name || 'workflow'"></span>
+                <code style="font-family:var(--font-mono);font-size:0.6rem;color:var(--accent);" x-text="wf.branch"></code>
+              </div>
+              <div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">
+                <span style="font-size:0.7rem;font-weight:600;" :style="{ color: wf.conclusion === 'success' ? '#10b981' : (wf.conclusion === 'failure' ? '#ef4444' : '#3b82f6') }" x-text="wf.conclusion || wf.status || '—'"></span>
+                <a :href="wf.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">view ↗</a>
+              </div>
+            </div>
+          </template>
+          <div x-show="ghWorkflows.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;">No workflow runs.</div>
+        </div>
+
+        <!-- RELEASES TAB -->
+        <div x-show="ghActiveTab === 'releases'" style="max-height:340px;overflow-y:auto;">
+          <template x-for="rel in ghReleases" :key="rel.id">
+            <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+                <span style="font-size:0.75rem;font-weight:600;color:var(--text-primary);" x-text="rel.tag"></span>
+                <template x-if="rel.prerelease"><span style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 5px;border-radius:3px;">pre</span></template>
+                <template x-if="rel.draft"><span style="font-size:0.58rem;color:var(--text-muted);background:var(--bg-elevated);padding:1px 5px;border-radius:3px;">draft</span></template>
+              </div>
+              <a :href="rel.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">view ↗</a>
+            </div>
+          </template>
+          <div x-show="ghReleases.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;">No releases published.</div>
+        </div>
+
+      </div><!-- /Main GitHub Card Body -->
 
       <!-- No GitHub repository configuration detected -->
       <div x-show="!ghIsGitHub && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
@@ -518,17 +621,45 @@ function workspaceApp() {
     ghError: '',
     showPatModal: false,
     githubPat: '',
+    // OAuth + tabbed read-only views
+    ghOAuthConnected: false,
+    ghOAuthConfigured: false,
+    ghActiveTab: 'overview',
+    ghPrs: [],
+    ghIssues: [],
+    ghCommits: [],
+    ghWorkflows: [],
+    ghReleases: [],
 
     async init() {
       await this.loadWorkspaces();
       await this.refreshAll();
       await this.loadBookmarks();
-      
-      // Poll Git & GitHub status every 10 seconds to keep UI live and fresh
+      await this.loadOAuthStatus();
+
+      // Listen for the OAuth callback tab signaling completion.
+      window.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'github-oauth-done') {
+          this.loadOAuthStatus().then(() => {
+            if (this.ghOAuthConnected) {
+              KazmaStream.toast(e.data.success ? 'GitHub connected.' : 'GitHub connection failed.', e.data.success ? 'success' : 'error', 2500);
+              if (e.data.success) this.loadGitHubStatus();
+            }
+          });
+        }
+      });
+
+      // Poll Git & GitHub status every 10 seconds to keep UI live and fresh.
+      // GitHub tab lists refresh on their own lighter cadence below.
       setInterval(() => {
         this.loadGitStatus();
-        this.loadGitHubStatus();
+        this.loadOAuthStatus();
+        if (this.ghOAuthConnected) this.loadGitHubStatus();
       }, 10000);
+      // Lighter poll for the active tab's list (30s).
+      setInterval(() => {
+        if (this.ghOAuthConnected && this.ghActiveTab !== 'overview') this.ghLoadTab(this.ghActiveTab);
+      }, 30000);
     },
 
     async loadWorkspaces() {
@@ -737,6 +868,72 @@ function workspaceApp() {
         this.ghIsGitHub = false;
         this.ghError = 'Connection error: ' + e.message;
       }
+    },
+
+    async loadOAuthStatus() {
+      try {
+        const resp = await fetch('/api/github/oauth/status');
+        if (resp.ok) {
+          const data = await resp.json();
+          this.ghOAuthConfigured = data.configured || false;
+          this.ghOAuthConnected = data.connected || false;
+          // If just connected, refresh the overview + first tab.
+          if (this.ghOAuthConnected) {
+            await this.loadGitHubStatus();
+          }
+        }
+      } catch (e) { /* non-fatal */ }
+    },
+
+    connectGitHub() {
+      // Opens the GitHub OAuth flow in a new tab; the callback page
+      // postMessage's back here so we refresh.
+      window.open('/api/github/oauth/start', '_blank');
+    },
+
+    async disconnectGitHub() {
+      if (!confirm('Disconnect GitHub? The read-only token will be removed from Kazma.')) return;
+      try {
+        const resp = await fetch('/api/github/oauth/revoke', { method: 'POST' });
+        if (resp.ok) {
+          this.ghOAuthConnected = false;
+          this.ghActiveTab = 'overview';
+          this.ghPrs = []; this.ghIssues = []; this.ghCommits = []; this.ghWorkflows = []; this.ghReleases = [];
+          KazmaStream.toast('GitHub disconnected.', 'info', 2000);
+        }
+      } catch (e) {
+        KazmaStream.toast('Disconnect failed: ' + e.message, 'error', 3000);
+      }
+    },
+
+    async ghLoadTab(tab) {
+      if (tab === 'overview') return;
+      try {
+        const map = { pulls: '/api/github/pulls', issues: '/api/github/issues', commits: '/api/github/commits', workflows: '/api/github/workflows', releases: '/api/github/releases' };
+        const resp = await fetch(map[tab]);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        if (data.error) { KazmaStream.toast(data.error, 'error', 3000); return; }
+        if (tab === 'pulls') this.ghPrs = data.pulls || [];
+        else if (tab === 'issues') this.ghIssues = data.issues || [];
+        else if (tab === 'commits') this.ghCommits = data.commits || [];
+        else if (tab === 'workflows') this.ghWorkflows = data.workflows || [];
+        else if (tab === 'releases') this.ghReleases = data.releases || [];
+      } catch (e) { /* non-fatal */ }
+    },
+
+    async ghOpenPr(number) {
+      // Fetch PR detail and surface it via a toast for now (rich detail
+      // panel can be layered on later without changing the data path).
+      try {
+        const resp = await fetch('/api/github/pulls/' + number);
+        if (!resp.ok) return;
+        const pr = await resp.json();
+        if (pr.error) { KazmaStream.toast(pr.error, 'error', 3000); return; }
+        const lines = [`#${pr.number} ${pr.title}`, `${pr.additions || 0} additions / ${pr.deletions || 0} deletions across ${pr.changed_files || 0} files`, `State: ${pr.merged ? 'merged' : pr.state}${pr.draft ? ' (draft)' : ''}${pr.mergeable_state ? ' / ' + pr.mergeable_state : ''}`];
+        if (pr.reviews && pr.reviews.length) lines.push('Reviews: ' + pr.reviews.map(r => `${r.user}=${r.state}`).join(', '));
+        showModal({ title: 'Pull Request #' + number, body: '<pre style="white-space:pre-wrap;font-family:var(--font-mono);font-size:0.78rem;line-height:1.6;color:var(--text-secondary);">' + (pr.body || '(no description)').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])).slice(0, 1200) + '</pre><p style="margin-top:12px;font-size:0.72rem;color:var(--text-muted);">' + lines.join('<br>') + '</p>', size: 'lg', actions: [{ label: 'Open on GitHub', variant: 'btn-primary', handler: () => window.open(pr.html_url, '_blank') }, { label: 'Close', variant: 'btn-secondary' }] });
+      } catch (e) { /* non-fatal */ }
     },
 
     async saveGitHubToken() {
