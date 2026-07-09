@@ -51,6 +51,7 @@ from kazma_core.swarm.task import (
     WorkerCapabilities,
     WorkerResult,
 )
+from kazma_core.swarm.sse_bridge import SseBridge
 from kazma_core.swarm.task_lifecycle import get_task as _hist_get_task
 from kazma_core.swarm.task_lifecycle import record_task as _hist_record_task
 from kazma_core.swarm.task_lifecycle import update_task as _hist_update_task
@@ -121,8 +122,17 @@ class SwarmEngine:
         # Register reject callback so the checkpoint timeout auto-reject
         # can call back into the engine without a circular reference.
         self._checkpoint_mgr.set_reject_callback(self.reject_checkpoint)
-        self._sse_bus: Any = None
+        self._sse = SseBridge()
         self._build_workers()
+
+    @property
+    def _sse_bus(self) -> Any:
+        """Backward-compat alias for tests/callers that read ``_sse_bus``."""
+        return self._sse.bus
+
+    @_sse_bus.setter
+    def _sse_bus(self, bus: Any) -> None:
+        self._sse.set_bus(bus)
 
     def get_autoscaler(self):
         """Return the AutoScaler, lazily initializing it."""
@@ -246,22 +256,11 @@ class SwarmEngine:
         This is the clean replacement for previous monkey-patching of
         dispatch/_finalize_task/_dispatch_worker.
         """
-        self._sse_bus = bus
+        self._sse.set_bus(bus)
 
     def _emit_sse(self, task_id: str, event: str, data: dict[str, Any]) -> None:
         """Internal helper to emit via registered SSE bus (if any)."""
-        if self._sse_bus is None:
-            return
-        try:
-            self._sse_bus.emit(task_id, event, data)
-        except Exception as sse_exc:
-            logger.debug(
-                "[SwarmEngine] SSE emit failed for %s:%s: %s",
-                task_id,
-                event,
-                sse_exc,
-                exc_info=True,
-            )
+        self._sse.emit(task_id, event, data)
 
     def list_tasks(self, task_type: TaskType | str | None = None) -> list[SwarmTask]:
         """Return completed task snapshots, optionally filtered by task type."""
