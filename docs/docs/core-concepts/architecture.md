@@ -46,6 +46,8 @@ kazma-ui/                Web dashboard (FastAPI + Jinja2)
 kazma-tui/               Terminal dashboard (Textual + TextArea selection)
 kazma-cli/               Command-line interface (11 commands)
 kazma-skills/            Built-in skill manifests
+kazma-core/kazma_core/chaos/  Chaos testing framework
+loadtests/               Load testing infrastructure (Locust + k6)
 ```
 
 ## Key architectural principles
@@ -70,3 +72,40 @@ Robust, sequential stage execution (e.g., Researcher → Refiner → Builder →
 
 ### SafetyMiddleware
 Danger-tier tool calls (`shell_exec`, `file_write`, `python_exec`, `spawn_agent`) are gated behind operator approval via the SwarmMessageBus. Approval cards expire after 60s.
+
+## Phase 3: Production Hardening (July 2026)
+
+### Chaos Testing Framework (`kazma-core/kazma_core/chaos/`)
+A comprehensive failure injection system for resilience testing:
+- **FailureInjector** — Central registry for latency, errors, timeouts, circuit breaker opens, network partitions, resource exhaustion
+- **10 Predefined Experiments** — LLM latency/errors/timeouts, DB slow/errors, message bus partition, tool executor failures, swarm degradation, gateway adapter errors, circuit breaker force-open, resource exhaustion
+- **UI Endpoints** (`/api/chaos/*`) — List experiments, run experiment, list active injections, stop injection, create custom injections
+- **Scoped Experiments** — `chaos_experiment()` context manager for test-time injections
+- **Target Components** — LLM provider, database, message bus, tool executor, swarm engine, gateway adapter
+
+### Config Migration UI (`/api/config/migrate/*`)
+Runtime database schema migration management:
+- `GET /api/config/migrate/status` — Migration status for config, task, session stores
+- `POST /api/config/migrate/run` — Run pending migrations (optionally filtered by store/target version)
+- `POST /api/config/migrate/rollback` — Rollback to target version
+- `POST /api/config/migrate/export` — Export config + migrations as YAML
+
+### Load Testing Infrastructure (`loadtests/`)
+- **Locust Test Suite** — Swarm dispatch, WebSocket/SSE/HITL, mixed workloads
+- **k6 Test Suite** — Advanced scenarios with custom metrics and thresholds
+- **Runner Script** — `python loadtests/run_loadtests.py` for CI/local runs
+- **CI Integration** — GitHub Actions runs load tests on main branch pushes
+
+### Adapter Extraction (`kazma-gateway/kazma_gateway/agent_handler/swarm_output.py`)
+Clean platform output abstraction:
+- **SwarmOutputTarget** ABC — Abstract base for platform output adapters
+- **TelegramSwarmOutputTarget** — Direct Bot API + Gateway fallback (dedicated bot token support)
+- **DiscordSwarmOutputTarget** / **SlackSwarmOutputTarget** — Gateway adapter routing
+- **Factory Pattern** — `send_swarm_output()` high-level dispatch function
+- Removed 150+ lines of inline routing logic from `swarm_dispatch.py`
+
+### WebSocket → SSE HITL Migration
+- **Deprecated** — `/ws/chat` returns 410 Gone, redirects to SSE
+- **Active** — `/api/chat/stream` with full HITL support
+- **HITL Flow** — SSE emits `approval_required` event → frontend prompts → `POST /api/approve/{thread_id}` → graph resumes via `Command(resume=...)`
+- **Platform-agnostic** — Same SSE contract works across Web/Telegram/Discord/Slack

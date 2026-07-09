@@ -4,10 +4,10 @@
 **Production-grade autonomous AI agent framework with multi-platform gateway, RAG memory, and human-in-the-loop safety.**
 
 
-![Tests](https://img.shields.io/badge/tests-138_passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-108_passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
-![Version](https://img.shields.io/badge/version-0.2.0-blue)
+![Version](https://img.shields.io/badge/version-0.3.0-blue)
 ![Portability](https://img.shields.io/badge/portability-linux_|_macOS_|_Windows_|_docker_|_WSL-brightgreen)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
 [![Framework][langgraph-shield]][langgraph-url]
@@ -20,6 +20,8 @@
 ![Docker](https://img.shields.io/badge/Docker-2496ed?style=flat&logo=docker&logoColor=white)
 ![Prometheus](https://img.shields.io/badge/Prometheus-e6522c?style=flat&logo=prometheus&logoColor=white)
 ![OpenTelemetry](https://img.shields.io/badge/OpenTelemetry-000000?style=flat&logo=opentelemetry&logoColor=white)
+![Locust](https://img.shields.io/badge/Locust-2.45.0-red)
+![k6](https://img.shields.io/badge/k6-load_testing-7d64ff)
 <!-- LINKS -->
 [python-shield]: https://img.shields.io/badge/python-3.11+-blue.svg
 [python-url]: https://www.python.org/downloads/
@@ -56,6 +58,26 @@ Kazma is an open-source framework for building reliable, culturally-aware AI age
 
 
 
+
+
+---
+
+## 🚀 Phase 3: Production Hardening (July 2026)
+
+| Feature | Description |
+|:---|:---|
+| **Config Migration UI** | `/api/config/migrate/*` endpoints — status, run, rollback, export for config/task/session stores |
+| **Chaos Testing Framework** | Failure injection engine with 10 predefined experiments (LLM latency, DB errors, network partitions, circuit breaker force-open, resource exhaustion) + UI endpoints `/api/chaos/*` |
+| **Load Testing Infrastructure** | Locust + k6 test suites for swarm dispatch, SSE/HITL, mixed workloads; CI integration on main branch |
+| **Adapter Extraction** | Clean SwarmOutputTarget ABC with Telegram (direct Bot API + Gateway fallback), Discord, Slack adapters — removed 150+ lines of inline routing from swarm_dispatch.py |
+| **WebSocket → SSE HITL** | Deprecated `/ws/chat` (410 Gone); active `/api/chat/stream` with full HITL approval flow via `approval_required` events |
+
+
+
+
+---
+
+## 📦 Quick Start
 ## 📦 Quick Start
 
 ### Prerequisites

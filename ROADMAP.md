@@ -1,8 +1,8 @@
 # 🇰🇼 Kazma Feature Roadmap
 
-> **Last updated:** July 3, 2026  
-> **Status:** All originally planned features shipped ✅ + two remediation rounds complete ✅  
-> **Tests:** 3,409+ passing
+> **Last updated:** July 9, 2026  
+> **Status:** All originally planned features shipped ✅ + three remediation rounds complete ✅ + Sprint 19 production hardening ✅  
+> **Tests:** 108 passing
 
 ---
 
@@ -47,6 +47,11 @@
 | Vision Analysis | Image analysis via LLM vision | ✅ Done |
 | Role Presets | Swarm worker role presets (orchestrator, backend, frontend, etc.) | ✅ Done |
 | Bug Fixes | 13 audit bugs fixed (RBAC, cron, schema, KG, etc.) | ✅ Done |
+| **Chaos Testing Framework** | Failure injection engine with 10 predefined experiments | ✅ Done (Sprint 19) |
+| **Config Migration UI** | Runtime DB schema migration management | ✅ Done (Sprint 19) |
+| **Load Testing Infrastructure** | Locust + k6 test suites with CI integration | ✅ Done (Sprint 19) |
+| **Adapter Extraction** | Clean platform output abstraction (swarm_output.py) | ✅ Done (Sprint 19) |
+| **WebSocket → SSE HITL** | Full HITL support via Server-Sent Events | ✅ Done (Sprint 19) |
 
 ### 🔧 Architecture Remediation (Sprint 8 — June 2026)
 
