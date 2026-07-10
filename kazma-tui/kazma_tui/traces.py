@@ -82,7 +82,7 @@ class TracesPanel(Vertical):
         self._selected_entry: Any = None
 
     def compose(self) -> ComposeResult:
-        yield Static("[bold $primary]Traces & Diagnostic Log Explorer[/]  ·  [dim]Real-time trace metrics[/]", classes="section-label")
+        yield Static("Traces", classes="section-label")
         with Horizontal(classes="toolbar"):
             yield Input(placeholder="🔍 Filter traces (text or regex)...", id="trace-search")
             yield Static("Traces: 0 | Tokens: 0 | Cost: $0.00", id="trace-stats", classes="stats-bar")
@@ -125,9 +125,9 @@ class TracesPanel(Vertical):
             stats = store.stats()
             stats_widget = self.query_one("#trace-stats", Static)
             stats_widget.update(
-                f"[bold $primary]Traces:[/] {stats.get('total_traces', 0)}  ·  "
-                f"[bold $primary]Tokens:[/] {stats.get('total_tokens', 0):,}  ·  "
-                f"[bold $primary]Cost:[/] [bold $secondary]${stats.get('total_cost', 0.0):.4f}[/]"
+                f"[dim]Traces:[/] {stats.get('total_traces', 0)}  ·  "
+                f"[dim]Tokens:[/] {stats.get('total_tokens', 0):,}  ·  "
+                f"[dim]Cost:[/] ${stats.get('total_cost', 0.0):.4f}"
             )
 
             # Retrieve entries
@@ -187,7 +187,7 @@ class TracesPanel(Vertical):
                 status_markup = "[bold $success]OK[/bold $success]"
 
             # Formatted type
-            type_markup = f"[bold $primary]{entry.trace_type.upper()}[/bold $primary]"
+            type_markup = f"[dim]{entry.trace_type.upper()}[/dim]"
             
             # Formatted duration
             dur_str = f"{entry.duration_ms:.0f}ms" if entry.duration_ms >= 0 else "N/A"
@@ -237,19 +237,19 @@ class TracesPanel(Vertical):
         time_str = datetime.fromtimestamp(entry.timestamp).strftime("%Y-%m-%d %H:%M:%S")
         status_color = "$error" if entry.status == "error" else ("$secondary" if entry.status == "warning" else "$success")
 
-        details_pane.write(f"[bold $primary]TRACE METRICS[/]")
+        details_pane.write("[bold]TRACE METRICS[/]")
         details_pane.write(f"  [dim]Timestamp:[/]  {time_str}")
-        details_pane.write(f"  [dim]Type:[/]       [bold $primary]{entry.trace_type.upper()}[/bold $primary]")
+        details_pane.write(f"  [dim]Type:[/]       {entry.trace_type.upper()}")
         details_pane.write(f"  [dim]Label:[/]      {entry.label}")
-        details_pane.write(f"  [dim]Status:[/]     [bold {status_color}]{entry.status.upper()}[/bold {status_color}]")
+        details_pane.write(f"  [dim]Status:[/]     [{status_color}]{entry.status.upper()}[/{status_color}]")
         details_pane.write(f"  [dim]Duration:[/]   {entry.duration_ms:.1f} ms")
-        
+
         if entry.tokens > 0:
             details_pane.write(f"  [dim]Tokens:[/]     {entry.tokens:,}")
-            details_pane.write(f"  [dim]Cost:[/]       [bold $secondary]${entry.cost:.4f}[/]")
+            details_pane.write(f"  [dim]Cost:[/]       ${entry.cost:.4f}")
 
         details_pane.write("\n" + "─" * 40 + "\n")
-        details_pane.write("[bold $primary]TRACE BODY / DIAGNOSTIC DETAILS[/]\n")
+        details_pane.write("[bold]TRACE BODY / DIAGNOSTIC DETAILS[/]\n")
         
         # Details text formatting (JSON, XML or raw text)
         raw_details = entry.details or ""

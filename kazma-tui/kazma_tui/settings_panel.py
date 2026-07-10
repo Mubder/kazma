@@ -90,93 +90,60 @@ class SettingsPanel(VerticalScroll):
         for label, key, default in self.SETTINGS:
             self._last_saved[key] = self._read_config(key, default)
 
+        yield Static("Settings", classes="section-label")
+
         # Feature Toggles Section
-        yield Static(
-            "[bold $primary]⚙️ Settings[/]  ·  [dim]Configure features and preferences[/]",
-            classes="section-label"
-        )
-        
         with Container(classes="settings-section"):
-            yield Static("[bold]$toggle Feature Toggles[/]", classes="settings-title")
+            yield Static("Feature Toggles", classes="settings-title")
             sel: SelectionList = SelectionList()
             for label, key, default in self.SETTINGS:
                 initial = self._read_config(key, default)
                 sel.add_option((label, key, initial))
-            sel.border_title = ""
             yield sel
-        
-        # Theme Selection Section
-        with Container(classes="settings-section"):
-            yield Static("[bold]$palette Theme Selection[/]", classes="settings-title")
-            yield Static(
-                f"Current: [bold $primary]{self.theme_manager.current_theme}[/]",
-                id="current-theme-label"
-            )
-            with Container(classes="theme-buttons"):
-                for theme_name in self.theme_manager.get_available_themes():
-                    display_name = theme_name.replace("-", " ").title()
-                    btn = Button(display_name, id=f"theme-{theme_name}", variant="default")
-                    if theme_name == self.theme_manager.current_theme:
-                        btn.variant = "primary"
-                    yield btn
 
         # Language Selection Section
         with Container(classes="settings-section"):
-            yield Static("[bold]🌐 Language / اللغة[/]", classes="settings-title")
+            yield Static("Language", classes="settings-title")
             yield Static(
-                f"Current: [bold $primary]{'العربية (AR)' if self.theme_manager.language == 'ar' else 'English (EN)'}[/]",
+                f"Current: [bold $primary]{'Arabic' if self.theme_manager.language == 'ar' else 'English'}[/]",
                 id="current-lang-label"
             )
             with Container(classes="theme-buttons"):
-                btn_en = Button("English (EN)", id="lang-en", variant="default")
-                btn_ar = Button("العربية (AR)", id="lang-ar", variant="default")
+                btn_en = Button("English", id="lang-en", variant="default")
+                btn_ar = Button("Arabic", id="lang-ar", variant="default")
                 if self.theme_manager.language == "en":
                     btn_en.variant = "primary"
                 else:
                     btn_ar.variant = "primary"
                 yield btn_en
                 yield btn_ar
-        
+
         # Preferences Section
         with Container(classes="settings-section"):
-            yield Static("[bold]$gauge Preferences[/]", classes="settings-title")
+            yield Static("Preferences", classes="settings-title")
             yield Label(
-                f"Auto-scroll: {'✓' if self.theme_manager.auto_scroll else '✗'}",
+                f"Auto-scroll: {'on' if self.theme_manager.auto_scroll else 'off'}",
                 id="auto-scroll-label"
             )
             yield Label(
-                f"Animations: {'✓' if self.theme_manager.animations_enabled else '✗'}",
+                f"Animations: {'on' if self.theme_manager.animations_enabled else 'off'}",
                 id="animations-label"
             )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle theme and language button presses."""
+        """Handle language button presses."""
         button_id = event.button.id
         if not button_id:
             return
-            
-        if button_id.startswith("theme-"):
-            theme_name = button_id[6:]  # Remove "theme-" prefix
-            try:
-                self.theme_manager.set_theme(theme_name)
-                # Apply theme to app
-                self.theme_manager.apply_theme(self.app, theme_name)
-                # Update UI
-                self._update_theme_buttons()
-                self.query_one("#current-theme-label", Static).update(
-                    f"Current: [bold $primary]{theme_name}[/]"
-                )
-                self.notify(f"Theme changed to {theme_name}", severity="information")
-            except Exception as e:
-                self.notify(f"Failed to change theme: {e}", severity="error")
-        elif button_id == "lang-en":
+
+        if button_id == "lang-en":
             try:
                 self.theme_manager.set_language("en")
                 self._update_lang_buttons()
                 self.query_one("#current-lang-label", Static).update(
-                    "Current: [bold $primary]English (EN)[/]"
+                    "Current: [bold $primary]English[/]"
                 )
-                self.theme_manager.apply_theme(self.app)  # Rebuild stylesheet with dynamic overrides removed/added
+                self.theme_manager.apply_theme(self.app)
                 self.app.update_localization()
                 self.notify("Language changed to English", severity="information")
             except Exception as e:
@@ -186,11 +153,11 @@ class SettingsPanel(VerticalScroll):
                 self.theme_manager.set_language("ar")
                 self._update_lang_buttons()
                 self.query_one("#current-lang-label", Static).update(
-                    "Current: [bold $primary]العربية (AR)[/]"
+                    "Current: [bold $primary]Arabic[/]"
                 )
-                self.theme_manager.apply_theme(self.app)  # Rebuild stylesheet with dynamic overrides removed/added
+                self.theme_manager.apply_theme(self.app)
                 self.app.update_localization()
-                self.notify("تم تغيير اللغة إلى العربية", severity="information")
+                self.notify("Language changed to Arabic", severity="information")
             except Exception as e:
                 self.notify(f"Failed to change language: {e}", severity="error")
 
@@ -202,16 +169,6 @@ class SettingsPanel(VerticalScroll):
             self.query_one("#lang-ar", Button).variant = "primary" if lang == "ar" else "default"
         except Exception as exc:
             logger.debug("Language button update failed: %s", exc)
-
-    def _update_theme_buttons(self) -> None:
-        """Update button variants to reflect current theme."""
-        current = self.theme_manager.current_theme
-        for theme_name in self.theme_manager.get_available_themes():
-            try:
-                btn = self.query_one(f"#theme-{theme_name}", Button)
-                btn.variant = "primary" if theme_name == current else "default"
-            except Exception as exc:
-                logger.debug("Theme button update failed: %s", exc)
 
     def on_selection_list_selected_changed(self, event: SelectionList.SelectedChanged) -> None:
         sel = event.selection_list
