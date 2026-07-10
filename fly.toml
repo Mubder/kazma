@@ -27,5 +27,5 @@ primary_region = "fra"  # Frankfurt — closest to Kuwait/Europe with good laten
 #   KAZMA_SECRET=<generate a random secret>
 #   GROQ_API_KEY=<your free Groq key from console.groq.com>
 #   KAZMA_PROVIDER=groq
-#   KAZMA_MODEL=llama-3.1-8b-instant
+#   KAZMA_MODEL=groq/compound-mini
 #   KAZMA_DEMO_MODE=true
