@@ -114,7 +114,7 @@ def default_provider_entries() -> list[dict[str, Any]]:
     for key, preset in PROVIDER_PRESETS.items():
         if key == "custom":
             continue
-        enabled = key == "google"
+        enabled = False
         models: list[str] = []
         project_id = ""
         location = "us-central1"
