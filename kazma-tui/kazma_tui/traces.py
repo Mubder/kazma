@@ -24,20 +24,28 @@ class TracesPanel(Vertical):
         background: $surface;
     }
 
+    TracesPanel > .section-label {
+        height: 1;
+        padding: 0 2;
+        color: $text-muted;
+        text-style: bold;
+    }
+
     TracesPanel > .toolbar {
-        height: 4;
+        height: 3;
         layout: horizontal;
-        padding: 1 2;
+        padding: 0 2;
         background: $panel;
         border-bottom: solid $border;
         align: left middle;
     }
 
     TracesPanel > .toolbar > Input {
-        width: 40%;
-        height: 3;
+        width: 1fr;
+        height: 1;
         background: $surface;
         border: solid $border;
+        margin: 0 1 0 0;
     }
 
     TracesPanel > .toolbar > Input:focus {
@@ -45,8 +53,9 @@ class TracesPanel(Vertical):
     }
 
     TracesPanel > .toolbar > .stats-bar {
-        width: 60%;
-        text-align: right;
+        width: auto;
+        min-width: 30;
+        height: 1;
         content-align: right middle;
         color: $text-muted;
     }

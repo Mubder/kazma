@@ -8,7 +8,7 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input, ProgressBar, RichLog
+from textual.widgets import Input, ProgressBar, RichLog, Static
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,15 @@ class ChatPanel(Vertical):
 
     ALLOW_SELECT = True
 
+    SLASH_COMMANDS = [
+        ("/help", "Show available commands"),
+        ("/clear", "Clear chat history"),
+        ("/model", "Show or switch active model"),
+        ("/models", "Alias for /model"),
+        ("/swarm", "Swarm dispatch and management"),
+        ("/quit", "Exit Kazma TUI"),
+    ]
+
     DEFAULT_CSS = """
     ChatPanel { height: 1fr; border: solid $border; background: $surface; }
     ChatPanel > RichLog { height: 1fr; background: transparent; border: none; padding: 1 2; }
@@ -36,6 +45,16 @@ class ChatPanel(Vertical):
         background: $panel; border: solid $border; color: $text;
     }
     ChatPanel > Input:focus { border: solid $primary; }
+
+    ChatPanel > #autocomplete {
+        dock: bottom; offset: 0 -4;
+        width: auto; min-width: 30; max-height: 8;
+        background: $panel; border: solid $primary;
+        padding: 0 1; display: none;
+    }
+    ChatPanel > #autocomplete .ac-cmd { color: $primary; text-style: bold; }
+    ChatPanel > #autocomplete .ac-desc { color: $text-muted; }
+    ChatPanel > #autocomplete .ac-selected { background: $primary 15%; }
     """
 
     BINDINGS = [
@@ -49,11 +68,73 @@ class ChatPanel(Vertical):
         self._last_response: str = ""
         self._pulse_timer = None
         self._busy: bool = False
+        self._ac_matches: list[tuple[str, str]] = []
+        self._ac_index: int = 0
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
         yield ProgressBar(id="chat-progress", total=100, show_eta=False)
-        yield Input(placeholder="Type... /help for commands", id="chat-input")
+        yield Input(placeholder="Type... / for commands", id="chat-input")
+        yield Static("", id="autocomplete")
+
+    # ── Slash command autocomplete ─────────────────────────────────
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Show autocomplete suggestions when the user types /."""
+        if event.input.id != "chat-input":
+            return
+        val = event.value
+        ac = self.query_one("#autocomplete", Static)
+
+        if not val.startswith("/"):
+            ac.styles.display = "none"
+            self._ac_matches = []
+            return
+
+        partial = val.split()[0] if val.split() else val
+        matches = [(c, d) for c, d in self.SLASH_COMMANDS if c.startswith(partial)]
+        self._ac_matches = matches
+        self._ac_index = 0
+
+        if matches and len(matches) < len(self.SLASH_COMMANDS):
+            lines = []
+            for i, (cmd, desc) in enumerate(matches):
+                cls = "ac-selected" if i == 0 else ""
+                lines.append(f"  [@class={cls}][bold $primary]{cmd:<10}[/] [dim]{desc}[/][/]")
+            ac.update("\n".join(lines))
+            ac.styles.display = "block"
+        else:
+            ac.styles.display = "none"
+
+    def on_key(self, event) -> None:
+        """Handle Tab/Arrow keys for autocomplete navigation."""
+        ac = self.query_one("#autocomplete", Static)
+        if ac.styles.display == "none" or not self._ac_matches:
+            return
+
+        if event.key in ("tab", "down"):
+            self._ac_index = (self._ac_index + 1) % len(self._ac_matches)
+            self._render_autocomplete()
+            event.prevent_default()
+        elif event.key == "up":
+            self._ac_index = (self._ac_index - 1) % len(self._ac_matches)
+            self._render_autocomplete()
+            event.prevent_default()
+        elif event.key == "enter" and len(self._ac_matches) == 1:
+            # Auto-complete the single match
+            cmd = self._ac_matches[0][0]
+            inp = self.query_one("#chat-input", Input)
+            inp.value = cmd + " "
+            inp.cursor_position = len(cmd) + 1
+            ac.styles.display = "none"
+            event.prevent_default()
+
+    def _render_autocomplete(self) -> None:
+        ac = self.query_one("#autocomplete", Static)
+        lines = []
+        for i, (cmd, desc) in enumerate(self._ac_matches):
+            prefix = ">" if i == self._ac_index else " "
+            lines.append(f" {prefix} [bold $primary]{cmd:<10}[/] [dim]{desc}[/]")
+        ac.update("\n".join(lines))
 
     # ── Message display ────────────────────────────────────────────
 
