@@ -30,8 +30,17 @@ class ChatPanel(Vertical):
     SLASH_COMMANDS = [
         ("/help", "Show available commands"),
         ("/clear", "Clear chat history"),
+        ("/reset", "Reset conversation context"),
         ("/model", "Show or switch active model"),
         ("/models", "Alias for /model"),
+        ("/status", "Gateway health overview"),
+        ("/memory", "Memory store stats"),
+        ("/cost", "Session token spend"),
+        ("/context", "Context window usage"),
+        ("/personality", "Show or switch personality"),
+        ("/config", "Interactive config wizard"),
+        ("/replay", "Time travel: list/replay snapshots"),
+        ("/export", "Export session to file"),
         ("/swarm", "Swarm dispatch and management"),
         ("/quit", "Exit Kazma TUI"),
     ]
@@ -265,7 +274,12 @@ class ChatPanel(Vertical):
     def _handle_command(self, text: str) -> None:
         cmd = text.lower().split()[0]
         if cmd == "/help":
-            self.write("system", "Commands: /help /clear /model /swarm /quit | Copy: Ctrl+A then Ctrl+Shift+C, or Shift+drag mouse to select text")
+            lines = ["Available commands:"]
+            for c, d in self.SLASH_COMMANDS:
+                lines.append(f"  {c:<14} {d}")
+            lines.append("")
+            lines.append("Tip: Type / and use Tab/arrows to autocomplete.")
+            self.write("system", "\n".join(lines))
         elif cmd == "/clear":
             # Use the app-level action which shows a confirmation dialog
             self.app.action_clear_chat()
