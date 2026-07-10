@@ -142,12 +142,20 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.get("/api/system/status")
     async def _get_system_status():
+        import os as _os
         from kazma_core.config_store import get_config_store
         from kazma_core.system.maintenance import get_memory_paths
         import sqlite3
-        
+
+        # Demo mode: report DEMO instead of DEGRADED so the UI hides the
+        # install button and shows a clean "demo mode" message.
+        _demo_mode = _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+
         store = get_config_store()
-        status = store.get("system.memory.status") or "ACTIVE"
+        if _demo_mode:
+            status = "DEMO"
+        else:
+            status = store.get("system.memory.status") or "ACTIVE"
         
         fts5_path, vector_path, _ = get_memory_paths()
         
@@ -189,6 +197,11 @@ def register_direct_routes(self: Any) -> None:
     @self.app.post("/api/system/install")
     async def _post_system_install(req: dict = None):
         req = req or {}
+        import os as _os
+        # In demo mode, ML deps can't be installed (container has no build
+        # tools and not enough RAM). Return a clean message.
+        if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+            return {"status": "unavailable", "message": "ML dependencies are not available in demo mode."}
         package_name = req.get("package_name", "sentence-transformers")
         from kazma_core.system import asynchronous_install_package
         await asynchronous_install_package(package_name)

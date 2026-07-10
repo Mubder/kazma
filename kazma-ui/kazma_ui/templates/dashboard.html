@@ -441,6 +441,11 @@
         installBtn.style.display = 'none';
         installBtn.disabled = false;
         installBtn.textContent = I18N.installMl;
+      } else if (status === 'DEMO') {
+        memoryBadge.textContent = 'DEMO';
+        memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(59,130,246,0.15);color:#3b82f6;border:1px solid rgba(59,130,246,0.3);';
+        memoryDesc.textContent = 'Demo mode — RAG memory is disabled. The full version includes ChromaDB vector search and sentence-transformers.';
+        installBtn.style.display = 'none';
       } else if (status === 'INSTALLING') {
         memoryBadge.textContent = I18N.memoryInstalling;
         memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(245, 158, 11, 0.15);color:#f59e0b;border:1px solid rgba(245, 158, 11, 0.3);';
