@@ -1,6 +1,6 @@
 # Kazma (كاظمه) — Autonomous Agent Framework
 
-> **Version anchor:** This documentation reflects the codebase as of **July 2026** (`pyproject.toml` → `0.3.0`; `kazma.yaml` `agent.version` still reads `0.2.0`). Every factual claim is traceable to source; anything not yet implemented is explicitly marked **Planned / Roadmap**.
+> **Version anchor:** This documentation reflects the codebase as of **July 2026** (`pyproject.toml` → `0.4.0 (current)`). Every factual claim is traceable to source; anything not yet implemented is explicitly marked **Planned / Roadmap**.
 
 Kazma is a multi-platform, autonomous AI agent framework built on a **LangGraph supervisor brain**, **swarm orchestration**, **cross-platform dispatch** (Telegram / Discord / Slack / Web / TUI), and an **OpenAI-compatible LLM provider layer**. It is designed with first-class **Arabic / RTL** support and a Gulf-cultural conversational protocol (*Majlis*).
 
