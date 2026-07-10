@@ -10,6 +10,7 @@ kazma-data/
 kubernetes/
 docs/
 *.md
+!README.md
 .env
 *.db
 *.db-journal
