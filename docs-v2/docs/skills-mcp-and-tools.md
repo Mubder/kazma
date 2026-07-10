@@ -125,6 +125,34 @@ Write endpoints (`kazma_core/hub/api.py:26-47`, `_require_auth`) require an `X-K
 
 > **"Trust tiers" do NOT exist as a cryptographic/security feature.** The only "trust" references in the codebase are (a) the plain `certified: bool` flag and (b) the `trust: trusted` string in `kazma.yaml` MCP config, which no code reads. This is explicitly flagged because older docs implied a tiered trust model.
 
+### 4.3 Finding & installing skills (consumer workflow)
+
+**Search** the registry by text, capability, tag, or author (`cli.py:171-234`):
+```bash
+kazma hub search "weather"
+kazma hub search --capabilities "image_analysis,data_processing"
+kazma hub search --tags "utility,beginner-friendly"
+kazma hub search --author "kazma-team"
+```
+
+**Browse** installed skills and inspect one in detail (`cli.py:208-303`):
+```bash
+kazma hub list
+kazma hub info author/skill-name
+```
+
+**Install** a specific version or the latest (`cli.py:234-266`):
+```bash
+kazma hub install author/skill-name@1.0.0
+kazma hub install author/skill-name
+```
+Or use the interactive **skill-installation wizard** (`kazma_core/cli/wizard.py`, `main.py:117-123`):
+```bash
+kazma wizard
+```
+
+> **⚠ `hub install`/`hub update` are currently stubbed** — `registry.py:269` only updates a DB row and performs no real fetch. Verify the skill source out-of-band until the installer is fully wired.
+
 ---
 
 ## 5. MCP (Model Context Protocol)

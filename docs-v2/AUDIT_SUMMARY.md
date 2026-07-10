@@ -116,4 +116,32 @@ The existing docs site is Docusaurus 3.4 (`docs/docusaurus.config.js`, `docs/sid
 
 ---
 
-*End of audit summary. The `docs-v2/` tree is 17 files: 1 README, 16 docs, plus this summary.*
+## 6. Consolidation record (July 2026)
+
+This `docs-v2/` is now the **single consolidated master**. Three pre-existing doc sets were merged into it:
+
+1. **The base rewrite** (this tree) — the strongest, most source-referenced set.
+2. **The duplicate `docs-v2/` copy** (formerly the Astro-site draft) — corrected against, then its 4 unique pieces folded in:
+   - `glossary.md`: +6 terms (`AutoScaler`, `BlackboardStore`, `Code-switch token`, `CommandConsole`, `PermissionLevel`, `WorkerCapabilities`).
+   - `security-and-safety.md` §8: +hardening-runner check table, +dependency-scanner table, +disclosure-workflow detail.
+   - `configuration.md`: +5 `swarm.*` keys (`default_pattern`, `auto_route`, `max_concurrent_tasks`, `max_concurrent`, `output_target`).
+   - `cli-reference.md`: +`--port` precedence table, +exit-codes section.
+3. **The original Docusaurus `docs/`** — its deep operator troubleshooting ported into `troubleshooting-and-workarounds.md` (§1.6–§1.9 registry, §9.1–§9.4 diagnostic tooling, §10 Gateway/Telegram, §11 Providers/Connectors hub, §12 TUI, §13 CLI, §14 Swarm panel), and the consumer skill workflow into `skills-mcp-and-tools.md` §4.3.
+
+> **Verification note:** `kazma wizard` was initially suspected fabricated but is a real command (`main.py:117-123` → `kazma_core/cli/wizard.py:SkillInstallationWizard`) and was retained. The fabricated-command findings above (`hub publish`, etc.) were re-confirmed against `hub/cli.py`.
+
+**Corrections applied to ported content:**
+- `ConfigStore()` → `get_config_store()` everywhere (direct construction causes SQLite lock contention; `config_store.py:760`).
+- The two distinct HITL endpoints are now explicitly disambiguated (agent tool-call `POST /api/approve/{thread_id}` vs. swarm/pipeline `POST /api/swarm/tasks/{id}/approve|reject`).
+- Dropped the stale `TelegramWorker`/`hermes`/`kazma -p <profile>` narrative — the class no longer exists (tree has only `SwarmWorker`/`InProcessWorker`).
+
+**Excluded from the merge (verified fabricated or superseded):**
+- `kazma-hub/overview.md`, `publishing-skills.md`, `security-auditing.md` — non-existent `hub publish` command; fabricated security-score tiers (real validator computes `score = max(0, min(100, 100 + delta))`, no rating tiers).
+- `skill-development/{creating-skills,testing-skills,certification}.md` — invented `MySkill.execute(context)` contract (skills register via `@register_tool`, invoked through `ToolRegistry.execute`); fake `--level`/`--security-audit`/`--verbose` flags; placeholder future dates.
+- `architecture/PROVIDERS.md` — superseded by the current `architecture.md`/`configuration.md` ModelRegistry coverage (incl. the SSRF guard this older doc omits).
+
+**Outcome:** one internally-consistent, code-verified set, mirrored across the framework and Astro-site repos.
+
+---
+
+*End of audit summary. The `docs-v2/` tree is 19 files: 1 README, 17 docs, plus this summary.*
