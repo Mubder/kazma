@@ -424,8 +424,8 @@
                 <template x-for="p in personalities" :key="p.name">
                     <div @click="setPersonality(p.name)" style="padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:all 0.15s" :style="agent.personality === p.name ? 'border-color:var(--accent);background:rgba(94,106,210,0.08)' : ''">
                         <div style="font-size:1.5rem;margin-bottom:4px" x-text="p.emoji"></div>
-                        <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px" x-text="p.name"></div>
-                        <div style="font-size:0.8rem;color:var(--text-tertiary)" x-text="p.description"></div>
+                        <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px" x-text="p.display_name_ar && window.KAZMA_LANG === 'ar' ? p.display_name_ar : p.name"></div>
+                        <div style="font-size:0.8rem;color:var(--text-tertiary)" x-text="p.description_ar && window.KAZMA_LANG === 'ar' ? p.description_ar : p.description"></div>
                     </div>
                 </template>
             </div>

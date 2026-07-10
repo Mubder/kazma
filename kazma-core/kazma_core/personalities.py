@@ -71,6 +71,8 @@ _register({
         "Answer directly without unnecessary preamble. When you don't know something, say so."
     ),
     "description": "Professional AI assistant, efficient and helpful.",
+    "description_ar": "مساعد ذكي احترافي، فعال ومفيد.",
+    "display_name_ar": "الافتراضي",
     "emoji": "🤖",
 })
 
@@ -82,6 +84,8 @@ _register({
         "and examples. Celebrate progress and milestones."
     ),
     "description": "Warm, encouraging expert who explains concepts clearly.",
+    "description_ar": "خبير دافئ ومشجع يشرح المفاهيم بوضوح.",
+    "display_name_ar": "الخبير الودود",
     "emoji": "😊",
 })
 
@@ -93,6 +97,8 @@ _register({
         "If a single word answers the question, use a single word."
     ),
     "description": "Short answers, no fluff. Bullet points preferred.",
+    "description_ar": "إجابات قصيرة، بدون حشو. يفضل النقاط المختصرة.",
+    "display_name_ar": "الموجز",
     "emoji": "⚡",
 })
 
@@ -106,6 +112,8 @@ _register({
         "same language the user uses, but your personality carries through regardless."
     ),
     "description": "Kuwaiti engineering colleague. Gulf Arabic phrases. Practical, no-nonsense.",
+    "description_ar": "زميل مهندس كويتي. عبارات خليجية. عملي وبدون مجاملات.",
+    "display_name_ar": "المهندس الخليجي",
     "emoji": "🛠️",
 })
 
@@ -117,6 +125,8 @@ _register({
         "unexpected path? Use emoji to keep the energy light. Encourage exploration."
     ),
     "description": "Playful brainstorming partner. Multiple angles. Uses emoji.",
+    "description_ar": "شريك عصف ذهني مرح. زوايا متعددة. يستخدم الرموز التعبيرية.",
+    "display_name_ar": "الشريك المبدع",
     "emoji": "🎨",
 })
 
@@ -129,6 +139,8 @@ _register({
         "If it's in the docs, point to the docs."
     ),
     "description": "Terse, technical. Shell commands first. Assumes competence.",
+    "description_ar": "مختصر، تقني. أوامر الطرفية أولاً. يفترض الكفاءة.",
+    "display_name_ar": "مدير النظام",
     "emoji": "🐧",
 })
 
@@ -141,6 +153,8 @@ _register({
         "sure the foundation is solid before building on it."
     ),
     "description": "Patient explainer. Breaks down concepts step by step. Checks understanding.",
+    "description_ar": "معلّم صبور. يفكك المفاهيم خطوة بخطوة. يتحقق من الفهم.",
+    "display_name_ar": "المعلّم",
     "emoji": "📚",
 })
 
@@ -153,6 +167,8 @@ _register({
         "about bugs — no sugar-coating real issues."
     ),
     "description": "Direct, constructive. Points to exact lines. Suggests alternatives.",
+    "description_ar": "مباشر، بنّاء. يشير إلى الأسطر بدقة. يقترح بدائل.",
+    "display_name_ar": "مراجع الأكواد",
     "emoji": "🔍",
 })
 
