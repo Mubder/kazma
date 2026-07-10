@@ -186,6 +186,10 @@ class KazmaAppBuilder:
         _default_cors_origins = [
             "http://localhost:8000",
             "http://127.0.0.1:8000",
+            "http://localhost:4321",
+            "http://localhost:4322",
+            "https://kazma.ai",
+            "https://www.kazma.ai",
         ]
         _cors_env = os.environ.get("KAZMA_CORS_ORIGINS", "").strip()
         if _cors_env:
