@@ -169,6 +169,17 @@ class KazmaAppBuilder:
         set_config_store(self.config_store)
         self.config_store.reconcile_from_yaml()
 
+        # In demo mode: wipe stale providers so only the env-var configured
+        # one (e.g. Groq) appears in the settings UI. Also wipe Google
+        # Gemini models that may have been persisted from a previous run.
+        _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+        if _demo_mode:
+            self.config_store.set("registry.providers", "[]", category="registry")
+            self.config_store.set("registry.discovered_models", "{}", category="registry")
+            self.config_store.set("registry.active_provider", "", category="registry")
+            self.config_store.set("registry.active_model", "", category="registry")
+            logger.info("[App] Demo mode: cleared stale provider config")
+
         # Initialize WorkspaceStore and align active workspace configurations on boot
         try:
             from kazma_core.stores import get_workspace_store
@@ -199,6 +210,15 @@ class KazmaAppBuilder:
             ).strip()
             _env_model = os.environ.get("KAZMA_MODEL", "").strip()
             if base_url and _env_key:
+                # Register the provider as a proper stored entry so
+                # _resolve_provider_config() finds it with the API key.
+                self.registry.upsert_provider({
+                    "name": _env_provider,
+                    "base_url": base_url,
+                    "api_key": _env_key,
+                    "enabled": True,
+                })
+                # Also set legacy keys + active profile for get_client()
                 self.config_store.batch_set([
                     ("llm.base_url", base_url, "llm"),
                     ("llm.api_key", _env_key, "llm"),
