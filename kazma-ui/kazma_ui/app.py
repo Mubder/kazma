@@ -147,6 +147,35 @@ class KazmaAppBuilder:
             logger.warning("[App] Failed to align active workspace on boot: %s", e)
         
         self.registry = initialize_model_registry(self.config_store)
+
+        # ── Env-var override: KAZMA_PROVIDER / KAZMA_MODEL / *_API_KEY ──
+        # Lets cloud deployments (Fly.io, Docker, etc.) configure the LLM
+        # without needing a pre-seeded ConfigStore or settings UI access.
+        _env_provider = os.environ.get("KAZMA_PROVIDER", "").strip()
+        if _env_provider:
+            from kazma_core.providers import get_preset
+            preset = get_preset(_env_provider)
+            base_url = preset.get("base_url", "") if preset else ""
+            # Resolve API key from provider-specific env var or generic
+            _env_key = (
+                os.environ.get(f"{_env_provider.upper()}_API_KEY", "")
+                or os.environ.get("KAZMA_API_KEY", "")
+                or os.environ.get("OPENAI_API_KEY", "")
+            ).strip()
+            _env_model = os.environ.get("KAZMA_MODEL", "").strip()
+            if base_url and _env_key:
+                self.config_store.batch_set([
+                    ("llm.base_url", base_url, "llm"),
+                    ("llm.api_key", _env_key, "llm"),
+                ] + ([("llm.model", _env_model, "llm")] if _env_model else []))
+                self.registry._active_provider = _env_provider
+                self.registry._active_model = _env_model or "gpt-4o-mini"
+                self.registry._clients.clear()
+                logger.info(
+                    "[App] Env-var override: provider=%s model=%s base_url=%s",
+                    _env_provider, _env_model or "(default)", base_url,
+                )
+
         self.agent = KazmaAgent(self.config)
 
         # Configure workspace
