@@ -174,10 +174,13 @@ class KazmaAppBuilder:
         # Gemini models that may have been persisted from a previous run.
         _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
         if _demo_mode:
-            self.config_store.set("registry.providers", "[]", category="registry")
-            self.config_store.set("registry.discovered_models", "{}", category="registry")
-            self.config_store.set("registry.active_provider", "", category="registry")
-            self.config_store.set("registry.active_model", "", category="registry")
+            self.config_store.batch_set([
+                ("providers.list", "[]", "providers"),
+                ("registry.providers", "[]", "registry"),
+                ("registry.discovered_models", "{}", "registry"),
+                ("registry.active_provider", "", "registry"),
+                ("registry.active_model", "", "registry"),
+            ])
             logger.info("[App] Demo mode: cleared stale provider config")
 
         # Initialize WorkspaceStore and align active workspace configurations on boot
