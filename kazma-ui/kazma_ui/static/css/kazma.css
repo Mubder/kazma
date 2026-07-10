@@ -2416,6 +2416,12 @@ canvas { display: block; border-radius: 4px; }
   grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
+/* Identical sizing for the Create Workspace / Switch Repo action buttons */
+.ws-action-btn {
+  min-width: 150px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 .card-header {
   display: flex;
   align-items: center;

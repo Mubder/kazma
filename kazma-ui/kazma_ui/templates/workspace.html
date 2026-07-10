@@ -16,12 +16,12 @@
       </div>
     </div>
     
-    <div style="display:flex;align-items:center;gap:12px;margin-left:auto;">
+    <div style="display:flex;align-items:center;gap:12px;margin-left:auto;flex-wrap:wrap;justify-content:flex-end;">
       <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);">{{ t('workspace.active_env') }}</span>
-      <select 
-        class="form-input" 
-        style="width:240px;padding:6px 12px;border-radius:var(--radius-sm);font-weight:500;" 
-        :value="activeWorkspaceId" 
+      <select
+        class="form-input"
+        style="max-width:240px;min-width:160px;flex:1;padding:6px 12px;border-radius:var(--radius-sm);font-weight:500;"
+        :value="activeWorkspaceId"
         @change="switchWorkspace($event.target.value)"
       >
         <template x-for="ws in workspaces" :key="ws.id">
@@ -29,10 +29,10 @@
         </template>
       </select>
       
-      <button class="btn btn-sm btn-secondary" @click="showCreateModal = true" style="display:flex;align-items:center;gap:6px;">
+      <button class="btn btn-sm btn-secondary ws-action-btn" @click="showCreateModal = true" style="display:flex;align-items:center;justify-content:center;gap:6px;">
         <span>➕</span> {{ t('workspace.create') }}
       </button>
-      <button x-show="ghOAuthConnected" class="btn btn-sm btn-secondary" @click="openRepoPicker()" style="display:flex;align-items:center;gap:6px;" x-cloak>
+      <button x-show="ghOAuthConnected" class="btn btn-sm btn-secondary ws-action-btn" @click="openRepoPicker()" style="display:flex;align-items:center;justify-content:center;gap:6px;" x-cloak>
         <span>🐙</span> {{ t('workspace.switch_repo') }}
       </button>
     </div>
