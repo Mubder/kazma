@@ -156,7 +156,8 @@ class LLMProvider:
             from urllib.parse import urlparse as _up
 
             parsed = _up(base)
-            if parsed.path not in ("/v1", "/v1/"):
+            # Check if the path ALREADY ends with /v1 (e.g. /openai/v1 for Groq)
+            if not parsed.path.rstrip("/").endswith("/v1"):
                 port = parsed.port
                 # Skip assertion for Ollama (11434) and LiteLLM (4000)
                 if port not in (11434, 4000):
