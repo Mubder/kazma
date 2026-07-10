@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+# Install WITHOUT the heavy RAG extras (chromadb, sentence-transformers)
+# to stay within Fly.io free tier 256MB RAM. The demo only needs chat + LLM.
+RUN pip install --no-cache-dir -e ".[test]"
+
+RUN useradd -r -m -d /home/kazma -s /bin/bash kazma \
+    && mkdir -p /app/kazma-data \
+    && chown -R kazma:kazma /app /home/kazma
+
+USER kazma
+
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "kazma_ui.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "15"]

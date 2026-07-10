@@ -5,7 +5,7 @@ app = "kazma-demo"
 primary_region = "fra"  # Frankfurt — closest to Kuwait/Europe with good latency
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "Dockerfile.demo"
 
 [http_service]
   internal_port = 8000
