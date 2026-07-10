@@ -3,7 +3,7 @@
    Requires Alpine.js x-data from base.html.
    ─────────────────────────────────────────── #}
 
-<aside class="sidebar" :class="{ 'collapsed': sidebarCollapsed }" x-data="sidebarComponent()">
+<aside class="sidebar" :class="{ 'collapsed': sidebarCollapsed, 'mobile-open': mobileNavOpen }" x-data="sidebarComponent()">
     {# Header / Logo #}
     <div class="sidebar-header">
         <a href="/" class="logo" style="text-decoration:none">
@@ -35,7 +35,7 @@
         {# Primary Section #}
         <span class="nav-section-title">{{ t('nav.primary') }}</span>
 
-        <a href="/workspace" class="nav-link {{ 'active' if active_page == 'workspace' else '' }}">
+        <a href="/workspace" class="nav-link {{ 'active' if active_page == 'workspace' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
@@ -46,7 +46,7 @@
             <span class="nav-kbd">⌘1</span>
         </a>
 
-        <a href="/chat" class="nav-link {{ 'active' if active_page == 'chat' else '' }}">
+        <a href="/chat" class="nav-link {{ 'active' if active_page == 'chat' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
@@ -56,7 +56,7 @@
             <span class="nav-kbd">⌘2</span>
         </a>
 
-        <a href="/dashboard" class="nav-link {{ 'active' if active_page == 'dashboard' else '' }}">
+        <a href="/dashboard" class="nav-link {{ 'active' if active_page == 'dashboard' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/>
@@ -69,7 +69,7 @@
         {# Tools Section #}
         <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.tools') }}</span>
 
-        <a href="/skills" class="nav-link {{ 'active' if active_page == 'skills' else '' }}">
+        <a href="/skills" class="nav-link {{ 'active' if active_page == 'skills' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
@@ -79,7 +79,7 @@
             <span class="nav-kbd">⌘4</span>
         </a>
 
-        <a href="/mcp" class="nav-link {{ 'active' if active_page == 'mcp' else '' }}">
+        <a href="/mcp" class="nav-link {{ 'active' if active_page == 'mcp' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/>
@@ -94,7 +94,7 @@
         {# System Section #}
         <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.system') }}</span>
 
-        <a href="/swarm" class="nav-link {{ 'active' if active_page == 'swarm' else '' }}">
+        <a href="/swarm" class="nav-link {{ 'active' if active_page == 'swarm' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>
@@ -108,7 +108,7 @@
             <span class="nav-kbd">⌘6</span>
         </a>
 
-        <a href="/agents" class="nav-link {{ 'active' if active_page == 'agents' else '' }}">
+        <a href="/agents" class="nav-link {{ 'active' if active_page == 'agents' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <path d="M12 2L2 7l10 5 10-5-10-5z"/>
@@ -119,7 +119,7 @@
             <span class="nav-label">{{ t('nav.agents') }}</span>
         </a>
 
-        <a href="/settings" class="nav-link {{ 'active' if active_page == 'settings' else '' }}">
+        <a href="/settings" class="nav-link {{ 'active' if active_page == 'settings' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <circle cx="12" cy="12" r="3"/>

@@ -96,7 +96,7 @@
   <!-- ── System Resources ── -->
   <div id="resources-section" class="chart-card" style="margin-bottom:1.5rem;">
     <h3 class="chart-title">{{ t('dashboard.system_resources') }}</h3>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+    <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
       <div>
         <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
           <span style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.cpu') }}</span>
@@ -174,7 +174,7 @@
         <div style="padding:10px 16px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--border-subtle);font-weight:600;font-size:0.8rem;color:var(--text-secondary);">
           {{ t('dashboard.available_backups') }}
         </div>
-        <div style="max-height:220px;overflow-y:auto;">
+        <div style="max-height:220px;overflow-y:auto;overflow-x:auto;">
           <table style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:left;">
             <thead>
               <tr style="border-bottom:1px solid var(--border-subtle);background:rgba(255,255,255,0.01);">

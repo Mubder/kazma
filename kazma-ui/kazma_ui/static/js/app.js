@@ -162,6 +162,8 @@ function kazmaApp() {
         theme: 'dark',
         lang: 'ar',
         sidebarCollapsed: false,
+        mobileNavOpen: false,
+        mobileChatSidebarOpen: false,
         fontSize: 14,
 
         // Arabic needs ~15% larger base font for readability.
@@ -203,6 +205,14 @@ function kazmaApp() {
 
             // Global keyboard shortcuts
             document.addEventListener('keydown', (e) => this._handleKeyboard(e));
+
+            // Auto-close mobile drawers when resizing back to desktop.
+            window.addEventListener('resize', () => {
+                if (window.innerWidth > 768) {
+                    this.mobileNavOpen = false;
+                    this.mobileChatSidebarOpen = false;
+                }
+            });
         },
 
         toggleTheme() {
@@ -227,6 +237,20 @@ function kazmaApp() {
         toggleSidebar() {
             this.sidebarCollapsed = !this.sidebarCollapsed;
             localStorage.setItem('kazma-sidebar-collapsed', this.sidebarCollapsed);
+        },
+
+        // ── Mobile navigation drawer ──
+        toggleMobileNav() {
+            this.mobileNavOpen = !this.mobileNavOpen;
+        },
+        closeMobileNav() {
+            this.mobileNavOpen = false;
+        },
+        toggleMobileChatSidebar() {
+            this.mobileChatSidebarOpen = !this.mobileChatSidebarOpen;
+        },
+        closeMobileChatSidebar() {
+            this.mobileChatSidebarOpen = false;
         },
 
         _applyTheme() {

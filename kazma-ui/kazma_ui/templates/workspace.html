@@ -50,7 +50,7 @@
 
   <!-- ── Create Workspace Modal ── -->
   <div x-show="showCreateModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showCreateModal = false">
-    <div class="card" style="width:520px;padding:0;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);display:flex;flex-direction:column;">
+    <div class="card" style="max-width:520px;width:100%;padding:0;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);display:flex;flex-direction:column;">
       <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">➕ {{ t('workspace.create_modal_title') }}</h3>
         <button class="btn-icon" @click="showCreateModal = false" style="font-size:1rem;">✕</button>
@@ -77,7 +77,7 @@
 
   <!-- ── Select Folder Modal ── -->
   <div x-show="showFolderModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
-    <div class="card" style="width:480px;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
+    <div class="card" style="max-width:480px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;">📂 {{ t('workspace.folder_modal_title') }}</h3>
         <button class="btn-icon" @click="showFolderModal = false" style="font-size:1rem;">✕</button>
@@ -109,7 +109,7 @@
 
   <!-- ── GitHub Repo Picker Modal ── -->
   <div x-show="showRepoPicker" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showRepoPicker = false">
-    <div class="card" style="width:520px;max-height:80vh;display:flex;flex-direction:column;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
+    <div class="card" style="max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🐙 {{ t('workspace.repo_picker_title') }}</h3>
         <button class="btn-icon" @click="showRepoPicker = false" style="font-size:1rem;">✕</button>
@@ -140,7 +140,7 @@
 
   <!-- ── GitHub Token Config Modal ── -->
   <div x-show="showPatModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
-    <div class="card" style="width:480px;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
+    <div class="card" style="max-width:480px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🔑 {{ t('workspace.pat_modal_title') }}</h3>
         <button class="btn-icon" @click="showPatModal = false" style="font-size:1rem;">✕</button>
@@ -341,7 +341,7 @@
         </div>
 
         <!-- Telemetry Stats Grid -->
-        <div style="display:grid;grid-template-columns:repeat(4, 1fr);gap:8px;margin-bottom:10px;">
+        <div class="swarm-metrics-grid" style="display:grid;grid-template-columns:repeat(4, 1fr);gap:8px;margin-bottom:10px;">
           <!-- Stars -->
           <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
             <div style="font-size:1.1rem;margin-bottom:2px;">⭐</div>

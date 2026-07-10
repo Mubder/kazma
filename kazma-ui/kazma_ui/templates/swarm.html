@@ -15,7 +15,7 @@
   </div>
 
   <!-- ── Metrics Bar ── -->
-  <div class="metrics-grid" style="margin-bottom:1.5rem;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
+  <div class="metrics-grid swarm-metrics-grid" style="margin-bottom:1.5rem;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
     <div class="metric-card">
       <div class="metric-icon">🐝</div>
       <div class="metric-label">{{ t('swarm.workers') }}</div>
@@ -71,7 +71,7 @@
   <!-- TAB: Task Builder                                                -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-task-builder" style="display:block;">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+    <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
 
       <!-- Left: Task Configuration -->
       <div class="card">
@@ -197,7 +197,7 @@
   <!-- TAB: Workflow Editor (Option A)                                 -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-workflow-editor" style="display:none;">
-    <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:20px;">
+    <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1.2fr;gap:20px;">
       <!-- Visual Pipeline Editor Left Column -->
       <div class="card" style="display:flex;flex-direction:column;gap:12px;min-height:550px;">
         <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -285,7 +285,7 @@
   <!-- TAB: Playground (Option C)                                      -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-playground" style="display:none;">
-    <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:20px;">
+    <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1.2fr;gap:20px;">
       
       <!-- Playground Config Left Column -->
       <div class="card" style="min-height:550px;">
@@ -472,7 +472,7 @@
   <!-- TAB: Worker Registry                                            -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <div class="tab-panel" id="panel-worker-registry" style="display:none;">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+    <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
 
       <!-- Left: Worker Cards -->
       <div>

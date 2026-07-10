@@ -1954,29 +1954,147 @@ tbody tr:last-child td {
 
 
 /* ── 25. Responsive ─────────────────────────────────────────────── */
+
+/* Hamburger button — hidden on desktop, shown on mobile (see 768px block) */
+.hamburger-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.hamburger-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+/* Mobile nav backdrop — hidden on desktop */
+.sidebar-backdrop {
+  display: none;
+}
+
 @media (max-width: 1024px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 768px) {
-  .sidebar { display: none; }
+  /* ── Mobile nav drawer ──
+     The sidebar becomes a slide-in drawer. RTL (default) slides from the
+     right; LTR slides from the left. Toggled by .mobile-open (Alpine state). */
+  .hamburger-btn { display: inline-flex; }
+  .sidebar-toggle { display: none; }     /* desktop collapse button hidden */
+
+  .sidebar {
+    display: flex;                        /* override previous display:none */
+    z-index: 200;
+    transform: translateX(100%);          /* off-screen right (RTL default) */
+    transition: transform 0.25s ease;
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+  [dir="ltr"] .sidebar {
+    transform: translateX(-100%);         /* off-screen left for English */
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0) !important;   /* slide into view */
+  }
+  .sidebar.collapsed { width: var(--sidebar-width); }  /* never collapsed on mobile */
+
+  /* Backdrop fades in over the page content */
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 199;                          /* below the drawer (200), above content */
+  }
+
   .main-content { margin-left: 0 !important; margin-right: 0 !important; }
-  .chat-sidebar { display: none; }
+
+  /* ── Chat sidebar drawer (session list) ── */
+  .chat-sidebar {
+    display: flex;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    max-width: 85vw;
+    z-index: 200;
+    transform: translateX(100%);           /* off-screen right (RTL default) */
+    transition: transform 0.25s ease;
+    box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+  [dir="ltr"] .chat-sidebar {
+    left: 0;
+    right: auto;
+    transform: translateX(-100%);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+  .chat-sidebar.mobile-open {
+    transform: translateX(0) !important;
+  }
+
+  /* ── Header overflow control ── */
+  .header-right { flex-wrap: wrap; flex-shrink: 1; }
+  .header-right .sidebar-collapsed-hide { display: none; }  /* hide "New Chat" label */
+  .header-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 45vw;
+    white-space: nowrap;
+  }
+
+  /* ── Grids collapse to single column ── */
   .form-row { flex-direction: column; }
   .skills-grid { grid-template-columns: 1fr; }
   .mcp-grid { grid-template-columns: 1fr; }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .metrics-grid { grid-template-columns: 1fr; }
+  .charts-row { grid-template-columns: 1fr; }
+  .workspace-grid { grid-template-columns: 1fr; }
+  .swarm-container .workspace-grid { grid-template-columns: 1fr; }
+  .swarm-metrics-grid { grid-template-columns: 1fr !important; }
+  .two-col-grid { grid-template-columns: 1fr !important; }   /* inline-grid helper */
+
+  /* ── Padding reductions ── */
   .page-header { padding: 0 var(--sp-4); }
   .page-body { padding: var(--sp-4); }
   .header-left { gap: var(--sp-2); }
   .breadcrumbs { display: none; }
+
+  /* ── Chat layout adjustments ──
+     Override the inline margin:-24px / calc(100vh - 60px) from chat.html. */
+  .chat-container {
+    height: calc(100vh - var(--header-height)) !important;
+    margin: 0 !important;
+  }
+  .chat-messages { padding: var(--sp-3); }
+  .chat-input-area { padding: var(--sp-3); }
+  .chat-welcome { padding: var(--sp-6) var(--sp-4); }
+  .chat-input-footer-hint { display: none; }   /* hide "Enter / Ctrl+Enter" hint */
+
+  /* ── Modals ── */
   .modal { margin: var(--sp-4); max-height: 90vh; }
+  .modal.modal-lg, .modal.modal-xl { max-width: 100%; }
+
+  /* ── Decorative overflow prevention ── */
+  .hero-glow { display: none; }
 }
 
 @media (max-width: 480px) {
   .header-title { font-size: 0.95rem; }
-  .metrics-row { grid-template-columns: repeat(2, 1fr); }
+  .metrics-row { grid-template-columns: 1fr; }
+  .metrics-grid { grid-template-columns: 1fr; }
+  /* Toasts must fit narrow phones (was right:20px + max-width:380px → overflow). */
+  .toast {
+    left: 16px;
+    right: 16px;
+    max-width: calc(100vw - 32px);
+  }
 }
 
 /* ── 26. New UI Components (Phase 3) ─────────────────────────────── */
@@ -2369,17 +2487,7 @@ canvas { display: block; border-radius: 4px; }
   flex: 1;
 }
 
-/* Responsive */
-@media (max-width: 768px) {
-  .charts-row { grid-template-columns: 1fr; }
-  .workspace-grid { grid-template-columns: 1fr; }
-  .swarm-container .workspace-grid { grid-template-columns: 1fr; }
-  .metrics-grid { grid-template-columns: repeat(2, 1fr); }
-  .chat-sidebar { display: none; }
-}
-@media (max-width: 480px) {
-  .metrics-grid { grid-template-columns: 1fr 1fr; }
-}
+/* Responsive (consolidated into the main @media block in §25 above). */
 
 /* ── HITL Approval Panel ───────────────────────────────────────── */
 .hitl-panel.has-pending {

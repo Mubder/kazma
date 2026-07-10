@@ -5,6 +5,17 @@
 
 <header class="page-header">
     <div class="header-left">
+        {# Mobile hamburger — toggles the slide-in nav drawer (≤768px only).
+           Visibility is CSS-gated (.hamburger-btn is display:none on desktop). #}
+        <button class="hamburger-btn" @click="toggleMobileNav()"
+                :aria-expanded="mobileNavOpen" aria-label="Menu">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round">
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+            </svg>
+        </button>
         <h1 class="header-title">{% block page_title %}{{ active_page|default('Kazma')|title }}{% endblock %}</h1>
         {% block breadcrumbs %}
         <nav class="breadcrumbs" aria-label="Breadcrumb">

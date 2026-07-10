@@ -9,8 +9,12 @@
 
 {% block content %}
 <div class="chat-container" style="height: calc(100vh - 60px); margin: -24px;">
-  <!-- ── Session Sidebar ── -->
-  <aside class="chat-sidebar">
+  <!-- ── Mobile chat-sidebar backdrop ── -->
+  <div class="sidebar-backdrop" x-show="mobileChatSidebarOpen" x-transition.opacity
+       @click="closeMobileChatSidebar()" style="display: none;"></div>
+
+  <!-- ── Session Sidebar (slide-in drawer on mobile) ── -->
+  <aside class="chat-sidebar" :class="{ 'mobile-open': mobileChatSidebarOpen }">
     <div class="chat-sidebar-header">
       <h3 style="font-size:0.85rem;font-weight:600;color:var(--text-secondary);">{{ t('chat.sessions') }}</h3>
       <button id="new-session-btn" class="btn btn-sm btn-primary" title="{{ t('chat.new_session') }} (Ctrl+N)">{{ t('chat.new_session') }}</button>
@@ -33,6 +37,14 @@
   <main class="chat-main">
     <!-- Model selector bar -->
     <div class="chat-model-bar">
+      {# Mobile sessions-toggle button (≤768px only — .hamburger-btn is display:none on desktop) #}
+      <button class="hamburger-btn" @click="toggleMobileChatSidebar()" aria-label="Sessions"
+              style="margin-inline-end: 4px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+      </button>
       <label for="model-selector" style="font-size:0.75rem;color:var(--text-muted);margin-right:6px;">{{ t('chat.model') }}</label>
       <select id="model-selector" class="form-select" style="font-size:0.8rem;padding:4px 8px;max-width:280px;">
         <option value="">— loading models —</option>
@@ -82,7 +94,7 @@
       <div class="input-footer">
         <span id="session-cost" class="cost-badge">$0.0000</span>
         <span id="session-tokens" class="token-badge">0 {{ t('chat.tokens') }}</span>
-        <span style="margin-left:auto;font-size:0.7rem;color:var(--text-muted);">
+        <span class="chat-input-footer-hint" style="margin-left:auto;font-size:0.7rem;color:var(--text-muted);">
           <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Enter</kbd> / <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+Enter</kbd> {{ t('chat.send_shortcut') }} ·
           <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Shift+Enter</kbd> {{ t('chat.newline_shortcut') }}
         </span>

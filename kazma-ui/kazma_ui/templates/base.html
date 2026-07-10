@@ -15,6 +15,10 @@
 </head>
 <body>
     <div class="app-layout">
+        {# Mobile nav backdrop — fades in when drawer is open (≤768px) #}
+        <div class="sidebar-backdrop" x-show="mobileNavOpen" x-transition.opacity
+             @click="closeMobileNav()" style="display: none;"></div>
+
         {# Sidebar #}
         {% include "components/sidebar.html" %}
 
