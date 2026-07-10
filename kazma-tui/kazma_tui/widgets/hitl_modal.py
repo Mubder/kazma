@@ -31,7 +31,7 @@ class HitlApprovalScreen(ModalScreen[bool]):
         height: auto;
         max-height: 28;
         background: $boost;
-        border: thick $error;
+        border: solid $warning;
         padding: 1 3;
         border-title-color: $error;
         border-title-align: center;
@@ -128,7 +128,7 @@ class HitlApprovalScreen(ModalScreen[bool]):
             formatted_args = str(self.arguments)
 
         with Container():
-            yield Static("🛑 GOVERNANCE INTERRUPT REQUIRED", classes="hitl-title")
+            yield Static("Approval Required", classes="hitl-title")
             yield Static(self.message, classes="hitl-subtitle")
 
             with Vertical(classes="hitl-meta-grid"):

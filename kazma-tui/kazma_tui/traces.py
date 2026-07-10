@@ -184,7 +184,7 @@ class TracesPanel(Vertical):
             elif entry.status == "warning":
                 status_markup = "[bold $secondary]WARN[/bold $secondary]"
             else:
-                status_markup = "[bold #10b981]OK[/bold #10b981]"
+                status_markup = "[bold $success]OK[/bold $success]"
 
             # Formatted type
             type_markup = f"[bold $primary]{entry.trace_type.upper()}[/bold $primary]"
@@ -235,7 +235,7 @@ class TracesPanel(Vertical):
 
         # Format general information header
         time_str = datetime.fromtimestamp(entry.timestamp).strftime("%Y-%m-%d %H:%M:%S")
-        status_color = "$error" if entry.status == "error" else ("$secondary" if entry.status == "warning" else "#10b981")
+        status_color = "$error" if entry.status == "error" else ("$secondary" if entry.status == "warning" else "$success")
 
         details_pane.write(f"[bold $primary]TRACE METRICS[/]")
         details_pane.write(f"  [dim]Timestamp:[/]  {time_str}")

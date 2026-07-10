@@ -16,32 +16,30 @@ Color sources from kazma-ui/kazma_ui/static/css/kazma.css:
 
 KAZMA_THEME = """
 /* ═══════════════════════════════════════════════════════════════════════
-   Kazma Web UI Palette → Textual TCSS
+   Kazma TUI Theme — muted, professional palette
    ═══════════════════════════════════════════════════════════════════════ */
 
-/* Base colors */
-$primary:    #22d3ee;      /* accent-cyan */
-$secondary:  #a855f7;      /* purple */
-$accent:     #22d3ee;
-$error:      #ef4444;      /* danger */
+/* Base colors — desaturated for a professional, calm look */
+$primary:    #56b6c2;      /* muted teal-cyan (was neon #22d3ee) */
+$secondary:  #c084fc;      /* soft purple (was saturated #a855f7) */
+$accent:     #56b6c2;
+$error:      #ef4444;
 $success:    #10b981;
-$warning:    #f59e0b;      /* amber */
-$surface:    #0a0f14;      /* bg — deepest */
-$panel:      #11171f;      /* bg-panel */
-$boost:      #141c25;      /* bg-surface */
-$border:     rgba(255,255,255,0.1);
+$warning:    #f59e0b;
+$surface:    #0a0f14;      /* deepest bg */
+$panel:      #11171f;      /* card/panel bg */
+$boost:      #141c25;      /* elevated surface */
+$border:     rgba(255,255,255,0.08);  /* subtle borders */
 
-$text:       #e6edf3;      /* text-primary */
-$text-muted: #b1bac4;      /* text-secondary */
-$text-disabled: #8b949e;   /* text-tertiary */
+$text:       #e6edf3;
+$text-muted: #b1bac4;
+$text-disabled: #8b949e;
 
 /* Selection */
-$screen-selection-background: rgba(34,211,238,0.35);
+$screen-selection-background: rgba(86,182,194,0.25);
 $screen-selection-foreground: #e6edf3;
 
-/* ═══════════════════════════════════════════════════════════════════════
-   Global
-   ═══════════════════════════════════════════════════════════════════════ */
+/* ═════ Global ═════ */
 
 Screen {
     background: $surface;
@@ -49,24 +47,16 @@ Screen {
 }
 
 Header {
-    dock: top;
-    height: 3;
     background: $panel;
-    border-bottom: solid $primary 40%;
-    color: $text;
-    text-style: bold;
+    color: $text-muted;
 }
 
 Footer {
-    dock: bottom;
-    height: 1;
-    background: $primary 18%;
-    color: $primary;
+    background: $panel;
+    color: $text-muted;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   Tabs — matching web UI nav style
-   ═══════════════════════════════════════════════════════════════════════ */
+/* ═════ Tabs ═════ */
 
 TabbedContent {
     height: 1fr;
@@ -78,7 +68,6 @@ TabPane {
 ContentTabs {
     background: $panel;
     border-bottom: solid $border;
-    height: 3;
 }
 ContentTabs > Tab {
     padding: 0 3;
@@ -91,12 +80,10 @@ ContentTabs > Tab:hover { color: $text; }
 ContentTabs > Tab.-active {
     color: $primary;
     background: $surface;
-    border-bottom: double $primary;
+    border-bottom: solid $primary;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   Chat
-   ═══════════════════════════════════════════════════════════════════════ */
+/* ═════ Chat ═════ */
 
 ChatPanel {
     height: 1fr;
@@ -118,39 +105,23 @@ ChatPanel > Input {
 }
 ChatPanel > Input:focus { border: solid $primary; }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   Swarm
-   ═══════════════════════════════════════════════════════════════════════ */
-
-WorkerTable {
-    height: 1fr;
-    background: transparent;
-}
-WorkerTable > .datatable--header {
-    background: $panel;
-    color: $primary;
-    text-style: bold;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════
-   Shared components
-   ═══════════════════════════════════════════════════════════════════════ */
+/* ═════ Shared components ═════ */
 
 DataTable {
     background: transparent;
-    border: solid $border;
 }
 DataTable > .datatable--header {
     background: $panel;
     color: $primary;
+    text-style: bold;
 }
 DataTable > .datatable--cursor {
-    background: $primary 12%;
+    background: $primary 10%;
 }
 
 RichLog {
     background: transparent;
-    scrollbar-color: $primary $panel;
+    scrollbar-color: $border $panel;
     scrollbar-color-hover: $primary;
     scrollbar-color-active: $primary;
     scrollbar-size: 1 1;
@@ -169,37 +140,39 @@ Button {
     color: $text;
 }
 Button:hover { border: solid $primary; background: $primary 8%; }
+Button.-primary {
+    background: $primary 15%;
+    border: solid $primary;
+    color: $primary;
+    text-style: bold;
+}
+Button.-primary:hover { background: $primary 25%; }
 
 SelectionList {
     background: transparent;
-    border: solid $border;
 }
 SelectionList > ListItem {
     padding: 0 2;
 }
 SelectionList > ListItem.-highlight {
-    background: $primary 12%;
+    background: $primary 10%;
 }
 
 Tree {
     background: transparent;
 }
 Tree > .tree--cursor {
-    background: $primary 12%;
+    background: $primary 10%;
 }
 
 ProgressBar {
     height: 1;
 }
 
-    /* ═══════════════════════════════════════════════════════════════════════
-       Scrollbar — matching web UI
-       ═══════════════════════════════════════════════════════════════════════ */
-
-    Scrollbar {
-        scrollbar-color: $border;
-        scrollbar-color-hover: $primary;
-        scrollbar-color-active: $primary;
-        scrollbar-size: 1 0;
-    }
-    """
+Scrollbar {
+    scrollbar-color: $border;
+    scrollbar-color-hover: $primary;
+    scrollbar-color-active: $primary;
+    scrollbar-size: 1 1;
+}
+"""

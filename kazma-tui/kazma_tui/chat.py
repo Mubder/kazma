@@ -14,11 +14,11 @@ logger = logging.getLogger(__name__)
 
 ROLE_HEX: dict[str, str] = {
     "user": "#e6edf3",
-    "assistant": "#a855f7",
+    "assistant": "#c084fc",
     "tool": "#f59e0b",
     "system": "#8b949e",
     "error": "#ef4444",
-    "thinking": "#22d3ee",
+    "thinking": "#56b6c2",
 }
 
 
@@ -98,7 +98,7 @@ class ChatPanel(Vertical):
         """Send prompt to provider and write response to RichLog."""
         log = self.query_one("#chat-log", RichLog)
         ts = datetime.now().strftime("%H:%M")
-        log.write(f"[dim]{ts}[/] [#a855f7]▌ KAZMA[/] ")
+        log.write(f"[dim]{ts}[/] [#c084fc]▌ KAZMA[/] ")
         self.show_progress(True)
 
         try:

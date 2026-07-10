@@ -50,8 +50,9 @@ class StatusIndicator(Static):
         self._pulse = True
     
     def on_mount(self) -> None:
-        """Start pulse animation for connecting state."""
-        self.set_interval(1.0, self._toggle_pulse)
+        """Only pulse when connecting — don't burn cycles otherwise."""
+        if self.status == "connecting":
+            self.set_interval(1.0, self._toggle_pulse)
     
     def _toggle_pulse(self) -> None:
         """Toggle pulse state for animation."""
@@ -124,7 +125,7 @@ class TokenCounter(Static):
     
     def watch_tokens(self, new_count: int) -> None:
         """Update display when token count changes."""
-        self.update(f"🪙 {new_count:,} tokens")
+        self.update(f"Tokens: {new_count:,}")
 
 
 class OperationStatus(Static):
@@ -157,9 +158,8 @@ class KazmaStatusBar(Widget):
     
     DEFAULT_CSS = """
     KazmaStatusBar {
-        height: 3;
+        height: 1;
         background: $panel;
-        border-top: solid $primary 30%;
         padding: 0 2;
         align: center middle;
     }

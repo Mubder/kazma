@@ -42,7 +42,7 @@ class FilesPanel(VerticalScroll):
             else:
                 log = RichLog(highlight=True, markup=True)
                 container.mount(log)
-                log.write(f"[bold #22d3ee]{path.name}[/]\n")
+                log.write(f"[bold $primary]{path.name}[/]\n")
                 log.write(content[:10000])
         except UnicodeDecodeError:
             container.mount(Static("[dim](binary file)[/]"))

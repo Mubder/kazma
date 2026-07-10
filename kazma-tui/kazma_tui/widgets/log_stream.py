@@ -18,10 +18,10 @@ _MAX_LINES = 500
 
 # Color mapping for log levels.
 _LEVEL_COLORS: dict[str, str] = {
-    "info":    "#00ff00",   # green
-    "warn":    "#ffff00",   # yellow
-    "error":   "#ff4444",   # red
-    "success": "#00ff00",   # green
+    "info":    "#10b981",   # green
+    "warn":    "#f59e0b",   # amber
+    "error":   "#ef4444",   # red
+    "success": "#10b981",   # green
 }
 
 

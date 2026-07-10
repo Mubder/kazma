@@ -23,7 +23,7 @@ from typing import Optional
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Footer, RichLog, TabbedContent, TabPane
+from textual.widgets import Footer, Header, RichLog, TabbedContent, TabPane
 
 from kazma_tui.chat import ChatPanel
 from kazma_tui.dashboard import MetricsDashboard
@@ -63,8 +63,8 @@ class KazmaTUI(App[None]):
         Binding("g", "scroll_top", "Top", show=False),
         Binding("G", "scroll_bottom", "Bottom", show=False),
         # Tab navigation
-        Binding("ctrl+n", "next_tab", "Next Tab", show=False),
-        Binding("ctrl+b", "prev_tab", "Prev Tab", show=False),
+        Binding("ctrl+n", "next_tab", "Next Tab"),
+        Binding("ctrl+b", "prev_tab", "Prev Tab"),
         # Help
         Binding("?", "help_screen", "Help", show=False),
         # Accessibility
@@ -84,7 +84,7 @@ class KazmaTUI(App[None]):
         self._shown_approvals: set[str] = set()
 
     def compose(self) -> ComposeResult:
-        yield KazmaHeader()
+        yield Header()
         with TabbedContent(initial="dashboard", id="main-tabs"):
             with TabPane("Dashboard", id="dashboard"):
                 yield MetricsDashboard()
@@ -553,22 +553,11 @@ class KazmaTUI(App[None]):
         except Exception as exc:
             logger.debug("Failed to locate or update main-tabs: %s", exc)
 
-        # 3. Update Header title/logo
+        # 3. Update Header title (stock Textual Header)
         try:
-            header = self.query_one(KazmaHeader)
+            header = self.query_one(Header)
             if lang == "ar":
-                try:
-                    registry = header._get_model_registry() if hasattr(header, "_get_model_registry") else None
-                    profile = registry.get_active_profile() if registry else {}
-                    model = profile.get("model", "?")
-                    provider = profile.get("provider", "?")
-                    header_text = f"╭─ [bold $primary]كاظمه[/] ─╮  [dim]{provider} / {model}[/]"
-                except Exception:
-                    header_text = "╭─ [bold $primary]كاظمه[/] ─╮  [dim]تكوين نشط[/]"
-                header.update(header_text)
-            else:
-                if hasattr(header, "_build_header_text"):
-                    header.update(header._build_header_text())
+                header.title_comp.add_class("header-title")
         except Exception as exc:
             logger.debug("Failed to update header localization: %s", exc)
 

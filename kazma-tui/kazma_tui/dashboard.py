@@ -48,7 +48,6 @@ class MetricCard(Widget):
         width: 1fr;
         padding: 1 2;
         background: $panel;
-        border: solid $border;
         margin: 0 1;
     }
 
@@ -137,7 +136,6 @@ class MetricsDashboard(Widget):
     DEFAULT_CSS = """
     MetricsDashboard {
         height: auto;
-        border: solid $primary;
         padding: 1 2;
     }
 
