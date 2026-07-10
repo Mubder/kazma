@@ -57,9 +57,10 @@ class ChatPanel(Vertical):
 
     ChatPanel > #autocomplete {
         dock: bottom; offset: 0 -4;
-        width: auto; min-width: 30; max-height: 8;
+        width: auto; min-width: 30; max-height: 18;
         background: $panel; border: solid $primary;
         padding: 0 1; display: none;
+        overflow-y: auto;
     }
     ChatPanel > #autocomplete .ac-cmd { color: $primary; text-style: bold; }
     ChatPanel > #autocomplete .ac-desc { color: $text-muted; }
