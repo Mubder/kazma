@@ -310,6 +310,8 @@ class SettingsManager:
                     "name": p.name,
                     "emoji": p.emoji,
                     "description": p.description,
+                    "description_ar": p.get("description_ar", ""),
+                    "display_name_ar": p.get("display_name_ar", ""),
                     "system_prompt": p.system_prompt,
                 }
                 for p in list_personalities()
