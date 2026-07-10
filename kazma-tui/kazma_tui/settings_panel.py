@@ -101,23 +101,6 @@ class SettingsPanel(VerticalScroll):
                 sel.add_option((label, key, initial))
             yield sel
 
-        # Language Selection Section
-        with Container(classes="settings-section"):
-            yield Static("Language", classes="settings-title")
-            yield Static(
-                f"Current: [bold $primary]{'Arabic' if self.theme_manager.language == 'ar' else 'English'}[/]",
-                id="current-lang-label"
-            )
-            with Container(classes="theme-buttons"):
-                btn_en = Button("English", id="lang-en", variant="default")
-                btn_ar = Button("Arabic", id="lang-ar", variant="default")
-                if self.theme_manager.language == "en":
-                    btn_en.variant = "primary"
-                else:
-                    btn_ar.variant = "primary"
-                yield btn_en
-                yield btn_ar
-
         # Preferences Section
         with Container(classes="settings-section"):
             yield Static("Preferences", classes="settings-title")
@@ -131,37 +114,10 @@ class SettingsPanel(VerticalScroll):
             )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle language button presses."""
-        button_id = event.button.id
-        if not button_id:
-            return
+        """Handle button presses."""
+        pass
 
-        if button_id == "lang-en":
-            try:
-                self.theme_manager.set_language("en")
-                self._update_lang_buttons()
-                self.query_one("#current-lang-label", Static).update(
-                    "Current: [bold $primary]English[/]"
-                )
-                self.theme_manager.apply_theme(self.app)
-                self.app.update_localization()
-                self.notify("Language changed to English", severity="information")
-            except Exception as e:
-                self.notify(f"Failed to change language: {e}", severity="error")
-        elif button_id == "lang-ar":
-            try:
-                self.theme_manager.set_language("ar")
-                self._update_lang_buttons()
-                self.query_one("#current-lang-label", Static).update(
-                    "Current: [bold $primary]Arabic[/]"
-                )
-                self.theme_manager.apply_theme(self.app)
-                self.app.update_localization()
-                self.notify("Language changed to Arabic", severity="information")
-            except Exception as e:
-                self.notify(f"Failed to change language: {e}", severity="error")
-
-    def _update_lang_buttons(self) -> None:
+    def on_selection_list_selected_changed(self) -> None:
         """Update language button variants to reflect current language."""
         lang = self.theme_manager.language
         try:

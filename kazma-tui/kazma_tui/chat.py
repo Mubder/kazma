@@ -98,8 +98,8 @@ class ChatPanel(Vertical):
         if matches and len(matches) < len(self.SLASH_COMMANDS):
             lines = []
             for i, (cmd, desc) in enumerate(matches):
-                cls = "ac-selected" if i == 0 else ""
-                lines.append(f"  [@class={cls}][bold $primary]{cmd:<10}[/] [dim]{desc}[/][/]")
+                marker = ">" if i == self._ac_index else " "
+                lines.append(f"{marker} [bold $primary]{cmd:<10}[/] [dim]{desc}[/]")
             ac.update("\n".join(lines))
             ac.styles.display = "block"
         else:
