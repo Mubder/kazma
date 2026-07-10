@@ -6,13 +6,13 @@
 <div class="skills-container" x-data="skillsApp()">
     <div class="skills-tabs">
         <button class="tab-btn" :class="{ active: tab === 'installed' }" @click="tab = 'installed'">
-            Installed ({{ installed_skills|length }})
+            {{ t('skills.tab_installed') }} ({{ installed_skills|length }})
         </button>
         <button class="tab-btn" :class="{ active: tab === 'hub' }" @click="tab = 'hub'">
-            Hub Browse
+            {{ t('skills.tab_hub') }}
         </button>
         <button class="tab-btn" :class="{ active: tab === 'validate' }" @click="tab = 'validate'">
-            Validate
+            {{ t('skills.tab_validate') }}
         </button>
     </div>
 
@@ -37,13 +37,13 @@
                                @change="toggleSkill('{{ skill.id }}', $event.target.checked)">
                         <span class="toggle-slider"></span>
                     </label>
-                    <button class="btn btn-sm btn-danger" @click="uninstallSkill('{{ skill.id }}')">Uninstall</button>
+                    <button class="btn btn-sm btn-danger" @click="uninstallSkill('{{ skill.id }}')">{{ t('skills.uninstall') }}</button>
                 </div>
             </div>
             {% endfor %}
             {% if not installed_skills %}
             <div class="empty-state">
-                <p>No skills installed yet. Browse the Hub to find skills.</p>
+                <p>{{ t('skills.empty_installed') }}</p>
             </div>
             {% endif %}
         </div>
@@ -52,7 +52,7 @@
     <!-- Hub Browse -->
     <div x-show="tab === 'hub'">
         <div class="search-bar">
-            <input type="text" x-model="hubQuery" @input.debounce.300ms="searchHub()" placeholder="Search skills..." class="form-input">
+            <input type="text" x-model="hubQuery" @input.debounce.300ms="searchHub()" placeholder="{{ t('skills.search_ph') }}" class="form-input">
         </div>
         <div class="skills-grid">
             <template x-for="skill in hubResults" :key="skill.id">
@@ -66,7 +66,7 @@
                         <span class="text-muted" x-text="skill.author"></span>
                     </div>
                     <div class="skill-actions">
-                        <button class="btn btn-primary btn-sm" @click="installSkill(skill.id)">Install</button>
+                        <button class="btn btn-primary btn-sm" @click="installSkill(skill.id)">{{ t('skills.install') }}</button>
                     </div>
                 </div>
             </template>
@@ -76,19 +76,19 @@
     <!-- Validate -->
     <div x-show="tab === 'validate'">
         <div class="settings-group">
-            <h3>Validate Local Skill</h3>
+            <h3>{{ t('skills.validate_heading') }}</h3>
             <div class="form-row">
                 <div class="form-group" style="flex:1">
-                    <label>Skill Directory Path</label>
-                    <input type="text" x-model="validatePath" class="form-input" placeholder="/path/to/skill">
+                    <label>{{ t('skills.validate_path') }}</label>
+                    <input type="text" x-model="validatePath" class="form-input" placeholder="{{ t('skills.validate_path_ph') }}">
                 </div>
                 <div class="form-group">
                     <label>&nbsp;</label>
-                    <button class="btn btn-primary" @click="validateSkill()">Validate</button>
+                    <button class="btn btn-primary" @click="validateSkill()">{{ t('skills.validate_btn') }}</button>
                 </div>
             </div>
             <div x-show="validateResult" class="validation-result">
-                <div :class="validateResult?.passed ? 'text-success' : 'text-error'" x-text="validateResult?.passed ? 'PASSED' : 'FAILED'"></div>
+                <div :class="validateResult?.passed ? 'text-success' : 'text-error'" x-text="validateResult?.passed ? t('skills.validate_passed') : t('skills.validate_failed')"></div>
                 <div x-text="'Score: ' + (validateResult?.score || 0) + '/100'"></div>
                 <template x-if="validateResult?.errors?.length">
                     <ul class="error-list">

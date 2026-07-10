@@ -5,7 +5,7 @@
 {% block content %}
 <div class="mcp-container" x-data="mcpApp()">
     <div class="mcp-header-actions">
-        <button class="btn btn-primary" @click="showAddModal = true">Add Server</button>
+        <button class="btn btn-primary" @click="showAddModal = true">{{ t('mcp.add_btn') }}</button>
     </div>
 
     <div class="mcp-grid">
@@ -15,17 +15,17 @@
                 <div class="status-dot status-{{ server.status }}"></div>
                 <h3>{{ server.name }}</h3>
                 <span class="badge badge-{{ server.transport }}">{{ server.transport }}</span>
-                <span class="tool-count">{{ server.tool_count }} tools</span>
+                <span class="tool-count">{{ server.tool_count }} {{ t('mcp.tools_suffix') }}</span>
             </div>
             <div class="mcp-card-body">
                 {% if server.transport == 'stdio' %}
                 <div class="mcp-detail">
-                    <span class="label">Command:</span>
+                    <span class="label">{{ t('mcp.command_label') }}</span>
                     <code>{{ server.command|join(' ') }}</code>
                 </div>
                 {% else %}
                 <div class="mcp-detail">
-                    <span class="label">URL:</span>
+                    <span class="label">{{ t('mcp.url_label') }}</span>
                     <code>{{ server.url }}</code>
                 </div>
                 {% endif %}
@@ -33,15 +33,15 @@
             <div class="mcp-card-actions">
                 {% if server.status == 'stopped' %}
                 <button class="btn btn-sm btn-primary"
-                        @click="startServer('{{ server.name }}')">Start</button>
+                        @click="startServer('{{ server.name }}')">{{ t('mcp.start') }}</button>
                 {% else %}
                 <button class="btn btn-sm btn-secondary"
-                        @click="stopServer('{{ server.name }}')">Stop</button>
+                        @click="stopServer('{{ server.name }}')">{{ t('mcp.stop') }}</button>
                 {% endif %}
                 <button class="btn btn-sm btn-secondary"
-                        @click="testServer('{{ server.name }}')">Test</button>
+                        @click="testServer('{{ server.name }}')">{{ t('mcp.test') }}</button>
                 <button class="btn btn-sm btn-secondary" @click="expanded = !expanded">
-                    <span x-text="expanded ? 'Hide Tools' : 'Show Tools'"></span>
+                    <span x-text="expanded ? t('mcp.hide_tools') : t('mcp.show_tools')"></span>
                 </button>
                 <button class="btn btn-sm btn-danger"
                         hx-delete="/api/mcp/servers/{{ server.name }}"
@@ -55,7 +55,7 @@
                 </div>
                 {% endfor %}
                 {% if not server.tools %}
-                <div class="text-muted">No tools loaded. Start the server to see tools.</div>
+                <div class="text-muted">{{ t('mcp.no_tools') }}</div>
                 {% endif %}
             </div>
         </div>
@@ -63,7 +63,7 @@
 
         {% if not servers %}
         <div class="empty-state">
-            <p>No MCP servers configured. Click "Add Server" to get started.</p>
+            <p>{{ t('mcp.empty') }}</p>
         </div>
         {% endif %}
     </div>
@@ -71,26 +71,26 @@
     <!-- Add Server Modal -->
     <div class="modal-overlay" x-show="showAddModal" @click.self="showAddModal = false" style="display:none">
         <div class="modal">
-            <h2>Add MCP Server</h2>
+            <h2>{{ t('mcp.modal_title') }}</h2>
             <div class="form-group">
-                <label>Server Name</label>
+                <label>{{ t('mcp.field_name') }}</label>
                 <input type="text" x-model="newServer.name" class="form-input" placeholder="my-server">
             </div>
             <div class="form-group">
-                <label>Transport</label>
+                <label>{{ t('mcp.field_transport') }}</label>
                 <select x-model="newServer.transport" class="form-select">
-                    <option value="stdio">stdio (local process)</option>
-                    <option value="sse">SSE (HTTP)</option>
+                    <option value="stdio">{{ t('mcp.transport_stdio') }}</option>
+                    <option value="sse">{{ t('mcp.transport_sse') }}</option>
                 </select>
             </div>
             <template x-if="newServer.transport === 'stdio'">
                 <div>
                     <div class="form-group">
-                        <label>Command (space-separated)</label>
+                        <label>{{ t('mcp.field_command') }}</label>
                         <input type="text" x-model="newServer.commandStr" class="form-input" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
                     </div>
                     <div class="form-group">
-                        <label>Working Directory (optional)</label>
+                        <label>{{ t('mcp.field_working_dir') }}</label>
                         <input type="text" x-model="newServer.working_dir" class="form-input" placeholder="/home/user">
                     </div>
                 </div>
@@ -98,25 +98,25 @@
             <template x-if="newServer.transport === 'sse'">
                 <div>
                     <div class="form-group">
-                        <label>SSE URL</label>
+                        <label>{{ t('mcp.field_sse_url') }}</label>
                         <input type="text" x-model="newServer.url" class="form-input" placeholder="http://localhost:8080/sse">
                     </div>
                     <div class="form-group">
-                        <label>Auth Token (Bearer)</label>
+                        <label>{{ t('mcp.field_auth_token') }}</label>
                         <input type="password" x-model="newServer.authToken" class="form-input" placeholder="optional bearer token">
                     </div>
                 </div>
             </template>
             <div class="form-group">
-                <label>Trust Level</label>
+                <label>{{ t('mcp.field_trust') }}</label>
                 <select x-model="newServer.trust" class="form-select">
-                    <option value="approval_required">Approval Required (HITL for danger tools)</option>
-                    <option value="trusted">Trusted (no HITL)</option>
+                    <option value="approval_required">{{ t('mcp.trust_approval') }}</option>
+                    <option value="trusted">{{ t('mcp.trust_trusted') }}</option>
                 </select>
             </div>
             <div class="modal-actions">
-                <button class="btn btn-secondary" @click="showAddModal = false">Cancel</button>
-                <button class="btn btn-primary" @click="addServer()">Add Server</button>
+                <button class="btn btn-secondary" @click="showAddModal = false">{{ t('mcp.cancel') }}</button>
+                <button class="btn btn-primary" @click="addServer()">{{ t('mcp.add_server') }}</button>
             </div>
         </div>
     </div>

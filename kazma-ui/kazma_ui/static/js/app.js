@@ -164,6 +164,12 @@ function kazmaApp() {
         sidebarCollapsed: false,
         fontSize: 14,
 
+        // Arabic needs ~15% larger base font for readability.
+        effectiveFontSize() {
+            var base = this.fontSize || 14;
+            return this.lang === 'ar' ? Math.round(base * 1.15) : base;
+        },
+
         init() {
             // Restore font size from localStorage (synchronous). The Alpine
             // $persist plugin is not bundled, so persistence is handled here.

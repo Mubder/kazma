@@ -118,22 +118,22 @@
   <!-- ── Memory & Governance ── -->
   <div id="memory-governance-section" class="chart-card" style="margin-bottom:1.5rem;">
     <h3 class="chart-title" style="display:flex;align-items:center;justify-content:space-between;margin:0;">
-      <span>🧠 Memory &amp; Governance</span>
-      <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">ACTIVE</span>
+      <span>🧠 {{ t('dashboard.memory_governance') }}</span>
+      <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">{{ t('dashboard.memory_active') }}</span>
     </h3>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border-subtle);padding-bottom:14px;">
       <span style="font-size:0.85rem;color:var(--text-secondary);line-height:1.4;" id="memory-status-desc">
-        ChromaDB Vector Store and sentence-transformers models are fully operational.
+        {{ t('dashboard.memory_desc_active') }}
       </span>
       <button id="install-ml-btn" class="btn btn-sm btn-primary" style="display:none;white-space:nowrap;padding:6px 14px;border-radius:6px;font-size:0.8rem;">
-        Install ML Dependencies
+        {{ t('dashboard.install_ml') }}
       </button>
     </div>
 
     <!-- Expansion Deck Toggle -->
     <div style="margin-top:12px;">
       <button id="toggle-maintenance-deck" style="background:transparent;border:none;color:var(--text-link);font-size:0.85rem;font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px;outline:none;">
-        <span id="deck-toggle-arrow">▶</span> Backup &amp; Database Maintenance
+        <span id="deck-toggle-arrow">▶</span> {{ t('dashboard.backup_maintenance') }}
       </button>
     </div>
 
@@ -144,27 +144,27 @@
       <div style="display:grid;grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));gap:16px;margin-bottom:16px;">
         <!-- FTS5 Metrics Card -->
         <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
-          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">FTS5 Keyword DB</h4>
+          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.fts5_db') }}</h4>
           <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="fts5-size-metric">–</div>
-          <span style="font-size:0.75rem;color:var(--text-muted);" id="fts5-count-metric">0 records</span>
+          <span style="font-size:0.75rem;color:var(--text-muted);" id="fts5-count-metric">0 {{ t('dashboard.records') }}</span>
         </div>
 
         <!-- Vector Metrics Card -->
         <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:8px;padding:12px 16px;">
-          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">Vector Store</h4>
+          <h4 style="font-size:0.75rem;color:var(--text-tertiary);text-transform:uppercase;margin:0;font-weight:600;letter-spacing:0.03em;">{{ t('dashboard.vector_store') }}</h4>
           <div style="font-size:1.4rem;font-weight:700;margin-top:8px;" id="vector-size-metric">–</div>
-          <span style="font-size:0.75rem;color:var(--text-muted);" id="vector-count-metric">0 vectors</span>
+          <span style="font-size:0.75rem;color:var(--text-muted);" id="vector-count-metric">0 {{ t('dashboard.vectors') }}</span>
         </div>
 
         <!-- Dynamic Actions Card -->
         <div style="display:flex;flex-direction:column;justify-content:center;gap:10px;background:rgba(255,255,255,0.01);border:1px dashed var(--border-subtle);border-radius:8px;padding:12px 16px;">
           <button id="trigger-backup-btn" class="btn btn-sm btn-success" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <span class="spinner" id="backup-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
-            💾 Create Hot Backup
+            💾 {{ t('dashboard.create_backup') }}
           </button>
           <button id="trigger-optimize-btn" class="btn btn-sm btn-primary" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <span class="spinner" id="optimize-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
-            ⚡ Optimize Database
+            ⚡ {{ t('dashboard.optimize_db') }}
           </button>
         </div>
       </div>
@@ -172,22 +172,22 @@
       <!-- Backups List Table Container -->
       <div style="border:1px solid var(--border-subtle);border-radius:8px;overflow:hidden;background:rgba(0,0,0,0.15);">
         <div style="padding:10px 16px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--border-subtle);font-weight:600;font-size:0.8rem;color:var(--text-secondary);">
-          Available Backups
+          {{ t('dashboard.available_backups') }}
         </div>
         <div style="max-height:220px;overflow-y:auto;">
           <table style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:left;">
             <thead>
               <tr style="border-bottom:1px solid var(--border-subtle);background:rgba(255,255,255,0.01);">
-                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">Backup Name</th>
-                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">Keyword Size</th>
-                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">Vector Size</th>
-                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">Date Created</th>
-                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;text-align:center;">Action</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_name') }}</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_keyword') }}</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_vector') }}</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;">{{ t('dashboard.col_date') }}</th>
+                <th style="padding:8px 16px;color:var(--text-tertiary);font-weight:500;text-align:center;">{{ t('dashboard.col_action') }}</th>
               </tr>
             </thead>
             <tbody id="backups-tbody">
               <tr>
-                <td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">Loading backups...</td>
+                <td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">{{ t('dashboard.loading_backups') }}</td>
               </tr>
             </tbody>
           </table>
@@ -297,7 +297,31 @@
     confirmClearAll: "{{ t('dashboard.confirm_clear_all') }}",
     errorDeleting: "{{ t('dashboard.error_deleting') }}",
     errorClearing: "{{ t('dashboard.error_clearing') }}",
-    na: "{{ t('dashboard.na') }}"
+    na: "{{ t('dashboard.na') }}",
+    // Memory & Governance
+    memoryActive: "{{ t('dashboard.memory_active') }}",
+    memoryDescActive: "{{ t('dashboard.memory_desc_active') }}",
+    installMl: "{{ t('dashboard.install_ml') }}",
+    fts5Db: "{{ t('dashboard.fts5_db') }}",
+    records: "{{ t('dashboard.records') }}",
+    vectors: "{{ t('dashboard.vectors') }}",
+    loadingBackups: "{{ t('dashboard.loading_backups') }}",
+    noBackups: "{{ t('dashboard.no_backups') }}",
+    restore: "{{ t('dashboard.restore') }}",
+    confirmRestore: "{{ t('dashboard.confirm_restore') }}",
+    restoreWarning: "{{ t('dashboard.restore_warning') }}",
+    restoring: "{{ t('dashboard.restoring') }}",
+    restoreSuccess: "{{ t('dashboard.restore_success') }}",
+    backupSuccess: "{{ t('dashboard.backup_success') }}",
+    backupFailed: "{{ t('dashboard.backup_failed') }}",
+    optimizeSuccess: "{{ t('dashboard.optimize_success') }}",
+    optimizeFailed: "{{ t('dashboard.optimize_failed') }}",
+    memoryInstalling: "{{ t('dashboard.memory_installing') }}",
+    installing: "{{ t('dashboard.installing') }}",
+    memoryDescInstalling: "{{ t('dashboard.memory_desc_installing') }}",
+    memoryDegraded: "{{ t('dashboard.memory_degraded') }}",
+    memoryDescDegraded: "{{ t('dashboard.memory_desc_degraded') }}",
+    installFailed: "{{ t('dashboard.install_failed') }}"
   };
 
   async function _loadSessions() {
@@ -411,26 +435,26 @@
       const status = data.status || 'ACTIVE';
 
       if (status === 'ACTIVE') {
-        memoryBadge.textContent = 'ACTIVE';
+        memoryBadge.textContent = I18N.memoryActive;
         memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(46, 213, 115, 0.15);color:#2ed573;border:1px solid rgba(46, 213, 115, 0.3);';
-        memoryDesc.textContent = 'ChromaDB Vector Store and sentence-transformers models are fully operational.';
+        memoryDesc.textContent = I18N.memoryDescActive;
         installBtn.style.display = 'none';
         installBtn.disabled = false;
-        installBtn.textContent = 'Install ML Dependencies';
+        installBtn.textContent = I18N.installMl;
       } else if (status === 'INSTALLING') {
-        memoryBadge.textContent = 'INSTALLING';
+        memoryBadge.textContent = I18N.memoryInstalling;
         memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(245, 158, 11, 0.15);color:#f59e0b;border:1px solid rgba(245, 158, 11, 0.3);';
-        memoryDesc.textContent = 'Installing ML dependencies (ChromaDB & sentence-transformers) in the background. Please wait...';
+        memoryDesc.textContent = I18N.memoryDescInstalling;
         installBtn.style.display = 'inline-block';
         installBtn.disabled = true;
-        installBtn.textContent = 'Installing...';
+        installBtn.textContent = I18N.installing;
       } else {
-        memoryBadge.textContent = 'DEGRADED';
+        memoryBadge.textContent = I18N.memoryDegraded;
         memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(255, 71, 87, 0.15);color:#ff4757;border:1px solid rgba(255, 71, 87, 0.3);';
-        memoryDesc.textContent = 'System is running in degraded mode using keyword-only FTS5 fallback. ML dependencies are missing.';
+        memoryDesc.textContent = I18N.memoryDescDegraded;
         installBtn.style.display = 'inline-block';
         installBtn.disabled = false;
-        installBtn.textContent = 'Install ML Dependencies';
+        installBtn.textContent = I18N.installMl;
       }
 
       // Update metrics inside collapsible deck
@@ -438,14 +462,14 @@
       const ftsCountEl = document.getElementById('fts5-count-metric');
       if (ftsSizeEl && data.fts5_size !== undefined) {
         ftsSizeEl.textContent = formatBytes(data.fts5_size);
-        ftsCountEl.textContent = `${data.fts5_count || 0} records`;
+        ftsCountEl.textContent = `${data.fts5_count || 0} ${I18N.records}`;
       }
 
       const vecSizeEl = document.getElementById('vector-size-metric');
       const vecCountEl = document.getElementById('vector-count-metric');
       if (vecSizeEl && data.vector_size !== undefined) {
         vecSizeEl.textContent = formatBytes(data.vector_size);
-        vecCountEl.textContent = `${data.vector_count || 0} vectors`;
+        vecCountEl.textContent = `${data.vector_count || 0} ${I18N.vectors}`;
       }
 
     } catch (e) {
@@ -456,7 +480,7 @@
   if (installBtn) {
     installBtn.addEventListener('click', async function() {
       installBtn.disabled = true;
-      installBtn.textContent = 'Installing...';
+      installBtn.textContent = I18N.installing;
       try {
         await fetch('/api/system/install', {
           method: 'POST',
@@ -464,9 +488,9 @@
           body: JSON.stringify({ package_name: 'sentence-transformers' })
         });
       } catch (e) {
-        alert('Failed to trigger installation.');
+        alert(I18N.installFailed);
         installBtn.disabled = false;
-        installBtn.textContent = 'Install ML Dependencies';
+        installBtn.textContent = I18N.installMl;
       }
     });
   }
@@ -484,10 +508,10 @@
       const backups = data.backups || [];
       
       if (backups.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">No backups found. Create one above!</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted);">${I18N.noBackups}</td></tr>`;
         return;
       }
-      
+
       tbody.innerHTML = backups.map(backup => {
         const ftsSize = backup.fts5_size ? formatBytes(backup.fts5_size) : 'None';
         const vecSize = backup.vector_size ? formatBytes(backup.vector_size) : 'None';
@@ -500,20 +524,20 @@
             <td style="padding:10px 16px;color:var(--text-tertiary);">${created}</td>
             <td style="padding:10px 16px;text-align:center;">
               <button class="btn btn-sm btn-primary restore-btn" data-name="${backup.name}" style="padding:2px 8px;font-size:0.75rem;border-radius:4px;">
-                Restore
+                ${I18N.restore}
               </button>
             </td>
           </tr>
         `;
       }).join('');
-      
+
       // Bind restore button action
       document.querySelectorAll('.restore-btn').forEach(btn => {
         btn.addEventListener('click', async function() {
           const name = this.getAttribute('data-name');
-          if (confirm(`Are you absolutely sure you want to restore backup "${name}"? This will overwrite the current memory database state.`)) {
+          if (confirm(I18N.confirmRestore + ` "${name}"? ` + I18N.restoreWarning)) {
             this.disabled = true;
-            this.textContent = 'Restoring...';
+            this.textContent = I18N.restoring;
             try {
               const r = await fetch('/api/system/memory/restore', {
                 method: 'POST',
@@ -522,7 +546,7 @@
               });
               const res = await r.json();
               if (res.status === 'success') {
-                alert('Successfully restored and hot-reloaded memory stores!');
+                alert(I18N.restoreSuccess);
                 pollMemoryStatus();
                 loadBackups();
               } else {
@@ -532,7 +556,7 @@
               alert('Restoration failed: ' + e);
             } finally {
               this.disabled = false;
-              this.textContent = 'Restore';
+              this.textContent = I18N.restore;
             }
           }
         });
@@ -565,14 +589,14 @@
       const resp = await fetch('/api/system/memory/backup', { method: 'POST' });
       const res = await resp.json();
       if (res.status === 'success') {
-        alert(`Backup completed successfully: ${res.manifest.name}`);
+        alert(I18N.backupSuccess + `: ${res.manifest.name}`);
         loadBackups();
         pollMemoryStatus();
       } else {
-        alert('Backup failed: ' + (res.detail || 'unknown error'));
+        alert(I18N.backupFailed + ': ' + (res.detail || 'unknown error'));
       }
     } catch (e) {
-      alert('Backup failed: ' + e);
+      alert(I18N.backupFailed + ': ' + e);
     } finally {
       backupBtn.disabled = false;
       backupSpinner.style.display = 'none';
@@ -589,7 +613,7 @@
       const resp = await fetch('/api/system/memory/maintenance', { method: 'POST' });
       const res = await resp.json();
       if (res.status === 'success') {
-        let msg = 'Optimization run completed successfully!\n\n';
+        let msg = I18N.optimizeSuccess + '\n\n';
         if (res.details.fts5) {
           msg += `• FTS5 keyword index optimized (VACUUM & ANALYZE completed).\n  Reclaimed space: ${formatBytes(res.details.fts5.reclaimed_bytes)}\n\n`;
         }
@@ -599,10 +623,10 @@
         alert(msg);
         pollMemoryStatus();
       } else {
-        alert('Optimization failed: ' + (res.detail || 'unknown error'));
+        alert(I18N.optimizeFailed + ': ' + (res.detail || 'unknown error'));
       }
     } catch (e) {
-      alert('Optimization failed: ' + e);
+      alert(I18N.optimizeFailed + ': ' + e);
     } finally {
       optimizeBtn.disabled = false;
       optimizeSpinner.style.display = 'none';

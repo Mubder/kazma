@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% set active_page = "workspace" %}
-{% block title %}Kazma — Workspace{% endblock %}
-{% block page_title %}Workspace{% endblock %}
+{% block title %}{{ t('workspace.title') }}{% endblock %}
+{% block page_title %}{{ t('workspace.page_title') }}{% endblock %}
 
 {% block content %}
 <div class="workspace-container" x-data="workspaceApp()" x-init="init()" style="max-width:1400px;margin:0 auto;">
@@ -11,13 +11,13 @@
     <div style="display:flex;align-items:center;gap:12px;">
       <div style="font-size:1.5rem;">🏗️</div>
       <div>
-        <h2 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);letter-spacing:-0.02em;">Multi-Workspace Engine</h2>
-        <p style="margin:0;font-size:0.75rem;color:var(--text-muted);">Manage separate project environments and contexts dynamically.</p>
+        <h2 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);letter-spacing:-0.02em;">{{ t('workspace.engine_title') }}</h2>
+        <p style="margin:0;font-size:0.75rem;color:var(--text-muted);">{{ t('workspace.engine_desc') }}</p>
       </div>
     </div>
     
     <div style="display:flex;align-items:center;gap:12px;margin-left:auto;">
-      <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);">Active Environment:</span>
+      <span style="font-size:0.8rem;font-weight:600;color:var(--text-secondary);">{{ t('workspace.active_env') }}</span>
       <select 
         class="form-input" 
         style="width:240px;padding:6px 12px;border-radius:var(--radius-sm);font-weight:500;" 
@@ -30,10 +30,10 @@
       </select>
       
       <button class="btn btn-sm btn-secondary" @click="showCreateModal = true" style="display:flex;align-items:center;gap:6px;">
-        <span>➕</span> Create Workspace
+        <span>➕</span> {{ t('workspace.create') }}
       </button>
       <button x-show="ghOAuthConnected" class="btn btn-sm btn-secondary" @click="openRepoPicker()" style="display:flex;align-items:center;gap:6px;" x-cloak>
-        <span>🐙</span> Switch Repo
+        <span>🐙</span> {{ t('workspace.switch_repo') }}
       </button>
     </div>
   </div>
@@ -52,25 +52,25 @@
   <div x-show="showCreateModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showCreateModal = false">
     <div class="card" style="width:520px;padding:0;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);display:flex;flex-direction:column;">
       <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">➕ Create New Project Workspace</h3>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">➕ {{ t('workspace.create_modal_title') }}</h3>
         <button class="btn-icon" @click="showCreateModal = false" style="font-size:1rem;">✕</button>
       </div>
       
       <div style="display:flex;flex-direction:column;gap:16px;padding:16px 24px;">
         <div>
-          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Workspace Name</label>
-          <input type="text" class="form-input" placeholder="e.g., My New Project" x-model="newWorkspaceName" style="width:100%;">
+          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">{{ t('workspace.field_name') }}</label>
+          <input type="text" class="form-input" placeholder="{{ t('workspace.field_name_ph') }}" x-model="newWorkspaceName" style="width:100%;">
         </div>
         <div>
-          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Absolute Directory Path</label>
-          <input type="text" class="form-input" placeholder="e.g., C:/Users/balfa/my-project" x-model="newWorkspacePath" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;">
-          <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">Folder will be automatically created on the filesystem if it doesn't exist.</p>
+          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">{{ t('workspace.field_path') }}</label>
+          <input type="text" class="form-input" placeholder="{{ t('workspace.field_path_ph') }}" x-model="newWorkspacePath" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;">
+          <p style="margin:4px 0 0 0;font-size:0.7rem;color:var(--text-muted);">{{ t('workspace.folder_autocreate') }}</p>
         </div>
       </div>
 
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:12px 24px 16px;border-top:1px solid var(--border-subtle);">
-        <button class="btn btn-secondary" @click="showCreateModal = false">Cancel</button>
-        <button class="btn btn-primary" @click="createWorkspace()" :disabled="!newWorkspaceName.trim() || !newWorkspacePath.trim()">Create & Switch</button>
+        <button class="btn btn-secondary" @click="showCreateModal = false">{{ t('workspace.cancel') }}</button>
+        <button class="btn btn-primary" @click="createWorkspace()" :disabled="!newWorkspaceName.trim() || !newWorkspacePath.trim()">{{ t('workspace.create_switch') }}</button>
       </div>
     </div>
   </div>
@@ -79,14 +79,14 @@
   <div x-show="showFolderModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
     <div class="card" style="width:480px;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;">📂 Open Local Folder as Workspace</h3>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;">📂 {{ t('workspace.folder_modal_title') }}</h3>
         <button class="btn-icon" @click="showFolderModal = false" style="font-size:1rem;">✕</button>
       </div>
-      
+
       <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
         <div style="position:relative;">
-          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Absolute Folder Path</label>
-          <input type="text" class="form-input" placeholder="e.g., C:/Projects/my-app" x-model="selectedFolderPath" @input.debounce.300ms="fetchSuggestions()" @blur="setTimeout(() => suggestList = [], 200)" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;">
+          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">{{ t('workspace.field_folder_path') }}</label>
+          <input type="text" class="form-input" placeholder="{{ t('workspace.field_folder_path_ph') }}" x-model="selectedFolderPath" @input.debounce.300ms="fetchSuggestions()" @blur="setTimeout(() => suggestList = [], 200)" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;">
           <!-- Autocomplete dropdown -->
           <div x-show="suggestList.length > 0" x-cloak style="position:absolute;top:100%;left:0;right:0;max-height:180px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:0 0 var(--radius-sm) var(--radius-sm);z-index:100;box-shadow:var(--shadow-md);">
             <template x-for="s in suggestList" :key="s.path">
@@ -96,13 +96,13 @@
               </div>
             </template>
           </div>
-          <p style="margin:4px 0 0 0;font-size:0.75rem;color:var(--text-muted);">Type a path to autocomplete, or use "Switch Repo" to pick from GitHub.</p>
+          <p style="margin:4px 0 0 0;font-size:0.75rem;color:var(--text-muted);">{{ t('workspace.autocomplete_hint') }}</p>
         </div>
       </div>
       
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
-        <button class="btn btn-secondary" @click="showFolderModal = false">Cancel</button>
-        <button class="btn btn-primary" @click="selectFolder()" :disabled="!selectedFolderPath.trim()">Open Folder</button>
+        <button class="btn btn-secondary" @click="showFolderModal = false">{{ t('workspace.cancel') }}</button>
+        <button class="btn btn-primary" @click="selectFolder()" :disabled="!selectedFolderPath.trim()">{{ t('workspace.open_folder') }}</button>
       </div>
     </div>
   </div>
@@ -111,11 +111,11 @@
   <div x-show="showRepoPicker" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showRepoPicker = false">
     <div class="card" style="width:520px;max-height:80vh;display:flex;flex-direction:column;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🐙 Switch GitHub Repo</h3>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🐙 {{ t('workspace.repo_picker_title') }}</h3>
         <button class="btn-icon" @click="showRepoPicker = false" style="font-size:1rem;">✕</button>
       </div>
       <div style="padding:0 24px 12px;">
-        <input type="text" class="form-input" placeholder="Search repos..." x-model="ghRepoSearch" style="width:100%;font-size:0.85rem;">
+        <input type="text" class="form-input" placeholder="{{ t('workspace.repo_search_ph') }}" x-model="ghRepoSearch" style="width:100%;font-size:0.85rem;">
       </div>
       <div style="flex:1;overflow-y:auto;padding:0 24px 16px;min-height:200px;">
         <template x-for="r in ghRepoFiltered" :key="r.full_name">
@@ -124,16 +124,16 @@
               <span style="font-size:0.9rem;">📦</span>
               <span style="font-size:0.82rem;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="r.full_name"></span>
             </div>
-            <span x-show="r.private" style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 6px;border-radius:3px;flex-shrink:0;" x-cloak>private</span>
+            <span x-show="r.private" style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 6px;border-radius:3px;flex-shrink:0;" x-cloak x-text="t('workspace.private_badge')"></span>
           </div>
         </template>
         <div x-show="ghRepoFiltered.length === 0" style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.8rem;">
-          <span x-show="!ghCloning">No repos found.</span>
-          <span x-show="ghCloning">Cloning... please wait.</span>
+          <span x-show="!ghCloning" x-text="t('workspace.no_repos')"></span>
+          <span x-show="ghCloning" x-text="t('workspace.cloning_wait')"></span>
         </div>
       </div>
       <div x-show="ghCloning" style="padding:12px 24px;border-top:1px solid var(--border-subtle);text-align:center;font-size:0.8rem;color:var(--accent);" x-cloak>
-        ⏳ Cloning repository...
+        ⏳ <span x-text="t('workspace.cloning')"></span>
       </div>
     </div>
   </div>
@@ -142,23 +142,23 @@
   <div x-show="showPatModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
     <div class="card" style="width:480px;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🔑 Configure GitHub Token</h3>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🔑 {{ t('workspace.pat_modal_title') }}</h3>
         <button class="btn-icon" @click="showPatModal = false" style="font-size:1rem;">✕</button>
       </div>
-      
+
       <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
         <div>
-          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Personal Access Token (PAT)</label>
-          <input type="password" class="form-input" placeholder="ghp_..." x-model="githubPat" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;letter-spacing:0.1em;">
+          <label style="display:block;font-size:0.8rem;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">{{ t('workspace.pat_label') }}</label>
+          <input type="password" class="form-input" placeholder="{{ t('workspace.pat_ph') }}" x-model="githubPat" style="width:100%;font-family:var(--font-mono);font-size:0.8rem;letter-spacing:0.1em;">
           <p style="margin:6px 0 0 0;font-size:0.75rem;color:var(--text-muted);line-height:1.4;">
-            Providing a PAT raises API rate limits (unauthenticated limits are 60/hr) and enables secure access to private repository metadata. The token is saved in your local SQLite settings and synced directly to your <code>.env</code> file.
+            {{ t('workspace.pat_desc') }}
           </p>
         </div>
       </div>
-      
+
       <div style="display:flex;align-items:center;justify-content:flex-end;gap:12px;">
-        <button class="btn btn-secondary" @click="showPatModal = false">Cancel</button>
-        <button class="btn btn-primary" @click="saveGitHubToken()" :disabled="!githubPat.trim()">Save & Verify</button>
+        <button class="btn btn-secondary" @click="showPatModal = false">{{ t('workspace.cancel') }}</button>
+        <button class="btn btn-primary" @click="saveGitHubToken()" :disabled="!githubPat.trim()">{{ t('workspace.pat_save') }}</button>
       </div>
     </div>
   </div>
@@ -167,22 +167,22 @@
   <div class="quick-actions-bar">
     <button class="btn btn-sm btn-primary" @click="runTests()">
       <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="5 12 10 17 19 8"/></svg>
-      Run Tests
+      {{ t('workspace.qa_run_tests') }}
     </button>
     <button class="btn btn-sm btn-secondary" @click="build()">
       <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
-      Build
+      {{ t('workspace.qa_build') }}
     </button>
     <button class="btn btn-sm btn-secondary" @click="deploy()">
       <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-      Deploy
+      {{ t('workspace.qa_deploy') }}
     </button>
     <button class="btn btn-sm btn-secondary" @click="openTerminal()">
       <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-      Terminal
+      {{ t('workspace.qa_terminal') }}
     </button>
     <button class="btn btn-sm btn-secondary" @click="refreshAll()" style="margin-left:auto;">
-      ↻ Refresh
+      ↻ {{ t('workspace.qa_refresh') }}
     </button>
   </div>
 
@@ -193,11 +193,11 @@
       <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:10px 16px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:1.1rem;">🔀</span>
-          <h3 style="margin:0;font-size:1rem;font-weight:600;">Git Status</h3>
+          <h3 style="margin:0;font-size:1rem;font-weight:600;">{{ t('workspace.git_status') }}</h3>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <span :style="{ color: gitDirty ? 'var(--warning)' : 'var(--success)', fontSize:'0.75rem', fontWeight:'500' }"
-                x-text="gitDirty ? '● Uncommitted' : '● Clean'"></span>
+                x-text="gitDirty ? ('● ' + t('workspace.dirty')) : ('● ' + t('workspace.clean'))"></span>
           <span style="color:var(--border-strong);font-size:0.8rem;" x-show="gitIsGit">|</span>
           <code style="font-family:var(--font-mono);font-size:0.8rem;background:var(--bg-elevated);padding:2px 6px;border-radius:var(--radius-xs);color:var(--accent);" x-show="gitIsGit" x-text="gitBranch"></code>
         </div>
@@ -207,7 +207,7 @@
         <!-- Staged Files -->
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Staged Files</span>
+            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">{{ t('workspace.staged') }}</span>
             <span class="badge" :style="{ background: gitStaged.length ? 'var(--success-subtle)' : 'var(--tint-strong)', color: gitStaged.length ? 'var(--success)' : 'var(--text-muted)', fontSize:'0.65rem', padding:'1px 5px', borderRadius:'10px' }" x-text="gitStaged.length"></span>
           </div>
           <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:65px;overflow-y:auto;padding:4px 8px;">
@@ -218,7 +218,7 @@
               </div>
             </template>
             <div x-show="gitStaged.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;">
-              No staged changes
+              {{ t('workspace.no_staged') }}
             </div>
           </div>
         </div>
@@ -226,7 +226,7 @@
         <!-- Modified Files -->
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Modified Files</span>
+            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">{{ t('workspace.modified') }}</span>
             <span class="badge" :style="{ background: gitModified.length ? 'var(--warning-subtle)' : 'var(--tint-strong)', color: gitModified.length ? 'var(--warning)' : 'var(--text-muted)', fontSize:'0.65rem', padding:'1px 5px', borderRadius:'10px' }" x-text="gitModified.length"></span>
           </div>
           <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:65px;overflow-y:auto;padding:4px 8px;">
@@ -237,7 +237,7 @@
               </div>
             </template>
             <div x-show="gitModified.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;">
-              No unstaged changes
+              {{ t('workspace.no_modified') }}
             </div>
           </div>
         </div>
@@ -245,7 +245,7 @@
         <!-- Untracked Files -->
         <div>
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">Untracked Files</span>
+            <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;">{{ t('workspace.untracked') }}</span>
             <span class="badge" :style="{ background: gitUntracked.length ? 'var(--secondary-subtle)' : 'var(--tint-strong)', color: gitUntracked.length ? 'var(--secondary-light)' : 'var(--text-muted)', fontSize:'0.65rem', padding:'1px 5px', borderRadius:'10px' }" x-text="gitUntracked.length"></span>
           </div>
           <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);max-height:65px;overflow-y:auto;padding:4px 8px;">
@@ -256,7 +256,7 @@
               </div>
             </template>
             <div x-show="gitUntracked.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;">
-              No untracked files
+              {{ t('workspace.no_untracked') }}
             </div>
           </div>
         </div>
@@ -264,7 +264,7 @@
 
       <div x-show="!gitIsGit && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);">
         <div style="font-size:1.5rem;margin-bottom:8px;">⚠️</div>
-        <p style="font-size:0.85rem;margin:0;">Not a Git repository</p>
+        <p style="font-size:0.85rem;margin:0;">{{ t('workspace.not_repo') }}</p>
       </div>
     </div>
 
@@ -275,33 +275,33 @@
           <svg class="github-icon" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" style="color:var(--text-primary);display:block;">
             <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
           </svg>
-          <h3 style="margin:0;font-size:1rem;font-weight:600;letter-spacing:-0.01em;">GitHub Telemetry</h3>
+          <h3 style="margin:0;font-size:1rem;font-weight:600;letter-spacing:-0.01em;">{{ t('workspace.gh_title') }}</h3>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <!-- Status indicator badge -->
           <template x-if="ghIsGitHub && ghHasToken && ghTokenValid">
             <span class="badge" style="background:rgba(16, 185, 129, 0.1);color:#10b981;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(16, 185, 129, 0.2);display:inline-flex;align-items:center;gap:4px;">
               <span style="display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;box-shadow:0 0 8px #10b981;animation:pulse 2s infinite;"></span>
-              Connected
+              {{ t('workspace.gh_connected') }}
             </span>
           </template>
           <template x-if="ghIsGitHub && (!ghHasToken || !ghTokenValid)">
             <span class="badge" style="background:rgba(245, 158, 11, 0.1);color:#f59e0b;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(245, 158, 11, 0.2);display:inline-flex;align-items:center;gap:4px;">
               <span style="display:inline-block;width:6px;height:6px;background:#f59e0b;border-radius:50%;"></span>
-              Token Missing
+              {{ t('workspace.gh_token_missing') }}
             </span>
           </template>
           <template x-if="ghRateLimited">
             <span class="badge" style="background:rgba(239, 68, 68, 0.1);color:#ef4444;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(239, 68, 68, 0.2);display:inline-flex;align-items:center;gap:4px;">
-              Rate Limited
+              {{ t('workspace.gh_rate_limited') }}
             </span>
           </template>
           <!-- Connect / Disconnect (OAuth) -->
           <button x-show="!ghOAuthConnected" class="btn btn-xs btn-primary" @click="connectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 10px;">
-            🔑 Connect GitHub
+            🔑 {{ t('workspace.gh_connect') }}
           </button>
           <button x-show="ghOAuthConnected" class="btn btn-xs btn-secondary" @click="disconnectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
-            Disconnect
+            {{ t('workspace.gh_disconnect') }}
           </button>
         </div>
       </div>
@@ -309,17 +309,17 @@
       <!-- OAuth not connected state (only after status has been checked) -->
       <div x-show="ghIsGitHub && ghOAuthChecked && !ghOAuthConnected" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
         <div style="font-size:1.5rem;margin-bottom:8px;">🔒</div>
-        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">Connect to GitHub</h4>
-        <p style="font-size:0.75rem;max-width:340px;margin:0 auto 12px auto;line-height:1.5;">Authorize Kazma (read-only) to see live pull requests, issues, commits, and workflow runs for <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span>.</p>
-        <button class="btn btn-sm btn-primary" @click="connectGitHub()" style="font-size:0.8rem;">🔑 Connect with GitHub</button>
-        <p style="font-size:0.65rem;color:var(--text-tertiary);margin-top:10px;">Secure OAuth — no password or token to paste. Read-only access.</p>
+        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.gh_connect_heading') }}</h4>
+        <p style="font-size:0.75rem;max-width:340px;margin:0 auto 12px auto;line-height:1.5;">{{ t('workspace.gh_connect_body') }} <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span>.</p>
+        <button class="btn btn-sm btn-primary" @click="connectGitHub()" style="font-size:0.8rem;">🔑 {{ t('workspace.gh_connect_with') }}</button>
+        <p style="font-size:0.65rem;color:var(--text-tertiary);margin-top:10px;">{{ t('workspace.gh_oauth_note') }}</p>
       </div>
 
       <!-- Main GitHub Card Body -->
       <div style="padding:12px;background:var(--bg-surface);" x-show="ghIsGitHub && ghOAuthConnected" x-cloak>
         <!-- Tab navigation -->
         <div style="display:flex;gap:2px;border-bottom:1px solid var(--border-subtle);margin-bottom:10px;overflow-x:auto;">
-          <template x-for="tab in [['overview','Overview'],['pulls','PRs'],['issues','Issues'],['commits','Commits'],['workflows','Actions'],['releases','Releases']]" :key="tab[0]">
+          <template x-for="tab in [['overview',t('workspace.gh_tab_overview')],['pulls',t('workspace.gh_tab_prs')],['issues',t('workspace.gh_tab_issues')],['commits',t('workspace.gh_tab_commits')],['workflows',t('workspace.gh_tab_actions')],['releases',t('workspace.gh_tab_releases')]]" :key="tab[0]">
             <button @click="ghActiveTab = tab[0]; ghLoadTab(tab[0])" :style="{ background: ghActiveTab === tab[0] ? 'var(--bg-elevated)' : 'transparent', color: ghActiveTab === tab[0] ? 'var(--accent)' : 'var(--text-muted)', borderBottom: ghActiveTab === tab[0] ? '2px solid var(--accent)' : '2px solid transparent' }" style="border:none;padding:6px 10px;font-size:0.72rem;font-weight:600;cursor:pointer;white-space:nowrap;border-radius:var(--radius-xs) var(--radius-xs) 0 0;" x-text="tab[1]"></button>
           </template>
         </div>
@@ -335,9 +335,9 @@
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/>
               </svg>
             </a>
-            <p style="margin:2px 0 0 0;font-size:0.75rem;color:var(--text-secondary);line-height:1.4;" x-text="ghDescription || 'No repository description set.'"></p>
+            <p style="margin:2px 0 0 0;font-size:0.75rem;color:var(--text-secondary);line-height:1.4;" x-text="ghDescription || t('workspace.no_description')"></p>
           </div>
-          <span class="badge" :style="{ background: ghPrivate ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)', color: ghPrivate ? '#ef4444' : '#10b981', borderColor: ghPrivate ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)' }" style="font-size:0.65rem;font-weight:600;padding:2px 6px;border-radius:4px;border:1px solid;text-transform:uppercase;" x-text="ghPrivate ? 'Private' : 'Public'"></span>
+          <span class="badge" :style="{ background: ghPrivate ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)', color: ghPrivate ? '#ef4444' : '#10b981', borderColor: ghPrivate ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)' }" style="font-size:0.65rem;font-weight:600;padding:2px 6px;border-radius:4px;border:1px solid;text-transform:uppercase;" x-text="ghPrivate ? t('workspace.gh_private') : t('workspace.gh_public')"></span>
         </div>
 
         <!-- Telemetry Stats Grid -->
@@ -346,32 +346,32 @@
           <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
             <div style="font-size:1.1rem;margin-bottom:2px;">⭐</div>
             <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghStars">0</div>
-            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">Stars</div>
+            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_stars') }}</div>
           </div>
           <!-- Forks -->
           <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
             <div style="font-size:1.1rem;margin-bottom:2px;">🍴</div>
             <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghForks">0</div>
-            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">Forks</div>
+            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_forks') }}</div>
           </div>
           <!-- Open Issues -->
           <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
             <div style="font-size:1.1rem;margin-bottom:2px;">🐛</div>
             <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenIssues">0</div>
-            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">Issues</div>
+            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_issues') }}</div>
           </div>
           <!-- Pull Requests -->
           <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
             <div style="font-size:1.1rem;margin-bottom:2px;">📈</div>
             <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenPrs">0</div>
-            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">PRs</div>
+            <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_prs') }}</div>
           </div>
         </div>
 
         <!-- GitHub Action / CI/CD Live Workflows -->
         <div style="border-top:1px solid var(--border-subtle);padding-top:10px;">
           <h4 style="margin:0 0 6px 0;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;display:flex;align-items:center;gap:6px;">
-            <span>🤖</span> GitHub Actions — Workflow Automation
+            <span>🤖</span> {{ t('workspace.gh_actions_title') }}
           </h4>
           
           <template x-if="ghLatestWorkflow">
@@ -382,9 +382,9 @@
                   <code style="font-family:var(--font-mono);font-size:0.65rem;background:var(--bg-deep);padding:1px 4px;border-radius:var(--radius-xs);color:var(--accent);" x-text="ghLatestWorkflow.branch"></code>
                 </div>
                 <div style="font-size:0.7rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
-                  <span x-text="'Triggered by ' + ghLatestWorkflow.event"></span>
+                  <span x-text="t('workspace.triggered_by') + ' ' + ghLatestWorkflow.event"></span>
                   <span>•</span>
-                  <span x-text="'ID: ' + ghLatestWorkflow.id"></span>
+                  <span x-text="t('workspace.id_prefix') + ' ' + ghLatestWorkflow.id"></span>
                 </div>
               </div>
               
@@ -394,26 +394,26 @@
                   <!-- Success -->
                   <template x-if="ghLatestWorkflow.conclusion === 'success'">
                     <span style="background:rgba(16,185,129,0.1);color:#10b981;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(16,185,129,0.2);display:inline-flex;align-items:center;gap:4px;">
-                      <span style="color:#10b981;font-size:0.8rem;">✓</span> Passed
+                      <span style="color:#10b981;font-size:0.8rem;">✓</span> <span x-text="t('workspace.gh_passed')"></span>
                     </span>
                   </template>
                   <!-- Failure -->
                   <template x-if="ghLatestWorkflow.conclusion === 'failure' || ghLatestWorkflow.conclusion === 'cancelled'">
                     <span style="background:rgba(239,68,68,0.1);color:#ef4444;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(239,68,68,0.2);display:inline-flex;align-items:center;gap:4px;">
-                      <span style="color:#ef4444;font-size:0.8rem;">✕</span> Failed
+                      <span style="color:#ef4444;font-size:0.8rem;">✕</span> <span x-text="t('workspace.gh_failed')"></span>
                     </span>
                   </template>
                   <!-- In progress -->
                   <template x-if="ghLatestWorkflow.status === 'in_progress' || ghLatestWorkflow.status === 'queued' || !ghLatestWorkflow.conclusion">
                     <span style="background:rgba(59,130,246,0.1);color:#3b82f6;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(59,130,246,0.2);display:inline-flex;align-items:center;gap:4px;">
-                      <span style="display:inline-block;width:5px;height:6px;background:#3b82f6;border-radius:50%;box-shadow:0 0 6px #3b82f6;animation:pulse 1.5s infinite;"></span> Running
+                      <span style="display:inline-block;width:5px;height:6px;background:#3b82f6;border-radius:50%;box-shadow:0 0 6px #3b82f6;animation:pulse 1.5s infinite;"></span> <span x-text="t('workspace.gh_running')"></span>
                     </span>
                   </template>
                 </div>
                 
                 <!-- Action link -->
                 <a :href="ghLatestWorkflow.html_url" target="_blank" class="btn btn-xs btn-primary" style="display:inline-flex;align-items:center;gap:4px;font-size:0.7rem;padding:2px 6px;text-decoration:none;">
-                  View Run
+                  <span x-text="t('workspace.gh_view_run')"></span>
                 </a>
               </div>
             </div>
@@ -421,7 +421,7 @@
           
           <template x-if="!ghLatestWorkflow">
             <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px;text-align:center;color:var(--text-muted);font-size:0.75rem;">
-              No workflow runs detected for this repository.
+              <span x-text="t('workspace.gh_no_workflows')"></span>
             </div>
           </template>
         </div>
@@ -441,7 +441,7 @@
               </div>
             </div>
           </template>
-          <div x-show="ghPrs.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;">No open pull requests.</div>
+          <div x-show="ghPrs.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_prs')"></div>
         </div>
 
         <!-- ISSUES TAB -->
@@ -459,7 +459,7 @@
               </div>
             </div>
           </template>
-          <div x-show="ghIssues.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;">No open issues.</div>
+          <div x-show="ghIssues.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_issues')"></div>
         </div>
 
         <!-- COMMITS TAB -->
@@ -471,7 +471,7 @@
               <span style="font-size:0.62rem;color:var(--text-muted);flex-shrink:0;margin-left:auto;" x-text="c.author"></span>
             </div>
           </template>
-          <div x-show="ghCommits.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;">No recent commits.</div>
+          <div x-show="ghCommits.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_recent_commits')"></div>
         </div>
 
         <!-- WORKFLOWS TAB -->
@@ -488,7 +488,7 @@
               </div>
             </div>
           </template>
-          <div x-show="ghWorkflows.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;">No workflow runs.</div>
+          <div x-show="ghWorkflows.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_workflow_runs')"></div>
         </div>
 
         <!-- RELEASES TAB -->
@@ -503,7 +503,7 @@
               <a :href="rel.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">view ↗</a>
             </div>
           </template>
-          <div x-show="ghReleases.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;">No releases published.</div>
+          <div x-show="ghReleases.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_releases')"></div>
         </div>
 
       </div><!-- /Main GitHub Card Body -->
@@ -511,11 +511,11 @@
       <!-- No GitHub repository configuration detected -->
       <div x-show="!ghIsGitHub && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
         <div style="font-size:1.5rem;margin-bottom:8px;">☁️</div>
-        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">GitHub Integration Offline</h4>
-        <p style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || 'No remote GitHub repository has been configured for this active workspace directory.'"></p>
+        <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.gh_offline') }}</h4>
+        <p style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || t('workspace.gh_offline_body')"></p>
         <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
           <button class="btn btn-xs btn-secondary" @click="showPatModal = true">
-            🔑 Configure PAT Token
+            🔑 {{ t('workspace.configure_pat') }}
           </button>
         </div>
       </div>
@@ -526,18 +526,18 @@
       <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:10px 16px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:1.1rem;">📁</span>
-          <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">Project Files</h3>
+          <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.files_title') }}</h3>
         </div>
         <div style="display:flex;align-items:center;gap:12px;">
-          <code style="font-family:var(--font-mono);font-size:0.75rem;background:var(--bg-elevated);padding:3px 8px;border-radius:var(--radius-sm);color:var(--text-secondary);border:1px solid var(--border-subtle);" x-text="absoluteRoot || 'Loading...'"></code>
+          <code style="font-family:var(--font-mono);font-size:0.75rem;background:var(--bg-elevated);padding:3px 8px;border-radius:var(--radius-sm);color:var(--text-secondary);border:1px solid var(--border-subtle);" x-text="absoluteRoot || t('workspace.loading_path')"></code>
           <button class="btn btn-xs btn-secondary" @click="triggerSelectFolder()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
-            <span>📂</span> Select Folder
+            <span>📂</span> {{ t('workspace.select_folder') }}
           </button>
         </div>
       </div>
       
       <div style="background:var(--bg-elevated);padding:6px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--text-secondary);">
-        <span style="font-weight:600;">Location:</span>
+        <span style="font-weight:600;">{{ t('workspace.location') }}</span>
         <code style="font-family:var(--font-mono);color:var(--accent);" x-text="currentPath"></code>
       </div>
       <div class="file-list" style="max-height:180px;overflow-y:auto;">
@@ -545,7 +545,7 @@
              style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;color:var(--text-secondary);font-size:0.8rem;">
           <span style="width:20px;">⬆️</span>
           <span style="flex:1;">..</span>
-          <span style="font-size:0.75rem;color:var(--text-muted);">Up one level</span>
+          <span style="font-size:0.75rem;color:var(--text-muted);">{{ t('workspace.up_one_level') }}</span>
         </div>
         <template x-for="item in files" :key="item.path">
           <div class="file-row"
@@ -559,7 +559,7 @@
         </template>
         <div x-show="files.length === 0 && !loading" style="padding:20px;text-align:center;color:var(--text-muted);">
           <div style="font-size:1.5rem;margin-bottom:4px;">📭</div>
-          <p style="margin:0;font-size:0.8rem;">No files found</p>
+          <p style="margin:0;font-size:0.8rem;">{{ t('workspace.no_files') }}</p>
         </div>
         <div x-show="loading" style="padding:15px;text-align:center;color:var(--text-muted);">
           <div class="skeleton" style="height:28px;margin-bottom:6px;"></div>
@@ -572,10 +572,10 @@
     <!-- Recent Activity (replaces Recent Files) -->
     <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
       <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
-        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">⚡ Recent Activity</h3>
+        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">⚡ {{ t('workspace.activity_title') }}</h3>
         <!-- Filter chips -->
         <div style="display:flex;gap:4px;" x-show="ghOAuthConnected" x-cloak>
-          <template x-for="chip in [['all','All'],['commit','Commits'],['pr','PRs'],['issue','Issues'],['ci','CI']]" :key="chip[0]">
+          <template x-for="chip in [['all',t('workspace.filter_all')],['commit',t('workspace.filter_commits')],['pr',t('workspace.filter_prs')],['issue',t('workspace.filter_issues')],['ci',t('workspace.filter_ci')]]" :key="chip[0]">
             <button @click="ghActivityFilter = chip[0]" :style="{ background: ghActivityFilter === chip[0] ? 'var(--accent)' : 'var(--bg-elevated)', color: ghActivityFilter === chip[0] ? '#fff' : 'var(--text-muted)', border: ghActivityFilter === chip[0] ? '1px solid var(--accent)' : '1px solid var(--border-subtle)' }" style="font-size:0.62rem;font-weight:600;padding:2px 7px;border-radius:10px;cursor:pointer;" x-text="chip[1]"></button>
           </template>
         </div>
@@ -592,7 +592,7 @@
           </div>
         </template>
         <div x-show="ghActivity.length === 0 && !loading" style="padding:30px 20px;text-align:center;color:var(--text-muted);">
-          <p style="margin:0;font-size:0.8rem;" x-text="ghOAuthConnected ? 'No recent activity.' : 'Connect GitHub to see activity.'"></p>
+          <p style="margin:0;font-size:0.8rem;" x-text="ghOAuthConnected ? t('workspace.no_activity') : t('workspace.connect_for_activity')"></p>
         </div>
       </div>
     </div>
@@ -600,19 +600,19 @@
     <!-- Terminal Output -->
     <div class="card" x-show="showTerminal" style="padding:0;overflow:hidden;grid-column:1/-1;">
       <div class="card-header">
-        <h3>💻 Terminal</h3>
-        <button class="btn-icon" @click="showTerminal = false">✕ Close</button>
+        <h3>💻 <span x-text="t('workspace.terminal_title')"></span></h3>
+        <button class="btn-icon" @click="showTerminal = false">✕ <span x-text="t('workspace.terminal_close')"></span></button>
       </div>
       <div class="terminal-output" x-ref="terminal" style="background:var(--bg-deep);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;padding:16px;max-height:300px;overflow-y:auto;">
-        <div x-show="termOutput.length === 0" style="color:var(--text-muted);">Terminal ready. Type a command below.</div>
+        <div x-show="termOutput.length === 0" style="color:var(--text-muted);" x-text="t('workspace.terminal_ready')"></div>
         <template x-for="line in termOutput" :key="line">
           <div x-text="line" style="white-space:pre-wrap;word-break:break-all;"></div>
         </template>
       </div>
       <div style="display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--border-subtle);background:var(--bg-panel);">
-        <input type="text" class="form-input" placeholder="Enter command…" x-model="termCommand"
+        <input type="text" class="form-input" :placeholder="t('workspace.terminal_command_ph')" x-model="termCommand"
                @keydown.enter="runTermCommand()" style="flex:1;font-family:var(--font-mono);">
-        <button class="btn btn-sm btn-primary" @click="runTermCommand()">Run</button>
+        <button class="btn btn-sm btn-primary" @click="runTermCommand()" x-text="t('workspace.terminal_run')"></button>
       </div>
     </div>
   </div>
@@ -708,7 +708,7 @@ function workspaceApp() {
         if (e.data && e.data.type === 'github-oauth-done') {
           this.loadOAuthStatus().then(() => {
             if (this.ghOAuthConnected) {
-              KazmaStream.toast(e.data.success ? 'GitHub connected.' : 'GitHub connection failed.', e.data.success ? 'success' : 'error', 2500);
+              KazmaStream.toast(e.data.success ? t('workspace.toast_gh_connected') : t('workspace.toast_gh_conn_failed'), e.data.success ? 'success' : 'error', 2500);
               if (e.data.success) this.loadGitHubStatus();
             }
           });
@@ -760,13 +760,13 @@ function workspaceApp() {
           if (data.active_workspace) {
             this.absoluteRoot = data.active_workspace.root_path;
           }
-          KazmaStream.toast('Switched workspace successfully', 'success', 2000);
+          KazmaStream.toast(t('workspace.toast_switched'), 'success', 2000);
           await this.refreshAll();
         } else {
-          KazmaStream.toast('Failed to switch workspace', 'error', 3000);
+          KazmaStream.toast(t('workspace.toast_switch_failed'), 'error', 3000);
         }
       } catch (e) {
-        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+        KazmaStream.toast(t('workspace.toast_error', {msg: e.message}), 'error', 3000);
       }
     },
 
@@ -784,17 +784,17 @@ function workspaceApp() {
         if (resp.ok) {
           const data = await resp.json();
           const ws = data.workspace;
-          KazmaStream.toast('Workspace created: ' + ws.name, 'success', 2000);
+          KazmaStream.toast(t('workspace.toast_created', {name: ws.name}), 'success', 2000);
           this.showCreateModal = false;
           this.newWorkspaceName = '';
           this.newWorkspacePath = '';
           await this.switchWorkspace(ws.id);
         } else {
           const err = await resp.json();
-          KazmaStream.toast('Error: ' + (err.detail || 'Failed to create workspace'), 'error', 3000);
+          KazmaStream.toast(t('workspace.toast_error', {msg: err.detail || t('workspace.toast_create_failed')}), 'error', 3000);
         }
       } catch (e) {
-        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+        KazmaStream.toast(t('workspace.toast_error', {msg: e.message}), 'error', 3000);
       }
     },
 
@@ -820,16 +820,16 @@ function workspaceApp() {
         if (resp.ok) {
           const data = await resp.json();
           const ws = data.workspace;
-          KazmaStream.toast('Folder registered: ' + ws.name, 'success', 2000);
+          KazmaStream.toast(t('workspace.toast_folder_registered', {name: ws.name}), 'success', 2000);
           this.showFolderModal = false;
           this.selectedFolderPath = '';
           await this.switchWorkspace(ws.id);
         } else {
           const err = await resp.json();
-          KazmaStream.toast('Error: ' + (err.detail || 'Failed to register folder'), 'error', 3000);
+          KazmaStream.toast(t('workspace.toast_error', {msg: err.detail || t('workspace.toast_folder_failed')}), 'error', 3000);
         }
       } catch (e) {
-        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+        KazmaStream.toast(t('workspace.toast_error', {msg: e.message}), 'error', 3000);
       }
     },
 
@@ -884,7 +884,7 @@ function workspaceApp() {
       if (this.recentFiles.length > 20) this.recentFiles.pop();
       // Try to open in chat or new tab
       window.open('/chat?file=' + encodeURIComponent(path), '_blank');
-      KazmaStream.toast('Opening ' + path, 'info', 2000);
+      KazmaStream.toast(t('workspace.toast_opening', {path: path}), 'info', 2000);
     },
 
     async loadGitStatus() {
@@ -933,11 +933,11 @@ function workspaceApp() {
           this.ghError = data.error || '';
         } else {
           this.ghIsGitHub = false;
-          this.ghError = 'Failed to load GitHub integration status.';
+          this.ghError = t('workspace.toast_gh_status_failed');
         }
       } catch (e) {
         this.ghIsGitHub = false;
-        this.ghError = 'Connection error: ' + e.message;
+        this.ghError = t('workspace.toast_conn_error', {msg: e.message});
       }
     },
 
@@ -971,7 +971,7 @@ function workspaceApp() {
         if (this.ghOAuthConnected) {
           clearInterval(this._ghPoll);
           this._ghPoll = null;
-          KazmaStream.toast('GitHub connected.', 'success', 2500);
+          KazmaStream.toast(t('workspace.toast_gh_connected'), 'success', 2500);
           await this.loadGitHubStatus();
         } else if (attempts > 24) { // ~2 min at 5s
           clearInterval(this._ghPoll);
@@ -981,17 +981,17 @@ function workspaceApp() {
     },
 
     async disconnectGitHub() {
-      if (!confirm('Disconnect GitHub? The read-only token will be removed from Kazma.')) return;
+      if (!confirm(t('workspace.disconnect_confirm'))) return;
       try {
         const resp = await fetch('/api/github/oauth/revoke', { method: 'POST' });
         if (resp.ok) {
           this.ghOAuthConnected = false;
           this.ghActiveTab = 'overview';
           this.ghPrs = []; this.ghIssues = []; this.ghCommits = []; this.ghWorkflows = []; this.ghReleases = [];
-          KazmaStream.toast('GitHub disconnected.', 'info', 2000);
+          KazmaStream.toast(t('workspace.toast_gh_disconnected'), 'info', 2000);
         }
       } catch (e) {
-        KazmaStream.toast('Disconnect failed: ' + e.message, 'error', 3000);
+        KazmaStream.toast(t('workspace.toast_disconnect_failed', {msg: e.message}), 'error', 3000);
       }
     },
 
@@ -1085,15 +1085,15 @@ function workspaceApp() {
         const data = await resp.json();
         if (resp.ok && !data.error) {
           this.showRepoPicker = false;
-          KazmaStream.toast('Opened ' + repo.full_name + '.', 'success', 2500);
+          KazmaStream.toast(t('workspace.toast_repo_opened', {name: repo.full_name}), 'success', 2500);
           await this.loadWorkspaces();
           await this.refreshAll();
           await this.loadActivity();
         } else {
-          KazmaStream.toast(data.error || 'Failed to open repo.', 'error', 3000);
+          KazmaStream.toast(data.error || t('workspace.toast_repo_failed'), 'error', 3000);
         }
       } catch (e) {
-        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+        KazmaStream.toast(t('workspace.toast_error', {msg: e.message}), 'error', 3000);
       } finally {
         this.ghCloning = false;
       }
@@ -1129,16 +1129,16 @@ function workspaceApp() {
           body: JSON.stringify({ token: token })
         });
         if (resp.ok) {
-          KazmaStream.toast('GitHub Personal Access Token saved and synced.', 'success', 2500);
+          KazmaStream.toast(t('workspace.toast_pat_saved'), 'success', 2500);
           this.showPatModal = false;
           this.githubPat = '';
           await this.loadGitHubStatus();
         } else {
           const err = await resp.json();
-          KazmaStream.toast('Error saving token: ' + (err.detail || 'Request failed'), 'error', 3000);
+          KazmaStream.toast(t('workspace.toast_token_save_failed', {detail: err.detail || t('workspace.toast_request_failed')}), 'error', 3000);
         }
       } catch (e) {
-        KazmaStream.toast('Error saving token: ' + e.message, 'error', 3000);
+        KazmaStream.toast(t('workspace.toast_token_save_failed', {detail: e.message}), 'error', 3000);
       }
     },
 
@@ -1191,15 +1191,15 @@ function workspaceApp() {
     },
 
     build() {
-      KazmaStream.toast('Build started...', 'info', 3000);
+      KazmaStream.toast(t('workspace.toast_build_started'), 'info', 3000);
       this.showTerminal = true;
       this.termOutput.push('$ make build');
       this.termOutput.push('Build command dispatched.');
     },
 
     deploy() {
-      if (!confirm('Deploy to production?')) return;
-      KazmaStream.toast('Deployment initiated', 'info', 3000);
+      if (!confirm(t('workspace.deploy_confirm'))) return;
+      KazmaStream.toast(t('workspace.toast_deploy_initiated'), 'info', 3000);
       this.termOutput.push('$ make deploy');
       this.termOutput.push('Deploy command dispatched.');
     },
@@ -1229,7 +1229,7 @@ function workspaceApp() {
     },
 
     async addBookmark() {
-      const path = prompt('Enter file or URL to bookmark:');
+      const path = prompt(t('workspace.bookmark_prompt'));
       if (!path) return;
       const name = path.split('/').pop() || path;
       const type = path.startsWith('http') ? 'url' : 'file';
@@ -1241,12 +1241,12 @@ function workspaceApp() {
         });
         if (resp.ok) {
           await this.loadBookmarks();
-          KazmaStream.toast('Bookmarked: ' + name, 'success', 2000);
+          KazmaStream.toast(t('workspace.toast_bookmarked', {name: name}), 'success', 2000);
         } else {
-          KazmaStream.toast('Failed to bookmark', 'error', 3000);
+          KazmaStream.toast(t('workspace.toast_bookmark_failed'), 'error', 3000);
         }
       } catch(e) {
-        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+        KazmaStream.toast(t('workspace.toast_error', {msg: e.message}), 'error', 3000);
       }
     },
 
@@ -1261,10 +1261,10 @@ function workspaceApp() {
         if (resp.ok || resp.status === 204) {
           this.bookmarks = this.bookmarks.filter(function(b) { return b.id !== bm.id; });
         } else {
-          KazmaStream.toast('Failed to remove bookmark', 'error', 3000);
+          KazmaStream.toast(t('workspace.toast_remove_bookmark_failed'), 'error', 3000);
         }
       } catch(e) {
-        KazmaStream.toast('Error: ' + e.message, 'error', 3000);
+        KazmaStream.toast(t('workspace.toast_error', {msg: e.message}), 'error', 3000);
       }
     }
   };

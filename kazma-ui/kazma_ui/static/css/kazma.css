@@ -895,6 +895,7 @@ tbody tr:last-child td {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   width: 100%;
+  max-width: 560px;   /* default — prevents edge-to-edge; overridden by -sm/-lg/-xl */
   max-height: 85vh;
   display: flex;
   flex-direction: column;
