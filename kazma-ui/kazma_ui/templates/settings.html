@@ -51,12 +51,12 @@
                         <div style="flex:1">
                             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                                 <strong x-text="p.display_name || p.name" style="font-size:0.95rem"></strong>
-                                <span class="badge" :class="p.enabled ? 'badge-stdio' : 'badge-sse'" x-text="p.enabled ? 'Enabled' : 'Disabled'"></span>
+                                <span class="badge" :class="p.enabled ? 'badge-stdio' : 'badge-sse'" x-text="p.enabled ? t('common.enabled') : t('common.disabled')"></span>
                                 <span class="badge" :class="{
                                     'badge-stdio': p.health === 'healthy',
                                     'badge-standard': p.health === 'degraded',
                                     'badge-premium': p.health === 'down'
-                                }" x-text="p.health || 'unknown'" x-show="p.health"></span>
+                                }" x-text="p.health || t('settings.unknown')" x-show="p.health"></span>
                             </div>
                             <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" x-text="p.base_url"></div>
                             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">
@@ -68,12 +68,12 @@
                             <div x-show="p.discovered_models && p.discovered_models.length" style="margin-top:6px">
                                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
                                     <div style="font-size:0.7rem;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.06em">
-                                        Discovered (<span x-text="p.discovered_models.length"></span>)
+                                        <span x-text="t('settings.discovered_n', {n: p.discovered_models.length})"></span>
                                         <span x-show="p.selected_models && p.selected_models.length" style="color:var(--text-muted);margin-left:6px">
-                                            (<span x-text="(p.selected_models || []).length"></span> selected)
+                                            <span x-text="t('settings.selected_n', {n: (p.selected_models || []).length})"></span>
                                         </span>
                                     </div>
-                                    <button class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(p.name)">All/None</button>
+                                    <button class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(p.name)" x-text="t('settings.all_none')"></button>
                                 </div>
                                 <div style="display:flex;flex-direction:column;gap:2px;max-height:160px;overflow-y:auto;padding:4px;border:1px solid var(--border);border-radius:4px;background:rgba(0,0,0,0.15)">
                                     <template x-for="m in p.discovered_models" :key="m">
@@ -87,12 +87,12 @@
                                     </template>
                                 </div>
                                 <div style="font-size:0.65rem;color:var(--text-tertiary);margin-top:3px">
-                                    Only checked models appear in the sidebar & chat dropdowns.
+                                    {{ t('settings.checked_models_hint') }}
                                 </div>
                             </div>
                         </div>
                         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                            <label class="toggle" :title="p.enabled ? 'Disable' : 'Enable'">
+                            <label class="toggle" :title="p.enabled ? t('common.disable') : t('common.enable')">
                                 <input type="checkbox" :checked="p.enabled" @change="toggleHubProvider(p.name, $event.target.checked)">
                                 <span class="toggle-slider"></span>
                             </label>
@@ -155,8 +155,8 @@
                         <div style="flex:1">
                             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
                                 <strong x-text="c.name" style="font-size:0.95rem;text-transform:capitalize"></strong>
-                                <span class="badge" :class="c.enabled ? 'badge-stdio' : 'badge-sse'" x-text="c.enabled ? 'Enabled' : 'Disabled'"></span>
-                                <span class="badge" :class="c.status === 'configured' ? 'badge-stdio' : 'badge-premium'" x-text="c.status || 'unknown'"></span>
+                                <span class="badge" :class="c.enabled ? 'badge-stdio' : 'badge-sse'" x-text="c.enabled ? t('common.enabled') : t('common.disabled')"></span>
+                                <span class="badge" :class="c.status === 'configured' ? 'badge-stdio' : 'badge-premium'" x-text="c.status || t('settings.unknown')"></span>
                             </div>
                             <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" x-text="c.endpoint || '—'"></div>
                             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">
@@ -169,7 +169,7 @@
                             </div>
                         </div>
                         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                            <label class="toggle" :title="c.enabled ? 'Disable' : 'Enable'">
+                            <label class="toggle" :title="c.enabled ? t('common.disable') : t('common.enable')">
                                 <input type="checkbox" :checked="c.enabled" @change="toggleHubConnector(c.name, $event.target.checked)">
                                 <span class="toggle-slider"></span>
                             </label>
@@ -412,7 +412,7 @@
             </div>
             <div class="form-group">
                 <label>{{ t('settings.system_prompt') }}</label>
-                <textarea class="form-textarea" x-model="agent.system_prompt" rows="6" placeholder="You are a helpful AI assistant..."></textarea>
+                <textarea class="form-textarea" x-model="agent.system_prompt" rows="6" :placeholder="t('settings.system_prompt_placeholder')"></textarea>
             </div>
             <button class="btn btn-primary" @click="saveAgent()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save_agent') }}'"></button>
         </div>
@@ -709,7 +709,7 @@
 
             <template x-for="(keys, action) in shortcuts" :key="action">
                 <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
-                    <span style="flex:1;font-size:0.9rem" x-text="action.replace(/_/g, ' ')"></span>
+                    <span style="flex:1;font-size:0.9rem" x-text="t('settings.kb_action.' + action) || action.replace(/_/g, ' ')"></span>
                     <input type="text" readonly
                            class="form-input shortcut-capture-input"
                            :value="keys"
@@ -769,7 +769,7 @@
             <h3>{{ t('settings.active_sessions') }}</h3>
             <template x-for="s in sessions" :key="s.id">
                 <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
-                    <span style="flex:1;font-size:0.9rem" x-text="s.platform || 'Web'"></span>
+                    <span style="flex:1;font-size:0.9rem" x-text="s.platform || t('settings.web')"></span>
                     <span style="font-size:0.8rem;color:var(--text-muted)" x-text="s.last_active || ''"></span>
                     <span class="badge badge-stdio" x-show="s.current">{{ t('settings.current') }}</span>
                 </div>

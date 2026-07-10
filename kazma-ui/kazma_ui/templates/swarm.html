@@ -714,7 +714,7 @@
       <button class="modal-close" onclick="KazmaSwarm.closeTaskDetail()">✕</button>
     </div>
     <div class="modal-body" id="task-detail-body" style="max-height:70vh;overflow-y:auto;">
-      Loading…
+      {{ t('common.loading') }}
     </div>
   </div>
 </div>
@@ -727,7 +727,7 @@
       <button class="modal-close" onclick="KazmaSwarm.closeLogs()">✕</button>
     </div>
     <div id="logs-content" class="modal-body" style="max-height:60vh;overflow-y:auto;font-family:var(--font-mono);font-size:0.8rem;">
-      Loading logs…
+      {{ t('swarm.loading_logs') }}
     </div>
   </div>
 </div>
@@ -735,7 +735,7 @@
 <!-- ── Edit Worker Modal ── -->
 <div id="edit-worker-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)KazmaSwarm.closeEditWorker()">
   <div class="modal">
-    <h2>✏️ Edit Worker</h2>
+    <h2>{{ t('swarm.edit_worker_modal') }}</h2>
     <input type="hidden" id="edit-worker-name">
     <div class="form-group">
       <label class="form-label">{{ t('swarm.role') }}</label>

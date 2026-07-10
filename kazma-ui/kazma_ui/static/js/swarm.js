@@ -43,14 +43,28 @@
   function showToast(msg, ok) { if (KS && KS.toast) KS.toast(msg, ok ? 'success' : 'error', 4000); }
   function showError(msg) { if (KS && KS.toast) KS.toast(msg, 'error', 5000); }
 
+  // i18n helper: looks up window.t (injected by base.html) with safe fallback.
+  function t(key, vars) {
+    if (typeof window.t === 'function') return window.t(key, vars || {});
+    // Fallback: return the key if the global translator is unavailable.
+    if (vars) {
+      var out = key;
+      Object.keys(vars).forEach(function(k) {
+        out = out.split('{' + k + '}').join(String(vars[k]));
+      });
+      return out;
+    }
+    return key;
+  }
+
   // ── Pattern hints for worker selection ─────────────────
   var patternHints = {
-    dispatch: 'Select a single worker for dispatch',
-    broadcast: 'All registered workers will be targeted (selection optional)',
-    pipeline: 'Select workers in execution order: first → middle → last',
-    fan_out: 'Select workers for parallel execution',
-    consult: 'Select workers to provide independent opinions',
-    conditional: 'Select a router worker and destination workers'
+    dispatch: t('swarm.hint_dispatch'),
+    broadcast: t('swarm.hint_broadcast'),
+    pipeline: t('swarm.hint_pipeline'),
+    fan_out: t('swarm.hint_fan_out'),
+    consult: t('swarm.hint_consult'),
+    conditional: t('swarm.hint_conditional')
   };
 
   // ══════════════════════════════════════════════════════
@@ -201,7 +215,7 @@
     var sel = $(selectId);
     if (!sel) return;
     if (providerModelMap.length === 0) {
-      sel.innerHTML = '<option value="">— no models available —</option>';
+      sel.innerHTML = '<option value="">' + esc(t('swarm.no_models')) + '</option>';
       return;
     }
     var html = '';
@@ -326,8 +340,8 @@
     var stopBtn = $('swarm-stop');
     if (statusEl) {
       statusEl.innerHTML = started
-        ? '<span style="color:var(--success);">● Swarm running — ' + count + ' worker(s) active</span>'
-        : '<span style="color:var(--text-muted);">● Swarm stopped — ' + count + ' worker(s) registered</span>';
+        ? '<span style="color:var(--success);">' + esc(t('swarm.status_running', {count: count})) + '</span>'
+        : '<span style="color:var(--text-muted);">' + esc(t('swarm.status_stopped', {count: count})) + '</span>';
     }
     if (startBtn) startBtn.disabled = started;
     if (stopBtn) stopBtn.disabled = !started;
@@ -335,7 +349,7 @@
 
   function updateMetrics(data) {
     setText('metric-worker-count', String(data.count || 0));
-    setText('metric-swarm-status', data.started ? 'Running' : 'Stopped');
+    setText('metric-swarm-status', data.started ? t('swarm.running') : t('swarm.stopped'));
     var sc = $('metric-swarm-status');
     if (sc) sc.style.color = data.started ? 'var(--success)' : 'var(--text-muted)';
     var busy = workers.filter(function(w) { return w.status === 'busy'; }).length;
@@ -369,7 +383,7 @@
     badge.className = 'badge ' + (cb.state === 'open' ? 'badge-danger' : 'badge-warning');
     badge.style.fontSize = '0.65rem';
     badge.textContent = '⚡ ' + cb.state;
-    badge.title = 'Failures: ' + (cb.consecutive_failures || 0) + '/' + (cb.failure_threshold || 5);
+    badge.title = t('swarm.circuit_failures', {n: (cb.consecutive_failures || 0), threshold: (cb.failure_threshold || 5)});
   }
 
   function updateBreakerBadges(workerList) {
@@ -414,11 +428,11 @@
 
     // Client-side validation: empty prompt blocked (VAL-ORCH-044)
     if (!task.trim()) {
-      showError('Task prompt is required');
+      showError(t('swarm.err_prompt_required'));
       return;
     }
     if (!workerList.length && pattern !== 'broadcast') {
-      showError('Select at least one worker');
+      showError(t('swarm.err_select_worker'));
       return;
     }
 
@@ -448,7 +462,7 @@
         try {
           payload.metadata = { routes: JSON.parse(routesStr) };
         } catch (e) {
-          showError('Invalid routes JSON');
+          showError(t('swarm.err_invalid_routes'));
           return;
         }
       }
@@ -456,7 +470,7 @@
 
     // Disable dispatch button to prevent double-submit
     var dispatchBtn = $('btn-dispatch');
-    if (dispatchBtn) { dispatchBtn.disabled = true; dispatchBtn.textContent = 'Dispatching...'; }
+    if (dispatchBtn) { dispatchBtn.disabled = true; dispatchBtn.textContent = t('swarm.dispatching'); }
 
     // Show a pending card immediately (without SSE) so the user sees activity.
     var pendingTaskId = 'pending-' + Date.now();
@@ -481,7 +495,7 @@
       .then(function(data) {
         if (data.status === 'ok' || data.status === 'warning') {
           var dispatchedCount = (data.dispatched || []).length;
-          showToast('Task dispatched to ' + dispatchedCount + ' worker(s)', true);
+          showToast(t('swarm.task_dispatched_to', {count: dispatchedCount}), true);
 
           // Connect SSE for live updates using the real task id.
           if (data.task_id) {
@@ -500,7 +514,7 @@
         } else {
           // Dispatch failed: remove the optimistic card and notify the user.
           removeActiveTaskCard(pendingTaskId);
-          showError(data.message || 'Dispatch failed');
+          showError(data.message || t('swarm.dispatch_failed'));
         }
         refreshStatus();
       })
@@ -510,7 +524,7 @@
       })
       .finally(function() {
         var btn = $('btn-dispatch');
-        if (btn) { btn.disabled = false; btn.textContent = '⚡ Dispatch Task'; }
+        if (btn) { btn.disabled = false; btn.textContent = t('swarm.dispatch_btn'); }
       });
   }
 
@@ -577,7 +591,7 @@
       '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
         '<div style="display:flex;align-items:center;gap:8px;">' +
           '<span style="font-weight:600;font-size:0.9rem;">' + esc(taskId.slice(0, 16)) + '…</span>' +
-          '<span class="badge badge-warning" id="status-' + taskId + '">running</span>' +
+          '<span class="badge badge-warning" id="status-' + taskId + '">' + esc(t('swarm.running_lower')) + '</span>' +
         '</div>' +
         '<span style="font-size:0.75rem;color:var(--text-muted);" id="timer-' + taskId + '">0s</span>' +
       '</div>' +
@@ -678,17 +692,17 @@
     activeTasks[taskId] = { sse: evtSource, events: [], timer: timerInterval };
 
     evtSource.addEventListener('task_started', function(e) {
-      addEventLine(taskId, '🚀', 'Task started');
+      addEventLine(taskId, '🚀', t('swarm.task_started'));
     });
 
     evtSource.addEventListener('worker_started', function(e) {
       var data = parseSseData(e); if (!data) return;
-      addEventLine(taskId, '⚙️', 'Worker ' + esc(data.worker) + ' started (step ' + (Number(data.step) || 0) + ')');
+      addEventLine(taskId, '⚙️', t('swarm.worker_started', {worker: esc(data.worker), step: (Number(data.step) || 0)}));
     });
 
     evtSource.addEventListener('worker_progress', function(e) {
       var data = parseSseData(e); if (!data) return;
-      addEventLine(taskId, '📝', esc(data.worker) + ': ' + (Number(data.tokens) || 0) + ' tokens');
+      addEventLine(taskId, '📝', esc(data.worker) + ': ' + t('swarm.tokens_inline', {count: (Number(data.tokens) || 0)}));
     });
 
     evtSource.addEventListener('worker_completed', function(e) {
@@ -704,11 +718,11 @@
       if (cpEl) {
         cpEl.style.display = 'block';
         cpEl.innerHTML =
-          '<div style="font-weight:600;margin-bottom:8px;color:var(--warning);">⏸ HITL Checkpoint — Step ' + (Number(data.step) || 0) + '</div>' +
-          '<div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:8px;max-height:100px;overflow-y:auto;">' + esc(data.output_preview || 'No preview') + '</div>' +
+          '<div style="font-weight:600;margin-bottom:8px;color:var(--warning);">' + esc(t('swarm.checkpoint_step', {step: (Number(data.step) || 0)})) + '</div>' +
+          '<div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:8px;max-height:100px;overflow-y:auto;">' + esc(data.output_preview || t('swarm.no_preview')) + '</div>' +
           '<div style="display:flex;gap:8px;">' +
-            '<button class="btn btn-primary btn-sm" data-action="approve" data-task-id="' + esc(taskId) + '">✓ Approve</button>' +
-            '<button class="btn btn-danger btn-sm" data-action="reject" data-task-id="' + esc(taskId) + '">✕ Reject</button>' +
+            '<button class="btn btn-primary btn-sm" data-action="approve" data-task-id="' + esc(taskId) + '">' + esc(t('swarm.approve')) + '</button>' +
+            '<button class="btn btn-danger btn-sm" data-action="reject" data-task-id="' + esc(taskId) + '">' + esc(t('swarm.reject')) + '</button>' +
           '</div>';
       }
     });
@@ -728,10 +742,10 @@
       clearInterval(timerInterval);
       var statusEl = $('status-' + taskId);
       if (statusEl) {
-        statusEl.textContent = data.result ? data.result.status : 'completed';
+        statusEl.textContent = data.result ? data.result.status : t('swarm.completed');
         statusEl.className = 'badge badge-' + ((data.result && data.result.status === 'success') ? 'success' : 'danger');
       }
-      addEventLine(taskId, '🏁', 'Task completed');
+      addEventLine(taskId, '🏁', t('swarm.task_completed'));
       evtSource.close();
       // Keep the completed card visible for a few seconds so the user can see
       // it finished, then refresh the dashboard. The activeTasks entry is
@@ -768,7 +782,7 @@
       clearInterval(timerInterval);
       delete activeTasks[taskId];
       var statusEl = $('status-' + taskId);
-      if (statusEl) statusEl.textContent = 'Disconnected';
+      if (statusEl) statusEl.textContent = t('common.error');
     };
   }
 
@@ -790,22 +804,22 @@
     fetch('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/approve', { method: 'POST' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        showToast('Checkpoint approved, pipeline resuming', true);
+        showToast(t('swarm.checkpoint_approved'), true);
         var cpEl = $('checkpoint-' + taskId);
         if (cpEl) cpEl.style.display = 'none';
       })
-      .catch(function(err) { showError('Approve failed: ' + err.message); });
+      .catch(function(err) { showError(t('swarm.approve_failed', {msg: err.message})); });
   }
 
   function rejectCheckpoint(taskId) {
     fetch('/api/swarm/tasks/' + encodeURIComponent(taskId) + '/reject', { method: 'POST' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        showToast('Checkpoint rejected, pipeline aborted', false);
+        showToast(t('swarm.checkpoint_rejected'), false);
         var cpEl = $('checkpoint-' + taskId);
         if (cpEl) cpEl.style.display = 'none';
       })
-      .catch(function(err) { showError('Reject failed: ' + err.message); });
+      .catch(function(err) { showError(t('swarm.reject_failed', {msg: err.message})); });
   }
 
   function cancelTask(taskId) {
@@ -813,14 +827,14 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          showToast('Task cancelled', true);
+          showToast(t('swarm.task_cancelled'), true);
           closeTaskDetail();
           loadActiveTasks();
         } else {
-          showError(data.message || 'Failed to cancel task');
+          showError(data.message || t('swarm.cancel_failed'));
         }
       })
-      .catch(function(err) { showError('Cancel failed: ' + err.message); });
+      .catch(function(err) { showError(t('swarm.cancel_failed', {msg: err.message})); });
   }
 
   function retryTask(taskId) {
@@ -828,14 +842,14 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          showToast('Task retried as ' + data.new_task_id, true);
+          showToast(t('swarm.task_retried', {id: data.new_task_id}), true);
           closeTaskDetail();
           loadActiveTasks();
         } else {
-          showError(data.message || 'Failed to retry task');
+          showError(data.message || t('swarm.retry_failed'));
         }
       })
-      .catch(function(err) { showError('Retry failed: ' + err.message); });
+      .catch(function(err) { showError(t('swarm.retry_failed_msg', {msg: err.message})); });
   }
 
   // ══════════════════════════════════════════════════════
@@ -849,14 +863,15 @@
     if (!listEl) return;
     var card = document.createElement('div');
     card.className = 'task-result-card';
+    card.setAttribute('data-pending', '1');
     card.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--border-subtle);border-radius:6px;background:rgba(255,255,255,0.02);';
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
         '<span style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(workerNames.join(', ')) + '</span>' +
-        '<span class="badge badge-warning">● pending</span>' +
+        '<span class="badge badge-warning">● ' + esc(t('swarm.pending')) + '</span>' +
       '</div>' +
       '<div style="font-size:0.8rem;color:var(--text-muted);">' + esc(task.slice(0, 120)) + '</div>' +
-      '<div class="task-result-output" style="font-size:0.75rem;color:var(--text-tertiary);margin-top:4px;">Waiting…</div>';
+      '<div class="task-result-output" style="font-size:0.75rem;color:var(--text-tertiary);margin-top:4px;">' + esc(t('swarm.waiting')) + '</div>';
     listEl.insertBefore(card, listEl.firstChild);
   }
 
@@ -866,8 +881,8 @@
     var listEl = $('task-results-list');
     if (!listEl) return;
     // Remove pending card
-    var pendingCard = listEl.querySelector('.task-result-card');
-    if (pendingCard && pendingCard.textContent.indexOf('pending') >= 0) pendingCard.remove();
+    var pendingCard = listEl.querySelector('.task-result-card[data-pending]');
+    if (pendingCard) pendingCard.remove();
 
     var results = data.results || [];
     results.forEach(function(r) {
@@ -892,7 +907,7 @@
       synthCard.className = 'task-result-card';
       synthCard.style.cssText = 'padding:12px;margin-bottom:8px;border:1px solid var(--accent-subtle);border-radius:6px;background:var(--accent-subtle);';
       synthCard.innerHTML =
-        '<div style="font-weight:600;font-size:0.85rem;color:var(--accent-light);margin-bottom:6px;">🧠 Synthesized Answer</div>' +
+        '<div style="font-weight:600;font-size:0.85rem;color:var(--accent-light);margin-bottom:6px;">' + esc(t('swarm.synthesized_answer')) + '</div>' +
         '<div style="font-size:0.8rem;color:var(--text-secondary);white-space:pre-wrap;">' + esc(data.synthesized_output) + '</div>';
       listEl.insertBefore(synthCard, listEl.firstChild);
     }
@@ -954,7 +969,7 @@
       var pattern = r.type || r._pattern || 'dispatch';
       var status = r.status || 'unknown';
       var statusColor = status === 'success' ? 'var(--success)' : status === 'failed' ? 'var(--danger)' : 'var(--warning)';
-      var patternLabel = {dispatch:'🎯 Dispatch',broadcast:'📢 Broadcast',pipeline:'🔗 Pipeline',fan_out:'🌀 Fan-Out',consult:'💬 Consult',conditional:'🔀 Conditional'}[pattern] || pattern;
+      var patternLabel = {dispatch:t('swarm.pattern.dispatch_short'),broadcast:t('swarm.pattern.broadcast_short'),pipeline:t('swarm.pattern.pipeline_short'),fan_out:t('swarm.pattern.fan_out_short'),consult:t('swarm.pattern.consult_short'),conditional:t('swarm.pattern.conditional_short')}[pattern] || pattern;
 
       var html = '<div class="card result-card" data-pattern="' + esc(pattern) + '" data-task-id="' + esc(r.task_id || r.id) + '" style="margin-bottom:12px;cursor:pointer;">';
       html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
@@ -1007,7 +1022,7 @@
         }
       } else if (pattern === 'conditional' && r.metadata && r.metadata.route_taken) {
         // VAL-ORCH-034: Conditional routing decision
-        html += '<div style="font-size:0.8rem;color:var(--info);margin-bottom:4px;">🔀 Routed to: <strong>' + esc(r.metadata.route_taken) + '</strong></div>';
+        html += '<div style="font-size:0.8rem;color:var(--info);margin-bottom:4px;">' + esc(t('swarm.routed_to')) + '<strong>' + esc(r.metadata.route_taken) + '</strong></div>';
       }
 
       // Aggregated output
@@ -1035,8 +1050,8 @@
     var toolsStr = ($('add-tools') || {}).value || '';
     var systemPrompt = ($('add-system-prompt') || {}).value || '';
 
-    if (!name.trim()) { showError('Worker name is required'); return; }
-    if (!model) { showError('Please select a model'); return; }
+    if (!name.trim()) { showError(t('swarm.err_worker_name_required')); return; }
+    if (!model) { showError(t('swarm.err_select_model')); return; }
 
     var provider = providerForModel(model);
     var expertise = expertiseStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
@@ -1063,11 +1078,11 @@
       body: JSON.stringify(payload),
     })
       .then(function(r) {
-        if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Failed'); });
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || t('common.error')); });
         return r.json();
       })
       .then(function() {
-        showToast('Worker "' + name + '" added', true);
+        showToast(t('swarm.toast_worker_added', {name: name}), true);
         // Clear form fields
         ['add-name', 'add-expertise', 'add-tools', 'add-system-prompt'].forEach(function(id) {
           var el = $(id); if (el) el.value = '';
@@ -1081,14 +1096,14 @@
   }
 
   function removeWorker(name) {
-    if (!confirm('Remove worker "' + name + '" from the swarm?')) return;
+    if (!confirm(t('swarm.remove_worker_confirm', {name: name}))) return;
     fetch('/api/swarm/workers/' + encodeURIComponent(name), { method: 'DELETE' })
       .then(function(r) {
-        if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Failed'); });
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || t('common.error')); });
         return r.json();
       })
       .then(function() {
-        showToast('Worker "' + name + '" removed', true);
+        showToast(t('swarm.toast_worker_removed', {name: name}), true);
         var card = $('worker-card-' + name);
         if (card) card.remove();
         refreshStatus();
@@ -1100,20 +1115,20 @@
     fetch('/api/swarm/workers/' + encodeURIComponent(name) + '/start', { method: 'POST' })
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        if (d.status === 'ok') { showToast('Worker "' + name + '" started', true); refreshStatus(); }
-        else showError(d.message || 'Failed to start worker');
+        if (d.status === 'ok') { showToast(t('swarm.toast_worker_started', {name: name}), true); refreshStatus(); }
+        else showError(d.message || t('swarm.start_worker_failed'));
       })
-      .catch(function() { showError('Failed to start worker'); });
+      .catch(function() { showError(t('swarm.start_worker_failed')); });
   }
 
   function stopWorker(name) {
     fetch('/api/swarm/workers/' + encodeURIComponent(name) + '/stop', { method: 'POST' })
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        if (d.status === 'ok') { showToast('Worker "' + name + '" stopped', true); refreshStatus(); }
-        else showError(d.message || 'Failed to stop worker');
+        if (d.status === 'ok') { showToast(t('swarm.toast_worker_stopped', {name: name}), true); refreshStatus(); }
+        else showError(d.message || t('swarm.stop_worker_failed'));
       })
-      .catch(function() { showError('Failed to stop worker'); });
+      .catch(function() { showError(t('swarm.stop_worker_failed')); });
   }
 
   function editWorker(name) {
@@ -1149,8 +1164,8 @@
     var role = ($('edit-worker-role') || {}).value || '';
     var modelSel = $('edit-worker-model');
     var model = modelSel ? modelSel.value : '';
-    if (!name) { showError('Worker name is missing'); return; }
-    if (!model) { showError('Please select a model'); return; }
+    if (!name) { showError(t('swarm.err_worker_name_missing')); return; }
+    if (!model) { showError(t('swarm.err_select_model')); return; }
     var provider = providerForModel(model);
 
     var payload = { model: model, provider: provider };
@@ -1162,11 +1177,11 @@
       body: JSON.stringify(payload),
     })
       .then(function(r) {
-        if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || 'Failed'); });
+        if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || t('common.error')); });
         return r.json();
       })
       .then(function() {
-        showToast('Worker "' + name + '" updated', true);
+        showToast(t('swarm.toast_worker_updated', {name: name}), true);
         closeEditWorker();
         refreshStatus();
       })
@@ -1254,8 +1269,8 @@
 
   function updateHistoryPagination() {
     var maxPage = Math.ceil(historyTotal / historyPageSize) || 1;
-    setText('history-count', historyTotal + ' tasks');
-    setText('history-page-info', 'Page ' + historyPage + ' of ' + maxPage);
+    setText('history-count', t('swarm.tasks_count_inline', {count: historyTotal}));
+    setText('history-page-info', t('swarm.page_x_of_y', {x: historyPage, y: maxPage}));
     var prevBtn = $('history-prev'); if (prevBtn) prevBtn.disabled = historyPage <= 1;
     var nextBtn = $('history-next'); if (nextBtn) nextBtn.disabled = historyPage >= maxPage;
   }
@@ -1264,7 +1279,7 @@
     var tbody = $('history-table-body');
     if (!tbody) return;
     if (!tasks.length) {
-      tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted);">No tasks found</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-muted);">' + esc(t('swarm.no_tasks_found')) + '</td></tr>';
       return;
     }
 
@@ -1299,19 +1314,19 @@
     var bodyEl = $('task-detail-body');
     if (!modal || !bodyEl) return;
 
-    if (titleEl) titleEl.textContent = 'Task: ' + taskId.slice(0, 20) + '…';
-    bodyEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">Loading…</div>';
+    if (titleEl) titleEl.textContent = t('swarm.task_title_prefix') + taskId.slice(0, 20) + '…';
+    bodyEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">' + esc(t('common.loading')) + '</div>';
     modal.style.display = 'flex';
 
     fetch('/api/swarm/tasks/' + encodeURIComponent(taskId))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         var task = data.task;
-        if (!task) { bodyEl.innerHTML = '<div style="padding:24px;color:var(--text-muted);">Task not found</div>'; return; }
+        if (!task) { bodyEl.innerHTML = '<div style="padding:24px;color:var(--text-muted);">' + esc(t('swarm.task_not_found')) + '</div>'; return; }
         bodyEl.innerHTML = renderTaskDetailHTML(task);
       })
       .catch(function(err) {
-        bodyEl.innerHTML = '<div style="padding:24px;color:var(--danger);">Error loading task: ' + esc(err.message) + '</div>';
+        bodyEl.innerHTML = '<div style="padding:24px;color:var(--danger);">' + esc(t('swarm.error_loading_task') + err.message) + '</div>';
       });
   }
 
@@ -1325,29 +1340,29 @@
     var html = '';
     // Header info
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">';
-    html += '<div><strong>Type:</strong> ' + esc(task.type) + '</div>';
-    html += '<div><strong>Status:</strong> <span class="badge">' + esc(task.status) + '</span></div>';
-    html += '<div><strong>Workers:</strong> ' + esc((task.workers || []).join(', ')) + '</div>';
-    html += '<div><strong>Duration:</strong> ' + (task.duration_seconds ? task.duration_seconds.toFixed(2) + 's' : '—') + '</div>';
-    html += '<div style="grid-column:1/-1;"><strong>Prompt:</strong> ' + esc(task.prompt) + '</div>';
-    if (task.context) html += '<div style="grid-column:1/-1;"><strong>Context:</strong> ' + esc(task.context) + '</div>';
+    html += '<div><strong>' + esc(t('swarm.detail_type')) + '</strong> ' + esc(task.type) + '</div>';
+    html += '<div><strong>' + esc(t('swarm.detail_status')) + '</strong> <span class="badge">' + esc(task.status) + '</span></div>';
+    html += '<div><strong>' + esc(t('swarm.detail_workers')) + '</strong> ' + esc((task.workers || []).join(', ')) + '</div>';
+    html += '<div><strong>' + esc(t('swarm.detail_duration')) + '</strong> ' + (task.duration_seconds ? task.duration_seconds.toFixed(2) + 's' : '—') + '</div>';
+    html += '<div style="grid-column:1/-1;"><strong>' + esc(t('swarm.detail_prompt')) + '</strong> ' + esc(task.prompt) + '</div>';
+    if (task.context) html += '<div style="grid-column:1/-1;"><strong>' + esc(t('swarm.detail_context')) + '</strong> ' + esc(task.context) + '</div>';
     html += '</div>';
 
     // Unified Routing Diagnostics UI
     var diagnostics = task.metadata && task.metadata.routing_diagnostics;
     if (diagnostics) {
-      html += '<h4 style="margin-top:16px;margin-bottom:8px;display:flex;align-items:center;gap:6px;">🎯 Unified Routing Diagnostics</h4>';
+      html += '<h4 style="margin-top:16px;margin-bottom:8px;display:flex;align-items:center;gap:6px;">' + esc(t('swarm.routing_diagnostics')) + '</h4>';
       html += '<div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:var(--radius);padding:12px;margin-bottom:16px;">';
-      
+
       html += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
       var strategy = diagnostics.strategy_used || 'keyword';
       var stratColor = strategy === 'semantic' ? 'var(--accent)' : 'var(--warning)';
-      html += '<span class="badge" style="background:' + stratColor + '22;color:' + stratColor + ';border:1px solid ' + stratColor + '44;text-transform:capitalize;font-weight:600;padding:4px 8px;font-size:0.75rem;">Strategy: ' + esc(strategy) + '</span>';
-      
+      html += '<span class="badge" style="background:' + stratColor + '22;color:' + stratColor + ';border:1px solid ' + stratColor + '44;text-transform:capitalize;font-weight:600;padding:4px 8px;font-size:0.75rem;">' + esc(t('swarm.strategy')) + esc(strategy) + '</span>';
+
       if (diagnostics.dialect_detected) {
-        var dialectName = diagnostics.dialect_detected === 'msa' ? 'Modern Standard Arabic' : 'Khaleeji Dialect';
+        var dialectName = diagnostics.dialect_detected === 'msa' ? t('swarm.dialect_msa') : t('swarm.dialect_khaleeji');
         var dialectConf = diagnostics.dialect_confidence ? (diagnostics.dialect_confidence * 100).toFixed(0) + '%' : '100%';
-        html += '<span class="badge" style="background:var(--success)22;color:var(--success);border:1px solid var(--success)44;font-weight:600;padding:4px 8px;font-size:0.75rem;">🗣️ Arabic Dialect: ' + esc(dialectName) + ' (' + dialectConf + ')</span>';
+        html += '<span class="badge" style="background:var(--success)22;color:var(--success);border:1px solid var(--success)44;font-weight:600;padding:4px 8px;font-size:0.75rem;">' + esc(t('swarm.arabic_dialect')) + esc(dialectName) + ' (' + dialectConf + ')</span>';
       }
       html += '</div>';
 
@@ -1355,15 +1370,15 @@
       html += '<table style="width:100%;border-collapse:collapse;font-size:0.8rem;text-align:left;">';
       html += '<thead>';
       html += '<tr style="border-bottom:2px solid var(--border);">';
-      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Worker</th>';
-      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Routed</th>';
+      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">' + esc(t('swarm.diag_worker')) + '</th>';
+      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">' + esc(t('swarm.diag_routed')) + '</th>';
       if (strategy === 'semantic') {
-        html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Semantic Similarity</th>';
+        html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">' + esc(t('swarm.diag_similarity')) + '</th>';
       } else {
-        html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Keyword Overlap</th>';
+        html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">' + esc(t('swarm.diag_overlap')) + '</th>';
       }
-      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Dialect Boost</th>';
-      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">Final Score</th>';
+      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">' + esc(t('swarm.diag_boost')) + '</th>';
+      html += '<th style="padding:6px 8px;color:var(--text-secondary);font-weight:600;">' + esc(t('swarm.diag_score')) + '</th>';
       html += '</tr>';
       html += '</thead>';
       html += '<tbody>';
@@ -1382,7 +1397,7 @@
         html += '<td style="padding:8px;font-weight:500;">' + esc(wName) + '</td>';
         
         if (isRouted) {
-          html += '<td style="padding:8px;"><span class="badge badge-accent" style="font-weight:600;font-size:0.7rem;padding:2px 6px;">🎯 YES</span></td>';
+          html += '<td style="padding:8px;"><span class="badge badge-accent" style="font-weight:600;font-size:0.7rem;padding:2px 6px;">' + esc(t('swarm.diag_yes')) + '</span></td>';
         } else {
           html += '<td style="padding:8px;color:var(--text-muted);font-size:0.75rem;">—</td>';
         }
@@ -1400,12 +1415,12 @@
           html += '</td>';
         } else {
           var kwOverlap = scoreInfo.keyword_overlap || 0;
-          html += '<td style="padding:8px;"><span class="badge badge-secondary" style="font-family:var(--font-mono);font-size:0.75rem;padding:2px 6px;">' + kwOverlap + ' tokens</span></td>';
+          html += '<td style="padding:8px;"><span class="badge badge-secondary" style="font-family:var(--font-mono);font-size:0.75rem;padding:2px 6px;">' + kwOverlap + ' ' + esc(t('swarm.tokens_word')) + '</span></td>';
         }
 
         var dBoost = scoreInfo.dialect_boost || 0;
         if (dBoost > 0) {
-          html += '<td style="padding:8px;"><span class="badge badge-success" style="font-size:0.7rem;font-weight:600;padding:2px 6px;">+' + dBoost + ' Boost</span></td>';
+          html += '<td style="padding:8px;"><span class="badge badge-success" style="font-size:0.7rem;font-weight:600;padding:2px 6px;">' + esc(t('swarm.boost_label', {boost: dBoost})) + '</span></td>';
         } else {
           html += '<td style="padding:8px;color:var(--text-muted);font-size:0.75rem;">0</td>';
         }
@@ -1424,20 +1439,20 @@
     // Worker Results
     var results = task.worker_results || [];
     if (results.length) {
-      html += '<h4 style="margin-bottom:8px;">Worker Results</h4>';
+      html += '<h4 style="margin-bottom:8px;">' + esc(t('swarm.worker_results')) + '</h4>';
       html += '<div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">';
       results.forEach(function(wr, idx) {
         var statusColor = wr.status === 'success' ? 'var(--success)' : 'var(--danger)';
         html += '<div style="padding:10px;border:1px solid var(--border-subtle);border-radius:var(--radius);">';
         html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">';
-        html += '<span style="font-weight:500;">Step ' + (idx + 1) + ': ' + esc(wr.worker) + '</span>';
+        html += '<span style="font-weight:500;">' + esc(t('swarm.step_n', {n: (idx + 1)})) + ': ' + esc(wr.worker) + '</span>';
         html += '<span style="color:' + statusColor + ';">● ' + esc(wr.status) + '</span>';
         html += '</div>';
         if (wr.output) html += '<div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.15);padding:8px;border-radius:4px;">' + esc(wr.output) + '</div>';
         if (wr.error) html += '<div style="color:var(--danger);font-size:0.8rem;margin-top:4px;">⚠ ' + esc(wr.error) + '</div>';
         // Handoffs
         if (wr.handoffs && wr.handoffs.length) {
-          html += '<div style="margin-top:6px;font-size:0.8rem;color:var(--info);">Handoff: ' + wr.handoffs.map(function(h) { return esc(h.from_worker) + ' → ' + esc(h.to_worker); }).join(', ') + '</div>';
+          html += '<div style="margin-top:6px;font-size:0.8rem;color:var(--info);">' + esc(t('swarm.handoff')) + wr.handoffs.map(function(h) { return esc(h.from_worker) + ' → ' + esc(h.to_worker); }).join(', ') + '</div>';
         }
         html += '</div>';
       });
@@ -1447,7 +1462,7 @@
     // Consult opinions (VAL-ORCH-024, VAL-ORCH-025)
     var opinions = task.individual_opinions || [];
     if (opinions.length) {
-      html += '<h4 style="margin-bottom:8px;">💬 Individual Opinions (Side-by-Side)</h4>';
+      html += '<h4 style="margin-bottom:8px;">' + esc(t('swarm.individual_opinions')) + '</h4>';
       html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;margin-bottom:16px;">';
       opinions.forEach(function(op) {
         html += '<div style="padding:10px;border:1px solid var(--border-subtle);border-radius:var(--radius);">';
@@ -1460,29 +1475,29 @@
 
     // Synthesized output
     if (task.synthesized_output) {
-      html += '<h4 style="margin-bottom:8px;">🧠 Synthesized Answer</h4>';
+      html += '<h4 style="margin-bottom:8px;">' + esc(t('swarm.synthesized_answer')) + '</h4>';
       html += '<div style="padding:12px;background:var(--accent-subtle);border:1px solid var(--accent-subtle);border-radius:var(--radius);color:var(--accent-light);white-space:pre-wrap;">' + esc(task.synthesized_output) + '</div>';
     }
 
     // Aggregated output
     if (task.aggregated_output && !task.synthesized_output) {
-      html += '<h4 style="margin-bottom:8px;">📊 Aggregated Output</h4>';
+      html += '<h4 style="margin-bottom:8px;">' + esc(t('swarm.aggregated_output')) + '</h4>';
       html += '<div style="padding:12px;background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:var(--radius);white-space:pre-wrap;">' + esc(task.aggregated_output) + '</div>';
     }
 
     // Metadata
     if (task.metadata && Object.keys(task.metadata).length) {
-      html += '<h4 style="margin-top:16px;margin-bottom:8px;">📋 Metadata</h4>';
+      html += '<h4 style="margin-top:16px;margin-bottom:8px;">' + esc(t('swarm.metadata')) + '</h4>';
       html += '<pre style="font-family:var(--font-mono);font-size:0.75rem;padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;overflow-x:auto;">' + esc(JSON.stringify(task.metadata, null, 2)) + '</pre>';
     }
 
     // Action buttons (cancel for running, retry for failed/timeout/cancelled)
     html += '<div style="display:flex;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border-subtle);">';
     if (task.status === 'running' || task.status === 'pending' || task.status === 'paused') {
-      html += '<button class="btn btn-danger" data-action="cancel" data-task-id="' + esc(task.id || task.task_id || '') + '" onclick="event.stopPropagation()">🚫 Cancel Task</button>';
+      html += '<button class="btn btn-danger" data-action="cancel" data-task-id="' + esc(task.id || task.task_id || '') + '" onclick="event.stopPropagation()">' + esc(t('swarm.cancel_task')) + '</button>';
     }
     if (task.status === 'failed' || task.status === 'timeout' || task.status === 'cancelled' || task.status === 'error') {
-      html += '<button class="btn btn-primary" data-action="retry" data-task-id="' + esc(task.id || task.task_id || '') + '" onclick="event.stopPropagation()">🔄 Retry Task</button>';
+      html += '<button class="btn btn-primary" data-action="retry" data-task-id="' + esc(task.id || task.task_id || '') + '" onclick="event.stopPropagation()">' + esc(t('swarm.retry_task')) + '</button>';
     }
     html += '</div>';
 
@@ -1498,8 +1513,8 @@
     var titleEl = $('logs-worker-name');
     var contentEl = $('logs-content');
     if (!modal) return;
-    if (titleEl) titleEl.textContent = 'Logs: ' + workerName;
-    if (contentEl) contentEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Loading…</div>';
+    if (titleEl) titleEl.textContent = t('swarm.logs_title', {name: workerName});
+    if (contentEl) contentEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">' + esc(t('swarm.loading_logs')) + '</div>';
     modal.style.display = 'flex';
 
     fetch('/api/swarm/workers/' + encodeURIComponent(workerName) + '/logs')
@@ -1509,10 +1524,10 @@
         var lines = data.logs || [];
         contentEl.innerHTML = lines.length
           ? lines.map(function(l) { return '<div style="font-family:var(--font-mono);font-size:0.75rem;padding:2px 0;border-bottom:1px solid var(--border-subtle);">' + esc(String(l)) + '</div>'; }).join('')
-          : '<div style="text-align:center;padding:40px;color:var(--text-muted);">No logs yet</div>';
+          : '<div style="text-align:center;padding:40px;color:var(--text-muted);">' + esc(t('swarm.no_logs_yet')) + '</div>';
       })
       .catch(function() {
-        if (contentEl) contentEl.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);">Failed to load logs</div>';
+        if (contentEl) contentEl.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-muted);">' + esc(t('swarm.failed_to_load_logs')) + '</div>';
       });
   }
 
@@ -1530,7 +1545,7 @@
     fetch('/api/swarm/' + action, { method: 'POST' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        showToast(data.message || 'Done', data.status === 'ok' || data.status === 'warning');
+        showToast(data.message || t('swarm.done'), data.status === 'ok' || data.status === 'warning');
         refreshStatus();
       })
       .catch(function(err) { showError(err.message); });
@@ -1601,7 +1616,7 @@
             // Update status text
             var statusEl = existing.querySelector('.active-task-status');
             if (statusEl) {
-              statusEl.textContent = t.status || 'running';
+              statusEl.textContent = t.status || t('swarm.running_lower');
               statusEl.className = 'active-task-status status-' + (t.status || 'running');
             }
           } else {
@@ -1609,19 +1624,19 @@
             card.className = 'card';
             card.id = cardId;
             card.style.cssText = 'margin-bottom:12px;padding:12px;border-left:3px solid var(--warning);';
-            var workers = (t.workers || []).join(', ') || 'all';
+            var workers = (t.workers || []).join(', ') || t('swarm.all_workers');
             var statusColor = t.status === 'paused' ? 'var(--info)' : 'var(--warning)';
             card.innerHTML =
               '<div style="display:flex;justify-content:space-between;align-items:center;">' +
                 '<div>' +
                   '<strong>' + esc((t.prompt || t.id).substring(0, 60)) + '</strong>' +
                   '<div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">' +
-                    'Workers: ' + esc(workers) + ' · Type: ' + esc(t.type || 'dispatch') +
+                    esc(t('swarm.workers_label_inline')) + esc(workers) + esc(t('swarm.type_inline')) + esc(t.type || 'dispatch') +
                   '</div>' +
                 '</div>' +
                 '<span class="active-task-status status-' + esc(t.status || 'running') + '" ' +
                   'style="padding:2px 8px;border-radius:4px;background:' + statusColor + ';color:#fff;font-size:0.75rem;">' +
-                  esc(t.status || 'running') +
+                  esc(t.status || t('swarm.running_lower')) +
                 '</span>' +
               '</div>';
             container.appendChild(card);
@@ -1650,11 +1665,11 @@
         if (bt) bt.value = t.bot_token || '';
         if (st) {
           if (t.chat_id != null && t.enabled) {
-            var mode = t.bot_token ? ' (swarm bot)' : ' (gateway)';
-            st.textContent = '● Active → ' + t.chat_id + mode;
+            var mode = t.bot_token ? window.t('swarm.routing_swarm_bot') : window.t('swarm.routing_gateway');
+            st.textContent = window.t('swarm.routing_active', {id: t.chat_id, mode: mode});
             st.style.color = 'var(--success)';
           } else if (t.chat_id != null) {
-            st.textContent = '● Disabled';
+            st.textContent = window.t('swarm.routing_disabled');
             st.style.color = 'var(--text-muted)';
           } else {
             st.textContent = '';
@@ -1673,7 +1688,7 @@
     var chatId = id ? id.value.trim() : '';
     var botToken = bt ? bt.value.trim() : '';
     if (enabled && !chatId) {
-      showError('Enter a chat ID to enable routing.');
+      showError(t('swarm.err_chat_id'));
       return;
     }
     var payload;
@@ -1693,13 +1708,13 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          showToast('Output routing saved.', true);
+          showToast(t('swarm.routing_saved'), true);
           loadOutputTarget();
         } else {
-          showError(data.message || 'Failed to save output routing.');
+          showError(data.message || t('swarm.routing_save_failed'));
         }
       })
-      .catch(function() { showError('Network error saving output routing.'); });
+      .catch(function() { showError(t('swarm.network_saving_routing')); });
   }
 
   function clearOutputTarget() {
@@ -1718,9 +1733,9 @@
         if (id) id.value = '';
         if (bt) bt.value = '';
         if (st) st.textContent = '';
-        showToast('Output routing cleared.', true);
+        showToast(t('swarm.routing_cleared'), true);
       })
-      .catch(function() { showError('Network error clearing output routing.'); });
+      .catch(function() { showError(t('swarm.network_clearing_routing')); });
   }
 
   // ══════════════════════════════════════════════════════
@@ -1765,7 +1780,7 @@
 
     var promptEl = $('pipeline-prompt');
     if (promptEl) {
-      promptEl.value = "Compile and analyze market reports, review for policy guidelines, and draft executive summary.";
+      promptEl.value = window.t ? window.t('swarm.example_prompt') : "Compile and analyze market reports, review for policy guidelines, and draft executive summary.";
     }
 
     fetch('/api/pipelines/scaffold')
@@ -1841,13 +1856,13 @@
       panel.innerHTML = 
         '<div style="padding: 10px 14px; border-radius: var(--radius); border: 1px solid ' + (valid ? 'var(--success)' : 'var(--danger)') + '; background: ' + (valid ? 'var(--success-subtle)' : 'var(--danger-subtle)') + '; box-shadow: 0 0 12px ' + (valid ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)') + '; transition: all 0.3s ease;">' +
           '<div style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.8rem; color: ' + (valid ? 'var(--success)' : 'var(--danger)') + ';">' +
-            '<span>' + (valid ? '✅ Pipeline Verified' : '❌ Validation Issues') + '</span>' +
+            '<span>' + esc(valid ? t('swarm.pipeline_verified') : t('swarm.validation_issues')) + '</span>' +
           '</div>' +
           (errors.length > 0 ? 
             '<ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">' +
               errors.map(function(err) { return '<li>' + esc(err) + '</li>'; }).join('') +
             '</ul>' : 
-            '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">Structure and worker definitions are verified.</div>'
+            '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">' + esc(t('swarm.verified_desc')) + '</div>'
           ) +
         '</div>';
     })
@@ -1856,7 +1871,7 @@
       panel.style.display = 'block';
       panel.innerHTML = 
         '<div style="padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--danger); background: var(--danger-subtle);">' +
-          '<div style="font-weight: 600; font-size: 0.8rem; color: var(--danger);">⚠️ Validation API Error</div>' +
+          '<div style="font-weight: 600; font-size: 0.8rem; color: var(--danger);">' + esc(t('swarm.validation_api_error')) + '</div>' +
           '<div style="margin-top: 4px; font-size: 0.75rem; color: var(--text-secondary);">' + esc(err.message || err) + '</div>' +
         '</div>';
     });
@@ -1868,7 +1883,7 @@
     container.innerHTML = '';
     
     if (pipelineStages.length === 0) {
-      container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:0.8rem;">No steps added yet. Click "Add Step" above.</div>';
+      container.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:0.8rem;">' + esc(t('swarm.no_steps_added')) + '</div>';
       return;
     }
     
@@ -1902,7 +1917,7 @@
       card.appendChild(dragHandle);
 
       var stepBadge = document.createElement('span');
-      stepBadge.textContent = 'Step ' + (index + 1);
+      stepBadge.textContent = t('swarm.step_n', {n: (index + 1)});
       stepBadge.className = 'badge badge-secondary';
       stepBadge.style.cssText = 'font-size:0.7rem;font-weight:600;min-width:45px;text-align:center;';
       card.appendChild(stepBadge);
@@ -1950,7 +1965,7 @@
 
       var timeoutInput = document.createElement('input');
       timeoutInput.type = 'number';
-      timeoutInput.placeholder = 'Timeout';
+      timeoutInput.placeholder = t('swarm.timeout_placeholder');
       timeoutInput.value = stage.timeout || 300;
       timeoutInput.style.cssText = 'width:60px;height:28px;font-size:0.75rem;padding:2px 6px;background:rgba(0,0,0,0.2);border:1px solid var(--border);border-radius:var(--radius);text-align:center;';
       timeoutInput.onchange = function() {
@@ -2085,13 +2100,13 @@
 
   function generateMermaidCode() {
     if (pipelineStages.length === 0) {
-      return 'graph TD\n  Empty[Diagram cleared. Populate steps...]';
+      return 'graph TD\n  Empty[' + escapeMermaidLabel(t('swarm.diagram_cleared')) + ']';
     }
     
     var lines = ['graph TD'];
     pipelineStages.forEach(function(stage, index) {
       var stepNum = index + 1;
-      var label = 'Step ' + stepNum + ': ' + escapeMermaidLabel(stage.worker);
+      var label = t('swarm.step_n', {n: stepNum}) + ': ' + escapeMermaidLabel(stage.worker);
       if (stage.hitl) {
         label = '⏸ ' + label;
       }
@@ -2142,7 +2157,7 @@
         }).catch(function(err) {
           console.error("Mermaid render failed:", err);
           target.innerHTML = '<div style="color:var(--danger);font-family:var(--font-mono);font-size:0.75rem;padding:8px;border:1px dashed var(--border-subtle);border-radius:var(--radius);background:rgba(239,68,68,0.02);">' +
-            '<div style="font-weight:600;margin-bottom:4px;">⚠️ Mermaid Render Error:</div>' +
+            '<div style="font-weight:600;margin-bottom:4px;">' + esc(t('swarm.mermaid_render_error')) + '</div>' +
             '<pre style="margin:0;font-family:inherit;white-space:pre-wrap;color:var(--text-secondary);">' + esc(err.message || err) + '</pre>' +
             '</div>';
         });
@@ -2151,7 +2166,7 @@
         target.innerHTML = '<pre style="color:var(--danger);font-family:var(--font-mono);">' + esc(mermaidCode) + '</pre>';
       }
     } else {
-      target.innerHTML = '<pre style="color:var(--danger);font-family:var(--font-mono);">Mermaid library not loaded.</pre>';
+      target.innerHTML = '<pre style="color:var(--danger);font-family:var(--font-mono);">' + esc(t('swarm.mermaid_not_loaded')) + '</pre>';
     }
   }
 
@@ -2159,12 +2174,12 @@
     var promptEl = $('pipeline-prompt');
     var prompt = promptEl ? promptEl.value.trim() : '';
     if (!prompt) {
-      showError('Master Task Prompt is required.');
+      showError(t('swarm.err_master_prompt'));
       return;
     }
     
     if (pipelineStages.length === 0) {
-      showError('Please add at least one step to the pipeline.');
+      showError(t('swarm.err_add_step'));
       return;
     }
 
@@ -2196,7 +2211,7 @@
     var btn = $('btn-pipeline-run');
     if (btn) {
       btn.disabled = true;
-      btn.textContent = '⏳ Executing...';
+      btn.textContent = t('swarm.executing');
     }
 
     var termCard = $('pipeline-terminal-card');
@@ -2204,7 +2219,7 @@
     
     var terminal = $('pipeline-terminal');
     if (terminal) {
-      terminal.innerHTML = '<div style="color:var(--text-muted);font-style:italic;">Initializing pipeline session...</div>';
+      terminal.innerHTML = '<div style="color:var(--text-muted);font-style:italic;">' + esc(t('swarm.initializing_pipeline')) + '</div>';
     }
 
     var liveTimer = $('pipeline-live-timer');
@@ -2241,16 +2256,16 @@
             pipelineActiveTaskId = data.task_id;
             connectPipelineSSE(data.task_id);
           } else {
-            addPipelineTerminalLine('❌', 'No task_id returned by dispatch.');
+            addPipelineTerminalLine('❌', esc(t('swarm.no_task_id')));
             resetPipelineRunBtn();
           }
         } else {
-          addPipelineTerminalLine('❌', 'Dispatch failed: ' + esc(data.message || 'unknown error'));
+          addPipelineTerminalLine('❌', esc(t('swarm.dispatch_failed_msg', {msg: (data.message || '')})));
           resetPipelineRunBtn();
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('❌', 'Network error: ' + esc(err.message));
+        addPipelineTerminalLine('❌', esc(t('swarm.network_error') + err.message));
         resetPipelineRunBtn();
       });
   }
@@ -2259,7 +2274,7 @@
     var terminal = $('pipeline-terminal');
     if (!terminal) return;
     
-    if (terminal.innerHTML.indexOf('Initializing pipeline') !== -1) {
+    if (terminal.innerHTML.indexOf(t('swarm.initializing_pipeline')) !== -1) {
       terminal.innerHTML = '';
     }
     
@@ -2284,35 +2299,35 @@
     pipelineSSE = source;
 
     source.addEventListener('task_started', function(e) {
-      addPipelineTerminalLine('🚀', 'Pipeline execution started.');
+      addPipelineTerminalLine('🚀', esc(t('swarm.pipeline_started')));
     });
 
     source.addEventListener('worker_started', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('⚙️', 'Worker <strong style="color:var(--accent);">' + esc(d.worker) + '</strong> activated (Step ' + (Number(d.step) || 0) + ')');
+      addPipelineTerminalLine('⚙️', esc(t('swarm.worker_prefix')) + '<strong style="color:var(--accent);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.activated_step')) + (Number(d.step) || 0) + ')');
     });
 
     source.addEventListener('worker_progress', function(e) {
       var d = parseSseData(e); if (!d) return;
       var tokens = Number(d.tokens) || 0;
-      addPipelineTerminalLine('📝', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> is working (Processed ' + tokens + ' tokens)');
+      addPipelineTerminalLine('📝', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.working_processed')) + tokens + ' ' + esc(t('swarm.tokens_word')) + ')');
     });
 
     source.addEventListener('worker_completed', function(e) {
       var d = parseSseData(e); if (!d) return;
       var icon = d.status === 'success' ? '✅' : '❌';
       var color = d.status === 'success' ? 'var(--success)' : 'var(--danger)';
-      addPipelineTerminalLine(icon, 'Worker <strong style="color:' + color + ';">' + esc(d.worker) + '</strong> completed with status: ' + esc(d.status));
+      addPipelineTerminalLine(icon, esc(t('swarm.worker_prefix')) + '<strong style="color:' + color + ';">' + esc(d.worker) + '</strong> ' + esc(t('swarm.completed_status')) + esc(d.status));
     });
 
     source.addEventListener('checkpoint', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('⏸', 'Human-in-the-Loop checkpoint encountered (Step ' + (Number(d.step) || 0) + '). Awaiting user confirmation...');
+      addPipelineTerminalLine('⏸', esc(t('swarm.hitl_checkpoint')) + (Number(d.step) || 0) + esc(t('swarm.awaiting_confirm')));
       
       var hitlGate = $('pipeline-hitl-gate');
       var hitlPreview = $('pipeline-hitl-preview');
       if (hitlGate && hitlPreview) {
-        hitlPreview.textContent = d.output_preview || 'No preview available.';
+        hitlPreview.textContent = d.output_preview || t('swarm.no_preview_available');
         hitlGate.style.display = 'block';
         hitlGate.style.animation = 'slideDown 0.3s ease';
       }
@@ -2320,16 +2335,16 @@
 
     source.addEventListener('handoff', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('🔀', 'Swarm Handoff: <span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
+      addPipelineTerminalLine('🔀', esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
     });
 
     source.addEventListener('task_completed', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('🏁', 'Pipeline execution finalized.');
+      addPipelineTerminalLine('🏁', esc(t('swarm.pipeline_finalized')));
       
       var res = d.result || {};
-      var summary = res.synthesis || res.response || 'No final synthesis output returned.';
-      addPipelineTerminalLine('📝', '<strong>Synthesis Output:</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
+      var summary = res.synthesis || res.response || t('swarm.no_synthesis');
+      addPipelineTerminalLine('📝', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
       
       cleanupPipelineSession();
     });
@@ -2357,7 +2372,7 @@
     var btn = $('btn-pipeline-run');
     if (btn) {
       btn.disabled = false;
-      btn.textContent = '🚀 Run Visual Pipeline';
+      btn.textContent = t('swarm.run_pipeline_btn');
     }
   }
 
@@ -2370,13 +2385,13 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          addPipelineTerminalLine('✅', 'Pipeline checkpoint approved. Continuing execution...');
+          addPipelineTerminalLine('✅', esc(t('swarm.pipeline_checkpoint_approved')));
         } else {
-          addPipelineTerminalLine('❌', 'Approval failed: ' + esc(data.message || 'unknown error'));
+          addPipelineTerminalLine('❌', esc(t('swarm.approval_failed', {msg: (data.message || '')})));
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('❌', 'Network error approving: ' + esc(err.message));
+        addPipelineTerminalLine('❌', esc(t('swarm.network_error_action', {action: 'approving', msg: err.message})));
       });
   }
 
@@ -2389,14 +2404,14 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          addPipelineTerminalLine('❌', 'Pipeline checkpoint rejected. Task aborted.');
+          addPipelineTerminalLine('❌', esc(t('swarm.pipeline_checkpoint_rejected')));
           cleanupPipelineSession();
         } else {
-          addPipelineTerminalLine('❌', 'Rejection failed: ' + esc(data.message || 'unknown error'));
+          addPipelineTerminalLine('❌', esc(t('swarm.rejection_failed', {msg: (data.message || '')})));
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('❌', 'Network error rejecting: ' + esc(err.message));
+        addPipelineTerminalLine('❌', esc(t('swarm.network_error_action', {action: 'rejecting', msg: err.message})));
       });
   }
 
@@ -2409,22 +2424,22 @@
     if (!hint) return;
     switch (val) {
       case 'dispatch':
-        hint.textContent = '🎯 Dispatch: Runs a single worker on your prompt.';
+        hint.textContent = t('swarm.play_hint_dispatch');
         break;
       case 'broadcast':
-        hint.textContent = '📢 Broadcast: Broadcasts your prompt to all selected workers in parallel.';
+        hint.textContent = t('swarm.play_hint_broadcast');
         break;
       case 'pipeline':
-        hint.textContent = '🔗 Pipeline: Executes selected workers sequentially as a chain (A ➜ B ➜ C).';
+        hint.textContent = t('swarm.play_hint_pipeline');
         break;
       case 'fan_out':
-        hint.textContent = '🌀 Fan-Out: Executes workers in parallel, then aggregates results.';
+        hint.textContent = t('swarm.play_hint_fan_out');
         break;
       case 'consult':
-        hint.textContent = '💬 Consult: Gathers multiple opinions and synthesizes them.';
+        hint.textContent = t('swarm.play_hint_consult');
         break;
       case 'conditional':
-        hint.textContent = '🔀 Conditional: Evaluates condition to determine route.';
+        hint.textContent = t('swarm.play_hint_conditional');
         break;
       default:
         hint.textContent = '';
@@ -2440,11 +2455,11 @@
     var task = ($('play-dispatch-task') || {}).value || '';
 
     if (!task.trim()) {
-      showError('Task prompt is required');
+      showError(t('swarm.err_prompt_required'));
       return;
     }
     if (!workerList.length && pattern !== 'broadcast') {
-      showError('Select at least one worker');
+      showError(t('swarm.err_select_worker'));
       return;
     }
 
@@ -2461,27 +2476,27 @@
       try {
         payload.metadata = JSON.parse(metadataStr);
       } catch (e) {
-        showError('Invalid metadata JSON: ' + e.message);
+        showError(t('swarm.invalid_metadata_json', {msg: e.message}));
         return;
       }
     }
 
     var btn = $('btn-play-run');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Executing...'; }
+    if (btn) { btn.disabled = true; btn.textContent = t('swarm.executing'); }
 
     var terminal = $('playground-terminal');
     if (terminal) {
-      terminal.innerHTML = '<div style="color:var(--text-muted);font-style:italic;">Initializing swarm session...</div>';
+      terminal.innerHTML = '<div style="color:var(--text-muted);font-style:italic;">' + esc(t('swarm.initializing_swarm')) + '</div>';
     }
 
     var timerEl = $('play-live-timer');
     if (timerEl) { timerEl.style.display = 'inline'; timerEl.textContent = '0s'; }
 
-    setText('play-state-status', 'RUNNING');
+    setText('play-state-status', t('swarm.state_running'));
     var statusBadge = $('play-state-status');
     if (statusBadge) { statusBadge.className = 'badge badge-warning'; }
     setText('play-state-node', '—');
-    setText('play-state-tokens', '0 tokens');
+    setText('play-state-tokens', t('swarm.tokens_inline', {count: 0}));
     setText('play-state-cost', '$0.0000');
 
     var hitlGate = $('play-hitl-gate');
@@ -2512,16 +2527,16 @@
             currentPlaygroundTaskId = data.task_id;
             connectPlaygroundSSE(data.task_id);
           } else {
-            addTerminalLine('❌', 'No task_id returned by dispatch.');
+            addTerminalLine('❌', esc(t('swarm.no_task_id')));
             resetPlaygroundBtn();
           }
         } else {
-          addTerminalLine('❌', 'Dispatch failed: ' + esc(data.message || 'unknown error'));
+          addTerminalLine('❌', esc(t('swarm.dispatch_failed_msg', {msg: (data.message || '')})));
           resetPlaygroundBtn();
         }
       })
       .catch(function(err) {
-        addTerminalLine('❌', 'Network error dispatching: ' + esc(err.message));
+        addTerminalLine('❌', esc(t('swarm.network_error_dispatching', {msg: err.message})));
         resetPlaygroundBtn();
       });
   }
@@ -2530,7 +2545,7 @@
     var terminal = $('playground-terminal');
     if (!terminal) return;
     
-    if (terminal.innerHTML.indexOf('terminal idle') !== -1 || terminal.innerHTML.indexOf('Initializing swarm') !== -1) {
+    if (terminal.innerHTML.indexOf(t('swarm.playground_idle')) !== -1 || terminal.innerHTML.indexOf(t('swarm.initializing_swarm')) !== -1) {
       terminal.innerHTML = '';
     }
     
@@ -2556,12 +2571,12 @@
     playgroundSSE = source;
 
     source.addEventListener('task_started', function(e) {
-      addTerminalLine('🚀', 'Task execution started.');
+      addTerminalLine('🚀', esc(t('swarm.task_execution_started')));
     });
 
     source.addEventListener('worker_started', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('⚙️', 'Worker <strong style="color:var(--accent);">' + esc(d.worker) + '</strong> activated (Step ' + (Number(d.step) || 0) + ')');
+      addTerminalLine('⚙️', esc(t('swarm.worker_prefix')) + '<strong style="color:var(--accent);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.activated_step')) + (Number(d.step) || 0) + ')');
       setText('play-state-node', esc(d.worker));
     });
 
@@ -2569,45 +2584,45 @@
       var d = parseSseData(e); if (!d) return;
       var tokens = d.tokens || 0;
       playgroundTotalTokens += tokens;
-      setText('play-state-tokens', playgroundTotalTokens + ' tokens');
+      setText('play-state-tokens', t('swarm.tokens_inline', {count: playgroundTotalTokens}));
       
       var estCost = playgroundTotalTokens * 0.0000015;
       setText('play-state-cost', '$' + estCost.toFixed(4));
 
-      addTerminalLine('📝', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> is working (Processed ' + tokens + ' tokens)');
+      addTerminalLine('📝', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.working_processed')) + tokens + ' ' + esc(t('swarm.tokens_word')) + ')');
     });
 
     source.addEventListener('worker_completed', function(e) {
       var d = parseSseData(e); if (!d) return;
       var icon = d.status === 'success' ? '✅' : '❌';
       var color = d.status === 'success' ? 'var(--success)' : 'var(--danger)';
-      addTerminalLine(icon, 'Worker <strong style="color:' + color + ';">' + esc(d.worker) + '</strong> completed with status: ' + esc(d.status));
+      addTerminalLine(icon, esc(t('swarm.worker_prefix')) + '<strong style="color:' + color + ';">' + esc(d.worker) + '</strong> ' + esc(t('swarm.completed_status')) + esc(d.status));
     });
 
     source.addEventListener('checkpoint', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('⏸', 'Human-in-the-Loop checkpoint encountered (Step ' + (Number(d.step) || 0) + '). Awaiting user confirmation...');
+      addTerminalLine('⏸', esc(t('swarm.hitl_checkpoint')) + (Number(d.step) || 0) + esc(t('swarm.awaiting_confirm')));
       
       var hitlGate = $('play-hitl-gate');
       var hitlPreview = $('play-hitl-preview');
       if (hitlGate && hitlPreview) {
-        hitlPreview.textContent = d.output_preview || 'No preview available.';
+        hitlPreview.textContent = d.output_preview || t('swarm.no_preview_available');
         hitlGate.style.display = 'block';
         hitlGate.style.animation = 'slideDown 0.3s ease';
       }
-      setText('play-state-status', 'AWAITING APPROVAL');
+      setText('play-state-status', t('swarm.state_awaiting'));
       var statusBadge = $('play-state-status');
       if (statusBadge) statusBadge.className = 'badge badge-warning';
     });
 
     source.addEventListener('handoff', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('🔀', 'Swarm Handoff: <span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
+      addTerminalLine('🔀', esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
     });
 
     source.addEventListener('task_completed', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('🏁', 'Task finalized. Synthesis finished.');
+      addTerminalLine('🏁', esc(t('swarm.task_finalized')));
       
       var res = d.result || {};
       var finalStatus = res.status || 'success';
@@ -2618,14 +2633,14 @@
       }
       
       if (res.total_tokens) {
-        setText('play-state-tokens', res.total_tokens + ' tokens');
+        setText('play-state-tokens', t('swarm.tokens_inline', {count: res.total_tokens}));
       }
       if (res.total_cost !== undefined) {
         setText('play-state-cost', '$' + parseFloat(res.total_cost).toFixed(4));
       }
       
-      var summary = res.synthesis || res.response || 'No final synthesis output returned.';
-      addTerminalLine('📝', '<strong>Synthesis Output:</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
+      var summary = res.synthesis || res.response || t('swarm.no_synthesis');
+      addTerminalLine('📝', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
       
       cleanupPlaygroundSession();
     });
@@ -2651,7 +2666,7 @@
 
   function resetPlaygroundBtn() {
     var btn = $('btn-play-run');
-    if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Task'; }
+    if (btn) { btn.disabled = false; btn.textContent = t('swarm.run_task_btn'); }
   }
 
   function approvePlaygroundHitl() {
@@ -2664,15 +2679,15 @@
     fetch('/api/swarm/tasks/' + encodeURIComponent(currentPlaygroundTaskId) + '/approve', { method: 'POST' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        showToast('Playground checkpoint approved.', true);
+        showToast(t('swarm.playground_approved'), true);
         var hitlGate = $('play-hitl-gate');
         if (hitlGate) hitlGate.style.display = 'none';
-        setText('play-state-status', 'RUNNING');
+        setText('play-state-status', t('swarm.state_running'));
         var statusBadge = $('play-state-status');
         if (statusBadge) statusBadge.className = 'badge badge-warning';
       })
       .catch(function(err) {
-        showError('Approve failed: ' + err.message);
+        showError(t('swarm.approve_failed', {msg: err.message}));
       })
       .finally(function() {
         if (btnApprove) btnApprove.disabled = false;
@@ -2690,16 +2705,16 @@
     fetch('/api/swarm/tasks/' + encodeURIComponent(currentPlaygroundTaskId) + '/reject', { method: 'POST' })
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        showToast('Playground checkpoint rejected. Execution stopped.', true);
+        showToast(t('swarm.playground_rejected'), true);
         var hitlGate = $('play-hitl-gate');
         if (hitlGate) hitlGate.style.display = 'none';
         cleanupPlaygroundSession();
-        setText('play-state-status', 'REJECTED');
+        setText('play-state-status', t('swarm.state_rejected'));
         var statusBadge = $('play-state-status');
         if (statusBadge) statusBadge.className = 'badge badge-danger';
       })
       .catch(function(err) {
-        showError('Reject failed: ' + err.message);
+        showError(t('swarm.reject_failed', {msg: err.message}));
       })
       .finally(function() {
         if (btnApprove) btnApprove.disabled = false;
@@ -2764,7 +2779,7 @@
     // Backward compatibility mappings
     onEditorInput: function() {},
     loadEditorExample: loadPipelineExample,
-    copyEditorCode: function() { showToast('Visual pipeline has no YAML text to copy.', true); },
+    copyEditorCode: function() { showToast(t('swarm.no_yaml'), true); },
     clearEditor: clearPipeline,
 
     onPlayPatternChange: onPlayPatternChange,
