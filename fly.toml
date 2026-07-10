@@ -1,0 +1,30 @@
+# Fly.io configuration for Kazma live demo
+# Deploy: fly launch (first time) then fly deploy
+
+app = "kazma-demo"
+primary_region = "fra"  # Frankfurt — closest to Kuwait/Europe with good latency
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true   # stop when idle (saves free tier hours)
+  auto_start_machines = true  # wake on first request
+  min_machines_running = 0
+
+[http_service.concurrency]
+  type = "requests"
+  hard_limit = 20
+  soft_limit = 10
+
+[[vm]]
+  size = "shared-cpu-1x"   # free tier (256MB RAM)
+  memory = 256
+
+# Environment variables — set via `fly secrets set` (not in this file):
+#   KAZMA_SECRET=<generate a random secret>
+#   GROQ_API_KEY=<your free Groq key from console.groq.com>
+#   KAZMA_PROVIDER=groq
+#   KAZMA_MODEL=llama-3.1-8b-instant

@@ -25,6 +25,13 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
         "auth_header": "x-api-key",
         "docs": "https://console.anthropic.com/keys",
     },
+    "groq": {
+        "name": "Groq (Free Tier)",
+        "base_url": "https://api.groq.com/openai/v1",
+        "models_endpoint": "/models",
+        "auth_header": "Bearer",
+        "docs": "https://console.groq.com/keys",
+    },
     "deepseek": {
         "name": "DeepSeek",
         "base_url": "https://api.deepseek.com/v1",
