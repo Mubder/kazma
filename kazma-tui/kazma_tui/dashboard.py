@@ -124,9 +124,10 @@ class MetricCard(Widget):
 class MetricsDashboard(Widget):
     """Real-time metrics dashboard widget.
 
-    Displays 6 metrics in a 3x2 grid with color-coded cards:
-    Row 1: Throughput (RPM)  |  Latency (ms)  |  Health (CPU/Mem)
-    Row 2: VRAM (GB)         |  Error Rate (%) |  Active Agents
+    Displays 10 metrics in a 3-col grid with color-coded cards:
+    Row 1: Throughput (RPM)  |  Latency (ms)    |  Health (CPU/Mem)
+    Row 2: VRAM (GB)         |  Error Rate (%)   |  Active Agents
+    Row 3: Uptime             |  Provider Health  |  Token Usage Today
 
     Refreshes every 2 seconds. Data sources are injectable for testing.
     """
@@ -177,6 +178,9 @@ class MetricsDashboard(Widget):
         self._trace_store = trace_store
         self._metrics_collector = metrics_collector
         self._swarm_engine = swarm_engine
+        self._start_time: float = 0.0
+        import time
+        self._start_time = time.time()
 
     # ── Textual lifecycle ───────────────────────────────────────────
 
@@ -228,6 +232,28 @@ class MetricsDashboard(Widget):
                     status="normal",
                     show_sparkline=False,
                     card_id="metric-agents",
+                )
+            with Horizontal(classes="metric-row"):
+                yield MetricCard(
+                    label="Uptime",
+                    value=self._format_uptime(0),
+                    status="normal",
+                    show_sparkline=False,
+                    card_id="metric-uptime",
+                )
+                yield MetricCard(
+                    label="Provider Health",
+                    value=self._format_provider_health(None),
+                    status="normal",
+                    show_sparkline=False,
+                    card_id="metric-provider",
+                )
+                yield MetricCard(
+                    label="Token Usage Today",
+                    value=self._format_token_usage(None),
+                    status="normal",
+                    show_sparkline=False,
+                    card_id="metric-tokens-today",
                 )
 
     async def on_mount(self) -> None:
@@ -369,6 +395,46 @@ class MetricsDashboard(Widget):
                 value=self._format_agents(agent_names),
                 status="normal",
             )
+
+            # ── Uptime ─────────────────────────────────────────────
+            import time as _time
+            uptime_card = self.query_one("#metric-uptime", MetricCard)
+            uptime_card.update_card(
+                label="Uptime",
+                value=self._format_uptime(_time.time() - self._start_time),
+                status="normal",
+            )
+
+            # ── Provider Health ────────────────────────────────────
+            provider_status: str | None = None
+            try:
+                from kazma_core.model_registry import get_model_registry
+                registry = get_model_registry()
+                profile = registry.get_active_profile()
+                provider_status = profile.get("provider", "?")
+            except Exception:
+                provider_status = None
+            provider_card = self.query_one("#metric-provider", MetricCard)
+            provider_card.update_card(
+                label="Provider Health",
+                value=self._format_provider_health(provider_status),
+                status="normal" if provider_status else "warning",
+            )
+
+            # ── Token Usage Today ──────────────────────────────────
+            tokens_today: int | None = None
+            if store is not None:
+                try:
+                    stats = store.stats()
+                    tokens_today = stats.get("total_tokens", 0)
+                except Exception:
+                    pass
+            tokens_card = self.query_one("#metric-tokens-today", MetricCard)
+            tokens_card.update_card(
+                label="Token Usage Today",
+                value=self._format_token_usage(tokens_today),
+                status="normal",
+            )
         except Exception:
             logger.debug("Dashboard MetricCard widgets not yet mounted", exc_info=True)
 
@@ -489,6 +555,34 @@ class MetricsDashboard(Widget):
         if not names:
             return _NA
         return ", ".join(names)
+
+    @staticmethod
+    def _format_uptime(seconds: float) -> str:
+        """Format uptime seconds as human-readable string."""
+        if seconds <= 0:
+            return "just started"
+        days = int(seconds // 86400)
+        hours = int((seconds % 86400) // 3600)
+        mins = int((seconds % 3600) // 60)
+        if days > 0:
+            return f"{days}d {hours}h {mins}m"
+        if hours > 0:
+            return f"{hours}h {mins}m"
+        return f"{mins}m"
+
+    @staticmethod
+    def _format_provider_health(provider: str | None) -> str:
+        """Format provider health status."""
+        if not provider:
+            return "No provider"
+        return f"Connected: {provider}"
+
+    @staticmethod
+    def _format_token_usage(tokens: int | None) -> str:
+        """Format token count with thousand separators."""
+        if tokens is None or tokens == 0:
+            return "0"
+        return f"{tokens:,}"
 
     # ── Status determination helpers ────────────────────────────────
 

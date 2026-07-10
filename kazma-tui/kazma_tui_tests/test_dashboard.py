@@ -696,8 +696,8 @@ class TestDashboardGridLayout:
     """Dashboard must render 6 MetricCard widgets in a 3x2 grid."""
 
     @pytest.mark.asyncio
-    async def test_compose_yields_six_metric_cards(self) -> None:
-        """compose() must yield exactly 6 MetricCard widgets."""
+    async def test_compose_yields_nine_metric_cards(self) -> None:
+        """compose() must yield exactly 9 MetricCard widgets."""
         from kazma_tui.dashboard import MetricCard, MetricsDashboard
         from textual.app import App
 
@@ -708,11 +708,11 @@ class TestDashboardGridLayout:
         async with _TestApp().run_test() as pilot:
             dashboard = pilot.app.query_one(MetricsDashboard)
             cards = dashboard.query(MetricCard)
-            assert len(cards) == 6, f"Expected 6 MetricCard widgets, got {len(cards)}"
+            assert len(cards) == 9, f"Expected 9 MetricCard widgets, got {len(cards)}"
 
     @pytest.mark.asyncio
     async def test_metric_card_ids(self) -> None:
-        """All 6 metric cards must have correct IDs."""
+        """All 9 metric cards must have correct IDs."""
         from kazma_tui.dashboard import MetricCard, MetricsDashboard
         from textual.app import App
 
@@ -723,6 +723,9 @@ class TestDashboardGridLayout:
             "metric-vram",
             "metric-errors",
             "metric-agents",
+            "metric-uptime",
+            "metric-provider",
+            "metric-tokens-today",
         }
 
         class _TestApp(App[None]):

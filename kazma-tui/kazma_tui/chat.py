@@ -95,7 +95,7 @@ class ChatPanel(Vertical):
         self._ac_matches = matches
         self._ac_index = 0
 
-        if matches and len(matches) < len(self.SLASH_COMMANDS):
+        if matches:
             lines = []
             for i, (cmd, desc) in enumerate(matches):
                 marker = ">" if i == self._ac_index else " "
