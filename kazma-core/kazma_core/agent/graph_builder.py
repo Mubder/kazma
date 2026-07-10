@@ -970,6 +970,18 @@ async def create_supervisor_app(
     # Time Travel recorder
     snapshot_recorder = create_recorder(config=config)
 
+    # Universal language directive — ALWAYS enforced regardless of which
+    # system prompt or personality is configured. This is injected here
+    # (not in the config) so it can never be accidentally removed.
+    _LANG_DIRECTIVE = (
+        "\n\nCRITICAL LANGUAGE RULE: You MUST respond in the EXACT language "
+        "the user writes in. Arabic input = Arabic output. English input = "
+        "English output. If they mix, match their pattern. This overrides "
+        "all other instructions. NEVER switch languages unless explicitly asked."
+    )
+    if _LANG_DIRECTIVE not in system_prompt:
+        system_prompt = system_prompt.rstrip() + _LANG_DIRECTIVE
+
     # Build graph
     graph = build_supervisor_graph(
         llm=llm,
