@@ -5,6 +5,52 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## v0.4.0 — GitHub Integration + Full Arabic i18n + Security Audit Remediation (July 2026)
+
+### GitHub OAuth Integration (read-only)
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **GitHubClient** | Shared async client (REST + GraphQL + pagination + rate-limit handling + Bearer auth) | `github_client.py` |
+| ✅ | **OAuth Flow** | Connect/disconnect via browser redirect; token in ConfigStore only (never .env); CSRF state validation | `github.py /oauth/*` |
+| ✅ | **Read-Only Endpoints** | 7 endpoints: pulls, pulls/{n} detail, issues, commits, workflows (history), branches, releases | `github.py` |
+| ✅ | **Repo Picker** | Searchable dropdown of user's GitHub repos; clone-and-open or activate existing | `github.py /repos, /repos/clone` |
+| ✅ | **Activity Timeline** | GraphQL feed (commits + PRs + issues + CI) with filter chips; replaces Recent Files | `github.py /activity` |
+| ✅ | **Unified Workspace** | All 3 cards (Project Files, Git Status, GitHub Telemetry) follow one active repo atomically | `workspace.py, workspace_api.py` |
+| ✅ | **Filesystem Autocomplete** | Path prefix filtering on the Select Folder input (browsers can't open native OS dialog) | `workspace.py /suggest` |
+
+### Full Arabic i18n Coverage (~926 keys)
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **JS-side t()** | Translation dict injected as window.KAZMA_I18N; Alpine x-text expressions now translatable | `base.html, app.js` |
+| ✅ | **workspace.html** | 131 keys (was 0% translated): Multi-Workspace Engine, Git Status, GitHub Telemetry + tabs, Project Files, Activity, all modals | `workspace.html` |
+| ✅ | **swarm.js** | ~90 keys: status, pipeline validation, toasts, terminal events, task detail, routing diagnostics | `swarm.js` |
+| ✅ | **agents.html** | ~40 keys: states, buttons, metrics, config, tools | `agents.html` |
+| ✅ | **settings.html** | Keyboard shortcut actions, provider/connector badges, gateway adapters, tool registry | `settings.html` |
+| ✅ | **skills.html + mcp.html** | 41 keys: tabs, install/uninstall, validate, Add Server modal | `skills.html, mcp.html` |
+| ✅ | **dashboard.html** | 34 keys: Memory & Governance section (backup, restore, optimize) | `dashboard.html` |
+| ✅ | **Font & Sizing** | Calibri primary font; RTL effectiveFontSize() (1.15x Arabic multiplier); class-based minimum floor | `kazma.css, app.js` |
+| ✅ | **Text Bug Fixes** | CJK corruption (م有利→مفيد), rbac typos (تتجارة→تجارة, العاملة→العامة), name standardized to كاظمه | `correlator.py, rbac.py, i18n.py` |
+| ✅ | **Breadcrumb Fix** | Duplicate label (الرئيسية / Chat) → translated page name | `header.html` |
+| ✅ | **Modal Width Fix** | Default max-width:560px on .modal (was edge-to-edge) | `kazma.css` |
+
+### Deep Security Audit Remediation (~40 fixes)
+| Status | Category | Key Fixes |
+|:---:|:---|:---|
+| ✅ | **P0 Security** | Async HITL fail-closed on NullBusAdapter; Discord allowed_users; Slack allowed_teams/channels; semantic-cache cross-user leak (scope key + default off); delegation empty-signature bypass |
+| ✅ | **High Concurrency** | Checkpoint timeout re-arm on restart; CheckpointManager task_lock; ModelRegistry RLock + set_active_provider model revalidation; autoscaler threading.Lock + auto-reap; list_tasks locked read |
+| ✅ | **High Correctness** | _build_target_id channel_id for Discord/Slack; cascade_execute failing-stage append; orchestrator uuid4 task_id; _pending_requests cleanup |
+| ✅ | **Medium** | 14 SQLite stores WAL/busy_timeout; LLM 400/422 tool-fallback; API-key prefix masking; _PLATFORM_KEYS strip guard; ChromaDB hnsw:space=cosine; gateway router error sanitization; KAZMA_WORKSPACE_ROOT confinement |
+| ✅ | **Telegram Fix** | pytest guard on bus adapter + send_swarm_output (tests no longer send real messages); report de-duplication |
+
+### Repo Cleanup
+| Status | Action |
+|:---:|:---|
+| ✅ | Deleted 16 obsolete docs (handoffs, task plans, old audits, prompts) |
+| ✅ | Archived 8 historical audit reports to `docs/audits/` |
+| ✅ | Cleaned pytest temp dirs + log files; updated .gitignore |
+
+---
+
 ## Sprint 19 — Chaos Testing + Config Migration UI + Load Testing + Adapter Extraction (July 2026)
 
 ### Chaos Testing Framework (`kazma-core/kazma_core/chaos/`)

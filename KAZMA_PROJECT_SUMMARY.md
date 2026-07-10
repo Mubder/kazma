@@ -1,9 +1,10 @@
 # كاظمه — Kazma AI Agent Framework
 ## Project Summary & Final Status
 
-> **Status:** Production-Ready (All Sprints Complete)
-> **Date:** June 26, 2026
+> **Status:** Active Development — v0.4.0
+> **Date:** July 10, 2026
 > **Architecture:** Domain-Agnostic, Local-First, Open-Source AI Agent Framework
+> **Languages:** English + Arabic (full i18n, ~926 keys)
 
 ---
 

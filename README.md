@@ -7,7 +7,7 @@
 ![Tests](https://img.shields.io/badge/tests-3500+_suite-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Python](https://img.shields.io/badge/python-3.11_|_3.12-blue)
-![Version](https://img.shields.io/badge/version-0.3.0-blue)
+![Version](https://img.shields.io/badge/version-0.4.0-blue)
 ![Portability](https://img.shields.io/badge/portability-linux_|_macOS_|_Windows_|_docker_|_WSL-brightgreen)
 ![Docker](https://img.shields.io/badge/docker-ready-blue)
 [![Framework][langgraph-shield]][langgraph-url]

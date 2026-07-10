@@ -1,8 +1,10 @@
 # 🇰🇼 Kazma Feature Roadmap
 
-> **Last updated:** July 9, 2026  
-> **Status:** All originally planned features shipped ✅ + three remediation rounds complete ✅ + Sprint 19 production hardening ✅  
-> **Tests:** 108 passing
+> **Last updated:** July 10, 2026  
+> **Version:** 0.4.0  
+> **Status:** All originally planned features shipped ✅ + deep audit remediation ✅ + GitHub OAuth integration ✅ + full Arabic i18n ✅  
+> **Tests:** ~3,544 root + ~118 package + ~216 TUI  
+> **i18n:** ~926 keys (EN + AR)
 
 ---
 
@@ -33,6 +35,15 @@
 | [#19](https://github.com/Mubder/kazma/issues/19) | Time travel replay | 1-2 weeks | 🔥🔥 | Sprint 5 |
 | [#20](https://github.com/Mubder/kazma/issues/20) | IDE integration (MCP server) | 4-6 weeks | 🔥🔥🔥 | Sprint 6 |
 | [#21](https://github.com/Mubder/kazma/issues/21) | Voice/multimodal support | 3-4 weeks | 🔥🔥 | Sprint 6 |
+
+### 🆕 v0.4.0 — GitHub Integration + Arabic i18n + Security Audit (July 2026)
+
+| Feature | Description | Status |
+|---------|-------------|--------|
+| **GitHub OAuth Integration** | Read-only OAuth flow (no PAT in .env); GitHubClient (REST + GraphQL + pagination); 7 read endpoints (pulls, issues, commits, workflows, branches, releases); repo picker with clone; activity timeline with filter chips; unified workspace | ✅ Done |
+| **Full Arabic i18n** | ~926 translation keys (EN + AR); JS-side `t()` for Alpine expressions; all templates wired (workspace, agents, swarm, settings, skills, mcp, dashboard); Calibri font; RTL font sizing | ✅ Done |
+| **Deep Security Audit** | ~40 bugs found and fixed: async HITL auto-approve, adapter access control (Discord/Slack), semantic-cache cross-user leak, delegation auth bypass, autoscaler race, SQLite WAL pragmas (14 stores), model registry lock, checkpoint timeout | ✅ Done |
+| **Unified Workspace** | All 3 cards (Project Files, Git Status, GitHub Telemetry) follow one active repo atomically; filesystem autocomplete | ✅ Done |
 
 ### 🆕 Additional Features (Not in Original Plan)
 
