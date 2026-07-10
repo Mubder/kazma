@@ -21,12 +21,18 @@ How fan-out results are combined: `collect`, `first_valid`, `merge_all`, `vote`,
 **Authority (Context)**
 `ContextAuthority` (`authority.py`) — decides when to compact the conversation (at 80% of the context window) and invokes the `CompactionEngine`.
 
+**AutoScaler**
+Spawns `{name}-pool-{n}` workers from templates when `auto` routing finds no capable worker; reaps idle instances.
+
 ---
 
 ## B
 
 **Blackboard (pipeline)**
 The shared context passed between pipeline stages; each stage sees prior stages' outputs.
+
+**BlackboardStore**
+The shared scratchpad object passed between pipeline/fan-out/consult workers; each stage reads prior outputs and writes its own.
 
 **Bounded concurrency**
 `BoundedConcurrency` (`reliability.py:872`) — an `asyncio.Semaphore` wrapper limiting parallel dispatches (default 5).
@@ -49,6 +55,12 @@ The LangGraph persistence layer (`AsyncSqliteSaver` on `kazma-data/checkpoints.d
 
 **Classify (MCP tool)**
 `classify_mcp_tool()` (`mcp/manager.py:71`) — classifies a runtime-discovered MCP tool as `danger`/`safe`/`unknown` by name pattern. Unknown defaults to danger.
+
+**Code-switch token**
+An English/Latin run embedded inside Arabic text, tagged `CODE_SWITCH` by the dual tokenizers so it is preserved rather than transliterated or stemmed.
+
+**CommandConsole**
+The TUI's vim-style `:`-activated command bar (enter ex-style commands such as `:theme`, `:lang`).
 
 **Compaction**
 `CompactionEngine` (`compaction.py`) — summarises the conversation when it nears the context window. In the default wiring, only the LLM summarise step runs (memory retrieval + checkpointing are no-ops).
@@ -144,6 +156,9 @@ The process-wide singleton (`model_registry.py:81`) managing providers, models, 
 **Phonebook**
 `swarm/phonebook.py` — direct summon-and-dispatch bypassing the reliability layer; used by topology/DAG executors. Injects episodic memory from the 4-layer adapter.
 
+**PermissionLevel**
+The swarm tool-access tier: `READ_ONLY`, `SYSTEM_EXEC`, `FULL_ACCESS`. Assigned per worker role.
+
 **Pipeline**
 A swarm pattern: ordered stages sharing a blackboard, with optional HITL checkpoints.
 
@@ -221,6 +236,9 @@ The ChromaDB-backed memory used by the `memory_search`/`memory_store` tools (`me
 
 **Worker**
 A swarm execution unit (`SwarmWorker`). Registered in `_workers`; resolved via the registry or phonebook.
+
+**WorkerCapabilities**
+A `{role, expertise, tools, model_specialty}` object describing what a worker can do; used by `UnifiedRouter` and the AutoScaler to match tasks to workers.
 
 **WorkerRegistry**
 JSON-backed worker registry (`swarm/registry.py`), loaded from `swarm_registry.json`.

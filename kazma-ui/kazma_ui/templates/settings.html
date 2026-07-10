@@ -797,13 +797,13 @@
                                 <span class="toggle-slider"></span>
                             </label>
                             <span class="tool-name" x-text="tool.name"></span>
-                            <span class="badge badge-basic" x-text="tool.category || t('settings.category_general')" style="font-size:0.7rem"></span>
+                            <span class="badge badge-basic" x-text="t('settings.category_' + (tool.category || 'general')) || tool.category" style="font-size:0.7rem"></span>
                             <span style="flex:1"></span>
-                            <span style="font-size:0.8rem;color:var(--text-muted)" x-text="tool.description || ''" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+                            <span style="font-size:0.8rem;color:var(--text-muted)" x-text="t('tool.desc.' + tool.name) || tool.description || ''" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
                         </div>
                         <!-- Expanded tool details -->
                         <div x-show="selectedTool === tool.name" x-transition style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle)">
-                            <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px" x-text="tool.description || ''"></div>
+                            <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px" x-text="t('tool.desc.' + tool.name) || tool.description || ''"></div>
                             <div x-show="tool.parameters" style="margin-bottom:8px">
                                 <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">{{ t('settings.parameters') }}</div>
                                 <pre style="font-size:0.75rem;color:var(--text-secondary);background:var(--bg-primary);padding:8px;border-radius:var(--radius);overflow-x:auto" x-text="JSON.stringify(tool.parameters || {}, null, 2)"></pre>

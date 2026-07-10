@@ -107,7 +107,19 @@ Global flags (for completion data): `--model`, `--provider`, `--yolo`, `--verbos
 
 ## 5. `kazma gateway`
 
-Omnichannel gateway control via REST. All subcommands accept `--port N` (default `KAZMA_PORT` or `8000`) and talk to `http://localhost:{port}` (`gateway.py`).
+Omnichannel gateway control via REST. All subcommands accept `--port N` and talk to `http://localhost:{port}` (`gateway.py`).
+
+### 5.0 The `--port` flag (swarm / gateway)
+
+Swarm and gateway commands target the server at `http://localhost:8000` by default. The port resolves with this precedence:
+
+| Source | Priority |
+|---|---|
+| `--port N` (per command) | highest |
+| `KAZMA_PORT` env var | middle |
+| `8000` (default) | lowest |
+
+If the server is unreachable, the CLI prints `Server not running. Start with: kazma serve` and exits `1` (see [exit codes](#exit-codes)).
 
 | Subcommand | Endpoint | Description |
 |---|---|---|
@@ -262,6 +274,18 @@ These are typed inside a connected chat (Telegram/Discord/Slack/Web). Defined in
 | `/swarm` | Swarm orchestration (Telegram-registered; interactive handler). |
 
 > **Parity note:** `/help` text omits `/hitl` and `/swarm` even though both are functional. Telegram's `setMyCommands` registers `/swarm` but not `/hitl`. Discord reserves `/`-prefixed commands for itself, so Kazma receives them as plain text. See [Gateways & Platforms](gateways-and-platforms.md).
+
+---
+
+## 12. Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success. |
+| `1` | General failure / server unreachable (swarm & gateway commands print `Server not running. Start with: kazma serve` and exit `1` when the WebUI server is not running — start it first with `kazma serve`). |
+| `2` | Argument/usage error (Click, `kazma hub` subtree only). |
+
+> Swarm and gateway commands are REST clients: they exit non-zero whenever the WebUI server is not running. Always start the server (`kazma serve`) before invoking them.
 
 ---
 

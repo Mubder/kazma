@@ -222,6 +222,41 @@ This is inter-agent delegation — unrelated to MCP or skills.
 
 `kazma-security.yaml` declares posture across `scanning`, `disclosure`, `bug_bounty`, and `hardening` (8 checks: `secrets_in_logs`, `input_validation`, `rbac_enforcement`, `tls_required`, `dependency_audit`, `least_privilege`, `audit_trail`, `config_integrity`). See [Configuration → security config](configuration.md#7-security-config-files). `kazma-permissions.yaml` defines division-based MCP allow/deny lists (the ALMuhalab divisions) with cross-division rules (`require_explicit_approval`, `max_approval_duration_hours: 24`, `audit_all_access`).
 
+### 8.1 Hardening runner (`security/hardening.py`)
+
+`SecurityHardeningRunner` runs the checks at startup; keys are `run_on_startup: true`, `fail_on_critical: true`, `auto_fix: false`. Each yaml check label maps to an implemented method:
+
+| Check (yaml label) | Implemented method | Severity |
+|---|---|---|
+| `secrets_in_logs` | `check_no_hardcoded_secrets` (regex scan for `api_key`/`secret`/`token`/`password`/`AWS`/`PRIVATE_KEY`) | critical |
+| `tls_required` | `check_encrypted_communications` (TLS/SSL/HTTPS/mTLS scan) | high |
+| `rbac_enforcement` | `check_rbac_enforcement` | high |
+| `dependency_audit` | `check_dependency_vulnerabilities` → `DependencyScanner` | critical |
+| (MCP sandboxing) | `check_mcp_sandboxing` | high |
+| (Skill manifests) | `check_skill_manifest_validity` | medium |
+| (Audit logging) | `check_audit_logging` | high |
+| (Escalation) | `check_permission_escalation` (`os.system`, `subprocess(...shell=True)`, `eval`, `exec`, `__import__`, `setattr(...__...)`) | critical |
+| `least_privilege`, `config_integrity` | ⚠ roadmap (no dedicated implementation) | — |
+
+`fix_issues(auto_fix)` can create a `.env` and amend `.gitignore` for the secrets check.
+
+### 8.2 Dependency scanning (`security/dependency_scanner.py`)
+
+| Scanner | Sources | Cache / history |
+|---|---|---|
+| `DependencyScanner` | **OSV** (`api.osv.dev`) | JSON cache `kazma-data/vuln_cache.json` |
+| `DependabotStyleScanner` | **OSV + GitHub Advisories + NVD** | SQLite `kazma-data/security_scan.db`; dedupes by `(package, vuln_id)` |
+
+Both parse `requirements.txt` and `pyproject.toml`. `DependabotStyleScanner` additionally runs `scan_skill_manifests()` (flags suspicious MCP configs: `eval`/`exec`/`system` in command, env `TOKEN`/`SECRET`/`KEY`, `--privileged`, `network: host`; escalation patterns like `sudo`/`chmod 777`/`setuid`), `create_github_issue()` via the `gh` CLI, `generate_advisory()`, and `check_for_updates()`.
+
+`kazma-security.yaml`: `scanning` interval 24 h, `severity_threshold: medium`, `auto_create_issues: true`.
+
+### 8.3 Disclosure workflow (`security/disclosure.py`)
+
+SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → acknowledged → investigating → confirmed → patched → closed`. `publish_advisory()` generates a CVE placeholder + markdown template, but only from `patched`/`closed` states. `encrypt_report()` HMAC-SHA256-signs the JSON payload with `KAZMA_DISCLOSURE_KEY`.
+
+`kazma-security.yaml`: response window 48 h, assessment 7 d, PGP key URL, encrypted channels (email + Signal), bug bounty USD $50–$2000.
+
 > **Verify runtime enforcement** of `kazma-security.yaml` checks against the hardening runner before relying on them. The file declares policy; confirm the runner enforces each check at startup (`hardening.run_on_startup: true`, `fail_on_critical: true`).
 
 ---

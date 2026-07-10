@@ -209,9 +209,14 @@ safety:
 |---|---|---|---|
 | `swarm.enabled` | bool | `true` | Master swarm switch. |
 | `swarm.group_chat_id` | int | `0` | Real value read from `SWARM_CHAT_ID` env. |
+| `swarm.default_pattern` | str | `dispatch` | Fallback pattern: `dispatch` \| `pipeline` \| `consult` \| `fan_out` \| `broadcast`. |
+| `swarm.auto_route` | bool | `true` | Enable semantic auto-routing (`UnifiedRouter`) for `workers=["auto"]`. |
+| `swarm.max_concurrent_tasks` | int | `10` (1–100) | Max concurrent swarm tasks. |
+| `swarm.max_concurrent` | int | `5` | Fan-out / broadcast / consult worker concurrency. |
 | `swarm.orchestrator.name` | string | `Kazma Orchestrator` | Orchestrator display name. |
 | `swarm.orchestrator.profile` | string | `default` | Orchestrator profile id. |
 | `swarm.workers` | list | `[]` | Populated at runtime via Web UI / `POST /api/swarm/workers`. |
+| `swarm.output_target` | obj | none | `{bot_token, chat_id, platform, enabled}` — when set, the token must match the active Telegram bot token. |
 
 ### `pipelines` (lines 129-162)
 
