@@ -50,7 +50,7 @@ async def crawl_page(url: str) -> str:
 
 
 async def parse_document(path: str) -> str:
-    """Parse structured text from local files including CSV, JSON, or text.
+    """Parse structured text from local files including CSV, JSON, XLS/XLSX, and PDF.
 
     Args:
         path: Path to the local file to parse.
@@ -87,6 +87,12 @@ async def parse_document(path: str) -> str:
                     rows.append(", ".join(row))
             return "\n".join(rows)
 
+        elif suffix in (".xls", ".xlsx"):
+            return _parse_excel(p)
+
+        elif suffix == ".pdf":
+            return _parse_pdf(p)
+
         elif suffix in (".txt", ".md", ".log"):
             content = p.read_text(encoding="utf-8", errors="replace")
             if len(content) > 8000:
@@ -103,3 +109,71 @@ async def parse_document(path: str) -> str:
     except Exception as e:
         logger.error("Error parsing document %s: %s", path, e)
         return f"Error parsing document: {e}"
+
+
+def _parse_excel(p: Path) -> str:
+    """Parse XLS/XLSX files using openpyxl. Returns rows as text."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return "Error: openpyxl not installed. Run: pip install openpyxl"
+
+    wb = load_workbook(p, read_only=True, data_only=True)
+    lines = []
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        lines.append(f"--- Sheet: {sheet_name} ---")
+        for i, row in enumerate(ws.iter_rows(values_only=True)):
+            if i >= 100:
+                lines.append("[... truncated after 100 rows ...]")
+                break
+            # Convert all cells to string, skip fully-empty rows
+            cells = [str(c) if c is not None else "" for c in row]
+            if any(c.strip() for c in cells):
+                lines.append(" | ".join(cells))
+        lines.append("")
+    wb.close()
+    result = "\n".join(lines)
+    return result[:8000] + "\n[... truncated ...]" if len(result) > 8000 else result
+
+
+def _parse_pdf(p: Path) -> str:
+    """Parse PDF files using PyPDF2 or pdfplumber. Returns extracted text."""
+    # Try pdfplumber first (better extraction quality)
+    try:
+        import pdfplumber
+
+        lines = []
+        with pdfplumber.open(p) as pdf:
+            for i, page in enumerate(pdf.pages[:50]):  # Cap at 50 pages
+                text = page.extract_text() or ""
+                if text.strip():
+                    lines.append(f"--- Page {i + 1} ---")
+                    lines.append(text.strip())
+                    lines.append("")
+        result = "\n".join(lines)
+        if result.strip():
+            return result[:8000] + "\n[... truncated ...]" if len(result) > 8000 else result
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug("pdfplumber failed: %s, trying PyPDF2", e)
+
+    # Fallback: PyPDF2
+    try:
+        from PyPDF2 import PdfReader
+
+        reader = PdfReader(str(p))
+        lines = []
+        for i, page in enumerate(reader.pages[:50]):
+            text = page.extract_text() or ""
+            if text.strip():
+                lines.append(f"--- Page {i + 1} ---")
+                lines.append(text.strip())
+                lines.append("")
+        result = "\n".join(lines)
+        return result[:8000] + "\n[... truncated ...]" if len(result) > 8000 else result
+    except ImportError:
+        return "Error: No PDF library installed. Run: pip install pdfplumber"
+    except Exception as e:
+        return f"Error parsing PDF: {e}"
