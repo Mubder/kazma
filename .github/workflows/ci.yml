@@ -45,6 +45,7 @@ jobs:
           NULL_SHA="0000000000000000000000000000000000000000"
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "$NULL_SHA" ]; then
             if [ "${{ github.event_name }}" = "pull_request" ]; then
+              # For PRs, fail closed instead of guessing a fallback diff base.
               echo "Unable to determine pull request base SHA for lint/type checks." >&2
               exit 1
             elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
@@ -59,7 +60,7 @@ jobs:
 
       - name: Run Ruff
         run: |
-          mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${TYPECHECK_PATH_REGEX}" || true)
+          mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${{ env.TYPECHECK_PATH_REGEX }}" || true)
           if [ "${#TYPECHECK_FILES[@]}" -eq 0 ]; then
             echo "No changed Python files detected; skipping Ruff."
             exit 0
@@ -68,7 +69,7 @@ jobs:
 
       - name: Run MyPy
         run: |
-          mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${TYPECHECK_PATH_REGEX}" || true)
+          mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${{ env.TYPECHECK_PATH_REGEX }}" || true)
           if [ "${#TYPECHECK_FILES[@]}" -eq 0 ]; then
             echo "No changed typed-package Python files detected; skipping MyPy."
             exit 0
