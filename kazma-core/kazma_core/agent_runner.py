@@ -158,16 +158,30 @@ class KazmaAgent:
         )
         self.tracer = KazmaTracer(config=tracing_config)
 
-        # Context Authority (80% compaction)
+        # Memory System (FTS5/SQLite backend) — initialized *before* the
+        # authority so we can pass it as the compaction memory_store.
+        self._memory_backend = None
+        self._init_memory()
+
+        # Context Authority (80% compaction) — wired with the VectorMemory
+        # singleton (wrapped in an async adapter) so that the compaction
+        # engine can retrieve and inject relevant memories into the fresh
+        # context after summarizing.
+        from kazma_core.agent.tool_registry import get_vector_memory
+        from kazma_core.memory.async_adapter import wrap_vector_memory
+
+        _vm = get_vector_memory()
+        _memory_store = wrap_vector_memory(_vm) if _vm is not None else None
         self.authority: ContextAuthority = create_authority(
             model=self.config.default_model,
             window=self.config.raw.get("memory", {}).get("max_context_tokens", 128_000),
             llm_client=self._make_compaction_client(),
+            memory_store=_memory_store,
         )
-
-        # Memory System (Tantivy backend)
-        self.memory = None
-        self._init_memory()
+        if _memory_store is not None:
+            logger.info("ContextAuthority wired with VectorMemory for compaction retrieval")
+        else:
+            logger.warning("ContextAuthority has no memory_store — compaction will not inject memories")
 
         # System prompt
         self.system_prompt = self.config.system_prompt or self._default_system_prompt()
@@ -195,35 +209,39 @@ class KazmaAgent:
     def _init_memory(self) -> None:
         """Initialize the memory system.
 
-        Uses Tantivy + SQLite when tantivy-py is available.
-        Falls back to SQLite-only when tantivy-py is not installed.
+        Historically this constructed a SQLiteMemoryBackend (FTS5) as
+        ``self.memory``.  That backend was orphaned — never read or written
+        during chat.  Memory retrieval/injection now flows through the
+        ``VectorMemory`` singleton (ChromaDB or FTS5 fallback) wired into
+        the ``ContextAuthority``.
+
+        This method is retained for backward compatibility but is a no-op;
+        ``self.memory`` always reflects the active ``VectorMemory``
+        singleton via the ``memory`` property below.
         """
+        memory_cfg = self.config.raw.get("memory", {})
+        if not memory_cfg.get("enabled", True):
+            logger.info("Memory system disabled in config")
+            return
+        # The canonical memory backend is the VectorMemory singleton,
+        # set by app.py at startup.  Nothing to construct here.
+        logger.info("Memory system: using VectorMemory singleton (ChromaDB/FTS5)")
+
+    @property
+    def memory(self):
+        """Return the active VectorMemory singleton (or None if not set).
+
+        This replaces the old orphaned SQLiteMemoryBackend.  Any code that
+        referenced ``self.memory`` now transparently uses the canonical
+        ChromaDB/FTS5 backend.
+        """
+        if self._memory_backend is not None:
+            return self._memory_backend
         try:
-            memory_cfg = self.config.raw.get("memory", {})
-            if not memory_cfg.get("enabled", True):
-                logger.info("Memory system disabled in config")
-                return
-
-            tantivy_available = False
-            try:
-                import tantivy  # noqa: F401
-
-                tantivy_available = True
-            except ImportError:
-                logger.info("tantivy-py not installed — using SQLite-only memory")
-
-            from kazma_memory import SQLiteMemoryBackend
-
-            sqlite_backend = SQLiteMemoryBackend(
-                db_path=memory_cfg.get("sqlite_path", "kazma-data/memory.db"),
-            )
-            self.memory = sqlite_backend
-            logger.info("Memory system initialized (SQLite FTS5)")
-
-        except ImportError:
-            logger.warning("kazma_memory module not found — memory disabled")
-        except Exception as e:
-            logger.error("Failed to initialize memory: %s", e)
+            from kazma_core.agent.tool_registry import get_vector_memory
+            return get_vector_memory()
+        except Exception:
+            return None
 
     def _make_compaction_client(self) -> Any:
         """Create a lightweight LLM client for the compaction engine."""

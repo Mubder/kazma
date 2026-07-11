@@ -498,7 +498,7 @@ class KazmaAppBuilder:
                         vector_memory_model,
                     )
                 except Exception as e:
-                    logger.debug("[VectorMemory] Not available: %s", e)
+                    logger.warning("[VectorMemory] Not available: %s", e)
                     if not getattr(self.app.state, "_vector_memory_hint_shown", False):
                         logger.info(
                             "[VectorMemory] RAG memory disabled. "
@@ -830,6 +830,14 @@ class KazmaAppBuilder:
                     logger.info("[Cron] Scheduler started")
             except Exception as e:
                 logger.warning("[Cron] Failed to start: %s", e)
+
+        # Flush any pending VectorMemory degradation alerts that were
+        # scheduled during construction (outside the event loop).
+        try:
+            from kazma_core.memory.vector_store import flush_pending_alerts
+            await flush_pending_alerts()
+        except Exception as e:
+            logger.debug("[Startup] flush_pending_alerts: %s", e)
 
     async def _on_shutdown(self) -> None:
         """Application shutdown: HTTP pool + gateway."""

@@ -237,15 +237,15 @@ Handoffs between workers are guarded against infinite recursion: `MAX_HANDOFF_DE
 
 ## 7. The memory subsystems (overview)
 
-Kazma contains **three distinct** memory subsystems. The documentation historically conflated them; this rewrite separates them honestly:
+Kazma contains **three memory subsystems**, each serving a distinct consumer. After the July 2026 memory overhaul, all three are correctly wired and active:
 
-| Subsystem | Backing | Used by chat agent? | Notes |
+| Subsystem | Backing | Used by | Status |
 |---|---|---|---|
-| **VectorMemory** (RAG tools) | ChromaDB, `all-MiniLM-L6-v2` (384-d) | Only when LLM calls `memory_search` / `memory_store` | Opt-in tool; no automatic injection |
-| **SQLiteMemoryBackend** (agent `self.memory`) | SQLite + FTS5 (`porter unicode61`) | **Not queried during chat retrieval** | Wired as `self.memory` but no chat-path caller |
-| **UnifiedMemoryAdapter** (4-layer RRF) | ChromaDB + NetworkX + FTS5 + sqlite-vec | No — only `self_improvement.py` and `phonebook.py` | The "4-layer memory" from the README |
+| **VectorMemory** (RAG) | ChromaDB, `all-MiniLM-L6-v2` (384-d) | Chat agent (LLM tools + **compaction injection**) | ✅ Active — compaction now retrieves + injects memories |
+| **SQLiteMemoryBackend** (FTS5) | SQLite + FTS5 + cosine vector search | 4-layer adapter's L3 | ✅ Active — bugs fixed (Arabic tokenization, `distance()`, vec detection) |
+| **UnifiedMemoryAdapter** (4-layer RRF) | ChromaDB + NetworkX + FTS5 + sqlite-vec | Swarm: `self_improvement.py` + `phonebook.py` | ✅ Active — L1 import typo fixed, caller bug fixed |
 
-Full details, including the wiring gaps and the buggy `distance()` function in `search_backend.py`, are in [Memory & RAG → Honest status notes](memory-and-rag.md#honest-status-notes).
+Full details in [Memory & RAG](memory-and-rag.md).
 
 ---
 
@@ -265,15 +265,26 @@ See [Arabic & Cultural Features](arabic-cultural-features.md).
 
 | Signal | Source | Status |
 |---|---|---|
-| Structured logs | `logging` (JSON format option in `kazma.yaml`) | Active |
-| Swarm metrics | `MetricsCollector` (in-memory + SQLite) — `tasks_completed`, `tasks_failed`, `avg_latency`, `total_tokens`, `total_cost` | Active |
-| Tracing spans | In-house `TracingEmitter` / `Span` / `InMemorySpanExporter` | Active (not OTel) |
-| SSE telemetry | `/api/chat/stream` events; telemetry router | Active |
-| **Prometheus** | — | **Not implemented** (no `prometheus_client`, no `/metrics` endpoint) |
-| **OpenTelemetry** | `opentelemetry-api/sdk` in deps; `[tracing]` extra has OTLP exporters | Library present; **wiring is roadmap** |
-| **Langfuse** | `langfuse>=2.0.0` in deps; `logging.langfuse.enabled` config flag | Dependency present; integration is roadmap |
+| Structured logs | `logging` (JSON format option in `kazma.yaml`) | ✅ Active |
+| Swarm metrics | `MetricsCollector` (in-memory + SQLite) — `tasks_completed`, `tasks_failed`, `avg_latency`, `total_tokens`, `total_cost` | ✅ Active |
+| Tracing spans | In-house `TraceStore` (ring buffer + WebSocket to dashboard) + `TracingEmitter` (swarm, stdlib-only) | ✅ Active |
+| SSE telemetry | `/api/chat/stream` events; telemetry router | ✅ Active |
+| **Langfuse** | `KazmaTracer` with `backend="langfuse"`; enabled via `logging.langfuse.enabled: true` + keys | ✅ **Wired and functional** (dormant by default — activate with keys) |
+| **OpenTelemetry** | — | 🔴 **Removed** (dead code + dead deps purged; Langfuse + Console remain) |
+| **Prometheus** | — | 🔴 **Not implemented** |
 
-> The `opentelemetry-*` packages are declared so users *can* wire OTel, but Kazma's own tracing emitter is a custom in-house span system, not OTel. See [Roadmap](roadmap-and-future.md#observability).
+### OpenTelemetry — removed (Option A)
+
+OpenTelemetry was **declared as a dependency with real code, but was never reachable at runtime** — no config path selected `backend="opentelemetry"`. The `[tracing]` extra (6 packages) was pure dead weight (never imported).
+
+**Removed in the July 2026 cleanup:**
+- `_init_opentelemetry()` method + all four `_trace_*_otel()` methods from `KazmaTracer`
+- `OPENTELEMETRY` enum value from `TracingBackend`
+- `opentelemetry-api` + `opentelemetry-sdk` from core deps
+- Entire `[tracing]` optional extra (6 packages) from `pyproject.toml`
+- `otlp_endpoint` field + `"opentelemetry"` from valid backends in `TracingConfig`
+
+Tracing now has two backends: **Langfuse** (primary, dormant by default) and **Console** (fallback). The in-house `TraceStore` (ring buffer + WebSocket dashboard) and the swarm's stdlib-only `TracingEmitter` (OTel-compatible span format, no OTel package) remain unchanged.
 
 ---
 

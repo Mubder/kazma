@@ -9,6 +9,7 @@ Compacts the agent's conversation context by:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -210,23 +211,77 @@ class CompactionEngine:
     async def retrieve_memories(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         """Retrieve relevant memories from the memory store.
 
+        Handles both async (``await search(query, limit=)``) and sync
+        (``search(query, n_results=)``) backends gracefully.  This makes the
+        compaction engine compatible with ``AsyncMemoryAdapter`` (the canonical
+        wrapper), raw ``VectorMemory`` (sync), and any future async backend.
+
         Args:
             query: Search query (typically the conversation summary).
             limit: Maximum number of memories to retrieve.
 
         Returns:
-            List of memory dicts, or empty list if no memory store is configured.
+            List of memory dicts, or empty list if no memory store is configured
+            or retrieval fails.
         """
         if self.memory_store is None:
-            return []
+            # Lazy resolution: if no store was passed at construction time
+            # (e.g. because VectorMemory was set AFTER the agent was built),
+            # try to resolve it now from the singleton. This fixes the
+            # initialization-ordering issue where app.py constructs KazmaAgent
+            # before calling set_vector_memory().
+            store = self._resolve_memory_store()
+            if store is None:
+                return []
+        else:
+            store = self.memory_store
 
         try:
-            memories = await self.memory_store.search(query, limit=limit)
+            result = store.search(query, limit=limit)
+            # If the backend is async (e.g. AsyncMemoryAdapter), await it.
+            if asyncio.iscoroutine(result):
+                memories = await result
+            else:
+                memories = result
             logger.info("Retrieved %d memories for compaction", len(memories))
             return memories
+        except TypeError:
+            # Fallback: the backend may use n_results= instead of limit=.
+            try:
+                result = store.search(query, n_results=limit)
+                if asyncio.iscoroutine(result):
+                    memories = await result
+                else:
+                    memories = result
+                logger.info("Retrieved %d memories for compaction (n_results fallback)", len(memories))
+                return memories
+            except Exception:
+                logger.exception("Memory retrieval failed during compaction (n_results fallback)")
+                return []
         except Exception:
             logger.exception("Memory retrieval failed during compaction")
             return []
+
+    def _resolve_memory_store(self) -> Any:
+        """Lazily resolve the memory store from the VectorMemory singleton.
+
+        Called when ``self.memory_store`` is None. Wraps the singleton in an
+        ``AsyncMemoryAdapter`` so the compaction engine can ``await`` it.
+        """
+        try:
+            from kazma_core.agent.tool_registry import get_vector_memory
+            from kazma_core.memory.async_adapter import wrap_vector_memory
+
+            vm = get_vector_memory()
+            if vm is not None:
+                logger.debug("CompactionEngine: lazily resolved VectorMemory singleton")
+                store = wrap_vector_memory(vm)
+                # Cache it so we don't re-resolve on every compaction.
+                self.memory_store = store
+                return store
+        except Exception:
+            logger.debug("CompactionEngine: could not lazily resolve memory store", exc_info=True)
+        return None
 
     def _build_compacted_system(self, summary: str, memories: list[dict[str, Any]]) -> str:
         """Build the system message content for the compacted context.

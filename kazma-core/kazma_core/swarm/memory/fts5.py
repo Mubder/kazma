@@ -85,7 +85,11 @@ class FTS5LexicalStore:
                 rid = r.get("id", "")
                 bm25 = r.get("bm25_score", 0)
                 scored.append((rid, float(bm25)))
-            scored.sort(key=lambda x: x[1], reverse=True)
+            # SQLite FTS5 bm25 scores are negative (more negative = more
+            # relevant).  Sort ascending so the best (most negative) results
+            # come first — the RRF blender in the adapter assigns rank 0 to
+            # the first item, giving it the highest RRF contribution.
+            scored.sort(key=lambda x: x[1])
             return scored
         except Exception as exc:
             logger.warning("[FTS5Lexical] Search failed: %s", exc)

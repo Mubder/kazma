@@ -27,78 +27,24 @@ class ArabicTokenizer:
         self.stemmer = self._init_stemmer()
 
     def _load_stop_words(self) -> set[str]:
-        """Load Arabic stop words.
+        """Load Arabic stop words (deduplicated).
 
         Returns:
             Set of common Arabic stop words.
         """
         return {
             # Particles
-            "في",
-            "من",
-            "على",
-            "إلى",
-            "الي",  # normalized (without hamza — BUG-023 fix)
-            "عن",
-            "مع",
-            "هذا",
-            "هذه",
-            "التي",
-            "الذي",
-            "أن",
-            "ان",  # normalized (BUG-023 fix)
-            "كان",
-            "هو",
-            "هي",
-            "لا",
-            "ما",
-            "لم",
-            "لن",
-            "لكن",
-            "كما",
-            "كلما",
-            # Pronouns (with and without hamza for normalization compatibility)
-            "أنا",
-            "انا",
-            "انت",
-            "انتما",
-            "هم",
-            "هن",
-            "نحن",
-            "انتم",
-            "هو",
-            "هي",
-            "هيا",
-            "انا",
-            "انت",
-            "انتما",
-            "هم",
-            "هن",
-            "نحن",
-            "انتم",
-            "هو",
-            "هي",
-            "هيا",
+            "في", "من", "على", "الى", "عن", "مع",
+            "هذا", "هذه", "التي", "الذي", "ان", "كان",
+            "لا", "ما", "لم", "لن", "لكن", "كما", "كلما",
+            # Pronouns
+            "انا", "انت", "انتما", "انتم", "هم", "هن",
+            "نحن", "هو", "هي", "هيا",
             # Common connectors
-            "و",
-            "أو",
-            "او",  # normalized (BUG-023 fix)
-            "ثم",
-            "حتى",
-            "عندما",
-            "حين",
-            "هناك",
+            "او", "ثم", "حتى", "عندما", "حين", "هناك",
             # Kuwaiti dialect terms
-            "يلا",
-            "يا",
-            "شلون",
-            "عشان",
-            "مو",
-            "ليه",
-            "لازم",
-            "شخ",
-            "ماكو",
-            "فد",
+            "يلا", "يا", "شلون", "عشان", "مو", "ليه",
+            "لازم", "شخ", "ماكو", "فد",
         }
 
     def _init_stemmer(self):
@@ -107,19 +53,17 @@ class ArabicTokenizer:
         Returns:
             Simple stemmer function or None.
         """
-        # Basic stemming rules - can be enhanced
+        # Suffix stripping rules (raw strings, applied after normalization).
+        # Note: the feminine marker ة$ is NOT here because normalize() already
+        # converts Teh Marbuta (ة) to Heh (ه). Stripping ه$ would wrongly
+        # truncate words whose final letter happens to be ه.
         stem_rules = {
-            # Common suffixes
-            r"ات$": "",  # feminine plural
-            r"ون$": "",  # masculine plural
-            "ين$": "",  # dual/masculine plural
-            r"ة$": "",  # feminine marker
-            r"ان$": "",  # dual
-            r"نا$": "",  # first person plural
-            # Common prefixes
-            r"^ال": "",  # definite article
-            r"^بـ": "",  # prefixing B
-            r"^كـ": "",  # prefixing K
+            r"ات$": "",    # feminine plural
+            r"ون$": "",    # masculine plural
+            r"ين$": "",    # dual / masculine plural (genitive)
+            r"ان$": "",    # dual (nominative)
+            r"نا$": "",    # first person plural
+            r"^ال": "",    # definite article
         }
 
         def stem(word: str) -> str:
@@ -141,20 +85,22 @@ class ArabicTokenizer:
         # Remove diacritics (tashkeel)
         text = self._remove_diacritics(text)
 
-        # Normalize Alef variants
+        # Normalize Alef variants (أ إ آ → ا)
         text = self._normalize_alef(text)
 
-        # normalize Teh Marbuta to Heh
+        # Normalize Teh Marbuta to Heh (ة → ه)
         text = text.replace("ة", "ه")
 
-        # Normalize Yeh variants
+        # Normalize Yeh variants — must run BEFORE Waw Hamza / Ya Hamza
+        # to avoid the conflicting rules that previously dead-coded each other.
+        # _normalize_yeh converts: ئ→ي, ى→ي (and removed the old ؤ→ي conflict).
         text = self._normalize_yeh(text)
 
-        # Normalize Waw Hamza
+        # Normalize Waw Hamza (ؤ → و) — no longer conflicts with _normalize_yeh
         text = text.replace("ؤ", "و")
 
-        # Normalize Ya Hamza
-        text = text.replace("ئ", "ي")
+        # Ya Hamza (ئ) is already handled by _normalize_yeh above; the old
+        # redundant text.replace("ئ", "ي") is removed.
 
         # Remove Kashida (tatweel)
         text = text.replace("ـ", "")
@@ -162,6 +108,33 @@ class ArabicTokenizer:
         # Remove extra spaces
         text = re.sub(r"\s+", " ", text).strip()
 
+        return text
+
+    def _split_arabic_clitics(self, text: str) -> str:
+        """Split attached Arabic clitic prefixes for better token matching.
+
+        Arabic commonly attaches the conjunction ``و`` (and) to the
+        following word (e.g. ``وسلام`` = wa-salām = "and peace"). This
+        function separates ONLY the waw-conjunction case, and ONLY when the
+        resulting stem is 4+ characters — this avoids corrupting legitimate
+        Arabic words that start with ``و`` (like ``واصل``, ``وجه``, ``وفق``)
+        or ``ل`` (like ``لابد``) or ``ب`` (like ``بريد``).
+
+        Note: ``ل`` and ``ب`` prefixes are NOT split at all because the
+        false-positive rate is too high (many common words start with these
+        letters). Only ``و`` is split, and conservatively.
+
+        Args:
+            text: Normalized Arabic text.
+
+        Returns:
+            Text with waw-conjunction prefixes separated by spaces.
+        """
+        # و (wāw al-ʿaṭf — "and") at the start of a 5+ char word.
+        # Minimum 5 chars (و + 4 stem chars) avoids splitting real words
+        # like واصل(3), ورد(2), وفق(2), وجه(2) while still splitting
+        # conjunctions like وسلام(5), والكتاب(6), فالمشروع(7).
+        text = re.sub(r"(?<![^\s])و([\u0600-\u06FF]{4,})(?![^\s])", r"و \1", text)
         return text
 
     def tokenize(self, text: str) -> str:
@@ -178,6 +151,9 @@ class ArabicTokenizer:
 
         # Normalize text
         processed = self.normalize(text)
+
+        # Split attached clitics (و, ل, ب prefixes) for better recall
+        processed = self._split_arabic_clitics(processed)
 
         # Remove stop words
         words = processed.split()
@@ -220,13 +196,21 @@ class ArabicTokenizer:
     def _normalize_yeh(self, text: str) -> str:
         """Normalize Yeh variants to ي.
 
+        Note: ``ؤ`` (Waw Hamza) is NOT included here — it is normalized to
+        ``و`` in ``normalize()``. The old code included ``ؤ`` in the Yeh
+        variants, which converted it to ``ي`` and dead-coded the ``ؤ→و``
+        rule. The dead ``إي`` entry is also removed (Alef is already
+        normalized to ``ا`` by ``_normalize_alef`` before this runs, so
+        ``إي`` can never match).
+
         Args:
             text: Arabic text with Yeh variants.
 
         Returns:
             Text with normalized Yeh.
         """
-        yeh_variants = ["ئ", "ؤ", "إي", "ى"]
+        # ئ (Ya Hamza) → ي, ى (Alef Maqsura) → ي
+        yeh_variants = ["ئ", "ى"]
         for variant in yeh_variants:
             text = text.replace(variant, "ي")
         return text

@@ -159,29 +159,38 @@ class TestKeyboardShortcutCapture:
 
 
 class TestChromaDBWarningSuppressed:
-    """VectorMemory ImportError must be logged at DEBUG, not WARNING."""
+    """VectorMemory ImportError must be visible in production logs.
 
-    def test_no_warning_level_for_vector_memory(self) -> None:
-        """app.py must not use logger.warning for VectorMemory unavailability."""
+    Previously logged at DEBUG (invisible in default-logging deployments,
+    causing silent RAG disablement). Now elevated to WARNING per the memory
+    audit — the failure should be visible so operators know RAG is off.
+    """
+
+    def test_warning_level_for_vector_memory(self) -> None:
+        """app.py must use logger.warning for VectorMemory unavailability."""
         app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
         # Find the VectorMemory exception handler
         vm_idx = app_source.find("[VectorMemory] Not available")
         assert vm_idx != -1, "VectorMemory handler not found"
-        # Check the surrounding code (50 chars before)
+        # Check the surrounding code (100 chars before)
         context = app_source[max(0, vm_idx - 100) : vm_idx + 50]
-        assert "logger.warning" not in context, (
-            "VectorMemory ImportError still logged at WARNING level"
+        assert "logger.warning" in context, (
+            "VectorMemory ImportError should be logged at WARNING level "
+            "(elevated from DEBUG per memory audit — silent RAG disablement "
+            "must be visible to operators)"
         )
 
-    def test_debug_level_for_vector_memory(self) -> None:
-        """app.py must use logger.debug for VectorMemory unavailability."""
+    def test_no_silent_debug_for_vector_memory(self) -> None:
+        """app.py must NOT use logger.debug for VectorMemory ImportError.
+
+        The debug level made RAG failures invisible in production.
+        """
         app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
         vm_idx = app_source.find("[VectorMemory] Not available")
         assert vm_idx != -1
         context = app_source[max(0, vm_idx - 100) : vm_idx + 50]
-        assert "logger.debug" in context, (
-            "VectorMemory ImportError should use logger.debug"
-        )
+        # The context should have warning, not debug, in the except handler
+        assert "logger.debug" not in context.split("except")[0] if "except" in context else True
 
     def test_helpful_hint_present(self) -> None:
         """A helpful hint about installing the rag extra should be present."""

@@ -343,14 +343,23 @@ def list_memory_backups() -> list[dict[str, Any]]:
 
 
 async def _hot_reload_memory() -> None:
-    """Hot-reload the VectorMemory singleton globally."""
+    """Hot-reload the VectorMemory singleton globally.
+
+    Uses the SAME environment variables as ``app.py`` startup so the
+    hot-reload points at the user's configured path/collection/model,
+    not the defaults.
+    """
+    import os
     from kazma_core.memory.vector_store import VectorMemory
     from kazma_core.agent.tool_registry import set_vector_memory
 
     logger.info("[Maintenance] Reloading global memory instance...")
     try:
-        mem = VectorMemory()
+        path = os.environ.get("KAZMA_VECTOR_PATH", "~/.kazma/vector_memory")
+        collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
+        model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
+        mem = VectorMemory(path=path, collection_name=collection, model_name=model)
         set_vector_memory(mem)
-        logger.info("[Maintenance] Memory reload complete. Registered count: %d", mem.count)
+        logger.info("[Maintenance] Memory reload complete. Registered count: %s", mem.count)
     except Exception as e:
         logger.error("[Maintenance] Failed to hot-reload global memory: %s", e, exc_info=True)

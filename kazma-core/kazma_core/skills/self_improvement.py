@@ -134,7 +134,7 @@ class SelfImprovementSkill:
                 results = await adapter.search(f"{worker_name} pipeline {task[:100]}", limit=3)
                 if results:
                     past_context = "\nPast memory:\n" + "\n".join(
-                        f"  [{layer}] {text[:200]}" for text, _, layer, _, _ in results[:3]
+                        f"  [{r.source_layer}] {r.content[:200]}" for r in results[:3]
                     )
         except Exception as exc:
             logger.debug("Memory adapter search failed: %s", exc)
@@ -197,7 +197,7 @@ Output ONLY the delta text, no preamble."""
                 results = await adapter.search(f"{worker_name} failure {task[:100]}", limit=3)
                 if results:
                     past_context = "\nPast failures:\n" + "\n".join(
-                        f"  [{layer}] {text[:200]}" for text, _, layer, _, _ in results[:3]
+                        f"  [{r.source_layer}] {r.content[:200]}" for r in results[:3]
                     )
         except Exception as exc:
             logger.debug("Memory adapter search failed: %s", exc)

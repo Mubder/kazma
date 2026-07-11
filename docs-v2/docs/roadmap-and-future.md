@@ -31,16 +31,21 @@ Items are marked:
 
 ## 3. Memory & RAG
 
+> **Updated July 2026** — the memory overhaul (Phases 1–4) closed all previously-documented gaps. Items below reflect the current state.
+
 | Capability | Status | Notes |
 |---|---|---|
-| ChromaDB vector memory (RAG tools) | ✅ | Opt-in via `memory_search`/`memory_store`. |
-| 4-layer UnifiedMemoryAdapter (RRF) | 🟡 | Works, but only used by `self_improvement.py` + `phonebook.py`. |
-| Automatic RAG injection into prompts | 🔴 | Retrieval is tool-based, not automatic. |
-| Short-term→permanent consolidation | 🔴 | No promotion logic; only explicit `memory_store`. |
-| Document chunking | 🔴 | No chunker; one `add()` = one doc. |
-| Arabic tokenizer (FTS5) | ✅ | `arabic_tokenizer.py`. |
-| `SQLiteMemoryBackend` used in chat retrieval | 🟡 | Wired as `self.memory` but no chat-path caller of `search()`. |
-| `distance()` bug in `search_backend._vector_search` | 🟡 | Known broken path; unreached in practice. |
+| ChromaDB vector memory (RAG tools) | ✅ | Via `memory_search`/`memory_store` + compaction injection. |
+| **Memory injection during compaction** | ✅ | `CompactionEngine.retrieve_memories()` now retrieves top-5 and injects `## Relevant Memories`. Lazy resolution handles init ordering. |
+| 4-layer UnifiedMemoryAdapter (RRF) | ✅ | **Fixed** — L1 import typo + caller tuple-unpacking bug resolved. Used by swarm (self-improvement + phonebook). |
+| Automatic RAG injection into prompts | ✅ | Compaction injects at 80% context; LLM tools remain opt-in. |
+| Short-term→permanent consolidation | 🟡 | Explicit-only (`memory_store` tool). No background auto-promotion — deliberate design choice. |
+| Document chunking | ✅ | `VectorMemory.add()` chunks at 2000 chars with 200-char overlap. |
+| Arabic tokenizer (FTS5) | ✅ | **Improved** — symmetric normalization, conservative clitic splitting, deduplicated stop words, dead rules removed. |
+| VectorMemory CRUD | ✅ | `delete()`, `update()`, `clear()` added; chunk-aware. |
+| `SQLiteMemoryBackend` vector search | ✅ | **Fixed** — `distance()` replaced with cosine distance; `_vec_available` detection corrected. |
+| BM25 ranking | ✅ | **Fixed** — ascending sort (was inverted). |
+| `checkpoint_manager` in compaction | 🟡 | Still not passed to `create_authority()` — low-risk (LangGraph checkpointer covers this). |
 
 ---
 
@@ -114,22 +119,28 @@ Items are marked:
 |---|---|---|
 | Structured JSON logs | ✅ | `logging.format: json`. |
 | Swarm metrics (in-memory + SQLite) | ✅ | `MetricsCollector`. |
-| In-house tracing spans | ✅ | `TracingEmitter`. |
+| In-house tracing spans | ✅ | `TraceStore` (dashboard) + `TracingEmitter` (swarm). |
 | SSE telemetry events | ✅ | `/api/chat/stream` + telemetry router. |
+| Langfuse tracing | ✅ | Wired via `KazmaTracer`; dormant by default (`logging.langfuse.enabled: false`). |
 | Prometheus scrape endpoint | 🔴 | Absent. |
-| OTel export pipeline | 🟡 | Libraries available; wiring is roadmap. |
+| OpenTelemetry export | 🔴 | **Removed** — dead code + 8 packages purged. Langfuse + Console remain as the two backends. Re-add only if OTLP export to Jaeger/Tempo becomes a real requirement. |
 
 ---
 
-## 9. Suggested next steps (from the audit)
+## 9. Suggested next steps (updated post-overhaul)
 
-High-leverage improvements that would close the gaps surfaced by this rewrite:
+The memory overhaul closed items #1–4 below. Remaining items:
 
-1. **Wire `memory_store` + `checkpoint_manager` into `create_authority()`** (`agent_runner.py:162-166`). This would activate the memory-enriched, checkpointed compaction the docs already describe. *(High impact, small change.)*
-2. **Fix `search_backend.py`** — replace `SELECT sqlite_version()` with a real `load_extension("vec0")` probe, and replace `distance(...)` with proper vec0 `MATCH`/`k` syntax. *(Correctness.)*
-3. **Wire the 4-layer adapter into the chat path** (or document explicitly that it's self-improvement-only) so the "4-layer memory" claim matches reality.
-4. **Add a document chunker** for `memory_store` so long texts retrieve well.
+1. ~~**Wire `memory_store` into `create_authority()`**~~ ✅ **Done** (Phase 1) — compaction now retrieves + injects memories.
+2. ~~**Fix `search_backend.py`**~~ ✅ **Done** (Phase 2) — vec detection + cosine distance in Python.
+3. ~~**Fix the 4-layer adapter**~~ ✅ **Done** (Phase 2) — L1 import typo + caller bug fixed.
+4. ~~**Add a document chunker**~~ ✅ **Done** (Phase 3) — 2000-char chunks with 200-char overlap.
 5. **Add 429 backoff** to the retry layer (or document the proxy requirement more loudly).
+6. **Auto-wire `CostCircuitBreaker`** into the agent loop so runaway spend is actually halted.
+7. **Sync the version strings** (`pyproject.toml`, `kazma.yaml`, CLI `--help`).
+8. **Resolve the OpenTelemetry question** — either remove the dead OTel code + `[tracing]` extra (6 unused packages), or wire it properly with a `logging.opentelemetry.enabled` config flag.
+9. **Add Prometheus `/metrics`** or commit to the Langfuse/OTel path.
+10. ~~**Remove the dead WebSocket endpoint**~~ / **Remove stub `/undo`/`/edit`** commands to reduce user confusion.
 6. **Auto-wire `CostCircuitBreaker`** into the agent loop so runaway spend is actually halted.
 7. **Sync the version strings** (`pyproject.toml`, `kazma.yaml`, CLI `--help`).
 8. **Add Prometheus `/metrics`** or commit to the OTel path and wire it.

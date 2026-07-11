@@ -942,10 +942,20 @@ async def create_supervisor_app(
     # Cost breaker
     cost_breaker = create_cost_breaker()
 
-    # Context authority
+    # Context authority — wired with the VectorMemory singleton (wrapped
+    # in an async adapter) so compaction can retrieve + inject memories.
     model = llm_cfg.get("model", "gpt-4o-mini")
     window = config.get("memory", {}).get("max_context_tokens", 128_000)
-    authority = create_authority(model=model, window=window)
+    from kazma_core.agent.tool_registry import get_vector_memory
+    from kazma_core.memory.async_adapter import wrap_vector_memory
+
+    _vm = get_vector_memory()
+    _memory_store = wrap_vector_memory(_vm) if _vm is not None else None
+    authority = create_authority(
+        model=model,
+        window=window,
+        memory_store=_memory_store,
+    )
 
     # Tracer
     tracing_cfg = config.get("logging", {})

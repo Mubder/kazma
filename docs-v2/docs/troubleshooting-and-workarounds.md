@@ -126,33 +126,45 @@ Verify persistence via `get_config_store().get("registry.active_provider")` / `.
 
 ## 2. Memory & RAG issues
 
+> **Updated July 2026** — most previously-documented memory bugs have been fixed in the overhaul. Remaining items are design decisions, not bugs.
+
 ### 2.1 "My agent doesn't seem to remember anything"
 
-**Root cause (most likely):** memory retrieval is **not automatic**. The chat agent only retrieves when the LLM voluntarily calls `memory_search`. There is no injection of retrieved context into the prompt, and no short-term→permanent consolidation. See [Memory & RAG → Honest status](memory-and-rag.md#7-honest-status-notes-read-before-relying-on-memory-features).
+**After the overhaul, memory works in two ways:**
 
-**Workarounds:**
-- Instruct the model (via `system_prompt`) to call `memory_search` for relevant queries and `memory_store` for important facts.
-- For automatic retrieval during long conversations, note that **compaction's memory-retrieval step is a no-op** in the default wiring (`agent_runner.py:162-166` passes no `memory_store` to `create_authority`). Only LLM summarisation runs.
+1. **LLM tools** — the model can call `memory_search` / `memory_store` at any time.
+2. **Compaction injection** — when the conversation hits 80% of the context window, the `CompactionEngine` now **automatically retrieves the top-5 relevant memories** from ChromaDB and injects them into the fresh system message as `## Relevant Memories`. This was previously dead code; it's now active.
 
-### 2.2 `distance(embedding, ?)` errors from `search_backend.py`
+**If memories still aren't surfacing:**
+- Verify `pip install -e ".[rag]"` was run (ChromaDB + sentence-transformers).
+- Check logs for `[VectorMemory]` warnings (now logged at WARNING level, not debug).
+- Instruct the model (via `system_prompt`) to proactively call `memory_store` for important facts — there is no background auto-promotion (by design).
 
-**Cause:** `_vector_search` (`search_backend.py:343,354`) calls `distance(...)`, which is **not a valid sqlite-vec function**. The path throws and returns `[]` from the `except`.
+### 2.2 VectorMemory not initialized
 
-**Why you probably haven't seen it:** callers don't pass `semantic_search=True` with an embedding. The `SQLiteMemoryBackend` (agent `self.memory`) isn't queried during chat retrieval anyway.
+**Cause:** the `[rag]` extra is not installed, or ChromaDB failed to initialize (corrupt DB, disk permission, version incompatibility).
 
-### 2.3 `sqlite-vec` "not loaded" despite being installed
+**What happens:** `get_vector_memory()` returns `None`. The tools return `"Error: VectorMemory not initialized."` Compaction's memory retrieval gracefully returns `[]`.
 
-**Cause:** `search_backend.py:55-60` runs `SELECT sqlite_version()` (always succeeds) and never calls `load_extension`, so `_vec_available` is unreliable. The correct pattern (used in `swarm/memory/sqlite_vec.py:73-89`) is `conn.load_extension("vec0")` + a `SELECT vec_version()` probe.
+**Fix:** `pip install -e ".[rag]"`. If it was installed but failed, check the WARNING-level log line (previously invisible at debug level — now elevated). The constructor catches all exceptions and degrades to FTS5; if even that fails, the singleton stays `None`.
 
-### 2.4 Embedding dimension mismatch
+### 2.3 Embedding dimension mismatch (cosmetic)
 
-`kazma.yaml` declares `storage.vector_dim: 1536`, but the actual model (`all-MiniLM-L6-v2`) is **384-d**. The 4-layer sqlite-vec store correctly uses `FLOAT[384]`. Don't rely on the yaml value for dimension logic.
+`kazma.yaml` declares `storage.vector_dim: 1536`, but the actual model (`all-MiniLM-L6-v2`) is **384-d**. This value is informational and not enforced by `VectorMemory`. Don't rely on it for dimension logic.
 
-### 2.5 Long documents retrieved poorly
+### 2.4 Long documents
 
-**Cause:** there is **no chunking strategy**. Each `memory_store` call embeds one whole document.
+**Fixed:** `VectorMemory.add()` now chunks at 2000 characters with 200-char overlap. No manual pre-splitting needed.
 
-**Fix:** pre-split long text in your skill/tool before calling `memory_store`.
+### 2.5 Previously-documented bugs (now fixed)
+
+These were fixed in the July 2026 memory overhaul:
+- ~~`distance()` SQL function error~~ → replaced with cosine distance in Python
+- ~~`_vec_available` false-positive detection~~ → now uses `load_extension("vec0")` + `vec_version()`
+- ~~Arabic FTS5 search asymmetric~~ → tokenized query now used in MATCH
+- ~~BM25 sort inverted~~ → ascending sort (most negative = best = first)
+- ~~4-layer adapter L1 dead~~ → `GlobalVectorStore` typo fixed to `VectorStore`
+- ~~4-layer callers crash on tuple unpack~~ → uses `MemoryHit` attribute access
 
 ---
 

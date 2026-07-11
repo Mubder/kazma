@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from kazma_core.config_store import get_config_store
-from kazma_core.memory.vector_store import VectorMemory
+from kazma_core.memory.vector_store import VectorMemory, flush_pending_alerts
 from kazma_core.memory.fts5 import FTS5Memory
 from kazma_core.system.installer import asynchronous_install_package, _hot_reload_memory, _active_installations
 
@@ -22,28 +22,35 @@ async def test_vector_memory_degrades_gracefully() -> None:
         with patch("kazma_core.observability.AlertDispatcher.broadcast_alert", new_callable=AsyncMock) as mock_alert:
             with tempfile.TemporaryDirectory() as tmpdir:
                 mem = VectorMemory(path=tmpdir)
-                
+
                 assert mem.degraded is True
                 assert mem._fallback is not None
                 assert isinstance(mem._fallback, FTS5Memory)
-                
+
                 # Verify status updated in ConfigStore
                 store = get_config_store()
                 assert store.get("system.memory.status") == "DEGRADED"
-                
+
+                # Flush any deferred alerts (the alert is deferred when
+                # constructed outside a running loop, or scheduled via
+                # create_task when inside one).
+                await flush_pending_alerts()
+                # Allow scheduled tasks to complete
+                await asyncio.sleep(0.01)
+
                 # Check alert broadcast called
                 mock_alert.assert_called_once()
-                
+
                 # Clear fallback store for isolation
                 mem._fallback.clear()
-                
+
                 # Test add
                 doc_id = mem.add("Test fallback data", {"category": "test"})
                 assert doc_id is not None
-                
+
                 # Test count
                 assert mem.count == 1
-                
+
                 # Test search
                 results = mem.search("fallback")
                 assert len(results) == 1

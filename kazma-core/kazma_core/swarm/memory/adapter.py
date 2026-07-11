@@ -363,8 +363,8 @@ def get_adapter() -> UnifiedMemoryAdapter | None:
         return _adapter
     # Initialize with available backends
     try:
-        from kazma_core.swarm.memory.vector import GlobalVectorStore
-        chroma = GlobalVectorStore()
+        from kazma_core.swarm.memory.vector import VectorStore
+        chroma = VectorStore()
     except Exception:
         chroma = None
     try:

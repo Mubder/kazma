@@ -52,12 +52,20 @@ class SQLiteMemoryBackend:
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA synchronous=NORMAL")
 
-        # Check for sqlite-vec extension
+        # Check for sqlite-vec extension — must actually probe vec_version(),
+        # not sqlite_version() (which exists in every SQLite build).
         try:
-            await conn.execute("SELECT sqlite_version()")
+            conn.enable_load_extension(True)
+            conn.load_extension("vec0")
+            await conn.execute("SELECT vec_version()")
             self._vec_available = True
         except Exception:
             self._vec_available = False
+        finally:
+            try:
+                conn.enable_load_extension(False)
+            except Exception:
+                pass
 
         # Create memories table with vector embedding support
         await conn.execute("""
@@ -181,8 +189,15 @@ class SQLiteMemoryBackend:
         conn = await self._ensure_connection()
         tenant_id = kwargs.get("tenant_id") if kwargs.get("tenant_id") is not None else get_current_tenant_id()
 
-        # Process query through Arabic tokenizer for better matching
+        # Process query through Arabic tokenizer for better matching.
+        # The tokenizer normalizes Alef/Yeh/Teh-Marbuta, strips diacritics
+        # and tatweel — the SAME transformations applied at index time to
+        # ``content_arabic``.  Using the tokenized query makes Arabic
+        # search symmetric (index and query normalized identically).
         query_arabic = self._arabic_tokenizer.tokenize(query)
+        # Use the tokenized form if it produced something different, so
+        # the MATCH hits the normalized ``content_arabic`` column.
+        fts_query = query_arabic if query_arabic else query
 
         results = []
 
@@ -199,7 +214,7 @@ class SQLiteMemoryBackend:
                     ORDER BY bm25_score ASC
                     LIMIT ?
                     """,
-                    (query, tenant_id, limit),
+                    (fts_query, tenant_id, limit),
                 )
             else:
                 cursor = await conn.execute(
@@ -210,7 +225,7 @@ class SQLiteMemoryBackend:
                     ORDER BY bm25_score ASC
                     LIMIT ?
                     """,
-                    (query, limit),
+                    (fts_query, limit),
                 )
             fts_rows = await cursor.fetchall()
 
@@ -320,59 +335,96 @@ class SQLiteMemoryBackend:
         return sorted_results[:limit]
 
     async def _vector_search(self, embedding: bytes, limit: int = 10, tenant_id: str | None = None) -> list[dict[str, Any]]:
-        """Perform vector similarity search using sqlite-vec.
+        """Perform vector similarity search using cosine distance in Python.
+
+        The ``memories`` table stores embeddings as raw BLOBs.  Rather than
+        relying on a non-existent ``distance()`` SQL function, we fetch all
+        rows that have embeddings and compute cosine similarity in Python.
+        This is correct for small-to-medium memory sets; for large-scale
+        vector search, migrate to a proper vec0 virtual table (as done in
+        ``swarm/memory/sqlite_vec.py``).
 
         Args:
-            embedding: Query embedding vector.
+            embedding: Query embedding as a serialized byte string (float32 array).
             limit: Maximum number of results.
             tenant_id: Optional tenant isolation ID.
 
         Returns:
-            List of memory dictionaries.
+            List of memory dictionaries with a ``similarity`` score (0–1).
         """
+        import math
+        import struct
+
         conn = await self._ensure_connection()
 
+        # Deserialize the query embedding (assume float32 little-endian)
         try:
-            # Use sqlite-vec for vector similarity search
-            if tenant_id is not None:
-                cursor = await conn.execute(
-                    """
-                    SELECT id, content, metadata, timestamp, source, relevance
-                    FROM memories
-                    WHERE embedding IS NOT NULL AND (tenant_id = ? OR tenant_id IS NULL)
-                    ORDER BY distance(embedding, ?)
-                    LIMIT ?
-                    """,
-                    (tenant_id, embedding, limit),
-                )
-            else:
-                cursor = await conn.execute(
-                    """
-                    SELECT id, content, metadata, timestamp, source, relevance
-                    FROM memories
-                    WHERE embedding IS NOT NULL
-                    ORDER BY distance(embedding, ?)
-                    LIMIT ?
-                    """,
-                    (embedding, limit),
-                )
-            rows = await cursor.fetchall()
-
-            return [
-                {
-                    "id": row[0],
-                    "content": row[1],
-                    "metadata": row[2],
-                    "timestamp": row[3],
-                    "source": row[4],
-                    "relevance": row[5],
-                    "search_type": "vector",
-                }
-                for row in rows
-            ]
-        except Exception as e:
-            logger.warning("Vector search failed: %s", e)
+            query_vec = list(struct.unpack(f"<{len(embedding) // 4}f", embedding))
+        except Exception:
+            logger.warning("Could not deserialize query embedding for vector search")
             return []
+        if not query_vec:
+            return []
+
+        query_norm = math.sqrt(sum(v * v for v in query_vec))
+        if query_norm == 0:
+            return []
+
+        # Fetch candidate rows with embeddings
+        if tenant_id is not None:
+            cursor = await conn.execute(
+                """
+                SELECT id, content, metadata, timestamp, source, relevance, embedding
+                FROM memories
+                WHERE embedding IS NOT NULL AND (tenant_id = ? OR tenant_id IS NULL)
+                """,
+                (tenant_id,),
+            )
+        else:
+            cursor = await conn.execute(
+                """
+                SELECT id, content, metadata, timestamp, source, relevance, embedding
+                FROM memories
+                WHERE embedding IS NOT NULL
+                """,
+            )
+        rows = await cursor.fetchall()
+
+        scored: list[tuple[float, dict[str, Any]]] = []
+        for row in rows:
+            emb_bytes = row[6]
+            if not emb_bytes:
+                continue
+            try:
+                vec = list(struct.unpack(f"<{len(emb_bytes) // 4}f", emb_bytes))
+            except Exception:
+                continue
+            if len(vec) != len(query_vec):
+                continue
+            norm = math.sqrt(sum(v * v for v in vec))
+            if norm == 0:
+                continue
+            dot = sum(a * b for a, b in zip(query_vec, vec))
+            similarity = dot / (query_norm * norm)
+            scored.append(
+                (
+                    similarity,
+                    {
+                        "id": row[0],
+                        "content": row[1],
+                        "metadata": row[2],
+                        "timestamp": row[3],
+                        "source": row[4],
+                        "relevance": row[5],
+                        "similarity": similarity,
+                        "search_type": "vector",
+                    },
+                )
+            )
+
+        # Sort by similarity descending (most similar first), take top-`limit`
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [item[1] for item in scored[:limit]]
 
     def _generate_id(self) -> str:
         """Generate a unique memory ID."""

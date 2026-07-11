@@ -188,20 +188,29 @@ class TestKeyboardShortcuts:
 
 
 class TestChromaDBDebugLevel:
-    """ChromaDB missing must be logged at DEBUG, not WARNING."""
+    """ChromaDB missing must be visible in production logs (WARNING level).
 
-    def test_app_py_uses_debug_for_vector_memory(self) -> None:
+    Previously logged at DEBUG (invisible in default-logging deployments,
+    causing silent RAG disablement). Elevated to WARNING per the memory audit.
+    """
+
+    def test_app_py_uses_warning_for_vector_memory(self) -> None:
         app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
         vm_idx = app_source.find("[VectorMemory] Not available")
         assert vm_idx != -1
         context = app_source[max(0, vm_idx - 120) : vm_idx + 50]
-        assert "logger.debug" in context, (
-            "VectorMemory ImportError must use logger.debug, not logger.warning"
+        assert "logger.warning" in context, (
+            "VectorMemory ImportError must use logger.warning (elevated from "
+            "debug per memory audit — RAG disablement must be visible)"
         )
-        assert "logger.warning" not in context
 
-    def test_vector_store_no_warning_on_import(self) -> None:
-        """vector_store.py must not log WARNING for chromadb import failure."""
+    def test_vector_store_uses_warning_for_chromadb_failures(self) -> None:
+        """vector_store.py may use logger.warning for ChromaDB failures.
+
+        Non-ImportError failures (corrupt DB, disk permission errors) SHOULD
+        be visible at WARNING level. The old ImportError-only warning was
+        broadened to catch all ChromaDB init failures per the memory audit.
+        """
         vs_source = (
             Path(__file__).resolve().parent.parent
             / "kazma-core"
@@ -209,8 +218,10 @@ class TestChromaDBDebugLevel:
             / "memory"
             / "vector_store.py"
         ).read_text(encoding="utf-8")
-        assert "logger.warning" not in vs_source, (
-            "vector_store.py should not use logger.warning"
+        # The warning is expected for non-import failures now.
+        assert "logger.warning" in vs_source, (
+            "vector_store.py should use logger.warning for ChromaDB failures "
+            "(non-import errors like corrupt DB, disk permission, etc.)"
         )
 
 

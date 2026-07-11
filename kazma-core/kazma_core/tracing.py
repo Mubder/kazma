@@ -137,7 +137,6 @@ def get_trace_store() -> TraceStore:
 
 class TracingBackend(StrEnum):
     LANGFUSE = "langfuse"
-    OPENTELEMETRY = "opentelemetry"
     CONSOLE = "console"  # fallback for testing / no-dashboard mode
 
 
@@ -147,28 +146,33 @@ from kazma_core.config_schema import TracingConfig
 class KazmaTracer:
     """Traces all agent operations.
 
-    Supports three backends:
+    Supports two backends:
     - langfuse: Full-featured dashboard at localhost:3000 (primary)
-    - opentelemetry: Jaeger/Zipkin exporter at localhost:16686 (fallback)
     - console: Stdout logging for testing / no-dashboard environments
 
     All traces are also written to the in-memory TraceStore for the
     local dashboard at /dashboard.
     """
 
-    def __init__(self, config: TracingConfig | None = None) -> None:
+    def __init__(self, config: TracingConfig | None = None, *, backend: str | None = None) -> None:
+        """Initialize the tracer.
+
+        Args:
+            config: A TracingConfig. If None, a default is created.
+            backend: Convenience override for the backend name (e.g. "console",
+                "langfuse"). Takes precedence over config.backend.
+        """
         self.config = config or TracingConfig()
+        if backend is not None:
+            self.config = self.config.model_copy(update={"backend": backend})
         self.backend = TracingBackend(self.config.backend)
         self._client: Any = None
-        self._otel_tracer: Any = None
         self._init_backend()
 
     def _init_backend(self) -> None:
         """Initialize the tracing backend."""
         if self.backend == TracingBackend.LANGFUSE:
             self._init_langfuse()
-        elif self.backend == TracingBackend.OPENTELEMETRY:
-            self._init_opentelemetry()
         else:
             logger.info("Tracing backend: console (stdout logging only)")
 
@@ -192,43 +196,6 @@ class KazmaTracer:
             self.backend = TracingBackend.CONSOLE
         except Exception as e:
             logger.warning("Langfuse init failed (%s), falling back to console", e)
-            self.backend = TracingBackend.CONSOLE
-
-    def _init_opentelemetry(self) -> None:
-        """Initialize OpenTelemetry with OTLP exporter."""
-        try:
-            from opentelemetry import trace
-            from opentelemetry.sdk.resources import Resource
-            from opentelemetry.sdk.trace import TracerProvider
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor
-
-            resource = Resource.create({"service.name": "kazma-agent"})
-            provider = TracerProvider(resource=resource)
-
-            try:
-                from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
-                    OTLPSpanExporter,
-                )
-
-                endpoint = self.config.otlp_endpoint or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317")
-                exporter = OTLPSpanExporter(
-                    endpoint=endpoint,
-                )
-            except ImportError:
-                from opentelemetry.sdk.trace.export import ConsoleSpanExporter
-
-                exporter = ConsoleSpanExporter()
-                logger.info("OTLP exporter not available, using console exporter")
-
-            provider.add_span_processor(BatchSpanProcessor(exporter))
-            trace.set_tracer_provider(provider)
-            self._otel_tracer = trace.get_tracer("kazma-agent")
-            logger.info("OpenTelemetry tracing initialized")
-        except ImportError:
-            logger.warning("opentelemetry not installed, falling back to console tracing")
-            self.backend = TracingBackend.CONSOLE
-        except Exception as e:
-            logger.warning("OpenTelemetry init failed (%s), falling back to console", e)
             self.backend = TracingBackend.CONSOLE
 
     def trace_llm_call(
@@ -276,8 +243,6 @@ class KazmaTracer:
 
         if self.backend == TracingBackend.LANGFUSE and self._client:
             self._trace_llm_langfuse(model, tokens, cost, duration_ms, prompt, response)
-        elif self.backend == TracingBackend.OPENTELEMETRY and self._otel_tracer:
-            self._trace_llm_otel(model, tokens, cost, duration_ms)
         else:
             logger.info(
                 "LLM call: model=%s tokens=%d cost=$%.4f duration=%.0fms",
@@ -318,22 +283,6 @@ class KazmaTracer:
         except Exception as e:
             logger.warning("Langfuse LLM trace failed: %s", e)
 
-    def _trace_llm_otel(
-        self,
-        model: str,
-        tokens: int,
-        cost: float,
-        duration_ms: float,
-    ) -> None:
-        """Send LLM trace to OpenTelemetry."""
-        try:
-            with self._otel_tracer.start_as_current_span("llm_call") as span:
-                span.set_attribute("llm.model", model)
-                span.set_attribute("llm.tokens", tokens)
-                span.set_attribute("llm.cost_usd", cost)
-                span.set_attribute("llm.duration_ms", duration_ms)
-        except Exception as e:
-            logger.warning("OTel LLM trace failed: %s", e)
 
     def trace_tool_execution(
         self,
@@ -376,8 +325,6 @@ class KazmaTracer:
 
         if self.backend == TracingBackend.LANGFUSE and self._client:
             self._trace_tool_langfuse(tool_name, input_data, output_data, duration_ms, success)
-        elif self.backend == TracingBackend.OPENTELEMETRY and self._otel_tracer:
-            self._trace_tool_otel(tool_name, duration_ms, success)
         else:
             status_label = "OK" if success else "FAIL"
             logger.info(
@@ -410,20 +357,6 @@ class KazmaTracer:
         except Exception as e:
             logger.warning("Langfuse tool trace failed: %s", e)
 
-    def _trace_tool_otel(
-        self,
-        tool_name: str,
-        duration_ms: float,
-        success: bool,
-    ) -> None:
-        """Send tool trace to OpenTelemetry."""
-        try:
-            with self._otel_tracer.start_as_current_span(f"tool:{tool_name}") as span:
-                span.set_attribute("tool.name", tool_name)
-                span.set_attribute("tool.duration_ms", duration_ms)
-                span.set_attribute("tool.success", success)
-        except Exception as e:
-            logger.warning("OTel tool trace failed: %s", e)
 
     def trace_state_transition(
         self,
@@ -452,8 +385,6 @@ class KazmaTracer:
 
         if self.backend == TracingBackend.LANGFUSE and self._client:
             self._trace_transition_langfuse(from_state, to_state, checkpoint_id)
-        elif self.backend == TracingBackend.OPENTELEMETRY and self._otel_tracer:
-            self._trace_transition_otel(from_state, to_state, checkpoint_id)
         else:
             logger.info(
                 "State transition: %s → %s (checkpoint=%s)",
@@ -480,20 +411,6 @@ class KazmaTracer:
         except Exception as e:
             logger.warning("Langfuse transition trace failed: %s", e)
 
-    def _trace_transition_otel(
-        self,
-        from_state: str,
-        to_state: str,
-        checkpoint_id: str,
-    ) -> None:
-        """Send state transition to OpenTelemetry."""
-        try:
-            with self._otel_tracer.start_as_current_span("state_transition") as span:
-                span.set_attribute("state.from", from_state)
-                span.set_attribute("state.to", to_state)
-                span.set_attribute("checkpoint.id", checkpoint_id)
-        except Exception as e:
-            logger.warning("OTel transition trace failed: %s", e)
 
     def trace_compaction(
         self,
@@ -524,8 +441,6 @@ class KazmaTracer:
 
         if self.backend == TracingBackend.LANGFUSE and self._client:
             self._trace_compaction_langfuse(tokens_before, tokens_after, summary, reduction_pct)
-        elif self.backend == TracingBackend.OPENTELEMETRY and self._otel_tracer:
-            self._trace_compaction_otel(tokens_before, tokens_after, reduction_pct)
         else:
             logger.info(
                 "Compaction: %d → %d tokens (%.0f%% reduction): %s",
@@ -557,20 +472,6 @@ class KazmaTracer:
         except Exception as e:
             logger.warning("Langfuse compaction trace failed: %s", e)
 
-    def _trace_compaction_otel(
-        self,
-        tokens_before: int,
-        tokens_after: int,
-        reduction_pct: float,
-    ) -> None:
-        """Send compaction trace to OpenTelemetry."""
-        try:
-            with self._otel_tracer.start_as_current_span("context_compaction") as span:
-                span.set_attribute("compaction.tokens_before", tokens_before)
-                span.set_attribute("compaction.tokens_after", tokens_after)
-                span.set_attribute("compaction.reduction_pct", reduction_pct)
-        except Exception as e:
-            logger.warning("OTel compaction trace failed: %s", e)
 
     def flush(self) -> None:
         """Flush pending traces to the backend."""
@@ -583,23 +484,15 @@ class KazmaTracer:
     def shutdown(self) -> None:
         """Gracefully shutdown the tracer."""
         self.flush()
-        if self.backend == TracingBackend.OPENTELEMETRY:
-            try:
-                from opentelemetry import trace
-
-                provider = trace.get_tracer_provider()
-                if hasattr(provider, "shutdown"):
-                    provider.shutdown()
-            except Exception as e:
-                logger.warning("OTel shutdown failed: %s", e)
         logger.info("Tracer shut down (backend=%s)", self.backend.value)
 
 
-def create_tracer(config: TracingConfig | None = None) -> KazmaTracer:
+def create_tracer(config: TracingConfig | None = None, *, backend: str | None = None) -> KazmaTracer:
     """Factory to create a KazmaTracer with the configured backend.
 
     Args:
         config: TracingConfig object (from kazma.yaml tracing section).
                 If None, uses default TracingConfig with env var fallbacks.
+        backend: Convenience override (e.g. "console", "langfuse").
     """
-    return KazmaTracer(config=config)
+    return KazmaTracer(config=config, backend=backend)

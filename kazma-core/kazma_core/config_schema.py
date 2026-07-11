@@ -90,22 +90,21 @@ class ModelRegistryConfig(BaseModel):
 
 
 class TracingConfig(BaseModel):
-    """OpenTelemetry tracing configuration."""
-    
+    """Tracing configuration."""
+
     enabled: bool = Field(default=False)
-    backend: str = Field(default="opentelemetry", description="Tracing backend: opentelemetry, langfuse, console")
-    otlp_endpoint: str = Field(default="http://localhost:4317", description="OTLP gRPC endpoint")
+    backend: str = Field(default="console", description="Tracing backend: langfuse, console")
     service_name: str = Field(default="kazma-agent", description="Service name for traces")
     sample_rate: float = Field(default=1.0, ge=0.0, le=1.0, description="Trace sampling rate")
     # Langfuse specific (if backend=langfuse)
     langfuse_public_key: str | None = Field(default=None)
     langfuse_secret_key: str | None = Field(default=None)
     langfuse_host: str = Field(default="http://localhost:3000")
-    
+
     @field_validator("backend")
     @classmethod
     def validate_backend(cls, v: str) -> str:
-        valid = {"opentelemetry", "langfuse", "console"}
+        valid = {"langfuse", "console"}
         if v not in valid:
             raise ValueError(f"backend must be one of {valid}")
         return v

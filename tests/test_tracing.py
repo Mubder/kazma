@@ -13,7 +13,6 @@ class TestTracingBackend:
 
     def test_all_backends(self):
         assert TracingBackend.LANGFUSE.value == "langfuse"
-        assert TracingBackend.OPENTELEMETRY.value == "opentelemetry"
         assert TracingBackend.CONSOLE.value == "console"
 
 
@@ -38,12 +37,6 @@ class TestKazmaTracerInit:
     def test_langfuse_backend(self, mock_init):
         tracer = KazmaTracer(backend="langfuse")
         assert tracer.backend == TracingBackend.LANGFUSE
-        mock_init.assert_called_once()
-
-    @patch("kazma_core.tracing.KazmaTracer._init_opentelemetry")
-    def test_opentelemetry_backend(self, mock_init):
-        tracer = KazmaTracer(backend="opentelemetry")
-        assert tracer.backend == TracingBackend.OPENTELEMETRY
         mock_init.assert_called_once()
 
 
