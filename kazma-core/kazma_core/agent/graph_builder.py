@@ -982,6 +982,18 @@ async def create_supervisor_app(
     if _LANG_DIRECTIVE not in system_prompt:
         system_prompt = system_prompt.rstrip() + _LANG_DIRECTIVE
 
+    # ── Cultural context enrichment ──────────────────────────────────
+    # Inject seasonal/cultural awareness (Ramadan, Eid, Kuwait National
+    # Day, Hijri date) into the system prompt. Previously dead code —
+    # CulturalContext existed but was never connected to the live agent.
+    try:
+        from kazma_core.cultural_context_enrichment import get_cultural_prompt_suffix
+        cultural_suffix = get_cultural_prompt_suffix()
+        if cultural_suffix and cultural_suffix not in system_prompt:
+            system_prompt = system_prompt.rstrip() + cultural_suffix
+    except Exception:
+        pass  # Non-critical — agent works fine without cultural context
+
     # Build graph
     graph = build_supervisor_graph(
         llm=llm,

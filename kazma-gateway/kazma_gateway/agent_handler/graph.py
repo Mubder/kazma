@@ -249,6 +249,41 @@ def create_graph_handler(
         if swarm_handled:
             return  # swarm dispatched, skip graph
 
+        # ── Majlis cultural fast-path ─────────────────────────────
+        # Detect pure greetings/farewells before invoking the LLM.
+        # Instant (< 50ms), zero token cost, culturally aware.
+        try:
+            from kazma_core.pacing import detect_intent, Intent, get_greeting_response
+            from kazma_core.cultural_context import CulturalContext
+
+            intent = detect_intent(msg.text)
+            if intent in (Intent.GREETING, Intent.FAREWELL):
+                cc = CulturalContext()
+                if intent == Intent.GREETING:
+                    greeting = get_greeting_response(
+                        dialect="kw",
+                        is_ramadan=cc.state.is_ramadan,
+                        is_eid=cc.state.is_eid,
+                    )
+                    reply_text = greeting
+                else:
+                    # Farewell
+                    reply_text = "في أمان الله 👋"
+
+                ctx = msg.context_metadata
+                tg_text, tg_ctx = _prepare_tg_outbound(msg, reply_text, ctx)
+                await manager.send(
+                    OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=tg_text,
+                        context_metadata=tg_ctx,
+                    )
+                )
+                logger.info("[agent-handler] Majlis fast-path: %s (thread=%s)", intent.name, thread_id)
+                return  # skip LLM — instant cultural greeting/farewell
+        except Exception as exc:
+            logger.debug("[agent-handler] Majlis fast-path unavailable: %s", exc)
+
         # ── Serialize per thread_id ────────────────────────────────
         # Two concurrent messages for the same thread_id must NOT interleave
         # graph.ainvoke() calls, or LangGraph checkpoints and messages will
@@ -300,6 +335,27 @@ def create_graph_handler(
 
                 if not assistant_text:
                     assistant_text = "(No response generated)"
+
+                # ── Majlis tone adaptation ──────────────────────────
+                # Wrap the LLM's response with cultural tone based on
+                # current cultural context (Ramadan warm, Eid celebratory,
+                # formal business, general polite).
+                try:
+                    from kazma_core.tone_adapter import ToneAdapter
+                    from kazma_core.cultural_context import CulturalContext
+
+                    _cc = CulturalContext()
+                    _ta = ToneAdapter()
+                    _profile = _ta.select_profile(
+                        formality=_ta.determine_formality_from_text(msg.text),
+                        dialect="kw",
+                        is_ramadan=_cc.state.is_ramadan,
+                        is_eid=_cc.state.is_eid,
+                        is_national_day=_cc.state.is_national_day,
+                    )
+                    assistant_text = _ta.adapt_response(assistant_text, profile=_profile, dialect="kw")
+                except Exception as exc:
+                    logger.debug("[agent-handler] Tone adaptation skipped: %s", exc)
 
                 logger.info(
                     "[agent-handler] Graph completed in %.0fms (thread=%s, platform=%s)",
