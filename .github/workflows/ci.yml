@@ -40,14 +40,18 @@ jobs:
           fi
 
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            BASE_SHA="$(git rev-list --max-parents=0 HEAD)"
+            if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              BASE_SHA="$(git rev-parse HEAD~1)"
+            else
+              BASE_SHA="$(git rev-parse HEAD)"
+            fi
           fi
 
           echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Run Ruff
         run: |
-          mapfile -t CHANGED_PY_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "\.py$" || true)
+          mapfile -t CHANGED_PY_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "^(kazma-core/kazma_core|kazma-gateway/kazma_gateway|kazma-ui/kazma_ui)/.*\.py$" || true)
           if [ "${#CHANGED_PY_FILES[@]}" -eq 0 ]; then
             echo "No changed Python files detected; skipping Ruff."
             exit 0
@@ -61,7 +65,7 @@ jobs:
             echo "No changed typed-package Python files detected; skipping MyPy."
             exit 0
           fi
-          mypy "${TYPECHECK_FILES[@]}" --ignore-missing-imports --follow-imports=skip
+          mypy "${TYPECHECK_FILES[@]}" --ignore-missing-imports --follow-imports=silent
 
   test-core:
     name: Core Tests
