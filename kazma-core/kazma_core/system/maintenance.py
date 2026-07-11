@@ -25,9 +25,10 @@ def get_memory_paths() -> tuple[Path, Path, Path]:
     Returns:
         A tuple of (fts5_path, vector_path, backups_dir) Path objects.
     """
-    fts5_path = Path(os.environ.get("KAZMA_FTS5_PATH", "~/.kazma/memory.db")).expanduser().resolve()
-    vector_path = Path(os.environ.get("KAZMA_VECTOR_PATH", "~/.kazma/vector_memory")).expanduser().resolve()
-    backups_dir = Path(os.environ.get("KAZMA_BACKUPS_DIR", "~/.kazma/backups")).expanduser().resolve()
+    from kazma_core.paths import fts5_memory_path, vector_memory_path, backups_dir as _backups_dir
+    fts5_path = Path(fts5_memory_path())
+    vector_path = Path(vector_memory_path())
+    backups_dir = _backups_dir()
     return fts5_path, vector_path, backups_dir
 
 
@@ -355,10 +356,9 @@ async def _hot_reload_memory() -> None:
 
     logger.info("[Maintenance] Reloading global memory instance...")
     try:
-        path = os.environ.get("KAZMA_VECTOR_PATH", "~/.kazma/vector_memory")
         collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
         model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
-        mem = VectorMemory(path=path, collection_name=collection, model_name=model)
+        mem = VectorMemory(collection_name=collection, model_name=model)
         set_vector_memory(mem)
         logger.info("[Maintenance] Memory reload complete. Registered count: %s", mem.count)
     except Exception as e:

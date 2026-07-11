@@ -41,7 +41,11 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
-_VAULT_DB = "kazma-data/vault.db"
+def _default_vault_db() -> str:
+    from kazma_core.paths import vault_db_path
+    return vault_db_path()
+
+_VAULT_DB = None  # Resolved lazily via paths.py
 _PBKDF2_ITERATIONS = 600_000
 _SALT_BYTES = 32
 _KEY_BYTES = 32  # AES-256
@@ -76,7 +80,10 @@ class SecretVault:
     random 12-byte GCM nonce.
     """
 
-    def __init__(self, db_path: str = _VAULT_DB) -> None:
+    def __init__(self, db_path: str | None = None) -> None:
+        from kazma_core.paths import vault_db_path
+        if db_path is None:
+            db_path = vault_db_path()
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC

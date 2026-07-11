@@ -56,16 +56,18 @@ class VectorMemory:
 
     def __init__(
         self,
-        path: str = "~/.kazma/vector_memory",
+        path: str | None = None,
         collection_name: str = "agent_memory",
         model_name: str = "all-MiniLM-L6-v2",
     ) -> None:
         from kazma_core.config_store import get_config_store
         from kazma_core.memory.fts5 import FTS5Memory
+        from kazma_core.paths import vector_memory_path
 
         self.degraded = False
         self._fallback: FTS5Memory | None = None
-        self._path = str(Path(path).expanduser().resolve())
+        self._path = path or vector_memory_path()
+        self._path = str(Path(self._path).expanduser().resolve())
         self._collection_name = collection_name
         self._model_name = model_name
 

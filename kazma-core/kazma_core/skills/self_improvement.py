@@ -299,8 +299,8 @@ Output ONLY the delta text, no preamble."""
 
     @staticmethod
     def _pending_queue_path() -> Path:
-        from pathlib import Path
-        return Path.home() / ".kazma" / "pending_evolution.json"
+        from kazma_core.paths import data_dir
+        return data_dir() / "pending_evolution.json"
 
     @classmethod
     def _stage_delta(cls, worker_name: str, delta: str) -> bool:

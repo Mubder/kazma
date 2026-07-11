@@ -32,9 +32,13 @@ class FTS5Memory:
 
     def __init__(
         self,
-        db_path: str = "~/.kazma/memory.db",
+        db_path: str | None = None,
         table_name: str = "memory_fts",
     ) -> None:
+        from kazma_core.paths import fts5_memory_path
+
+        if db_path is None:
+            db_path = fts5_memory_path()
         self._db_path = str(Path(db_path).expanduser().resolve())
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._table_name = table_name

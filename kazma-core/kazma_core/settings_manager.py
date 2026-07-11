@@ -795,7 +795,6 @@ class SettingsManager:
         log_paths = [
             Path("kazma-data/kazma.log"),
             Path.cwd() / "kazma.log",
-            Path.home() / ".kazma" / "kazma.log",
         ]
         for log_path in log_paths:
             if log_path.exists():

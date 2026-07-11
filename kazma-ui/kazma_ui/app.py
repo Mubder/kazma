@@ -481,12 +481,10 @@ class KazmaAppBuilder:
                     from kazma_core.agent.tool_registry import set_vector_memory
                     from kazma_core.memory.vector_store import VectorMemory
 
-                    vector_memory_path = os.environ.get("KAZMA_VECTOR_PATH", "~/.kazma/vector_memory")
                     vector_memory_collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
                     vector_memory_model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
 
                     vector_memory = VectorMemory(
-                        path=vector_memory_path,
                         collection_name=vector_memory_collection,
                         model_name=vector_memory_model,
                     )
