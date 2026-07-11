@@ -14,6 +14,7 @@ jobs:
     name: Lint & Type Check
     runs-on: ubuntu-latest
     env:
+      # Keep this in sync with typed packages covered by CI MyPy checks.
       TYPECHECK_PATH_REGEX: "^(kazma-core/kazma_core|kazma-gateway/kazma_gateway|kazma-ui/kazma_ui)/.*\\.py$"
     steps:
       - name: Checkout
@@ -58,12 +59,12 @@ jobs:
 
       - name: Run Ruff
         run: |
-          mapfile -t CHANGED_TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${TYPECHECK_PATH_REGEX}" || true)
-          if [ "${#CHANGED_TYPECHECK_FILES[@]}" -eq 0 ]; then
+          mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${TYPECHECK_PATH_REGEX}" || true)
+          if [ "${#TYPECHECK_FILES[@]}" -eq 0 ]; then
             echo "No changed Python files detected; skipping Ruff."
             exit 0
           fi
-          ruff check "${CHANGED_TYPECHECK_FILES[@]}"
+          ruff check "${TYPECHECK_FILES[@]}"
 
       - name: Run MyPy
         run: |
