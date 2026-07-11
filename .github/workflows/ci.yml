@@ -30,8 +30,8 @@ jobs:
           pip install -e ".[dev]"
           pip install ruff mypy
 
-      - name: Determine changed Python files
-        id: changed-files
+      - name: Determine diff base SHA
+        id: diff-base
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             BASE_SHA="${{ github.event.pull_request.base.sha }}"
@@ -43,19 +43,25 @@ jobs:
             BASE_SHA="$(git rev-list --max-parents=0 HEAD)"
           fi
 
-          CHANGED_PY_FILES="$(git diff --name-only "$BASE_SHA" "${{ github.sha }}" -- "*.py" | xargs)"
-          TYPECHECK_FILES="$(git diff --name-only "$BASE_SHA" "${{ github.sha }}" -- "*.py" | grep -E "^(kazma-core/kazma_core|kazma-gateway/kazma_gateway|kazma-ui/kazma_ui)/" | xargs || true)"
-
-          echo "ruff_targets=$CHANGED_PY_FILES" >> "$GITHUB_OUTPUT"
-          echo "mypy_targets=$TYPECHECK_FILES" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Run Ruff
-        if: steps.changed-files.outputs.ruff_targets != ''
-        run: ruff check ${{ steps.changed-files.outputs.ruff_targets }}
+        run: |
+          mapfile -t CHANGED_PY_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "\.py$" || true)
+          if [ "${#CHANGED_PY_FILES[@]}" -eq 0 ]; then
+            echo "No changed Python files detected; skipping Ruff."
+            exit 0
+          fi
+          ruff check "${CHANGED_PY_FILES[@]}"
 
       - name: Run MyPy
-        if: steps.changed-files.outputs.mypy_targets != ''
-        run: mypy ${{ steps.changed-files.outputs.mypy_targets }} --ignore-missing-imports --follow-imports=skip
+        run: |
+          mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "^(kazma-core/kazma_core|kazma-gateway/kazma_gateway|kazma-ui/kazma_ui)/.*\.py$" || true)
+          if [ "${#TYPECHECK_FILES[@]}" -eq 0 ]; then
+            echo "No changed typed-package Python files detected; skipping MyPy."
+            exit 0
+          fi
+          mypy "${TYPECHECK_FILES[@]}" --ignore-missing-imports --follow-imports=skip
 
   test-core:
     name: Core Tests
