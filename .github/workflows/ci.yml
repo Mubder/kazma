@@ -13,6 +13,8 @@ jobs:
   lint-and-typecheck:
     name: Lint & Type Check
     runs-on: ubuntu-latest
+    env:
+      TYPECHECK_PATH_REGEX: "^(kazma-core/kazma_core|kazma-gateway/kazma_gateway|kazma-ui/kazma_ui)/.*\\.py$"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,7 +41,8 @@ jobs:
             BASE_SHA="${{ github.event.before }}"
           fi
 
-          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+          NULL_SHA="0000000000000000000000000000000000000000"
+          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "$NULL_SHA" ]; then
             if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
               BASE_SHA="$(git rev-parse HEAD~1)"
             else
@@ -52,7 +55,7 @@ jobs:
 
       - name: Run Ruff
         run: |
-          mapfile -t CHANGED_PY_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "^(kazma-core/kazma_core|kazma-gateway/kazma_gateway|kazma-ui/kazma_ui)/.*\.py$" || true)
+          mapfile -t CHANGED_PY_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "$TYPECHECK_PATH_REGEX" || true)
           if [ "${#CHANGED_PY_FILES[@]}" -eq 0 ]; then
             echo "No changed Python files detected; skipping Ruff."
             exit 0
@@ -61,7 +64,7 @@ jobs:
 
       - name: Run MyPy
         run: |
-          mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "^(kazma-core/kazma_core|kazma-gateway/kazma_gateway|kazma-ui/kazma_ui)/.*\.py$" || true)
+          mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "$TYPECHECK_PATH_REGEX" || true)
           if [ "${#TYPECHECK_FILES[@]}" -eq 0 ]; then
             echo "No changed typed-package Python files detected; skipping MyPy."
             exit 0
