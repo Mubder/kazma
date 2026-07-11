@@ -55,7 +55,7 @@ jobs:
 
       - name: Run Ruff
         run: |
-          mapfile -t CHANGED_PY_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "$TYPECHECK_PATH_REGEX" || true)
+          mapfile -t CHANGED_PY_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${TYPECHECK_PATH_REGEX}" || true)
           if [ "${#CHANGED_PY_FILES[@]}" -eq 0 ]; then
             echo "No changed Python files detected; skipping Ruff."
             exit 0
@@ -64,12 +64,12 @@ jobs:
 
       - name: Run MyPy
         run: |
-          mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "$TYPECHECK_PATH_REGEX" || true)
+          mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${TYPECHECK_PATH_REGEX}" || true)
           if [ "${#TYPECHECK_FILES[@]}" -eq 0 ]; then
             echo "No changed typed-package Python files detected; skipping MyPy."
             exit 0
           fi
-          mypy "${TYPECHECK_FILES[@]}" --ignore-missing-imports --follow-imports=silent
+          mypy "${TYPECHECK_FILES[@]}" --ignore-missing-imports
 
   test-core:
     name: Core Tests
