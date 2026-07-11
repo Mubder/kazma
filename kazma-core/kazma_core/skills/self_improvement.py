@@ -107,7 +107,7 @@ class SelfImprovementSkill:
 
         if status == "completed" and success_rate >= 1.0:
             return await self._analyze_success(worker_name, task, stages, success_rate)
-        elif status in ("failed", "partial") or success_rate < 0.5:
+        elif status in ("failed", "partial", "timeout") or success_rate < 0.5:
             return await self._analyze_failure(worker_name, task, stages, success_rate, failed)
         return {"action": "skip", "delta": "", "reason": f"Mixed results — rate={success_rate:.0%}"}
 
@@ -235,14 +235,64 @@ Output ONLY the delta text, no preamble."""
     # ── Apply mutation ──────────────────────────────────────────────────
 
     async def apply_mutation(self, worker_name: str, delta: str) -> bool:
-        """Stage the Soul delta into pending_evolution.json for HITL approval.
+        """Auto-apply the Soul delta to the worker's system prompt.
 
-        Returns True if the delta was staged.
-        Uses approve_delta() to actually apply after human approval.
+        Deltas are applied immediately, subject to the ``_cap_evolution_prompt``
+        safeguards (max 12 blocks, 8000 chars).  The applied delta is also
+        logged to the 4-layer memory adapter via ``log_evolution`` so future
+        runs can retrieve it.
+
+        Returns True if the delta was applied.
         """
         if not delta or not self._enabled:
             return False
-        return self._stage_delta(worker_name, delta)
+        try:
+            return self._auto_apply(worker_name, delta)
+        except Exception as exc:
+            logger.warning("[SelfImprovement] Auto-apply failed for %s: %s", worker_name, exc)
+            return False
+
+    def _auto_apply(self, worker_name: str, delta: str) -> bool:
+        """Apply the delta to the worker's system prompt with safety caps."""
+        from kazma_core.swarm.registry import WorkerRegistry
+
+        registry = WorkerRegistry()
+        entry = registry.get(worker_name)
+        if entry is None:
+            logger.warning("[SelfImprovement] Worker '%s' not found — cannot apply delta", worker_name)
+            return False
+
+        old_prompt = entry.system_prompt or ""
+        new_prompt = _cap_evolution_prompt(old_prompt, delta)
+        registry.update(worker_name, system_prompt=new_prompt)
+
+        # Record in mutation log
+        import time as _time_apply
+        self._mutation_log.append({
+            "worker": worker_name,
+            "delta": delta[:_MAX_DELTA_CHARS],
+            "timestamp": _time_apply.strftime("%Y-%m-%dT%H:%M:%S"),
+            "status": "applied",
+        })
+        logger.info("[SelfImprovement] Delta APPLIED to '%s' (prompt: %d → %d chars)",
+                     worker_name, len(old_prompt), len(new_prompt))
+
+        # Persist to the 4-layer memory adapter for future retrieval
+        try:
+            import asyncio
+            from kazma_core.swarm.memory.adapter import get_adapter
+
+            adapter = get_adapter()
+            if adapter is not None:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(adapter.log_evolution(worker_name, delta))
+                else:
+                    loop.run_until_complete(adapter.log_evolution(worker_name, delta))
+        except Exception:
+            logger.debug("[SelfImprovement] log_evolution failed (non-fatal)", exc_info=True)
+
+        return True
 
     @staticmethod
     def _pending_queue_path() -> Path:

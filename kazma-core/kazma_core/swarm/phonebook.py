@@ -59,23 +59,39 @@ class WorkerPhonebook:
         )
 
     async def dispatch_by_name(self, worker_name: str, task: str) -> dict[str, Any]:
-        """Summon a worker by name and dispatch a task with episodic memory context."""
+        """Summon a worker by name and dispatch a task with episodic memory context.
+
+        Injects both:
+        1. Past successful strategies from the 4-layer memory adapter.
+        2. Past evolution learnings (SoulEvolution entries) specific to this worker.
+        """
         worker = self.summon(worker_name)
         if worker is None:
             return {"synthesis": f"Worker '{worker_name}' not found", "opinions": []}
-        # Inject episodic memory context before dispatch
+
+        # Inject episodic memory + evolution learnings before dispatch
         enriched = task
         try:
             from kazma_core.swarm.memory.adapter import get_adapter
             adapter = get_adapter()
             if adapter is not None:
+                # Query for past strategies
                 hits = await adapter.search(task, limit=3)
                 if hits:
                     strategies = [h.content or h.metadata.get("summary", "") for h in hits]
                     episodic = " | ".join(s for s in strategies if s)
                     if episodic:
                         enriched = f"PREVIOUS_SUCCESSFUL_STRATEGIES: {episodic[:1500]}\n\n{task}"
+
+                # Query for past evolution learnings specific to this worker
+                evo_hits = await adapter.search(f"{worker_name} evolution learning", limit=2)
+                if evo_hits:
+                    learnings = [h.content for h in evo_hits if h.content]
+                    if learnings:
+                        learning_ctx = "\n".join(f"- {l[:300]}" for l in learnings)
+                        enriched = f"PAST_LEARNINGS_FOR_THIS_WORKER:\n{learning_ctx}\n\n{enriched}"
         except Exception as exc:
             logger.debug("Episodic memory lookup failed: %s", exc)
+
         result = await worker.dispatch(enriched)
         return {"synthesis": result.get("output", ""), "opinions": [result]}

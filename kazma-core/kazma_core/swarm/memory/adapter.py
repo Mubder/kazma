@@ -145,10 +145,15 @@ class UnifiedMemoryAdapter:
     # ── Per-layer query helpers ─────────────────────────────────────────
 
     async def _query_l1(self, text: str, limit: int) -> list[tuple[str, float, str, str, dict]]:
-        """ChromaDB semantic query."""
+        """ChromaDB semantic query — fetches document content by ID after scoring."""
         try:
             results = self._l1.query(text, limit=limit)
-            return [(r[0], r[1], "", "L1:chromadb", {}) for r in results]
+            if not results:
+                return []
+            # Fetch document text for the scored IDs
+            ids = [r[0] for r in results]
+            docs = self._l1.get_documents(ids) if hasattr(self._l1, "get_documents") else {}
+            return [(r[0], r[1], docs.get(r[0], ""), "L1:chromadb", {}) for r in results]
         except Exception as exc:
             logger.warning("[Adapter] L1 query failed: %s", exc)
             return []
@@ -177,10 +182,15 @@ class UnifiedMemoryAdapter:
             return []
 
     async def _query_l3(self, text: str, limit: int) -> list[tuple[str, float, str, str, dict]]:
-        """FTS5 lexical query."""
+        """FTS5 lexical query — fetches document content by ID after scoring."""
         try:
             results = await self._l3.lexical_search(text, limit=limit)
-            return [(r[0], float(r[1]), "", "L3:fts5", {}) for r in results]
+            if not results:
+                return []
+            # Fetch document text for the scored IDs
+            ids = [r[0] for r in results]
+            texts = await self._l3.get_texts(ids) if hasattr(self._l3, "get_texts") else {}
+            return [(r[0], float(r[1]), texts.get(r[0], ""), "L3:fts5", {}) for r in results]
         except Exception as exc:
             logger.warning("[Adapter] L3 query failed: %s", exc)
             return []

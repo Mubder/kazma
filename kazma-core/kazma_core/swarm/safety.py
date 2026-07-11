@@ -28,6 +28,8 @@ _EXTENDED_DANGER = DEFAULT_DANGER_TOOLS + [
     "schedule_task",
     "cancel_scheduled",
     "run_tests",  # MCP IDE test runner tool
+    "vault_retrieve",
+    "vault_delete",
 ]
 
 # Tools classified as "sensitive reads" — allowed but logged.

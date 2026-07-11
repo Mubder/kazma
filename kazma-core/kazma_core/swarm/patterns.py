@@ -136,6 +136,49 @@ async def _synthesize_refined_output(
     return "\n".join(lines)
 
 
+async def _run_self_improvement(
+    task: SwarmTask,
+    worker_results: list[WorkerResult],
+    status: str,
+) -> None:
+    """Run the self-improvement hook for all workers in a completed task.
+
+    This is called from ``_finalize_pipeline`` (pipelines), and also from
+    ``execute_fan_out`` and ``execute_conditional`` post-completion.
+
+    Each worker is analyzed against ONLY its own result (not all stages),
+    avoiding redundant LLM calls and misattribution.
+    """
+    try:
+        from kazma_core.skills.self_improvement import get_self_improvement
+        si = get_self_improvement()
+        for res in worker_results:
+            if not res.worker:
+                continue
+
+            class _WorkerStage:
+                """Wraps a single WorkerResult as a stage for analyze()."""
+                def __init__(self, r: WorkerResult) -> None:
+                    self.role = r.worker
+                    self.worker_name = r.worker
+                    self.status = "completed" if r.status == "success" else r.status
+                    self.output = r.output
+                    self.error = r.error
+                    self.duration_ms = getattr(r, "duration_ms", 0) or 0
+
+            # Analyze this worker against ONLY its own result
+            analysis = await si.analyze(
+                worker_name=res.worker,
+                task=task.prompt,
+                stages=[_WorkerStage(res)],
+                status="completed" if status == "success" else status,
+            )
+            if analysis.get("action") == "mutate":
+                await si.apply_mutation(res.worker, analysis["delta"])
+    except Exception as exc:
+        logger.warning("[SwarmPatterns] Self-improvement hook failed: %s", exc)
+
+
 async def _finalize_pipeline(
     task: SwarmTask,
     worker_results: list[WorkerResult],
@@ -150,30 +193,7 @@ async def _finalize_pipeline(
     refined_output = await _synthesize_refined_output(task.prompt, worker_results, status, total_ms)
     
     # 2. Self-Improvement Hook
-    try:
-        from kazma_core.skills.self_improvement import get_self_improvement
-        si = get_self_improvement()
-        for res in worker_results:
-            if res.worker:
-                class MockStage:
-                    def __init__(self, r: WorkerResult):
-                        self.role = r.worker
-                        self.worker_name = r.worker
-                        self.status = "completed" if r.status == "success" else r.status
-                        self.output = r.output
-                        self.error = r.error
-                        self.duration_ms = 0
-                
-                analysis = await si.analyze(
-                    worker_name=res.worker,
-                    task=task.prompt,
-                    stages=[MockStage(r) for r in worker_results],
-                    status="completed" if status == "success" else status,
-                )
-                if analysis.get("action") == "mutate":
-                    await si.apply_mutation(res.worker, analysis["delta"])
-    except Exception as exc:
-        logger.debug("[SwarmPatterns] Self-improvement hook failed: %s", exc)
+    await _run_self_improvement(task, worker_results, status)
         
     # 3. Pipeline Logger Hook
     try:
@@ -621,6 +641,8 @@ async def execute_conditional(
 
     # Step 6: Build final result.
     status = _dispatch_like_status(target_result)
+    # Self-improvement hook (conditional path)
+    await _run_self_improvement(task, worker_results, status)
     return PatternExecution(
         worker_results=worker_results,
         status=status,
@@ -741,9 +763,12 @@ async def execute_fan_out(
         )
 
     aggregation_result = await aggregator.aggregate(task, worker_results)
+    # Self-improvement hook (fan-out path)
+    fan_status = _fan_out_status(worker_results)
+    await _run_self_improvement(task, worker_results, fan_status)
     return PatternExecution(
         worker_results=worker_results,
-        status=_fan_out_status(worker_results),
+        status=fan_status,
         aggregated_output=aggregation_result.aggregated_output,
         synthesized_output=aggregation_result.synthesized_output,
         error=_join_errors(worker_results),

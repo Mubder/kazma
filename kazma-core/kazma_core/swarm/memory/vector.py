@@ -208,6 +208,23 @@ class VectorStore:
         except Exception:
             return 0
 
+    def get_documents(self, ids: list[str]) -> dict[str, str]:
+        """Fetch document text by IDs. Returns a {id: text} mapping.
+
+        Used by the UnifiedMemoryAdapter to populate the ``content`` field
+        after scoring — previously the adapter hard-coded ``""`` for content.
+        """
+        if not ids or not self._ensure_client():
+            return {}
+        try:
+            result = self._collection.get(ids=ids, include=["documents"])
+            docs = result.get("documents", [])
+            returned_ids = result.get("ids", [])
+            return {rid: doc for rid, doc in zip(returned_ids, docs) if doc}
+        except Exception as exc:
+            logger.warning("[VectorStore] get_documents failed: %s", exc)
+            return {}
+
     def build_from_registry(self, workers: list[dict[str, Any]]) -> int:
         """Rebuild the collection from a list of worker dicts.
 

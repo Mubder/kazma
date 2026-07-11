@@ -38,7 +38,7 @@ TOOL_TIERS: dict[str, str] = {
     # Unsafe — always blocked (reserved)
 }
 
-DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec"]
+DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec", "vault_retrieve", "vault_delete"]
 
 
 def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:

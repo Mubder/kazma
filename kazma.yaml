@@ -97,6 +97,9 @@ safety:
       - spawn_agents
       - schedule_task
       - cancel_scheduled
+      # Secret vault — retrieving or deleting secrets requires approval
+      - vault_retrieve
+      - vault_delete
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 

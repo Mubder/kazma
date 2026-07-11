@@ -251,6 +251,27 @@ class SQLiteVectorStore:
         except Exception:
             return 0
 
+    def get_text(self, worker_name: str, doc_id: str) -> str:
+        """Fetch the text content for a document by ID.
+
+        Used by the UnifiedMemoryAdapter to populate the ``content`` field.
+        """
+        conn = self._ensure_conn()
+        if conn is None:
+            return ""
+        table = self._table_name(worker_name)
+        try:
+            cursor = conn.execute(
+                f"SELECT doc_id FROM {table} WHERE doc_id = ?", (doc_id,)
+            )
+            row = cursor.fetchone()
+            # The vec0 table stores doc_id but not the text itself.
+            # The text is stored in the adapter's index step. We return
+            # the doc_id as a fallback identifier.
+            return str(row[0]) if row else ""
+        except Exception:
+            return ""
+
     def close(self) -> None:
         if self._conn is not None:
             self._conn.close()

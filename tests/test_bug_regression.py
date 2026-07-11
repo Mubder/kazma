@@ -412,7 +412,14 @@ class TestBug19_TracingReadsConfig:
         from kazma_core.tracing import KazmaTracer
 
         source = inspect.getsource(KazmaTracer._init_langfuse)
-        assert "self._config.get" in source, "Langfuse init still only reads from env vars"
+        # The current implementation reads from self.config (TracingConfig
+        # dataclass attributes) with env-var fallback. The old test asserted
+        # "self._config.get" (dict-style); the code now uses attribute access
+        # (self.config.langfuse_public_key). Verify it reads from config, not
+        # only env vars.
+        assert "self.config.langfuse_public_key" in source or "self._config.get" in source, (
+            "Langfuse init should read keys from config, not only env vars"
+        )
 
 
 # ── Bug 20: ContextAuthority not wired into agent.py ──────────────────────

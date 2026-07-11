@@ -118,6 +118,40 @@ class FTS5LexicalStore:
         except Exception:
             return 0
 
+    async def get_text(self, uid: str) -> str:
+        """Fetch the content text for a memory by ID.
+
+        Used by the UnifiedMemoryAdapter to populate the ``content`` field.
+        """
+        backend = await self._ensure_backend()
+        if backend is None:
+            return ""
+        try:
+            conn = backend._conn if hasattr(backend, "_conn") else None
+            if conn is None:
+                return ""
+            row = await conn.execute(
+                "SELECT content FROM memories WHERE id = ?", (uid,)
+            )
+            r = await row.fetchone()
+            return r[0] if r else ""
+        except Exception:
+            return ""
+
+    async def get_texts(self, uids: list[str]) -> dict[str, str]:
+        """Batch fetch content text for multiple IDs."""
+        if not uids:
+            return {}
+        backend = await self._ensure_backend()
+        if backend is None:
+            return {}
+        result: dict[str, str] = {}
+        for uid in uids:
+            text = await self.get_text(uid)
+            if text:
+                result[uid] = text
+        return result
+
     async def close(self) -> None:
         if self._backend is not None:
             await self._backend.close()

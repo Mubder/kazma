@@ -1,0 +1,44 @@
+name: secret-vault
+version: 0.1.0
+description: Encrypted secret vault for API keys, tokens, and credentials. Stores secrets with AES-256-GCM encryption.
+author: Kazma Team
+license: MIT
+
+tools:
+  vault_store:
+    arabic_name: "تخزين سر"
+    description: >-
+      Store an API key, token, password, or other secret in the encrypted vault.
+      The secret is encrypted with AES-256-GCM and can be retrieved later by name.
+      Use this when the user shares a credential that should be securely stored.
+    category: "security"
+    prompt_chain:
+      - "قم بتخزين المفتاح أو السر في الخزنة المشفرة"
+  vault_retrieve:
+    arabic_name: "استرجاع سر"
+    description: >-
+      Retrieve a stored secret from the vault by name. The value is decrypted
+      and returned. This action requires human approval (HITL) before the
+      secret is released. Use when the user asks for a key/secret, or when
+      a tool needs a credential to proceed.
+    category: "security"
+    prompt_chain:
+      - "قم باسترجاع السر المخزن من الخزنة (يتطلب موافقة)"
+  vault_list:
+    arabic_name: "قائمة الأسرار"
+    description: >-
+      List all stored secret names and their categories. Secret values are
+      NOT shown — only names. Use this to discover what credentials are
+      available before retrieving one.
+    category: "security"
+    prompt_chain:
+      - "اعرض قائمة الأسرار المخزنة (الأسماء فقط)"
+  vault_delete:
+    arabic_name: "حذف سر"
+    description: >-
+      Permanently delete a stored secret from the vault by name.
+      This action requires human approval (HITL). Use when the user
+      asks to remove a credential.
+    category: "security"
+    prompt_chain:
+      - "احذف السر المحدد من الخزنة (يتطلب موافقة)"
