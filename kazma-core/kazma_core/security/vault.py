@@ -261,6 +261,16 @@ class SecretVault:
         with self._lock:
             return self._conn.execute("SELECT COUNT(*) FROM secrets").fetchone()[0]
 
+    def close(self) -> None:
+        """Close the SQLite connection. Safe to call multiple times."""
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.close()
+                except Exception:
+                    pass
+                self._conn = None
+
 
 # ── Singleton ──────────────────────────────────────────────────────────────
 
@@ -288,7 +298,9 @@ def get_vault() -> SecretVault | None:
 
 
 def reset_vault() -> None:
-    """Reset the singleton (for tests)."""
+    """Reset the singleton (for tests). Closes the existing connection first."""
     global _vault, _vault_init_attempted
+    if _vault is not None:
+        _vault.close()
     _vault = None
     _vault_init_attempted = False

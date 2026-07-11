@@ -69,23 +69,30 @@ class WorkerPhonebook:
         if worker is None:
             return {"synthesis": f"Worker '{worker_name}' not found", "opinions": []}
 
-        # Inject episodic memory + evolution learnings before dispatch
+        # Inject episodic memory + evolution learnings before dispatch.
+        # Issue both queries in parallel to avoid doubling dispatch latency.
         enriched = task
         try:
+            import asyncio as _asyncio
             from kazma_core.swarm.memory.adapter import get_adapter
             adapter = get_adapter()
             if adapter is not None:
-                # Query for past strategies
-                hits = await adapter.search(task, limit=3)
-                if hits:
-                    strategies = [h.content or h.metadata.get("summary", "") for h in hits]
+                # Co-issue both memory queries in parallel
+                strategies_hits, evo_hits = await _asyncio.gather(
+                    adapter.search(task, limit=3),
+                    adapter.search(f"{worker_name} evolution learning", limit=2),
+                    return_exceptions=True,
+                )
+
+                # Process past strategies
+                if isinstance(strategies_hits, list) and strategies_hits:
+                    strategies = [h.content or h.metadata.get("summary", "") for h in strategies_hits]
                     episodic = " | ".join(s for s in strategies if s)
                     if episodic:
                         enriched = f"PREVIOUS_SUCCESSFUL_STRATEGIES: {episodic[:1500]}\n\n{task}"
 
-                # Query for past evolution learnings specific to this worker
-                evo_hits = await adapter.search(f"{worker_name} evolution learning", limit=2)
-                if evo_hits:
+                # Process past evolution learnings
+                if isinstance(evo_hits, list) and evo_hits:
                     learnings = [h.content for h in evo_hits if h.content]
                     if learnings:
                         learning_ctx = "\n".join(f"- {l[:300]}" for l in learnings)

@@ -155,13 +155,13 @@ The three gates use **different** danger-tool lists. This is deliberate (each pa
 
 ### 5.1 Gate A (graph) — `kazma.yaml safety.hitl.require_approval_for`
 
-Default (`kazma.yaml:84-94`): `file_write`, `file_delete`, `shell_exec`, `code_exec`, `python_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`.
+Default (`kazma.yaml:84-94`): `file_write`, `file_delete`, `shell_exec`, `code_exec`, `python_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`, `vault_retrieve`, `vault_delete`.
 
-Code fallback if unset: `DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec"]` (`safety/hitl.py:41`).
+Code fallback if unset: `DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec", "vault_retrieve", "vault_delete"]` (`safety/hitl.py:41`). The vault tools protect secret retrieval/deletion.
 
 ### 5.2 Gate B (swarm bus) — `_EXTENDED_DANGER`
 
-`swarm/safety.py:23-31`: `DEFAULT_DANGER_TOOLS` (file_write, file_delete, shell_exec) **+** `python_exec`, `code_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`, `run_tests` (MCP IDE test runner).
+`swarm/safety.py:23-31`: `DEFAULT_DANGER_TOOLS` (file_write, file_delete, shell_exec, vault_retrieve, vault_delete) **+** `python_exec`, `code_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`, `run_tests` (MCP IDE test runner).
 
 Plus `_SENSITIVE_READS = ["sqlite_query", "file_search"]` (lines 34-37) — allowed but **logged**.
 

@@ -136,7 +136,13 @@ class TestHitlConfig:
         assert requires_approval("shell_exec", cfg) is False
 
     def test_default_danger_tools(self):
-        assert DEFAULT_DANGER_TOOLS == ["file_write", "file_delete", "shell_exec"]
+        # Vault tools (vault_retrieve, vault_delete) were added to protect
+        # secret access. The original 3 are always present.
+        assert "file_write" in DEFAULT_DANGER_TOOLS
+        assert "file_delete" in DEFAULT_DANGER_TOOLS
+        assert "shell_exec" in DEFAULT_DANGER_TOOLS
+        assert "vault_retrieve" in DEFAULT_DANGER_TOOLS
+        assert "vault_delete" in DEFAULT_DANGER_TOOLS
 
     def test_tool_tiers(self):
         assert get_tool_tier("file_read") == "read"

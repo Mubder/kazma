@@ -164,7 +164,7 @@ async def _run_self_improvement(
                     self.status = "completed" if r.status == "success" else r.status
                     self.output = r.output
                     self.error = r.error
-                    self.duration_ms = getattr(r, "duration_ms", 0) or 0
+                    self.duration_ms = (getattr(r, "duration_seconds", 0) or 0) * 1000
 
             # Analyze this worker against ONLY its own result
             analysis = await si.analyze(
@@ -744,9 +744,12 @@ async def execute_fan_out(
 
     if len(worker_results) == 1:
         worker_result = worker_results[0]
+        single_status = _dispatch_like_status(worker_result)
+        # Self-improvement hook (single-worker fan-out path)
+        await _run_self_improvement(task, worker_results, single_status)
         return PatternExecution(
             worker_results=worker_results,
-            status=_dispatch_like_status(worker_result),
+            status=single_status,
             aggregated_output=(
                 worker_result.output if worker_result.status == "success" else None
             ),

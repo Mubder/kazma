@@ -211,7 +211,59 @@ The in-process IDE/file MCP server (`mcp.ide_server`) exposes file read/write ov
 
 ---
 
-## 6. Delegation (agent-to-agent) — separate crypto subsystem
+## 6. Secret Vault (encrypted credential storage)
+
+The Secret Vault is a native skill that provides **encrypted-at-rest** storage for API keys, tokens, passwords, and other secrets. It uses AES-256-GCM encryption with a PBKDF2-derived key.
+
+### 6.1 Architecture
+
+| Component | File | Role |
+|---|---|---|
+| Vault engine | `kazma-core/kazma_core/security/vault.py` | AES-256-GCM encrypt/decrypt, PBKDF2 key derivation, SQLite storage |
+| Skill manifest | `kazma-skills/kazma_skills/native/secret_vault/skill_manifest.yaml` | Native skill declaration |
+| LLM tools | `kazma-skills/kazma_skills/native/secret_vault/tools.py` | `vault_store`, `vault_retrieve`, `vault_list`, `vault_delete` |
+
+### 6.2 Security model
+
+| Aspect | Implementation |
+|---|---|
+| **Master key** | `KAZMA_VAULT_KEY` environment variable. If unset, vault is disabled (all tools return graceful error). |
+| **Key derivation** | PBKDF2-HMAC-SHA256, 600,000 iterations, per-installation 32-byte random salt. |
+| **Encryption** | AES-256-GCM with 12-byte random nonce per record. Auth tag built into GCM. |
+| **Storage** | Separate encrypted SQLite DB at `kazma-data/vault.db` (NOT the plaintext `settings.db`). |
+| **Tenant isolation** | Uses `get_current_tenant_id()` ContextVar. Tenant-specific secrets + global fallback. |
+| **HITL gating** | `vault_retrieve` and `vault_delete` require human approval before execution. |
+
+### 6.3 Tools
+
+| Tool | HITL? | Description |
+|---|---|---|
+| `vault_store(name, value, category, metadata)` | No | Store (or update) a secret. Encrypted before persistence. |
+| `vault_retrieve(name)` | **Yes** | Retrieve and decrypt a secret. Returns `[SECRET — handle with care]\n<value>`. |
+| `vault_list()` | No | List all secret names + categories (values NOT shown). |
+| `vault_delete(name)` | **Yes** | Permanently delete a secret. |
+
+### 6.4 Enabling the vault
+
+```dotenv
+# .env
+KAZMA_VAULT_KEY=your-vault-passphrase
+```
+
+Any string works — it's a passphrase, not a pre-derived key. The PBKDF2 derivation converts it into the 256-bit AES key.
+
+### 6.5 Security note on retrieval
+
+When a secret is retrieved (after HITL approval), the decrypted value enters the conversation context as a tool result. This means it will appear in:
+- The chat history (message stream)
+- The LangGraph checkpointer (`checkpoints.db`) if checkpointing is active
+- Any enabled tracing (Langfuse)
+
+This is by design — the LLM needs the value to make authenticated API calls. The HITL gate ensures a human approves each retrieval. Only retrieve secrets when actually needed.
+
+---
+
+## 7. Delegation (agent-to-agent) — separate crypto subsystem
 
 Distinct from skills and MCP, the **delegation** subsystem (`kazma_core/delegation/`) lets agents hand tasks to other agents with cryptographic integrity:
 

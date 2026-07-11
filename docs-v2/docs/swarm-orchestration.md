@@ -277,7 +277,46 @@ Flushes to `TaskStore.record_worker_metric` on every record. Exposed via REST at
 
 ---
 
-## 11. Predefined pipelines (`kazma.yaml`)
+## 11. Self-improvement engine (feedback loop)
+
+The self-improvement skill (`skills/self_improvement.py`) automatically learns from task outcomes and mutates worker system prompts to improve future performance.
+
+### 11.1 The feedback loop
+
+```mermaid
+flowchart LR
+    T[Task completes] --> SI[_run_self_improvement]
+    SI --> A{analyze}
+    A -->|success| S[Meta-Refiner: reinforce]
+    A -->|failure/timeout| F[Meta-Refiner: correct]
+    S --> AA[_auto_apply]
+    F --> AA
+    AA --> CP[_cap_evolution_prompt]
+    CP --> WR[WorkerRegistry.update system_prompt]
+    AA --> LE[adapter.log_evolution]
+    LE --> ML[4-layer memory]
+    ML --> PD[Phonebook dispatch_by_name]
+    PD -->|PAST_LEARNINGS| WR
+```
+
+### 11.2 How it works
+
+1. **Hook fires** after every pipeline, fan-out, and conditional pattern completion (`patterns.py:_run_self_improvement`).
+2. **Each worker is analyzed** against only its own result (not all stages — fixed from the old behavior).
+3. The **Meta-Refiner LLM** generates a 2-3 sentence delta (reinforcement for success, correction for failure).
+4. The delta is **auto-applied** to the worker's system prompt via `_cap_evolution_prompt` (max 12 blocks, 8000 chars).
+5. The applied delta is **persisted** to the 4-layer memory adapter via `adapter.log_evolution()`.
+6. On future dispatches, the phonebook retrieves relevant past learnings and injects them as `PAST_LEARNINGS_FOR_THIS_WORKER` context.
+
+### 11.3 Status tracking
+
+- `_mutation_log` records every applied delta (worker, delta, timestamp, status).
+- `stats()` returns `{"enabled": ..., "mutations_applied": N}`.
+- `mutation_history` returns the last 50 mutations.
+
+---
+
+## 12. Predefined pipelines (`kazma.yaml`)
 
 | Pipeline | Stages |
 |---|---|
@@ -288,7 +327,7 @@ Each stage carries a `system_prompt`. See [Configuration → pipelines](configur
 
 ---
 
-## 12. CLI swarm commands
+## 13. CLI swarm commands
 
 The full `kazma swarm` surface (dispatch, broadcast, consult, pipeline, fanout, history, metrics, approve, reject, circuit-breaker, …) is documented in [CLI Reference → swarm](cli-reference.md#6-kazma-swarm).
 

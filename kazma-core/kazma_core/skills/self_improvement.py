@@ -99,10 +99,10 @@ class SelfImprovementSkill:
         if not self._enabled:
             return {"action": "skip", "delta": "", "reason": "Self-improvement disabled"}
 
-        # Compute success metrics
+        # Compute success metrics — count both "failed" and "timeout" as failures
         total = len(stages)
         succeeded = sum(1 for s in stages if getattr(s, "status", "") == "completed")
-        failed = sum(1 for s in stages if getattr(s, "status", "") == "failed")
+        failed = sum(1 for s in stages if getattr(s, "status", "") in ("failed", "timeout"))
         success_rate = succeeded / total if total > 0 else 0.0
 
         if status == "completed" and success_rate >= 1.0:
@@ -247,12 +247,12 @@ Output ONLY the delta text, no preamble."""
         if not delta or not self._enabled:
             return False
         try:
-            return self._auto_apply(worker_name, delta)
+            return await self._auto_apply(worker_name, delta)
         except Exception as exc:
             logger.warning("[SelfImprovement] Auto-apply failed for %s: %s", worker_name, exc)
             return False
 
-    def _auto_apply(self, worker_name: str, delta: str) -> bool:
+    async def _auto_apply(self, worker_name: str, delta: str) -> bool:
         """Apply the delta to the worker's system prompt with safety caps."""
         from kazma_core.swarm.registry import WorkerRegistry
 
@@ -268,29 +268,32 @@ Output ONLY the delta text, no preamble."""
 
         # Record in mutation log
         import time as _time_apply
+        ts = _time_apply.strftime("%Y-%m-%dT%H:%M:%S")
         self._mutation_log.append({
             "worker": worker_name,
             "delta": delta[:_MAX_DELTA_CHARS],
-            "timestamp": _time_apply.strftime("%Y-%m-%dT%H:%M:%S"),
+            "timestamp": ts,
             "status": "applied",
         })
         logger.info("[SelfImprovement] Delta APPLIED to '%s' (prompt: %d → %d chars)",
                      worker_name, len(old_prompt), len(new_prompt))
 
-        # Persist to the 4-layer memory adapter for future retrieval
+        # Persist to the 4-layer memory adapter for future retrieval.
+        # Use keyword arguments to match log_evolution's signature exactly.
         try:
-            import asyncio
             from kazma_core.swarm.memory.adapter import get_adapter
 
             adapter = get_adapter()
             if adapter is not None:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(adapter.log_evolution(worker_name, delta))
-                else:
-                    loop.run_until_complete(adapter.log_evolution(worker_name, delta))
+                await adapter.log_evolution(
+                    task_id=f"evolution_{ts}",
+                    worker_name=worker_name,
+                    delta=delta[:500],
+                    summary=f"Auto-applied evolution for {worker_name}",
+                )
+                logger.debug("[SelfImprovement] log_evolution persisted for %s", worker_name)
         except Exception:
-            logger.debug("[SelfImprovement] log_evolution failed (non-fatal)", exc_info=True)
+            logger.warning("[SelfImprovement] log_evolution failed (non-fatal)", exc_info=True)
 
         return True
 

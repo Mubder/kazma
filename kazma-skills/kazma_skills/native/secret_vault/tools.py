@@ -60,6 +60,11 @@ async def vault_retrieve(name: str) -> str:
     This action requires HITL approval — the user will be asked to approve
     before the secret is released.
 
+    **Security note:** The retrieved value enters the conversation context
+    (tool result). It will appear in the chat history and any enabled
+    tracing. Only retrieve when necessary, and prefer passing the secret
+    name to tools that accept ``vault_secret_name`` parameters.
+
     Args:
         name: The name of the secret to retrieve (e.g. "openai_key").
 
@@ -72,7 +77,10 @@ async def vault_retrieve(name: str) -> str:
     value = vault.retrieve(name)
     if value is None:
         return f"No secret found with name '{name}'."
-    return value
+    # Return the value with a warning that it's sensitive. The HITL gate
+    # ensures the user approved this retrieval. The value is needed by the
+    # LLM to make authenticated API calls.
+    return f"[SECRET — handle with care]\n{value}"
 
 
 async def vault_list() -> str:
