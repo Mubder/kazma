@@ -43,7 +43,10 @@ jobs:
 
           NULL_SHA="0000000000000000000000000000000000000000"
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "$NULL_SHA" ]; then
-            if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "Unable to determine pull request base SHA for lint/type checks." >&2
+              exit 1
+            elif git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
               BASE_SHA="$(git rev-parse HEAD~1)"
             else
               echo "Unable to determine a safe diff base for lint/type checks." >&2
@@ -55,12 +58,12 @@ jobs:
 
       - name: Run Ruff
         run: |
-          mapfile -t CHANGED_PY_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${TYPECHECK_PATH_REGEX}" || true)
-          if [ "${#CHANGED_PY_FILES[@]}" -eq 0 ]; then
+          mapfile -t CHANGED_TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${TYPECHECK_PATH_REGEX}" || true)
+          if [ "${#CHANGED_TYPECHECK_FILES[@]}" -eq 0 ]; then
             echo "No changed Python files detected; skipping Ruff."
             exit 0
           fi
-          ruff check "${CHANGED_PY_FILES[@]}"
+          ruff check "${CHANGED_TYPECHECK_FILES[@]}"
 
       - name: Run MyPy
         run: |
