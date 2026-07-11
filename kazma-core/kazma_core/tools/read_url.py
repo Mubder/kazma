@@ -1,7 +1,14 @@
 """Read URL tool — Fetch and extract readable content from a URL.
 
-Uses httpx for fetching and trafilatura for content extraction.
+Uses Playwright stealth (if installed) for JS-heavy / bot-protected pages,
+falls back to httpx + trafilatura for lightweight fetching.
 Caps output at 8000 characters with friendly error messages.
+
+Resolution order:
+    1. httpx fast fetch — if it works, done (fast path)
+    2. If bot-detection detected (Cloudflare, 403/503, "enable JS") →
+       retry with Playwright stealth headless browser
+    3. If Playwright not installed → return the httpx result or error
 
 Usage:
     from kazma_core.tools.read_url import read_url
@@ -10,7 +17,29 @@ Usage:
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 MAX_CONTENT_CHARS = 8000
+
+# Markers that indicate a page is blocking us with bot detection
+_BOT_DETECTION_MARKERS = (
+    "cloudflare",
+    "checking your browser",
+    "enable javascript",
+    "datadome",
+    "cf-browser-verification",
+    "cf-challenge",
+    "just a moment",
+    "access denied",
+    "are you a robot",
+    "captcha",
+    "incapsula",
+    "perimeterx",
+    "blocked",
+    "unusual traffic",
+)
 
 
 def _friendly_error(exc: Exception, url: str = "") -> str:
@@ -34,6 +63,75 @@ def _friendly_error(exc: Exception, url: str = "") -> str:
         return f"Error: Request to {url} timed out. The server may be slow or unreachable."
 
     return f"Error: Failed to read {url} — {exc}"
+
+
+def _looks_like_bot_block(html: str, status_code: int) -> bool:
+    """Check if the response is a bot-detection challenge page."""
+    if status_code in (403, 429, 503):
+        html_lower = html[:5000].lower()
+        return any(marker in html_lower for marker in _BOT_DETECTION_MARKERS)
+    # Also check 200 pages that are actually challenge pages
+    if len(html) < 3000:
+        html_lower = html.lower()
+        if any(marker in html_lower for marker in ("cloudflare", "checking your browser", "cf-challenge", "just a moment")):
+            return True
+    return False
+
+
+async def _fetch_with_playwright(url: str) -> str | None:
+    """Fetch URL using Playwright stealth headless browser.
+
+    Returns extracted text content, or None if Playwright is not installed
+    or the fetch failed. The caller falls back to httpx result in that case.
+    """
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        return None
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                ],
+            )
+            context = await browser.new_context(
+                viewport={"width": 1920, "height": 1080},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                locale="en-US",
+                timezone_id="America/New_York",
+            )
+
+            # Stealth: hide webdriver flag
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+                Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                window.chrome = { runtime: {} };
+            """)
+
+            page = await context.new_page()
+            await page.goto(url, wait_until="networkidle", timeout=30000)
+
+            # Wait a bit for any challenge to resolve
+            await page.wait_for_timeout(2000)
+
+            # Extract readable text
+            text = await page.inner_text("body")
+            await browser.close()
+
+            if text and text.strip():
+                logger.info("[read_url] Playwright stealth fetch succeeded for %s (%d chars)", url, len(text))
+                return text.strip()
+            return None
+
+    except Exception as exc:
+        logger.debug("[read_url] Playwright fetch failed: %s", exc)
+        return None
 
 
 async def read_url(url: str) -> str:
@@ -106,6 +204,18 @@ async def read_url(url: str) -> str:
                 url = redirect_url
             response.raise_for_status()
             html = response.text
+
+            # ── Bot-detection retry ──────────────────────────────────
+            # If the response looks like a Cloudflare/bot-challenge page,
+            # retry with Playwright stealth (if installed).
+            if _looks_like_bot_block(html, response.status_code):
+                logger.info("[read_url] Bot detection detected on %s, trying Playwright stealth", url)
+                pw_text = await _fetch_with_playwright(url)
+                if pw_text:
+                    if len(pw_text) > MAX_CONTENT_CHARS:
+                        pw_text = pw_text[:MAX_CONTENT_CHARS] + f"\n\n[truncated — showing first {MAX_CONTENT_CHARS}]"
+                    return pw_text
+                logger.warning("[read_url] Playwright not available or failed, returning raw response")
     except ConnectionError:
         return _friendly_error(ConnectionError(), url)
     except TimeoutError:

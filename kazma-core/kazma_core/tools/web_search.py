@@ -1,4 +1,11 @@
-"""Web search tool — DuckDuckGo-powered search returning markdown results.
+"""Web search tool — SearXNG / DuckDuckGo / Bing search returning markdown.
+
+Resolution order:
+    1. SearXNG (if KAZMA_SEARXNG_URL set or localhost:8088 detected) — aggregates 70+ engines
+    2. DuckDuckGo library (always available)
+    3. Bing HTML scrape (fallback)
+
+All paths are optional — Kazma works without SearXNG installed.
 
 Usage:
     from kazma_core.tools.web_search import web_search
@@ -36,8 +43,60 @@ def _friendly_error(exc: Exception) -> str:
     return "Error: Search failed. Please try again."
 
 
+def _searxng_search(query: str, max_results: int) -> list[dict[str, str]] | None:
+    """Try SearXNG search. Returns results or None if unavailable.
+
+    Reads KAZMA_SEARXNG_URL env var, or auto-detects localhost:8088.
+    """
+    import os
+    import urllib.parse
+
+    searxng_url = os.environ.get("KAZMA_SEARXNG_URL", "").strip()
+    if not searxng_url:
+        # Auto-detect: try localhost:8088 (common SearXNG port)
+        searxng_url = "http://localhost:8088"
+
+    try:
+        import httpx
+
+        search_url = f"{searxng_url.rstrip('/')}/search"
+        params = {
+            "q": query,
+            "format": "json",
+            "categories": "general",
+            "language": "en",
+            "pageno": 1,
+        }
+        r = httpx.get(search_url, params=params, timeout=10, headers={"Accept": "application/json"})
+        if r.status_code != 200:
+            logger.debug("[web_search] SearXNG returned status %d", r.status_code)
+            return None
+
+        data = r.json()
+        raw_results = data.get("results", [])
+        if not raw_results:
+            logger.debug("[web_search] SearXNG returned no results")
+            return None
+
+        # Normalize to DDG-compatible format
+        normalized = []
+        for res in raw_results[:max_results]:
+            normalized.append({
+                "title": res.get("title", "Untitled"),
+                "href": res.get("url", ""),
+                "body": res.get("content", ""),
+            })
+
+        logger.info("[web_search] SearXNG search returned %d results.", len(normalized))
+        return normalized
+
+    except Exception as exc:
+        logger.debug("[web_search] SearXNG not available: %s", exc)
+        return None
+
+
 def _run_search(query: str, max_results: int) -> list[dict[str, str]]:
-    """Synchronous search — tries DuckDuckGo, falls back to Bing scraping.
+    """Synchronous search — tries SearXNG → DuckDuckGo → Bing scraping.
 
     Kept as a standalone module-level function so it is picklable and
     easy to test in isolation. MUST be executed in a worker thread
@@ -46,7 +105,12 @@ def _run_search(query: str, max_results: int) -> list[dict[str, str]]:
     import logging
     logger = logging.getLogger(__name__)
 
-    # 1. Try DuckDuckGo first
+    # 0. Try SearXNG first (if configured or auto-detected)
+    results = _searxng_search(query, max_results)
+    if results is not None:
+        return results
+
+    # 1. Try DuckDuckGo
     try:
         from duckduckgo_search import DDGS
         with DDGS() as ddgs:
