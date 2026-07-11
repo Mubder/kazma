@@ -109,12 +109,18 @@ def detect_gcp_project_id() -> str:
 
 
 def default_provider_entries() -> list[dict[str, Any]]:
-    """Build default provider rows from PROVIDER_PRESETS (no custom)."""
+    """Build default provider rows from PROVIDER_PRESETS (no custom).
+
+    All providers start **disabled** — the user enables the one they want
+    via the Settings UI or by setting the corresponding env var.
+    Google is auto-enabled if Application Default Credentials are detected.
+    """
+    import os
+
     providers: list[dict[str, Any]] = []
     for key, preset in PROVIDER_PRESETS.items():
         if key == "custom":
             continue
-        enabled = key == "google"
         models: list[str] = []
         project_id = ""
         location = "us-central1"
@@ -123,12 +129,18 @@ def default_provider_entries() -> list[dict[str, Any]]:
 
             models = list(GEMINI_MODELS)
             project_id = detect_gcp_project_id()
+        # Auto-enable a provider if its API key is in the environment.
+        env_key = f"{key.upper()}_API_KEY"
+        has_key = bool(os.environ.get(env_key, "").strip())
+        # Google uses ADC, not an env key — enable if project_id detected.
+        has_adc = key == "google" and bool(project_id)
+        enabled = has_key or has_adc
         providers.append(
             {
                 "name": key,
                 "display_name": preset.get("name", key),
                 "base_url": preset.get("base_url", ""),
-                "api_key": "",
+                "api_key": os.environ.get(env_key, "") if has_key else "",
                 "models": models,
                 "enabled": enabled,
                 "health": "unknown",
@@ -154,7 +166,7 @@ def seed_missing_presets(
             "base_url": preset.get("base_url", ""),
             "api_key": "",
             "models": [],
-            "enabled": key == "google",
+            "enabled": False,  # User enables via Settings UI or env var
             "health": "unknown",
         }
         if key == "google":

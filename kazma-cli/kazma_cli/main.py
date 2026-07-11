@@ -106,10 +106,28 @@ def _run_serve(port: int) -> None:
 
     app = create_app()
     import os as _os_cli
+    import socket as _socket
     host = "127.0.0.1"
     if _os_cli.environ.get("KAZMA_SECRET"):
         host = "0.0.0.0"
-    print(f"Starting Kazma WebUI on http://{host}:{port}")
+
+    # Print the browseable URL — 0.0.0.0 is a bind address, not browsable.
+    # Always show 127.0.0.1 (works everywhere), plus the LAN IP if binding to 0.0.0.0.
+    browse_url = f"http://127.0.0.1:{port}"
+    if host == "0.0.0.0":
+        try:
+            lan_ip = _socket.gethostbyname(_socket.gethostname())
+            if lan_ip and not lan_ip.startswith("127."):
+                print(f"\n  Kazma WebUI running:")
+                print(f"    → Local:   {browse_url}")
+                print(f"    → Network: http://{lan_ip}:{port}\n")
+            else:
+                print(f"\n  Kazma WebUI running: {browse_url}\n")
+        except Exception:
+            print(f"\n  Kazma WebUI running: {browse_url}\n")
+    else:
+        print(f"\n  Kazma WebUI running: {browse_url}\n")
+
     import uvicorn
     uvicorn.run(app, host=host, port=port, log_level="info", timeout_graceful_shutdown=15)
 
