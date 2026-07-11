@@ -14,7 +14,7 @@ jobs:
     name: Lint & Type Check
     runs-on: ubuntu-latest
     env:
-      # Keep this in sync with typed packages covered by CI MyPy checks.
+      # Keep this in sync with the packages currently type-checked in this job (core/gateway/ui).
       TYPECHECK_PATH_REGEX: "^(kazma-core/kazma_core|kazma-gateway/kazma_gateway|kazma-ui/kazma_ui)/.*\\.py$"
     steps:
       - name: Checkout
@@ -59,6 +59,7 @@ jobs:
           echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Run Ruff
+        shell: bash
         run: |
           mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${{ env.TYPECHECK_PATH_REGEX }}" || true)
           if [ "${#TYPECHECK_FILES[@]}" -eq 0 ]; then
@@ -68,6 +69,7 @@ jobs:
           ruff check "${TYPECHECK_FILES[@]}"
 
       - name: Run MyPy
+        shell: bash
         run: |
           mapfile -t TYPECHECK_FILES < <(git diff --name-only "${{ steps.diff-base.outputs.base_sha }}" "${{ github.sha }}" | grep -E "${{ env.TYPECHECK_PATH_REGEX }}" || true)
           if [ "${#TYPECHECK_FILES[@]}" -eq 0 ]; then
