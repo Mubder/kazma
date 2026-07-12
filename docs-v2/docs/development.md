@@ -40,9 +40,26 @@ kazma/
 ```bash
 git clone <repo> kazma && cd kazma
 python -m venv .venv
-source .venv/bin/activate        # POSIX
-# or: .venv\Scripts\activate      # Windows
+```
 
+Activate the venv for your platform:
+
+```bash
+# Linux / macOS / WSL
+source .venv/bin/activate
+```
+
+```powershell
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+```
+
+```cmd
+:: Windows (CMD)
+.venv\Scripts\activate.bat
+```
+
+```bash
 pip install -e ".[rag,dev]"
 ```
 

@@ -27,11 +27,26 @@ Choose one path. All three produce the same console scripts: `kazma`, `kazma-tui
 git clone <your-repo-url> kazma
 cd kazma
 python -m venv .venv
-# Windows (Git Bash / PowerShell):
-.venv\Scripts\activate
-# POSIX:
-source .venv/bin/activate
+```
 
+Activate the venv for your platform:
+
+```bash
+# Linux / macOS / WSL (bash, zsh)
+source .venv/bin/activate
+```
+
+```powershell
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+```
+
+```cmd
+:: Windows (CMD)
+.venv\Scripts\activate.bat
+```
+
+```bash
 pip install -e ".[rag,dev]"
 ```
 
@@ -71,6 +86,16 @@ Kazma reads configuration from three layers (in increasing precedence for runtim
 ### Minimal `.env`
 
 Copy `.env.example` to `.env` and set at least one provider key:
+
+```bash
+# Linux / macOS / WSL
+cp .env.example .env
+```
+
+```powershell
+# Windows (PowerShell)
+Copy-Item .env.example .env
+```
 
 ```dotenv
 # Required for the OpenAI provider:

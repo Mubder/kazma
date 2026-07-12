@@ -30,16 +30,45 @@ Kazma is a multi-platform AI agent framework that lets you build, deploy, and or
 
 ```bash
 git clone <repo-url> kazma && cd kazma
-python -m venv .venv && source .venv/bin/activate  # Windows: .venv\Scripts\activate
+python -m venv .venv
+```
+
+**Activate the venv — pick the one for your platform:**
+
+```bash
+# Linux / macOS / WSL (bash, zsh)
+source .venv/bin/activate
+```
+
+```powershell
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+```
+
+```cmd
+:: Windows (CMD)
+.venv\Scripts\activate.bat
+```
+
+```bash
 pip install -e ".[rag,dev]"
 ```
 
 ### Configure
 
 ```bash
+# Linux / macOS / WSL
 cp .env.example .env
-# Edit .env — set at least one provider key:
-#   OPENAI_API_KEY=sk-...
+```
+
+```powershell
+# Windows (PowerShell)
+Copy-Item .env.example .env
+```
+
+Edit `.env` — set at least one provider key:
+```dotenv
+OPENAI_API_KEY=sk-...
 ```
 
 ### Run
@@ -170,11 +199,13 @@ kazma-cli/        The `kazma` command surface
 ## 🧪 Development
 
 ```bash
-pip install -e ".[rag,dev]"     # Install with dev deps
+pip install -e ".[rag,dev]"     # Install with dev deps (after activating venv)
 pytest tests/ -v                # Run tests
 ruff check kazma-core/          # Lint
 mypy kazma-core/                # Type check
 ```
+
+> **Windows PowerShell:** the venv activation command is `.venv\Scripts\Activate.ps1`, not `source .venv/bin/activate`. See [Quick Start](#-quick-start) above.
 
 See [Development](docs-v2/docs/development.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 

@@ -18,8 +18,26 @@ cd kazma
 
 # Create virtual environment
 python -m venv .venv
-source .venv/bin/activate
+```
 
+Activate the venv for your platform:
+
+```bash
+# Linux / macOS / WSL
+source .venv/bin/activate
+```
+
+```powershell
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+```
+
+```cmd
+:: Windows (CMD)
+.venv\Scripts\activate.bat
+```
+
+```bash
 # Install with dev dependencies
 pip install -e ".[dev,cli]"
 ```
