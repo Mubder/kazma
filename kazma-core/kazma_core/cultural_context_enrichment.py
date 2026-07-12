@@ -22,7 +22,11 @@ def get_cultural_prompt_suffix() -> str:
     Safe to call at startup — all failures return empty string.
     """
     try:
-        from kazma_core.cultural_context import CulturalContext
+        from kazma_core.cultural_context import (
+            CulturalContext,
+            _gregorian_to_hijri_approx,
+            _hijri_month_name,
+        )
 
         ctx = CulturalContext()
         state = ctx.state
@@ -30,9 +34,12 @@ def get_cultural_prompt_suffix() -> str:
 
         parts: list[str] = []
 
-        # Hijri date awareness
-        hijri = ctx._gregorian_to_hijri_approx(state.current_date)
-        month_name = ctx._hijri_month_name(hijri[1])
+        # Hijri date awareness — these are module-level functions, not
+        # methods on CulturalContext; calling them as ctx._foo(...) raised
+        # AttributeError, silently swallowed below, so this suffix never
+        # fired despite being wired into the system prompt.
+        hijri = _gregorian_to_hijri_approx(state.current_date)
+        month_name = _hijri_month_name(hijri[1])
         parts.append(
             f"\n\nCULTURAL CONTEXT — Today is {hijri[0]} {month_name} {hijri[2]} AH "
             f"({state.current_date.isoformat()} Gregorian)."

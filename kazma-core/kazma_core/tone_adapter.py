@@ -124,6 +124,14 @@ _KUWAITI_FORMAL_MAP: dict[str, str] = {
     "يالله": "هيا بنا",
 }
 
+# Precompiled once at import time — _formalize_text used to re-run
+# re.compile() for every slang term on every single call.
+# Unicode-aware word boundary: (?<!\w) and (?!\w) support Arabic.
+_KUWAITI_FORMAL_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"(?<!\w)" + re.escape(informal) + r"(?!\w)"), formal)
+    for informal, formal in _KUWAITI_FORMAL_MAP.items()
+]
+
 
 # ── Public API ────────────────────────────────────────────────────────
 
@@ -230,9 +238,7 @@ class ToneAdapter:
             return text  # Only Kuwaiti formalization implemented
 
         result = text
-        for informal, formal in _KUWAITI_FORMAL_MAP.items():
-            # Unicode-aware word boundary: (?<!\w) and (?!\w) support Arabic
-            pattern = re.compile(r"(?<!\w)" + re.escape(informal) + r"(?!\w)")
+        for pattern, formal in _KUWAITI_FORMAL_PATTERNS:
             result = pattern.sub(formal, result)
 
         return result

@@ -20,6 +20,7 @@ from kazma_core.delegation.protocol import (
     DelegationProtocol,
     DelegationResult,
     RequestStatus,
+    default_worker_registry_executor,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,12 @@ class DelegationOrchestrator:
         self.cost_breaker = cost_breaker
         self._max_orchestrations = max_orchestrations
         self._active_orchestrations: dict[str, OrchestrationResult] = {}
+        # The orchestrator always has a concrete assigned agent per sub-task,
+        # so unlike a standalone DelegationProtocol (which intentionally
+        # no-ops to PENDING when unwired), auto-wire a real executor here so
+        # delegated sub-tasks actually get dispatched.
+        if self.protocol.executor is None:
+            self.protocol.executor = default_worker_registry_executor
 
     async def decompose_and_delegate(
         self,
@@ -256,11 +263,13 @@ class DelegationOrchestrator:
         for sub_task in sub_tasks:
             agent: AgentInfo | None = None
 
-            # 1 — Try WorkerRegistry by expertise tag
+            # 1 — Try WorkerRegistry by expertise tag. Use the process-wide
+            # singleton so this sees the same live worker set as
+            # phonebook.summon()/dispatch, not a stale on-disk snapshot.
             try:
-                from kazma_core.swarm.registry import WorkerRegistry
+                from kazma_core.swarm.registry import get_worker_registry
 
-                registry = WorkerRegistry()
+                registry = get_worker_registry()
                 for cap in sub_task.required_capabilities:
                     entries = registry.find_by_expertise(cap)
                     for entry in entries:
@@ -314,15 +323,16 @@ class DelegationOrchestrator:
 
         async def _execute_one(sub_task_id: str, agent: AgentInfo) -> tuple[str, DelegationResult]:
             async with semaphore:
+                st = st_map.get(sub_task_id)
                 request = await self.protocol.create_delegation_request(
-                    task_description=f"Sub-task {sub_task_id}",
-                    required_capabilities=[],
+                    task_description=st.description if st is not None else f"Sub-task {sub_task_id}",
+                    required_capabilities=st.required_capabilities if st is not None else [],
                     max_budget=budget_per_task,
                     timeout_seconds=timeout_seconds,
+                    payload={"assigned_agent": agent.agent_id},
                 )
                 # Record the request id on the sub-task so timeout/failure
                 # callbacks can correlate back to it even with no result.
-                st = st_map.get(sub_task_id)
                 if st is not None:
                     st.delegation_request_id = request.request_id
                 result = await asyncio.wait_for(

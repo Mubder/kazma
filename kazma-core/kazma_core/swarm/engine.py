@@ -144,6 +144,9 @@ class SwarmEngine:
         # can call back into the engine without a circular reference.
         self._checkpoint_mgr.set_reject_callback(self.reject_checkpoint)
         self._sse = SseBridge()
+        # Register SSE emission so a fresh pause notifies listeners the
+        # same way _finalize_task does for non-paused outcomes.
+        self._checkpoint_mgr.set_sse_emit_callback(self._emit_sse)
         self._build_workers()
 
     @property
@@ -456,6 +459,7 @@ class SwarmEngine:
         return _build_retry_task(
             task_id=task_id,
             history=self._task_history,
+            history_lock=self._task_lock,
             active_tasks=self._active_tasks,
             task_store=self._task_store,
         )

@@ -9,6 +9,14 @@ from __future__ import annotations
 
 import re
 
+# Arabic-Indic (U+0660-0669) and Extended Arabic-Indic/Persian (U+06F0-06F9)
+# digits map to ASCII so numbers are searchable/matchable regardless of which
+# digit script the user typed them in.
+_ARABIC_DIGIT_TRANSLATION = str.maketrans(
+    "٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹",
+    "0123456789" "0123456789",
+)
+
 
 class ArabicTokenizer:
     """Enhanced Arabic tokenizer for general Arabic text processing.
@@ -82,6 +90,9 @@ class ArabicTokenizer:
         Returns:
             Normalized Arabic text.
         """
+        # Normalize Arabic-Indic digits to ASCII (٠-٩ / ۰-۹ → 0-9)
+        text = text.translate(_ARABIC_DIGIT_TRANSLATION)
+
         # Remove diacritics (tashkeel)
         text = self._remove_diacritics(text)
 

@@ -7,7 +7,12 @@ dispatch, records a :class:`~kazma_core.swarm.task.HandoffRecord`, and
 transfers control (with accumulated context) to the target worker.
 
 Multi-hop chains (A -> B -> C) and return handoffs (A -> B -> A) are
-supported.  No false cycle detection is applied.
+supported. This module itself does no cycle detection — it only raises
+:class:`HandoffRequest` for the engine to catch. Cycle/depth guarding is
+enforced by the caller: ``SwarmEngine._handle_handoff()`` tracks per-worker
+visit counts and hop depth (max depth 5, each worker revisitable up to
+``_MAX_VISITS=2`` times) to allow legitimate A -> B -> A returns while still
+stopping runaway A -> B -> A -> B ... cycles.
 """
 
 from __future__ import annotations

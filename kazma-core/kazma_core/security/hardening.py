@@ -549,12 +549,18 @@ class SecurityHardeningRunner:
             )
 
     async def check_permission_escalation(self) -> HardeningCheck:
-        """Check for privilege escalation vectors in delegation."""
-        escalation_patterns = [
-            re.compile(r"os\.system\s*\(", re.I),
-            re.compile(r"subprocess\.(run|call|Popen)\s*\([^)]*shell\s*=\s*True", re.I),
-            re.compile(r"eval\s*\(", re.I),
-            re.compile(r"exec\s*\(", re.I),
+        """Check for privilege escalation vectors in delegation.
+
+        Uses AST-based detection (:func:`_scan_file_for_dangerous_calls`)
+        for os.system/subprocess/eval/exec calls — this parses real call
+        nodes instead of matching text, so it doesn't flag commented-out
+        code, docstrings, or lookalike names (e.g. ``my_os.system_name``),
+        and it correctly flags calls split across multiple lines that a
+        single-line regex would miss. A couple of narrow regex-only
+        heuristics (``__import__``, ``setattr`` on dunder attrs) are kept
+        alongside it since the AST scanner doesn't cover those.
+        """
+        supplemental_patterns = [
             re.compile(r"__import__\s*\(", re.I),
             re.compile(r"setattr\s*\([^)]*__", re.I),
         ]
@@ -564,6 +570,10 @@ class SecurityHardeningRunner:
             parts = py_file.parts
             if any(d in parts for d in (".venv", "venv", "__pycache__", ".git", "node_modules")):
                 continue
+
+            for lineno, label in _scan_file_for_dangerous_calls(py_file):
+                findings.append(f"{py_file.relative_to(self.project_root)}:{lineno} ({label})")
+
             try:
                 content = py_file.read_text(encoding="utf-8", errors="ignore")
             except OSError:
@@ -573,7 +583,7 @@ class SecurityHardeningRunner:
                 stripped = line.strip()
                 if stripped.startswith("#"):
                     continue
-                for pattern in escalation_patterns:
+                for pattern in supplemental_patterns:
                     if pattern.search(line):
                         findings.append(f"{py_file.relative_to(self.project_root)}:{i}")
                         break

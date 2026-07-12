@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from kazma_core.swarm.task import SwarmTask
+from kazma_core.swarm.task_lifecycle import get_task as _hist_get_task
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +53,17 @@ def build_retry_task(
     history: dict[str, SwarmTask],
     active_tasks: dict[str, SwarmTask],
     task_store: Any | None,
+    history_lock: threading.Lock | None = None,
 ) -> SwarmTask | None:
-    """Build a fresh SwarmTask for retry lineage, or None if original missing."""
-    original = history.get(task_id)
+    """Build a fresh SwarmTask for retry lineage, or None if original missing.
+
+    ``history_lock`` should be the same lock guarding all other mutations of
+    ``history`` (e.g. ``SwarmEngine._task_lock``) so this read can't race a
+    concurrent ``record_task``/``update_task`` call and observe a
+    partially-mutated task. Defaults to a throwaway lock for callers (tests)
+    that only ever touch ``history`` from one thread.
+    """
+    original = _hist_get_task(history, history_lock or threading.Lock(), task_id)
     if original is None:
         original = active_tasks.get(task_id)
     if original is None and task_store is not None:

@@ -245,9 +245,6 @@ class KazmaAppBuilder:
 
         # Global template context for language/direction
         _lang = self.agent.config.language if hasattr(self.agent.config, "language") else "en"
-        _dir = "rtl" if getattr(self.agent.config, "rtl", False) else "ltr"
-        self.templates.env.globals["lang"] = _lang
-        self.templates.env.globals["dir"] = _dir
 
         # i18n
         import contextvars
@@ -260,12 +257,24 @@ class KazmaAppBuilder:
         def _dynamic_translate(key: str, **kwargs) -> str:
             return _make_translator(self._current_lang.get())(key, **kwargs)
 
+        # `lang`/`dir` are exposed as callables backed by the request-scoped
+        # `_current_lang` contextvar (like `t()` above) rather than plain
+        # dict values on the shared Jinja2 Environment. `env.globals` is one
+        # object shared by every request; mutating it per-request created a
+        # race where a concurrent request could render with another
+        # request's language/direction.
+        def _dynamic_lang() -> str:
+            return self._current_lang.get()
+
+        def _dynamic_dir() -> str:
+            return "rtl" if self._current_lang.get() == "ar" else "ltr"
+
         # Inject the full translation dict as JSON so Alpine.js expressions
         # can call a client-side t() — server-side t() only covers Jinja2.
         _translations_json = _json.dumps(TRANSLATIONS, ensure_ascii=False)
         self.templates.env.globals["t"] = _dynamic_translate
-        self.templates.env.globals["lang"] = _startup_lang
-        self.templates.env.globals["dir"] = "rtl" if _startup_lang == "ar" else "ltr"
+        self.templates.env.globals["lang"] = _dynamic_lang
+        self.templates.env.globals["dir"] = _dynamic_dir
         self.templates.env.globals["translations_json"] = _translations_json
 
         @self.app.middleware("http")
@@ -276,8 +285,6 @@ class KazmaAppBuilder:
             else:
                 req_lang = _startup_lang
             self._current_lang.set(req_lang)
-            self.templates.env.globals["lang"] = req_lang
-            self.templates.env.globals["dir"] = "rtl" if req_lang == "ar" else "ltr"
             return await call_next(request)
 
     def _setup_swarm(self) -> None:

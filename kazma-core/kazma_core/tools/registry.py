@@ -64,17 +64,24 @@ class BaseTool:
 
 
 class ShellTool(BaseTool):
-    """Restricted shell execution with AST safety scanning.
+    """Restricted shell execution — strict allowlist, no AST/denylist bypass.
 
-    Blocks dangerous patterns (rm -rf, os.system, etc.) using the same
-    AST scanner from hardening.py.  Captures stdout/stderr into a
-    structured ToolResult.
+    Only binaries in ``_READ_ONLY_COMMANDS`` may ever run. Interpreters
+    (python, node), network tools (curl, wget), and container runtimes
+    (docker) are never permitted here, mirroring the hardened allowlist in
+    ``agent/tool_registry.py``'s ``shell_exec`` builtin. A denylist/pattern
+    scan (e.g. blocking ``"os.system"``/``"eval("`` substrings) is NOT a
+    sufficient boundary for those binaries — it is trivially bypassed
+    (``python3 -c "__import__('os').system(...)"``, ``curl ... | sh``) — so
+    they are excluded from the allowlist entirely rather than gated by a
+    pattern check.
     """
 
     name = "shell"
     permission = PermissionLevel.SYSTEM_EXEC
 
-    # Read-only / safe commands always allowed
+    # Only these binaries may ever execute. No interpreters, no network
+    # fetch tools, no container runtimes — see class docstring.
     _READ_ONLY_COMMANDS = {
         "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
         "uniq", "echo", "date", "whoami", "pwd", "env", "df", "du",
@@ -84,20 +91,9 @@ class ShellTool(BaseTool):
         "hermes", "kazma", "uv", "pytest", "ruff", "mypy",
     }
 
-    # Commands that need AST-level safety scan
-    _RESTRICTED_COMMANDS = {
-        "python", "python3", "pip", "pip3", "node", "npm", "npx",
-        "docker", "docker-compose", "curl", "wget",
-    }
-
     @classmethod
     def is_safe(cls, command: str) -> bool:
-        """Check if a shell command is safe to execute.
-
-        Returns True if the command:
-        - Starts with a read-only binary, OR
-        - Passes AST safety scanning (no os.system, eval, etc.)
-        """
+        """Return True only if the command's binary is in the strict allowlist."""
         import shlex
         try:
             args = shlex.split(command)
@@ -106,23 +102,7 @@ class ShellTool(BaseTool):
         if not args:
             return False
         binary = args[0].split("/")[-1]
-        if binary in cls._READ_ONLY_COMMANDS:
-            return True
-        if binary in cls._RESTRICTED_COMMANDS:
-            # Extra safety: scan for dangerous patterns in the full command
-            return not cls._has_dangerous_pattern(command)
-        return False
-
-    @staticmethod
-    def _has_dangerous_pattern(command: str) -> bool:
-        """Scan for dangerous shell patterns: rm -rf, eval, os.system, etc."""
-        dangerous = [
-            "rm -rf", "rm -r", "mkfs.", "dd if=", ">/dev/sda",
-            "chmod 777", "chown root", "sudo ",
-            "os.system", "eval(", "exec(",
-        ]
-        cmd_lower = command.lower()
-        return any(d in cmd_lower for d in dangerous)
+        return binary in cls._READ_ONLY_COMMANDS
 
     async def execute(self, **kwargs: Any) -> ToolResult:
         """Execute a shell command with safety gates."""

@@ -1,6 +1,6 @@
 commands:
   install: pip install -e kazma-tui/ -e kazma-core/
-  test: python -m pytest kazma-tui/tests/ -v
+  test: python -m pytest kazma-tui/kazma_tui_tests/ -v
   lint: python -m ruff check kazma-tui/kazma_tui/
   typecheck: python -m mypy kazma-tui/kazma_tui/
 

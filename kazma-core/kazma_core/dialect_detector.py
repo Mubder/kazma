@@ -7,6 +7,7 @@ Uses fasttext when available, falls back to rule-based detection.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -146,33 +147,48 @@ _MAGHREBI_MARKERS: set[str] = {
 # ── Rule-based detector ──────────────────────────────────────────────
 
 
+def _marker_present(marker: str, text_lower: str) -> bool:
+    """Return True if a dialect marker is present in already-lowercased text.
+
+    Latin-script (transliterated) markers such as "gal" or "rah" are short
+    enough to appear as substrings of unrelated words (e.g. "gal" inside
+    "legal"), so they're matched on word boundaries. Arabic-script markers
+    keep plain substring containment — word-boundary semantics matter far
+    less there and the script itself makes accidental collisions rare.
+    """
+    marker_lower = marker.lower()
+    if marker_lower.isascii():
+        return re.search(rf"\b{re.escape(marker_lower)}\b", text_lower) is not None
+    return marker_lower in text_lower
+
+
 def _rule_based_detect(text: str) -> DialectResult:
     """Rule-based dialect detection using keyword/pattern matching."""
-    text_lower = text.strip()
+    text_lower = text.strip().lower()
     scores: dict[str, float] = {d: 0.0 for d in ("kw", "eg", "lb", "ma", "msa")}
     total_hits = 0
 
     # Kuwaiti markers
     for marker in _KUWAITI_MARKERS:
-        if marker.lower() in text_lower:
+        if _marker_present(marker, text_lower):
             scores["kw"] += 2.0
             total_hits += 1
 
     # Egyptian markers
     for marker in _EGYPTIAN_MARKERS:
-        if marker.lower() in text_lower:
+        if _marker_present(marker, text_lower):
             scores["eg"] += 2.0
             total_hits += 1
 
     # Levantine markers
     for marker in _LEVANTINE_MARKERS:
-        if marker.lower() in text_lower:
+        if _marker_present(marker, text_lower):
             scores["lb"] += 2.0
             total_hits += 1
 
     # Maghrebi markers
     for marker in _MAGHREBI_MARKERS:
-        if marker.lower() in text_lower:
+        if _marker_present(marker, text_lower):
             scores["ma"] += 2.0
             total_hits += 1
 

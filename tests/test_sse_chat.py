@@ -319,7 +319,12 @@ class TestStreamContent:
         assert "file1.txt" in tool_results[0]
 
     def test_error_handling_in_stream(self):
-        """Verify exceptions yield an error SSE frame."""
+        """Verify exceptions yield a sanitized error SSE frame.
+
+        The raw exception string must NOT reach the client (it can leak
+        internal details like stack traces, file paths, or API error
+        bodies) — only a generic, user-safe message via sanitize_error().
+        """
         import asyncio
 
         from kazma_ui.sse_chat import _stream_langgraph_events
@@ -343,4 +348,5 @@ class TestStreamContent:
 
         error_frames = [f for f in frames if f.startswith("event: error")]
         assert len(error_frames) == 1
-        assert "LLM crashed" in error_frames[0]
+        assert "LLM crashed" not in error_frames[0]
+        assert "error" in error_frames[0].lower()

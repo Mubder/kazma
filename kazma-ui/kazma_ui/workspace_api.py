@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import logging
 import os
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any

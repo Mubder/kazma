@@ -97,19 +97,12 @@ DIALECT_MARKERS: dict[str, str] = {
     " ما شاء الله ": "ما شاء الله",
     " ان شاء الله ": "إن شاء الله",
     " الحمد لله ": "الحمد لله",
-    "_subhanallah": "سبحان الله",
+    " سبحان الله ": "سبحان الله",
     # Numbers / time
     " buckra ": "غداً",
     " ibaarak ": "مبروك",
 }
 
-# Code-switch patterns: English words that commonly appear in Kuwaiti text
-_CODE_SWITCH_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(?:ok|okay|yes|no|please|thanks|thank you|sorry|excuse me)\b", re.IGNORECASE),
-    re.compile(r"\b(?:meeting|call|send|message|file|folder|email|report)\b", re.IGNORECASE),
-    re.compile(r"\b(?:team|project|deadline|task|status|update|review)\b", re.IGNORECASE),
-    re.compile(r"\b(?:good|bad|nice|fine|great|perfect|awesome)\b", re.IGNORECASE),
-]
 
 # Emoji pattern
 _EMOJI_RE = re.compile(

@@ -26,6 +26,8 @@ from typing import Any, Callable
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
+from kazma_core.exceptions import sanitize_error
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat-sse"])
@@ -240,7 +242,7 @@ async def _stream_langgraph_events(
 
     except Exception as exc:
         logger.error("SSE stream error: %s", exc, exc_info=True)
-        yield _sse_frame("error", {"content": str(exc)})
+        yield _sse_frame("error", {"content": sanitize_error(exc)})
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -532,7 +534,7 @@ def create_sse_chat_router(
 
             except Exception as exc:
                 logger.error("SSE generator error: %s", exc, exc_info=True)
-                yield _sse_frame("error", {"content": str(exc)})
+                yield _sse_frame("error", {"content": sanitize_error(exc)})
 
         return StreamingResponse(
             _event_generator(),

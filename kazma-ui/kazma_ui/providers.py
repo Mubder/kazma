@@ -353,6 +353,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             except Exception as exc:
                 logger.debug("Telegram connector test failed: %s", exc)
                 return {"success": False, "error": "Connection test failed"}
+
+        if name == "discord":
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.get(

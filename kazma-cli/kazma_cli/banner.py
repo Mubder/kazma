@@ -6,9 +6,12 @@ and a quick reference hint for slash commands.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Version detection
@@ -24,7 +27,7 @@ def _get_version() -> str:
                 if line.strip().startswith("version ="):
                     return line.split("=")[1].strip().strip('"').strip("'")
     except Exception as exc:
-        logging.getLogger(__name__).debug("pyproject.toml version parse failed: %s", exc)
+        logger.debug("pyproject.toml version parse failed: %s", exc)
     return "0.2.0"
 
 

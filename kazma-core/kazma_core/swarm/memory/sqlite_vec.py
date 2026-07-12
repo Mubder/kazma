@@ -11,6 +11,7 @@ return empty lists — no crashes.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 from pathlib import Path
 
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/vector.db"
 _TABLE_PREFIX = "worker_vectors"
+# SQLite can't parameterize identifiers, so table names are built via
+# f-string interpolation below. Worker names can originate from the
+# ``spawn_agent`` tool (LLM-controlled, HITL-gated) as well as static
+# config, so anything outside this set is stripped rather than trusted.
+_UNSAFE_TABLE_CHARS = re.compile(r"[^A-Za-z0-9_]")
 
 
 class SQLiteVectorStore:
@@ -96,8 +102,15 @@ class SQLiteVectorStore:
     # ── Table management ────────────────────────────────────────────────
 
     def _table_name(self, worker_name: str) -> str:
-        """Sanitise and return the table name for a worker."""
-        safe = worker_name.replace("-", "_").replace(".", "_")
+        """Sanitise and return the table name for a worker.
+
+        Normal names (alnum/hyphen/dot/underscore) map to the same table
+        name as before. Any other character is stripped so a crafted
+        worker name can never break out of the identifier position in the
+        interpolated SQL below.
+        """
+        normalized = worker_name.replace("-", "_").replace(".", "_")
+        safe = _UNSAFE_TABLE_CHARS.sub("", normalized) or "unnamed"
         return f"{_TABLE_PREFIX}_{safe}"
 
     def ensure_table(self, worker_name: str) -> bool:

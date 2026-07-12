@@ -113,8 +113,16 @@ class Span:
 # In-memory exporter (for testing)
 # ---------------------------------------------------------------------------
 
+DEFAULT_MAX_SPANS = 5000
+
+
 class InMemorySpanExporter:
     """Collects exported spans in memory for inspection in tests.
+
+    ``_spans`` is trimmed (oldest-first) once it exceeds *max_spans* so a
+    long-running process doesn't accumulate an unbounded span history —
+    every dispatch/LLM-call/tool-call ends a span, so without a cap this
+    list grows for the lifetime of the process.
 
     Usage::
 
@@ -125,14 +133,18 @@ class InMemorySpanExporter:
         assert any(s.name == "swarm.task.abc" for s in spans)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_spans: int = DEFAULT_MAX_SPANS) -> None:
         self._lock = threading.Lock()
         self._spans: list[Span] = []
+        self._max_spans = max_spans
 
     def export(self, span: Span) -> None:
-        """Record a finished span."""
+        """Record a finished span, trimming the oldest if over capacity."""
         with self._lock:
             self._spans.append(span)
+            if self._max_spans > 0 and len(self._spans) > self._max_spans:
+                excess = len(self._spans) - self._max_spans
+                del self._spans[:excess]
 
     def get_finished_spans(self) -> list[Span]:
         """Return all exported spans."""
@@ -194,10 +206,10 @@ class TracingEmitter:
     def __init__(self, exporter: InMemorySpanExporter | None = None) -> None:
         self._exporter = exporter if exporter is not None else InMemorySpanExporter()
         self._lock = threading.Lock()
-        # Active spans keyed by trace_id, maintained as a stack.
+        # Active spans keyed by trace_id, maintained as a stack. Emptied
+        # trace entries are removed in end_span() so this dict only ever
+        # holds traces with genuinely in-flight spans.
         self._active: dict[str, list[Span]] = {}
-        # All spans by span_id for quick lookup.
-        self._span_index: dict[str, Span] = {}
 
     @property
     def exporter(self) -> InMemorySpanExporter:
@@ -239,7 +251,6 @@ class TracingEmitter:
             )
 
             self._active.setdefault(trace_id, []).append(span)
-            self._span_index[span.span_id] = span
             return span
 
     def end_span(self, span: Span, *, status: str = "ok", status_msg: str = "") -> None:
@@ -261,9 +272,12 @@ class TracingEmitter:
                 stack.pop()
             elif stack:
                 # The span may not be at the top (e.g. out-of-order end).
-                self._active[span.trace_id] = [
-                    s for s in stack if s.span_id != span.span_id
-                ]
+                stack = [s for s in stack if s.span_id != span.span_id]
+                self._active[span.trace_id] = stack
+            if span.trace_id in self._active and not self._active[span.trace_id]:
+                # Drop the now-empty trace entry so _active doesn't
+                # accumulate one stale empty list per completed trace.
+                del self._active[span.trace_id]
 
         self._exporter.export(span)
 
@@ -446,5 +460,4 @@ class TracingEmitter:
         """Clear all state (useful for tests)."""
         with self._lock:
             self._active.clear()
-            self._span_index.clear()
         self._exporter.clear()

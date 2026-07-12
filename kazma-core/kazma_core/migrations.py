@@ -53,7 +53,16 @@ class MigrationRunner:
         return conn
     
     def _ensure_migration_table(self, conn) -> None:
-        """Create migration tracking table if it doesn't exist."""
+        """Create migration tracking table if it doesn't exist.
+
+        ``ConfigStore._init_db()`` (config_store.py) also creates a table
+        named "schema_migrations" — but without a ``success`` column,
+        since it never needed one. Because it runs first on every normal
+        startup, ``CREATE TABLE IF NOT EXISTS`` here is a no-op against an
+        already-existing table, and ``success`` would be missing. Add it
+        via ALTER TABLE (idempotent) so this runner works against both a
+        fresh table and one ConfigStore already created.
+        """
         conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {self.table} (
                 version INTEGER PRIMARY KEY,
@@ -62,6 +71,13 @@ class MigrationRunner:
                 success INTEGER NOT NULL DEFAULT 1
             )
         """)
+        import sqlite3
+
+        try:
+            conn.execute(f"ALTER TABLE {self.table} ADD COLUMN success INTEGER NOT NULL DEFAULT 1")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
         conn.commit()
     
     def _get_applied_versions(self, conn) -> set[int]:

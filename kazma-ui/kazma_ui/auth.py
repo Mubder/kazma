@@ -77,6 +77,12 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/bookmarks",
     "/api/pipelines",
     "/v1/models",
+    # Observability dashboard: unlike the SPA page shells (/, /chat,
+    # /workspace), this route renders real cost/session/trace data
+    # server-side into the HTML itself, not just via a later AJAX call —
+    # so the page route and its JSON API both need to be gated.
+    "/dashboard",
+    "/api/dashboard",
 )
 
 #: Exact read-only paths that are always open regardless of secret config.

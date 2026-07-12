@@ -210,12 +210,16 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -e ".[test]"
+        run: pip install -e ".[test,tui]"
 
+      # Includes the root tests/ corpus (~3.5k tests) and kazma-tui, which
+      # were previously excluded here and silently undercounted in the
+      # codecov report despite being covered by their own dedicated jobs.
       - name: Run tests with coverage
         run: |
           python -m pytest kazma-core/kazma_core_tests kazma-gateway/kazma_gateway_tests kazma-ui/kazma_ui_tests \
-            --cov=kazma-core/kazma_core --cov=kazma-gateway/kazma_gateway --cov=kazma-ui/kazma_ui \
+            kazma-tui/kazma_tui_tests tests/ \
+            --cov=kazma-core/kazma_core --cov=kazma-gateway/kazma_gateway --cov=kazma-ui/kazma_ui --cov=kazma-tui/kazma_tui \
             --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage

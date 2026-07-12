@@ -111,8 +111,14 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     # Resolve thread_id using standardized resolver
     thread_id = _resolve_thread(msg)
 
-    # Store full platform context in SessionStore (NEVER enters the graph)
-    await store.put(thread_id, dict(ctx))
+    # Store full platform context in SessionStore (NEVER enters the graph).
+    # Adapters only set sender_id as the top-level IncomingMessage field,
+    # never inside context_metadata — but hitl.py's cross-thread approval
+    # ownership check reads original_sender from the persisted context, so
+    # without this it always sees "" and the authz guard never fires.
+    persisted_ctx = dict(ctx)
+    persisted_ctx.setdefault("sender_id", msg.sender_id)
+    await store.put(thread_id, persisted_ctx)
 
     # Build graph state with ONLY platform-agnostic fields
     try:

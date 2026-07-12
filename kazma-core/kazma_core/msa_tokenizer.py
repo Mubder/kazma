@@ -1,7 +1,7 @@
 """Modern Standard Arabic (MSA) tokenizer.
 
 Handles formal Arabic with:
-1. Standard Arabic morphological analysis
+1. Character-class tokenization (Arabic word / punctuation / number / whitespace)
 2. Diacritics handling (Tashkeel)
 3. Alef unification (أ, إ, آ → ا)
 """
@@ -92,11 +92,15 @@ def _unify_alef(text: str) -> str:
 
 
 def _normalize(text: str) -> str:
-    """Apply full MSA normalization pipeline."""
+    """Apply the MSA normalization pipeline (diacritics + Alef unification).
+
+    Note: taa marbuta (ة → ه) and alef maksura/yaa (ى → ي) normalization
+    are NOT implemented here — they're common additions for fuzzy-matching
+    use cases but would need their own toggle (like ``unify_alef``) since
+    they're not always desirable (e.g. they lose grammatical gender info).
+    """
     text = _strip_diacritics(text)
     text = _unify_alef(text)
-    # Normalize taa marbuta (ة → ه) for matching purposes (optional, kept separate)
-    # Normalize yaa (ى → ي) — keep separate, only for matching
     return text
 
 
@@ -104,10 +108,12 @@ class MSATokenizer:
     """Handles Modern Standard Arabic tokenization.
 
     Features:
-    1. Standard Arabic morphological analysis
-    2. Diacritics handling (preserves or strips)
-    3. Alef unification (أ, إ, آ → ا)
-    4. Word-level normalization
+    1. Character-class-based word/punctuation/number/whitespace splitting
+    2. Diacritics handling (preserves or strips, per ``strip_diacritics``)
+    3. Alef unification (أ, إ, آ → ا, per ``unify_alef``)
+
+    Does not perform morphological analysis (stemming/root extraction) —
+    that would require a dedicated Arabic morphological analyzer.
     """
 
     def __init__(self, strip_diacritics: bool = True, unify_alef: bool = True) -> None:

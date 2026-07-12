@@ -326,7 +326,7 @@ class HighContrastMode:
         # Save current stylesheet to restore later
         self._prev_stylesheet = self.app.stylesheet
         # Build a proper Stylesheet object (not a raw string)
-        from textual.stylesheet import Stylesheet
+        from textual.css.stylesheet import Stylesheet
         ss = Stylesheet()
         # Preserve widget default CSS
         try:
@@ -363,7 +363,7 @@ class HighContrastMode:
         if self._prev_stylesheet is None:
             try:
                 from kazma_tui.themes.theme_manager import ThemeManager
-                tm = ThemeManager(self.app)
+                tm = ThemeManager()
                 tm.apply_theme("kazma-dark")
             except Exception:
                 logger.debug("[HighContrast] ThemeManager fallback failed", exc_info=True)

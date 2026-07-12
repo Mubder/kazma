@@ -87,6 +87,67 @@ class DelegationResult:
 TaskExecutor = Callable[[DelegationRequest], Awaitable[DelegationResult]]
 
 
+async def default_worker_registry_executor(request: DelegationRequest) -> DelegationResult:
+    """Best-effort default executor backed by the live ``SwarmEngine``.
+
+    Looks up the worker recorded in ``request.payload["assigned_agent"]``
+    against the process-wide ``SwarmEngine`` singleton and dispatches the
+    sub-task through its normal ``worker.dispatch()`` path. Never raises —
+    returns an explicit ``FAILED`` result (with a reason) when no engine or
+    matching worker is available, rather than leaving the caller waiting on
+    a ``PENDING`` result that nothing will ever resolve.
+
+    Callers that want delegation to actually execute (as opposed to the
+    protocol's standalone no-op default) should pass this as ``executor=``,
+    or rely on ``DelegationOrchestrator`` which wires it in automatically.
+    """
+    start = time.time()
+    agent_id = request.payload.get("assigned_agent", "")
+    if not agent_id:
+        return DelegationResult(
+            request_id=request.request_id,
+            executor_id="",
+            status=RequestStatus.FAILED,
+            error="No 'assigned_agent' in delegation request payload",
+            duration_seconds=time.time() - start,
+        )
+
+    from kazma_core.swarm.engine import get_swarm_engine
+
+    engine = get_swarm_engine()
+    worker = engine.get_worker(agent_id) if engine is not None else None
+    if worker is None:
+        return DelegationResult(
+            request_id=request.request_id,
+            executor_id=agent_id,
+            status=RequestStatus.FAILED,
+            error=f"No live SwarmEngine worker named '{agent_id}'",
+            duration_seconds=time.time() - start,
+        )
+
+    try:
+        outcome = await worker.dispatch(request.task_description)
+    except Exception as exc:
+        return DelegationResult(
+            request_id=request.request_id,
+            executor_id=agent_id,
+            status=RequestStatus.FAILED,
+            error=str(exc),
+            duration_seconds=time.time() - start,
+        )
+
+    ok = outcome.get("status") == "success"
+    return DelegationResult(
+        request_id=request.request_id,
+        executor_id=agent_id,
+        status=RequestStatus.COMPLETED if ok else RequestStatus.FAILED,
+        output=outcome.get("output"),
+        error=outcome.get("error") or "",
+        duration_seconds=time.time() - start,
+        provenance={"dispatched_via": "default_worker_registry_executor"},
+    )
+
+
 class DelegationProtocol:
     """Agent-to-agent delegation protocol.
 

@@ -55,6 +55,11 @@ class CheckpointManager:
         # consistent with _finalize_task / list_tasks. If not supplied we
         # fall back to a private lock (degraded but never unlocked).
         self._task_lock = task_lock if task_lock is not None else threading.Lock()
+        # Engine registers its ``_emit_sse`` so a pause here notifies SSE
+        # listeners the same way ``_finalize_task`` does for non-paused
+        # outcomes. Without this, background-dispatched pipelines that hit
+        # a checkpoint never tell the frontend it's waiting for approval.
+        self._sse_emit: Any = None
 
     def handle_pipeline_checkpoint(
         self,
@@ -152,6 +157,24 @@ class CheckpointManager:
             task.id,
             step,
         )
+
+        if self._sse_emit is not None:
+            try:
+                self._sse_emit(
+                    task.id,
+                    "checkpoint",
+                    {
+                        "step": step,
+                        "needs_approval": True,
+                        "output_preview": output_preview,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "[CheckpointManager] failed to emit SSE checkpoint event for '%s'",
+                    task.id,
+                )
+
         return result
 
     async def _checkpoint_timeout_reject(
@@ -184,6 +207,10 @@ class CheckpointManager:
     def set_reject_callback(self, callback: Any) -> None:
         """Register the engine's reject_checkpoint as the timeout callback."""
         self._reject_callback = callback
+
+    def set_sse_emit_callback(self, callback: Any) -> None:
+        """Register the engine's ``_emit_sse`` so pauses notify SSE listeners."""
+        self._sse_emit = callback
 
     def get_checkpoint_info(self, task_id: str) -> HITLCheckpoint | None:
         """Return checkpoint info for a paused task, or ``None``."""

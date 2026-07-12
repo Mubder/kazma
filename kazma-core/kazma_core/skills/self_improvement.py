@@ -254,9 +254,13 @@ Output ONLY the delta text, no preamble."""
 
     async def _auto_apply(self, worker_name: str, delta: str) -> bool:
         """Apply the delta to the worker's system prompt with safety caps."""
-        from kazma_core.swarm.registry import WorkerRegistry
+        from kazma_core.swarm.registry import get_worker_registry
 
-        registry = WorkerRegistry()
+        # Use the process-wide singleton, not a fresh in-memory copy — a
+        # bare WorkerRegistry() here would mutate a throwaway instance and
+        # never refresh the live registry that phonebook.summon()/dispatch
+        # actually read from, silently discarding the applied delta.
+        registry = get_worker_registry()
         entry = registry.get(worker_name)
         if entry is None:
             logger.warning("[SelfImprovement] Worker '%s' not found — cannot apply delta", worker_name)
@@ -361,9 +365,9 @@ Output ONLY the delta text, no preamble."""
                     remaining.append(e)
             if entry is None:
                 return {"success": False, "error": f"Delta '{delta_id}' not found or not pending"}
-            # Apply to worker registry
-            from kazma_core.swarm.registry import WorkerRegistry
-            registry = WorkerRegistry()
+            # Apply to worker registry — use the singleton (see _auto_apply).
+            from kazma_core.swarm.registry import get_worker_registry
+            registry = get_worker_registry()
             worker_entry = registry.get(entry["worker_name"])
             if worker_entry is not None:
                 new_prompt = _cap_evolution_prompt(worker_entry.system_prompt, entry["delta"])

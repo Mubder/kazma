@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,11 @@ import yaml
 from kazma_core.swarm.task import WorkerCapabilities
 
 logger = logging.getLogger(__name__)
+
+# Worker names are used as SQL identifiers (e.g. per-worker vector tables in
+# sqlite_vec.py) and can't be parameterized there, so config-loaded names are
+# restricted to a safe identifier charset up front.
+_SAFE_WORKER_NAME = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _resolve_chat_id(yaml_value: int) -> int:
@@ -57,6 +63,11 @@ class WorkerConfig:
         errors: list[str] = []
         if not self.name:
             errors.append("Worker name is required.")
+        elif not _SAFE_WORKER_NAME.match(self.name):
+            errors.append(
+                f"Worker name '{self.name}' must contain only letters, digits, "
+                "underscores, or hyphens."
+            )
         if self.type not in ("in_process", "telegram_bot"):
             errors.append(f"Worker type must be 'in_process' or 'telegram_bot', got '{self.type}'.")
         if self.type == "telegram_bot" and not self.profile:

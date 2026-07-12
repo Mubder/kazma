@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import random
 import time
 from abc import ABC, abstractmethod
@@ -24,6 +25,23 @@ from typing import Any, Callable, Optional
 from functools import wraps
 
 logger = logging.getLogger(__name__)
+
+
+def _chaos_enabled() -> bool:
+    """Production kill-switch: chaos injections only ever fire when this
+    is explicitly truthy. Mirrors the env var that gates the ``/api/chaos``
+    HTTP routes (kazma_ui/routes_chaos.py) so there's one toggle for the
+    whole feature — this check runs at the actual injection-trigger point
+    too, so a stray ``add_injection()`` call or a decorator left on a
+    production code path can never cause real failures unless someone
+    explicitly opted in.
+    """
+    return os.environ.get("KAZMA_CHAOS_ENABLED", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 class FailureType(Enum):
@@ -70,10 +88,6 @@ class FailureInjection:
 
     def __post_init__(self):
         if self.duration_seconds:
-            self.expires_at = datetime.now(UTC).replace(
-                microsecond=datetime.now(UTC).microsecond
-            ) + datetime.now(UTC).replace(microsecond=0) - datetime.now(UTC).replace(microsecond=0)
-            # Simpler: just add timedelta
             from datetime import timedelta
             self.expires_at = datetime.now(UTC) + timedelta(seconds=self.duration_seconds)
 
@@ -153,6 +167,10 @@ class FailureInjector:
             self._stats.clear()
             logger.info(f"[Chaos] Cleared all {count} injections")
             return count
+
+    async def stop_all(self) -> int:
+        """Stop all injections on *this* instance. Alias for clear_all()."""
+        return await self.clear_all()
     
     async def clear_expired(self) -> int:
         """Remove expired injections. Returns count removed."""
@@ -167,6 +185,8 @@ class FailureInjector:
     
     async def should_inject(self, target: InjectionTarget) -> Optional[FailureInjection]:
         """Check if any injection should trigger for the given target."""
+        if not _chaos_enabled():
+            return None
         await self.clear_expired()
         
         async with self._lock:
@@ -522,14 +542,3 @@ async def list_active_injections() -> list[dict]:
         }
         for inj in injections
     ]
-
-
-# Add stop_all method to FailureInjector
-async def stop_all_injections() -> int:
-    """Stop all active fault injections. Returns count stopped."""
-    injector = get_injector()
-    return await injector.clear_all()
-
-
-# Monkey-patch the method
-FailureInjector.stop_all = staticmethod(stop_all_injections)

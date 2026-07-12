@@ -431,10 +431,16 @@ class KazmaTUI(App[None]):
 
     def action_toggle_high_contrast(self) -> None:
         """Toggle high contrast mode for accessibility."""
-        if self._high_contrast:
+        if not self._high_contrast:
+            return
+        try:
             enabled = self._high_contrast.toggle()
-            mode = "enabled" if enabled else "disabled"
-            self.push_screen(Toast(f"High contrast mode {mode}", "info", duration=2.0))
+        except Exception as exc:
+            logger.exception("Failed to toggle high contrast mode")
+            self.push_screen(Toast(f"High contrast toggle failed: {exc}", "error"))
+            return
+        mode = "enabled" if enabled else "disabled"
+        self.push_screen(Toast(f"High contrast mode {mode}", "info", duration=2.0))
 
     def action_record_activity(self) -> None:
         """Record user activity (no-op — adaptive refresh removed)."""
@@ -493,6 +499,7 @@ class KazmaTUI(App[None]):
             if secret:
                 headers["X-Kazma-Secret"] = secret
 
+            _port = os.environ.get("KAZMA_PORT", "8000")
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(
                     f"http://127.0.0.1:{_port}/api/approve/{thread_id}",

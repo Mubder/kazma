@@ -13,8 +13,16 @@ from textual.containers import VerticalScroll, Container
 from textual.widgets import SelectionList, Static, Button, Label
 
 from kazma_tui.themes.theme_manager import ThemeManager
+from kazma_tui.widgets.confirm_dialog import ConfirmDialog
 
 logger = logging.getLogger(__name__)
+
+# Toggling this off removes the human-approval gate for danger tools
+# (file writes, shell exec, code exec) — see AGENTS.md "HITL Approval
+# Gates". Disabling it is a safety-relevant action, so it needs an
+# explicit confirmation rather than taking effect on a single checkbox
+# click like the other feature toggles.
+_HITL_KEY = "safety.hitl_enabled"
 
 
 class SettingsPanel(VerticalScroll):
@@ -134,17 +142,50 @@ class SettingsPanel(VerticalScroll):
             # Only persist keys whose value actually flipped — avoid the
             # round-trip per hover/move event that SelectedChanged fires on.
             changed = 0
+            confirm_hitl_disable = False
             for _label, key, _default in self.SETTINGS:
                 new_val = key in sel.selected
                 prev_val = self._last_saved.get(key)
                 if prev_val is None or prev_val != new_val:
+                    if key == _HITL_KEY and prev_val and not new_val:
+                        # Defer persisting until the user confirms — leave
+                        # _last_saved as-is so a cancel is a clean no-op.
+                        confirm_hitl_disable = True
+                        continue
                     cs.set(key, new_val)
                     self._last_saved[key] = new_val
                     changed += 1
             if changed:
                 self.notify(f"Settings saved ({changed})", severity="information")
+            if confirm_hitl_disable:
+                self._confirm_hitl_disable(sel, cs)
         except Exception as e:
             self.notify(f"Failed to save settings: {e}", severity="error")
+
+    def _confirm_hitl_disable(self, sel: SelectionList, cs) -> None:
+        """Ask for explicit confirmation before disabling HITL approval."""
+
+        def on_confirm(confirmed: bool) -> None:
+            if confirmed:
+                cs.set(_HITL_KEY, False)
+                self._last_saved[_HITL_KEY] = False
+                self.notify(
+                    "HITL approval disabled — danger tools will run without approval",
+                    severity="warning",
+                )
+            else:
+                # Re-check the box; _last_saved was never flipped so this
+                # is a no-op for ConfigStore.
+                sel.select(_HITL_KEY)
+
+        dialog = ConfirmDialog(
+            "Disabling HITL approval means dangerous tools (file writes, "
+            "shell commands, code execution) will run WITHOUT requiring "
+            "your approval. Are you sure you want to disable it?",
+            title="Disable HITL Approval",
+            confirm_text="Disable",
+        )
+        self.app.push_screen(dialog, on_confirm)
 
     def action_refresh_settings(self) -> None:
         """Refresh settings display."""
