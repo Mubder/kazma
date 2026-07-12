@@ -973,6 +973,7 @@ async def create_supervisor_app(
     # Checkpointer
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = await aiosqlite.connect(db_path)
+    from kazma_core.config_store import apply_sqlite_pragmas_async
     await apply_sqlite_pragmas_async(conn)
     checkpointer = AsyncSqliteSaver(conn)
     await checkpointer.setup()

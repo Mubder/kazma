@@ -187,16 +187,23 @@ class SecretVault:
         meta = json.dumps(metadata or {})
 
         with self._lock:
-            # Upsert: if name+tenant exists, replace.
-            self._conn.execute(
-                "DELETE FROM secrets WHERE name = ? AND COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')",
-                (name, tid),
-            )
-            self._conn.execute(
-                """INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, tenant_id, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (sid, name, ct, nonce, category, meta, tid, now, now),
-            )
+            # Atomic upsert: use BEGIN/COMMIT so a crash between DELETE and
+            # INSERT doesn't lose the secret.
+            self._conn.execute("BEGIN")
+            try:
+                self._conn.execute(
+                    "DELETE FROM secrets WHERE name = ? AND COALESCE(tenant_id, '__global__') = COALESCE(?, '__global__')",
+                    (name, tid),
+                )
+                self._conn.execute(
+                    """INSERT INTO secrets (id, name, encrypted_value, nonce, category, metadata, tenant_id, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (sid, name, ct, nonce, category, meta, tid, now, now),
+                )
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
         logger.info("[Vault] Stored secret '%s' (category=%s, tenant=%s)", name, category, tid or "global")
         return sid
 

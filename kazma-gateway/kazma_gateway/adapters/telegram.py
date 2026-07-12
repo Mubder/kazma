@@ -546,7 +546,7 @@ class TelegramAdapter(BaseAdapter):
                 err_body = "<unreadable>"
             logger.error("[telegram] HTTP %d downloading voice file: %s", exc.response.status_code, err_body)
             return None
-        except Exception:
+        except Exception as exc:
             logger.error("[telegram] Failed to download voice file: %s", type(exc).__name__)
             return None
 

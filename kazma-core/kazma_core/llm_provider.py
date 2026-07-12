@@ -451,7 +451,7 @@ class LLMProvider:
 
                 parsed = _up(normalized)
                 port = parsed.port
-                if port != 11434 and not normalized.rstrip("/").endswith("/v1"):
+                if port not in (11434, 4000) and not normalized.rstrip("/").endswith("/v1"):
                     normalized = normalized.rstrip("/") + "/v1"
                     logger.info("reconfigure: forced /v1 → %s", normalized)
             self.config.base_url = normalized

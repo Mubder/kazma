@@ -85,6 +85,16 @@ class CheckpointManager:
 
         blackboard_data = pattern_result.metadata.get("paused_blackboard", {})
 
+        # Persist checkpoint info INTO task.metadata so restore_paused_tasks
+        # can reconstruct the checkpoint after a restart.
+        task.metadata["hitl_checkpoint"] = {
+            "step": step,
+            "worker": worker,
+            "output_preview": output_preview,
+            "task_id": task_id,
+        }
+        task.metadata["paused_blackboard"] = blackboard_data
+
         self._checkpoint_handler.store_paused_pipeline(
             task=task,
             checkpoint=checkpoint,

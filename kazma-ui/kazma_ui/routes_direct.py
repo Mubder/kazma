@@ -495,7 +495,7 @@ def register_direct_routes(self: Any) -> None:
             if self.session_store is not None:
                 ctx = None
                 try:
-                    ctx = self.session_store.get(thread_id)
+                    ctx = await self.session_store.get(thread_id)
                 except Exception as _e:
                     logger.debug("[HITL] Failed to fetch session context for ownership check: %s", _e)
                 if ctx and isinstance(ctx, dict):

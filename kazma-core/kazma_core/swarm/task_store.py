@@ -429,8 +429,10 @@ class TaskStore:
             cost_estimate=float(row["cost"] or 0),
             metadata=metadata,
         )
-        # Restore fields added in migration
-        task.context = _safe_json("context", "") if isinstance(_safe_json("context", ""), str) else ""
+        # Restore context — stored as raw text, not JSON (natural-language
+        # context is not JSON-parseable; the old _safe_json call silently
+        # wiped it). Just read the raw value.
+        task.context = row["context"] if "context" in row.keys() else ""
         if "dependencies" in row.keys():
             task.dependencies = _safe_json("dependencies", [])
         if "fallback_chain" in row.keys():

@@ -449,8 +449,9 @@ class KazmaTUI(App[None]):
             if secret:
                 headers["X-Kazma-Secret"] = secret
 
+            _port = os.environ.get("KAZMA_PORT", "8000")
             async with httpx.AsyncClient(timeout=2.0) as client:
-                response = await client.get("http://127.0.0.1:8090/api/pending-approvals", headers=headers)
+                response = await client.get(f"http://127.0.0.1:{_port}/api/pending-approvals", headers=headers)
                 if response.status_code == 200:
                     data = response.json()
                     pending_list = data.get("pending", [])
@@ -494,7 +495,7 @@ class KazmaTUI(App[None]):
 
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(
-                    f"http://127.0.0.1:8090/api/approve/{thread_id}",
+                    f"http://127.0.0.1:{_port}/api/approve/{thread_id}",
                     json={"action": decision},
                     headers=headers,
                 )

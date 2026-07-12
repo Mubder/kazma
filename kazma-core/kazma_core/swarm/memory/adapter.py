@@ -233,9 +233,15 @@ class UnifiedMemoryAdapter:
             source = r[3] or "unknown"
             layers.setdefault(source, []).append(r)
 
-        # Sort within each layer by original score
+        # Sort within each layer by original score.
+        # FTS5 (BM25) scores are negative (more negative = more relevant),
+        # so sort ascending for that layer. Other layers use descending
+        # (higher score = more relevant).
         for source in layers:
-            layers[source].sort(key=lambda x: x[1], reverse=True)
+            if source == "L3:fts5":
+                layers[source].sort(key=lambda x: x[1])  # ascending for BM25
+            else:
+                layers[source].sort(key=lambda x: x[1], reverse=True)  # descending
 
         # Compute RRF scores across all layers
         rrf_scores: dict[str, tuple[float, str, str | None, dict]] = {}

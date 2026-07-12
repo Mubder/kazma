@@ -408,7 +408,7 @@ def _run_status() -> None:
                     active = [
                         a.get("platform", "?")
                         for a in adapters
-                        if a.get("status") == "running"
+                        if a.get("status") in ("running", "connected")
                     ]
                     gateway_summary = (
                         f"{len(active)} adapter(s) active"

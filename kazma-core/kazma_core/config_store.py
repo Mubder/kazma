@@ -375,16 +375,12 @@ class _InMemoryStore:
             self._data.clear()
             self._timestamps.clear()
             return count
-    
+
     def close(self) -> None:
         with self._lock:
             self._data.clear()
             self._timestamps.clear()
-    
-    async def close(self) -> None:
-        async with self._lock:
-            self._data.clear()
-            self._timestamps.clear()
+
 
 
 class ConfigStore:

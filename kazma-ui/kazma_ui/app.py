@@ -491,7 +491,7 @@ class KazmaAppBuilder:
                     set_vector_memory(vector_memory)
                     logger.info(
                         "[VectorMemory] Initialized at %s (collection=%s, model=%s)",
-                        vector_memory_path,
+                        getattr(vector_memory, '_path', 'unknown'),
                         vector_memory_collection,
                         vector_memory_model,
                     )
