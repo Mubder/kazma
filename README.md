@@ -30,6 +30,17 @@ Kazma is a multi-platform AI agent framework that lets you build, deploy, and or
 
 ```bash
 git clone https://github.com/Mubder/kazma && cd kazma
+```
+
+**Option A — uv (recommended):**
+
+```bash
+uv sync --all-extras
+```
+
+**Option B — pip + venv:**
+
+```bash
 python -m venv .venv
 ```
 
@@ -199,7 +210,7 @@ kazma-cli/        The `kazma` command surface
 ## 🧪 Development
 
 ```bash
-pip install -e ".[rag,dev]"     # Install with dev deps (after activating venv)
+uv sync --all-extras            # Install all deps (or: pip install -e ".[rag,dev]")
 pytest tests/ -v                # Run tests
 ruff check kazma-core/          # Lint
 mypy kazma-core/                # Type check
