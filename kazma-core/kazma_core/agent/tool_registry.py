@@ -644,6 +644,45 @@ class LocalToolRegistry:
             return now.isoformat()
 
         @self.register(
+            description=(
+                "Save a configuration setting to the persistent settings store. "
+                "Use this when the user asks to save, update, or configure a setting "
+                "(e.g. Telegram allowed users, Discord tokens, model preferences). "
+                "Common keys: connectors.telegram.allowed_users (comma-separated user IDs), "
+                "connectors.discord.allowed_users, agent.personality, agent.language. "
+                "This tool requires user approval before applying changes."
+            ),
+            category="system",
+        )
+        async def config_save(key: str, value: str) -> str:
+            from kazma_core.config_store import get_config_store
+
+            # Block writes to security-critical keys
+            _BLOCKED_PREFIXES = ("security.", "kazma_secret", "vault.")
+            if any(key.startswith(p) for p in _BLOCKED_PREFIXES):
+                return f"Error: Cannot modify restricted key '{key}'."
+
+            store = get_config_store()
+            store.set(key, value, category="connectors" if key.startswith("connectors.") else "general")
+            logger.info("[config_save] Saved setting: %s", key)
+            return f"Setting saved: {key} = {value}"
+
+        @self.register(
+            description=(
+                "Read a configuration setting from the persistent settings store. "
+                "Use this to check current values of settings like allowed users, "
+                "tokens, or preferences."
+            ),
+            category="system",
+        )
+        async def config_read(key: str) -> str:
+            from kazma_core.config_store import get_config_store
+
+            store = get_config_store()
+            val = store.get(key, "")
+            return f"{key} = {val}" if val else f"No value set for {key}"
+
+        @self.register(
             description="Execute a shell command and return stdout+stderr. Use with caution.",
             category="system",
         )

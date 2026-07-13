@@ -99,6 +99,8 @@ safety:
       # Secret vault — retrieving or deleting secrets requires approval
       - vault_retrieve
       - vault_delete
+      # Config changes require approval
+      - config_save
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 
