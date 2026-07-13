@@ -74,7 +74,7 @@ def _flatten_swarm_task(task: Any) -> dict[str, Any]:
         "prompt": data.get("prompt"),
         "context": data.get("context"),
         "workers": data.get("workers", []),
-        "status": data.get("status") or result.get("status"),
+        "status": result.get("status", data.get("status")),
         "created_at": data.get("created_at"),
         "started_at": data.get("started_at"),
         "completed_at": data.get("completed_at"),

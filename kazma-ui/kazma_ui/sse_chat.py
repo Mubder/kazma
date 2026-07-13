@@ -620,13 +620,17 @@ def create_sse_chat_router(
         except Exception:
             return {"error": "Invalid JSON"}
 
-        # SSRF validation on user-supplied base_url
+        # SSRF validation on user-supplied base_url.
+        # Provider switch is user-initiated configuration of their own LLM
+        # endpoint (often local: Ollama, LM Studio), so we allow private
+        # addresses and normalize scheme-less URLs before validating.
         _raw_url = body.get("base_url", "")
         if _raw_url:
             try:
+                from kazma_core.url_utils import normalize_provider_url
                 from kazma_core.security.ssrf import validate_url
 
-                validate_url(_raw_url)
+                validate_url(normalize_provider_url(_raw_url), allow_private=True)
             except Exception as exc:
                 return {"error": f"URL validation failed: {exc}"}
 

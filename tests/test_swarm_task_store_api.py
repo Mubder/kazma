@@ -106,7 +106,7 @@ class TestTaskHistoryAPI:
         assert response.status_code == 200
         data = response.json()
         for task in data["tasks"]:
-            assert task["status"] == "completed"
+            assert task["status"] == "success"
 
     def test_tasks_endpoint_filter_by_type(self) -> None:
         """GET /api/swarm/tasks?type=consult filters correctly."""
