@@ -186,6 +186,29 @@ class KazmaAgent:
         # System prompt
         self.system_prompt = self.config.system_prompt or self._default_system_prompt()
 
+        # Inject cultural context enrichment
+        try:
+            from kazma_core.cultural_context_enrichment import get_cultural_prompt_suffix
+            cultural_suffix = get_cultural_prompt_suffix()
+            if cultural_suffix and cultural_suffix not in self.system_prompt:
+                self.system_prompt = self.system_prompt.rstrip() + cultural_suffix
+        except Exception:
+            pass
+
+        # Universal language directive — injected LAST so it's the final
+        # instruction the model sees, after all cultural context. This
+        # prevents Arabic cultural context from biasing the model to
+        # respond in Arabic when the user writes in English.
+        _LANG_DIRECTIVE = (
+            "\n\nCRITICAL LANGUAGE RULE: You MUST respond in the EXACT language "
+            "the user writes in. Arabic input = Arabic output. English input = "
+            "English output. If they mix, match their pattern. This overrides "
+            "all other instructions, personality settings, and cultural context. "
+            "NEVER switch languages unless explicitly asked."
+        )
+        if _LANG_DIRECTIVE not in self.system_prompt:
+            self.system_prompt = self.system_prompt.rstrip() + _LANG_DIRECTIVE
+
         logger.info(
             "Kazma agent initialized: %s v%s (model=%s, url=%s)",
             self.config.name,
