@@ -389,17 +389,15 @@ def create_sse_chat_router(
         # ── Resolve session and thread_id (shared store) ───────────
         session, thread_id = _resolve_session(session_id)
 
-        # ── Apply model from request body (Bug 2/4 fix) ─────────────
+        # ── Apply model from request body ──────────────────────────
         # The chat frontend sends the selected model so the server can
-        # reconfigure the live LLM provider before streaming. This
-        # closes the gap where settings.js saved the model but it never
-        # reached the graph.
+        # reconfigure the live LLM provider before streaming. We only
+        # reconfigure the llm_provider for this request — we do NOT call
+        # registry.set_active_model() to avoid mutating global state for
+        # all users (any authenticated user could otherwise change the
+        # model for everyone).
         requested_model = (body.get("model") or "").strip()
         if requested_model:
-            if registry is not None:
-                registry.set_active_model(requested_model)
-            # Re-resolve the provider that owns this model so the
-            # LLM client points at the correct base_url + api_key.
             _resolved_url = None
             _resolved_key = None
             if registry is not None:
@@ -407,7 +405,6 @@ def create_sse_chat_router(
                 if _owner:
                     _resolved_url = str(_owner.get("base_url", ""))
                     _resolved_key = str(_owner.get("api_key", ""))
-                    registry.set_active_provider(_owner.get("name", ""))
                     logger.info(
                         "SSE chat: model %s routed to provider %s (%s)",
                         requested_model,
@@ -622,6 +619,16 @@ def create_sse_chat_router(
             body = await request.json()
         except Exception:
             return {"error": "Invalid JSON"}
+
+        # SSRF validation on user-supplied base_url
+        _raw_url = body.get("base_url", "")
+        if _raw_url:
+            try:
+                from kazma_core.security.ssrf import validate_url
+
+                validate_url(_raw_url)
+            except Exception as exc:
+                return {"error": f"URL validation failed: {exc}"}
 
         if registry is not None:
             result = registry.set_active_provider(

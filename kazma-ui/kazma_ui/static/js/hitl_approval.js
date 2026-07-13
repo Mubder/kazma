@@ -206,6 +206,5 @@
   window.__hitl_approval__ = {
     renderApprovals: renderApprovals,
     refreshPending: refreshPending,
-    getSecret: getSecret,
   };
 })();

@@ -34,10 +34,10 @@
                 <div class="skill-actions">
                     <label class="toggle">
                         <input type="checkbox" {% if skill.enabled %}checked{% endif %}
-                               @change="toggleSkill('{{ skill.id }}', $event.target.checked)">
+                               @change="toggleSkill({{ skill.id|tojson }}, $event.target.checked)">
                         <span class="toggle-slider"></span>
                     </label>
-                    <button class="btn btn-sm btn-danger" @click="uninstallSkill('{{ skill.id }}')">{{ t('skills.uninstall') }}</button>
+                    <button class="btn btn-sm btn-danger" @click="uninstallSkill({{ skill.id|tojson }})">{{ t('skills.uninstall') }}</button>
                 </div>
             </div>
             {% endfor %}

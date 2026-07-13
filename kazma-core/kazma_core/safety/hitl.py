@@ -44,6 +44,11 @@ DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec", "vault_retrie
 def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     """Extract HITL config from raw kazma.yaml dict.
 
+    Also checks ConfigStore for runtime overrides (set by the Settings UI).
+    ConfigStore keys use the flat ``safety.hitl_enabled`` convention
+    (matching SettingsManager), while YAML uses the nested
+    ``safety.hitl.enabled`` convention.
+
     Args:
         raw_config: The full kazma.yaml dict.
 
@@ -52,13 +57,37 @@ def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     """
     safety = raw_config.get("safety", {})
     hitl = safety.get("hitl", {})
+
+    enabled = hitl.get("enabled", True)
+    require_approval_for = set(
+        hitl.get("require_approval_for", DEFAULT_DANGER_TOOLS)
+    )
+    approval_timeout_seconds = hitl.get("approval_timeout_seconds", 60)
+    auto_deny_on_timeout = hitl.get("auto_deny_on_timeout", True)
+
+    # Apply ConfigStore overrides (set by SettingsManager.save_safety_settings)
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs = get_config_store()
+        # SettingsManager uses "safety.hitl_enabled" (flat key)
+        cs_enabled = cs.get("safety.hitl_enabled")
+        if cs_enabled is not None:
+            enabled = bool(cs_enabled)
+        cs_timeout = cs.get("safety.approval_timeout")
+        if cs_timeout is not None:
+            approval_timeout_seconds = int(cs_timeout)
+        cs_auto_deny = cs.get("safety.auto_deny_on_timeout")
+        if cs_auto_deny is not None:
+            auto_deny_on_timeout = bool(cs_auto_deny)
+    except Exception:
+        pass
+
     return {
-        "enabled": hitl.get("enabled", True),
-        "require_approval_for": set(
-            hitl.get("require_approval_for", DEFAULT_DANGER_TOOLS)
-        ),
-        "approval_timeout_seconds": hitl.get("approval_timeout_seconds", 60),
-        "auto_deny_on_timeout": hitl.get("auto_deny_on_timeout", True),
+        "enabled": enabled,
+        "require_approval_for": require_approval_for,
+        "approval_timeout_seconds": approval_timeout_seconds,
+        "auto_deny_on_timeout": auto_deny_on_timeout,
     }
 
 

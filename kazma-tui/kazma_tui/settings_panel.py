@@ -125,15 +125,6 @@ class SettingsPanel(VerticalScroll):
         """Handle button presses."""
         pass
 
-    def on_selection_list_selected_changed(self) -> None:
-        """Update language button variants to reflect current language."""
-        lang = self.theme_manager.language
-        try:
-            self.query_one("#lang-en", Button).variant = "primary" if lang == "en" else "default"
-            self.query_one("#lang-ar", Button).variant = "primary" if lang == "ar" else "default"
-        except Exception as exc:
-            logger.debug("Language button update failed: %s", exc)
-
     def on_selection_list_selected_changed(self, event: SelectionList.SelectedChanged) -> None:
         sel = event.selection_list
         try:

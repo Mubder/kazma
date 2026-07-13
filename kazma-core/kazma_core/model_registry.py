@@ -100,6 +100,16 @@ class ModelRegistry:
         # methods (e.g. set_active_* -> get_active_profile) re-enter.
         self._lock = threading.RLock()
 
+    async def close(self) -> None:
+        """Close all cached LLM clients (call on app shutdown)."""
+        with self._lock:
+            for client in self._clients.values():
+                try:
+                    await client.close()
+                except Exception:
+                    pass
+            self._clients.clear()
+
     # ── Active profile management ──────────────────────────────────
 
     def _resolve_provider_config(

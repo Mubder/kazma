@@ -59,6 +59,9 @@ _DANGER_KEYWORDS = (
     "write", "delete", "remove", "exec", "run", "shell", "bash",
     "command", "kill", "terminate", "install", "deploy", "upload",
     "download", "fetch", "request", "post", "put", "patch",
+    "replace", "rename", "create", "update", "modify", "alter",
+    "truncate", "drop", "grant", "revoke", "clear", "purge",
+    "wipe", "overwrite", "reset",
 )
 
 # Keywords that indicate a safe read-only tool (never requires approval).
@@ -732,7 +735,12 @@ class UnifiedToolExecutor:
                 # route danger-tier tools through the swarm bus for approval.
                 # Skip if the graph already approved (double-gating prevention).
                 # Skip if the server is explicitly trusted (trust: trusted).
-                _hitl_already_approved = bool(arguments.pop("_hitl_approved", False))
+                # We NEVER trust _hitl_approved from LLM args (prompt-injection
+                # risk); only the ContextVar set by graph_builder is honored.
+                arguments.pop("_hitl_approved", None)
+                from kazma_core.agent.tool_registry import _hitl_approved_ctx
+
+                _hitl_already_approved = _hitl_approved_ctx.get()
                 _server_trusted = (
                     self._mcp.get_server_trust(server_name) == "trusted"
                 )

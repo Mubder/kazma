@@ -20,7 +20,6 @@ mcp:
   servers:
   - name: filesystem
     transport: stdio
-    trust: trusted
     command:
     - npx
     - -y

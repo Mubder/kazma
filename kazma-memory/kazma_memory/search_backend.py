@@ -51,19 +51,20 @@ class SQLiteMemoryBackend:
         conn = await aiosqlite.connect(self.db_path)
         await conn.execute("PRAGMA journal_mode=WAL")
         await conn.execute("PRAGMA synchronous=NORMAL")
+        await conn.execute("PRAGMA busy_timeout=5000")
 
         # Check for sqlite-vec extension — must actually probe vec_version(),
         # not sqlite_version() (which exists in every SQLite build).
         try:
-            conn.enable_load_extension(True)
-            conn.load_extension("vec0")
+            await conn.enable_load_extension(True)
+            await conn.load_extension("vec0")
             await conn.execute("SELECT vec_version()")
             self._vec_available = True
         except Exception:
             self._vec_available = False
         finally:
             try:
-                conn.enable_load_extension(False)
+                await conn.enable_load_extension(False)
             except Exception:
                 pass
 

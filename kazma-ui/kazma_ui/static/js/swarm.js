@@ -666,7 +666,7 @@
         }
 
         var delay = Math.min(self.maxDelay, self.baseDelay * Math.pow(2, self.retryCount - 1)) + Math.random() * 1000;
-        console.log("SSE disconnected from " + self.url + ". Reconnecting in " + Math.round(delay) + "ms (attempt " + self.retryCount + ")...");
+        console.debug("SSE disconnected from " + self.url + ". Reconnecting in " + Math.round(delay) + "ms (attempt " + self.retryCount + ")...");
         
         setTimeout(connect, delay);
       };

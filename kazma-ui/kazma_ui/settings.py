@@ -318,6 +318,18 @@ class SettingsRouterBuilder:
             body = await request.body()
             if len(body) > 10 * 1024 * 1024:  # 10MB limit
                 return {"error": "Backup too large (max 10MB)"}
+            # Validate the payload is valid YAML/JSON before restoring
+            try:
+                import yaml as _yaml
+
+                _yaml.safe_load(body.decode("utf-8"))
+            except Exception:
+                try:
+                    import json as _json
+
+                    _json.loads(body.decode("utf-8"))
+                except Exception:
+                    return {"error": "Backup content is not valid YAML or JSON"}
             count = _get_sm().restore_backup(body.decode("utf-8"))
             return {"status": "ok", "restored": str(count)}
 
@@ -338,8 +350,18 @@ class SettingsRouterBuilder:
             return {"status": "ok", "imported": str(count)}
 
         @router.post("/api/settings/reset")
-        async def api_reset_settings() -> dict[str, str]:
-            """Reset all DB settings (reverts to YAML defaults)."""
+        async def api_reset_settings(request: Request) -> dict[str, str]:
+            """Reset all DB settings (reverts to YAML defaults).
+
+            Requires a confirmation body ``{"confirm": "RESET"}`` to
+            prevent accidental or malicious triggering.
+            """
+            try:
+                body = await request.json()
+            except Exception:
+                return {"error": "Invalid JSON body. Expected {'confirm': 'RESET'}"}
+            if body.get("confirm") != "RESET":
+                return {"error": "Confirmation required. Send {\"confirm\": \"RESET\"} to confirm."}
             count = config_store.reset_all()
             config_store.invalidate_yaml_cache()
             return {"status": "ok", "reset": str(count)}

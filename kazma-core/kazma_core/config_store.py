@@ -68,8 +68,7 @@ def get_kazma_secret() -> str:
         new_secret = secrets.token_hex(16)
         store.set("security.secret", new_secret, category="security")
         logger.warning(
-            "[SECURITY] Auto-generated KAZMA_SECRET (save or set env KAZMA_SECRET): %s",
-            new_secret,
+            "[SECURITY] Auto-generated KAZMA_SECRET — set KAZMA_SECRET env var to persist",
         )
         return new_secret
     except Exception as exc:
@@ -164,27 +163,36 @@ class Migration:
         return f"Migration(v={self.version}, name={self.name})"
 
 
-# ConfigStore schema migrations
+# ConfigStore schema migrations.
+# Versions start at 100 to avoid collision with migrations.py's
+# CONFIG_STORE_MIGRATIONS (v1-v3). These run automatically on init;
+# the migrations.py runner is used by the admin UI.
 CONFIG_STORE_MIGRATIONS: list[Migration] = [
     Migration(
-        version=1,
+        version=100,
         name="initial_schema",
         sql="""
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
             category TEXT NOT NULL DEFAULT 'general',
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            scope TEXT DEFAULT 'global'
         );
         CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
+        CREATE INDEX IF NOT EXISTS idx_settings_scope ON settings(scope);
         """,
     ),
+    # v101 was "add_scope_column" (ALTER TABLE). Now a no-op because
+    # the column is included in the initial_schema above. Kept as a
+    # placeholder for databases already migrated to v101.
     Migration(
-        version=2,
+        version=101,
         name="add_scope_column",
         sql="""
-        ALTER TABLE settings ADD COLUMN scope TEXT DEFAULT 'global';
-        CREATE INDEX IF NOT EXISTS idx_settings_scope ON settings(scope);
+        -- No-op: scope column is included in initial_schema (v100).
+        -- Existing DBs that had the column added via old v2 ALTER TABLE
+        -- are unaffected; fresh DBs get it from the CREATE TABLE.
         """,
     ),
 ]

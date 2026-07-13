@@ -517,24 +517,54 @@
         return;
       }
 
-      tbody.innerHTML = backups.map(backup => {
+      tbody.innerHTML = '';
+      backups.forEach(backup => {
         const ftsSize = backup.fts5_size ? formatBytes(backup.fts5_size) : 'None';
         const vecSize = backup.vector_size ? formatBytes(backup.vector_size) : 'None';
         const created = new Date(backup.timestamp).toLocaleString();
-        return `
-          <tr style="border-bottom:1px solid var(--border-subtle);transition: background 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.02)'" onmouseout="this.style.background='transparent'">
-            <td style="padding:10px 16px;font-family:var(--font-mono);">${backup.name}</td>
-            <td style="padding:10px 16px;">${ftsSize} (${backup.fts5_count || 0} docs)</td>
-            <td style="padding:10px 16px;">${vecSize}</td>
-            <td style="padding:10px 16px;color:var(--text-tertiary);">${created}</td>
-            <td style="padding:10px 16px;text-align:center;">
-              <button class="btn btn-sm btn-primary restore-btn" data-name="${backup.name}" style="padding:2px 8px;font-size:0.75rem;border-radius:4px;">
-                ${I18N.restore}
-              </button>
-            </td>
-          </tr>
-        `;
-      }).join('');
+        const tr = document.createElement('tr');
+        tr.style.borderBottom = '1px solid var(--border-subtle)';
+        tr.style.transition = 'background 0.2s';
+        tr.onmouseover = function() { this.style.background = 'rgba(255,255,255,0.02)'; };
+        tr.onmouseout = function() { this.style.background = 'transparent'; };
+
+        const tdName = document.createElement('td');
+        tdName.style.padding = '10px 16px';
+        tdName.style.fontFamily = 'var(--font-mono)';
+        tdName.textContent = backup.name;
+
+        const tdFts = document.createElement('td');
+        tdFts.style.padding = '10px 16px';
+        tdFts.textContent = `${ftsSize} (${backup.fts5_count || 0} docs)`;
+
+        const tdVec = document.createElement('td');
+        tdVec.style.padding = '10px 16px';
+        tdVec.textContent = vecSize;
+
+        const tdCreated = document.createElement('td');
+        tdCreated.style.padding = '10px 16px';
+        tdCreated.style.color = 'var(--text-tertiary)';
+        tdCreated.textContent = created;
+
+        const tdAction = document.createElement('td');
+        tdAction.style.padding = '10px 16px';
+        tdAction.style.textAlign = 'center';
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-primary restore-btn';
+        btn.dataset.name = backup.name;
+        btn.style.padding = '2px 8px';
+        btn.style.fontSize = '0.75rem';
+        btn.style.borderRadius = '4px';
+        btn.textContent = I18N.restore;
+        tdAction.appendChild(btn);
+
+        tr.appendChild(tdName);
+        tr.appendChild(tdFts);
+        tr.appendChild(tdVec);
+        tr.appendChild(tdCreated);
+        tr.appendChild(tdAction);
+        tbody.appendChild(tr);
+      });
 
       // Bind restore button action
       document.querySelectorAll('.restore-btn').forEach(btn => {

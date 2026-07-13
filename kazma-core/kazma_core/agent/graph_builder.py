@@ -494,13 +494,17 @@ async def tool_worker_node(
 
             if isinstance(approval, dict) and approval.get("approved", False):
                 logger.info("[ToolWorker] HITL approved: %s", tc["name"])
-                # Mark as already-approved so tool_registry.execute() skips
-                # the redundant swarm-bus check (double-gating prevention).
-                approved_tc = dict(tc)
-                approved_tc_args = dict(tc.get("arguments") or {})
-                approved_tc_args["_hitl_approved"] = True
-                approved_tc["arguments"] = approved_tc_args
-                results.append(await _exec_one(approved_tc))
+                # Set the ContextVar so tool_registry.execute() and
+                # UnifiedToolExecutor.execute() skip the redundant swarm-bus
+                # check (double-gating prevention). Using a ContextVar instead
+                # of an argument flag prevents LLM prompt-injection bypass.
+                from kazma_core.agent.tool_registry import _hitl_approved_ctx
+
+                _token = _hitl_approved_ctx.set(True)
+                try:
+                    results.append(await _exec_one(tc))
+                finally:
+                    _hitl_approved_ctx.reset(_token)
             else:
                 logger.info("[ToolWorker] HITL denied: %s", tc["name"])
                 results.append(_denied_result(tc))

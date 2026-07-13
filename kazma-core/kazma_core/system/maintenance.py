@@ -62,21 +62,25 @@ def create_memory_backup() -> dict[str, Any]:
             # Safe zero-downtime hot backup via SQLite backup API
             src_conn = sqlite3.connect(fts5_path)
             dest_conn = sqlite3.connect(backup_db_file)
-            src_conn.backup(dest_conn)
-            dest_conn.close()
-            src_conn.close()
+            try:
+                src_conn.backup(dest_conn)
+            finally:
+                dest_conn.close()
+                src_conn.close()
 
             fts5_size = backup_db_file.stat().st_size
 
             # Count rows for manifest
             try:
                 conn = sqlite3.connect(backup_db_file)
-                cursor = conn.cursor()
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'")
-                if cursor.fetchone():
-                    cursor.execute("SELECT COUNT(*) FROM memory_fts")
-                    fts5_count = cursor.fetchone()[0]
-                conn.close()
+                try:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'")
+                    if cursor.fetchone():
+                        cursor.execute("SELECT COUNT(*) FROM memory_fts")
+                        fts5_count = cursor.fetchone()[0]
+                finally:
+                    conn.close()
             except Exception as e:
                 logger.debug("[Maintenance] Could not count FTS5 records: %s", e)
         except Exception as e:
@@ -152,9 +156,11 @@ async def restore_memory_backup(backup_name: str) -> dict[str, Any]:
         if fts5_path.exists():
             src_conn = sqlite3.connect(fts5_path)
             dest_conn = sqlite3.connect(temp_rollback_dir / "memory.db")
-            src_conn.backup(dest_conn)
-            dest_conn.close()
-            src_conn.close()
+            try:
+                src_conn.backup(dest_conn)
+            finally:
+                dest_conn.close()
+                src_conn.close()
         if vector_path.exists():
             shutil.copytree(vector_path, temp_rollback_dir / "vector_memory", dirs_exist_ok=True)
     except Exception as e:
@@ -168,9 +174,11 @@ async def restore_memory_backup(backup_name: str) -> dict[str, Any]:
             # To bypass Windows file locking, write directly using SQLite's backup API
             dest_conn = sqlite3.connect(fts5_path)
             src_conn = sqlite3.connect(backup_db_file)
-            src_conn.backup(dest_conn)
-            dest_conn.close()
-            src_conn.close()
+            try:
+                src_conn.backup(dest_conn)
+            finally:
+                dest_conn.close()
+                src_conn.close()
             logger.info("[Maintenance] Restored FTS5 SQLite database in-place.")
         else:
             if fts5_path.exists():
@@ -222,9 +230,11 @@ async def restore_memory_backup(backup_name: str) -> dict[str, Any]:
             if (temp_rollback_dir / "memory.db").exists():
                 dest_conn = sqlite3.connect(fts5_path)
                 src_conn = sqlite3.connect(temp_rollback_dir / "memory.db")
-                src_conn.backup(dest_conn)
-                dest_conn.close()
-                src_conn.close()
+                try:
+                    src_conn.backup(dest_conn)
+                finally:
+                    dest_conn.close()
+                    src_conn.close()
             if (temp_rollback_dir / "vector_memory").exists():
                 if vector_path.exists():
                     shutil.rmtree(vector_path, ignore_errors=True)
@@ -255,9 +265,11 @@ def run_memory_maintenance() -> dict[str, Any]:
         try:
             size_before = fts5_path.stat().st_size
             conn = sqlite3.connect(fts5_path)
-            conn.execute("VACUUM;")
-            conn.execute("ANALYZE;")
-            conn.close()
+            try:
+                conn.execute("VACUUM;")
+                conn.execute("ANALYZE;")
+            finally:
+                conn.close()
             size_after = fts5_path.stat().st_size
 
             details["fts5"] = {
@@ -277,9 +289,11 @@ def run_memory_maintenance() -> dict[str, Any]:
         try:
             size_before = chroma_sqlite.stat().st_size
             conn = sqlite3.connect(chroma_sqlite)
-            conn.execute("VACUUM;")
-            conn.execute("ANALYZE;")
-            conn.close()
+            try:
+                conn.execute("VACUUM;")
+                conn.execute("ANALYZE;")
+            finally:
+                conn.close()
             size_after = chroma_sqlite.stat().st_size
 
             details["vector"] = {

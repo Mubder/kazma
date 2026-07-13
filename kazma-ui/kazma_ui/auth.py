@@ -69,6 +69,9 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/workspace", "/api/workspaces", "/api/memory",
     "/api/pending-approvals", "/api/metrics",
     "/api/telemetry/stream", "/api/telemetry/snapshot",
+    "/api/telemetry/typing",
+    "/api/alerts",
+    "/metrics",
     # Sprint 19 / Phase 3 surfaces (chaos, migrations, workspace tooling)
     "/api/chaos",
     "/api/config",

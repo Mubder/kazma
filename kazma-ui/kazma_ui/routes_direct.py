@@ -172,6 +172,11 @@ def register_direct_routes(self: Any) -> None:
                 conn.close()
             except Exception as _e:
                 logger.debug("fts5 count failed: %s", _e)
+                if 'conn' in dir():
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
                 
         vector_size = 0
         if vector_path.exists() and vector_path.is_dir():
@@ -203,6 +208,10 @@ def register_direct_routes(self: Any) -> None:
         if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
             return {"status": "unavailable", "message": "ML dependencies are not available in demo mode."}
         package_name = req.get("package_name", "sentence-transformers")
+        # Allowlist — prevent arbitrary package installation (supply-chain risk)
+        _ALLOWED_PACKAGES = {"sentence-transformers", "chromadb"}
+        if package_name not in _ALLOWED_PACKAGES:
+            return {"status": "error", "message": f"Package '{package_name}' is not in the allowed list: {sorted(_ALLOWED_PACKAGES)}"}
         from kazma_core.system import asynchronous_install_package
         await asynchronous_install_package(package_name)
         return {"status": "started", "package": package_name}
@@ -456,8 +465,6 @@ def register_direct_routes(self: Any) -> None:
             "init_errors": self._init_errors,
         }
 
-    _KAZMA_SECRET = os.environ.get("KAZMA_SECRET", "")
-
     def _resolve_hitl_graph() -> Any:
         return self._hitl_state.get("graph") or self._graph_holder.get("graph")
 
@@ -466,7 +473,11 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.post("/api/approve/{thread_id}")
     async def approve_tool(thread_id: str, request: Request) -> _JSONResponse:
-        if _KAZMA_SECRET:
+        # Use dynamic secret resolution (checks env AND config_store)
+        from kazma_ui.auth import get_kazma_secret
+
+        _secret = get_kazma_secret()
+        if _secret:
             import secrets as _secrets
             from kazma_ui.auth import SECRET_COOKIE
 
@@ -474,7 +485,7 @@ def register_direct_routes(self: Any) -> None:
             if not provided:
                 provided = request.cookies.get(SECRET_COOKIE, "")
 
-            if not provided or not _secrets.compare_digest(provided, _KAZMA_SECRET):
+            if not provided or not _secrets.compare_digest(provided, _secret):
                 return _JSONResponse({"error": "Unauthorized"}, status_code=401)
 
         try:

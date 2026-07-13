@@ -128,7 +128,12 @@ class TestUnifiedExecutorHitlGate:
 
     @pytest.mark.asyncio
     async def test_hitl_approved_flag_skips_gate(self):
-        """_hitl_approved=True bypasses the HITL gate (double-gating prevention)."""
+        """ContextVar _hitl_approved bypasses the HITL gate (double-gating prevention).
+
+        The _hitl_approved key in LLM args is always stripped and never
+        honored — only the ContextVar set by graph_builder is trusted.
+        """
+        from kazma_core.agent.tool_registry import _hitl_approved_ctx
         from kazma_core.swarm.safety import SafetyMiddleware, set_safety
 
         # Safety that would deny — but should never be called
@@ -141,9 +146,15 @@ class TestUnifiedExecutorHitlGate:
             mcp_mgr = _MockMCPManager({"write_file": "filesystem"})
             executor = UnifiedToolExecutor(local=None, mcp=mcp_mgr)  # type: ignore
 
-            result = await executor.execute(
-                "write_file", {"path": "/tmp/x", "_hitl_approved": True}
-            )
+            # Set the ContextVar (as graph_builder does after interrupt() approval)
+            token = _hitl_approved_ctx.set(True)
+            try:
+                # Also pass _hitl_approved in args to verify it gets stripped
+                result = await executor.execute(
+                    "write_file", {"path": "/tmp/x", "_hitl_approved": True}
+                )
+            finally:
+                _hitl_approved_ctx.reset(token)
 
             # Should execute despite safety being set to deny
             assert result["is_error"] is False

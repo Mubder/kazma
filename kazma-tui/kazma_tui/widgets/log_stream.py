@@ -62,7 +62,12 @@ class LogStream(RichLog):
         color = _LEVEL_COLORS.get(level, "#ffffff")
         icon = {"info": "ℹ️", "warn": "⚠️", "error": "❌", "success": "✅"}.get(level, "📍")
         ts = f"[{timestamp[11:19]}] " if timestamp else ""
-        self.write(f"[{color}]{icon} {ts}[{worker_name}][/{color}] {content}")
+        # Escape dynamic segments to prevent Rich markup injection
+        from rich.text import Text
+
+        safe_worker = Text.escape(worker_name)
+        safe_content = Text.escape(content)
+        self.write(f"[{color}]{icon} {ts}[{safe_worker}][/{color}] {safe_content}")
 
     def handle_bus_event(self, event_type: str, data: dict) -> None:
         """Callback for SwarmMessageBus.subscribe()."""

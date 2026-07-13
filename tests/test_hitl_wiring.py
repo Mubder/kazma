@@ -313,8 +313,12 @@ class TestToolRegistryHitlFlag:
 
     @pytest.mark.asyncio
     async def test_hitl_approved_flag_skips_gate(self):
-        """When _hitl_approved=True, file_write should execute (not blocked)."""
-        from kazma_core.agent.tool_registry import LocalToolRegistry
+        """When ContextVar _hitl_approved is set, file_write should execute (not blocked).
+
+        The _hitl_approved key in LLM args is always stripped and never
+        honored — only the ContextVar set by graph_builder is trusted.
+        """
+        from kazma_core.agent.tool_registry import LocalToolRegistry, _hitl_approved_ctx
         import tempfile
         from pathlib import Path
 
@@ -323,11 +327,16 @@ class TestToolRegistryHitlFlag:
             path = f.name
 
         try:
-            # _hitl_approved=True should bypass the bus gate entirely
-            result = await registry.execute(
-                "file_write",
-                {"path": path, "content": "approved test", "_hitl_approved": True},
-            )
+            # Set the ContextVar (as graph_builder does after interrupt() approval)
+            token = _hitl_approved_ctx.set(True)
+            try:
+                # _hitl_approved in args should be stripped, not honored
+                result = await registry.execute(
+                    "file_write",
+                    {"path": path, "content": "approved test", "_hitl_approved": True},
+                )
+            finally:
+                _hitl_approved_ctx.reset(token)
             assert result["is_error"] is False
             assert "bytes" in result["content"]
         finally:

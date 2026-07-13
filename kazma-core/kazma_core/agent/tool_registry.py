@@ -50,12 +50,19 @@ import time
 import types as _types
 import typing as _typing
 from collections.abc import Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC
 from pathlib import Path
 from typing import Any, get_type_hints
 
 logger = logging.getLogger(__name__)
+
+#: ContextVar set by the graph's interrupt() gate after HITL approval.
+#: This is the ONLY trusted source for the "already approved" flag —
+#: the ``_hitl_approved`` key in LLM-supplied tool arguments is always
+#: stripped and never honored (prevents prompt-injection bypass).
+_hitl_approved_ctx: ContextVar[bool] = ContextVar("_hitl_approved", default=False)
 
 
 def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
@@ -344,9 +351,12 @@ class LocalToolRegistry:
         Returns:
             Dict with ``content`` (str) and ``is_error`` (bool).
         """
-        # Pop the private HITL flag before tool execution — it is not a
-        # real argument and must not leak into the tool call.
-        _hitl_already_approved = bool(arguments.pop("_hitl_approved", False))
+        # Strip the private HITL flag from LLM-supplied arguments — it is
+        # not a real argument and must not leak into the tool call. We NEVER
+        # trust this flag from the arguments dict (prompt-injection risk);
+        # only the ContextVar set by graph_builder is honored.
+        arguments.pop("_hitl_approved", None)
+        _hitl_already_approved = _hitl_approved_ctx.get()
         tool = self._tools.get(tool_name)
         if tool is None:
             return {

@@ -887,7 +887,25 @@ class KazmaAppBuilder:
             logger.debug("[Startup] flush_pending_alerts: %s", e)
 
     async def _on_shutdown(self) -> None:
-        """Application shutdown: HTTP pool + gateway."""
+        """Application shutdown: agent, HTTP pool, gateway."""
+        # Shut down the agent (closes MCP processes, LLM clients, checkpointer)
+        if self.agent is not None:
+            try:
+                await self.agent.shutdown()
+                logger.info("[app] Agent shut down cleanly")
+            except Exception as e:
+                logger.warning("[app] Error during agent shutdown: %s", e)
+
+        # Close all cached ModelRegistry clients
+        try:
+            from kazma_core.model_registry import get_model_registry
+
+            registry = get_model_registry()
+            if registry is not None:
+                await registry.close()
+        except Exception as e:
+            logger.warning("[app] Error closing model registry: %s", e)
+
         try:
             from kazma_core.http_pool import close_http_client
 
