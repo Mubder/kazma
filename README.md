@@ -29,7 +29,7 @@ Kazma is a multi-platform AI agent framework that lets you build, deploy, and or
 ### Install
 
 ```bash
-git clone kazma](https://github.com/Mubder/kazma) && cd kazma
+git clone https://github.com/Mubder/kazma && cd kazma
 python -m venv .venv
 ```
 
