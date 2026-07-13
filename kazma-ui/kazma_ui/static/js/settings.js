@@ -114,6 +114,7 @@ function settingsApp() {
         logLines: 100,
         diagnostics: {},
         updateInfo: null,
+        vaultStatus: { enabled: false, secret_count: 0 },
 
         // ── Import/Export Tab ──
         exportFormat: 'yaml',
@@ -1373,6 +1374,14 @@ function settingsApp() {
             }
         },
 
+        async loadVaultStatus() {
+            try {
+                this.vaultStatus = await this._fetch('/api/settings/vault/status') || { enabled: false, secret_count: 0 };
+            } catch (e) {
+                this.vaultStatus = { enabled: false, secret_count: 0 };
+            }
+        },
+
         async checkUpdates() {
             try {
                 this.updateInfo = await this._fetch('/api/settings/system/updates');
@@ -1509,7 +1518,7 @@ function settingsApp() {
                 case 'shortcuts': this.shortcutConflicts = this.detectConflicts(); break;
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
-                case 'system': await this.loadDiagnostics(); await this.loadLogs(); break;
+                case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); break;
                 case 'import': break;
             }
         },

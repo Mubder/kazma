@@ -861,6 +861,27 @@
             <button class="btn btn-secondary btn-sm" @click="loadDiagnostics()">{{ t('dashboard.refresh') }}</button>
         </div>
 
+        <!-- Secret Vault -->
+        <div class="settings-group">
+            <h3>🔐 Secret Vault</h3>
+            <div style="padding:12px 16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                <div>
+                    <div style="font-weight:600;font-size:0.95rem">
+                        <span x-show="vaultStatus.enabled" style="color:var(--success)">● Vault Enabled</span>
+                        <span x-show="!vaultStatus.enabled" style="color:var(--danger)">● Vault Disabled</span>
+                    </div>
+                    <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
+                        <span x-show="vaultStatus.enabled" x-text="vaultStatus.secret_count + ' secrets stored'"></span>
+                        <span x-show="!vaultStatus.enabled">Set KAZMA_VAULT_KEY in .env or restart the server to auto-generate one.</span>
+                    </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" @click="loadVaultStatus()">Refresh</button>
+            </div>
+            <div x-show="vaultStatus.enabled" style="margin-top:12px;font-size:0.85rem;color:var(--text-muted)">
+                The agent can store and retrieve encrypted secrets (API keys, tokens, passwords) using the <code>vault_store</code> and <code>vault_retrieve</code> tools. Retrieval requires HITL approval.
+            </div>
+        </div>
+
         <!-- Logs -->
         <div class="settings-group">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">

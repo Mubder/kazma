@@ -125,6 +125,16 @@ class SettingsRouterBuilder:
             """Get all settings grouped by category."""
             return config_store.get_all()
 
+        @router.get("/api/settings/vault/status")
+        async def api_vault_status() -> dict[str, Any]:
+            """Check if the encrypted secret vault is enabled."""
+            from kazma_core.security.vault import get_vault
+            vault = get_vault()
+            return {
+                "enabled": vault is not None,
+                "secret_count": len(vault.list_secrets()) if vault else 0,
+            }
+
         @router.get("/api/settings/export")
         async def api_export_yaml(fmt: str = Query("yaml", alias="format")) -> Response:
             """Export settings as YAML or JSON file download."""

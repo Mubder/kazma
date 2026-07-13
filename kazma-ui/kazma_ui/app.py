@@ -97,7 +97,7 @@ class KazmaAppBuilder:
                 import secrets
                 generated = secrets.token_hex(32)
                 os.environ["KAZMA_SECRET"] = generated
-                
+
                 # Persist to .env if possible
                 env_path = Path(".env")
                 if env_path.exists():
@@ -126,6 +126,41 @@ class KazmaAppBuilder:
                         logger.info("[Auth] Created .env and persisted auto-generated KAZMA_SECRET")
                     except Exception as e:
                         logger.warning("[Auth] Failed to create .env for auto-generated KAZMA_SECRET: %s", e)
+
+            # Ensure KAZMA_VAULT_KEY is configured (for the encrypted secret vault)
+            _vault_key = os.environ.get("KAZMA_VAULT_KEY", "").strip()
+            if not _vault_key:
+                import secrets as _sec2
+                _vault_generated = _sec2.token_hex(32)
+                os.environ["KAZMA_VAULT_KEY"] = _vault_generated
+
+                env_path = Path(".env")
+                if env_path.exists():
+                    try:
+                        content = env_path.read_text(encoding="utf-8")
+                        lines = content.splitlines()
+                        updated = False
+                        for i, line in enumerate(lines):
+                            stripped = line.strip()
+                            if stripped.startswith("# KAZMA_VAULT_KEY=") or stripped.startswith("KAZMA_VAULT_KEY="):
+                                lines[i] = f"KAZMA_VAULT_KEY={_vault_generated}"
+                                updated = True
+                                break
+                        if updated:
+                            env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                            logger.info("[Vault] Auto-generated and updated KAZMA_VAULT_KEY in .env file")
+                        else:
+                            with open(env_path, "a", encoding="utf-8") as f:
+                                f.write(f"\nKAZMA_VAULT_KEY={_vault_generated}\n")
+                            logger.info("[Vault] Auto-generated and appended KAZMA_VAULT_KEY to .env file")
+                    except Exception as e:
+                        logger.warning("[Vault] Failed to write KAZMA_VAULT_KEY to .env: %s", e)
+                else:
+                    try:
+                        env_path.write_text(f"KAZMA_VAULT_KEY={_vault_generated}\n", encoding="utf-8")
+                        logger.info("[Vault] Created .env and persisted auto-generated KAZMA_VAULT_KEY")
+                    except Exception as e:
+                        logger.warning("[Vault] Failed to create .env for KAZMA_VAULT_KEY: %s", e)
 
         self.config = load_config(self.config_path)
         self.config_store = ConfigStore()
