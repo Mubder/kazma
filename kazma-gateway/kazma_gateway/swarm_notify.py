@@ -5,6 +5,9 @@ Formal module replacing ad-hoc swarm_dispatch.py. Provides:
 - SwarmTaskTracker: track dispatched tasks, post periodic progress updates,
   and send completion notifications with result summaries
 
+**Status: UNWIRED library** (not hooked into gateway dispatch yet). See
+``docs/audits/UNWIRED_INVENTORY.md``. Safe to import for custom integrations.
+
 Standalone mode: if kazma_core.swarm is unavailable, reads config from env vars:
     SWARM_BOT_TOKEN  — Telegram bot token
     SWARM_CHAT_ID    — Default chat ID for notifications

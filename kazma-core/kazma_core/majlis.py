@@ -4,6 +4,10 @@ The Majlis (مجلس) is the traditional Gulf gathering space where conversation
 follows specific cultural rhythms: greetings first, then social talk, then
 business. This protocol enforces that pattern for AI conversations.
 
+**Status: UNWIRED orchestrator.** Building blocks (pacing, tone, cultural
+context) are live in the gateway graph; this composite is library-only until
+wired. See ``docs/audits/UNWIRED_INVENTORY.md``.
+
 Orchestrates:
 - Dialect detection → cultural context
 - Conversation pacing → greeting phase enforcement

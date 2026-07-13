@@ -3,6 +3,11 @@
 Enables secure, auditable delegation of sub-tasks between autonomous
 Kazma agents without global shared state. Each agent operates
 independently while collaborating on shared objectives.
+
+**Status: UNWIRED library.** Implemented and tested, but not imported by the
+production agent runner, SwarmEngine, gateway, or UI. See
+``docs/audits/UNWIRED_INVENTORY.md``. Import paths stay stable until product
+decides to wire this into SwarmEngine or retire it.
 """
 
 from kazma_core.delegation.discovery import AgentDiscovery

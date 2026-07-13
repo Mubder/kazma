@@ -1241,11 +1241,13 @@ def _patch_jinja2_templates() -> None:
         result = _original_init(self, *args, **kwargs)
         # Inject default i18n globals (English fallback).
         # ``create_app()`` may override these with the configured language.
+        # Templates call ``lang()`` / ``dir()`` (see base.html) — same callable
+        # shape as production in app.py, not plain strings.
         try:
             env = self.env
             env.globals.setdefault("t", make_translator("en"))
-            env.globals.setdefault("lang", "en")
-            env.globals.setdefault("dir", "ltr")
+            env.globals.setdefault("lang", lambda: "en")
+            env.globals.setdefault("dir", lambda: "ltr")
         except Exception as exc:
             logger.debug("i18n Jinja2 patch failed: %s", exc)
         return result  # type: ignore[attr-defined]

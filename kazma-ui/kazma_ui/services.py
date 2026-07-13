@@ -20,6 +20,8 @@ class SwarmService:
 
     def __init__(self) -> None:
         self._engine: Any = None
+        # Retained so resolve_engine() can re-wire SSE after the engine is created.
+        self._sse_bus: Any = None
 
     def _get_engine(self) -> Any:
         """Get the current engine, preferring public APIs."""
@@ -35,6 +37,15 @@ class SwarmService:
         except Exception as exc:
             logger.debug("Failed to get swarm engine via public API: %s", exc)
             return None
+
+    def register_sse_bus(self, bus: Any) -> None:
+        """Store the UI SSE bus and attach it to the engine when present.
+
+        Safe to call before the engine exists: :meth:`resolve_engine` re-applies
+        the bus once an engine is available.
+        """
+        self._sse_bus = bus
+        self.set_sse_bus(bus)
 
     def list_workers(self) -> list[dict[str, Any]]:
         """Return list of workers via public ``list_workers()`` only."""
@@ -160,6 +171,14 @@ class SwarmService:
             self._shared_task_store = getattr(engine, "task_store", None) or getattr(self, "_shared_task_store", None)
             set_swarm_engine(engine)
             self._engine = engine
+            # Re-apply SSE bus registered at panel build time (engine may have been created later).
+            if self._sse_bus is not None:
+                try:
+                    from kazma_ui.swarm_sse import wire_engine_events
+
+                    wire_engine_events(engine, self._sse_bus)
+                except Exception as exc:
+                    logger.debug("wire_engine_events failed during resolve_engine: %s", exc)
         return engine
 
     def get_config_store(self) -> Any:
