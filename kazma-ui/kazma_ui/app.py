@@ -211,6 +211,39 @@ class KazmaAppBuilder:
                     _env_provider, _env_model or "(default)", base_url,
                 )
 
+        # ── Initialize Vector Memory (RAG) BEFORE agent creation ──────
+        # The agent's ContextAuthority needs vector memory at init time
+        # for compaction retrieval. Initializing it here prevents the
+        # "ContextAuthority has no memory_store" warning.
+        _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+        if _demo_mode:
+            logger.info("[VectorMemory] Skipped — KAZMA_DEMO_MODE is set")
+        else:
+            try:
+                from kazma_core.agent.tool_registry import set_vector_memory
+                from kazma_core.memory.vector_store import VectorMemory
+
+                vector_memory_collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
+                vector_memory_model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
+
+                vector_memory = VectorMemory(
+                    collection_name=vector_memory_collection,
+                    model_name=vector_memory_model,
+                )
+                set_vector_memory(vector_memory)
+                logger.info(
+                    "[VectorMemory] Initialized at %s (collection=%s, model=%s)",
+                    getattr(vector_memory, '_path', 'unknown'),
+                    vector_memory_collection,
+                    vector_memory_model,
+                )
+            except Exception as e:
+                logger.warning("[VectorMemory] Not available: %s", e)
+                logger.info(
+                    "[VectorMemory] RAG memory disabled. "
+                    "Install the 'rag' extra (pip install -e '.[rag]') to enable."
+                )
+
         self.agent = KazmaAgent(self.config)
 
         # Configure workspace
@@ -555,38 +588,6 @@ class KazmaAppBuilder:
                 )
             except Exception as e:
                 logger.warning("[Gateway] Suggestions wiring failed: %s", e)
-
-            # Vector Memory (RAG)
-            _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
-            if _demo_mode:
-                logger.info("[VectorMemory] Skipped — KAZMA_DEMO_MODE is set")
-            else:
-                try:
-                    from kazma_core.agent.tool_registry import set_vector_memory
-                    from kazma_core.memory.vector_store import VectorMemory
-
-                    vector_memory_collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
-                    vector_memory_model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
-
-                    vector_memory = VectorMemory(
-                        collection_name=vector_memory_collection,
-                        model_name=vector_memory_model,
-                    )
-                    set_vector_memory(vector_memory)
-                    logger.info(
-                        "[VectorMemory] Initialized at %s (collection=%s, model=%s)",
-                        getattr(vector_memory, '_path', 'unknown'),
-                        vector_memory_collection,
-                        vector_memory_model,
-                    )
-                except Exception as e:
-                    logger.warning("[VectorMemory] Not available: %s", e)
-                    if not getattr(self.app.state, "_vector_memory_hint_shown", False):
-                        logger.info(
-                            "[VectorMemory] RAG memory disabled. "
-                            "Install the 'rag' extra (pip install -e '.[rag]') to enable."
-                        )
-                        self.app.state._vector_memory_hint_shown = True
 
             # Register brain handler
             try:

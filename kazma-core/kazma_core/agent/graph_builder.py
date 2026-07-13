@@ -985,22 +985,9 @@ async def create_supervisor_app(
     # Time Travel recorder
     snapshot_recorder = create_recorder(config=config)
 
-    # Universal language directive — ALWAYS enforced regardless of which
-    # system prompt or personality is configured. This is injected here
-    # (not in the config) so it can never be accidentally removed.
-    _LANG_DIRECTIVE = (
-        "\n\nCRITICAL LANGUAGE RULE: You MUST respond in the EXACT language "
-        "the user writes in. Arabic input = Arabic output. English input = "
-        "English output. If they mix, match their pattern. This overrides "
-        "all other instructions. NEVER switch languages unless explicitly asked."
-    )
-    if _LANG_DIRECTIVE not in system_prompt:
-        system_prompt = system_prompt.rstrip() + _LANG_DIRECTIVE
-
     # ── Cultural context enrichment ──────────────────────────────────
     # Inject seasonal/cultural awareness (Ramadan, Eid, Kuwait National
-    # Day, Hijri date) into the system prompt. Previously dead code —
-    # CulturalContext existed but was never connected to the live agent.
+    # Day, Hijri date) into the system prompt.
     try:
         from kazma_core.cultural_context_enrichment import get_cultural_prompt_suffix
         cultural_suffix = get_cultural_prompt_suffix()
@@ -1008,6 +995,21 @@ async def create_supervisor_app(
             system_prompt = system_prompt.rstrip() + cultural_suffix
     except Exception:
         pass  # Non-critical — agent works fine without cultural context
+
+    # Universal language directive — ALWAYS enforced and injected LAST
+    # so it's the final instruction the model sees, after all cultural
+    # context and personality prompts. This prevents Arabic cultural
+    # context from biasing the model to respond in Arabic when the user
+    # writes in English.
+    _LANG_DIRECTIVE = (
+        "\n\nCRITICAL LANGUAGE RULE: You MUST respond in the EXACT language "
+        "the user writes in. Arabic input = Arabic output. English input = "
+        "English output. If they mix, match their pattern. This overrides "
+        "all other instructions, personality settings, and cultural context. "
+        "NEVER switch languages unless explicitly asked."
+    )
+    if _LANG_DIRECTIVE not in system_prompt:
+        system_prompt = system_prompt.rstrip() + _LANG_DIRECTIVE
 
     # Build graph
     graph = build_supervisor_graph(
