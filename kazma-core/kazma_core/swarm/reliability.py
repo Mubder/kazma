@@ -74,7 +74,7 @@ class RetryPolicy:
         jitter:      If ``True``, adds random jitter of 0--25 % of ``base_delay``.
     """
 
-    max_retries: int = 3
+    max_retries: int = 0
     base_delay: float = 1.0
     max_delay: float = 60.0
     jitter: bool = True

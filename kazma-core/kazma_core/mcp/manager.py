@@ -139,6 +139,8 @@ class MCPServerHandle:
     tools: list[dict[str, Any]] = field(default_factory=list)
     connected: bool = False
     read_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # trust level: "trusted" (no HITL), "approval_required" (HITL for danger tools)
+    trust: str = "approval_required"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -379,9 +381,15 @@ class AsyncMCPManager:
                 "transport": h.transport,
                 "connected": h.connected,
                 "tool_count": len(h.tools),
+                "trust": h.trust,
             }
             for h in self._servers.values()
         ]
+
+    def get_server_trust(self, server_name: str) -> str:
+        """Return the trust level for a server (``trusted`` or ``approval_required``)."""
+        handle = self._servers.get(server_name)
+        return handle.trust if handle else "approval_required"
 
     # ════════════════════════════════════════════════════════════════
     # Internal: stdio transport (pure asyncio)
@@ -440,6 +448,7 @@ class AsyncMCPManager:
         tools = result.get("tools", []) if isinstance(result, dict) else []
         handle.tools = tools
         handle.connected = True
+        handle.trust = cfg.get("trust", "approval_required")
 
         self._servers[name] = handle
         logger.info("[MCP] Connected to '%s' (stdio, pid=%d, tools=%d)", name, process.pid, len(tools))
@@ -499,6 +508,7 @@ class AsyncMCPManager:
         tools = result.get("tools", []) if isinstance(result, dict) else []
         handle.tools = tools
         handle.connected = True
+        handle.trust = cfg.get("trust", "approval_required")
 
         self._servers[name] = handle
         logger.info("[MCP] Connected to '%s' (sse, url=%s, tools=%d)", name, url, len(tools))
@@ -721,8 +731,12 @@ class UnifiedToolExecutor:
                 # static interrupt() gate. Classify by name pattern and
                 # route danger-tier tools through the swarm bus for approval.
                 # Skip if the graph already approved (double-gating prevention).
+                # Skip if the server is explicitly trusted (trust: trusted).
                 _hitl_already_approved = bool(arguments.pop("_hitl_approved", False))
-                if not _hitl_already_approved:
+                _server_trusted = (
+                    self._mcp.get_server_trust(server_name) == "trusted"
+                )
+                if not _hitl_already_approved and not _server_trusted:
                     tier = classify_mcp_tool(tool_name)
                     if tier in ("danger", "unknown"):
                         try:

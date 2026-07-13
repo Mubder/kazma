@@ -25,7 +25,7 @@ class TestRetryPolicyDefaults:
 
     def test_default_values(self):
         policy = RetryPolicy()
-        assert policy.max_retries == 3
+        assert policy.max_retries == 0
         assert policy.base_delay == 1.0
         assert policy.max_delay == 60.0
         assert policy.jitter is True

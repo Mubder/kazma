@@ -74,6 +74,9 @@ class _MockMCPManager:
     def get_server_for_tool(self, name: str) -> str | None:
         return self._tools_map.get(name)
 
+    def get_server_trust(self, server_name: str) -> str:
+        return "approval_required"
+
 
 class TestUnifiedExecutorHitlGate:
     """The HITL gate in UnifiedToolExecutor.execute() for MCP tools."""

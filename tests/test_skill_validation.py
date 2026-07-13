@@ -1,7 +1,7 @@
-"""Tests for CI/CD skill review workflow logic.
+"""Tests for skill manifest validation and SkillValidator security linting.
 
-Tests the validation steps that a CI pipeline would run when
-reviewing a submitted skill for certification.
+Tests manifest schema validation, full directory validation, and
+security scanning (secrets, eval, exec, os.system) for submitted skills.
 """
 
 from __future__ import annotations

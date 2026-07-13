@@ -59,7 +59,7 @@ class AgentConfig:
     rtl: bool = True
     default_model: str = "gpt-4o-mini"
     storage_path: str = "data/kazma.db"
-    vector_dim: int = 1536
+    vector_dim: int = 384
     system_prompt: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -85,7 +85,7 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
         rtl=agent_cfg.get("rtl", True),
         default_model=models_cfg.get("default", "gpt-4o-mini"),
         storage_path=storage_cfg.get("path", "data/kazma.db"),
-        vector_dim=storage_cfg.get("vector_dim", 1536),
+        vector_dim=storage_cfg.get("vector_dim", 384),
         system_prompt=raw.get("system_prompt", ""),
         raw=raw,
     )

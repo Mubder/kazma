@@ -51,7 +51,7 @@ system_prompt: 'You are Kazma (كاظمه), an autonomous AI agent framework.
 storage:
   engine: sqlite
   path: kazma-data/checkpoints.db
-  vector_dim: 1536
+  vector_dim: 384
 memory:
   enabled: true
   max_context_tokens: 128000

@@ -18,7 +18,7 @@ class TestAgentConfig:
         assert config.version == "0.2.0"
         assert config.language == "ar"
         assert config.rtl is True
-        assert config.vector_dim == 1536
+        assert config.vector_dim == 384
 
     def test_custom_values(self) -> None:
         config = AgentConfig(name="custom", version="2.0", language="en")

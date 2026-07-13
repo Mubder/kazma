@@ -432,6 +432,8 @@ class GatewayManager:
         self.metrics = MessageMetrics()
         # Rate feedback (optional, set via set_rate_feedback)
         self._rate_feedback: Any = None
+        # Suggestions (optional, set via set_suggester)
+        self._suggester: Any = None
         # Persistence references (set by app.py at startup)
         self._session_store: Any = None
         self._checkpointer: Any = None
@@ -460,6 +462,11 @@ class GatewayManager:
         """Register a RateFeedbackManager for inbound rate limiting."""
         self._rate_feedback = rate_feedback
         logger.info("Rate feedback manager registered")
+
+    def set_suggester(self, suggester: Any) -> None:
+        """Register a PostTaskSuggester for next-step suggestions."""
+        self._suggester = suggester
+        logger.info("Suggestion manager registered")
 
     def on_message(self, handler: MessageHandler) -> None:
         """Register the Brain's message handler."""
@@ -627,6 +634,27 @@ class GatewayManager:
                             "Handler error for message from %s",
                             msg.sender_id,
                         )
+
+                    # ── Post-task suggestions ────────────────────────
+                    # Send next-step hints after the handler completes.
+                    # detect_tool_intent analyzes the user's message for
+                    # patterns that suggest a tool could help.
+                    if self._suggester is not None and msg.text:
+                        try:
+                            from kazma_gateway.suggestions import detect_tool_intent
+
+                            hints = detect_tool_intent(msg.text)
+                            if hints:
+                                hint_text = "\n".join(f"💡 {h}" for h in hints[:2])
+                                try:
+                                    await self.send(OutboundMessage(
+                                        target_id=msg.reply_target(),
+                                        text=hint_text,
+                                    ))
+                                except Exception:
+                                    logger.debug("[Gateway] Failed to send suggestion hints")
+                        except Exception:
+                            logger.debug("[Gateway] Suggestion detection failed")
                 else:
                     logger.warning(
                         "[Gateway] Message from %s dropped — no handler registered",

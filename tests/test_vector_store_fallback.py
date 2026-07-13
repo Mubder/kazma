@@ -92,7 +92,7 @@ async def test_hot_reload_reindexes_data() -> None:
     # Mock VectorMemory
     mock_vector_mem = MagicMock()
     
-    with patch("kazma_core.memory.vector_store.VectorMemory", return_callable=MagicMock) as mock_class:
+    with patch("kazma_core.memory.vector_store.VectorMemory", new_callable=MagicMock) as mock_class:
         mock_class.return_value = mock_vector_mem
         
         await _hot_reload_memory()

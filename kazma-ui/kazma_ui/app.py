@@ -479,6 +479,48 @@ class KazmaAppBuilder:
                 session_store=self.session_store,
             )
 
+            # Rate feedback (from gateway.rate_limits YAML config)
+            rate_limits_cfg = self.config.raw.get("gateway", {}).get("rate_limits", {})
+            if rate_limits_cfg:
+                try:
+                    from kazma_gateway.rate_feedback import RateFeedbackManager
+
+                    # Use the most conservative limit among active adapters
+                    _active_limits = []
+                    if tg_adapter is not None and "telegram" in rate_limits_cfg:
+                        _active_limits.append(int(rate_limits_cfg["telegram"]))
+                    if discord_token and "discord" in rate_limits_cfg:
+                        _active_limits.append(int(rate_limits_cfg["discord"]))
+                    if slack_bot_token and "slack" in rate_limits_cfg:
+                        _active_limits.append(int(rate_limits_cfg["slack"]))
+                    if _active_limits:
+                        _limit = min(_active_limits)
+                        rfm = RateFeedbackManager(
+                            limit=_limit,
+                            window_seconds=60,
+                            cooldown_seconds=30,
+                        )
+                        self.gateway.set_rate_feedback(rfm)
+                        logger.info(
+                            "[Gateway] Rate feedback wired (limit=%d/60s, cooldown=30s)",
+                            _limit,
+                        )
+                except Exception as e:
+                    logger.warning("[Gateway] Rate feedback wiring failed: %s", e)
+
+            # Suggestions (from gateway.suggestions.enabled YAML config)
+            try:
+                from kazma_gateway.suggestions import suggestions_from_config
+
+                suggester = suggestions_from_config(self.config.raw)
+                self.gateway.set_suggester(suggester)
+                logger.info(
+                    "[Gateway] Suggestions wired (enabled=%s)",
+                    suggester.enabled,
+                )
+            except Exception as e:
+                logger.warning("[Gateway] Suggestions wiring failed: %s", e)
+
             # Vector Memory (RAG)
             _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
             if _demo_mode:
