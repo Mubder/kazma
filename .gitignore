@@ -78,6 +78,12 @@ htmlcov/
 kazma-data/
 swarm_registry.json
 
+# SQLite WAL/SHM files (transient, never commit)
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+
 # Kubernetes secrets (never commit credentials)
 kubernetes/*secrets*.yaml
 

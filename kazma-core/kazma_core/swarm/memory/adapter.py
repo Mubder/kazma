@@ -342,6 +342,43 @@ class UnifiedMemoryAdapter:
         """Semantic search alias for self-improvement queries."""
         return await self.query(query_text, limit=limit)
 
+    async def search_dict(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Search returning list[dict] for chat compaction compatibility.
+
+        Args:
+            query: Search query string.
+            limit: Maximum results to return.
+
+        Returns:
+            List of dicts with keys: id, content, score, source_layer, metadata.
+        """
+        hits = await self.query(query, limit=limit)
+        return [
+            {
+                "id": h.id,
+                "content": h.content,
+                "score": h.score,
+                "source_layer": h.source_layer,
+                "metadata": h.metadata,
+            }
+            for h in hits
+        ]
+
+    async def store(self, text: str, metadata: dict[str, Any] | None = None) -> str:
+        """Store content across all available layers (chat compatibility wrapper).
+
+        Delegates to index() with extracted tags from metadata.
+        """
+        try:
+            # Extract tags if present for L2/L4 indexing
+            tags = metadata.get("tags", None) if isinstance(metadata, dict) else None
+            await self.index(text, metadata=metadata, tags=tags)
+            import hashlib
+            return hashlib.sha256(text.encode()).hexdigest()[:16]
+        except Exception:
+            logger.exception("UnifiedMemoryAdapter.store failed")
+            return ""
+
     # ── Self-improvement retrieval ────────────────────────────────────
 
     async def get_evolution_history(

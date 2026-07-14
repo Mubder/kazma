@@ -66,6 +66,10 @@ flowchart TB
 | RAG failure logged at `debug` (invisible) | **FIXED** — elevated to `warning` |
 | Arabic tokenizer dead/conflicting rules | **FIXED** — removed `ؤ` from yeh variants, dead stemmer rules, deduplicated stop words |
 | No clitic splitting (`وسلام` wouldn't match `سلام`) | **ADDED** — conservative waw-conjunction splitting (4+ char stem) |
+| Dead KG code (KazmaKG, KnowledgeGraphAdapter) causing confusion | **REMOVED** — ~1,000 lines of dead code deleted; Swarm uses its own `KnowledgeGraph` in `swarm/memory/graph.py` |
+| Chat agent didn't use UnifiedMemoryAdapter | **FIXED** — `agent_runner.py` now wires `UnifiedMemoryAdapter` for chat memory |
+| Compaction summaries not persisted | **ADDED** — auto-store now saves summaries to long-term memory |
+| Chat FTS5 used English-only tokenizer | **FIXED** — now attempts Arabic tokenization from `kazma-memory` |
 
 ---
 
@@ -272,15 +276,17 @@ Hardcoded `int(window * 0.8)`. With the default `memory.max_context_tokens: 1280
 
 These are the items that remain as design decisions or future work (all the bugs are fixed):
 
-1. **Short-term→permanent consolidation is still explicit-only.** There is no background process that promotes conversation fragments to vector memory. Permanent memory is written only when (a) the LLM calls `memory_store`, or (b) compaction retrieves and injects (but does not auto-store) existing memories. This is a deliberate design choice — automatic promotion without LLM curation risks storing noise.
+1. **Short-term→permanent consolidation is still explicit-only.** There is no background process that promotes conversation fragments to vector memory. Permanent memory is written only when (a) the LLM calls `memory_store`, or (b) **auto-store during compaction** (NEW — saves summaries to memory). This is a deliberate design choice — automatic promotion without LLM curation risks storing noise.
 
 2. **`checkpoint_manager` is still not passed** to `create_authority()`. The pre-compaction checkpoint save is skipped. The LLM summarise + memory retrieval + injection all work; only the checkpoint step is inert. This is low-risk because the LangGraph checkpointer already persists conversation state independently.
 
-3. **The 4-layer adapter is used by self-improvement and phonebook, not the main chat agent.** This is by design — the chat agent uses `VectorMemory` (Subsystem A) directly. The 4-layer adapter serves the swarm's cross-worker episodic memory.
+3. **Chat agent now uses UnifiedMemoryAdapter** (via `AsyncMemoryAdapter`). The chat path gets the same 4-layer RRF memory as Swarm, fixing the earlier divergence. The `VectorMemory` singleton still serves as the primary write target.
 
 4. **`sqlite-vec` is not a declared dependency.** It appears in `uv.lock` only as a transitive dependency of `langgraph-checkpoint-sqlite`. Available at runtime as a side effect.
 
 5. **No automatic rate-limit handling for memory operations.** If ChromaDB is slow under load, there's no backpressure mechanism. The `AsyncMemoryAdapter` runs in a thread executor, so it won't block the event loop, but very large collections could be slow to search.
+
+6. **Dead KG code removed.** The old `KazmaKG` class and `KnowledgeGraphAdapter` were deleted (~1,000 lines). The Swarm continues to use its dedicated `KnowledgeGraph` class in `swarm/memory/graph.py`.
 
 ---
 

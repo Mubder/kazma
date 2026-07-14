@@ -95,6 +95,19 @@ class CompactionEngine:
         # Step 2: Summarize the conversation
         summary = await self.summarize(messages)
 
+        # Step 2.5: Auto-store the summary in memory for long-term retention
+        # This ensures conversation facts survive context window compaction
+        if self.memory_store is not None:
+            try:
+                import time
+                await self.memory_store.store(
+                    summary,
+                    metadata={"type": "compaction_summary", "ts": time.time(), "source": "compaction"}
+                )
+                logger.debug("Auto-stored compaction summary to memory")
+            except Exception:
+                logger.debug("Auto-store failed (non-fatal)", exc_info=True)
+
         # Step 3: Retrieve relevant memories based on the summary
         memories = await self.retrieve_memories(summary, limit=5)
 
@@ -214,7 +227,8 @@ class CompactionEngine:
         Handles both async (``await search(query, limit=)``) and sync
         (``search(query, n_results=)``) backends gracefully.  This makes the
         compaction engine compatible with ``AsyncMemoryAdapter`` (the canonical
-        wrapper), raw ``VectorMemory`` (sync), and any future async backend.
+        wrapper), ``UnifiedMemoryAdapter.search_dict()``, raw ``VectorMemory`` (sync),
+        and any future async backend.
 
         Args:
             query: Search query (typically the conversation summary).
@@ -238,7 +252,7 @@ class CompactionEngine:
 
         try:
             result = store.search(query, limit=limit)
-            # If the backend is async (e.g. AsyncMemoryAdapter), await it.
+            # If the backend is async (e.g. AsyncMemoryAdapter or UnifiedMemoryAdapter), await it.
             if asyncio.iscoroutine(result):
                 memories = await result
             else:

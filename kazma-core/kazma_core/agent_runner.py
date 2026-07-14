@@ -163,27 +163,28 @@ class KazmaAgent:
         self._memory_backend = None
         self._init_memory()
 
-        # Context Authority (80% compaction) — wired with the VectorMemory
-        # singleton (wrapped in an async adapter) so that the compaction
+        # Context Authority (80% compaction) — wired with the UnifiedMemoryAdapter
+        # (4-layer RRF: ChromaDB + KG + FTS5 + sqlite-vec) so that the compaction
         # engine can retrieve and inject relevant memories into the fresh
-        # context after summarizing.
-        from kazma_core.agent.tool_registry import get_vector_memory
-        from kazma_core.memory.async_adapter import wrap_vector_memory
+        # context after summarizing. Falls back to VectorMemory-only if adapter fails.
+        try:
+            from kazma_core.swarm.memory.adapter import get_adapter
+            _memory_store = get_adapter()
+            logger.info("ContextAuthority wired with UnifiedMemoryAdapter (4-layer RRF)")
+        except Exception:
+            # Fallback to VectorMemory-only if adapter initialization fails
+            from kazma_core.agent.tool_registry import get_vector_memory
+            from kazma_core.memory.async_adapter import wrap_vector_memory
+            _vm = get_vector_memory()
+            _memory_store = wrap_vector_memory(_vm) if _vm is not None else None
+            logger.warning("ContextAuthority fallback to VectorMemory (4-layer unavailable)")
 
-        _vm = get_vector_memory()
-        _memory_store = wrap_vector_memory(_vm) if _vm is not None else None
         self.authority: ContextAuthority = create_authority(
             model=self.config.default_model,
             window=self.config.raw.get("memory", {}).get("max_context_tokens", 128_000),
             llm_client=self._make_compaction_client(),
             memory_store=_memory_store,
         )
-        if _memory_store is not None:
-            logger.info("ContextAuthority wired with VectorMemory for compaction retrieval")
-        else:
-            logger.warning("ContextAuthority has no memory_store — compaction will not inject memories")
-
-        # System prompt
         self.system_prompt = self.config.system_prompt or self._default_system_prompt()
 
         # Inject cultural context enrichment

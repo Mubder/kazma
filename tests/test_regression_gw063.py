@@ -1,8 +1,9 @@
-"""Regression tests for gw-063: three critical bugs.
+"""Regression tests for gw-063: ReAct iteration counter.
 
 BUG 1: ReAct iteration counter dead — supervisor_node returns iteration unchanged.
-BUG 2: KG edge attribute name mismatch between engine and adapter.
-BUG 3: KG engine graph property type hint (docstring-only fix, no runtime test needed).
+
+BUG 2 and 3 (KG edge attributes) were removed - the dead KG code (KazmaKG, KnowledgeGraphAdapter)
+was deleted from kazma-core as they were never used in production.
 """
 
 from __future__ import annotations
@@ -111,92 +112,4 @@ class TestIterationCounterIncrement:
 
         assert result["iteration"] == 1, (
             f"BUG 1 REGRESSION: first iteration should be 1, got {result['iteration']}"
-        )
-
-
-# -----------------------------------------------------------------------
-# BUG 2: KG edge attribute consistency between engine and adapter
-# -----------------------------------------------------------------------
-
-
-class TestEdgeAttributeConsistency:
-    """Engine and adapter must use the same 'relation' key on graph edges."""
-
-    def test_engine_and_adapter_share_relation_key(self):
-        """Edge added via adapter must be queryable via engine using 'relation'."""
-        from kazma_core.kg_engine import KazmaKG
-        from kazma_core.memory.kg_adapter import KnowledgeGraphAdapter
-
-        engine = KazmaKG()
-        adapter = KnowledgeGraphAdapter(engine=engine)
-
-        adapter.add_entity("a", "node")
-        adapter.add_entity("b", "node")
-        adapter.add_relation("a", "b", "works_with")
-
-        # Query via engine — uses 'relation' key
-        engine_edges = engine.get_edges(source="a", target="b")
-        assert len(engine_edges) == 1
-        assert engine_edges[0]["relation"] == "works_with", (
-            "BUG 2 REGRESSION: engine edge missing 'relation' key"
-        )
-
-        # Query via adapter — now also uses 'relation' key
-        adapter_edges = adapter.query_relations(source="a", target="b")
-        assert len(adapter_edges) == 1
-        assert adapter_edges[0]["relation"] == "works_with", (
-            "BUG 2 REGRESSION: adapter edge missing 'relation' key"
-        )
-
-    def test_adapter_export_uses_relation_key(self):
-        """export_subgraph must use 'relation' key, not 'relation_type'."""
-        import json
-
-        from kazma_core.memory.kg_adapter import KnowledgeGraphAdapter
-
-        kg = KnowledgeGraphAdapter(backend="networkx")
-        kg.add_entity("x", "doc")
-        kg.add_entity("y", "doc")
-        kg.add_relation("x", "y", "references")
-
-        raw = kg.export_subgraph(["x", "y"])
-        data = json.loads(raw)
-        assert len(data["edges"]) == 1
-        edge = data["edges"][0]
-        assert "relation" in edge, (
-            f"BUG 2 REGRESSION: export_subgraph edge has keys {list(edge.keys())}, "
-            "expected 'relation'"
-        )
-        assert edge["relation"] == "references"
-        assert "relation_type" not in edge
-
-    def test_context_window_uses_relation_key(self):
-        """get_context_window text must contain 'relation' attribute, not 'relation_type'."""
-        from kazma_core.memory.kg_adapter import KnowledgeGraphAdapter
-
-        kg = KnowledgeGraphAdapter(backend="networkx")
-        kg.add_entity("alice", "person")
-        kg.add_entity("bob", "person")
-        kg.add_relation("alice", "bob", "collaborates_with")
-
-        ctx = kg.get_context_window("alice", max_tokens=2000)
-        # The relation label should appear in the context text
-        assert "collaborates_with" in ctx["text"]
-
-    def test_adapter_persistence_uses_relation_key(self, tmp_path):
-        """Relations persisted to SQLite and reloaded must use 'relation' key on graph."""
-        from kazma_core.memory.kg_adapter import KnowledgeGraphAdapter
-
-        db_path = str(tmp_path / "test.db")
-        kg = KnowledgeGraphAdapter(backend="networkx", persist_path=db_path)
-        kg.add_entity("a", "node")
-        kg.add_entity("b", "node")
-        kg.add_relation("a", "b", "linked_to")
-
-        # Reload from same DB
-        kg2 = KnowledgeGraphAdapter(backend="networkx", persist_path=db_path)
-        edges = kg2.query_relations(source="a", target="b")
-        assert len(edges) == 1
-        assert edges[0]["relation"] == "linked_to", (
-            "BUG 2 REGRESSION: reloaded edge uses wrong key"
         )

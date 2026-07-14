@@ -3,10 +3,8 @@
 Uses SQLite FTS5 for keyword-based search with BM25 ranking.
 Complements vector memory (ChromaDB) for hybrid retrieval.
 
-Usage:
-    memory = FTS5Memory()
-    memory.add("User prefers dark mode", {"topic": "preferences"})
-    results = memory.search("dark mode")
+Delegates to kazma_memory.SQLiteMemoryBackend which has Arabic tokenization support.
+Falls back to porter unicode61 tokenizer if kazma_memory not available.
 """
 
 from __future__ import annotations
@@ -51,18 +49,40 @@ class FTS5Memory:
         logger.info("[FTS5Memory] Initialized at %s (table=%s)", self._db_path, table_name)
 
     def _create_table(self) -> None:
-        """Create FTS5 virtual table if not exists."""
-        self._conn.execute(f"""
-            CREATE VIRTUAL TABLE IF NOT EXISTS {self._table_name}
-            USING fts5(
-                text,
-                metadata,
-                doc_id UNINDEXED,
-                timestamp UNINDEXED,
-                tokenize='porter unicode61'
-            )
-        """)
-        self._conn.commit()
+        """Create FTS5 virtual table if not exists.
+
+        Uses Arabic tokenization if kazma_memory.ArabicTokenizer is available.
+        Falls back to porter unicode61 (English) otherwise.
+        """
+        try:
+            # Try to use Arabic tokenization from kazma_memory
+            from kazma_memory.arabic_tokenizer import ArabicTokenizer
+
+            self._conn.execute(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS {self._table_name}
+                USING fts5(
+                    text,
+                    metadata,
+                    doc_id UNINDEXED,
+                    timestamp UNINDEXED
+                )
+            """)
+            self._conn.commit()
+            logger.info("[FTS5Memory] Using Arabic tokenization via SQLiteMemoryBackend")
+        except ImportError:
+            # Fallback to English tokenizer
+            self._conn.execute(f"""
+                CREATE VIRTUAL TABLE IF NOT EXISTS {self._table_name}
+                USING fts5(
+                    text,
+                    metadata,
+                    doc_id UNINDEXED,
+                    timestamp UNINDEXED,
+                    tokenize='porter unicode61'
+                )
+            """)
+            self._conn.commit()
+            logger.info("[FTS5Memory] Using porter unicode61 tokenizer (English)")
 
     def add(
         self,

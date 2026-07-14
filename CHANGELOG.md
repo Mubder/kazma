@@ -33,6 +33,16 @@ Features are listed with their implementation PR/commit where available.
 | ✅ | **Breadcrumb Fix** | Duplicate label (الرئيسية / Chat) → translated page name | `header.html` |
 | ✅ | **Modal Width Fix** | Default max-width:560px on .modal (was edge-to-edge) | `kazma.css` |
 
+### Memory System Unification (July 2026)
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **UnifiedMemoryAdapter for Chat** | `AsyncMemoryAdapter` wraps `VectorMemory`, giving chat agent 4-layer RRF memory | `swarm/memory/adapter.py` |
+| ✅ | **Auto-store Compaction Summaries** | Compaction now persists summaries to long-term memory for continuity | `compaction.py:98-109` |
+| ✅ | **search_dict() method** | Added to `UnifiedMemoryAdapter` for chat-compatible dict results | `adapter.py:345-358` |
+| ✅ | **store() method** | Added to `UnifiedMemoryAdapter` for memory persistence | `adapter.py:360-372` |
+| ✅ | **Arabic Tokenization in Chat** | `FTS5Memory` now attempts Arabic tokenizer from `kazma-memory` | `memory/fts5.py` |
+| ✅ | **Dead KG Code Removed** | Deleted `kg_engine.py` (539 lines) and `kg_adapter.py` (498 lines) | |
+
 ### Deep Security Audit Remediation (~40 fixes)
 | Status | Category | Key Fixes |
 |:---:|:---|:---|
@@ -48,6 +58,9 @@ Features are listed with their implementation PR/commit where available.
 | ✅ | Deleted 16 obsolete docs (handoffs, task plans, old audits, prompts) |
 | ✅ | Archived 8 historical audit reports to `docs/audits/` |
 | ✅ | Cleaned pytest temp dirs + log files; updated .gitignore |
+| ✅ | Removed dead KG code: `kg_engine.py` and `kg_adapter.py` (~1,000 lines total) |
+| ✅ | Deleted associated test files: `test_kg_engine.py`, `test_kg_adapter.py` |
+| ✅ | Removed KG exports from `kazma_core/memory/__init__.py` |
 
 ---
 

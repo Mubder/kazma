@@ -10,8 +10,8 @@ The previous documentation (README, architecture blueprints, audit reports) desc
 
 | Area | Gap | What the rewrite does |
 |---|---|---|
-| **Memory wiring** | "4-layer memory pipeline" implied automatic RAG injection. | Documents the **three disjoint subsystems** and that the 4-layer adapter is only used by `self_improvement.py` + `phonebook.py`. |
-| **Compaction** | Described as memory-enriched + checkpointed. | Documents that `agent_runner.py:162-166` calls `create_authority()` **without** `memory_store`/`checkpoint_manager`, so only LLM summarise runs. |
+| **Memory wiring** | "4-layer memory pipeline" implied automatic RAG injection. | Documents the **three disjoint subsystems** and that the 4-layer adapter is used by `self_improvement.py` + `phonebook.py` + now **chat agent via `AsyncMemoryAdapter`**. |
+| **Compaction** | Described as memory-enriched + checkpointed. | Documents that `agent_runner.py:162-166` wires `AsyncMemoryAdapter` → `VectorMemory`, so LLM summarise + memory retrieval work; auto-store added. |
 | **HITL build sites** | AGENTS.md cited "app.py ~line 966". | Corrected to `kazma-ui/kazma_ui/app.py:741-751`; noted `graph_builder.py:966` is unrelated. |
 | **Approval endpoint** | Said to be in `app.py`. | Located precisely at `routes_direct.py:454`. |
 | **Safety class name** | Some docs said `SafetyGate`/`SafetyChecker`. | Corrected to `SafetyMiddleware` (`swarm/safety.py:47`). |
@@ -25,6 +25,7 @@ The previous documentation (README, architecture blueprints, audit reports) desc
 | **`/undo`, `/edit`** | Listed in help. | Flagged as stubs ("not yet implemented"). |
 | **`sqlite-vec` dependency** | Assumed declared. | Clarified it's transitive via `langgraph-checkpoint-sqlite`. |
 | **`distance()` bug** | Undocumented. | Surfaced that `search_backend.py` `_vector_search` uses an invalid sqlite-vec function. |
+| **Dead KG code** | Old `KazmaKG` and `KnowledgeGraphAdapter` caused confusion. | **Removed** — ~1,000 lines deleted; Swarm uses its own `KnowledgeGraph` in `swarm/memory/graph.py`. |
 
 ---
 
