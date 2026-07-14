@@ -183,29 +183,92 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         if not provider:
             return {"success": False, "error": f"Provider '{name}' not found"}
 
+        if name.lower() == "google":
+            # Test Google Provider (either AI Studio or Vertex AI)
+            try:
+                client = registry.get_client_by_provider(name)
+                if not client:
+                    return {"success": False, "error": "Failed to construct Google Gemini provider client"}
+                
+                # Retrieve the authenticated HTTP client (resolves ADC or API Key)
+                http_client = await client._get_client()
+                
+                # Perform a lightweight ping to the base URL
+                start = time.monotonic()
+                if getattr(client, "_use_ai_studio", False):
+                    resp = await http_client.get("/models")
+                    latency = int((time.monotonic() - start) * 1000)
+                    if resp.status_code == 200:
+                        registry.set_provider_health(name, "healthy")
+                        return {"success": True, "latency_ms": latency}
+                    else:
+                        registry.set_provider_health(name, "degraded")
+                        return {"success": False, "error": f"AI Studio returned HTTP {resp.status_code}", "latency_ms": latency}
+                else:
+                    # Vertex AI: just check if get_client succeeded and do a lightweight head/get to base_url to check network.
+                    try:
+                        resp = await http_client.get("")
+                        latency = int((time.monotonic() - start) * 1000)
+                        registry.set_provider_health(name, "healthy")
+                        return {"success": True, "latency_ms": latency}
+                    except httpx.ConnectError:
+                        registry.set_provider_health(name, "down")
+                        return {"success": False, "error": f"Cannot connect to Vertex AI at {client.config.base_url}"}
+            except Exception as e:
+                registry.set_provider_health(name, "down")
+                return {"success": False, "error": f"Google Provider test failed: {e}"}
+
         base_url = str(provider.get("base_url", "")).rstrip("/")
         api_key = str(provider.get("api_key", ""))
         if not base_url:
             return {"success": False, "error": "No base URL configured"}
 
+        # Normalize to the OpenAI-compatible /v1 form. Local providers
+        # (Ollama, LM Studio, …) live on localhost / private LAN addresses,
+        # so private URLs must be allowed here (they are user-configured
+        # endpoints, not untrusted external input).
+        from kazma_core.url_utils import normalize_provider_url
+        from kazma_core.security.ssrf import validate_url
+        from urllib.parse import urlparse, urlunparse
+
+        base = normalize_provider_url(base_url, ensure_v1=True)
+        root = urlunparse((urlparse(base).scheme, urlparse(base).netloc, "", "", "", ""))
+        # Candidate health endpoints: the provider's own /models, plus the
+        # OpenAI-compatible /v1/models (covers LM Studio, Ollama, cloud).
+        candidates = [f"{base}/models", f"{root}/v1/models"]
+
+        # Strip any non-ASCII characters from the API key (e.g. an Arabic key
+        # pasted by an Arabic-first operator) so the Authorization header can
+        # be encoded — mirrors LLMProvider._strip_non_ascii.
+        safe_key = "".join(ch for ch in api_key if ord(ch) < 128) if api_key else ""
+
         start = time.monotonic()
         try:
             headers: dict[str, str] = {"Content-Type": "application/json"}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-            from kazma_core.security.ssrf import validate_url
-            validate_url(base_url)
+            if safe_key:
+                headers["Authorization"] = f"Bearer {safe_key}"
+            validate_url(base, allow_private=True)
             async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(f"{base_url}/models", headers=headers)
+                last_status = None
+                last_body = ""
+                for url in candidates:
+                    try:
+                        resp = await client.get(url, headers=headers)
+                    except Exception:
+                        # Try the next candidate endpoint.
+                        continue
+                    last_status = resp.status_code
+                    last_body = resp.text[:200]
+                    if resp.status_code == 200:
+                        latency = int((time.monotonic() - start) * 1000)
+                        registry.set_provider_health(name, "healthy")
+                        return {"success": True, "latency_ms": latency}
                 latency = int((time.monotonic() - start) * 1000)
-                if resp.status_code == 200:
-                    registry.set_provider_health(name, "healthy")
-                    return {"success": True, "latency_ms": latency}
                 registry.set_provider_health(name, "degraded")
                 return {
                     "success": False,
                     "latency_ms": latency,
-                    "error": f"HTTP {resp.status_code}: {resp.text[:200]}",
+                    "error": f"HTTP {last_status}: {last_body}",
                 }
         except httpx.ConnectError:
             registry.set_provider_health(name, "down")

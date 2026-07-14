@@ -345,6 +345,21 @@ class KazmaAppBuilder:
         self.templates.env.globals["dir"] = _dynamic_dir
         self.templates.env.globals["translations_json"] = _translations_json
 
+        # Cache-busting version for the main stylesheet. Derived from the
+        # CSS file's modification time so every edit forces browsers to
+        # reload (otherwise a stale cached kazma.css shows old/dark UI).
+        # Computed PER REQUEST (not at startup) so CSS edits take effect
+        # immediately without restarting the server.
+        _css_file = _STATIC_DIR / "css" / "kazma.css"
+
+        def _css_version() -> int:
+            try:
+                return int(os.path.getmtime(_css_file))
+            except Exception:
+                return 1
+
+        self.templates.env.globals["css_version"] = _css_version
+
         @self.app.middleware("http")
         async def language_middleware(request: Request, call_next):
             cookie_lang = request.cookies.get("kazma-lang")

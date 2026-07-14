@@ -212,49 +212,73 @@ class GeminiProvider(LLMProvider):
     ) -> None:
         self._gcp_project = project_id
         self._gcp_location = location
+        self._use_ai_studio = False
 
-        # Derive the Vertex AI OpenAI-compatible base URL.
-        resolved_project = self._resolve_project()
         config = config or LLMConfig()
-        config.base_url = _VERTEX_OPENAI_TEMPLATE.format(
-            location=location,
-            project=resolved_project,
-        )
+        self.config = config
+        self._resolve_api_key()
+
+        if self._use_ai_studio:
+            config.base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+        else:
+            # Derive the Vertex AI OpenAI-compatible base URL.
+            resolved_project = self._resolve_project()
+            config.base_url = _VERTEX_OPENAI_TEMPLATE.format(
+                location=location,
+                project=resolved_project,
+            )
 
         super().__init__(config)
         logger.info(
-            "GeminiProvider ready | project=%s location=%s endpoint=%s",
-            resolved_project, location, config.base_url,
+            "GeminiProvider ready | mode=%s project=%s location=%s endpoint=%s",
+            "AI Studio" if self._use_ai_studio else "Vertex AI",
+            self._gcp_project if not self._use_ai_studio else "N/A",
+            location if not self._use_ai_studio else "N/A",
+            config.base_url,
         )
 
     # ── Overrides ─────────────────────────────────────────────────
 
     def _resolve_api_key(self) -> None:
-        """ADC provides the auth token — skip the API key resolution."""
-        # The bearer token is obtained on-demand via _get_client().
-        # We set a placeholder so the parent doesn't error on missing key.
-        self.config.api_key = "adc-placeholder"
+        """Resolve API key from config or environment for AI Studio, or default to ADC placeholder."""
+        import os
+        key = self.config.api_key
+        if not key or key == "adc-placeholder":
+            key = os.getenv("GEMINI_API_KEY", "")
+        if not key:
+            key = os.getenv("GOOGLE_API_KEY", "")
+
+        if key and key != "adc-placeholder":
+            self.config.api_key = key
+            self._use_ai_studio = True
+        else:
+            self.config.api_key = "adc-placeholder"
+            self._use_ai_studio = False
 
     async def _get_client(self) -> httpx.AsyncClient:
-        """Return an httpx client authenticated with an ADC bearer token.
+        """Return an httpx client authenticated with an ADC bearer token or Google AI Studio API key.
 
         The token is refreshed on every call to ensure it never expires
         mid-session.
         """
         token: str
-        try:
-            import google.auth
-            import google.auth.transport.requests
+        if self._use_ai_studio:
+            token = self.config.api_key
+        else:
+            try:
+                import google.auth
+                import google.auth.transport.requests
 
-            credentials, _project = google.auth.default()
-            auth_req = google.auth.transport.requests.Request()
-            credentials.refresh(auth_req)
-            token = credentials.token
-        except Exception as exc:
-            logger.exception("Failed to obtain ADC credentials")
-            raise RuntimeError(
-                "ADC authentication failed.  Run: gcloud auth application-default login"
-            ) from exc
+                credentials, _project = google.auth.default()
+                auth_req = google.auth.transport.requests.Request()
+                credentials.refresh(auth_req)
+                token = credentials.token
+            except Exception as exc:
+                logger.exception("Failed to obtain ADC credentials")
+                raise RuntimeError(
+                    "ADC authentication failed. To use Vertex AI, run: gcloud auth application-default login. "
+                    "Alternatively, to use Google AI Studio, set the GEMINI_API_KEY environment variable."
+                ) from exc
 
         if self._http is None or self._http.is_closed:
             self._http = httpx.AsyncClient(
@@ -284,8 +308,8 @@ class GeminiProvider(LLMProvider):
     def _resolve_project(self) -> str:
         """Resolve the GCP project ID.
 
-        Priority: explicit kwarg > GOOGLE_CLOUD_PROJECT env > ADC project
-        > ADC quota_project_id > gcloud config_default file.
+        Priority: explicit kwarg > GOOGLE_CLOUD_PROJECT env > CLOUDSDK_CORE_PROJECT env > ADC project
+        > ADC quota_project_id > gcloud config_default file > gcloud CLI fallback query.
         """
         import os
         import json
@@ -293,7 +317,7 @@ class GeminiProvider(LLMProvider):
 
         if self._gcp_project:
             return self._gcp_project
-        env_project = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+        env_project = os.environ.get("GOOGLE_CLOUD_PROJECT", "") or os.environ.get("CLOUDSDK_CORE_PROJECT", "")
         if env_project:
             self._gcp_project = env_project
             return env_project
@@ -336,6 +360,24 @@ class GeminiProvider(LLMProvider):
                             return project
         except Exception as exc:
             logger.debug("gcloud config_default read failed: %s", exc)
+        # Fallback 3: query gcloud CLI directly for active project
+        try:
+            import subprocess
+            res = subprocess.run(
+                ["gcloud", "config", "get-value", "project"],
+                capture_output=True,
+                text=True,
+                check=False,
+                shell=True,
+            )
+            if res.returncode == 0:
+                gcloud_project = res.stdout.strip()
+                if gcloud_project and gcloud_project != "(unset)":
+                    self._gcp_project = gcloud_project
+                    logger.info("Resolved GCP project from gcloud CLI: %s", gcloud_project)
+                    return gcloud_project
+        except Exception as exc:
+            logger.debug("gcloud CLI project query failed: %s", exc)
         raise ValueError(
             "GCP project ID not set.  Pass project_id=, set GOOGLE_CLOUD_PROJECT, "
             "or run: gcloud auth application-default login --project=<your-project>"

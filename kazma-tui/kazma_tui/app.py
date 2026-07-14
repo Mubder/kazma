@@ -544,12 +544,12 @@ class KazmaTUI(App[None]):
                     "settings": "Settings"
                 },
                 "ar": {
-                    "dashboard": "لوحة القيادة",
-                    "chat": "المحادثة",
-                    "files": "الملفات",
-                    "traces": "التتبعات",
-                    "swarm": "السرب",
-                    "settings": "الإعدادات"
+                    "dashboard": "\u0644\u0648\u062d\u0629 \u0627\u0644\u0642\u064a\u0627\u062f\u0629",
+                    "chat": "\u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629",
+                    "files": "\u0627\u0644\u0645\u0644\u0641\u0627\u062a",
+                    "traces": "\u0627\u0644\u062a\u062a\u0628\u0639\u0627\u062a",
+                    "swarm": "\u0627\u0644\u0633\u0631\u0628",
+                    "settings": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a"
                 }
             }
             for tab_id, label in labels[lang].items():

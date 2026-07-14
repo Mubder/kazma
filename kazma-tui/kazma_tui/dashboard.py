@@ -629,15 +629,20 @@ class MetricsDashboard(Widget):
     def _calculate_rpm(self, entries: list[Any]) -> int:
         """Calculate requests per minute from recent trace entries.
 
-        Counts entries within the last 60 seconds. Returns the actual
-        count within the window without extrapolation to avoid
-        over-inflating RPM for short observation periods.
+        Counts entries within the last 60 seconds. Extrapolates when
+        the observation duration is under 60 seconds.
         """
         if not entries:
             return 0
         now = time.time()
         window = 60.0
         recent = [e for e in entries if (now - e.timestamp) <= window]
+        if not recent:
+            return 0
+        earliest = min(e.timestamp for e in recent)
+        span = now - earliest
+        if span >= 1.0 and span < window:
+            return int(round(len(recent) * (window / span)))
         return len(recent)
 
     def _calculate_avg_latency(self, data: list[dict[str, Any]]) -> float:

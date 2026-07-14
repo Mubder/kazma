@@ -350,7 +350,8 @@ async def send_swarm_output(
     # bot + chat) would otherwise receive real messages from every test
     # dispatch. This is the single chokepoint for all output-target sends.
     import sys
-    if "pytest" in sys.modules:
+    import os
+    if "pytest" in sys.modules and os.getenv("KAZMA_TEST_FORCE_OUTPUT_ROUTING") != "1":
         logger.debug("[swarm-output] pytest detected — skipping real output send")
         return False
 

@@ -146,6 +146,43 @@ class LLMProvider:
             key = "not-needed"
         self.config.api_key = key
 
+    @staticmethod
+    def _strip_non_ascii(value: str) -> str:
+        """Remove non-ASCII characters from a value destined for an HTTP header.
+
+        httpx raises ``UnicodeEncodeError`` (ascii codec) when a header value
+        contains non-ASCII characters — e.g. an API key pasted with Arabic text
+        by an Arabic-first operator. Strip them so the request can proceed
+        instead of crashing with a cryptic "ascii codec can't encode" error.
+        For local providers (Ollama/LM Studio) the key is ignored anyway; for
+        cloud providers a stripped key fails auth with a clear 401 instead.
+        """
+        if not value:
+            return value
+        return "".join(ch for ch in value if ord(ch) < 128)
+
+    # kazma-internal routing prefixes added by normalize_model_name()
+    # (e.g. "ollama/llama3.2", "openai/local-model"). These identify the
+    # provider inside kazma's registry/router but must NOT be sent to the
+    # provider's API — Ollama/LM Studio expect the bare model name.
+    _ROUTING_PREFIXES = ("ollama/", "openai/", "anthropic/", "groq/", "bedrock/", "azure/")
+
+    @staticmethod
+    def _strip_routing_prefix(model: str) -> str:
+        """Strip kazma's internal provider routing prefix from a model name.
+
+        ``normalize_model_name()`` tags local models with a provider prefix
+        ("ollama/", "openai/") for routing, but the upstream API (Ollama,
+        LM Studio, …) expects the bare name ("qwen2.5:7b"). Sending
+        "ollama/qwen2.5:7b" makes Ollama reply 404 "model not found".
+        """
+        if not model:
+            return model
+        for prefix in LLMProvider._ROUTING_PREFIXES:
+            if model.startswith(prefix):
+                return model[len(prefix):]
+        return model
+
     async def _get_client(self) -> httpx.AsyncClient:
         """Lazy-init the HTTP client."""
         if self._http is None or self._http.is_closed:
@@ -168,10 +205,18 @@ class LLMProvider:
                     logger.warning("LLMProvider: /v1 was missing — forced to %s", base)
 
             logger.debug("Creating httpx client: base_url=%s", base)
+            api_key = self.config.api_key or ""
+            safe_key = LLMProvider._strip_non_ascii(api_key)
+            if safe_key != api_key:
+                logger.warning(
+                    "LLMProvider: API key contained non-ASCII characters; these "
+                    "were stripped. If you use a cloud provider, set a valid ASCII "
+                    "API key in Settings > Models/Providers."
+                )
             self._http = httpx.AsyncClient(
                 base_url=base,
                 headers={
-                    "Authorization": f"Bearer {self.config.api_key}",
+                    "Authorization": f"Bearer {safe_key}",
                     "Content-Type": "application/json",
                 },
                 timeout=httpx.Timeout(self.config.timeout, connect=10.0),
@@ -241,7 +286,7 @@ class LLMProvider:
         client = await self._get_client()
 
         payload: dict[str, Any] = {
-            "model": model or self.config.model,
+            "model": LLMProvider._strip_routing_prefix(model or self.config.model),
             "messages": messages,
             "max_tokens": max_tokens or self.config.max_tokens,
             "temperature": temperature if temperature is not None else self.config.temperature,
@@ -413,6 +458,15 @@ class LLMProvider:
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             logger.error("LLM call failed (network): %s", e)
             raise LLMError(f"LLM call failed (network): {e}") from e
+        except UnicodeEncodeError as e:
+            # Non-ASCII in a header value (e.g. API key) — httpx fails to
+            # encode the request. Surface a clear, actionable message.
+            logger.error("LLM request encoding failed (non-ASCII config?): %s", e)
+            raise LLMError(
+                "The model request could not be encoded. Check that your API key "
+                "and model name contain only standard (ASCII) characters — "
+                "remove any Arabic or other non-English text from Settings."
+            ) from e
         except Exception as e:
             logger.error("LLM call failed: %s", e, exc_info=True)
             raise LLMError(f"LLM call failed: {e}") from e

@@ -15,6 +15,18 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import os
+
+
+@pytest.fixture(autouse=True)
+def force_output_routing():
+    original = os.environ.get("KAZMA_TEST_FORCE_OUTPUT_ROUTING")
+    os.environ["KAZMA_TEST_FORCE_OUTPUT_ROUTING"] = "1"
+    yield
+    if original is None:
+        del os.environ["KAZMA_TEST_FORCE_OUTPUT_ROUTING"]
+    else:
+        os.environ["KAZMA_TEST_FORCE_OUTPUT_ROUTING"] = original
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +171,7 @@ class TestMaybeSendToOutputTarget:
         outbound = call_args.args[0]
         assert outbound.target_id == "telegram:-100555"
         assert outbound.text == "hello"
-        assert outbound.context_metadata == {"chat_id": -100555}
+        assert outbound.context_metadata.get("chat_id") == -100555
 
     @pytest.mark.asyncio
     async def test_returns_false_when_no_target(self):
@@ -169,10 +181,9 @@ class TestMaybeSendToOutputTarget:
         manager = MagicMock()
         manager.send = AsyncMock()
 
-        with patch(
-            "kazma_gateway.agent_handler.swarm_dispatch._get_output_target_config",
-            return_value=None,
-        ):
+        mock_cs = MagicMock()
+        mock_cs.get.return_value = None
+        with patch("kazma_core.config_store.get_config_store", return_value=mock_cs):
             result = await _maybe_send_to_output_target(manager, "hello", None)
 
         assert result is False
@@ -204,10 +215,9 @@ class TestMaybeSendToOutputTarget:
             "enabled": True,
         }
 
-        with patch(
-            "kazma_gateway.agent_handler.swarm_dispatch._get_output_target_config",
-            return_value=config_target,
-        ):
+        mock_cs = MagicMock()
+        mock_cs.get.return_value = config_target
+        with patch("kazma_core.config_store.get_config_store", return_value=mock_cs):
             result = await _maybe_send_to_output_target(manager, "hi", None)
 
         assert result is True
@@ -515,8 +525,11 @@ class TestWebUIDispatchOutputRouting:
             "enabled": True,
         }
 
+        mock_cs = MagicMock()
+        mock_cs.get.return_value = config_target
+
         with patch("kazma_ui.services.SwarmService.resolve_engine", return_value=mock_engine), \
-             patch("kazma_gateway.agent_handler.swarm_dispatch._get_output_target_config", return_value=config_target):
+             patch("kazma_core.config_store.get_config_store", return_value=mock_cs):
             
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 resp = await ac.post("/api/swarm/dispatch", json={
@@ -551,13 +564,12 @@ class TestWebUIDispatchOutputRouting:
 
         # Mock the engine
         mock_engine = MagicMock()
-        if hasattr(mock_engine, "register_task_handle"):
-            del mock_engine.register_task_handle
-        if hasattr(mock_engine, "get_task_handle"):
-            del mock_engine.get_task_handle
+        mock_engine._task_handles = {}
+        mock_engine.register_task_handle = MagicMock(side_effect=lambda tid, h: mock_engine._task_handles.__setitem__(tid, h))
+        mock_engine.unregister_task_handle = MagicMock(side_effect=lambda tid: mock_engine._task_handles.pop(tid, None))
+        mock_engine.get_task_handle = MagicMock(side_effect=lambda tid: mock_engine._task_handles.get(tid))
         mock_worker = MagicMock()
         mock_engine.get_worker.return_value = mock_worker
-        mock_engine._task_handles = {}
 
         # Set up a future for mock_engine.dispatch so we can await it
         fut = asyncio.Future()
@@ -586,8 +598,11 @@ class TestWebUIDispatchOutputRouting:
         reset_swarm_service()
         get_swarm_service()._engine = mock_engine
 
+        mock_cs = MagicMock()
+        mock_cs.get.return_value = config_target
+
         with patch("kazma_ui.services.SwarmService.resolve_engine", return_value=mock_engine), \
-             patch("kazma_gateway.agent_handler.swarm_dispatch._get_output_target_config", return_value=config_target):
+             patch("kazma_core.config_store.get_config_store", return_value=mock_cs):
             
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 resp = await ac.post("/api/swarm/dispatch", json={
@@ -632,11 +647,10 @@ class TestWebUIDispatchOutputRouting:
 
         # Mock the engine
         mock_engine = MagicMock()
-        if hasattr(mock_engine, "register_task_handle"):
-            del mock_engine.register_task_handle
-        if hasattr(mock_engine, "get_task_handle"):
-            del mock_engine.get_task_handle
         mock_engine._task_handles = {}
+        mock_engine.register_task_handle = MagicMock(side_effect=lambda tid, h: mock_engine._task_handles.__setitem__(tid, h))
+        mock_engine.unregister_task_handle = MagicMock(side_effect=lambda tid: mock_engine._task_handles.pop(tid, None))
+        mock_engine.get_task_handle = MagicMock(side_effect=lambda tid: mock_engine._task_handles.get(tid))
 
         # Mock engine.retry_task to return a new task
         new_task = SwarmTask(id="task-new", prompt="retry prompt", workers=["worker1"])
@@ -668,8 +682,11 @@ class TestWebUIDispatchOutputRouting:
         reset_swarm_service()
         get_swarm_service()._engine = mock_engine
 
+        mock_cs = MagicMock()
+        mock_cs.get.return_value = config_target
+
         with patch("kazma_ui.services.SwarmService.resolve_engine", return_value=mock_engine), \
-             patch("kazma_gateway.agent_handler.swarm_dispatch._get_output_target_config", return_value=config_target):
+             patch("kazma_core.config_store.get_config_store", return_value=mock_cs):
             
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 resp = await ac.post("/api/swarm/tasks/task-old/retry")

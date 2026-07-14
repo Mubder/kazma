@@ -361,15 +361,25 @@ class TestRealtimeEndpoints:
         assert "text/event-stream" in content
 
     def test_websocket_chat_endpoint(self):
-        """WebSocket /ws/chat is wired in app.py."""
+        """WebSocket /ws/chat is wired in app.py or routes_direct.py."""
         app_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "app.py"
-        content = app_path.read_text(encoding="utf-8")
+        routes_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "routes_direct.py"
+        content = ""
+        if app_path.exists():
+            content += app_path.read_text(encoding="utf-8")
+        if routes_path.exists():
+            content += routes_path.read_text(encoding="utf-8")
         assert "/ws/chat" in content
 
     def test_websocket_dashboard_endpoint(self):
-        """WebSocket /ws/dashboard is wired in app.py."""
+        """WebSocket /ws/dashboard is wired in app.py or routes_direct.py."""
         app_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "app.py"
-        content = app_path.read_text(encoding="utf-8")
+        routes_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "routes_direct.py"
+        content = ""
+        if app_path.exists():
+            content += app_path.read_text(encoding="utf-8")
+        if routes_path.exists():
+            content += routes_path.read_text(encoding="utf-8")
         assert "/ws/dashboard" in content
 
     def test_telemetry_sse_endpoint(self):

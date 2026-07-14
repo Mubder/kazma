@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kazma Dashboard — UX Mockup</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      /* Dark theme (current) */
+      --bg-primary: #0a0a0a;
+      --bg-secondary: #111113;
+      --bg-elevated: #1a1a1e;
+      --text-primary: #ffffff;
+      --text-secondary: #a0a0b0;
+      --text-tertiary: #707080;
+      --text-muted: #50505a;
+      --border: #2a2a32;
+      --border-subtle: #1f1f26;
+      --accent: #00c278;
+      --accent-hover: #00d68a;
+      --success: #00c278;
+      --warning: #ff9500;
+      --danger: #ff453a;
+    }
+
+    /* Light theme variant */
+    body.light {
+      --bg-primary: #ffffff;
+      --bg-secondary: #f5f5f7;
+      --bg-elevated: #ffffff;
+      --text-primary: #111111;
+      --text-secondary: #404050;
+      --text-tertiary: #606070;
+      --text-muted: #808090;
+      --border: #e0e0e8;
+      --border-subtle: #f0f0f8;
+    }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+
+    .dashboard-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+
+    .header h1 {
+      font-size: 1.5rem;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      margin: 0;
+    }
+
+    /* Controls */
+    .controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .range-selector {
+      display: flex;
+      gap: 4px;
+      background: var(--bg-secondary);
+      padding: 4px;
+      border-radius: 8px;
+    }
+
+    .range-btn {
+      padding: 6px 12px;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .range-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .btn {
+      padding: 6px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-secondary {
+      background: var(--bg-secondary);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover { background: var(--border); }
+
+    /* HITL Panel */
+    .hitl-panel {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+
+    .hitl-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .hitl-header h2 {
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-tertiary);
+      margin: 0;
+      font-weight: 500;
+    }
+
+    .hitl-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 20px;
+      color: var(--text-muted);
+    }
+
+    .hitl-empty .emoji { font-size: 3rem; margin-bottom: 8px; }
+
+    /* Metrics Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .metric-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .metric-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+    }
+
+    .metric-icon { font-size: 1.5rem; margin-bottom: 12px; }
+    .metric-label { font-size: 0.75rem; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; }
+    .metric-value { font-size: 1.75rem; font-weight: 600; margin: 8px 0; color: var(--text-primary); }
+    .metric-sub { font-size: 0.75rem; color: var(--text-muted); }
+
+    /* Charts Row */
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .chart-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .chart-title {
+      font-size: 0.875rem;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 0 0 16px 0;
+      font-weight: 500;
+    }
+
+    /* Resource Bars */
+    .resource-item {
+      margin-bottom: 16px;
+    }
+
+    .resource-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 0.85rem;
+    }
+
+    .progress-bar {
+      height: 8px;
+      background: var(--bg-secondary);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    /* Memory Governance */
+    .memory-section {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 24px;
+    }
+
+    .memory-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .memory-header h3 {
+      margin: 0;
+      font-size: 1rem;
+      color: var(--text-primary);
+    }
+
+    .memory-badge {
+      font-size: 0.75rem;
+      padding: 4px 10px;
+      background: var(--success);
+      color: #fff;
+      border-radius: 12px;
+      font-weight: 600;
+    }
+
+    .memory-body {
+      padding: 16px 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .memory-metric {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 16px;
+    }
+
+    .memory-metric h4 {
+      font-size: 0.75rem;
+      color: var(--text-tertiary);
+      margin: 0 0 8px 0;
+      text-transform: uppercase;
+    }
+
+    .memory-metric .value {
+      font-size: 1.5rem;
+      font-weight: 600;
+      font-family: 'SFMono-Regular', monospace;
+    }
+
+    /* Actions Grid */
+    .actions-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+
+    .action-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .action-card .icon {
+      font-size: 2rem;
+      margin-bottom: 12px;
+    }
+
+    .action-card .title {
+      font-weight: 500;
+      margin-bottom: 8px;
+    }
+
+    .action-card .desc {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+    }
+
+    /* Tables */
+    .card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 24px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .card-header h2 {
+      font-size: 0.875rem;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 0;
+      font-weight: 500;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.85rem;
+    }
+
+    th {
+      padding: 12px 16px;
+      text-align: left;
+      font-weight: 500;
+      color: var(--text-tertiary);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    /* Theme Toggle */
+    .theme-toggle {
+      position: fixed;
+      top: 24px;
+      right: 24px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 100;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .charts-row { grid-template-columns: 1fr; }
+      .memory-body { grid-template-columns: 1fr; }
+      .dashboard-container { padding: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="theme-toggle" onclick="toggleTheme()">🌙</div>
+
+  <div class="dashboard-container">
+    <!-- Header -->
+    <div class="header">
+      <h1>📊 Observability Dashboard</h1>
+      <div class="controls">
+        <div class="range-selector">
+          <button class="range-btn active">Hour</button>
+          <button class="range-btn">Day</button>
+          <button class="range-btn">Week</button>
+        </div>
+        <button class="btn btn-secondary">↻ Refresh</button>
+        <span style="font-size:0.8rem;color:var(--text-muted);">● Connected</span>
+      </div>
+    </div>
+
+    <!-- HITL Panel -->
+    <div class="hitl-panel">
+      <div class="hitl-header">
+        <h2>⏳ Pending Approvals</h2>
+        <span class="metric-sub">Approve dangerous tool calls before execution</span>
+      </div>
+      <div class="hitl-empty">
+        <div class="emoji">✅</div>
+        <p style="margin:0;">No pending approvals</p>
+        <p style="font-size:0.8rem;color:var(--text-tertiary);">Danger tool calls will appear here for approval</p>
+      </div>
+    </div>
+
+    <!-- Metrics Grid -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-icon">💰</div>
+        <div class="metric-label">Total Cost</div>
+        <div class="metric-value">$0.4231</div>
+        <div class="metric-sub">$0.0769 headroom remaining</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon">🔢</div>
+        <div class="metric-label">Tokens</div>
+        <div class="metric-value">24,587</div>
+        <div class="metric-sub">142 LLM calls</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon">🔧</div>
+        <div class="metric-label">Tool Calls</div>
+        <div class="metric-value">32</div>
+        <div class="metric-sub">8 traces</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-icon">🔌</div>
+        <div class="metric-label">Circuit Breaker</div>
+        <div class="metric-value" style="color:var(--success);">Closed</div>
+        <div class="metric-sub">Console backend</div>
+      </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <h3 class="chart-title">📈 Tokens Over Time</h3>
+        <canvas id="tokenChart" height="150"></canvas>
+      </div>
+      <div class="chart-card">
+        <h3 class="chart-title">💸 Cost Over Time</h3>
+        <canvas id="costChart" height="150"></canvas>
+      </div>
+    </div>
+
+    <!-- System Resources -->
+    <div class="card">
+      <div class="card-header">
+        <h2">💻 System Resources</h2>
+      </div>
+      <div style="padding:20px;">
+        <div class="resource-item">
+          <div class="resource-header">
+            <span>CPU Usage</span>
+            <span id="cpu-value">12%</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="cpu-bar" style="width:12%"></div>
+          </div>
+        </div>
+        <div class="resource-item">
+          <div class="resource-header">
+            <span>Memory Usage</span>
+            <span id="memory-value">256 MB / 8 GB</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="memory-bar" style="width:3%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Memory & Governance -->
+    <div class="memory-section">
+      <div class="memory-header">
+        <h3 style="display:flex;align-items:center;gap:8px;">
+          <span>🧠 Memory Governance</span>
+          <span class="memory-badge">Active</span>
+        </h3>
+      </div>
+      <div class="memory-body">
+        <div class="memory-metric">
+          <h4>FTS5 Database</h4>
+          <div class="value">1.2 MB</div>
+          <span style="font-size:0.75rem;color:var(--text-muted);">247 records</span>
+        </div>
+        <div class="memory-metric">
+          <h4>Vector Store</h4>
+          <div class="value">45 MB</div>
+          <span style="font-size:0.75rem;color:var(--text-muted);">1,832 vectors</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="actions-grid">
+      <div class="action-card">
+        <div class="icon">💾</div>
+        <div class="title">Create Backup</div>
+        <div class="desc">Snapshot memory and configs</div>
+      </div>
+      <div class="action-card">
+        <div class="icon">⚡</div>
+        <div class="title">Optimize DB</div>
+        <div class="desc">Run SQLite vacuum + analyze</div>
+      </div>
+      <div class="action-card">
+        <div class="icon">📤</div>
+        <div class="title">Export Sessions</div>
+        <div class="desc">Download as JSON/MD/TXT</div>
+      </div>
+      <div class="action-card">
+        <div class="icon">🔁</div>
+        <div class="title">System Check</div>
+        <div class="desc">Validate all connections</div>
+      </div>
+    </div>
+
+    <!-- Sessions Table -->
+    <div class="card">
+      <div class="card-header">
+        <h2>💬 Active Sessions</h2>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Thread ID</th>
+            <th>Platform</th>
+            <th>User</th>
+            <th style="text-align:right;">Messages</th>
+            <th style="text-align:right;">Tokens</th>
+            <th style="text-align:left;">Created</th>
+            <th style="text-align:center;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="font-family:monospace;font-size:0.75rem;color:var(--text-muted);">telegram-12345…</td>
+            <td><span style="background:rgba(0,194,120,0.2);padding:2px 8px;border-radius:4px;font-size:0.75rem;color:var(--success);">telegram</span></td>
+            <td>@muhammed</td>
+            <td style="text-align:right;font-family:monospace;">12</td>
+            <td style="text-align:right;font-family:monospace;">1,247</td>
+            <td style="font-size:0.8rem;color:var(--text-muted);">2 min ago</td>
+            <td style="text-align:center;">
+              <button style="background:transparent;border:none;color:var(--danger);cursor:pointer;">🗑</button>
+            </td>
+          </tr>
+          <tr>
+            <td style="font-family:monospace;font-size:0.75rem;color:var(--text-muted);">web-abc123…</td>
+            <td><span style="background:rgba(0,120,255,0.2);padding:2px 8px;border-radius:4px;font-size:0.75rem;color:#0078ff;">web</span></td>
+            <td>Chrome</td>
+            <td style="text-align:right;font-family:monospace;">5</td>
+            <td style="text-align:right;font-family:monospace;">892</td>
+            <td style="font-size:0.8rem;color:var(--text-muted);">15 min ago</td>
+            <td style="text-align:center;">
+              <button style="background:transparent;border:none;color:var(--danger);cursor:pointer;">🗑</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // Theme toggle
+    function toggleTheme() {
+      document.body.classList.toggle('light');
+      document.querySelector('.theme-toggle').textContent = document.body.classList.contains('light') ? '☀️' : '🌙';
+    }
+
+    // Sample charts
+    const tokenCtx = document.getElementById('tokenChart');
+    const costCtx = document.getElementById('costChart');
+    
+    if (tokenCtx) {
+      new Chart(tokenCtx, {
+        type: 'line',
+        data: {
+          labels: ['00:00', '01:00', '02:00', '03:00', '04:00', '05:00', '06:00'],
+          datasets: [{
+            label: 'Tokens',
+            data: [120, 340, 560, 280, 190, 420, 567],
+            borderColor: '#00c278',
+            backgroundColor: 'rgba(0,194,120,0.1)',
+            tension: 0.4,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } }
+        }
+      });
+    }
+
+    if (costCtx) {
+      new Chart(costCtx, {
+        type: 'line',
+        data: {
+          labels: ['00:00', '01:00', '02:00', '03:00', '04:00', '05:00', '06:00'],
+          datasets: [{
+            label: 'Cost',
+            data: [0.01, 0.02, 0.03, 0.02, 0.015, 0.025, 0.02],
+            borderColor: '#ff9500',
+            backgroundColor: 'rgba(255,149,0,0.1)',
+            tension: 0.4,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: { y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.05)' } }, x: { grid: { display: false } } }
+        }
+      });
+    }
+  </script>
+</body>
+</html>

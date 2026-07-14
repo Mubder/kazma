@@ -47,12 +47,47 @@ class ProviderSettingsService:
         if not provider:
             return {"success": False, "error": f"Provider '{name}' not found"}
 
+        import httpx
+
+        if name.lower() == "google":
+            # Test Google Provider (either AI Studio or Vertex AI)
+            try:
+                client = self._registry.get_client_by_provider(name)
+                if not client:
+                    return {"success": False, "error": "Failed to construct Google Gemini provider client"}
+                
+                # Retrieve the authenticated HTTP client (resolves ADC or API Key)
+                http_client = await client._get_client()
+                
+                # Perform a lightweight ping to the base URL
+                start = time.monotonic()
+                if getattr(client, "_use_ai_studio", False):
+                    resp = await http_client.get("/models")
+                    latency = int((time.monotonic() - start) * 1000)
+                    if resp.status_code == 200:
+                        self._update_provider_health(name, "healthy")
+                        return {"success": True, "latency_ms": latency, "status_code": resp.status_code}
+                    else:
+                        self._update_provider_health(name, "degraded")
+                        return {"success": False, "error": f"AI Studio returned HTTP {resp.status_code}", "latency_ms": latency}
+                else:
+                    # Vertex AI: just check if get_client succeeded and do a lightweight head/get to base_url to check network.
+                    try:
+                        resp = await http_client.get("")
+                        latency = int((time.monotonic() - start) * 1000)
+                        self._update_provider_health(name, "healthy")
+                        return {"success": True, "latency_ms": latency, "status_code": resp.status_code}
+                    except httpx.ConnectError:
+                        self._update_provider_health(name, "down")
+                        return {"success": False, "error": f"Cannot connect to Vertex AI at {client.config.base_url}"}
+            except Exception as e:
+                self._update_provider_health(name, "down")
+                return {"success": False, "error": f"Google Provider test failed: {e}"}
+
         base_url = provider.get("base_url", "")
         api_key = provider.get("api_key", "")
         if not base_url:
             return {"success": False, "error": "No base URL configured"}
-
-        import httpx
 
         start = time.monotonic()
         try:

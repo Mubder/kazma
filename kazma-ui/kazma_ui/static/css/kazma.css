@@ -39,6 +39,7 @@
   --accent-light: #67e8f9;
   --accent-subtle: rgba(34, 211, 238, 0.12);
   --accent-glow: rgba(34, 211, 238, 0.25);
+  --gradient-accent: linear-gradient(135deg, #22d3ee 0%, #0891b2 100%);
 
   /* Secondary — blue (kazma.ai secondary) */
   --secondary: #3b82f6;
@@ -1264,13 +1265,16 @@ tbody tr:last-child td {
   flex: 1;
   background: none;
   border: none;
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  font-size: 0.95rem;
+  color: #e6edf3;
+  font-size: 15px;
+  line-height: 1.5;
   resize: none;
   outline: none;
-  max-height: 150px;
-  line-height: 1.5;
+  max-height: 140px;
+  font-family: inherit;
+}
+[data-theme="light"] .chat-input {
+  color: #0f1c2e;
 }
 /* Focus is signalled by the parent .input-wrapper ring — suppress the
    textarea's own outline so it doesn't look like two nested fields. */
@@ -1717,6 +1721,7 @@ tbody tr:last-child td {
   --accent-light: #0891b2;
   --accent-subtle: rgba(8, 145, 178, 0.10);
   --accent-glow: rgba(8, 145, 178, 0.22);
+  --gradient-accent: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
 
   --secondary: #2563eb;
   --secondary-hover: #1d4ed8;

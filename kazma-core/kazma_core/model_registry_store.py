@@ -131,8 +131,11 @@ def default_provider_entries() -> list[dict[str, Any]]:
             project_id = detect_gcp_project_id()
         # Auto-enable a provider if its API key is in the environment.
         env_key = f"{key.upper()}_API_KEY"
-        has_key = bool(os.environ.get(env_key, "").strip())
-        # Google uses ADC, not an env key — enable if project_id detected.
+        api_key_val = os.environ.get(env_key, "")
+        if key == "google" and not api_key_val:
+            api_key_val = os.environ.get("GEMINI_API_KEY", "")
+        has_key = bool(api_key_val.strip())
+        # Google uses ADC or API key — enable if project_id or API key detected.
         has_adc = key == "google" and bool(project_id)
         enabled = has_key or has_adc
         providers.append(
@@ -140,7 +143,7 @@ def default_provider_entries() -> list[dict[str, Any]]:
                 "name": key,
                 "display_name": preset.get("name", key),
                 "base_url": preset.get("base_url", ""),
-                "api_key": os.environ.get(env_key, "") if has_key else "",
+                "api_key": api_key_val if has_key else "",
                 "models": models,
                 "enabled": enabled,
                 "health": "unknown",

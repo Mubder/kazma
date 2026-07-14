@@ -23,7 +23,24 @@
   var selectedModel = '';
   var MODEL_LS_KEY = 'kazma.selectedModel';
 
+  // Active chat session (persisted so a page refresh resumes the same session)
+  var SESSION_LS_KEY = 'kazma.chatSessionId';
+
   function $(id) { return document.getElementById(id); }
+
+  function generateSessionId() {
+    try {
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    } catch (e) {}
+    return 's-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  }
+
+  function persistSessionId() {
+    try {
+      if (chatSessionId) localStorage.setItem(SESSION_LS_KEY, chatSessionId);
+      else localStorage.removeItem(SESSION_LS_KEY);
+    } catch (e) {}
+  }
 
   // ── Initialize ────────────────────────────────────────
   function init() {
@@ -248,6 +265,21 @@
         }
         populateModelSelector(fallback, savedModels);
       });
+
+    // Resume the last active session across page refreshes (issue: refresh
+    // used to start a brand-new empty session every time). Falls back to a
+    // fresh session only when no prior session id is persisted.
+    try {
+      var savedSid = localStorage.getItem(SESSION_LS_KEY);
+      if (savedSid) {
+        loadSession(savedSid);
+      } else {
+        newSession();
+      }
+    } catch (e) {
+      newSession();
+    }
+    loadSessions();
   }
 
   function populateModelSelector(providerGroups, savedProfiles) {
@@ -337,6 +369,13 @@
     currentMsgEl = null;
     tokenAccum = '';
     if (activeStream) activeStream.abort();
+
+    // Ensure we have a stable session id (generated client-side so it
+    // survives page refreshes and is reused for the same conversation).
+    if (!chatSessionId) {
+      chatSessionId = generateSessionId();
+      persistSessionId();
+    }
 
     activeStream = KS.sse('/api/chat/stream', {
       message: content,
@@ -632,6 +671,7 @@
 
   function loadSession(sessionId) {
     chatSessionId = sessionId;
+    persistSessionId();
     // Clear messages and show loading state
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
@@ -681,7 +721,8 @@
   }
 
   function newSession() {
-    chatSessionId = null;
+    chatSessionId = generateSessionId();
+    persistSessionId();
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
         '<div class="welcome-icon">\u{1F30A}</div>' +

@@ -52,7 +52,7 @@ async def stream_chat(
     the generator. Prefer the shared *client* when reusing connections.
     """
     payload: dict[str, Any] = {
-        "model": model,
+        "model": LLMProvider._strip_routing_prefix(model),
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
@@ -69,7 +69,15 @@ async def stream_chat(
     if base_url is not None:
         headers = {"Content-Type": "application/json"}
         if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+            from kazma_core.llm_provider import LLMProvider
+
+            safe_key = LLMProvider._strip_non_ascii(api_key)
+            if safe_key != api_key:
+                logger.warning(
+                    "stream_chat: API key contained non-ASCII characters; these "
+                    "were stripped before sending the request."
+                )
+            headers["Authorization"] = f"Bearer {safe_key}"
         stream_client = httpx.AsyncClient(
             base_url=base_url,
             headers=headers,

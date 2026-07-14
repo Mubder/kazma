@@ -361,8 +361,12 @@ class TestChatBehavioral:
         panel = ChatPanel()
         mock_output = MagicMock()
         mock_output.clear = MagicMock()
-        with patch.object(panel, "query_one", return_value=mock_output):
+        mock_app = MagicMock()
+        mock_app.action_clear_chat = MagicMock(side_effect=lambda: mock_output.clear())
+        with patch.object(panel, "query_one", return_value=mock_output), \
+             patch.object(type(panel), "app", new_callable=lambda: property(lambda self: mock_app)):
             panel._handle_command("/clear")
+            mock_app.action_clear_chat.assert_called_once()
             mock_output.clear.assert_called_once()
 
     def test_chat_quit_calls_app_exit(self) -> None:
