@@ -961,6 +961,13 @@ tbody tr:last-child td {
   overflow-y: auto;
   flex: 1;
 }
+.confirm-message {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  font-size: 0.95rem;
+  white-space: pre-wrap;
+}
 .modal-footer {
   display: flex;
   align-items: center;
@@ -1264,6 +1271,19 @@ tbody tr:last-child td {
   outline: none;
   max-height: 150px;
   line-height: 1.5;
+}
+/* Focus is signalled by the parent .input-wrapper ring — suppress the
+   textarea's own outline so it doesn't look like two nested fields. */
+.chat-input:focus,
+.chat-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+/* Fill the wrapper height so there's no dead strip above the field
+   (the box only looks "bigger" than the active area because of this gap). */
+.chat-input {
+  align-self: stretch;
+  min-height: 42px;
 }
 .send-btn {
   width: 36px;
@@ -2898,4 +2918,141 @@ textarea:focus-visible,
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   AURORA v5 VISUAL SKIN
+   Additive layer that ports the high-end mockup aesthetic into the real
+   components. Colors/backgrounds/shadows only — no layout/padding changes,
+   so the responsive tiers above remain authoritative.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* Ambient aurora — soft blue/cyan glow behind everything */
+body {
+  background:
+    radial-gradient(1100px 620px at 82% -12%, rgba(59,130,246,0.10), transparent 60%),
+    radial-gradient(900px 520px at 0% 0%, rgba(34,211,238,0.07), transparent 55%),
+    var(--bg);
+  background-attachment: fixed;
+}
+
+/* Gradient headings — the signature Aurora look */
+.header-title,
+.section-head h1,
+.page-header .header-title {
+  background: var(--gradient-header);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  letter-spacing: -0.02em;
+}
+
+/* Glassy, elevated cards with hover lift + accent glow */
+.card {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, #ffffff 3%), var(--bg-panel));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+}
+.card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+
+/* Metric cards — glowing icon chip + hover halo */
+.metric-card {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, #ffffff 3%), var(--bg-panel));
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+  position: relative;
+  overflow: hidden;
+}
+.metric-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+  box-shadow: var(--shadow-glow);
+  transform: translateY(-2px);
+}
+.metric-icon {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  box-shadow: 0 0 18px var(--accent-glow);
+}
+.metric-value { font-size: var(--fs-fluid-2xl); }
+
+/* Primary buttons get a soft glow */
+.btn-primary {
+  box-shadow: var(--shadow-glow);
+}
+.btn-primary:hover:not(:disabled) {
+  box-shadow: 0 0 28px var(--accent-glow);
+  transform: translateY(-1px);
+}
+
+/* ── Chat: glassy model bar + input area ── */
+.chat-model-bar {
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.chat-input-area {
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.input-wrapper {
+  background: color-mix(in srgb, var(--bg-surface) 70%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-2) var(--sp-3);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.input-wrapper:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.send-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius);
+  background: var(--gradient-accent);
+  color: #001016;
+  box-shadow: var(--shadow-glow);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
+}
+.send-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 0 22px var(--accent-glow);
+  transform: translateY(-1px);
+}
+
+/* ── Chat bubbles: glassy assistant, glowing user ── */
+.message-text {
+  border-radius: var(--radius-lg);
+  line-height: 1.7;
+  box-shadow: var(--shadow-sm);
+}
+.message-assistant .message-text {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 92%, #ffffff 3%), var(--bg-panel));
+  border: 1px solid var(--border-subtle);
+}
+.message-user .message-text {
+  background: var(--gradient-accent);
+  color: #001016;
+  border: none;
+  font-weight: 600;
+  box-shadow: 0 6px 22px var(--accent-glow);
+}
+.message-avatar {
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-sm);
+}
+.message-avatar.a { background: var(--accent-subtle); color: var(--accent); }
+.message-avatar.u { background: var(--gradient-accent); color: #001016; }
 

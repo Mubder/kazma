@@ -1095,8 +1095,13 @@
       .catch(function(err) { showError(err.message); });
   }
 
-  function removeWorker(name) {
-    if (!confirm(t('swarm.remove_worker_confirm', {name: name}))) return;
+  async function removeWorker(name) {
+    if (!(await window.kazmaConfirm({
+      title: 'Remove worker',
+      message: t('swarm.remove_worker_confirm', {name: name}),
+      confirmText: 'Remove',
+      danger: true,
+    }))) return;
     fetch('/api/swarm/workers/' + encodeURIComponent(name), { method: 'DELETE' })
       .then(function(r) {
         if (!r.ok) return r.json().then(function(d) { throw new Error(d.message || t('common.error')); });

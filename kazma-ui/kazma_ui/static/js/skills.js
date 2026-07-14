@@ -22,7 +22,12 @@ function skillsApp() {
         },
 
         async uninstallSkill(skillId) {
-            if (!confirm('Uninstall this skill?')) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Uninstall skill',
+                message: 'Uninstall this skill? This cannot be undone.',
+                confirmText: 'Uninstall',
+                danger: true,
+            }))) return;
             try {
                 await fetch('/api/skills/uninstall', {
                     method: 'POST',

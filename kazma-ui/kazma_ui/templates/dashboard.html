@@ -396,19 +396,29 @@
   }
 
   window._deleteSession = async function(threadId) {
-    if (!confirm(I18N.confirmDelete + threadId + '?')) return;
+    if (!(await window.kazmaConfirm({
+      title: 'Delete session',
+      message: I18N.confirmDelete + threadId + '?',
+      confirmText: 'Delete',
+      danger: true,
+    }))) return;
     try {
       await fetch('/api/sessions/' + threadId, { method: 'DELETE' });
       _loadSessions();
-    } catch(e) { alert(I18N.errorDeleting); }
+    } catch(e) { window.kazmaAlert({ title: 'Error', message: I18N.errorDeleting, variant: 'btn-danger' }); }
   };
 
   window._clearAllSessions = async function() {
-    if (!confirm(I18N.confirmClearAll)) return;
+    if (!(await window.kazmaConfirm({
+      title: 'Clear all sessions',
+      message: I18N.confirmClearAll,
+      confirmText: 'Clear all',
+      danger: true,
+    }))) return;
     try {
       await fetch('/api/sessions/clear-all', { method: 'POST' });
       _loadSessions();
-    } catch(e) { alert(I18N.errorClearing); }
+    } catch(e) { window.kazmaAlert({ title: 'Error', message: I18N.errorClearing, variant: 'btn-danger' }); }
   };
 
   document.getElementById('clear-all-btn').addEventListener('click', window._clearAllSessions);
@@ -493,7 +503,7 @@
           body: JSON.stringify({ package_name: 'sentence-transformers' })
         });
       } catch (e) {
-        alert(I18N.installFailed);
+        window.kazmaAlert({ title: 'Install failed', message: I18N.installFailed, variant: 'btn-danger' });
         installBtn.disabled = false;
         installBtn.textContent = I18N.installMl;
       }
@@ -570,7 +580,7 @@
       document.querySelectorAll('.restore-btn').forEach(btn => {
         btn.addEventListener('click', async function() {
           const name = this.getAttribute('data-name');
-          if (confirm(I18N.confirmRestore + ` "${name}"? ` + I18N.restoreWarning)) {
+          if (await window.kazmaConfirm({ title: 'Restore backup', message: I18N.confirmRestore + ` "${name}"? ` + I18N.restoreWarning, confirmText: 'Restore', danger: true })) {
             this.disabled = true;
             this.textContent = I18N.restoring;
             try {
@@ -581,14 +591,14 @@
               });
               const res = await r.json();
               if (res.status === 'success') {
-                alert(I18N.restoreSuccess);
+                window.kazmaAlert({ title: 'Restore complete', message: I18N.restoreSuccess });
                 pollMemoryStatus();
                 loadBackups();
               } else {
-                alert('Restoration error: ' + (res.detail || 'unknown error'));
+                window.kazmaAlert({ title: 'Error', message: 'Restoration error: ' + (res.detail || 'unknown error'), variant: 'btn-danger' });
               }
             } catch (e) {
-              alert('Restoration failed: ' + e);
+              window.kazmaAlert({ title: 'Error', message: 'Restoration failed: ' + e, variant: 'btn-danger' });
             } finally {
               this.disabled = false;
               this.textContent = I18N.restore;
@@ -624,14 +634,14 @@
       const resp = await fetch('/api/system/memory/backup', { method: 'POST' });
       const res = await resp.json();
       if (res.status === 'success') {
-        alert(I18N.backupSuccess + `: ${res.manifest.name}`);
+        window.kazmaAlert({ title: 'Backup complete', message: I18N.backupSuccess + `: ${res.manifest.name}` });
         loadBackups();
         pollMemoryStatus();
       } else {
-        alert(I18N.backupFailed + ': ' + (res.detail || 'unknown error'));
+        window.kazmaAlert({ title: 'Error', message: I18N.backupFailed + ': ' + (res.detail || 'unknown error'), variant: 'btn-danger' });
       }
     } catch (e) {
-      alert(I18N.backupFailed + ': ' + e);
+      window.kazmaAlert({ title: 'Error', message: I18N.backupFailed + ': ' + e, variant: 'btn-danger' });
     } finally {
       backupBtn.disabled = false;
       backupSpinner.style.display = 'none';
@@ -655,13 +665,13 @@
         if (res.details.vector) {
           msg += `• Vector index optimized.\n  Reclaimed space: ${formatBytes(res.details.vector.reclaimed_bytes)}\n`;
         }
-        alert(msg);
+        window.kazmaAlert({ title: 'Optimization complete', message: msg });
         pollMemoryStatus();
       } else {
-        alert(I18N.optimizeFailed + ': ' + (res.detail || 'unknown error'));
+        window.kazmaAlert({ title: 'Error', message: I18N.optimizeFailed + ': ' + (res.detail || 'unknown error'), variant: 'btn-danger' });
       }
     } catch (e) {
-      alert(I18N.optimizeFailed + ': ' + e);
+      window.kazmaAlert({ title: 'Error', message: I18N.optimizeFailed + ': ' + e, variant: 'btn-danger' });
     } finally {
       optimizeBtn.disabled = false;
       optimizeSpinner.style.display = 'none';

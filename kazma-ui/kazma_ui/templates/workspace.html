@@ -981,7 +981,12 @@ function workspaceApp() {
     },
 
     async disconnectGitHub() {
-      if (!confirm(t('workspace.disconnect_confirm'))) return;
+      if (!(await window.kazmaConfirm({
+        title: 'Disconnect GitHub',
+        message: t('workspace.disconnect_confirm'),
+        confirmText: 'Disconnect',
+        danger: true,
+      }))) return;
       try {
         const resp = await fetch('/api/github/oauth/revoke', { method: 'POST' });
         if (resp.ok) {
@@ -1197,8 +1202,13 @@ function workspaceApp() {
       this.termOutput.push('Build command dispatched.');
     },
 
-    deploy() {
-      if (!confirm(t('workspace.deploy_confirm'))) return;
+    async deploy() {
+      if (!(await window.kazmaConfirm({
+        title: 'Deploy',
+        message: t('workspace.deploy_confirm'),
+        confirmText: 'Deploy',
+        danger: true,
+      }))) return;
       KazmaStream.toast(t('workspace.toast_deploy_initiated'), 'info', 3000);
       this.termOutput.push('$ make deploy');
       this.termOutput.push('Deploy command dispatched.');

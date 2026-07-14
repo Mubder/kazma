@@ -47,18 +47,26 @@ export function registerStores() {
 
             /**
              * Open a modal.
-             * @param {Object} opts - { title, body, size, actions }
+             * @param {Object} opts - { title, body, size, actions, onClose }
+             *   onClose is invoked when the modal is dismissed via overlay
+             *   click or Escape (i.e. without an explicit action button).
              */
             show(opts = {}) {
                 this.title = opts.title || '';
                 this.body = opts.body || '';
                 this.size = opts.size || 'md';
                 this.actions = opts.actions || [];
+                this._onClose = opts.onClose || null;
                 this.open = true;
             },
 
             close() {
                 this.open = false;
+                if (this._onClose) {
+                    const cb = this._onClose;
+                    this._onClose = null;
+                    cb();
+                }
                 // Reset after transition
                 setTimeout(() => {
                     this.title = '';
@@ -68,7 +76,7 @@ export function registerStores() {
             },
 
             /**
-             * Quick confirm dialog.
+             * Quick confirm dialog (callback style).
              * @param {string} title
              * @param {string} message
              * @param {Function} onConfirm
@@ -87,7 +95,86 @@ export function registerStores() {
                     ],
                 });
             },
+
+            /**
+             * Promise-based confirm dialog — replaces native window.confirm.
+             * Resolves true on Confirm, false on Cancel / overlay / Escape.
+             * @param {Object} opts - { title, message, confirmText, cancelText, danger }
+             * @returns {Promise<boolean>}
+             */
+            confirmAsync(opts = {}) {
+                const title = opts.title || 'Confirm';
+                const message = opts.message || '';
+                const confirmText = opts.confirmText || 'Confirm';
+                const cancelText = opts.cancelText || 'Cancel';
+                const danger = opts.danger !== false;
+                const entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+                const escapedMsg = String(message).replace(/[&<>"']/g, function (c) { return entityMap[c]; });
+                const self = this;
+                return new Promise(function (resolve) {
+                    let settled = false;
+                    const settle = function (val) {
+                        if (settled) return;
+                        settled = true;
+                        resolve(val);
+                    };
+                    self.show({
+                        title: title,
+                        body: `<p class="confirm-message">${escapedMsg}</p>`,
+                        size: 'sm',
+                        onClose: function () { settle(false); },
+                        actions: [
+                            { label: cancelText, variant: 'btn-secondary', close: true, handler: function () { settle(false); } },
+                            { label: confirmText, variant: danger ? 'btn-danger' : 'btn-primary', close: true, handler: function () { settle(true); } },
+                        ],
+                    });
+                });
+            },
         });
+
+        // Global promise-based confirm — drop-in replacement for window.confirm().
+        // Usage: if (!(await window.kazmaConfirm({ message: 'Delete?', danger: true }))) return;
+        window.kazmaConfirm = function (opts) {
+            // Allow a plain string message for ergonomics.
+            if (typeof opts === 'string') opts = { message: opts };
+            if (window.Alpine && Alpine.store('modal')) {
+                return Alpine.store('modal').confirmAsync(opts || {});
+            }
+            // Fallback if Alpine hasn't booted yet (shouldn't happen on user action).
+            return Promise.resolve(window.confirm(opts && opts.message ? opts.message : ''));
+        };
+
+        // Global promise-based alert — drop-in replacement for window.alert().
+        // Resolves when the user dismisses the styled modal (OK / overlay / Escape).
+        // Usage: await window.kazmaAlert({ title: 'Error', message: errMsg, variant: 'btn-danger' });
+        window.kazmaAlert = function (opts) {
+            if (typeof opts === 'string') opts = { message: opts };
+            opts = opts || {};
+            const entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+            const escapedMsg = String(opts.message || '').replace(/[&<>"']/g, function (c) { return entityMap[c]; });
+            if (window.Alpine && Alpine.store('modal')) {
+                const self = Alpine.store('modal');
+                return new Promise(function (resolve) {
+                    let settled = false;
+                    const settle = function () {
+                        if (settled) return;
+                        settled = true;
+                        resolve();
+                    };
+                    self.show({
+                        title: opts.title || 'Notice',
+                        body: `<p class="confirm-message">${escapedMsg}</p>`,
+                        size: opts.size || 'sm',
+                        onClose: settle,
+                        actions: [
+                            { label: opts.okText || 'OK', variant: opts.variant || 'btn-primary', close: true, handler: settle },
+                        ],
+                    });
+                });
+            }
+            // Fallback if Alpine hasn't booted yet.
+            return Promise.resolve(window.alert(opts.message || ''));
+        };
 
         // ── 3. Search Store ────────────────────────────────────────────
         Alpine.store('search', {

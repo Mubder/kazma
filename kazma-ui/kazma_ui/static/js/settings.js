@@ -224,7 +224,12 @@ function settingsApp() {
         },
 
         async deleteProvider(name) {
-            if (!confirm(`Delete provider "${name}"?`)) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Delete provider',
+                message: `Delete provider "${name}"? This cannot be undone.`,
+                confirmText: 'Delete',
+                danger: true,
+            }))) return;
             await ProvidersManager.remove(name);
             await this.loadProviders();
             showToast('Provider removed', 'success');
@@ -373,7 +378,12 @@ function settingsApp() {
         },
 
         async deleteModelProfile(name) {
-            if (!confirm(`Delete profile "${name}"?`)) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Delete profile',
+                message: `Delete profile "${name}"? This cannot be undone.`,
+                confirmText: 'Delete',
+                danger: true,
+            }))) return;
             try {
                 await fetch(`/api/models/saved/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadSavedModels();
@@ -657,7 +667,12 @@ function settingsApp() {
         },
 
         async deleteHubProvider(name) {
-            if (!confirm(`Delete provider "${name}"?`)) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Delete provider',
+                message: `Delete provider "${name}"? This cannot be undone.`,
+                confirmText: 'Delete',
+                danger: true,
+            }))) return;
             try {
                 await fetch(`/api/providers/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadHubProviders();
@@ -865,7 +880,12 @@ function settingsApp() {
         },
 
         async deleteHubConnector(name) {
-            if (!confirm(`Delete connector "${name}"?`)) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Delete connector',
+                message: `Delete connector "${name}"? This cannot be undone.`,
+                confirmText: 'Delete',
+                danger: true,
+            }))) return;
             try {
                 await fetch(`/api/connectors/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadHubConnectors();
@@ -993,7 +1013,12 @@ function settingsApp() {
         },
 
         async deleteHubProfile(name) {
-            if (!confirm(`Delete profile "${name}"?`)) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Delete profile',
+                message: `Delete profile "${name}"? This cannot be undone.`,
+                confirmText: 'Delete',
+                danger: true,
+            }))) return;
             try {
                 await fetch(`/api/models/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadHubProfiles();
@@ -1044,7 +1069,12 @@ function settingsApp() {
         },
 
         async deleteMcpServer(name) {
-            if (!confirm(`Remove MCP server "${name}"?`)) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Remove MCP server',
+                message: `Remove MCP server "${name}"? This cannot be undone.`,
+                confirmText: 'Remove',
+                danger: true,
+            }))) return;
             await fetch(`/api/settings/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
             await this.loadMcpServers();
             showToast('Server removed', 'success');
@@ -1094,7 +1124,12 @@ function settingsApp() {
         },
 
         async uninstallSkill(skillId) {
-            if (!confirm(`Uninstall skill "${skillId}"?`)) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Uninstall skill',
+                message: `Uninstall skill "${skillId}"? This cannot be undone.`,
+                confirmText: 'Uninstall',
+                danger: true,
+            }))) return;
             await fetch(`/api/settings/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
             await this.loadSkills();
             showToast('Skill uninstalled', 'success');
@@ -1222,7 +1257,12 @@ function settingsApp() {
         },
 
         async resetShortcuts() {
-            if (!confirm('Reset all shortcuts to defaults?')) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Reset shortcuts',
+                message: 'Reset all shortcuts to defaults?',
+                confirmText: 'Reset',
+                danger: false,
+            }))) return;
             await fetch('/api/settings/shortcuts/reset', { method: 'POST' });
             this.shortcuts = await this._fetch('/api/settings/shortcuts') || {};
             this.shortcutConflicts = [];
@@ -1300,7 +1340,12 @@ function settingsApp() {
         },
 
         async revokeToken(tokenId) {
-            if (!confirm('Revoke this token?')) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Revoke token',
+                message: 'Revoke this token? This cannot be undone.',
+                confirmText: 'Revoke',
+                danger: true,
+            }))) return;
             await fetch(`/api/settings/account/tokens/${tokenId}`, { method: 'DELETE' });
             await this.loadAccount();
             showToast('Token revoked', 'success');
@@ -1407,8 +1452,18 @@ function settingsApp() {
         },
 
         async systemReset() {
-            if (!confirm('⚠️ This will reset ALL settings to defaults. Are you sure?')) return;
-            if (!confirm('Final confirmation: Reset everything?')) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Reset all settings',
+                message: '⚠️ This will reset ALL settings to defaults. Are you sure?',
+                confirmText: 'Reset',
+                danger: true,
+            }))) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Final confirmation',
+                message: 'Reset everything? This cannot be undone.',
+                confirmText: 'Reset everything',
+                danger: true,
+            }))) return;
             try {
                 await fetch('/api/settings/reset', { method: 'POST' });
                 showToast('System reset complete. Reloading...', 'success');
@@ -1471,7 +1526,12 @@ function settingsApp() {
         },
 
         async resetToDefaults() {
-            if (!confirm('Reset ALL settings to defaults?')) return;
+            if (!(await window.kazmaConfirm({
+                title: 'Reset settings',
+                message: 'Reset ALL settings to defaults? This cannot be undone.',
+                confirmText: 'Reset',
+                danger: true,
+            }))) return;
             try {
                 await fetch('/api/settings/reset', { method: 'POST' });
                 showToast('Settings reset. Reloading...', 'success');

@@ -46,6 +46,15 @@
     }
     if (sendBtn) sendBtn.addEventListener('click', sendMessage);
 
+    // Make the entire input box focus the text field (no dead zones).
+    var inputWrapper = document.querySelector('.input-wrapper');
+    if (inputWrapper && inputEl) {
+      inputWrapper.addEventListener('click', function (e) {
+        if (e.target.closest('button')) return; // let buttons do their job
+        inputEl.focus();
+      });
+    }
+
     // Model selector
     if (modelSelectorEl) {
       modelSelectorEl.addEventListener('change', onModelChange);
@@ -687,8 +696,13 @@
     if (inputEl) { inputEl.focus(); }
   }
 
-  function deleteSession(sessionId) {
-    if (!confirm('Delete session ' + sessionId.slice(0, 8) + '?')) return;
+  async function deleteSession(sessionId) {
+    if (!(await window.kazmaConfirm({
+      title: 'Delete session',
+      message: 'Delete session ' + sessionId.slice(0, 8) + '? This cannot be undone.',
+      confirmText: 'Delete',
+      danger: true,
+    }))) return;
     fetch('/api/chat/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' })
       .then(function() {
         KS.toast('Session deleted', 'success', 2000);
