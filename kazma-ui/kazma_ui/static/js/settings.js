@@ -64,7 +64,7 @@ function settingsApp() {
         hubProviderModal: false,
         hubConnectorModal: false,
         hubProfileModal: false,
-        hubEditingProvider: { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, _existing: false },
+        hubEditingProvider: { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, google_mode: 'ai_studio', project_id: '', location: 'us-central1', _existing: false },
         hubEditingConnector: { name: '', token: '', enabled: true, extras: {} },
         hubEditingProfile: { name: '', provider: '', base_url: '', api_key: '', model: '', _existing: false },
         hubShowProviderKey: false,
@@ -612,12 +612,15 @@ function settingsApp() {
                         api_key: p.api_key || '',
                         models: Array.isArray(p.models) ? p.models.join(', ') : (p.models || ''),
                         enabled: p.enabled !== false,
+                        google_mode: p.google_mode || (p.project_id ? 'vertex_ai' : 'ai_studio'),
+                        project_id: p.project_id || '',
+                        location: p.location || 'us-central1',
                         _existing: true,
                     };
                     this.hubProviderTested = true; // editing an existing tested provider is acceptable
                 }
             } else {
-                this.hubEditingProvider = { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, _existing: false };
+                this.hubEditingProvider = { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, google_mode: 'ai_studio', project_id: '', location: 'us-central1', _existing: false };
             }
             this.hubProviderModal = true;
         },

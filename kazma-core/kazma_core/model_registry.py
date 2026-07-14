@@ -455,6 +455,25 @@ class ModelRegistry:
             # Google Vertex AI has no static /models endpoint — models are
             # hardcoded because the base URL is computed per project/location.
             if clean_name == "google":
+                if api_key:
+                    try:
+                        async with httpx.AsyncClient(timeout=10.0) as client:
+                            resp = await client.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}")
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                model_ids = []
+                                for m_entry in data.get("models", []):
+                                    full_name = m_entry.get("name", "")
+                                    if full_name.startswith("models/"):
+                                        model_ids.append(full_name[7:])
+                                    elif full_name:
+                                        model_ids.append(full_name)
+                                if model_ids:
+                                    self._discovered_models[clean_name] = sorted(model_ids)
+                                    return self._discovered_models[clean_name]
+                    except Exception as exc:
+                        logger.warning("discover_models: Google AI Studio dynamic discovery failed: %s", exc)
+
                 from kazma_core.providers import GEMINI_MODELS
                 self._discovered_models[clean_name] = list(GEMINI_MODELS)
                 return self._discovered_models[clean_name]
