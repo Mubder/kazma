@@ -208,6 +208,31 @@ def create_graph_handler(
             logger.info("[agent-handler] /reset for thread=%s", thread_id)
             return
 
+        # ── /undo: Remove last assistant response ──────────────────
+        if msg.text and msg.text.strip().lower() == "/undo":
+            undo_result = await _handle_undo(thread_id, config)
+            ctx = await _store.get(thread_id) or msg.context_metadata
+            undo_text, undo_ctx = _prepare_tg_outbound(msg, undo_result, ctx)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=undo_text,
+                context_metadata=undo_ctx,
+            ))
+            return
+
+        # ── /edit: Correct last assistant response ─────────────────
+        edit_match = _extract_edit_command(msg.text)
+        if edit_match:
+            corrected_text, edit_result = await _handle_edit(thread_id, config, edit_match)
+            ctx = await _store.get(thread_id) or msg.context_metadata
+            edit_text, edit_ctx = _prepare_tg_outbound(msg, edit_result, ctx)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=edit_text,
+                context_metadata=edit_ctx,
+            ))
+            return
+
         # ── Slash-command intercept (/model, /help, /reset, etc.) ──
         # Resolve common commands without an LLM call. This keeps
         # responses instant and saves tokens.
@@ -407,6 +432,77 @@ def create_graph_handler(
             await _store.evict_older_than(_session_ttl_seconds)
         except Exception:
             logger.debug("[agent-handler] TTL eviction skipped (store may not support it)", exc_info=True)
+
+    # ── /undo and /edit helpers ──────────────────────────────────
+
+    async def _handle_undo(thread_id: str, config: dict[str, Any]) -> str:
+        """Remove the last assistant response from the conversation."""
+        try:
+            # Get current state from checkpointer
+            checkpoint = await graph.checkpointer.aget(config)
+            if checkpoint is None:
+                return "↩️ No conversation history to undo."
+
+            state = checkpoint.get("state", {}) or checkpoint.channel_values if hasattr(checkpoint, 'channel_values') else {}
+            messages = state.get("messages", [])
+            if not messages:
+                return "↩️ No messages in conversation."
+
+            # Find and remove the last assistant message
+            for i in range(len(messages) - 1, -1, -1):
+                if isinstance(messages[i], dict) and messages[i].get("role") == "assistant":
+                    messages.pop(i)
+                    # Update the checkpoint
+                    await graph.checkpointer.aupdate(config, {"messages": messages})
+                    return "✅ Removed last assistant response. You can continue the conversation."
+
+            return "↩️ No assistant response to undo."
+        except Exception as exc:
+            logger.warning("[agent-handler] /undo failed: %s", exc)
+            return f"⚠️ Could not undo: {exc}"
+
+    def _extract_edit_command(text: str | None) -> str | None:
+        """Extract /edit <corrected text> if present, else None."""
+        if not text:
+            return None
+        text = text.strip()
+        if not text.lower().startswith("/edit"):
+            return None
+        # Return the corrected text (everything after /edit)
+        parts = text.split(maxsplit=1)
+        return parts[1] if len(parts) > 1 else None
+
+    async def _handle_edit(thread_id: str, config: dict[str, Any], corrected_text: str) -> tuple[str, str]:
+        """Replace the last assistant response with corrected text.
+
+        Returns tuple of (corrected_text, status_message).
+        """
+        try:
+            checkpoint = await graph.checkpointer.aget(config)
+            if checkpoint is None:
+                return corrected_text, "✏️ No conversation history to edit."
+
+            state = checkpoint.get("state", {}) or checkpoint.channel_values if hasattr(checkpoint, 'channel_values') else {}
+            messages = state.get("messages", [])
+            if not messages:
+                return corrected_text, "✏️ No messages in conversation."
+
+            # Find and replace the last assistant message
+            for i in range(len(messages) - 1, -1, -1):
+                if isinstance(messages[i], dict) and messages[i].get("role") == "assistant":
+                    messages[i] = {"role": "assistant", "content": corrected_text}
+                    # Update the checkpoint
+                    await graph.checkpointer.aupdate(config, {"messages": messages})
+                    return corrected_text, "✅ Replaced last response. You can continue the conversation."
+
+            # If no assistant message found, add as new assistant message
+            messages.append({"role": "assistant", "content": corrected_text})
+            await graph.checkpointer.aupdate(config, {"messages": messages})
+            return corrected_text, "✅ Added corrected text as new message."
+
+        except Exception as exc:
+            logger.warning("[agent-handler] /edit failed: %s", exc)
+            return corrected_text, f"⚠️ Could not edit: {exc}"
 
     # ── Register telegram backend with core's send_message dispatcher ──
     try:
