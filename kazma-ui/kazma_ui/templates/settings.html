@@ -650,7 +650,7 @@
                 <input type="color" x-model="appearance.accent_color" style="width:48px;height:36px;border:none;cursor:pointer;background:none">
                 <input type="text" class="form-input" x-model="appearance.accent_color" style="width:120px" placeholder="#5e6ad2">
                 <div style="display:flex;gap:6px">
-                    <template x-for="color in ['#5e6ad2', '#6C5CE7', '#0969da', '#10b981', '#f85149', '#d29922', '#e34ba9', '#8b5cf6']" :key="color">
+                    <template x-for="color in ['#5e6ad2', '#60a5fa', '#0969da', '#10b981', '#f85149', '#d29922', '#0ea5e9', '#3b82f6']" :key="color">
                         <div @click="appearance.accent_color = color" style="width:28px;height:28px;border-radius:50%;cursor:pointer;border:2px solid transparent" :style="appearance.accent_color === color ? 'border-color:var(--text-primary)' : ''" :key="color">
                             <div style="width:100%;height:100%;border-radius:50%" :style="'background:' + color"></div>
                         </div>

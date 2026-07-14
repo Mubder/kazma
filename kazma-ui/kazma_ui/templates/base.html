@@ -23,7 +23,7 @@
         {% include "components/sidebar.html" %}
 
         {# Main Content Area #}
-        <div class="main-content" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+        <div class="main-content" id="main-content" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
             {# Header #}
             {% include "components/header.html" %}
 
@@ -63,6 +63,30 @@
         </div>
     </div>
 
+    {# Bottom navigation — Tier 2 (≤768px) phones/tablets only; hidden on desktop via CSS #}
+    <nav class="bottom-nav" aria-label="Primary mobile">
+        <a href="/workspace" class="{{ 'active' if active_page == 'workspace' else '' }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span>{{ t('nav.workspace') }}</span>
+        </a>
+        <a href="/chat" class="{{ 'active' if active_page == 'chat' else '' }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+            <span>{{ t('nav.chat') }}</span>
+        </a>
+        <a href="/dashboard" class="{{ 'active' if active_page == 'dashboard' else '' }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1"/></svg>
+            <span>{{ t('nav.dashboard') }}</span>
+        </a>
+        <a href="/swarm" class="{{ 'active' if active_page == 'swarm' else '' }}">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><line x1="6" y1="8" x2="12" y2="16"/><line x1="18" y1="8" x2="12" y2="16"/><line x1="8" y1="6" x2="16" y2="6"/></svg>
+            <span>{{ t('nav.swarm') }}</span>
+        </a>
+        <button type="button" class="bottom-nav-more" @click="mobileNavOpen = true" aria-label="More">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            <span>More</span>
+        </button>
+    </nav>
+
     {# Toast Container #}
     {% include "components/toast.html" %}
 
@@ -89,8 +113,8 @@
         };
     </script>
 
-    {# Core JS #}
-    <script src="/static/js/app.js"></script>
+    {# Core JS (ES module entry — imports focused modules under /static/js/modules) #}
+    <script type="module" src="/static/js/app.js"></script>
 
     {# HTMX #}
     <script src="/static/js/htmx.min.js"></script>

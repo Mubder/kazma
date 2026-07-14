@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════════════════
    Kazma Design System v4 — design-b-modern
-   BG: #0a0f14 | Accent: #22d3ee (cyan) | Secondary: #a855f7 (purple)
+   BG: #0a0f14 | Accent: #22d3ee (cyan) | Secondary: #3b82f6 (blue)
    Font: Inter, system-ui, sans-serif | Grid texture background
    ═══════════════════════════════════════════════════════════════════ */
 
@@ -40,16 +40,16 @@
   --accent-subtle: rgba(34, 211, 238, 0.12);
   --accent-glow: rgba(34, 211, 238, 0.25);
 
-  /* Secondary — purple (kazma.ai secondary) */
-  --secondary: #a855f7;
-  --secondary-hover: #c084fc;
-  --secondary-light: #d8b4fe;
-  --secondary-subtle: rgba(168, 85, 247, 0.12);
-  --secondary-glow: rgba(168, 85, 247, 0.20);
+  /* Secondary — blue (kazma.ai secondary) */
+  --secondary: #3b82f6;
+  --secondary-hover: #60a5fa;
+  --secondary-light: #93c5fd;
+  --secondary-subtle: rgba(59, 130, 246, 0.12);
+  --secondary-glow: rgba(59, 130, 246, 0.20);
 
-  /* Gradient accents — matching kazma.ai heading gradient */
-  --gradient-primary: linear-gradient(135deg, #a855f7, #ec4899, #00e5ff);
-  --gradient-header: linear-gradient(135deg, #a855f7 0%, #ec4899 50%, #00e5ff 100%);
+  /* Gradient accents — blue → sky → cyan */
+  --gradient-primary: linear-gradient(135deg, #3b82f6, #0ea5e9, #22d3ee);
+  --gradient-header: linear-gradient(135deg, #3b82f6 0%, #0ea5e9 50%, #22d3ee 100%);
 
   /* Status */
   --success: #10b981;
@@ -107,6 +107,24 @@
   --transition-fast: 150ms ease;
   --transition: 200ms ease;
   --transition-slow: 300ms ease;
+
+  /* ── v5 Responsive Foundation (additive — does not alter existing tokens) ── */
+  --tap: 44px;                  /* minimum touch target for interactive elements */
+  --content-max: 1440px;        /* max content width on large screens */
+  /* Fluid spacing — scales between phone and desktop */
+  --sp-fluid-1: clamp(2px, 0.3vw, 4px);
+  --sp-fluid-2: clamp(4px, 0.6vw, 8px);
+  --sp-fluid-3: clamp(8px, 1vw, 12px);
+  --sp-fluid-4: clamp(12px, 1.4vw, 16px);
+  --sp-fluid-5: clamp(16px, 2vw, 20px);
+  --sp-fluid-6: clamp(20px, 2.5vw, 24px);
+  --sp-fluid-8: clamp(24px, 3.5vw, 32px);
+  /* Fluid type scale */
+  --fs-fluid-sm: clamp(0.75rem, 0.72rem + 0.2vw, 0.8125rem);
+  --fs-fluid-base: clamp(0.875rem, 0.83rem + 0.3vw, 0.9375rem);
+  --fs-fluid-lg: clamp(1rem, 0.95rem + 0.4vw, 1.125rem);
+  --fs-fluid-xl: clamp(1.25rem, 1.15rem + 0.6vw, 1.5rem);
+  --fs-fluid-2xl: clamp(1.5rem, 1.35rem + 0.9vw, 1.875rem);
 }
 
 /* ── 2. Reset ───────────────────────────────────────────────────── */
@@ -1033,7 +1051,13 @@ tbody tr:last-child td {
 .toast-info .toast-progress { background: var(--info); }
 
 /* ── 13. Chat ───────────────────────────────────────────────────── */
-.chat-container { display: flex; flex: 1; overflow: hidden; }
+.chat-container {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  height: calc(100vh - var(--header-height));   /* was inline calc(100vh - 60px) */
+  margin: calc(-1 * var(--sp-6));               /* was inline margin:-24px (cancels page-body padding) */
+}
 .chat-sidebar {
   width: 240px;
   background: var(--bg-panel);
@@ -1111,6 +1135,41 @@ tbody tr:last-child td {
   border: 1px solid var(--border);
 }
 .message-meta { font-size: 0.75rem; color: var(--text-tertiary); margin-top: var(--sp-1); }
+
+/* ── Markdown content inside assistant messages (rendered by KS.markdown) ── */
+.message-text > :first-child { margin-top: 0; }
+.message-text > :last-child { margin-bottom: 0; }
+.message-text p { margin: 0 0 var(--sp-3); }
+.message-text h1, .message-text h2, .message-text h3, .message-text h4 {
+  margin: var(--sp-4) 0 var(--sp-2); font-weight: 700; line-height: 1.3; letter-spacing: -0.01em;
+}
+.message-text h1 { font-size: 1.3rem; }
+.message-text h2 { font-size: 1.15rem; }
+.message-text h3 { font-size: 1.02rem; }
+.message-text h4 { font-size: 0.95rem; }
+.message-text ul, .message-text ol { margin: 0 0 var(--sp-3); padding-inline-start: 1.4em; }
+.message-text li { margin: 4px 0; }
+.message-text li > ul, .message-text li > ol { margin: 4px 0; }
+.message-text a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.message-text a:hover { color: var(--accent-hover); }
+.message-text blockquote {
+  margin: var(--sp-3) 0; padding: 4px 14px; border-inline-start: 3px solid var(--border-strong);
+  color: var(--text-secondary); background: var(--tint); border-radius: var(--radius-xs);
+}
+.message-text code {
+  font-family: var(--font-mono); font-size: 0.85em; background: rgba(0,0,0,0.3);
+  padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border-subtle);
+}
+.message-text pre {
+  margin: var(--sp-3) 0; padding: 14px 16px; background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border); border-radius: var(--radius); overflow-x: auto; line-height: 1.5;
+}
+.message-text pre code { background: none; border: none; padding: 0; font-size: 0.85rem; }
+.message-text table { width: 100%; border-collapse: collapse; margin: var(--sp-3) 0; font-size: 0.85rem; }
+.message-text th, .message-text td { border: 1px solid var(--border); padding: 6px 10px; text-align: start; }
+.message-text th { background: var(--bg-surface); font-weight: 600; }
+.message-text hr { border: none; border-top: 1px solid var(--border); margin: var(--sp-4) 0; }
+.message-text img { max-width: 100%; border-radius: var(--radius-sm); }
 
 .tool-call-box {
   margin-top: var(--sp-2);
@@ -1639,11 +1698,11 @@ tbody tr:last-child td {
   --accent-subtle: rgba(8, 145, 178, 0.10);
   --accent-glow: rgba(8, 145, 178, 0.22);
 
-  --secondary: #7c3aed;
-  --secondary-hover: #6d28d9;
-  --secondary-light: #7c3aed;
-  --secondary-subtle: rgba(124, 58, 237, 0.10);
-  --secondary-glow: rgba(124, 58, 237, 0.18);
+  --secondary: #2563eb;
+  --secondary-hover: #1d4ed8;
+  --secondary-light: #2563eb;
+  --secondary-subtle: rgba(37, 99, 235, 0.10);
+  --secondary-glow: rgba(37, 99, 235, 0.18);
 
   --success: #059669;
   --success-subtle: rgba(5, 150, 105, 0.12);
@@ -1976,6 +2035,65 @@ tbody tr:last-child td {
   display: none;
 }
 
+/* ═══ v5 RESPONSIVE SPINE (5 tiers) ═══
+   Tier 1 (769–1280): sidebar collapses to an icon rail.
+   Tier 2 (≤768): existing drawer + new bottom-nav.
+   Tier 3 (≤600): large phone.   Tier 4 (≤480): phone.   Tier 5 (≤380): small phone.
+   The icon-rail is explicitly scoped to min-width:769px so it never overrides
+   the ≤768 RTL drawer behavior. */
+
+/* ── Tier 1: Tablet landscape / small desktop — icon rail ── */
+@media (max-width: 1280px) and (min-width: 769px) {
+  .sidebar { width: var(--sidebar-collapsed); }
+  .sidebar-header { justify-content: center; padding: 0; }
+  .sidebar-toggle { display: none; }
+  .sidebar .logo-text,
+  .sidebar .nav-label,
+  .sidebar .nav-kbd,
+  .sidebar .nav-section-title,
+  .sidebar .sidebar-collapsed-hide,
+  .sidebar .sidebar-footer-info { display: none; }
+  .nav-link { justify-content: center; padding: 0; min-height: var(--tap); }
+  .nav-icon { width: 22px; height: 22px; }
+  .sidebar-footer { align-items: center; padding: var(--sp-3) var(--sp-2); }
+  .sidebar-model-selector { display: none; }
+  .sidebar-user { justify-content: center; }
+}
+
+/* ── Bottom navigation (shown only on Tier 2 phones/tablets) ── */
+.bottom-nav { display: none; }
+@media (max-width: 768px) {
+  .bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    z-index: 250;
+    background: rgba(14, 20, 27, 0.94);
+    backdrop-filter: blur(16px);
+    border-top: 1px solid var(--border-subtle);
+    padding: 6px max(8px, env(safe-area-inset-bottom)) 6px;
+    justify-content: space-around;
+  }
+  .bottom-nav a, .bottom-nav button.bottom-nav-more {
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    text-decoration: none; color: var(--text-muted);
+    font-size: 0.625rem; font-weight: 600;
+    padding: 6px 0; min-height: var(--tap); justify-content: center;
+    background: none; border: none; cursor: pointer; font-family: var(--font-sans);
+  }
+  .bottom-nav a.active { color: var(--accent); }
+  .bottom-nav svg { width: 22px; height: 22px; }
+  /* keep content clear of the fixed bottom bar */
+  .page-body { padding-bottom: calc(var(--sp-8) + 56px); }
+  .chat-container { height: calc(100vh - var(--header-height) - 56px) !important; }
+}
+
+/* Touch devices: guarantee ≥44px tap targets (non-touch stays compact) */
+@media (hover: none) and (pointer: coarse) {
+  .btn, .icon-btn, .nav-link, .hamburger-btn, .bottom-nav a, .bottom-nav button.bottom-nav-more { min-height: var(--tap); }
+}
+
 @media (max-width: 1024px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
@@ -2085,16 +2203,35 @@ tbody tr:last-child td {
   .hero-glow { display: none; }
 }
 
+/* ── Tier 3: Large phone ── */
+@media (max-width: 600px) {
+  .metrics-grid { grid-template-columns: 1fr 1fr; }
+  .section-head h1 { font-size: var(--fs-fluid-xl); }
+  .metric-value { font-size: var(--fs-fluid-2xl); }
+  .card { padding: var(--sp-4); }
+  .chart-card { padding: var(--sp-4); }
+  .hitl-card { flex-wrap: wrap; }
+  .hitl-actions { margin-left: 0; width: 100%; }
+  .header-right .hide-sm { display: none; }
+}
+
 @media (max-width: 480px) {
   .header-title { font-size: 0.95rem; }
   .metrics-row { grid-template-columns: 1fr; }
   .metrics-grid { grid-template-columns: 1fr; }
+  .header-right .hide-xs { display: none; }
   /* Toasts must fit narrow phones (was right:20px + max-width:380px → overflow). */
   .toast {
     left: 16px;
     right: 16px;
     max-width: calc(100vw - 32px);
   }
+}
+
+/* ── Tier 5: Small phone ── */
+@media (max-width: 380px) {
+  .metrics-grid { grid-template-columns: 1fr; }
+  .page-body { padding: var(--sp-3); }
 }
 
 /* ── 26. New UI Components (Phase 3) ─────────────────────────────── */
@@ -2734,5 +2871,31 @@ canvas { display: block; border-radius: 4px; }
   object-fit: cover;
   flex-shrink: 0;
   border: 1px solid var(--border-subtle);
+}
+
+/* ── v5 Accessibility: reduced motion + consistent focus ring ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Visible, high-contrast focus ring for keyboard users on all interactives */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.nav-link:focus-visible,
+.icon-btn:focus-visible,
+.hamburger-btn:focus-visible,
+.bottom-nav a:focus-visible,
+.bottom-nav button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
 }
 
