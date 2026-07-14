@@ -717,6 +717,10 @@ class ModelRegistry:
             "enabled": bool(data.get("enabled", True)),
             "health": str(data.get("health") or "unknown"),
         }
+        # Safely preserve any other extra configuration keys (e.g. google_mode, project_id, location)
+        for key, val in data.items():
+            if key not in provider and key != "name":
+                provider[key] = val
         providers.append(provider)
         self._save_providers(providers)
         return dict(provider)

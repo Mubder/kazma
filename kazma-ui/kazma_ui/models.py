@@ -155,6 +155,9 @@ class ProviderUpdateRequest(BaseModel):
     api_key: str = ""
     models: list[str] = Field(default_factory=list)
     enabled: bool = True
+    google_mode: str = ""
+    project_id: str = ""
+    location: str = "us-central1"
 
 
 class ConnectorUpdateRequest(BaseModel):
