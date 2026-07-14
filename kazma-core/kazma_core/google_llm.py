@@ -209,9 +209,11 @@ class GeminiProvider(LLMProvider):
         *,
         project_id: str = "",
         location: str = _DEFAULT_LOCATION,
+        google_mode: str = "",
     ) -> None:
         self._gcp_project = project_id
         self._gcp_location = location
+        self._google_mode = str(google_mode).strip().lower() if google_mode else ""
         self._use_ai_studio = False
 
         config = config or LLMConfig()
@@ -242,13 +244,21 @@ class GeminiProvider(LLMProvider):
     def _resolve_api_key(self) -> None:
         """Resolve API key from config or environment for AI Studio, or default to ADC placeholder."""
         import os
+
+        # If they explicitly requested Vertex AI, do NOT use AI Studio even if keys are around.
+        if getattr(self, "_google_mode", "") == "vertex_ai":
+            self.config.api_key = "adc-placeholder"
+            self._use_ai_studio = False
+            return
+
         key = self.config.api_key
         if not key or key == "adc-placeholder":
             key = os.getenv("GEMINI_API_KEY", "")
         if not key:
             key = os.getenv("GOOGLE_API_KEY", "")
 
-        if key and key != "adc-placeholder":
+        # Use AI Studio if explicitly requested or if no mode specified but a key exists
+        if getattr(self, "_google_mode", "") == "ai_studio" or (not getattr(self, "_google_mode", "") and key and key != "adc-placeholder"):
             self.config.api_key = key
             self._use_ai_studio = True
         else:

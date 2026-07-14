@@ -343,7 +343,16 @@ class ModelRegistry:
                     google_entry.get("project_id", "")
                     if google_entry else ""
                 )
-                client = GeminiProvider(config, project_id=project_id, location=location)
+                google_mode = str(
+                    google_entry.get("google_mode", "")
+                    if google_entry else ""
+                )
+                client = GeminiProvider(
+                    config,
+                    project_id=project_id,
+                    location=location,
+                    google_mode=google_mode,
+                )
             else:
                 client = LLMProvider(config)
 
@@ -377,6 +386,7 @@ class ModelRegistry:
                     config,
                     project_id=str(owner.get("project_id", "")),
                     location=str(owner.get("location", "")) or "us-central1",
+                    google_mode=str(owner.get("google_mode", "")),
                 )
             return LLMProvider(config)
 
@@ -411,6 +421,7 @@ class ModelRegistry:
                 config,
                 project_id=str(entry.get("project_id", "")),
                 location=str(entry.get("location", "")) or "us-central1",
+                google_mode=str(entry.get("google_mode", "")),
             )
         return LLMProvider(config)
 
