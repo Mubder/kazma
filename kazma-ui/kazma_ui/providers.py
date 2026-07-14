@@ -196,7 +196,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 # Perform a lightweight ping to the base URL
                 start = time.monotonic()
                 if getattr(client, "_use_ai_studio", False):
-                    resp = await http_client.get("/models")
+                    # Google AI Studio: query the native models endpoint which is guaranteed to be supported.
+                    resp = await http_client.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={client.config.api_key}")
                     latency = int((time.monotonic() - start) * 1000)
                     if resp.status_code == 200:
                         registry.set_provider_health(name, "healthy")
