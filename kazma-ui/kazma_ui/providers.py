@@ -204,7 +204,12 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         return {"success": True, "latency_ms": latency}
                     else:
                         registry.set_provider_health(name, "degraded")
-                        return {"success": False, "error": f"AI Studio returned HTTP {resp.status_code}", "latency_ms": latency}
+                        error_msg = f"AI Studio returned HTTP {resp.status_code}"
+                        if resp.status_code == 401:
+                            error_msg += " (Unauthorized: Your Google AI Studio API key is invalid or has expired. Please verify your key or generate a new one at https://aistudio.google.com/)"
+                        elif resp.status_code == 403:
+                            error_msg += " (Forbidden: Your key does not have permission, or your region might not be supported. See https://ai.google.dev/gemini-api/docs/available-regions)"
+                        return {"success": False, "error": error_msg, "latency_ms": latency}
                 else:
                     # Vertex AI: just check if get_client succeeded and do a lightweight head/get to base_url to check network.
                     try:
