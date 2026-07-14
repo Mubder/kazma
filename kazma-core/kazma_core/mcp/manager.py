@@ -407,6 +407,18 @@ class AsyncMCPManager:
         env = {**os.environ, **cfg.get("env", {})}
         working_dir = cfg.get("working_dir")
 
+        # ── MCP stdio auth: inject auth into environment ────────────────
+        # MCP stdio servers can receive auth via environment variables
+        # or via command-line arguments (e.g., --api-key)
+        auth = cfg.get("auth", {})
+        if auth.get("type") == "env" and auth.get("name") and auth.get("value"):
+            # Set auth token in environment for the subprocess
+            env[auth["name"]] = auth["value"]
+        elif auth.get("type") == "arg" and auth.get("name") and auth.get("value"):
+            # Inject as command-line argument (--arg value)
+            # Find insertion point after executable, before other args
+            command = [command[0]] + [auth["name"], auth["value"]] + command[1:]
+
         logger.info("[MCP] Starting stdio server '%s': %s", name, command)
 
         try:
