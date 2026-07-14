@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 def register_direct_routes(self: Any) -> None:
     """Register direct FastAPI route handlers onto self.app."""
 
+    @self.app.get("/metrics")
+    async def _metrics():
+        """Prometheus metrics endpoint."""
+        from kazma_core.metrics import get_metrics_response
+        body, status, headers = get_metrics_response()
+        return _JSONResponse(content=body.decode() if isinstance(body, bytes) else body, media_type=headers["content-type"])
+
     @self.app.get("/api/system/debug/registry")
     async def _debug_registry():
         import kazma_core.model_registry as _mr

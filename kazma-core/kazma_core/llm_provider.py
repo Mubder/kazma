@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -275,6 +276,61 @@ class LLMProvider:
                 payload.get("model"),
                 len(tools) if tools else 0,
             )
+
+            # ── Rate-limit handling (429 Too Many Requests) ────────────────
+            if status_code == 429:
+                # Extract retry-after header if present
+                retry_after = 30.0  # default fallback
+                if e.response is not None:
+                    retry_header = e.response.headers.get("retry-after")
+                    if retry_header:
+                        try:
+                            retry_after = float(retry_header)
+                        except (ValueError, TypeError):
+                            pass
+                logger.warning(
+                    "Rate limited (429) — retrying after %.1fs with exponential backoff",
+                    retry_after,
+                )
+
+                # Exponential backoff (max 3 retries)
+                for retry_attempt in range(3):
+                    await asyncio.sleep(retry_after * (1.5 ** retry_attempt))
+                    try:
+                        resp = await client.post("/chat/completions", json=payload)
+                        if resp.status_code != 429:
+                            resp.raise_for_status()
+                            data = resp.json()
+                            # Return the successful response after retry
+                            duration_ms = (time.monotonic() - start) * 1000
+                            response = self._parse_response(data, duration_ms)
+                            if cache_enabled:
+                                try:
+                                    response_dict = {
+                                        "content": response.content,
+                                        "tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in response.tool_calls],
+                                        "finish_reason": response.finish_reason,
+                                        "model": response.model,
+                                        "usage": response.usage,
+                                        "cost_usd": response.cost_usd,
+                                        "duration_ms": response.duration_ms,
+                                    }
+                                    _semantic_cache_singleton.store(prompt_str, response_dict, tools=tools)
+                                except Exception as cache_exc:
+                                    logger.warning("[LLMProvider] Semantic cache store error: %s", cache_exc)
+                            return response
+                        # Still 429, continue retrying
+                    except httpx.HTTPStatusError as retry_err:
+                        if retry_err.response is not None and retry_err.response.status_code != 429:
+                            # Non-429 error, propagate it
+                            raise
+                        # Still rate-limited, continue retrying
+                        continue
+                else:
+                    # All retries exhausted with 429
+                    raise LLMError(
+                        f"LLM rate-limited after 3 retries: {detail[:300]}"
+                    ) from e
 
             # ── Tool-definition fallback ────────────────────────────────
             # NVIDIA NIM / some providers reject tool-calling with a

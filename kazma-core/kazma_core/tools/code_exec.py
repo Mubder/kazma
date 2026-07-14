@@ -177,7 +177,7 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
         # Build restricted PATH environment for Windows
         if sys.platform == "win32":
             python_dir = os.path.dirname(sys.executable)
-            sys_root = os.environ.get("SystemRoot", "C:\\Windows")
+            sys_root = os.environ.get("SystemRoot", os.path.join(os.environ.get("WINDIR", "C:\\Windows")))
             sys32 = os.path.join(sys_root, "System32")
             path_env = f"{python_dir};{sys32};{sys_root}"
         else:

@@ -58,6 +58,9 @@ rag = [
     "chromadb>=0.5.0",
     "sentence-transformers>=3.0.0",
 ]
+observability = [
+    "prometheus-client>=0.20.0",
+]
 web = [
     "playwright>=1.40",
 ]
