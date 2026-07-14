@@ -636,7 +636,7 @@ function settingsApp() {
         },
 
         async saveHubProvider() {
-            if (!this.hubEditingProvider.name || !this.hubEditingProvider.base_url) {
+            if (!this.hubEditingProvider.name || (!this.hubEditingProvider.base_url && this.hubEditingProvider.name !== 'google')) {
                 showToast('Name and Base URL are required', 'error');
                 return;
             }
@@ -715,7 +715,7 @@ function settingsApp() {
 
         async testHubProviderFromModal() {
             const name = this.hubEditingProvider.name;
-            if (!name || !this.hubEditingProvider.base_url) {
+            if (!name || (!this.hubEditingProvider.base_url && name !== 'google')) {
                 showToast('Enter a provider name and base URL first', 'error');
                 return;
             }
