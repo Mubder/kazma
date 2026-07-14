@@ -36,6 +36,7 @@ def normalize_provider_entry(provider: dict[str, Any]) -> dict[str, Any]:
         "health": str(provider.get("health") or "unknown"),
         "project_id": str(provider.get("project_id") or ""),
         "location": str(provider.get("location") or "us-central1"),
+        "google_mode": str(provider.get("google_mode") or ""),
     }
 
 
@@ -138,6 +139,9 @@ def default_provider_entries() -> list[dict[str, Any]]:
         # Google uses ADC or API key — enable if project_id or API key detected.
         has_adc = key == "google" and bool(project_id)
         enabled = has_key or has_adc
+        google_mode = ""
+        if key == "google":
+            google_mode = "vertex_ai" if project_id else "ai_studio"
         providers.append(
             {
                 "name": key,
@@ -149,6 +153,7 @@ def default_provider_entries() -> list[dict[str, Any]]:
                 "health": "unknown",
                 "project_id": project_id,
                 "location": location,
+                "google_mode": google_mode,
             }
         )
     return providers
@@ -176,8 +181,10 @@ def seed_missing_presets(
             from kazma_core.providers import GEMINI_MODELS
 
             entry["models"] = list(GEMINI_MODELS)
-            entry["project_id"] = detect_gcp_project_id()
+            pid = detect_gcp_project_id()
+            entry["project_id"] = pid
             entry["location"] = "us-central1"
+            entry["google_mode"] = "vertex_ai" if pid else "ai_studio"
         stored.append(entry)
         changed = True
         logger.info("[ModelRegistry] Seeded new preset provider: %s", key)
