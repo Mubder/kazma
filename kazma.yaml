@@ -63,10 +63,10 @@ memory:
   # in-process (free, 384-dim). provider "openai-compatible" uses any
   # OpenAI-compatible /embeddings endpoint (NVIDIA NIM, OpenAI, TEI).
   embedding:
-    provider: local          # local | openai-compatible
-    model: all-MiniLM-L6-v2  # or nv-embed-v1 / text-embedding-3-small / etc.
-    dim: 384                 # must match the model (NIM nv-embed-v1 = 1024)
-    base_url: ""             # e.g. https://integrate.api.nvidia.com/v1 (empty for local)
+    provider: openai-compatible   # local | openai-compatible
+    model: nvidia/nv-embed-v1     # NVIDIA NIM NeMo Retriever
+    dim: 4096                     # nv-embed-v1 output dimension
+    base_url: https://integrate.api.nvidia.com/v1
     api_key_env: KAZMA_EMBED_API_KEY   # env var name holding the API key (never inline)
 skills:
   path: kazma-skills/manifests/

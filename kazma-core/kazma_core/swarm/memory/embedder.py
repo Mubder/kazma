@@ -132,7 +132,7 @@ class OpenAICompatibleEmbedder:
         model: str,
         dim: int,
         *,
-        timeout: float = 30.0,
+        timeout: float = 60.0,
         cache_size: int = 512,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -169,17 +169,23 @@ class OpenAICompatibleEmbedder:
         if text in self._cache:
             return self._cache[text]
         client = self._ensure_client()
-        try:
-            resp = client.post(
-                "/embeddings",
-                json={"model": self._model, "input": text},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            emb = data["data"][0]["embedding"]
-        except Exception as exc:
-            logger.warning("[Embedder:openai-compatible] encode failed: %s", exc)
-            return []
+        # Retry once on failure (NIM endpoints can be slow / rate-limited).
+        for attempt in range(2):
+            try:
+                resp = client.post(
+                    "/embeddings",
+                    json={"model": self._model, "input": text},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                emb = data["data"][0]["embedding"]
+                break
+            except Exception as exc:
+                if attempt == 0:
+                    logger.debug("[Embedder:openai-compatible] retrying after: %s", exc)
+                else:
+                    logger.warning("[Embedder:openai-compatible] encode failed: %s", exc)
+                    return []
         # Cache store (evict oldest if over capacity)
         if len(self._cache) >= self._cache_size:
             self._cache.pop(next(iter(self._cache)))
@@ -241,15 +247,24 @@ def make_chroma_embedding_function(embedder: Embedder) -> Any:
 
     class _Wrapper(EmbeddingFunction):
         def __call__(self, input: Documents) -> Embeddings:
-            embeddings = [embedder.encode(doc) for doc in input]
+            embeddings = []
+            for doc in input:
+                emb = embedder.encode(doc)
+                if not emb:
+                    # Remote endpoint returned nothing (timeout / rate limit).
+                    # Retry once — if still empty, fall back to a zero vector
+                    # so ChromaDB doesn't crash (the doc just won't match well).
+                    emb = embedder.encode(doc)
+                if not emb:
+                    emb = [0.0] * embedder.dim
+                embeddings.append(emb)
             return np.array(embeddings, dtype=np.float32)
 
-        # ChromaDB requires a ``name`` property and ``default_space``.
-        @property
+        # ChromaDB 1.5.x calls name() and default_space() as methods
+        # (not properties). Must return strings, not be properties.
         def name(self) -> str:
             return "kazma_embedder_wrapper"
 
-        @property
         def default_space(self) -> str:
             return "cosine"
 
