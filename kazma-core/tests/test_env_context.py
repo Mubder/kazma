@@ -75,7 +75,7 @@ async def test_workspace_scope_is_noop_when_none():
 
 async def test_workspace_scope_pins_resolution(tmp_path, monkeypatch):
     """A scoped workspace_id overrides the global _get_workspace()."""
-    from kazma_core.stores import get_workspace_store, reset_workspace_store
+    from kazma_core.stores import reset_workspace_store
     from kazma_core.tools.file_write import _get_workspace
 
     # Point the store at a temp DB so we don't mutate the real settings.db.
@@ -112,4 +112,7 @@ async def test_workspace_scope_pins_resolution(tmp_path, monkeypatch):
         # After exiting the scope, we're back to the global (repo_a).
         assert _get_workspace().resolve() == repo_a.resolve()
     finally:
+        # Close the SQLite connection before resetting so Windows can
+        # clean up the temp dir (open file handles block deletion).
+        store.close()
         reset_workspace_store()
