@@ -631,9 +631,24 @@ class LocalToolRegistry:
             category="memory",
         )
         async def memory_search(query: str, limit: int = 5) -> str:
+            # Use the unified adapter (4-layer RRF) so tool searches see the
+            # same store as per-turn RAG retrieval. Fall back to VectorMemory
+            # if the adapter is unavailable.
+            try:
+                from kazma_core.swarm.memory.adapter import get_adapter
+
+                adapter = get_adapter()
+                if adapter is not None:
+                    results = await adapter.search(query, limit=limit)
+                    if results:
+                        return json.dumps(results, ensure_ascii=False, indent=2)
+                    return "No relevant memories found."
+            except Exception:
+                pass
+            # Fallback: VectorMemory (agent_memory collection).
             mem = get_vector_memory()
             if mem is None:
-                return "Error: VectorMemory not initialized. RAG not available."
+                return "Error: memory not initialized. RAG not available."
             results = mem.search(query=query, n_results=limit)
             if not results:
                 return "No relevant memories found."
@@ -648,13 +663,24 @@ class LocalToolRegistry:
             category="memory",
         )
         async def memory_store(text: str, metadata: str = "{}") -> str:
-            mem = get_vector_memory()
-            if mem is None:
-                return "Error: VectorMemory not initialized. RAG not available."
             try:
                 meta = json.loads(metadata) if isinstance(metadata, str) else metadata
             except json.JSONDecodeError:
                 meta = {"raw": metadata}
+            # Route through the unified adapter so stored memories are visible
+            # to per-turn RAG retrieval. Falls back to VectorMemory.
+            try:
+                from kazma_core.swarm.memory.adapter import get_adapter
+
+                adapter = get_adapter()
+                if adapter is not None:
+                    doc_id = await adapter.store(text, metadata=meta)
+                    return f"Stored memory (id={doc_id})"
+            except Exception:
+                pass
+            mem = get_vector_memory()
+            if mem is None:
+                return "Error: memory not initialized. RAG not available."
             doc_id = mem.add(text=text, metadata=meta)
             return f"Stored memory (id={doc_id})"
 

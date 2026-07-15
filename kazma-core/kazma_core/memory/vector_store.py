@@ -90,10 +90,30 @@ class VectorMemory:
 
             get_embedder()  # eagerly warm the singleton
             self._ef = make_chroma_embedding_function(get_embedder())
-            self._collection = self._client.get_or_create_collection(
-                name=collection_name,
-                embedding_function=self._ef,
-            )
+            try:
+                self._collection = self._client.get_or_create_collection(
+                    name=collection_name,
+                    embedding_function=self._ef,
+                )
+            except Exception as ef_conflict:
+                # Embedding-function conflict: the collection was created with
+                # a different EF (e.g. user switched from local to NIM, or the
+                # wrapper name changed). Drop and recreate — old vectors used
+                # a different embedder and can't be queried with the new one.
+                if "embedding function" in str(ef_conflict).lower() or "conflict" in str(ef_conflict).lower():
+                    logger.warning(
+                        "[VectorMemory] Embedding function conflict — recreating collection %s", collection_name,
+                    )
+                    try:
+                        self._client.delete_collection(collection_name)
+                    except Exception:
+                        pass
+                    self._collection = self._client.create_collection(
+                        name=collection_name,
+                        embedding_function=self._ef,
+                    )
+                else:
+                    raise
 
             # Update status in ConfigStore to ACTIVE
             store = get_config_store()

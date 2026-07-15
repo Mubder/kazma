@@ -338,9 +338,25 @@ class UnifiedMemoryAdapter:
         }
         await self.index(text, metadata=meta, tags=["soul_evolution", worker_name])
 
-    async def search(self, query_text: str, limit: int = 5) -> list[MemoryHit]:
-        """Semantic search alias for self-improvement queries."""
-        return await self.query(query_text, limit=limit)
+    async def search(self, query_text: str, limit: int = 5) -> list[dict[str, Any]]:
+        """Semantic search returning list[dict] (compatibility with retrieve_memories).
+
+        Returns dicts with ``content``, ``score``, ``id``, ``source_layer``,
+        ``metadata`` keys — the shape that ``retrieve_memories`` and
+        ``_format_retrieved_memories`` expect.
+        """
+        hits = await self.query(query_text, limit=limit)
+        return [
+            {
+                "id": h.id,
+                "content": h.content,
+                "text": h.content,  # alias for _format_retrieved_memories fallback
+                "score": h.score,
+                "source_layer": h.source_layer,
+                "metadata": h.metadata,
+            }
+            for h in hits
+        ]
 
     async def search_dict(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
         """Search returning list[dict] for chat compaction compatibility.
@@ -410,14 +426,29 @@ _adapter: UnifiedMemoryAdapter | None = None
 
 
 def get_adapter() -> UnifiedMemoryAdapter | None:
-    """Return the shared adapter, initialized lazily with available backends."""
+    """Return the shared adapter, initialized lazily with available backends.
+
+    The L1 (ChromaDB) VectorStore is pointed at the SAME persistent path +
+    collection (``agent_memory``) that the ``memory_store``/``memory_search``
+    tools use, so memories written by the agent are visible to per-turn RAG
+    retrieval and compaction. Previously the L1 used an ephemeral in-memory
+    ``kazma_global`` collection — separate from the tools' ``agent_memory``,
+    causing a silent write/read split.
+    """
     global _adapter
     if _adapter is not None:
         return _adapter
-    # Initialize with available backends
+    # Initialize L1 — persistent, same collection as the tools.
     try:
         from kazma_core.swarm.memory.vector import VectorStore
-        chroma = VectorStore()
+        from kazma_core.paths import vector_memory_path
+        import os
+
+        _collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
+        chroma = VectorStore(
+            collection_name=_collection,
+            persist_dir=str(vector_memory_path()),
+        )
     except Exception:
         chroma = None
     try:
