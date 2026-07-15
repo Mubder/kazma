@@ -293,6 +293,19 @@ def _make_tool_class(name: str, fn, perm: PermissionLevel, desc: str) -> type[Ba
 # ── Singleton access ───────────────────────────────────────────────────
 
 
-def get_tool_registry() -> ToolRegistry:
-    """Return the shared ToolRegistry singleton."""
-    return ToolRegistry()
+def get_tool_registry() -> "ToolRegistry | LocalToolRegistryProxy":
+    """Return the shared tool registry.
+
+    .. deprecated::
+        The swarm-specific ``ToolRegistry`` is no longer used for execution —
+        ``InProcessWorker`` uses ``kazma_core.agent.tool_registry.LocalToolRegistry``
+        directly. This function now delegates to the LocalToolRegistry so callers
+        (e.g. the skills UI) see the full tool set. The ``ToolRegistry`` class
+        itself is retained only for backward compatibility of the import path.
+    """
+    try:
+        from kazma_core.agent.tool_registry import get_tool_registry as _get_real_registry
+
+        return _get_real_registry()
+    except Exception:
+        return ToolRegistry()

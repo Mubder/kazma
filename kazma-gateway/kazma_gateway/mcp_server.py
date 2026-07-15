@@ -126,6 +126,41 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "name": "list_files",
+        "description": "List files and directories in the workspace. Returns names with type (file/dir).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Directory path relative to workspace root (default: root)",
+                },
+            },
+        },
+    },
+    {
+        "name": "run_command",
+        "description": "Run a shell command in the workspace (scoped + HITL-gated). Use for builds, linters, etc.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "Shell command to execute",
+                },
+            },
+            "required": ["command"],
+        },
+    },
+    {
+        "name": "git_status",
+        "description": "Get the git repository status: current branch and changed files.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
 ]
 
 TOOL_MAP = {t["name"]: t for t in TOOLS}
@@ -249,11 +284,70 @@ def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
     return output
 
 
+def _tool_list_files(root: Path, args: dict[str, Any]) -> str:
+    """List files/directories in the workspace via the IdeService."""
+    import asyncio
+
+    from kazma_core.ide import get_ide_service
+
+    async def _run() -> str:
+        svc = get_ide_service()
+        svc.refresh_root()
+        res = await svc.list_path(args.get("path", ""))
+        if not res["ok"]:
+            return res.get("error", "List failed")
+        entries = res.get("entries", [])
+        if not entries:
+            return "(empty)"
+        return "\n".join(
+            f"{'📁' if e['is_dir'] else '📄'} {e['name']}" for e in entries
+        )
+
+    return asyncio.get_event_loop().run_until_complete(_run())
+
+
+def _tool_run_command(root: Path, args: dict[str, Any]) -> str:
+    """Run a shell command in the workspace (HITL-gated via IdeService)."""
+    import asyncio
+
+    from kazma_core.ide import get_ide_service
+
+    async def _run() -> str:
+        svc = get_ide_service()
+        svc.refresh_root()
+        res = await svc.run(args["command"])
+        if not res["ok"]:
+            return res.get("error", "Command failed")
+        return res.get("output", "(no output)")
+
+    return asyncio.get_event_loop().run_until_complete(_run())
+
+
+def _tool_git_status(root: Path, args: dict[str, Any]) -> str:
+    """Get git status via the IdeService."""
+    import asyncio
+
+    from kazma_core.ide import get_ide_service
+
+    async def _run() -> str:
+        svc = get_ide_service()
+        svc.refresh_root()
+        res = await svc.git("status --short")
+        if not res["ok"]:
+            return res.get("error", "git status failed")
+        return res.get("output", "(clean)")
+
+    return asyncio.get_event_loop().run_until_complete(_run())
+
+
 DISPATCH = {
     "search_code": _tool_search_code,
     "read_file": _tool_read_file,
     "write_file": _tool_write_file,
     "run_tests": _tool_run_tests,
+    "list_files": _tool_list_files,
+    "run_command": _tool_run_command,
+    "git_status": _tool_git_status,
 }
 
 # ═══════════════════════════════════════════════════════════════════

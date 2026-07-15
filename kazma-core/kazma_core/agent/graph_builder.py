@@ -3,18 +3,32 @@
 Graph topology
 ══════════════
 
-    ┌────────────┐
-    │  SUPERVISOR │  ← entry point
-    └──┬───────┬─┘
-       │       │
-       │       └──────────────────────────────┐
-       │                                      │
-       ▼                                      ▼
-    ┌────────────┐                     ┌────────────┐
-    │ TOOL_WORKER │                     │   RESPOND  │ → END
-    └─────┬──────┘                     └────────────┘
-          │
-    SUPERVISOR
+    ┌───────────────────┐    (over 80% token budget)
+    │ CHECK_SATURATION  │ ──────────────────────► ┌───────────┐
+    │  ← entry point    │                        │ SUMMARIZE │ ─┐
+    └────────┬──────────┘                        └───────────┘ │
+             │ (under budget)                                   │
+             ▼                                                  │
+    ┌──────────────┐     ┌────────────────┐                     │
+    │  SUPERVISOR  │────►│  TOOL_WORKER   │                     │
+    └──┬────────┬──┘     └───────┬────────┘                     │
+       │        │                │ (loop back)                  │
+       │        │          SUPERVISOR                            │
+       │        │                                              │
+       │        └────────────────────────┐                     │
+       ▼                                 ▼                     │
+    ┌──────────┐                 ┌──────────┐                   │
+    │ RESPOND  │                 │ (re-enter│ ◄─────────────────┘
+    └────┬─────┘                 │SUPERVISOR)│
+         │                       └──────────┘
+         ▼
+        END
+
+CHECK_SATURATION is the entry point. When token usage exceeds 80% it
+routes to SUMMARIZE (compaction), then back to SUPERVISOR. Otherwise it
+goes straight to SUPERVISOR. The Supervisor decides TOOL_WORKER (tool
+calls) or RESPOND (final text). TOOL_WORKER always loops back to
+SUPERVISOR. RESPOND is terminal.
 
 The Supervisor is the decision-maker.  On each iteration it:
   1. Calls the LLM with the current messages + tool schemas.
@@ -909,207 +923,3 @@ def build_supervisor_graph(
         return graph.compile(checkpointer=checkpointer)
     return graph.compile()
 
-
-# ══════════════════════════════════════════════════════════════════════════
-# Factory — fully wired, ready-to-invoke
-# ══════════════════════════════════════════════════════════════════════════
-
-
-async def create_supervisor_app(
-    *,
-    config: dict[str, Any] | None = None,
-    llm: LLMProvider | None = None,
-    tool_executor: Any = None,
-    mcp_manager: Any = None,
-    db_path: str = "kazma-data/checkpoints.db",
-) -> tuple[Any, AsyncSqliteSaver]:
-    """Create a fully-wired Supervisor graph with SQLite checkpointer.
-
-    This is the high-level entry point.  Returns (compiled_graph, checkpointer)
-    so the caller can invoke the graph and close the checkpointer on shutdown.
-
-    Args:
-        config: Raw kazma.yaml dict (loads from disk if None).
-        llm: Pre-built LLMProvider (created from config if None).
-        tool_executor: Tool registry (created with builtins if None).
-        mcp_manager: Optional AsyncMCPManager for MCP tools.
-            If provided and config has ``mcp.servers``, the manager is
-            connected and a UnifiedToolExecutor wraps both backends.
-        db_path: Path to the SQLite checkpoint database.
-
-    Returns:
-        (compiled_graph, AsyncSqliteSaver)
-    """
-    from pathlib import Path
-
-    import aiosqlite
-    import yaml
-
-    from kazma_core.authority import create_authority
-    from kazma_core.cost_breaker import create_cost_breaker
-    from kazma_core.time_travel import create_recorder
-    from kazma_core.tracing import KazmaTracer
-    from kazma_core.url_utils import normalize_model_name, normalize_provider_url
-
-    # Load config
-    if config is None:
-        config_path = Path("kazma.yaml")
-        if config_path.exists():
-            with open(config_path) as f:
-                config = yaml.safe_load(f) or {}
-        else:
-            config = {}
-
-    llm_cfg = config.get("llm", {})
-    system_prompt = config.get("system_prompt", "You are Kazma (كاظمه).")
-
-    # ── Load personality from config / env ─────────────────────────
-    personality_prompt: str | None = None
-    try:
-        from kazma_core.personalities import load_personality
-
-        profile = load_personality(config=config)
-        personality_prompt = profile.system_prompt
-        logger.info("Personality loaded: %s (%s)", profile.name, profile.emoji)
-    except Exception as exc:
-        logger.warning("Personality loading failed, continuing without: %s", exc)
-        logger.debug("Personality loading failure details:", exc_info=True)
-
-    # Normalize LLM config URLs
-    if "base_url" in llm_cfg:
-        llm_cfg["base_url"] = normalize_provider_url(llm_cfg["base_url"])
-    if "model" in llm_cfg:
-        llm_cfg["model"] = normalize_model_name(llm_cfg["model"], llm_cfg.get("base_url", ""))
-
-    logger.info(
-        "LLM config: base_url=%s model=%s router=%s",
-        llm_cfg.get("base_url", "(default)"),
-        llm_cfg.get("model", "(default)"),
-        llm_cfg.get("router", "none"),
-    )
-
-    # LLM
-    if llm is None:
-        llm = LLMProvider(LLMConfig.from_dict(llm_cfg))
-
-    # Local tool executor
-    if tool_executor is None:
-        from kazma_core.agent.tool_registry import LocalToolRegistry
-
-        tool_executor = LocalToolRegistry(include_builtins=True)
-
-    # MCP manager — connect to configured servers if provided
-    if mcp_manager is not None:
-        mcp_servers = config.get("mcp", {}).get("servers", [])
-        if mcp_servers:
-            try:
-                count = await mcp_manager.connect_from_config(mcp_servers)
-                logger.info("MCP manager connected %d tools from %d servers", count, len(mcp_servers))
-            except Exception as exc:
-                logger.warning("MCP manager failed to connect: %s", exc)
-                logger.debug("MCP manager connection failure details:", exc_info=True)
-
-    # Wrap local + MCP into a unified executor
-    from kazma_core.mcp.manager import UnifiedToolExecutor
-
-    unified = UnifiedToolExecutor(local=tool_executor, mcp=mcp_manager)
-
-    tool_definitions = unified.get_tool_definitions()
-
-    # Cost breaker
-    cost_breaker = create_cost_breaker()
-
-    # Context authority — wired with the VectorMemory singleton (wrapped
-    # in an async adapter) so compaction can retrieve + inject memories.
-    model = llm_cfg.get("model", "gpt-4o-mini")
-    window = config.get("memory", {}).get("max_context_tokens", 128_000)
-    from kazma_core.agent.tool_registry import get_vector_memory
-    from kazma_core.memory.async_adapter import wrap_vector_memory
-
-    _vm = get_vector_memory()
-    _memory_store = wrap_vector_memory(_vm) if _vm is not None else None
-    authority = create_authority(
-        model=model,
-        window=window,
-        memory_store=_memory_store,
-    )
-
-    # Tracer
-    tracing_cfg = config.get("logging", {})
-    langfuse_cfg = tracing_cfg.get("langfuse", {})
-    
-    tracing_config = TracingConfig(
-        enabled=langfuse_cfg.get("enabled", False),
-        backend="langfuse" if langfuse_cfg.get("enabled") else "console",
-        langfuse_public_key=langfuse_cfg.get("public_key"),
-        langfuse_secret_key=langfuse_cfg.get("secret_key"),
-        langfuse_host=langfuse_cfg.get("host", "http://localhost:3000"),
-    )
-    tracer = KazmaTracer(config=tracing_config)
-
-    # Checkpointer
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = await aiosqlite.connect(db_path)
-    from kazma_core.config_store import apply_sqlite_pragmas_async
-    await apply_sqlite_pragmas_async(conn)
-    checkpointer = AsyncSqliteSaver(conn)
-    await checkpointer.setup()
-
-    # Time Travel recorder
-    snapshot_recorder = create_recorder(config=config)
-
-    # ── Cultural context enrichment ──────────────────────────────────
-    # Inject seasonal/cultural awareness (Ramadan, Eid, Kuwait National
-    # Day, Hijri date) into the system prompt.
-    try:
-        from kazma_core.cultural_context_enrichment import get_cultural_prompt_suffix
-        cultural_suffix = get_cultural_prompt_suffix()
-        if cultural_suffix and cultural_suffix not in system_prompt:
-            system_prompt = system_prompt.rstrip() + cultural_suffix
-    except Exception:
-        pass  # Non-critical — agent works fine without cultural context
-
-    # ── Environment awareness (IDE/workspace/repo) ──────────────────
-    # Make the supervisor brain aware it has an IDE workspace, tools, and
-    # GitHub. Base injection for the initial system prompt; per-turn
-    # refresh happens in the streaming node via build_env_context().
-    try:
-        from kazma_core.ide.env_context import build_env_context
-
-        env_block = build_env_context()
-        if env_block and env_block not in system_prompt:
-            system_prompt = system_prompt.rstrip() + "\n\n" + env_block
-    except Exception:
-        logger.debug("[graph_builder] env context injection skipped", exc_info=True)
-
-    # Universal language directive — ALWAYS enforced and injected LAST
-    # so it's the final instruction the model sees, after all cultural
-    # context and personality prompts. This prevents Arabic cultural
-    # context from biasing the model to respond in Arabic when the user
-    # writes in English.
-    _LANG_DIRECTIVE = (
-        "\n\nCRITICAL LANGUAGE RULE: You MUST respond in the EXACT language "
-        "the user writes in. Arabic input = Arabic output. English input = "
-        "English output. If they mix, match their pattern. This overrides "
-        "all other instructions, personality settings, and cultural context. "
-        "NEVER switch languages unless explicitly asked."
-    )
-    if _LANG_DIRECTIVE not in system_prompt:
-        system_prompt = system_prompt.rstrip() + _LANG_DIRECTIVE
-
-    # Build graph
-    graph = build_supervisor_graph(
-        llm=llm,
-        system_prompt=system_prompt,
-        tool_definitions=tool_definitions,
-        tool_executor=unified,
-        cost_breaker=cost_breaker,
-        authority=authority,
-        tracer=tracer,
-        checkpointer=checkpointer,
-        personality_prompt=personality_prompt,
-        snapshot_recorder=snapshot_recorder,
-    )
-
-    logger.info("Supervisor app created (model=%s, tools=%d)", model, len(tool_definitions))
-    return graph, checkpointer

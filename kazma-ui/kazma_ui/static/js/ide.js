@@ -674,38 +674,65 @@ function ideApp() {
       catch (e) { return String(args); }
     },
 
-    // After an agent tool call, if it wrote to the open file and the user
-    // has no unsaved edits, refresh the editor to show the change.
+    // After an agent tool call, if it wrote to a file that's open in a tab,
+    // refresh that tab. Handles both the active file and files open in other
+    // tabs (marks them stale so the user knows to refresh).
     async _maybeRefreshOpenFile(toolName, resultText) {
-      if (!this.currentFile) return;
       var writeTools = ['file_write', 'file_delete'];
       if (writeTools.indexOf(toolName) === -1) return;
-      // Don't clobber unsaved user edits.
-      if (this.dirty) {
-        this.toast('File changed on disk — save or discard to refresh', false);
-        return;
-      }
+
+      // Try to extract the written file path from the tool result.
+      // The agent's file_write/file_delete tools return text containing the
+      // path. Fall back to the active file if we can't parse it.
+      var writtenPath = this._extractPathFromResult(resultText) || this.currentFile;
+      if (!writtenPath) return;
+
+      // Find the tab matching the written path (may be the active tab or a
+      // background tab).
+      var affectedTab = this.tabs.find(function (t) { return t.path === writtenPath; });
+      if (!affectedTab) return;  // file isn't open in any tab — nothing to do
+
       if (toolName === 'file_delete') {
-        // The open file was deleted — clear the editor + tab.
-        this.closeTabSilent(this.currentFile);
-        this.toast('Open file was deleted', false);
+        this.closeTabSilent(writtenPath);
+        if (writtenPath !== this.currentFile) {
+          this.toast(writtenPath + ' was deleted', false);
+        } else {
+          this.toast('Open file was deleted', false);
+        }
         return;
       }
-      // file_write: re-read the open file silently.
-      try {
-        var data = await this._get('/api/ide/read?path=' + encodeURIComponent(this.currentFile));
-        if (data.ok) {
-          this.setContent(data.content || '');
-          // Sync the active tab so the saved state matches.
-          var tab = this._activeTab();
-          if (tab) {
-            tab.content = data.content || '';
-            tab.original = data.content || '';
-            tab.dirty = false;
+
+      // file_write: if it's the active tab and the user has no unsaved edits,
+      // re-read and refresh the editor live.
+      if (writtenPath === this.currentFile && !this.dirty) {
+        try {
+          var data = await this._get('/api/ide/read?path=' + encodeURIComponent(writtenPath));
+          if (data.ok) {
+            this.setContent(data.content || '');
+            affectedTab.content = data.content || '';
+            affectedTab.original = data.content || '';
+            affectedTab.dirty = false;
+            this.toast('Updated ' + writtenPath, true);
           }
-          this.toast('Updated ' + this.currentFile, true);
-        }
-      } catch (e) { /* non-fatal */ }
+        } catch (e) { /* non-fatal */ }
+      } else if (writtenPath === this.currentFile && this.dirty) {
+        // Active tab but user has unsaved edits — don't clobber.
+        this.toast(writtenPath + ' changed on disk — save or discard to refresh', false);
+      } else {
+        // Background tab was edited — mark it stale so the user knows.
+        affectedTab.original = '__STALE__';
+        this.toast(writtenPath + ' was modified — switch to it and reload', true);
+      }
+    },
+
+    // Best-effort extract a file path from a tool result string.
+    _extractPathFromResult(resultText) {
+      if (!resultText) return null;
+      var text = typeof resultText === 'string' ? resultText : String(resultText);
+      // The file_write tool returns "Wrote <path>" or similar.
+      // The file_delete tool returns "Deleted: <path>".
+      var match = text.match(/(?:Wrote|Written|Deleted?|Saved)[:\s]+([^\s,\n]+)/i);
+      return match ? match[1].replace(/['"]/g, '') : null;
     },
 
     _renderMd(text) {

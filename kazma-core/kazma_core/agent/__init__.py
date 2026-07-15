@@ -8,7 +8,7 @@ Also re-exports backward-compatible names from the legacy agent module
 """
 
 # ── New Supervisor components ───────────────────────────────────────
-from kazma_core.agent.graph_builder import build_supervisor_graph, create_supervisor_app
+from kazma_core.agent.graph_builder import build_supervisor_graph
 from kazma_core.agent.state import NodeName, SupervisorState, initial_supervisor_state
 from kazma_core.agent.tool_registry import LocalToolRegistry, tool
 
@@ -35,7 +35,6 @@ __all__ = [
     "NodeName",
     "initial_supervisor_state",
     "build_supervisor_graph",
-    "create_supervisor_app",
     "LocalToolRegistry",
     "tool",
     # Legacy
