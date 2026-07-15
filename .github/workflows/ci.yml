@@ -291,7 +291,7 @@ jobs:
         run: |
           cd ${{ github.workspace }}
           # Start server in background
-          nohup .venv/bin/python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8090 > server.log 2>&1 &
+          nohup python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8090 > server.log 2>&1 &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
           # Wait for server to be ready
@@ -307,7 +307,7 @@ jobs:
       - name: Run Load Test (Swarm Dispatch)
         run: |
           cd ${{ github.workspace }}
-          .venv/bin/locust -f loadtests/locustfile_swarm.py \
+          locust -f loadtests/locustfile_swarm.py \
             --host=http://127.0.0.1:8090 \
             --users=20 --spawn-rate=5 --run-time=60s \
             --headless --html=loadtest-report.html --csv=loadtest-results
@@ -315,7 +315,7 @@ jobs:
       - name: Run Load Test (SSE/HITL)
         run: |
           cd ${{ github.workspace }}
-          .venv/bin/locust -f loadtests/locustfile_websocket.py \
+          locust -f loadtests/locustfile_websocket.py \
             --host=http://127.0.0.1:8090 \
             --users=10 --spawn-rate=2 --run-time=30s \
             --headless --html=loadtest-sse-report.html --csv=loadtest-sse-results
