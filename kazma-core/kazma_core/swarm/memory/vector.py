@@ -1,8 +1,10 @@
 """Layer 1 — ChromaDB global vector store.
 
-Singleton encoder pattern: ``get_encoder()`` loads ``all-MiniLM-L6-v2``
-once and reuses it across all vector backends (L1 + L4).  This prevents
-double-loading the ~90MB model into RAM.
+Encoder pattern: ``get_encoder()`` delegates to the pluggable
+``embedder.get_embedder()`` factory so the system can use either local
+sentence-transformers or a remote OpenAI-compatible endpoint (NVIDIA NIM).
+All vector backends (L1 + L4) MUST use ``get_encoder()`` / ``get_embedder()``
+so the model is never loaded twice.
 
 The ``VectorStore`` manages ChromaDB collections for cross-worker semantic
 search.  Falls back gracefully to empty results when ChromaDB or
@@ -14,36 +16,22 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from kazma_core.swarm.memory.embedder import get_embedder
+
 logger = logging.getLogger(__name__)
 
-_DEFAULT_MODEL = "all-MiniLM-L6-v2"
 _DEFAULT_COLLECTION = "kazma_global"
 
-# ── Shared encoder singleton ──────────────────────────────────────────────
 
-_encoder: Any = None  # SentenceTransformer instance (lazy)
+def get_encoder(model_name: str | None = None) -> Any | None:
+    """Return the shared encoder (delegates to the pluggable embedder).
 
-
-def get_encoder(model_name: str = _DEFAULT_MODEL) -> Any | None:
-    """Return the shared SentenceTransformer encoder.
-
-    Loads the model on first call and caches it.  All vector backends
-    MUST use this function so the model is never loaded twice.
+    The ``model_name`` arg is accepted for backward compatibility but
+    ignored — the model is chosen by config (``memory.embedding`` in
+    ``kazma.yaml`` or ``KAZMA_EMBED_*`` env vars). Returns an object with
+    an ``encode(text) -> list[float]`` method (an Embedder).
     """
-    global _encoder
-    if _encoder is not None:
-        return _encoder
-    try:
-        from sentence_transformers import SentenceTransformer
-        _encoder = SentenceTransformer(model_name)
-        logger.info("[VectorStore] Loaded encoder: %s", model_name)
-        return _encoder
-    except ImportError:
-        logger.warning("[VectorStore] sentence-transformers not installed")
-        return None
-    except Exception as exc:
-        logger.warning("[VectorStore] Encoder load failed: %s", exc)
-        return None
+    return get_embedder()
 
 
 # ── VectorStore ────────────────────────────────────────────────────────────
@@ -118,10 +106,8 @@ class VectorStore:
         if self._model is None:
             return None
         try:
-            embedding = self._model.encode(text, convert_to_numpy=False)
-            if isinstance(embedding, list):
-                return embedding
-            return list(embedding)  # type: ignore[arg-type]
+            # _model is an Embedder (via get_encoder → get_embedder).
+            return self._model.encode(text)
         except Exception as exc:
             logger.warning("[VectorStore] Encode failed: %s", exc)
             return None

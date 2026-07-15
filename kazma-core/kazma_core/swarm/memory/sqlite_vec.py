@@ -114,7 +114,13 @@ class SQLiteVectorStore:
         return f"{_TABLE_PREFIX}_{safe}"
 
     def ensure_table(self, worker_name: str) -> bool:
-        """Create the vector table for a worker if it doesn't exist."""
+        """Create the vector table for a worker if it doesn't exist.
+
+        Uses the configured embedding dimension (default 384 for MiniLM,
+        1024 for NIM/NeMo). If an existing table has a mismatched dimension
+        (e.g. user switched providers), it is dropped and recreated — the
+        vectors are a cache and will be re-indexed on next store.
+        """
         if not self._check_vec_available():
             return False
         conn = self._ensure_conn()
@@ -122,16 +128,42 @@ class SQLiteVectorStore:
             return False
         table = self._table_name(worker_name)
         try:
+            from kazma_core.swarm.memory.embedder import get_embedding_dim
+
+            dim = get_embedding_dim()
+        except Exception:
+            dim = 384
+        try:
             conn.execute(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS {table}
                 USING vec0(
-                    embedding FLOAT[384],
+                    embedding FLOAT[{dim}],
                     +doc_id TEXT
                 )
             """)
             conn.commit()
             return True
         except Exception as exc:
+            # Dimension mismatch on an existing table — drop and recreate.
+            if "dim" in str(exc).lower() or "shape" in str(exc).lower():
+                logger.info(
+                    "[SQLiteVector] Dimension mismatch for %s — dropping and recreating",
+                    worker_name,
+                )
+                try:
+                    conn.execute(f"DROP TABLE IF EXISTS {table}")
+                    conn.execute(f"""
+                        CREATE VIRTUAL TABLE IF NOT EXISTS {table}
+                        USING vec0(
+                            embedding FLOAT[{dim}],
+                            +doc_id TEXT
+                        )
+                    """)
+                    conn.commit()
+                    return True
+                except Exception as exc2:
+                    logger.warning("[SQLiteVector] Recreate failed for %s: %s", worker_name, exc2)
+                    return False
             logger.warning("[SQLiteVector] Table creation failed for %s: %s", worker_name, exc)
             return False
 
@@ -156,9 +188,7 @@ class SQLiteVectorStore:
             return False
 
         try:
-            embedding = model.encode(text, convert_to_numpy=False)
-            if hasattr(embedding, "tolist"):
-                embedding = embedding.tolist()
+            embedding = model.encode(text)
             emb_bytes = _serialize_embedding(embedding)
         except Exception as exc:
             logger.warning("[SQLiteVector] Encode failed: %s", exc)
@@ -206,9 +236,7 @@ class SQLiteVectorStore:
             return []
 
         try:
-            embedding = model.encode(text, convert_to_numpy=False)
-            if hasattr(embedding, "tolist"):
-                embedding = embedding.tolist()
+            embedding = model.encode(text)
             emb_bytes = _serialize_embedding(embedding)
         except Exception:
             return []
