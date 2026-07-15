@@ -259,6 +259,28 @@ class InProcessWorker(SwarmWorker):
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
 
+            # ── Environment awareness (IDE/workspace/repo/tools) ──────
+            # Inject a dedicated env-context system message so the worker
+            # knows where the workspace is, what repo/branch it's in, and
+            # which tools it has. Without this, workers get stuck on
+            # discovery — they had the tools but no prompt ever told them.
+            try:
+                from kazma_core.ide.env_context import build_env_context
+
+                # Honor per-task workspace_id (Phase 3) if present on the
+                # dispatch context metadata.
+                ws_id = None
+                if isinstance(context, SwarmDispatchContext):
+                    ws_id = context.metadata.get("workspace_id")
+                env_block = build_env_context(workspace_id=ws_id)
+                if env_block:
+                    messages.append({"role": "system", "content": env_block})
+            except Exception:
+                logger.debug(
+                    "[InProcessWorker:%s] env context injection skipped",
+                    self.name, exc_info=True,
+                )
+
             user_content = task
             if context_text:
                 user_content = f"{task}\n\n--- Context ---\n{context_text}"

@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% set active_page = "ide" %}
+{% block title %}IDE{% endblock %}
+{% block page_title %}IDE{% endblock %}
+
+{% block head %}
+  {# CodeMirror 5 from cdnjs — JS falls back to a <textarea> if these fail to load (offline). #}
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/shell/shell.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .ide-layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; height: calc(100vh - 160px); min-height: 480px; }
+    .ide-layout.with-chat { grid-template-columns: 260px 1fr 380px; }
+    .ide-tree { overflow-y: auto; min-height: 0; }
+    .ide-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; gap: 12px; }
+    .ide-editor-wrap { flex: 1 1 0; min-height: 120px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-deep); }
+    .ide-editor-wrap .CodeMirror { height: 100%; font-family: var(--font-mono); font-size: 0.85rem; }
+    .ide-fallback { width: 100%; height: 100%; min-height: 120px; border: none; resize: none; background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.85rem; padding: 10px; box-sizing: border-box; }
+    .ide-tree-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; cursor: pointer; font-size: 0.8rem; border-bottom: 1px solid var(--tint); }
+    /* ── Chat panel ── */
+    .ide-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+    .ide-chat-msgs { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 4px 2px; display: flex; flex-direction: column; gap: 6px; }
+    .chat-bubble { width: fit-content; max-width: 88%; padding: 5px 10px; border-radius: var(--radius-sm); font-size: 0.78rem; line-height: 1.4; word-break: break-word; }
+    .chat-bubble.user { background: var(--bg-elevated); border: 1px solid var(--border-subtle); align-self: flex-end; }
+    .chat-bubble.assistant { background: var(--bg-deep); border: 1px solid var(--border-subtle); align-self: flex-start; }
+    .chat-bubble.system { background: transparent; color: var(--text-muted); font-size: 0.7rem; font-style: italic; border: 1px dashed var(--border-subtle); align-self: center; max-width: 100%; width: auto; }
+    .chat-bubble p:first-child { margin-top: 0; } .chat-bubble p:last-child { margin-bottom: 0; }
+    .chat-bubble pre { font-size: 0.72rem; max-height: 200px; overflow: auto; white-space: pre-wrap; }
+    .chat-bubble code { font-size: 0.72rem; }
+    .chat-tool { width: fit-content; max-width: 88%; font-size: 0.7rem; border-left: 3px solid var(--accent); padding: 4px 8px; background: var(--bg-elevated); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    .chat-tool pre { margin: 3px 0 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.68rem; max-height: 120px; overflow: auto; }
+    .chat-input-row { flex-shrink: 0; display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); }
+    .ide-tree-row:hover { background: var(--bg-hover); }
+    .ide-results { background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.78rem; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
+    @media (max-width: 1100px) { .ide-layout.with-chat { grid-template-columns: 220px 1fr 320px; } }
+    @media (max-width: 900px) { .ide-layout, .ide-layout.with-chat { grid-template-columns: 1fr; height: auto; } .ide-chat { min-height: 320px; } }
+  </style>
+{% endblock %}
+
+{% block content %}
+<div class="ide-container" x-data="ideApp()" x-init="init()" style="max-width:1600px;margin:0 auto;">
+
+  <!-- ── Toolbar ── -->
+  <div class="card" style="margin-bottom:16px;padding:10px 16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--border-subtle);">
+    <span style="font-size:1.3rem;">💻</span>
+    <code style="font-family:var(--font-mono);font-size:0.78rem;background:var(--bg-elevated);padding:3px 8px;border-radius:var(--radius-sm);color:var(--text-secondary);border:1px solid var(--border-subtle);"
+          x-text="currentFile || 'no file open'"></code>
+    <span x-show="dirty" style="color:var(--warning);font-size:0.75rem;" x-cloak>● unsaved</span>
+    <div style="display:flex;gap:8px;margin-left:auto;flex-wrap:wrap;">
+      <button class="btn btn-sm btn-primary" @click="save()" :disabled="!currentFile || busy">💾 Save</button>
+      <button class="btn btn-sm btn-secondary" @click="newFile()" :disabled="busy" title="Create a new file">📄 New</button>
+      <button class="btn btn-sm btn-secondary" @click="deleteFile()" :disabled="!currentFile || busy" title="Delete the open file">🗑 Delete</button>
+      <button class="btn btn-sm btn-secondary" @click="runFile()" :disabled="!currentFile || busy">▶ Run file</button>
+      <button class="btn btn-sm btn-secondary" @click="showDiff()" :disabled="!currentFile || busy">± Diff</button>
+      <button class="btn btn-sm btn-secondary" @click="gitCmd('status -s')" :disabled="busy">Git status</button>
+      <button class="btn btn-sm btn-secondary" @click="gitCmd('diff')" :disabled="busy">Git diff</button>
+      <select class="form-input" x-model="selectedSkill" x-show="skills.length"
+              style="max-width:150px;font-size:0.78rem;padding:2px 6px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);">
+        <template x-for="s in skills" :key="s.name" :value="s.name">
+          <option :value="s.name" x-text="s.name"></option>
+        </template>
+      </select>
+      <button class="btn btn-sm btn-secondary" @click="runSkill()"
+              :disabled="!currentFile || busy || !skills.length"
+              title="Run selected coding skill on the open file via the swarm">🔧 Run skill</button>
+      <button class="btn btn-sm" :class="chatOpen ? 'btn-primary' : 'btn-secondary'"
+              @click="toggleChat()" title="Toggle the AI chat panel">💬 Chat</button>
+    </div>
+  </div>
+
+  <div class="ide-layout" :class="{ 'with-chat': chatOpen }">
+    <!-- ── File Tree ── -->
+    <div class="card ide-tree" style="padding:0;border:1px solid var(--border-subtle);">
+      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:8px 12px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span>📁</span>
+          <h3 style="margin:0;font-size:0.9rem;font-weight:600;">Files</h3>
+        </div>
+        <button class="btn btn-xs btn-secondary" @click="loadTree(treePath)" title="Refresh">↻</button>
+      </div>
+      <div style="padding:5px 10px;background:var(--bg-elevated);border-bottom:1px solid var(--border-subtle);font-size:0.72rem;color:var(--text-secondary);display:flex;align-items:center;gap:6px;">
+        <span style="font-weight:600;">/</span>
+        <code style="font-family:var(--font-mono);color:var(--accent);" x-text="treePath || '(root)'"></code>
+      </div>
+      <div>
+        <div x-show="treePath" @click="goUp()" class="ide-tree-row" style="color:var(--text-secondary);">
+          <span style="width:18px;">⬆️</span><span>..</span>
+        </div>
+        <template x-for="item in tree" :key="item.path">
+          <div class="ide-tree-row" @click="navigate(item)">
+            <span x-text="item.is_dir ? '📁' : '📄'" style="width:18px;"></span>
+            <span x-text="item.name" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                  :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
+          </div>
+        </template>
+        <div x-show="tree.length === 0 && !busy" style="padding:16px;text-align:center;color:var(--text-muted);font-size:0.78rem;">Empty</div>
+      </div>
+    </div>
+
+    <!-- ── Editor + Panels ── -->
+    <div class="ide-main">
+      <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden;border:1px solid var(--border-subtle);min-height:260px;">
+        <div class="card-header" style="display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border-subtle);padding:8px 12px;">
+          <span style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Editor</span>
+          <span x-show="!cmReady" style="font-size:0.7rem;color:var(--text-muted);" x-cloak>(plain textarea — CodeMirror unavailable)</span>
+        </div>
+        <div class="ide-editor-wrap">
+          <textarea x-ref="editor" class="ide-fallback" spellcheck="false"
+                    placeholder="Open a file from the tree, or type here…"></textarea>
+        </div>
+      </div>
+
+      <!-- Command + Grep + Swarm bar -->
+      <div class="card" style="padding:10px 12px;display:flex;flex-direction:column;gap:8px;border:1px solid var(--border-subtle);">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input type="text" class="form-input" placeholder="Shell command (e.g. pytest -q)"
+                 x-model="command" @keydown.enter="runCommand()" style="flex:1;min-width:180px;font-family:var(--font-mono);font-size:0.8rem;">
+          <button class="btn btn-sm btn-secondary" @click="runCommand()" :disabled="busy">Run command</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input type="text" class="form-input" placeholder="Grep pattern"
+                 x-model="grepPattern" @keydown.enter="grep()" style="flex:1;min-width:140px;font-size:0.8rem;">
+          <input type="text" class="form-input" placeholder="glob (*.py)"
+                 x-model="grepGlob" style="max-width:120px;font-size:0.8rem;font-family:var(--font-mono);">
+          <button class="btn btn-sm btn-secondary" @click="grep()" :disabled="busy">Grep</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input type="text" class="form-input" placeholder="Send instruction to swarm…"
+                 x-model="swarmInstruction" @keydown.enter="sendToSwarm()" style="flex:1;min-width:180px;font-size:0.8rem;">
+          <button class="btn btn-sm btn-primary" @click="sendToSwarm()" :disabled="busy">🐝 Send to swarm</button>
+        </div>
+      </div>
+
+      <!-- Results -->
+      <div class="card" style="padding:10px 12px;border:1px solid var(--border-subtle);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <span style="font-size:0.8rem;font-weight:600;color:var(--text-primary);" x-text="resultTitle || 'Output'"></span>
+          <button class="btn btn-xs btn-secondary" @click="result=''" x-show="result">Clear</button>
+        </div>
+        <pre class="ide-results" x-text="result || '(no output yet)'"></pre>
+      </div>
+    </div>
+
+    <!-- ── AI Chat panel (third column; reuses /api/chat/stream) ── -->
+    <div class="card ide-chat" x-show="chatOpen" x-cloak
+         style="padding:0;border:1px solid var(--border-subtle);flex-direction:column;display:flex;">
+      <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:8px 12px;">
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span>💬</span>
+          <h3 style="margin:0;font-size:0.9rem;font-weight:600;">AI Chat</h3>
+          <span x-show="currentFile" style="font-size:0.68rem;color:var(--text-muted);"
+                x-text="'· ' + currentFile"></span>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-xs btn-secondary" @click="clearChat()" title="Clear conversation">🆕</button>
+          <button class="btn btn-xs btn-secondary" @click="toggleChat()" title="Close panel">✕</button>
+        </div>
+      </div>
+      <div id="ide-chat-messages" class="ide-chat-msgs" style="padding:12px;flex:1;">
+        <template x-for="(m, i) in chatMessages" :key="i">
+          <div>
+            <!-- user / assistant bubbles -->
+            <template x-if="m.role === 'user' || m.role === 'assistant' || m.role === 'system'">
+              <div class="chat-bubble" :class="m.role">
+                <span x-show="m.role === 'user'" style="font-weight:600;font-size:0.7rem;color:var(--accent);">You</span>
+                <span x-show="m.role === 'assistant' && m.content" style="font-weight:600;font-size:0.7rem;color:var(--success);">Kazma</span>
+                <div x-html="m.role === 'system' ? m.content : _renderMd(m.content)"></div>
+                <span x-show="m.role === 'assistant' && chatBusy && i === chatMessages.length - 1 && !m.content"
+                      style="color:var(--text-muted);font-size:0.75rem;">thinking…</span>
+              </div>
+            </template>
+            <!-- tool call -->
+            <template x-if="m.role === 'tool_call'">
+              <div class="chat-tool">
+                <span style="font-weight:600;color:var(--accent);">🔧 <span x-text="m.tool"></span></span>
+                <pre x-text="_fmtToolArgs(m.args)"></pre>
+              </div>
+            </template>
+            <!-- tool result -->
+            <template x-if="m.role === 'tool_result'">
+              <div class="chat-tool" style="border-left-color:var(--text-muted);">
+                <span style="font-weight:600;color:var(--text-muted);">↳ <span x-text="m.tool"></span> result</span>
+                <pre x-text="String(m.result).slice(0, 2000)"></pre>
+              </div>
+            </template>
+            <!-- HITL approval -->
+            <template x-if="m.role === 'approval'">
+              <div class="chat-bubble" style="background:var(--warning-bg, #fef3c7);border:1px solid var(--warning);">
+                <span style="font-weight:600;">⚠️ Approval required</span>
+                <div x-text="m.message || ('Tool: ' + m.tool)" style="font-size:0.78rem;margin-top:4px;"></div>
+                <div style="margin-top:6px;font-size:0.72rem;color:var(--text-muted);">Approve via the chat or Telegram/Discord.</div>
+              </div>
+            </template>
+          </div>
+        </template>
+      </div>
+      <div class="chat-input-row" style="padding:10px 12px;">
+        <textarea id="ide-chat-input" class="form-input" rows="2"
+                  placeholder="Ask about the open file, request edits… (Enter to send, Shift+Enter for newline)"
+                  x-model="chatInput" @keydown="chatKeydown($event)"
+                  :disabled="chatBusy"
+                  style="flex:1;resize:none;font-size:0.82rem;font-family:inherit;"></textarea>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <button class="btn btn-sm btn-primary" @click="sendChat()" :disabled="chatBusy || !chatInput.trim()">➤</button>
+          <button class="btn btn-sm btn-secondary" @click="abortChat()" x-show="chatBusy" x-cloak>⏹</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── New-file modal (Kazma style, reuses .modal-overlay/.modal CSS) ── -->
+  <template x-if="newFileModalOpen">
+    <div class="modal-overlay" @click.self="cancelNewFile()" @keydown.escape.window="cancelNewFile()" style="z-index:1100;">
+      <div class="modal modal-sm" role="dialog" aria-modal="true" aria-label="New file">
+        <div class="modal-header">
+          <h2>📄 New file</h2>
+          <button class="modal-close" @click="cancelNewFile()" aria-label="Close">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:6px;">
+            Path (relative to workspace root)
+          </label>
+          <input id="new-file-input" type="text" class="form-input"
+                 x-model="newFilePath" @keydown="newFileKeydown($event)"
+                 placeholder="e.g. src/new_module.py"
+                 style="width:100%;font-family:var(--font-mono);font-size:0.85rem;">
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" @click="cancelNewFile()">Cancel</button>
+          <button class="btn btn-primary" @click="confirmNewFile()" :disabled="!newFilePath.trim()">Create</button>
+        </div>
+      </div>
+    </div>
+  </template>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/streaming.js"></script>
+<script src="/static/js/ide.js"></script>
+{% endblock %}

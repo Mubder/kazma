@@ -256,6 +256,10 @@ class SwarmTask(_JsonSerializable):
     completed_at: str | None = None
     cost_estimate: float = 0.0
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Phase 3: target a specific workspace so this task's workers operate on
+    # that repo rather than the process-wide active one. None = use the
+    # global active workspace (backward compatible). See workspace_scope.py.
+    workspace_id: str | None = None
 
     def __post_init__(self) -> None:
         self.type = _coerce_enum(TaskType, self.type)
@@ -295,6 +299,7 @@ class SwarmTask(_JsonSerializable):
             completed_at=data.get("completed_at"),
             cost_estimate=float(data.get("cost_estimate", 0.0)),
             metadata=dict(data.get("metadata", {})),
+            workspace_id=data.get("workspace_id"),
         )
 
     @classmethod

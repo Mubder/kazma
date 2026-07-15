@@ -85,10 +85,15 @@ def build_dispatch_context(
     """Build context passed to worker.dispatch()."""
     if blackboard is None:
         return task.context
+    # Carry the per-task workspace_id into metadata so the worker path can
+    # set up the workspace_scope (Phase 3) and env_context honors it.
+    meta = dict(task.metadata)
+    if getattr(task, "workspace_id", None) and "workspace_id" not in meta:
+        meta["workspace_id"] = task.workspace_id
     return SwarmDispatchContext(
         task.context,
         blackboard=blackboard,
-        metadata=task.metadata,
+        metadata=meta,
         task_id=task.id,
         task_type=task.type.value,
         system_prompt=system_prompt,

@@ -1,0 +1,47 @@
+name: fix-lint
+version: 0.1.0
+description: Run the project linter (ruff/mypy) over a file or the workspace, then fix reported issues using the file tools.
+author: Kazma Team
+license: MIT
+
+# Prompt/instruction skill (no tool implementation). Render
+# `swarm_instruction_template` with a file or directory path and pass it to
+# IdeService.send_to_swarm(instruction=...).
+category: code
+capabilities:
+  - code
+  - lint
+  - swarm
+tags:
+  - coding
+  - swarm
+  - workspace
+  - lint
+
+workspace_scoped: true
+hitl_gated: true
+
+swarm_instruction_template: |
+  Run the linter over {path} and fix the reported issues inside the active
+  workspace.
+
+  Hard constraints:
+  - Operate ONLY within the active workspace root. Never read or write any path
+    outside the workspace. Use the existing tools only:
+      * file_read    — read the file(s) to fix
+      * file_write   — apply lint fixes
+      * shell_exec   — run the linter (e.g. `ruff check {path}`, `mypy {path}`)
+      * python_exec  — run Python-based lint/format helpers if needed
+  - Do NOT invent or call any new tools or libraries.
+  - Danger-tier operations (file_write, shell_exec, python_exec) are routed
+    through the HITL approval gate automatically by the safety layer. Do not
+    attempt to disable or bypass safety.
+
+  Steps:
+  1. Run the linter via shell_exec (prefer `ruff check {path}`; fall back to
+     `mypy {path}`). Capture the list of issues.
+  2. file_read each affected file and apply the minimal, safe fixes with
+     file_write (imports, unused variables, formatting, type annotations).
+  3. Re-run the linter to confirm issues are resolved.
+  4. Do not change behavior or formatting beyond what the linter requires.
+  5. Report the before/after issue counts.

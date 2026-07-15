@@ -851,6 +851,21 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
     except Exception:
         pass
 
+    # Persist the repo identity so it doesn't have to be re-derived from
+    # `git remote` on every call (Phase 2). full_name is "owner/repo".
+    try:
+        _owner, _repo = full_name.split("/", 1)
+        store.set_repo_identity(
+            str(repo_dir),
+            repo_url=url,
+            owner=_owner,
+            repo=_repo,
+            default_branch="main",
+            is_github=True,
+        )
+    except Exception:
+        logger.debug("[github/repos/clone] repo identity cache failed", exc_info=True)
+
     logger.info("[github/repos/clone] cloned %s → %s", full_name, repo_dir)
     return JSONResponse({"status": "ok", "path": str(repo_dir), "workspace_id": record["id"]}, status_code=201)
 

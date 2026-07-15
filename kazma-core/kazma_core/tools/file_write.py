@@ -33,19 +33,55 @@ def configure_workspace(workspace: str | None = None, allow_absolute: bool = Fal
 def _get_workspace() -> Path:
     """Get the configured workspace root.
 
+    Resolution precedence (mirrors ``IdeService._resolve_workspace_root``):
+
+      1. Per-task ``workspace_scope`` (Phase 3 — concurrent multi-repo).
+      2. Explicitly configured ``_WORKSPACE_ROOT`` (``configure_workspace``).
+      3. ``KAZMA_WORKSPACE`` env var.
+      4. The **active WorkspaceStore** row (the real workspace the user
+         selected — e.g. a cloned repo). This is the fix for the dual-root
+         bug where repo files were wrongly rejected as "outside workspace".
+      5. ``cwd/kazma-data/workspace`` (last-resort default).
+
     Defaults to ``kazma-data/workspace`` relative to the current working
-    directory (NOT the drive root) when no workspace has been explicitly
-    configured. This prevents accidental creation of a ``C:\\workspace``
-    folder on Windows. The ``KAZMA_WORKSPACE`` env var, if set, is
-    honored as an override.
+    directory (NOT the drive root) when nothing else is configured. This
+    prevents accidental creation of a ``C:\\workspace`` folder on Windows.
     """
+    # 1. Per-task scope (Phase 3) takes top precedence.
+    try:
+        from kazma_core.ide.workspace_scope import resolve_workspace_root
+
+        scoped = resolve_workspace_root()
+        if scoped is not None:
+            return scoped
+    except Exception:
+        pass
+
+    # 2. Explicitly configured root.
     if _WORKSPACE_ROOT is not None:
         return _WORKSPACE_ROOT
+
     import os
 
+    # 3. Env var override.
     env_ws = os.environ.get("KAZMA_WORKSPACE", "").strip()
     if env_ws:
         return Path(env_ws).expanduser().resolve()
+
+    # 4. Active WorkspaceStore row — the workspace the user actually
+    #    selected (e.g. the active repo). Without this, the file tools
+    #    scoped against the kazma-data/workspace default and rejected
+    #    every real repo file as "outside workspace".
+    try:
+        from kazma_core.stores import get_workspace_store
+
+        active = get_workspace_store().get_active_workspace()
+        if active and active.get("root_path"):
+            return Path(active["root_path"]).resolve()
+    except Exception:
+        pass
+
+    # 5. Last-resort default.
     return (Path.cwd() / "kazma-data" / "workspace").resolve()
 
 

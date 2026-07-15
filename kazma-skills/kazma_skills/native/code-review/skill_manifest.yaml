@@ -1,0 +1,44 @@
+name: code-review
+version: 0.1.0
+description: Review a file or diff and return findings. Read-only — do not modify files or run mutating commands.
+author: Kazma Team
+license: MIT
+
+# Prompt/instruction skill (no tool implementation). Render
+# `swarm_instruction_template` with a file or directory path and pass it to
+# IdeService.send_to_swarm(instruction=...). This skill is intentionally
+# read-only; it must not apply changes.
+category: code
+capabilities:
+  - code
+  - review
+  - swarm
+tags:
+  - coding
+  - swarm
+  - workspace
+  - review
+
+workspace_scoped: true
+hitl_gated: false
+
+swarm_instruction_template: |
+  Review the file at {path} (or the diff for that path) and return findings.
+  This is a READ-ONLY review — do NOT modify any files and do NOT run any
+  mutating commands.
+
+  Hard constraints:
+  - Operate ONLY within the active workspace root. Never read any path outside
+    the workspace. Use the existing tools only:
+      * file_read    — read the file and related context
+  - Do NOT use file_write, shell_exec, or python_exec in a way that mutates the
+    workspace. Read-only analysis only.
+  - Do NOT invent or call any new tools or libraries.
+  - Because this skill does not perform writes or exec, it does not trigger the
+    HITL danger-tool gate. Still respect workspace scoping at all times.
+
+  Deliver a structured review covering:
+  1. Correctness / bug risks.
+  2. Readability and maintainability.
+  3. Security or safety concerns.
+  4. Suggested concrete improvements (as recommendations, not applied edits).

@@ -996,6 +996,19 @@ async def create_supervisor_app(
     except Exception:
         pass  # Non-critical — agent works fine without cultural context
 
+    # ── Environment awareness (IDE/workspace/repo) ──────────────────
+    # Make the supervisor brain aware it has an IDE workspace, tools, and
+    # GitHub. Base injection for the initial system prompt; per-turn
+    # refresh happens in the streaming node via build_env_context().
+    try:
+        from kazma_core.ide.env_context import build_env_context
+
+        env_block = build_env_context()
+        if env_block and env_block not in system_prompt:
+            system_prompt = system_prompt.rstrip() + "\n\n" + env_block
+    except Exception:
+        logger.debug("[graph_builder] env context injection skipped", exc_info=True)
+
     # Universal language directive — ALWAYS enforced and injected LAST
     # so it's the final instruction the model sees, after all cultural
     # context and personality prompts. This prevents Arabic cultural

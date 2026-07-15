@@ -46,6 +46,15 @@
             <span class="nav-kbd">⌘1</span>
         </a>
 
+        <a href="/ide" class="nav-link {{ 'active' if active_page == 'ide' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+                </svg>
+            </span>
+            <span class="nav-label">IDE</span>
+        </a>
+
         <a href="/chat" class="nav-link {{ 'active' if active_page == 'chat' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
@@ -337,6 +338,441 @@ def _get_visible_providers() -> list[dict[str, Any]]:
     except Exception as exc:
         logger.warning("[agent-handler] Failed to get providers: %s", exc)
         return []
+
+
+async def _try_ide_command(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+) -> bool:
+    """Handle ``/ide`` coding commands across all chat platforms.
+
+    Every subcommand drives the transport-neutral ``IdeService`` in
+    ``kazma_core.ide``, so Web/TUI/chat all share one backend. Mutating
+    operations (``edit``, ``run``, ``git``) flow through the shared tool
+    registry and therefore trigger the same HITL danger-tool gate the agent
+    and swarm use — no parallel, un-gated path is created.
+
+    Subcommands::
+
+        /ide                      — show help
+        /ide ls [path]            — list a directory
+        /ide open <file>          — read a file (shown in a code block)
+        /ide edit <file> <text>   — write content to a file
+        /ide delete <file>        — delete a file or directory
+        /ide run <command>        — run a shell command in the workspace
+        /ide runfile <file>       — run a script with its interpreter
+        /ide grep <pattern> [glob]— regex search the workspace
+        /ide git <subcommand>     — run a git subcommand
+        /ide repo [list|switch <id>|clone <owner/repo>|<owner/repo>] — manage workspace
+        /ide skill [name] [file]  — run a coding skill (refactor/tests/lint/review)
+        /ide swarm <task>         — dispatch a coding task to the swarm
+
+    Returns ``True`` if handled (so the caller skips the graph), else ``False``.
+    """
+    text = (msg.text or "").strip()
+    if not text.lower().startswith("/ide"):
+        return False
+
+    # Extract the command body (everything after "/ide").
+    parts = text.split(None, 1)
+    body = parts[1].strip() if len(parts) > 1 else ""
+    tokens = body.split()
+    sub = tokens[0].lower() if tokens else ""
+
+    try:
+        from kazma_core.ide import get_ide_service
+
+        ide = get_ide_service()
+    except Exception as exc:
+        logger.debug("[AgentHandler] IdeService unavailable: %s", exc)
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            "⚠️ IDE service is unavailable in this deployment.",
+        )
+        return True
+
+    # ── Help ────────────────────────────────────────────────────────
+    if sub in ("", "help"):
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            "🖥️ **Kazma IDE**\n\n"
+            "All commands operate inside the active workspace.\n\n"
+            "`/ide ls [path]` — list a directory\n"
+            "`/ide open <file>` — read a file\n"
+            "`/ide edit <file> <text>` — write content to a file\n"
+            "`/ide delete <file>` — delete a file or directory\n"
+            "`/ide run <command>` — run a shell command\n"
+            "`/ide runfile <file>` — run a script with its interpreter\n"
+            "`/ide grep <pattern> [glob]` — search the workspace\n"
+            "`/ide git <subcommand>` — run git\n"
+            "`/ide repo [list|switch <id>|clone <owner/repo>|<owner/repo>]` — manage workspace\n"
+            "`/ide skill [name] [file]` — run a coding skill on a file\n"
+            "    skills: refactor-file, write-tests, fix-lint, code-review\n"
+            "`/ide swarm <task>` — dispatch a coding task to the swarm\n\n"
+            "_Danger-tier operations (edit/run/git) require HITL approval._",
+        )
+        return True
+
+    # ── /ide ls [path] ─────────────────────────────────────────────
+    if sub == "ls":
+        rel = " ".join(tokens[1:]).strip()
+        res = await ide.list_path(rel)
+        if not res["ok"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {res['error']}")
+            return True
+        if not res["files"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"📁 `{res['path'] or '/'}` is empty.")
+            return True
+        listed = "\n".join(f"  • {name}" for name in res["files"])
+        await _send_model_reply(msg, store, manager, thread_id, f"📁 `{res['path'] or '/'}`\n{listed}")
+        return True
+
+    # ── /ide open <file> ───────────────────────────────────────────
+    if sub == "open":
+        rel = " ".join(tokens[1:]).strip()
+        if not rel:
+            await _send_model_reply(msg, store, manager, thread_id, "⚠️ Usage: /ide open <file>")
+            return True
+        res = await ide.read_file(rel)
+        if not res["ok"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {res['error']}")
+            return True
+        lang = res.get("lang", "plaintext")
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"📄 `{rel}` ({res['lines']} lines)\n```{lang}\n{res['content']}\n```",
+        )
+        return True
+
+    # ── /ide edit <file> <text> ────────────────────────────────────
+    if sub == "edit":
+        rest = body[len("edit"):].strip()
+        if not rest:
+            await _send_model_reply(msg, store, manager, thread_id, "⚠️ Usage: /ide edit <file> <text>")
+            return True
+        sp = rest.split(None, 1)
+        rel = sp[0]
+        content = sp[1] if len(sp) > 1 else ""
+        res = await ide.write_file(rel, content)
+        if not res["ok"]:
+            # HITL rejection surfaces here as a denied error.
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {res['error']}")
+            return True
+        await _send_model_reply(msg, store, manager, thread_id, f"✅ {res['output']}")
+        return True
+
+    # ── /ide delete <file> ─────────────────────────────────────────
+    if sub == "delete":
+        rel = " ".join(tokens[1:]).strip()
+        if not rel:
+            await _send_model_reply(msg, store, manager, thread_id, "⚠️ Usage: /ide delete <file>")
+            return True
+        res = await ide.delete_file(rel)
+        if not res["ok"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {res['error']}")
+            return True
+        await _send_model_reply(msg, store, manager, thread_id, f"🗑 Deleted `{rel}`.")
+        return True
+
+    # ── /ide run <command> ─────────────────────────────────────────
+    if sub == "run":
+        cmd = " ".join(tokens[1:]).strip()
+        if not cmd:
+            await _send_model_reply(msg, store, manager, thread_id, "⚠️ Usage: /ide run <command>")
+            return True
+        res = await ide.run(cmd)
+        if not res["ok"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {res['error']}")
+            return True
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"⚙️ `$ {cmd}`\n```\n{(res['output'] or '(no output)')[:4000]}\n```",
+        )
+        return True
+
+    # ── /ide runfile <file> ────────────────────────────────────────
+    if sub == "runfile":
+        rel = " ".join(tokens[1:]).strip()
+        if not rel:
+            await _send_model_reply(msg, store, manager, thread_id, "⚠️ Usage: /ide runfile <file>")
+            return True
+        res = await ide.run_file(rel)
+        if not res["ok"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {res['error']}")
+            return True
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"⚙️ ran `{rel}`\n```\n{(res['output'] or '(no output)')[:4000]}\n```",
+        )
+        return True
+
+    # ── /ide grep <pattern> [glob] ─────────────────────────────────
+    if sub == "grep":
+        rest = body[len("grep"):].strip()
+        if not rest:
+            await _send_model_reply(msg, store, manager, thread_id, "⚠️ Usage: /ide grep <pattern> [glob]")
+            return True
+        gparts = rest.split(None, 1)
+        pattern = gparts[0]
+        glob = gparts[1].strip() if len(gparts) > 1 else "*.py"
+        res = await ide.search(pattern, glob=glob)
+        if not res["ok"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {res['error']}")
+            return True
+        if not res["matches"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"🔍 No matches for `{pattern}`.")
+            return True
+        matches = "\n".join(res["matches"])
+        await _send_model_reply(msg, store, manager, thread_id, f"🔍 `{pattern}`\n```{matches[:4000]}\n```")
+        return True
+
+    # ── /ide git <subcommand> ──────────────────────────────────────
+    if sub == "git":
+        subcmd = " ".join(tokens[1:]).strip()
+        if not subcmd:
+            await _send_model_reply(msg, store, manager, thread_id, "⚠️ Usage: /ide git <subcommand>")
+            return True
+        res = await ide.git(subcmd)
+        if not res["ok"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {res['error']}")
+            return True
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"🌿 `git {subcmd}`\n```\n{(res['output'] or '(no output)')[:4000]}\n```",
+        )
+        return True
+
+    # ── /ide skill [name] [file] ───────────────────────────────────
+    if sub == "skill":
+        rest = body[len("skill"):].strip()
+        # No args → list available skills.
+        if not rest:
+            try:
+                from kazma_skills.coding_skills import list_coding_skills
+
+                skills = list_coding_skills()
+            except Exception as exc:
+                await _send_model_reply(msg, store, manager, thread_id, f"⚠️ Skills unavailable: {exc}")
+                return True
+            if not skills:
+                await _send_model_reply(msg, store, manager, thread_id, "No coding skills available.")
+                return True
+            lines = ["🖥️ **Coding skills**\n"]
+            for s in skills:
+                lines.append(f"  • `{s['name']}` — {s['description']}")
+            lines.append("\nUsage: `/ide skill <name> <file>`")
+            await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
+            return True
+        sp = rest.split(None, 1)
+        skill_name = sp[0]
+        target_file = sp[1].strip() if len(sp) > 1 else ""
+        if not target_file:
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⚠️ Usage: /ide skill {skill_name} <file>",
+            )
+            return True
+        try:
+            from kazma_skills.coding_skills import render_instruction
+
+            instruction = render_instruction(skill_name, target_file)
+        except ValueError as exc:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {exc}")
+            return True
+        res = await ide.send_to_swarm(instruction, pattern="auto")
+        if not res["ok"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {res['error']}")
+            return True
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"🔧 Skill `{skill_name}` dispatched on `{target_file}`.\nTask ID: `{res['task_id']}`",
+        )
+        return True
+
+    # ── /ide repo [owner/repo | list | switch <id>] ────────────────
+    # Point-and-target: activate a workspace by GitHub slug so subsequent
+    # /ide and /swarm operations target that repo. This is the "work on
+    # repo X from any input source" entry point (Phase 3).
+    if sub == "repo":
+        rest = body[len("repo"):].strip()
+        if not rest:
+            # List registered workspaces with their repo identity.
+            try:
+                from kazma_core.stores import get_workspace_store
+
+                wsl = get_workspace_store().list_workspaces()
+            except Exception as exc:
+                await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {exc}")
+                return True
+            if not wsl:
+                await _send_model_reply(msg, store, manager, thread_id, "No workspaces registered.")
+                return True
+            lines = ["🖥️ **Workspaces**\n"]
+            for w in wsl:
+                marker = "🟢 " if w.get("is_active") else "   "
+                slug = f"{w.get('owner')}/{w.get('repo')}" if w.get("owner") else "(no repo)"
+                lines.append(f"{marker}`{w['name']}` — {slug}\n     `{w['id']}`")
+            lines.append("\n`/ide repo switch <id>` to activate one.")
+            lines.append("`/ide repo <owner/repo>` to clone + activate a new one.")
+            await _send_model_reply(msg, store, manager, thread_id, "\n".join(lines))
+            return True
+
+        sp = rest.split(None, 1)
+        action = sp[0].lower()
+
+        # /ide repo switch <id>
+        if action == "switch" and len(sp) > 1:
+            ws_id = sp[1].strip()
+            try:
+                from kazma_core.stores import get_workspace_store
+
+                ok = get_workspace_store().set_active_workspace(ws_id)
+            except Exception as exc:
+                await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {exc}")
+                return True
+            if ok:
+                from kazma_core.ide.service import get_ide_service
+
+                get_ide_service().refresh_root()
+                await _send_model_reply(msg, store, manager, thread_id, f"✅ Activated workspace `{ws_id}`.")
+            else:
+                await _send_model_reply(msg, store, manager, thread_id, f"⚠️ Workspace `{ws_id}` not found.")
+            return True
+
+        # /ide repo clone <owner/repo> — clone from GitHub + activate.
+        if action == "clone" and len(sp) > 1:
+            slug = sp[1].strip()
+            if "/" not in slug:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"⚠️ Usage: /ide repo clone <owner/repo>",
+                )
+                return True
+            import os
+            import subprocess
+            from kazma_core.stores import get_workspace_store
+            from kazma_core.config_store import get_config_store
+
+            store_ws = get_workspace_store()
+            # Reuse an existing workspace if one already matches.
+            existing = next(
+                (w for w in store_ws.list_workspaces()
+                 if w.get("owner") and f"{w['owner']}/{w['repo']}" == slug),
+                None,
+            )
+            if existing:
+                store_ws.set_active_workspace(existing["id"])
+                from kazma_core.ide.service import get_ide_service
+
+                get_ide_service().refresh_root()
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"✅ `{slug}` already cloned — activated workspace `{existing['name']}`.",
+                )
+                return True
+
+            base_dir = os.environ.get("KAZMA_CLONE_DIR", "").strip() or str(
+                Path.home() / "kazma-repos"
+            )
+            Path(base_dir).mkdir(parents=True, exist_ok=True)
+            repo_dir = Path(base_dir) / slug.split("/")[-1]
+            if repo_dir.exists():
+                i = 1
+                while Path(f"{repo_dir}-{i}").exists():
+                    i += 1
+                repo_dir = Path(f"{repo_dir}-{i}")
+            url = f"https://github.com/{slug}.git"
+            await _send_model_reply(
+                msg, store, manager, thread_id, f"⏳ Cloning `{slug}`…",
+            )
+            try:
+                subprocess.run(
+                    ["git", "clone", "--depth", "1", url, str(repo_dir)],
+                    check=True, capture_output=True, text=True, timeout=120,
+                )
+            except subprocess.CalledProcessError as exc:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"⚠️ Clone failed: {(exc.stderr or '')[:300]}",
+                )
+                return True
+            except subprocess.TimeoutExpired:
+                await _send_model_reply(msg, store, manager, thread_id, "⚠️ Clone timed out.")
+                return True
+            record = store_ws.create_workspace(slug.split("/")[-1], str(repo_dir))
+            store_ws.set_active_workspace(record["id"])
+            try:
+                _o, _r = slug.split("/", 1)
+                store_ws.set_repo_identity(
+                    str(repo_dir), repo_url=url, owner=_o, repo=_r,
+                    default_branch="main", is_github=True,
+                )
+            except Exception:
+                pass
+            get_config_store().set("workspace.selected_path", str(repo_dir), category="workspace")
+            from kazma_core.ide.service import get_ide_service
+
+            get_ide_service().refresh_root()
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"✅ Cloned `{slug}` and activated it.\nPath: `{repo_dir}`",
+            )
+            return True
+
+        # /ide repo <owner/repo> — try to match an existing workspace, else report.
+        slug = rest.strip()
+        try:
+            from kazma_core.stores import get_workspace_store
+
+            wsl = get_workspace_store().list_workspaces()
+        except Exception as exc:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {exc}")
+            return True
+        match = next(
+            (w for w in wsl if w.get("owner") and f"{w['owner']}/{w['repo']}" == slug),
+            None,
+        )
+        if match:
+            get_workspace_store().set_active_workspace(match["id"])
+            from kazma_core.ide.service import get_ide_service
+
+            get_ide_service().refresh_root()
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"✅ Activated `{slug}` (workspace `{match['name']}`).",
+            )
+            return True
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"ℹ️ No workspace matches `{slug}`. Clone it first via the Web UI GitHub panel, "
+            f"or `/ide repo switch <id>`. Send `/ide repo` to list workspaces.",
+        )
+        return True
+
+    # ── /ide swarm <task> ──────────────────────────────────────────
+    if sub == "swarm":
+        task = " ".join(tokens[1:]).strip()
+        if not task:
+            await _send_model_reply(msg, store, manager, thread_id, "⚠️ Usage: /ide swarm <task>")
+            return True
+        res = await ide.send_to_swarm(task, pattern="auto")
+        if not res["ok"]:
+            await _send_model_reply(msg, store, manager, thread_id, f"⚠️ {res['error']}")
+            return True
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"🐝 Dispatched coding task to the swarm.\nTask ID: `{res['task_id']}`",
+        )
+        return True
+
+    # Unknown subcommand → show help rather than falling through to the graph.
+    await _send_model_reply(
+        msg, store, manager, thread_id,
+        f"⚠️ Unknown IDE subcommand `{sub}`. Send `/ide` for help.",
+    )
+    return True
 
 
 async def _try_model_command(
