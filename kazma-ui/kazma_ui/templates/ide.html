@@ -18,6 +18,13 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/shell/shell.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js"></script>
+  {# Find / replace — CodeMirror search addon (Ctrl+F find, Ctrl+H replace inside the editor). #}
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/searchcursor.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/search.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/jump-to-line.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
     .ide-layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; height: calc(100vh - 160px); min-height: 480px; }
@@ -27,6 +34,16 @@
     .ide-editor-wrap { flex: 1 1 0; min-height: 120px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-deep); }
     .ide-editor-wrap .CodeMirror { height: 100%; font-family: var(--font-mono); font-size: 0.85rem; }
     .ide-fallback { width: 100%; height: 100%; min-height: 120px; border: none; resize: none; background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.85rem; padding: 10px; box-sizing: border-box; }
+    /* ── Tab bar ── */
+    .ide-tabs { display: flex; gap: 2px; overflow-x: auto; flex-shrink: 0; padding: 0 2px; max-height: 36px; }
+    .ide-tab { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-xs) var(--radius-xs) 0 0; background: var(--bg-elevated); border: 1px solid var(--border-subtle); cursor: pointer; font-size: 0.75rem; white-space: nowrap; max-width: 200px; }
+    .ide-tab.active { background: var(--bg-deep); border-bottom-color: var(--bg-deep); font-weight: 600; color: var(--accent); }
+    .ide-tab:hover { background: var(--bg-hover); }
+    .ide-tab-name { overflow: hidden; text-overflow: ellipsis; }
+    .ide-tab-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 2px; font-size: 0.9rem; line-height: 1; border-radius: var(--radius-xs); }
+    .ide-tab-close:hover { color: var(--danger, #ef4444); background: var(--bg-hover); }
+    .ide-tab-dot { color: var(--warning); font-size: 0.6rem; }
+    .CodeMirror-dialog { background: var(--bg-surface); color: var(--text-primary); }
     .ide-tree-row { display: flex; align-items: center; gap: 6px; padding: 5px 10px; cursor: pointer; font-size: 0.8rem; border-bottom: 1px solid var(--tint); }
     /* ── Chat panel ── */
     .ide-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
@@ -111,9 +128,23 @@
     <!-- ── Editor + Panels ── -->
     <div class="ide-main">
       <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden;border:1px solid var(--border-subtle);min-height:260px;">
-        <div class="card-header" style="display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border-subtle);padding:8px 12px;">
+        <div class="card-header" style="display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border-subtle);padding:6px 8px;">
           <span style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Editor</span>
-          <span x-show="!cmReady" style="font-size:0.7rem;color:var(--text-muted);" x-cloak>(plain textarea — CodeMirror unavailable)</span>
+          <span x-show="!cmReady" style="font-size:0.7rem;color:var(--text-muted);" x-cloak>(plain textarea)</span>
+          <span style="font-size:0.68rem;color:var(--text-muted);margin-left:auto;" x-show="cmReady && currentFile" x-cloak>
+            Ctrl+F find · Ctrl+H replace
+          </span>
+        </div>
+        <!-- ── Tab bar ── -->
+        <div class="ide-tabs" x-show="tabs.length > 0" x-cloak style="padding:4px 6px 0 6px;">
+          <template x-for="tab in tabs" :key="tab.path">
+            <div class="ide-tab" :class="{ 'active': tab.path === activeTabPath }"
+                 @click="switchTab(tab.path)" @mousedown.middle.prevent="closeTab(tab.path)">
+              <span class="ide-tab-dot" x-show="tab.dirty || (tab.path === activeTabPath && dirty)" x-cloak>●</span>
+              <span class="ide-tab-name" x-text="tab.name" :title="tab.path"></span>
+              <button class="ide-tab-close" @click.stop="closeTab(tab.path)" title="Close tab">×</button>
+            </div>
+          </template>
         </div>
         <div class="ide-editor-wrap">
           <textarea x-ref="editor" class="ide-fallback" spellcheck="false"
@@ -218,33 +249,6 @@
       </div>
     </div>
   </div>
-
-  <!-- ── New-file modal (Kazma style, reuses .modal-overlay/.modal CSS) ── -->
-  <template x-if="newFileModalOpen">
-    <div class="modal-overlay" @click.self="cancelNewFile()" @keydown.escape.window="cancelNewFile()" style="z-index:1100;">
-      <div class="modal modal-sm" role="dialog" aria-modal="true" aria-label="New file">
-        <div class="modal-header">
-          <h2>📄 New file</h2>
-          <button class="modal-close" @click="cancelNewFile()" aria-label="Close">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <label style="font-size:0.8rem;color:var(--text-secondary);display:block;margin-bottom:6px;">
-            Path (relative to workspace root)
-          </label>
-          <input id="new-file-input" type="text" class="form-input"
-                 x-model="newFilePath" @keydown="newFileKeydown($event)"
-                 placeholder="e.g. src/new_module.py"
-                 style="width:100%;font-family:var(--font-mono);font-size:0.85rem;">
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" @click="cancelNewFile()">Cancel</button>
-          <button class="btn btn-primary" @click="confirmNewFile()" :disabled="!newFilePath.trim()">Create</button>
-        </div>
-      </div>
-    </div>
-  </template>
 </div>
 {% endblock %}
 

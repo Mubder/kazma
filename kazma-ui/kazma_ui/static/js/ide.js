@@ -26,6 +26,9 @@ function ideApp() {
     cmReady: false,
     skills: [],
     selectedSkill: '',
+    // ── Multi-tab state ──
+    tabs: [],
+    activeTabPath: '',
     // ── Chat panel state ──
     chatOpen: true,
     chatMessages: [],
@@ -33,9 +36,6 @@ function ideApp() {
     chatBusy: false,
     chatSessionId: '',
     chatStream: null,
-    // ── New-file modal state ──
-    newFileModalOpen: false,
-    newFilePath: '',
 
     // ── i18n-safe toast ──
     toast(msg, ok) {
@@ -119,6 +119,10 @@ function ideApp() {
           var self = this;
           this.cm.on('change', function () {
             self.dirty = self.cm.getValue() !== self.originalContent;
+            // Keep the active tab's dirty flag in sync so the tab bar
+            // dot indicator updates live as the user types.
+            var tab = self._activeTab();
+            if (tab) tab.dirty = self.dirty;
           });
           this.cmReady = true;
           return;
@@ -208,12 +212,11 @@ function ideApp() {
 
     // ── Open ──
     async open(path) {
-      // Guard: warn before discarding unsaved edits.
-      if (this.dirty && this.currentFile && this.currentFile !== path) {
-        if (!window.confirm('You have unsaved changes in "' + this.currentFile +
-            '". Discard them and open "' + path + '"?')) {
-          return;
-        }
+      // If the file is already open in a tab, just switch to it (no re-read).
+      var existing = this.tabs.find(function (t) { return t.path === path; });
+      if (existing) {
+        this.switchTab(path);
+        return;
       }
       this.busy = true;
       try {
@@ -222,12 +225,20 @@ function ideApp() {
           this.showResult('Read failed', data.error || 'Unknown error');
           return;
         }
-        this.currentFile = data.path || path;
-        this.currentLang = data.lang || 'plaintext';
-        if (this.cm) {
-          this.cm.setOption('mode', this._cmMode(this.currentLang));
-        }
-        this.setContent(data.content || '');
+        var filePath = data.path || path;
+        var lang = data.lang || 'plaintext';
+        // Capture any edits in the current tab before creating a new one.
+        this._captureToTab();
+        this.tabs.push({
+          path: filePath,
+          name: filePath.split('/').pop(),
+          lang: lang,
+          content: data.content || '',
+          original: data.content || '',
+          dirty: false,
+        });
+        this.activeTabPath = filePath;
+        this._loadFromTab(this._activeTab());
       } catch (err) {
         this.toast('Open failed', false);
       } finally {
@@ -235,41 +246,102 @@ function ideApp() {
       }
     },
 
-    // ── New file (opens a Kazma-style modal, not window.prompt) ──
-    newFile() {
-      this.newFilePath = 'new_file.py';
-      this.newFileModalOpen = true;
+    // ── Multi-tab helpers ──
+    _activeTab() {
       var self = this;
-      this.$nextTick(function () {
-        var inp = document.getElementById('new-file-input');
-        if (inp) { inp.focus(); inp.select(); }
-      });
+      return this.tabs.find(function (t) { return t.path === self.activeTabPath; }) || null;
     },
 
-    confirmNewFile() {
-      var name = (this.newFilePath || '').trim();
-      if (!name) return;
-      this.newFileModalOpen = false;
-      // Guard unsaved edits in the current file.
-      if (this.dirty && this.currentFile) {
-        if (!window.confirm('Discard unsaved changes in "' + this.currentFile + '"?')) return;
+    // Save the current CodeMirror content + dirty state back into the tab.
+    _captureToTab() {
+      var tab = this._activeTab();
+      if (!tab) return;
+      tab.content = this.getContent();
+      tab.dirty = this.dirty;
+    },
+
+    // Load a tab's saved state into CodeMirror and update the UI.
+    _loadFromTab(tab) {
+      if (!tab) {
+        this.currentFile = '';
+        this.currentLang = 'plaintext';
+        this.originalContent = '';
+        this.setContent('');
+        return;
       }
-      this.currentFile = name;
-      this.currentLang = this._langFromName(name);
+      this.activeTabPath = tab.path;
+      this.currentFile = tab.path;
+      this.currentLang = tab.lang;
       if (this.cm) {
-        this.cm.setOption('mode', this._cmMode(this.currentLang));
+        this.cm.setOption('mode', this._cmMode(tab.lang));
       }
-      this.setContent('');
+      this.setContent(tab.content || '');
+      this.originalContent = tab.original || '';
+      this.dirty = !!tab.dirty;
+    },
+
+    switchTab(path) {
+      if (path === this.activeTabPath) return;
+      this._captureToTab();
+      var tab = this.tabs.find(function (t) { return t.path === path; });
+      if (tab) {
+        this._loadFromTab(tab);
+      }
+    },
+
+    async closeTab(path) {
+      var idx = this.tabs.findIndex(function (t) { return t.path === path; });
+      if (idx === -1) return;
+      var tab = this.tabs[idx];
+      // Warn if the tab being closed has unsaved edits.
+      if ((path === this.activeTabPath ? this.dirty : tab.dirty)) {
+        var ok = window.kazmaConfirm
+          ? await window.kazmaConfirm({
+              title: 'Close tab',
+              message: '"' + tab.name + '" has unsaved changes. Close anyway?',
+              confirmText: 'Close', danger: true,
+            })
+          : window.confirm('"' + tab.name + '" has unsaved changes. Close anyway?');
+        if (!ok) return;
+      }
+      this.tabs.splice(idx, 1);
+      if (path === this.activeTabPath) {
+        // Activate the neighbor tab, or clear the editor.
+        var next = this.tabs[idx] || this.tabs[idx - 1] || null;
+        if (next) {
+          this._loadFromTab(next);
+        } else {
+          this.currentFile = '';
+          this.setContent('');
+          this.activeTabPath = '';
+        }
+      }
+    },
+
+    // ── New file (uses the unified kazmaPrompt dialog) ──
+    async newFile() {
+      var name = window.kazmaPrompt
+        ? await window.kazmaPrompt({
+            title: '📄 New file',
+            message: 'Path (relative to workspace root)',
+            placeholder: 'e.g. src/new_module.py',
+            defaultValue: 'new_file.py',
+            confirmText: 'Create',
+          })
+        : window.prompt('New file path:', 'new_file.py');
+      if (!name || !name.trim()) return;
+      name = name.trim();
+      this._captureToTab();
+      this.tabs.push({
+        path: name,
+        name: name.split('/').pop(),
+        lang: this._langFromName(name),
+        content: '',
+        original: '',
+        dirty: false,
+      });
+      this._loadFromTab(this.tabs[this.tabs.length - 1]);
       this.toast('New file — press Save to create it', true);
-    },
-
-    cancelNewFile() {
-      this.newFileModalOpen = false;
-    },
-
-    newFileKeydown(e) {
-      if (e.key === 'Enter') { e.preventDefault(); this.confirmNewFile(); }
-      else if (e.key === 'Escape') { e.preventDefault(); this.cancelNewFile(); }
     },
 
     _langFromName(name) {
@@ -282,14 +354,22 @@ function ideApp() {
     // ── Delete current file (HITL-gated) ──
     async deleteFile() {
       if (!this.currentFile) return;
-      if (!window.confirm('Delete "' + this.currentFile + '"?\nThis cannot be undone.')) return;
+      var ok = window.kazmaConfirm
+        ? await window.kazmaConfirm({
+            title: 'Delete file',
+            message: 'Delete "' + this.currentFile + '"?\nThis cannot be undone.',
+            confirmText: 'Delete', danger: true,
+          })
+        : window.confirm('Delete "' + this.currentFile + '"?\nThis cannot be undone.');
+      if (!ok) return;
+      var delPath = this.currentFile;
       this.busy = true;
       try {
-        var data = await this._post('/api/ide/delete', { path: this.currentFile });
+        var data = await this._post('/api/ide/delete', { path: delPath });
         if (data.ok) {
-          this.toast('Deleted ' + this.currentFile, true);
-          this.currentFile = '';
-          this.setContent('');
+          this.toast('Deleted ' + delPath, true);
+          // Remove the tab for the deleted file.
+          this.closeTabSilent(delPath);
           this.loadTree(this.treePath);
         } else {
           this.showResult('Delete failed', data.error || 'Unknown error');
@@ -299,6 +379,24 @@ function ideApp() {
         this.toast('Delete failed', false);
       } finally {
         this.busy = false;
+      }
+    },
+
+    // Close a tab without the unsaved-changes confirmation (for deletion).
+    closeTabSilent(path) {
+      var idx = this.tabs.findIndex(function (t) { return t.path === path; });
+      if (idx === -1) {
+        // Not in a tab (e.g. agent deleted it) — just clear if active.
+        if (path === this.activeTabPath) {
+          this.currentFile = ''; this.setContent(''); this.activeTabPath = '';
+        }
+        return;
+      }
+      this.tabs.splice(idx, 1);
+      if (path === this.activeTabPath) {
+        var next = this.tabs[idx] || this.tabs[idx - 1] || null;
+        if (next) { this._loadFromTab(next); }
+        else { this.currentFile = ''; this.setContent(''); this.activeTabPath = ''; }
       }
     },
 
@@ -312,8 +410,12 @@ function ideApp() {
           content: this.getContent(),
         });
         if (data.ok) {
-          this.originalContent = this.getContent();
+          var saved = this.getContent();
+          this.originalContent = saved;
           this.dirty = false;
+          // Sync the active tab.
+          var tab = this._activeTab();
+          if (tab) { tab.original = saved; tab.content = saved; tab.dirty = false; }
           this.toast('Saved ' + this.currentFile, true);
           this.showResult('Save', data.output || 'OK');
         } else {
@@ -584,9 +686,8 @@ function ideApp() {
         return;
       }
       if (toolName === 'file_delete') {
-        // The open file was deleted — clear the editor.
-        this.currentFile = '';
-        this.setContent('');
+        // The open file was deleted — clear the editor + tab.
+        this.closeTabSilent(this.currentFile);
         this.toast('Open file was deleted', false);
         return;
       }
@@ -595,6 +696,13 @@ function ideApp() {
         var data = await this._get('/api/ide/read?path=' + encodeURIComponent(this.currentFile));
         if (data.ok) {
           this.setContent(data.content || '');
+          // Sync the active tab so the saved state matches.
+          var tab = this._activeTab();
+          if (tab) {
+            tab.content = data.content || '';
+            tab.original = data.content || '';
+            tab.dirty = false;
+          }
           this.toast('Updated ' + this.currentFile, true);
         }
       } catch (e) { /* non-fatal */ }
