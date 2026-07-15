@@ -24,6 +24,7 @@ from .hitl import (
     _handle_hitl_resume,
 )
 from .commands import (
+    _try_ide_command,
     _try_model_command,
     _try_swarm_command,
     _build_slash_ctx,
@@ -273,6 +274,15 @@ def create_graph_handler(
         )
         if swarm_handled:
             return  # swarm dispatched, skip graph
+
+        # ── IDE slash-command intercept ─────────────────────────────
+        # /ide ... drives the transport-neutral IdeService. Placed after the
+        # swarm intercept so /swarm keeps precedence; both skip the graph.
+        ide_handled = await _try_ide_command(
+            msg, _store, manager, thread_id,
+        )
+        if ide_handled:
+            return  # IDE command handled, skip graph
 
         # ── Majlis cultural fast-path ─────────────────────────────
         # Detect pure greetings/farewells before invoking the LLM.

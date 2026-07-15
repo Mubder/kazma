@@ -196,6 +196,19 @@ class KazmaAgent:
         except Exception:
             pass
 
+        # ── Environment awareness (IDE/workspace/repo) ──────────────
+        # Tell the brain it has an IDE workspace + tools + GitHub. Re-read
+        # per turn in build_env_context() via the streaming path; this base
+        # injection covers the initial system prompt. See env_context.py.
+        try:
+            from kazma_core.ide.env_context import build_env_context
+
+            env_block = build_env_context()
+            if env_block and env_block not in self.system_prompt:
+                self.system_prompt = self.system_prompt.rstrip() + "\n\n" + env_block
+        except Exception:
+            logger.debug("[agent_runner] env context injection skipped", exc_info=True)
+
         # Universal language directive — injected LAST so it's the final
         # instruction the model sees, after all cultural context. This
         # prevents Arabic cultural context from biasing the model to

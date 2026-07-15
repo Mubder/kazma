@@ -386,6 +386,16 @@ def create_sse_chat_router(
 
         session_id = body.get("session_id") or str(uuid.uuid4())
 
+        # ── Optional IDE context (Phase: IDE chat box) ───────────────
+        # When the IDE chat sends the currently-open file as context, we
+        # prepend it as a clearly-delimited preamble so the agent knows
+        # what the user is looking at, separate from their question. This
+        # is backward-compatible: the field is absent for the main /chat
+        # page, so behavior there is unchanged.
+        ide_context = (body.get("context") or "").strip()
+        if ide_context:
+            user_message = f"{ide_context}\n\n--- User message ---\n{user_message}"
+
         # ── Resolve session and thread_id (shared store) ───────────
         session, thread_id = _resolve_session(session_id)
 
@@ -462,6 +472,20 @@ def create_sse_chat_router(
         has_system = any(m.get("role") == "system" for m in session.messages)
         if not has_system and system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+
+        # ── Per-turn environment refresh (Phase 2) ─────────────────
+        # Re-resolve workspace/repo/tool facts on every request so a
+        # mid-conversation workspace switch takes effect immediately. The
+        # base system prompt is built once at init; this keeps it current.
+        try:
+            from kazma_core.ide.env_context import build_env_context
+
+            env_block = build_env_context()
+            if env_block:
+                messages.append({"role": "system", "content": env_block})
+        except Exception:
+            logger.debug("[sse_chat] per-turn env_context refresh skipped", exc_info=True)
+
         messages.extend(
             {k: v for k, v in m.items() if k in ("role", "content")} for m in session.messages
         )

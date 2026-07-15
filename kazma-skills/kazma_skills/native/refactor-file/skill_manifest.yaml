@@ -1,0 +1,48 @@
+name: refactor-file
+version: 0.1.0
+description: Refactor a source file for readability and maintainability, then run the project's tests/linter, operating only within the active workspace via the shared file/exec tools.
+author: Kazma Team
+license: MIT
+
+# Prompt/instruction skill (no tool implementation). The IDE "send to swarm"
+# button or a user can render `swarm_instruction_template` with a concrete
+# file path and pass the result to IdeService.send_to_swarm(instruction=...).
+category: code
+capabilities:
+  - code
+  - refactor
+  - swarm
+tags:
+  - coding
+  - swarm
+  - workspace
+  - refactor
+
+# Declares intent without implementing tools. Workers already have
+# file_write / file_read / shell_exec / python_exec from the shared pool.
+workspace_scoped: true
+hitl_gated: true
+
+swarm_instruction_template: |
+  Refactor the file at {path} for readability, maintainability, and clarity.
+
+  Hard constraints:
+  - Operate ONLY within the active workspace root. Never read or write any path
+    outside the workspace. Use the existing tools only:
+      * file_read    — read the file/diff
+      * file_write   — apply edits
+      * shell_exec   — run the project's test suite and linter (e.g. `ruff check`)
+      * python_exec  — run Python-based checks or tests
+  - Do NOT invent or call any new tools or libraries.
+  - Danger-tier operations (file_write, shell_exec, python_exec) are routed
+    through the HITL approval gate automatically by the safety layer. Do not
+    attempt to disable or bypass safety.
+
+  Steps:
+  1. file_read {path} and understand its structure and intent.
+  2. Apply refactorings that improve naming, structure, and clarity without
+     changing external behavior.
+  3. Run the project's linter (ruff/mypy) and test suite via shell_exec /
+     python_exec.
+  4. Fix any regressions introduced by the refactor using file_write.
+  5. Report the diff summary and final test/lint status.

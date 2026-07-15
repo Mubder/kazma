@@ -13,10 +13,10 @@ All packages are in scope. The four main packages:
 
 | Package | Path | Purpose |
 |---------|------|---------|
-| `kazma-core` | `kazma-core/kazma_core/` | Agent runner, LLM provider, swarm engine, model registry, config store |
-| `kazma-gateway` | `kazma-gateway/kazma_gateway/` | Platform adapters (Telegram/Discord/Slack), agent handler, slash commands |
-| `kazma-ui` | `kazma-ui/kazma_ui/` | FastAPI web app, swarm panel, settings, SSE chat, static JS/CSS |
-| `kazma-tui` | `kazma-tui/kazma_tui/` | Textual-based TUI dashboard (read-only ModelRegistry consumer) |
+| `kazma-core` | `kazma-core/kazma_core/` | Agent runner, LLM provider, swarm engine, model registry, config store, IDE service |
+| `kazma-gateway` | `kazma-gateway/kazma_gateway/` | Platform adapters (Telegram/Discord/Slack), agent handler, slash commands, `/ide` commands |
+| `kazma-ui` | `kazma-ui/kazma_ui/` | FastAPI web app, IDE page, swarm panel, settings, SSE chat, static JS/CSS |
+| `kazma-tui` | `kazma-tui/kazma_tui/` | Textual-based TUI dashboard + IDE editor screen |
 
 ## Critical Subsystems (READ BEFORE MODIFYING)
 
@@ -110,6 +110,69 @@ compatibility. **All public API methods and constructors are unchanged.**
 - The de-facto public attrs (`_workers`, `_active_tasks`, `_task_handles`, `_metrics_collector`) remain on `SwarmEngine`.
 - Constructor signature is unchanged — test fixtures work without modification.
 
+### 10. IDE Subsystem (`kazma-core/kazma_core/ide/`)
+
+The IDE is a transport-agnostic coding backend (Web, TUI, all chat platforms).
+It is the **single source of truth** for file/exec/git/swarm operations on a
+workspace. Three new modules; understanding their interaction is essential.
+
+**A. Workspace root resolution — TWO resolvers that MUST agree**
+- `file_write._get_workspace()` (`tools/file_write.py`) is used by ALL file
+  tools (`file_read`, `file_write`, `file_delete`, `file_list`, `file_search`).
+- `IdeService._resolve_workspace_root()` (`ide/service.py`) is used by the IDE
+  API + TUI.
+- **Resolution precedence (both must follow this):** per-task `workspace_scope`
+  ContextVar → `configure_workspace()` global → `KAZMA_WORKSPACE` env →
+  **active WorkspaceStore row** → `cwd/kazma-data/workspace` default.
+- `app.py` boot config (~line 250) calls `configure_workspace()` — it must
+  consult WorkspaceStore's active workspace, NOT just default to
+  `kazma-data/workspace`. Breaking this reintroduces the "reads outside
+  workspace" bug where repo files get rejected.
+- Path-traversal protection: `IdeService.resolve()` does a string-level
+  `normpath` `..` check + containment backstop (symlink/junction-aware).
+
+**B. HITL routing — no parallel write/exec path**
+- All mutating/exec IDE operations (`write_file`, `delete_file`, `run`,
+  `run_file`, `git`) delegate to `LocalToolRegistry.execute()` via
+  `IdeService._call_tool()`. The HITL gate lives in `tool_registry.py:execute()`
+  (§7B). Never call the underlying tool functions directly from the IDE layer.
+
+**C. Awareness injection — `ide/env_context.py`**
+- `build_env_context()` resolves workspace root, repo slug (from WorkspaceStore
+  cache or `git remote`), branch, GitHub auth, and available tools into a
+  markdown block.
+- Injected at THREE sites: main agent init (`agent_runner.py` + `graph_builder.py`),
+  per-turn in the SSE chat path (`sse_chat.py`, so workspace switches take
+  effect immediately), and into every dispatched worker prompt (`worker.py`).
+- `IdeService.send_to_swarm()` attaches the env block to the task `context` —
+  never drop this or workers lose workspace awareness.
+
+**D. Per-task workspace targeting — `ide/workspace_scope.py`**
+- `workspace_scope(workspace_id)` is an async context manager backed by a
+  `ContextVar`. `worker_dispatch.py` wraps `worker.dispatch()` in it when a
+  `SwarmTask` carries `workspace_id`.
+- `_get_workspace()` consults the scope FIRST, so concurrent tasks can target
+  different repos. `SwarmTask.workspace_id` (None = global active workspace)
+  propagates through `SwarmDispatchContext.metadata`.
+- `ContextVar` propagates across `await` points within one asyncio task;
+  `asyncio.create_task` copies the context (var travels with it).
+
+**E. Repo identity — `WorkspaceStore` persistence**
+- `stores/workspaces.py` has repo-identity columns (`repo_url`, `owner`,
+  `repo`, `default_branch`, `is_github`) added via idempotent `ALTER TABLE`.
+- `repo_for(root_path)` returns cached identity (avoids `git remote` per turn);
+  `set_repo_identity()` persists it. `env_context` prefers the cache.
+- Native GitHub tools (`git_github_manager/tools.py`) use the shared
+  `GitHubClient` (OAuth→PAT→env token) via lazy import, with env-var fallback
+  for headless mode. Don't revert to `os.getenv("GITHUB_TOKEN")`-only.
+
+**F. Transports**
+- Web: `/ide` page + `/api/ide/*` router (`ide_api.py`); file-aware AI chat
+  reuses `/api/chat/stream` (no parallel path).
+- TUI: `editor.py` `EditorScreen` (pushed from `files.py`).
+- Chat: `/ide` slash commands in `commands.py:_try_ide_command`, wired in
+  `graph.py` after the swarm intercept.
+
 - Follow existing Kazma code style (type hints, docstrings, logging)
 - Use `logger = logging.getLogger(__name__)` pattern
 - Use `from __future__ import annotations` for type hints
@@ -117,6 +180,18 @@ compatibility. **All public API methods and constructors are unchanged.**
 - Python: compile-check with `py_compile` before committing
 - JavaScript: syntax-check with `node --check` before committing
 - Never use `&&` or `||` in PowerShell commands; use `;` and `$LASTEXITCODE`
+
+## UI Conventions (Web)
+
+- **Dialogs:** use the unified Promise-based helpers, never native browser
+  dialogs. `window.kazmaConfirm(opts)` (→ `Promise<boolean>`),
+  `window.kazmaAlert(opts)` (→ `Promise<void>`), `window.kazmaPrompt(opts)`
+  (→ `Promise<string|null>`). All backed by `$store.modal`
+  (`static/js/modules/stores.js`) + `components/modal.html`. Each has a
+  native fallback if Alpine hasn't booted. The modal is single-instance.
+- **Toasts:** use `window.showToast(msg, type, duration)` or
+  `Alpine.store('toast').add(...)`. `streaming.js`'s `KazmaStream.toast`
+  delegates to `$store.toast` — there is one toast system.
 
 ## Server Management
 

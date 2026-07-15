@@ -539,6 +539,31 @@ class LocalToolRegistry:
             return await _fw_tool(path, content)
 
         @self.register(
+            description=(
+                "Delete a file or directory. Directories are removed recursively. "
+                "Restricted to the workspace. Danger-tier (requires HITL approval)."
+            ),
+            category="filesystem",
+        )
+        async def file_delete(path: str) -> str:
+            import shutil as _shutil
+
+            p = Path(path).expanduser().resolve()
+            scope_err = _workspace_scope_error(p, path, "deletions")
+            if scope_err:
+                return scope_err
+            if not p.exists():
+                return f"Error: Path not found: {path}"
+            try:
+                if p.is_dir():
+                    _shutil.rmtree(p)
+                else:
+                    p.unlink()
+                return f"Deleted: {path}"
+            except Exception as exc:
+                return f"Error deleting {path}: {exc}"
+
+        @self.register(
             description="List files and directories at a path. Returns names sorted alphabetically.",
             category="filesystem",
         )

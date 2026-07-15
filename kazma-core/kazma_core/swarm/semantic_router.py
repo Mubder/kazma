@@ -23,7 +23,16 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MODEL = "all-MiniLM-L6-v2"
 _DEFAULT_COLLECTION = "swarm_worker_profiles"
-_EMBEDDING_DIM = 384  # all-MiniLM-L6-v2 output dimension
+
+
+def _embedding_dim() -> int:
+    """Read the embedding dimension from config (default 384)."""
+    try:
+        from kazma_core.swarm.memory.embedder import get_embedding_dim
+
+        return get_embedding_dim()
+    except Exception:
+        return 384
 
 
 class SemanticRoutingUnavailableError(RuntimeError):
@@ -221,10 +230,8 @@ class SemanticRouter:
         if not self.available or self._model is None:
             return None
         try:
-            embedding = self._model.encode(text, convert_to_numpy=False)
-            if isinstance(embedding, list):
-                return embedding
-            return list(embedding)  # type: ignore[arg-type]
+            # _model is an Embedder (via get_encoder → get_embedder).
+            return self._model.encode(text)
         except Exception as exc:
             logger.warning("[SemanticRouter] Embedding failed: %s", exc)
             return None

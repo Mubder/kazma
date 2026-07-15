@@ -88,14 +88,29 @@ async def dispatch_worker(
     # Mutable container for handoff state captured inside _attempt.
     captured_handoff: dict[str, Any] = {}
 
+    # Phase 3: extract per-task workspace_id so we can scope the dispatch.
+    _ws_id = None
+    if isinstance(context, SwarmDispatchContext):
+        _ws_id = context.metadata.get("workspace_id")
+
     async def _attempt() -> dict[str, Any]:
         worker.mark_dispatched(prompt)
         # Record activity for auto-scaler reaping
         if engine._autoscaler is not None:
             engine._autoscaler.record_activity(worker.name)
+
+        async def _do_dispatch():
+            """Run the worker dispatch, honoring any per-task workspace scope."""
+            if _ws_id:
+                from kazma_core.ide.workspace_scope import workspace_scope
+
+                async with workspace_scope(_ws_id):
+                    return await worker.dispatch(prompt, context=context)
+            return await worker.dispatch(prompt, context=context)
+
         try:
             raw_result = await timeout_guard.execute(
-                lambda: worker.dispatch(prompt, context=context),
+                _do_dispatch,
                 timeout=timeout,
                 worker_name=worker.name,
             )

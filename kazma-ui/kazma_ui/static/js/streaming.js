@@ -276,6 +276,13 @@ var KazmaStream = (function() {
   function toast(msg, type, duration) {
     type = type || 'info';
     duration = duration || 3500;
+    // Delegate to the unified Alpine $store.toast when available so all
+    // Kazma notifications share one system + container. Falls back to the
+    // vanilla-DOM path when Alpine hasn't booted (early load / offline).
+    if (window.Alpine && window.Alpine.store && Alpine.store('toast')) {
+      Alpine.store('toast').add(msg, type, duration);
+      return;
+    }
     var container = document.getElementById('toast-container') ||
       document.querySelector('.toast-container');
     if (!container) return;

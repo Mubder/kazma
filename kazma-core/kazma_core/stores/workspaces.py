@@ -39,6 +39,22 @@ CREATE TABLE IF NOT EXISTS workspaces (
 CREATE INDEX IF NOT EXISTS idx_workspaces_active ON workspaces(is_active);
 """
 
+# ── Repo-identity columns (Phase 2) ────────────────────────────────────
+# These are added via idempotent ALTER TABLE on init (SQLite has no
+# ADD COLUMN IF NOT EXISTS). They persist the GitHub repo identity tied to
+# a workspace so it doesn't have to be re-derived from `git remote` on
+# every call. All nullable — a non-git directory has NULLs.
+_REPO_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("repo_url", "TEXT"),           # remote.origin.url
+    ("owner", "TEXT"),              # parsed owner
+    ("repo", "TEXT"),               # parsed repo name
+    ("default_branch", "TEXT"),     # 'main' / 'master' / ...
+    ("is_github", "INTEGER"),       # 1 if origin is github.com
+)
+
+# Comma-joined repo column names for SELECT statements.
+_REPO_COLS = "repo_url, owner, repo, default_branch, is_github"
+
 
 class WorkspaceStore:
     """SQLite-backed store for multi-project workspaces.
@@ -73,6 +89,7 @@ class WorkspaceStore:
         with self._lock:
             conn = self._get_conn()
             conn.executescript(_SCHEMA)
+            self._migrate_repo_columns(conn)
 
             # Boot-time check: If no workspaces are recorded, initialize current CWD
             try:
@@ -101,6 +118,85 @@ class WorkspaceStore:
                     )
                 logger.error("[WorkspaceStore] Failed to initialize Default Workspace: %s", exc)
                 raise exc
+
+    # ------------------------------------------------------------------
+    # Schema migration
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _migrate_repo_columns(conn: sqlite3.Connection) -> None:
+        """Idempotently add the repo-identity columns if absent.
+
+        SQLite lacks ``ADD COLUMN IF NOT EXISTS``; we probe ``PRAGMA
+        table_info`` and only ALTER when the column is missing. Safe to
+        call on every init — existing columns are a no-op. This mirrors
+        the auto-migrate pattern used by TaskStore (AGENTS.md §6).
+        """
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(workspaces)")}
+        for col_name, col_type in _REPO_COLUMNS:
+            if col_name not in existing:
+                conn.execute(f"ALTER TABLE workspaces ADD COLUMN {col_name} {col_type}")
+                logger.debug("[WorkspaceStore] Migrated column %s", col_name)
+
+    # ------------------------------------------------------------------
+    # Repo identity (Phase 2)
+    # ------------------------------------------------------------------
+
+    def repo_for(self, root_path: str) -> dict[str, Any] | None:
+        """Return the persisted repo identity for a workspace root, or None.
+
+        Looks up the workspace row by ``root_path`` and returns the repo
+        columns. Returns None if the workspace isn't registered or has no
+        repo identity cached. Callers should fall back to live git
+        detection when this returns None (see ``env_context``).
+        """
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                f"SELECT {_REPO_COLS} FROM workspaces WHERE root_path = ?",
+                (str(Path(root_path).resolve()),),
+            ).fetchone()
+        if not row:
+            return None
+        # All-NULL row = no identity cached.
+        if all(row[k] is None for k in ("repo_url", "owner", "repo", "default_branch", "is_github")):
+            return None
+        return {
+            "repo_url": row["repo_url"],
+            "owner": row["owner"],
+            "repo": row["repo"],
+            "default_branch": row["default_branch"],
+            "is_github": bool(row["is_github"]) if row["is_github"] is not None else None,
+        }
+
+    def set_repo_identity(self, root_path: str, *, repo_url: str | None,
+                          owner: str | None, repo: str | None,
+                          default_branch: str | None = None,
+                          is_github: bool | None = None) -> bool:
+        """Persist the repo identity against the workspace at ``root_path``.
+
+        Returns True if a row was updated, False if no workspace matches.
+        """
+        resolved = str(Path(root_path).resolve())
+        gh_val = None
+        if is_github is not None:
+            gh_val = 1 if is_github else 0
+        with self._lock:
+            conn = self._get_conn()
+            cur = conn.execute(
+                f"""UPDATE workspaces
+                    SET repo_url = ?, owner = ?, repo = ?,
+                        default_branch = ?, is_github = ?
+                    WHERE root_path = ?""",
+                (repo_url, owner, repo, default_branch, gh_val, resolved),
+            )
+            updated = cur.rowcount > 0
+        if updated:
+            logger.debug(
+                "[WorkspaceStore] Cached repo identity for %s: %s/%s",
+                resolved, owner, repo,
+            )
+        return updated
 
     # ------------------------------------------------------------------
     # Storage and Retrieval
@@ -144,39 +240,42 @@ class WorkspaceStore:
         }
 
     def list_workspaces(self) -> list[dict[str, Any]]:
-        """Return all registered workspaces."""
+        """Return all registered workspaces (including repo identity)."""
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
-                "SELECT id, name, root_path, created_at, is_active FROM workspaces ORDER BY created_at"
+                f"SELECT id, name, root_path, created_at, is_active, {_REPO_COLS} "
+                "FROM workspaces ORDER BY created_at"
             ).fetchall()
-        return [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "root_path": row["root_path"],
-                "created_at": row["created_at"],
-                "is_active": bool(row["is_active"]),
-            }
-            for row in rows
-        ]
+        return [self._row_to_dict(row) for row in rows]
 
     def get_active_workspace(self) -> dict[str, Any] | None:
         """Return the currently active workspace dictionary or None."""
         with self._lock:
             conn = self._get_conn()
             row = conn.execute(
-                "SELECT id, name, root_path, created_at, is_active FROM workspaces WHERE is_active = 1"
+                f"SELECT id, name, root_path, created_at, is_active, {_REPO_COLS} "
+                "FROM workspaces WHERE is_active = 1"
             ).fetchone()
         if row:
-            return {
-                "id": row["id"],
-                "name": row["name"],
-                "root_path": row["root_path"],
-                "created_at": row["created_at"],
-                "is_active": True,
-            }
+            return self._row_to_dict(row, active=True)
         return None
+
+    @staticmethod
+    def _row_to_dict(row: sqlite3.Row, *, active: bool | None = None) -> dict[str, Any]:
+        """Marshal a workspace row (with repo columns) into a dict."""
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "root_path": row["root_path"],
+            "created_at": row["created_at"],
+            "is_active": bool(row["is_active"]) if active is None else active,
+            "repo_url": row["repo_url"],
+            "owner": row["owner"],
+            "repo": row["repo"],
+            "default_branch": row["default_branch"],
+            "is_github": bool(row["is_github"]) if row["is_github"] is not None else None,
+        }
 
     def set_active_workspace(self, workspace_id: str) -> bool:
         """Set the workspace with workspace_id as active and others as inactive.

@@ -6,8 +6,9 @@ import asyncio
 from pathlib import Path
 
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import DirectoryTree, Markdown, RichLog, Static
+from textual.widgets import Button, DirectoryTree, Markdown, RichLog, Static
 
 # Cap how much of a file we read for preview. Reading a huge (or unbounded,
 # e.g. a device/pipe) file fully into memory would both block the event loop
@@ -26,16 +27,57 @@ class FilesPanel(VerticalScroll):
     FilesPanel .preview { width: 1fr; border: solid $border; background: $panel; }
     """
 
+    BINDINGS = [
+        Binding("e", "open_editor", "Edit", show=True),
+    ]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._selected_path = None
+
     def compose(self) -> ComposeResult:
         cwd = str(Path.cwd())
         yield Static(f"[bold $primary]Files[/]  ·  [dim]{cwd}[/]", classes="section-label")
+        yield Button("Open in editor (e)", id="open-editor", variant="primary")
         with Horizontal():
             yield DirectoryTree(cwd, id="file-tree")
             yield Static("Select a file to preview", id="file-preview", classes="preview")
 
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         path = event.path
+        self._selected_path = path
         self.run_worker(self._show_preview(path), exclusive=True)
+
+    def _rel_path_for(self, path) -> "str | None":
+        """Return the workspace-relative path, or None if outside the workspace."""
+        # Import lazily to avoid import cycles with kazma_core.
+        from kazma_core.ide.service import get_ide_service
+
+        root = get_ide_service().root
+        try:
+            return str(Path(path).resolve().relative_to(root.resolve()))
+        except ValueError:
+            return None
+
+    def action_open_editor(self) -> None:
+        if self._selected_path is None:
+            return
+        rel = self._rel_path_for(self._selected_path)
+        if rel is None:
+            from kazma_tui.widgets.toast import Toast
+
+            self.app.push_screen(
+                Toast("Selected file is outside the workspace root", "error", duration=2.5)
+            )
+            return
+        # Lazy import keeps kazma_core out of the module import graph.
+        from kazma_tui.editor import EditorScreen
+        from kazma_core.ide.service import get_ide_service
+
+        self.app.push_screen(
+            EditorScreen(rel_path=rel, workspace_root=get_ide_service().root)
+        )
+
 
     @staticmethod
     def _read_preview_text(path: Path, limit: int) -> tuple[str, bool]:

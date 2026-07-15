@@ -53,9 +53,21 @@ storage:
   vector_dim: 384
 memory:
   enabled: true
+  # Per-turn RAG: retrieve relevant memories on every user message (not just
+  # at context compaction). This is what makes the memory system useful.
+  per_turn_retrieval: true
   max_context_tokens: 128000
   retrieval_top_k: 5
   provenance: true
+  # Pluggable embedding backend. provider "local" uses sentence-transformers
+  # in-process (free, 384-dim). provider "openai-compatible" uses any
+  # OpenAI-compatible /embeddings endpoint (NVIDIA NIM, OpenAI, TEI).
+  embedding:
+    provider: local          # local | openai-compatible
+    model: all-MiniLM-L6-v2  # or nv-embed-v1 / text-embedding-3-small / etc.
+    dim: 384                 # must match the model (NIM nv-embed-v1 = 1024)
+    base_url: ""             # e.g. https://integrate.api.nvidia.com/v1 (empty for local)
+    api_key_env: KAZMA_EMBED_API_KEY   # env var name holding the API key (never inline)
 skills:
   path: kazma-skills/manifests/
   auto_discover: true

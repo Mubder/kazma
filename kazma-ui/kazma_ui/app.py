@@ -251,7 +251,23 @@ class KazmaAppBuilder:
             from kazma_core.tools.file_write import configure_workspace
 
             _workspace_env = os.environ.get("KAZMA_WORKSPACE", "").strip()
-            _workspace_path = _workspace_env or "kazma-data/workspace"
+            # Prefer the WorkspaceStore's active workspace (the real repo the
+            # user selected) over the kazma-data/workspace default. Without
+            # this, the boot-time configure_workspace() pins _WORKSPACE_ROOT
+            # to the default and the file tools reject every real repo file
+            # as "outside workspace".
+            _workspace_path = _workspace_env
+            if not _workspace_path:
+                try:
+                    from kazma_core.stores import get_workspace_store
+
+                    active = get_workspace_store().get_active_workspace()
+                    if active and active.get("root_path"):
+                        _workspace_path = active["root_path"]
+                except Exception:
+                    pass
+            if not _workspace_path:
+                _workspace_path = "kazma-data/workspace"
             configure_workspace(workspace=_workspace_path)
             logger.info("[Workspace] Configured to %s", _workspace_path)
         except Exception as e:
@@ -813,6 +829,13 @@ class KazmaAppBuilder:
         workspace_router = create_workspace_router()
         self.app.include_router(workspace_router)
         logger.info("Workspace API router mounted at /api/workspace/*")
+
+        # ── IDE API (delegates to transport-agnostic IdeService) ──
+        from kazma_ui.ide_api import create_ide_router
+
+        ide_router = create_ide_router()
+        self.app.include_router(ide_router)
+        logger.info("IDE API router mounted at /api/ide/*")
 
         # ── Swarm Panel ──
         from kazma_ui.swarm_panel import create_swarm_router

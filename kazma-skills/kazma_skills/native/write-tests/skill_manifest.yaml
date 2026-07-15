@@ -1,0 +1,46 @@
+name: write-tests
+version: 0.1.0
+description: Generate unit tests (pytest) for a given source file, write them into the workspace with the file tools, and run them.
+author: Kazma Team
+license: MIT
+
+# Prompt/instruction skill (no tool implementation). Render
+# `swarm_instruction_template` with a source file path and pass it to
+# IdeService.send_to_swarm(instruction=...).
+category: code
+capabilities:
+  - code
+  - testing
+  - swarm
+tags:
+  - coding
+  - swarm
+  - workspace
+  - tests
+
+workspace_scoped: true
+hitl_gated: true
+
+swarm_instruction_template: |
+  Generate unit tests for the source file at {path} using pytest, then write
+  and run them inside the active workspace.
+
+  Hard constraints:
+  - Operate ONLY within the active workspace root. Never read or write any path
+    outside the workspace. Use the existing tools only:
+      * file_read    — read the source file and any existing tests
+      * file_write   — create the new test module
+      * shell_exec   — run pytest (e.g. `pytest <test_path> -v`)
+      * python_exec  — run/inspect tests or imports
+  - Do NOT invent or call any new tools or libraries.
+  - Danger-tier operations (file_write, shell_exec, python_exec) are routed
+    through the HITL approval gate automatically by the safety layer. Do not
+    attempt to disable or bypass safety.
+
+  Steps:
+  1. file_read {path} and identify the public functions/classes to cover.
+  2. Write a pytest module (e.g. tests/test_<module>.py) in the workspace using
+     file_write, covering normal cases, edge cases, and failure paths.
+  3. Run the new tests with shell_exec / python_exec via pytest.
+  4. If any test fails, iterate on the tests or report the failures clearly.
+  5. Report the final pass/fail summary and the path of the created test file.

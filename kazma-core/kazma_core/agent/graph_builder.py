@@ -72,6 +72,51 @@ def truncate_tool_result(content: str, max_chars: int = TOOL_RESULT_MAX_CHARS) -
     return content
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# Per-turn memory retrieval (RAG) helpers
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _rag_top_k() -> int:
+    """Read the per-turn retrieval top-k from kazma.yaml (default 5)."""
+    try:
+        import yaml
+        from pathlib import Path
+
+        cfg_path = Path("kazma.yaml")
+        if cfg_path.exists():
+            with open(cfg_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            return int(cfg.get("memory", {}).get("retrieval_top_k", 5))
+    except Exception:
+        pass
+    return 5
+
+
+def _format_retrieved_memories(memories: list[dict[str, Any]]) -> str:
+    """Render retrieved memories as a compact system-message block.
+
+    Mirrors the compaction format (compaction.py:_build_compacted_system)
+    but for per-turn injection — a short "## Relevant context from memory"
+    block. Each memory is capped to keep the prompt lean.
+    """
+    if not memories:
+        return ""
+    parts = ["## Relevant context from memory"]
+    for i, mem in enumerate(memories, 1):
+        content = mem.get("content", mem.get("text", ""))
+        if not content:
+            continue
+        # Cap each memory at 300 chars so 5 memories ≤ ~1500 chars.
+        text = str(content).strip()
+        if len(text) > 300:
+            text = text[:300] + "…"
+        parts.append(f"{i}. {text}")
+    if len(parts) == 1:
+        return ""  # all memories were empty
+    return "\n".join(parts)
+
+
 def _ensure_personality(
     messages: list[dict[str, Any]],
     base_system_prompt: str,
@@ -185,16 +230,19 @@ async def supervisor_node(
         messages.insert(0, {"role": "system", "content": system_prompt})
 
     # ── LLM call ──────────────────────────────────────────────────
+    # Extract the latest user message (used by both the model router and
+    # per-turn memory retrieval below).
+    last_user_content = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            last_user_content = str(m.get("content", ""))
+            break
+
     # Classify and route to optimal model if router is available
     routed_model = None
     if model_router is not None:
         from kazma_core.models.router import ModelRouter
 
-        last_user_content = ""
-        for m in reversed(messages):
-            if m.get("role") == "user":
-                last_user_content = str(m.get("content", ""))
-                break
         if last_user_content:
             profile = ModelRouter.classify(last_user_content)
             model_spec = model_router.route(profile)
@@ -205,6 +253,31 @@ async def supervisor_node(
                 model_spec.provider,
                 model_spec.model,
             )
+
+    # ── Per-turn memory retrieval (RAG) ──────────────────────────
+    # Retrieve relevant memories for the current user message and inject
+    # them as a system message before the LLM call. Gated on iteration==0
+    # so it fires once per user turn (not per ReAct iteration). This is
+    # the key difference from compaction-only retrieval — the agent now
+    # has recall on EVERY turn, not just when the context window is full.
+    if iteration == 0 and last_user_content:
+        try:
+            _top_k = _rag_top_k()
+            memories = await authority.compactor.retrieve_memories(
+                last_user_content, limit=_top_k,
+            )
+            if memories:
+                mem_block = _format_retrieved_memories(memories)
+                if mem_block:
+                    # Insert after the base system prompt (position 0) so
+                    # the memory block sits with the persona/env context,
+                    # not in the user/assistant conversation thread.
+                    messages.insert(1, {"role": "system", "content": mem_block})
+                    logger.info(
+                        "[Supervisor] Retrieved %d memories for turn", len(memories),
+                    )
+        except Exception:
+            logger.debug("[Supervisor] per-turn memory retrieval skipped", exc_info=True)
 
     start = time.monotonic()
     try:
@@ -995,6 +1068,19 @@ async def create_supervisor_app(
             system_prompt = system_prompt.rstrip() + cultural_suffix
     except Exception:
         pass  # Non-critical — agent works fine without cultural context
+
+    # ── Environment awareness (IDE/workspace/repo) ──────────────────
+    # Make the supervisor brain aware it has an IDE workspace, tools, and
+    # GitHub. Base injection for the initial system prompt; per-turn
+    # refresh happens in the streaming node via build_env_context().
+    try:
+        from kazma_core.ide.env_context import build_env_context
+
+        env_block = build_env_context()
+        if env_block and env_block not in system_prompt:
+            system_prompt = system_prompt.rstrip() + "\n\n" + env_block
+    except Exception:
+        logger.debug("[graph_builder] env context injection skipped", exc_info=True)
 
     # Universal language directive — ALWAYS enforced and injected LAST
     # so it's the final instruction the model sees, after all cultural

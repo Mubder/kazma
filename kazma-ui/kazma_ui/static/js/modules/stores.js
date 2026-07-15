@@ -44,10 +44,15 @@ export function registerStores() {
             body: '',
             size: 'md',
             actions: [],
+            // Input support (for kazmaPrompt). When `input` is truthy, the
+            // modal renders a text field bound to `inputValue`.
+            input: null,        // null = no input; a string = placeholder text
+            inputValue: '',
+            inputType: 'text',
 
             /**
              * Open a modal.
-             * @param {Object} opts - { title, body, size, actions, onClose }
+             * @param {Object} opts - { title, body, size, actions, onClose, input, inputValue, inputType }
              *   onClose is invoked when the modal is dismissed via overlay
              *   click or Escape (i.e. without an explicit action button).
              */
@@ -56,6 +61,9 @@ export function registerStores() {
                 this.body = opts.body || '';
                 this.size = opts.size || 'md';
                 this.actions = opts.actions || [];
+                this.input = opts.input !== undefined ? opts.input : null;
+                this.inputValue = opts.inputValue !== undefined ? opts.inputValue : '';
+                this.inputType = opts.inputType || 'text';
                 this._onClose = opts.onClose || null;
                 this.open = true;
             },
@@ -72,6 +80,9 @@ export function registerStores() {
                     this.title = '';
                     this.body = '';
                     this.actions = [];
+                    this.input = null;
+                    this.inputValue = '';
+                    this.inputType = 'text';
                 }, 200);
             },
 
@@ -130,6 +141,48 @@ export function registerStores() {
                     });
                 });
             },
+
+            /**
+             * Promise-based prompt dialog — replaces native window.prompt.
+             * Resolves the entered string on confirm, null on Cancel /
+             * overlay / Escape (matching native semantics).
+             * @param {Object} opts - { title, message, placeholder, defaultValue, confirmText, cancelText }
+             * @returns {Promise<string|null>}
+             */
+            promptAsync(opts = {}) {
+                const title = opts.title || 'Input';
+                const message = opts.message || '';
+                const confirmText = opts.confirmText || 'OK';
+                const cancelText = opts.cancelText || 'Cancel';
+                const entityMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+                const escapedMsg = String(message).replace(/[&<>"']/g, function (c) { return entityMap[c]; });
+                const self = this;
+                return new Promise(function (resolve) {
+                    let settled = false;
+                    const settle = function (val) {
+                        if (settled) return;
+                        settled = true;
+                        resolve(val);
+                    };
+                    self.show({
+                        title: title,
+                        body: escapedMsg ? `<p class="confirm-message">${escapedMsg}</p>` : '',
+                        size: 'sm',
+                        input: opts.placeholder || '',          // truthy → render input
+                        inputValue: opts.defaultValue || '',
+                        onClose: function () { settle(null); },
+                        actions: [
+                            { label: cancelText, variant: 'btn-secondary', close: true, handler: function () { settle(null); } },
+                            { label: confirmText, variant: 'btn-primary', close: true, handler: function () { settle(self.inputValue); } },
+                        ],
+                    });
+                    // Autofocus the input once the modal is in the DOM.
+                    setTimeout(function () {
+                        const inp = document.querySelector('.modal-input');
+                        if (inp) { inp.focus(); inp.select(); }
+                    }, 60);
+                });
+            },
         });
 
         // Global promise-based confirm — drop-in replacement for window.confirm().
@@ -174,6 +227,18 @@ export function registerStores() {
             }
             // Fallback if Alpine hasn't booted yet.
             return Promise.resolve(window.alert(opts.message || ''));
+        };
+
+        // Global promise-based prompt — drop-in replacement for window.prompt().
+        // Resolves the entered string on OK, null on Cancel / overlay / Escape.
+        // Usage: const name = await window.kazmaPrompt({ title: 'New file', message: 'Path:', defaultValue: 'x.py' });
+        window.kazmaPrompt = function (opts) {
+            if (typeof opts === 'string') opts = { message: opts };
+            if (window.Alpine && Alpine.store('modal')) {
+                return Alpine.store('modal').promptAsync(opts || {});
+            }
+            // Fallback if Alpine hasn't booted yet.
+            return Promise.resolve(window.prompt(opts && opts.message ? opts.message : ''));
         };
 
         // ── 3. Search Store ────────────────────────────────────────────

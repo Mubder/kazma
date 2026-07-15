@@ -32,6 +32,18 @@
             {# Body #}
             <div class="modal-body" x-html="$store.modal.body"></div>
 
+            {# Input field (shown when $store.modal.input is truthy — kazmaPrompt) #}
+            <div class="modal-body" x-show="$store.modal.input" style="padding-top:0;">
+                <input type="text"
+                       class="form-input modal-input"
+                       x-model="$store.modal.inputValue"
+                       :type="$store.modal.inputType"
+                       :placeholder="$store.modal.input"
+                       @keydown.enter="$store.modal.actions[$store.modal.actions.length - 1] && $store.modal.actions[$store.modal.actions.length - 1].handler ? ($store.modal.actions[$store.modal.actions.length - 1].handler(), $store.modal.close()) : null"
+                       @keydown.escape="$store.modal.close()"
+                       style="width:100%;font-family:var(--font-mono);font-size:0.85rem;">
+            </div>
+
             {# Footer #}
             <div class="modal-footer" x-show="$store.modal.actions && $store.modal.actions.length > 0">
                 <template x-for="action in $store.modal.actions" :key="action.label">

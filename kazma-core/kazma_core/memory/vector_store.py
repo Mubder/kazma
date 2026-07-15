@@ -78,18 +78,18 @@ class VectorMemory:
             Path(self._path).mkdir(parents=True, exist_ok=True)
 
             self._client = chromadb.PersistentClient(path=self._path)
-            # Pre-load the shared encoder so the swarm's ``get_encoder()``
-            # singleton picks it up — avoiding a double-load (~180MB) when
-            # both subsystems are active.  We use ChromaDB's native wrapper
-            # for full API compatibility (embed_query / embed_documents).
-            try:
-                from kazma_core.swarm.memory.vector import get_encoder
-                get_encoder(model_name)  # eagerly warm the shared singleton
-            except Exception:
-                pass
-            self._ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=model_name,
+            # Use the pluggable embedder via the shared factory. For local
+            # sentence-transformers this delegates to ChromaDB's native
+            # SentenceTransformerEmbeddingFunction (no double-load); for a
+            # remote provider (NIM etc.) it wraps the Embedder in a
+            # ChromaDB-compatible EmbeddingFunction.
+            from kazma_core.swarm.memory.embedder import (
+                get_embedder,
+                make_chroma_embedding_function,
             )
+
+            get_embedder()  # eagerly warm the singleton
+            self._ef = make_chroma_embedding_function(get_embedder())
             self._collection = self._client.get_or_create_collection(
                 name=collection_name,
                 embedding_function=self._ef,

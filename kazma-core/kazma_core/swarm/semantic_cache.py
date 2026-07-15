@@ -125,9 +125,7 @@ class SemanticCache:
             return None
 
         try:
-            query_embedding = encoder.encode(prompt, convert_to_numpy=False)
-            if not isinstance(query_embedding, list):
-                query_embedding = list(query_embedding)
+            query_embedding = encoder.encode(prompt)
         except Exception as exc:
             logger.warning("[SemanticCache] Failed to encode query prompt: %s", exc)
             return None
@@ -181,9 +179,7 @@ class SemanticCache:
         encoder = get_encoder()
         if encoder is not None:
             try:
-                emb = encoder.encode(prompt, convert_to_numpy=False)
-                if not isinstance(emb, list):
-                    emb = list(emb)
+                emb = encoder.encode(prompt)
                 embedding_json = json.dumps(emb)
             except Exception as exc:
                 logger.debug("[SemanticCache] Failed to generate embedding for storage: %s", exc)
