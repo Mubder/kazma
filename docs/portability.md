@@ -1,6 +1,6 @@
 # Portability Guarantees
 
-Kazma runs on any Unix machine (Linux, macOS, WSL) with zero modifications.
+Kazma runs on any Unix machine (Linux, macOS, WSL) **or Windows** with zero modifications.
 These are the rules that keep it that way.
 
 ## Invariants
@@ -53,8 +53,11 @@ python -m pytest tests/ -q
 | Bare-metal Linux | `./setup.sh && ./run.sh`                          |
 | macOS         | `pip install -e '.' && python -m uvicorn ...`        |
 | WSL2          | `./setup.sh` (auto-detects WSL)                      |
+| Windows       | `setup.ps1` + `uv run kazma-web` (native, no WSL)    |
 | Docker        | `docker compose up`                                  |
 | Kubernetes    | Use `kazma.yaml` with env overrides, no code changes |
+
+> **IDE subsystem (v0.5.0):** the `kazma_core/ide/` coding backend, the Web IDE page (`/ide`), the TUI editor, and the `/ide` commands were designed cross-platform from the start and run identically on Windows and Unix. The IDE layer uses no `sys.platform` branching, so it obeys the same portability invariants below.
 
 See [scripts/ci/lint-absolute-paths.sh](../scripts/ci/lint-absolute-paths.sh) for the
 automated check, and [.github/workflows/ci.yml](../.github/workflows/ci.yml) for how

@@ -94,7 +94,8 @@ export DISCORD_BOT_TOKEN="your-token"
 kazma/
 ├── kazma-core/            Core agent loop, tools, policy engine
 │   └── kazma_core/
-│       ├── agent.py       ReAct loop via LangGraph
+│       ├── agent/         ReAct loop via LangGraph (KazmaAgent, graph builder)
+│       ├── ide/           Transport-agnostic coding backend (env_context, service, workspace_scope)
 │       ├── delegation/    Multi-agent orchestration
 │       ├── hub/           Skill manifest, registry, validator
 │       ├── security/      Linter, certification, audit trail
@@ -116,7 +117,9 @@ kazma/
 ### Key Design Decisions
 
 - **Storage**: sqlite-vec ONLY — single-file persistence, no ChromaDB or PostgreSQL
-- **Entry point**: `kazma-core/kazma_core/agent.py` — ReAct loop via LangGraph state machine
+- **Entry point**: `kazma-core/kazma_core/agent/__init__.py` (exports `KazmaAgent`, `AgentConfig`, `load_config`) plus `kazma-core/kazma_core/agent_runner.py` (`run_agent()`) — ReAct loop via LangGraph state machine
+- **IDE subsystem** (v0.5.0): `kazma-core/kazma_core/ide/` (`env_context.py`, `service.py`, `workspace_scope.py`) is a transport-agnostic coding backend powering the Web IDE page (`/ide`) and the TUI editor, with cross-platform `/ide` commands.
+- **Pluggable embeddings** (v0.5.0): `kazma-core/kazma_core/swarm/memory/embedder.py` lets memory/RAG use local `sentence-transformers` or any OpenAI-compatible `/embeddings` endpoint (NVIDIA NIM/NeMo Retriever, etc.), configured under `memory.embedding` in `kazma.yaml`.
 - **Config**: YAML-based (`kazma.yaml`) at project root
 - **Observability**: OpenTelemetry + Langfuse tracing
 - **Interface**: Arabic RTL dashboard via FastAPI + HTMX
@@ -490,6 +493,6 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 ## Questions?
 
-Open a [GitHub Discussion](https://github.com/nousresearch/kazma/discussions) for questions, ideas, or help. For bugs, use [GitHub Issues](https://github.com/nousresearch/kazma/issues).
+Open a [GitHub Discussion](https://github.com/Mubder/kazma/discussions) for questions, ideas, or help. For bugs, use [GitHub Issues](https://github.com/Mubder/kazma/issues).
 
 Thank you for contributing to Kazma! 🚀

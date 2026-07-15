@@ -331,20 +331,26 @@ The core library. Everything else depends on it. Entry point package is `kazma_c
   - `swarm/metrics.py`: `MetricsCollector`, `WorkerMetricSnapshot`.
   - `swarm/tracing.py`: `TracingEmitter`, OpenTelemetry-compatible spans.
   - `swarm/reliability.py`: `RetryPolicy`, `CircuitBreaker`, `TimeoutGuard`, `OutputValidator`, `FallbackChain`, `BoundedConcurrency`.
-  - `swarm/worker.py`: `SwarmWorker` (abstract), `InProcessWorker`, `TelegramWorker`.
+  - `swarm/worker.py`: `SwarmWorker` (abstract), `InProcessWorker`.
   - `swarm/checkpoint.py`: `HITLCheckpoint`, `HITLCheckpointHandler`.
   - `swarm/blackboard.py`: `BlackboardStore`, `SwarmDispatchContext`.
   - `swarm/aggregator.py`: `ResultAggregator`, aggregation strategies (`first_valid`, `merge_all`, `vote`, `synthesize`, `collect`).
   - `swarm/config.py`: `SwarmConfig`, `WorkerConfig`.
   - `swarm/manager.py`: `SwarmManager` (backward-compatible facade over `SwarmEngine`).
   - `swarm/handoff.py`: `HandoffRequest`, `request_handoff()`.
+  - `swarm/memory/`: Memory subsystem backing per-turn RAG and the memory tools. Includes `embedder.py` (**pluggable embeddings** — local `sentence-transformers` or any OpenAI-compatible `/embeddings` endpoint such as NVIDIA NIM/NeMo Retriever, configured under `memory.embedding` in `kazma.yaml`), `adapter.py` (retrieval adapter over the shared `agent_memory` ChromaDB collection), `fts5.py`, `sqlite_vec.py`, `graph.py`.
 
 - **`tools/`**: Built-in tools.
   - `file_read.py`, `file_write.py`, `web_search.py`, `read_url.py`, `image_gen.py`, `vision_analyze.py`, `code_exec.py`, `send_message.py`, `export_session.py`, `context_cmd.py`, `personality_cmd.py`.
 
 - **`memory/`**: RAG memory helpers.
-  - `vector_store.py`: `VectorMemory` (ChromaDB + sentence-transformers; optional `rag` extra).
+  - `vector_store.py`: `VectorMemory` (ChromaDB + sentence-transformers; optional `rag` extra). Backs the unified `agent_memory` collection shared by both the memory tools and per-turn RAG retrieval. As of v0.5.0 the agent retrieves memories every turn (iteration 0), not just at compaction; tools and RAG now read/write the same persistent `agent_memory` collection (previously split into an ephemeral `kazma_global` collection that caused a silent write/read split).
   - `fts5.py`: FTS5 helper functions.
+
+- **`ide/`**: **NEW (v0.5.0).** Transport-agnostic coding backend powering the Web IDE page (`/ide`) and the TUI editor. Cross-platform `/ide` commands (Windows + Unix).
+  - `env_context.py`: Workspace environment context (cwd, env vars, repo identity) surfaced to the agent for code tasks.
+  - `service.py`: The IDE service that coordinates file operations, test runs, and agent-driven edits independently of the frontend transport (Web or TUI).
+  - `workspace_scope.py`: Workspace scoping/boundaries that confine file and command operations to the active project root.
 
 - **`hub/`**: Skill marketplace (Kazma Hub).
   - `api.py`, `cli.py`, `loader.py`, `registry.py`, `validator.py`, `manifest_schema.py`, `versioning.py`, `badges.py`.
@@ -394,7 +400,6 @@ The core library. Everything else depends on it. Entry point package is `kazma_c
 - `token_counter.py`, `tokenizer.py`, `kuwaiti_tokenizer.py`, `msa_tokenizer.py`, `dialect_detector.py`, `cultural_context.py`, `tone_adapter.py`: Language and tokenization support.
 - `audit_logger.py`, `authorization_flow.py`, `rbac.py`, `permissions.py`, `division_sandbox.py`, `tool_sandbox.py`: Security and RBAC.
 - `mcp_client.py`: MCP client.
-- `kg_engine.py`: Knowledge graph engine.
 - `streaming.py`: Streaming utilities.
 - `summarizer.py`: Summarization utilities.
 - `majlis.py`: Multi-agent negotiation protocol.
@@ -739,7 +744,7 @@ Telegram/Discord/Slack adapter.listen()
 Web UI (JS/Alpine) -> POST /api/swarm/dispatch
     -> kazma_ui/swarm_panel.py -> _resolve_engine() -> SwarmEngine
         -> kazma_core/swarm/engine.py -> dispatch/broadcast/pipeline/etc.
-            -> kazma_core/swarm/worker.py -> InProcessWorker/TelegramWorker
+            -> kazma_core/swarm/worker.py -> InProcessWorker
             -> kazma_core/swarm/task_store.py -> persist_task()
             -> kazma_core/swarm/metrics.py -> record_worker_result()
             -> kazma_ui/swarm_sse.py -> SSEEventBus.emit()
@@ -1403,7 +1408,6 @@ The following are known limitations or deferred work discovered in the codebase.
 - **Providers hub tests now exist:** Prior to the Providers & Connectors Hub (commit `f3b0945`), there was no dedicated test coverage for the unified provider/connector API endpoints. The `TestUnifiedProvidersRouterAPI` class in `tests/test_settings.py` now covers CRUD, masking, secret preservation, toggle, discover, and connector test scenarios. The hub's `_mask_secret()` and `_is_masked_placeholder()` helpers are implicitly tested through the API integration tests but do not have standalone unit tests; consider adding them if edge cases arise (e.g., Unicode secrets, empty strings, very long keys).
 - **Local STT provider:** `TelegramAdapter._transcribe_voice()` logs "Local STT provider not yet implemented" for `voice_provider="local"`. Only `openai` and `groq` are implemented.
 - **Vector memory optional dependency:** RAG memory via ChromaDB/sentence-transformers requires the `rag` extra. Without it, the UI logs a hint at startup but does not fail.
-- **TelegramWorker external dependency:** `TelegramWorker` shells out to `kazma -p <profile>`. `kazma` is not bundled with Kazma. If not installed, Telegram workers return errors. Prefer `InProcessWorker` for environments without `kazma`.
 - **TUI chat is not wired to the agent:** The TUI chat panel is a local UI with `/help`, `/clear`, `/quit` commands. It does not send messages to the agent LLM. This is by design for the current milestone; a future enhancement could integrate with the SSE chat router or a local agent runner.
 - **Mock `/api/telemetry` endpoint:** `kazma-ui/kazma_ui/app.py` still defines a mock `/api/telemetry` endpoint returning random token/VRAM data. The real telemetry SSE endpoint is `/api/telemetry/stream`. The mock endpoint is kept for backward compatibility with old dashboard JS; it may be removed in a future cleanup.
 - **PowerShell completions:** The CLI completions module supports PowerShell but the installation path detection may need adjustment for non-standard PowerShell profiles.

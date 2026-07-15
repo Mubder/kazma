@@ -358,6 +358,50 @@ Shows the accumulated token spend and cost for the current session.
 
 ---
 
+## `/ide` — IDE Coding Commands (v0.5.0+)
+
+**Where handled:** `kazma_gateway/agent_handler/commands.py:_try_ide_command`
+(intercepted in the gateway, skips the graph — same path as `/swarm`).
+
+All `/ide` commands drive the transport-neutral `IdeService` in
+`kazma_core/ide/`. Mutating/executing operations (`edit`, `delete`, `run`,
+`git`) flow through the shared `LocalToolRegistry` + HITL danger-tool gate.
+
+### Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `/ide` | Show help with all subcommands |
+| `/ide ls [path]` | List a directory in the workspace |
+| `/ide open <file>` | Read a file (shown in a code block) |
+| `/ide edit <file> <text>` | Write content to a file (HITL-gated) |
+| `/ide delete <file>` | Delete a file or directory (HITL-gated) |
+| `/ide run <command>` | Run a shell command in the workspace (HITL-gated) |
+| `/ide runfile <file>` | Run a script with its inferred interpreter |
+| `/ide grep <pattern> [glob]` | Regex search the workspace |
+| `/ide git <subcommand>` | Run a git subcommand (HITL-gated) |
+| `/ide repo` | Manage workspaces (list, switch, clone, activate by slug) |
+| `/ide skill [name] [file]` | Run a coding skill (refactor-file, write-tests, fix-lint, code-review) |
+| `/ide swarm <task>` | Dispatch a coding task to the swarm |
+
+### Examples
+
+```
+/ide                              → shows help
+/ide open kazma_core/ide/service.py → reads the file
+/ide edit config.yaml "key: value" → writes (HITL approval required)
+/ide run pytest -q                → runs tests (HITL approval required)
+/ide repo clone Mubder/kazma      → clones + activates as workspace
+/ide skill write-tests kazma_core/ide/service.py → generates tests via swarm
+```
+
+**Danger-tier operations** (`edit`, `delete`, `run`, `git`) require HITL
+approval — the same gate as the agent and swarm. See AGENTS.md §7.
+
+**Available on:** Telegram, Discord, Slack, Web (chat), TUI.
+
+---
+
 ## Command Lifecycle
 
 1. User sends text starting with `/`.

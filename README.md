@@ -13,14 +13,15 @@ Kazma is a multi-platform AI agent framework that lets you build, deploy, and or
 
 **Key capabilities:**
 
-- 🧠 **LangGraph supervisor** — a ReAct loop with tool calling, durable checkpointing, and 80% context compaction with memory injection
+- 🧠 **LangGraph supervisor** — a ReAct loop with tool calling, durable checkpointing, 80% context compaction, and **per-turn RAG retrieval** (memories injected on every message, not just at compaction)
 - 🐝 **Swarm orchestration** — six patterns (dispatch, broadcast, pipeline, fan-out, consult, conditional) with circuit breakers, retries, and self-improvement
+- 💻 **IDE subsystem** — transport-agnostic coding backend (Web, TUI, all chat platforms): multi-tab editor, file-aware AI chat, `/ide` commands, per-task workspace targeting, GitHub clone-from-chat
 - 🔒 **Human-in-the-loop safety** — three independent HITL gates ensure dangerous tools never execute without approval
 - 🔑 **Encrypted secret vault** — AES-256-GCM encrypted storage for API keys and credentials
 - 🌐 **Any LLM provider** — OpenAI, Anthropic, DeepSeek, Google Gemini, xAI, OpenRouter, Ollama, LM Studio, NVIDIA NIM — via plain HTTP, no SDK lock-in
 - 🇸🇦 **Arabic-native** — custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultural protocol
-- 💾 **Memory & RAG** — ChromaDB vector memory with automatic retrieval injection during compaction
-- 📱 **Responsive web UI** — works on mobile with a slide-in nav drawer
+- 💾 **Memory & RAG** — ChromaDB vector memory with per-turn retrieval injection. **Pluggable embeddings** — local sentence-transformers or NVIDIA NIM / any OpenAI-compatible endpoint (config flip, no code change)
+- 📱 **Responsive web UI** — multi-tab code editor, AI chat, find/replace, unified dialog system — works on mobile with a slide-in nav drawer
 
 ---
 
@@ -177,8 +178,9 @@ User (Telegram/Discord/Slack/Web/TUI)
 Platform Adapter (isolates platform IDs)
     ↓
 Supervisor Graph (LangGraph ReAct loop)
-    ├── ContextAuthority (80% compaction + memory injection)
-    ├── ToolRegistry (built-in + native skills + MCP)
+    ├── ContextAuthority (80% compaction + per-turn RAG retrieval)
+    ├── UnifiedToolExecutor (LocalToolRegistry + native skills + MCP)
+    ├── IdeService (workspace-scoped file/exec/git + env_context awareness)
     ├── HITL Gate (interrupt before danger tools)
     └── LLM Provider (any OpenAI-compatible endpoint)
     ↓
@@ -186,7 +188,7 @@ SwarmEngine (when multi-agent is needed)
     ├── 6 dispatch patterns
     ├── Reliability layer (circuit breaker, retry, timeout)
     ├── Self-improvement (auto-learning feedback loop)
-    └── 4-layer memory adapter (ChromaDB + FTS5 + NetworkX + sqlite-vec)
+    └── UnifiedMemoryAdapter (ChromaDB + FTS5 + sqlite-vec, pluggable embeddings)
 ```
 
 Full diagrams in [Architecture](docs-v2/docs/architecture.md).
@@ -196,12 +198,12 @@ Full diagrams in [Architecture](docs-v2/docs/architecture.md).
 ## 📦 Project Structure
 
 ```
-kazma-core/       Agent runner, LLM provider, swarm engine, memory, safety
-kazma-gateway/    Telegram/Discord/Slack adapters, slash commands
-kazma-ui/         FastAPI web app, SSE chat, dashboard, settings
-kazma-tui/        Textual terminal dashboard
+kazma-core/       Agent runner, LLM provider, swarm engine, memory/RAG, IDE service, safety
+kazma-gateway/    Telegram/Discord/Slack adapters, slash commands, /ide commands
+kazma-ui/         FastAPI web app, IDE page, SSE chat, dashboard, settings
+kazma-tui/        Textual terminal dashboard + IDE editor screen
 kazma-memory/     Arabic tokenizer + FTS5 search backend
-kazma-skills/     Native skills (vault, database, web crawler, …)
+kazma-skills/     Native skills (vault, database, web crawler, coding skills, …)
 kazma-cli/        The `kazma` command surface
 ```
 

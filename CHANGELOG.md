@@ -5,6 +5,74 @@ Features are listed with their implementation PR/commit where available.
 
 ---
 
+## v0.5.0 — IDE as a Primary Element + Per-turn RAG + Pluggable Embeddings (July 2026)
+
+### IDE Subsystem — Transport-Agnostic Coding Backend
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **IdeService** | Transport-neutral coding backend (read/write/delete/list/search/run/diff/git/swarm). All mutating ops route through the shared LocalToolRegistry + HITL gate. | `kazma_core/ide/service.py` |
+| ✅ | **env_context** | `build_env_context()` resolves workspace root, repo slug, branch, GitHub auth, tools → prompt-injection block. Injected into supervisor + every worker + per-turn SSE chat. | `kazma_core/ide/env_context.py` |
+| ✅ | **workspace_scope** | Per-task workspace targeting via ContextVar — concurrent swarm tasks can operate on different repos. | `kazma_core/ide/workspace_scope.py` |
+| ✅ | **Web IDE** | 3-pane layout (tree \| multi-tab editor \| AI chat), CodeMirror find/replace, file-aware streaming chat, create/delete/save/run/diff/git/grep/skills/swarm. | `ide.html, ide.js, ide_api.py` |
+| ✅ | **TUI Editor** | Full-screen code editor pushed from the Files tab. | `kazma_tui/editor.py` |
+| ✅ | **Cross-platform /ide** | `/ide` commands work on Telegram/Discord/Slack/Web/TUI: ls, open, edit, delete, run, runfile, grep, git, repo (list/switch/clone), skill, swarm. | `commands.py:_try_ide_command` |
+| ✅ | **Coding skills** | refactor-file, write-tests, fix-lint, code-review manifests wired to swarm dispatch. | `kazma_skills/coding_skills.py` |
+
+### Awareness Layer — The Brain Knows Its Environment
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Prompt injection** | Workspace/repo/branch/tool facts injected into the supervisor system prompt (init + per-turn refresh in SSE chat). | `agent_runner.py, graph_builder.py, sse_chat.py` |
+| ✅ | **Worker awareness** | Every dispatched swarm worker gets an env-context system message so it knows where the workspace is and what tools it has. | `swarm/worker.py` |
+| ✅ | **No more "stuck" workers** | Workers were blind to the workspace before; now they know the root, repo, branch, and tool list. | `swarm/worker_dispatch.py` |
+
+### Repo Identity + GitHub Unification
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Repo identity persistence** | WorkspaceStore gains repo_url/owner/repo/default_branch/is_github columns (idempotent ALTER TABLE migration). `repo_for()` / `set_repo_identity()`. | `stores/workspaces.py` |
+| ✅ | **Clone persists identity** | Clone path stores the remote URL/owner/repo instead of discarding it. | `routers/github.py` |
+| ✅ | **GitHub tools unified** | Native `github_create_pr`/`github_list_issues` now use the shared `GitHubClient` (OAuth→PAT→env token). Closes the gap where OAuth tokens were invisible to the agent. | `git_github_manager/tools.py` |
+| ✅ | **Clone from Telegram** | `/ide repo clone <owner/repo>` clones + activates from any chat platform. | `commands.py` |
+
+### Per-Turn RAG Retrieval
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Per-turn retrieval** | Agent retrieves relevant memories on EVERY user turn (gated on iteration==0), not just at compaction. Memories injected as `## Relevant context from memory` system message. | `graph_builder.py:supervisor_node` |
+| ✅ | **Unified memory backend** | Tools + RAG + compaction now share one persistent `agent_memory` ChromaDB collection (was split: tools→agent_memory, RAG→ephemeral kazma_global). The write→read loop is closed. | `swarm/memory/adapter.py, tool_registry.py` |
+
+### Pluggable Embedding Backend
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Embedder protocol** | `Embedder` Protocol + `LocalSentenceTransformerEmbedder` + `OpenAICompatibleEmbedder` (NVIDIA NIM / NeMo Retriever / OpenAI / TEI). | `swarm/memory/embedder.py` |
+| ✅ | **Config flip** | Switch to NIM by setting `memory.embedding.provider: openai-compatible` + model/dim/base_url/api_key_env in kazma.yaml. No code changes. | `kazma.yaml` |
+| ✅ | **Dimension decoupling** | Hardcoded 384-dim replaced with config-driven dim. sqlite-vec tables auto-migrate on mismatch. | `sqlite_vec.py, semantic_router.py` |
+| ✅ | **Live-verified with NIM** | nv-embed-v1 (4096-dim) tested end-to-end: store → retrieve → inject → recall. | |
+
+### UI + Polish
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Unified dialog system** | `kazmaConfirm`/`kazmaAlert`/`kazmaPrompt` — zero native browser dialogs in feature code. | `stores.js, modal.html` |
+| ✅ | **Multi-tab editing** | Per-tab dirty tracking, close with × / middle-click, no data loss on switch. | `ide.js` |
+| ✅ | **Find/replace** | CodeMirror search addon (Ctrl+F / Ctrl+H). | `ide.html` |
+| ✅ | **Auto-refresh after agent edits** | Editor re-reads the open file when the agent writes to it (closes chat→edit loop). | `ide.js` |
+| ✅ | **Toast unification** | streaming.js delegates to $store.toast — one notification system. | `streaming.js` |
+
+### Cleanup
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **Dead code removed** | `create_supervisor_app()` (200 lines, never called) removed. | `graph_builder.py` |
+| ✅ | **Zombie ToolRegistry deprecated** | `get_tool_registry()` now delegates to the real LocalToolRegistry. | `tools/registry.py` |
+| ✅ | **MCP server expanded** | 7 tools (was 4): added list_files, run_command, git_status. | `mcp_server.py` |
+| ✅ | **Stale diagram fixed** | graph_builder.py topology diagram now shows the real 5-node graph. | `graph_builder.py` |
+| ✅ | **Dual workspace-root bug fixed** | `_get_workspace()` + app.py boot now consult WorkspaceStore (was pinning to kazma-data/workspace, blocking all repo file reads). | `file_write.py, app.py` |
+
+### Documentation
+| Status | Feature | Description | Reference |
+|:---:|:---|:---|:---|
+| ✅ | **AGENTS.md §10** | IDE Subsystem documented as the 10th critical subsystem. | `AGENTS.md` |
+| ✅ | **UI Conventions** | Unified dialog + toast system documented. | `AGENTS.md` |
+
+---
+
 ## v0.4.0 — GitHub Integration + Full Arabic i18n + Security Audit Remediation (July 2026)
 
 ### GitHub OAuth Integration (read-only)

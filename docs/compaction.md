@@ -320,6 +320,88 @@ The compacted agent continues the session with full awareness of what happened, 
 
 ## Summary
 
-Kazma's Context Authority solves context window bloat through an **asynchronous compaction loop**, not truncation. The hard 80% threshold ensures reliability is never traded for convenience. Every compaction pass creates an LLM-generated summary, archives the full state to crash-safe SQLite checkpoints, and enriches the fresh context with relevant long-term memories from FTS5 + sqlite-vec — making future compaction passes even more efficient.
+Kazma's Context Authority solves context window bloat through an **asynchronous compaction loop**, not truncation. The hard 80% threshold ensures reliability is never traded for convenience. Every compaction pass creates an LLM-generated summary, archives the full state to crash-safe SQLite checkpoints, and enriches the fresh context with relevant long-term memories from the unified memory backend — making future compaction passes even more efficient.
 
 The result is an agent that can sustain **hundreds of turns** without degradation, at **~3-5% of the cumulative token cost** of an uncompacted session, with **semantic recall that improves over time** as the memory store grows.
+
+---
+
+## 6. Per-Turn RAG Retrieval (v0.5.0+)
+
+> **Added in v0.5.0.** Before this, memory retrieval only fired during
+> compaction (§3, Step 4). The agent had no recall on a normal turn. This
+> section documents the per-turn retrieval layer that now runs alongside
+> compaction.
+
+### The Gap
+
+The compaction engine (§3) retrieves memories only when the context window
+crosses 80%. On a normal turn (under threshold), **no memory was retrieved
+and nothing was injected.** The supervisor graph had no retrieval node —
+the agent went straight to the LLM call with only the raw conversation
+history. This meant the memory system existed but was effectively dormant
+for most of the conversation.
+
+### The Fix — Inline Retrieval in `supervisor_node`
+
+Per-turn retrieval is implemented **inline in the supervisor node**
+(`graph_builder.py:supervisor_node`), not as a separate graph node. This
+matches the existing architecture — compaction, cost-breaker, personality
+injection, and model routing are all done inline, not as separate nodes.
+
+The retrieval fires at `iteration == 0` (once per user turn, not per ReAct
+loop iteration — cheaper, standard for RAG):
+
+```python
+if iteration == 0 and last_user_content:
+    memories = await authority.compactor.retrieve_memories(
+        last_user_content, limit=_rag_top_k(),
+    )
+    if memories:
+        mem_block = _format_retrieved_memories(memories)
+        messages.insert(1, {"role": "system", "content": mem_block})
+```
+
+The query is the **latest user message** (not the conversation summary
+that compaction uses). The memories are injected as a system message
+positioned after the base system prompt, formatted as:
+
+```
+## Relevant context from memory
+1. <memory content, capped at 300 chars>
+2. <memory content>
+...
+```
+
+### Why Inline, Not a New Node
+
+A new graph node would require: a new `NodeName` value, a closure, `add_node`,
+rewiring the entry point + conditional edges, and a new `State` field.
+Memory retrieval is semantically identical to personality injection (both
+prepend system context before the LLM call) — the inline approach follows
+the established pattern with ~10 lines of code and zero topology change.
+
+### Unified Memory Backend
+
+Both per-turn retrieval and the `memory_store`/`memory_search` tools now
+read/write the **same persistent `agent_memory` ChromaDB collection**
+(via the `UnifiedMemoryAdapter`). Before v0.5.0, these were split:
+tools wrote to `agent_memory` (persistent), but retrieval read from
+`kazma_global` (ephemeral, wiped on restart). The unification closes
+the write→read loop — memories stored by the agent are now visible to
+per-turn RAG on every subsequent turn.
+
+### Pluggable Embedding Backend
+
+The vector embeddings that power retrieval are now pluggable
+(`swarm/memory/embedder.py`):
+
+- **Local** (`provider: local`): `sentence-transformers` in-process, free,
+  384-dim (`all-MiniLM-L6-v2`). Default.
+- **OpenAI-compatible** (`provider: openai-compatible`): any
+  `/v1/embeddings` endpoint — NVIDIA NIM (`nv-embed-v1`, 4096-dim),
+  OpenAI, self-hosted TEI. Configured in `kazma.yaml` under `memory.embedding`.
+
+Switching is a config flip, not a code change. Dimensions are decoupled
+from the code (was hardcoded 384). sqlite-vec tables auto-migrate on
+dimension mismatch.

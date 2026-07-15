@@ -3,7 +3,7 @@
 ## v1.0 — Core Engine ✅
 - Autonomous AI agent framework with ModelRegistry singleton
 - Swarm orchestration (InProcess + Telegram workers)
-- 4-layer memory (ChromaDB, Graph, FTS5, sqlite-vec)
+- 3-layer memory (ChromaDB + FTS5 + sqlite-vec) — the Graph/NetworkX layer was removed in v0.4.0
 - Self-improvement engine with LLM Meta-Refiner
 - HITL approval queue for Soul Evolution
 - Dialect-aware router (Kuwaiti + MSA pipelines)
@@ -12,6 +12,8 @@
 - Web UI, TUI, and Telegram interfaces
 - **Universal Model Registry** — global model routing, durable discovery, cross-UI sync
 - **design-b-modern** branding — grid background, cyan accent, reactive font persistence
+
+> **Shipped in v0.5.0:** IDE subsystem (`kazma_core/ide/` — transport-agnostic coding backend, Web IDE page `/ide`, TUI editor, cross-platform `/ide` commands), per-turn RAG retrieval (the agent now retrieves memories every turn at iteration 0, not only at compaction), and pluggable embeddings (`swarm/memory/embedder.py` — local sentence-transformers or any OpenAI-compatible endpoint such as NVIDIA NIM). These are no longer planned — they are live.
 
 ---
 
