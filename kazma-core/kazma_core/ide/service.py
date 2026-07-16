@@ -38,11 +38,22 @@ def _resolve_workspace_root() -> Path:
     """Resolve the active workspace root, mirroring ``workspace_api`` precedence.
 
     Order:
-      1. ``KAZMA_WORKSPACE`` env var.
-      2. Active workspace from ``WorkspaceStore``.
-      3. ``kazma_core.tools.file_write`` configured workspace (cwd-based default).
+      1. Per-task ``workspace_scope`` ContextVar (Phase 3 — concurrent multi-repo).
+      2. ``KAZMA_WORKSPACE`` env var.
+      3. Active workspace from ``WorkspaceStore``.
+      4. ``kazma_core.tools.file_write`` configured workspace (cwd-based default).
     """
     import os
+
+    # 1. Per-task scope takes top precedence (matches file_write._get_workspace).
+    try:
+        from kazma_core.ide.workspace_scope import resolve_workspace_root
+
+        scoped = resolve_workspace_root()
+        if scoped is not None:
+            return scoped
+    except Exception:
+        pass
 
     env_ws = os.environ.get("KAZMA_WORKSPACE", "").strip()
     if env_ws:
@@ -116,6 +127,12 @@ class IdeService:
         self._root = _resolve_workspace_root()
         return self._root
 
+    @property
+    def root(self) -> Path:
+        """The workspace root, re-resolved to honor any active workspace_scope."""
+        self._root = _resolve_workspace_root()
+        return self._root
+
     def resolve(self, rel_path: str) -> Path:
         """Resolve a (possibly relative) path against the workspace root.
 
@@ -124,11 +141,16 @@ class IdeService:
         Uses ``os.path.realpath`` (fully symlink/junction aware) so the
         check is robust on Windows where ``%LOCALAPPDATA%\\Temp`` is often a
         junction.
+
+        The root is re-resolved on each call so per-task ``workspace_scope``
+        (Phase 3) is honored — the IDE layer no longer caches a stale root
+        across workspace switches.
         """
         import os
 
+        ws_root = self.root  # re-resolves, honoring workspace_scope
         if not rel_path:
-            return self._root
+            return ws_root
         rel = rel_path.strip().lstrip("/\\")
         norm = os.path.normpath(rel)
 
@@ -140,7 +162,7 @@ class IdeService:
         if not os.path.isabs(rel) and (norm == ".." or norm.startswith(".." + os.path.sep)):
             raise ValueError(
                 f"Path '{rel_path}' escapes the workspace root "
-                f"({self._root}); access denied."
+                f"({ws_root}); access denied."
             )
 
         if os.path.isabs(rel):
@@ -149,16 +171,16 @@ class IdeService:
             # the workspace root.
             target = Path(rel).resolve()
         else:
-            target = (self._root / norm).resolve()
+            target = (ws_root / norm).resolve()
 
         # Backstop containment check via pure string normalization (no
         # symlink resolution), so symlinked temp dirs can't mask an escape.
-        root_norm = os.path.normpath(str(self._root))
+        root_norm = os.path.normpath(str(ws_root))
         target_norm = os.path.normpath(str(target))
         if target_norm != root_norm and not target_norm.startswith(root_norm + os.path.sep):
             raise ValueError(
                 f"Path '{rel_path}' is outside the workspace root "
-                f"({self._root}); access denied."
+                f"({ws_root}); access denied."
             )
         # Return the original (non-realpath) resolved path for display.
         return target

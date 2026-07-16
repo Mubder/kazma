@@ -249,39 +249,44 @@ def _tool_read_file(root: Path, args: dict[str, Any]) -> str:
 
 
 def _tool_write_file(root: Path, args: dict[str, Any]) -> str:
-    """Write content to a file."""
-    content = args["content"]
-    if len(content) > 1_048_576:  # 1 MB limit matching read_file
-        return f"Error: content exceeds 1 MB write limit ({len(content)} chars)"
-    fpath = _resolve(root, args["path"])
-    fpath.parent.mkdir(parents=True, exist_ok=True)
-    fpath.write_text(content, encoding="utf-8")
-    return f"Wrote {len(content)} chars to {args['path']}"
+    """Write content to a file via IdeService (HITL-gated)."""
+    import asyncio
+
+    from kazma_core.ide import get_ide_service
+
+    async def _run() -> str:
+        svc = get_ide_service()
+        svc.refresh_root()
+        res = await svc.write_file(args["path"], args["content"])
+        if not res["ok"]:
+            return res.get("error", "Write failed (approval may be required)")
+        return res.get("output", f"Wrote {args['path']}")
+
+    return asyncio.get_event_loop().run_until_complete(_run())
 
 
 def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
-    """Run pytest and return output."""
-    cmd = [sys.executable, "-m", "pytest"]
-    test_path = args.get("path", "tests/")
-    cmd.append(test_path)
-    if args.get("keyword"):
-        cmd.extend(["-k", args["keyword"]])
-    if args.get("verbose"):
-        cmd.append("-v")
-    cmd.extend(["--tb=short", "-q"])
+    """Run pytest via IdeService.run (HITL-gated shell_exec)."""
+    import asyncio
 
-    result = subprocess.run(
-        cmd,
-        cwd=str(root),
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    output = result.stdout
-    if result.stderr:
-        output += "\n--- stderr ---\n" + result.stderr
-    output += f"\n(exit code: {result.returncode})"
-    return output
+    from kazma_core.ide import get_ide_service
+
+    async def _run() -> str:
+        svc = get_ide_service()
+        svc.refresh_root()
+        test_path = args.get("path", "tests/")
+        cmd = f"{sys.executable} -m pytest {test_path}"
+        if args.get("keyword"):
+            cmd += f" -k {args['keyword']}"
+        if args.get("verbose"):
+            cmd += " -v"
+        cmd += " --tb=short -q"
+        res = await svc.run(cmd, timeout=120)
+        if not res["ok"]:
+            return res.get("error", "Tests failed (approval may be required)")
+        return res.get("output", "(no output)")
+
+    return asyncio.get_event_loop().run_until_complete(_run())
 
 
 def _tool_list_files(root: Path, args: dict[str, Any]) -> str:

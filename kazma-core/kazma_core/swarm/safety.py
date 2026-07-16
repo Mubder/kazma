@@ -30,6 +30,15 @@ _EXTENDED_DANGER = DEFAULT_DANGER_TOOLS + [
     "run_tests",  # MCP IDE test runner tool
     "vault_retrieve",
     "vault_delete",
+    # Git operations — commit/push publish code to the remote without
+    # the operator's review. github_create_pr opens a PR. These must be
+    # HITL-gated just like file_write/shell_exec.
+    "git_commit",
+    "git_push_pull",
+    "github_create_pr",
+    # Package installation — supply-chain risk (typosquats, malicious packages).
+    "install_python_packages",
+    "install_npm_packages",
 ]
 
 # Tools classified as "sensitive reads" — allowed but logged.

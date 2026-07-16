@@ -291,7 +291,7 @@ async def supervisor_node(
                         "[Supervisor] Retrieved %d memories for turn", len(memories),
                     )
         except Exception:
-            logger.debug("[Supervisor] per-turn memory retrieval skipped", exc_info=True)
+            logger.warning("[Supervisor] per-turn memory retrieval failed — recall degraded", exc_info=True)
 
     start = time.monotonic()
     try:

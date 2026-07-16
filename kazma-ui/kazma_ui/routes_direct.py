@@ -71,11 +71,14 @@ def register_direct_routes(self: Any) -> None:
             WorkerRegistry._instance = None
         except Exception as exc:
             logger.debug("Worker registry cache flush failed: %s", exc)
-        # Flush tool registry
+        # Flush tool registry (the real registry is LocalToolRegistry)
         try:
-            from kazma_core.tools.registry import ToolRegistry
+            from kazma_core.agent.tool_registry import get_tool_registry
 
-            ToolRegistry._instance = None
+            # LocalToolRegistry caches the singleton in _builtin_registry.
+            import kazma_core.agent.tool_registry as _tr_mod
+
+            _tr_mod._builtin_registry = None
         except Exception as exc:
             logger.debug("Tool registry cache flush failed: %s", exc)
         return {"status": "flushed", "config_paths": paths}

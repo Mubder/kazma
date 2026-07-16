@@ -165,10 +165,17 @@ class OpenAICompatibleEmbedder:
         return self._dim
 
     def encode(self, text: str) -> list[float]:
+        """Embed a single text via the remote endpoint.
+
+        Retries once on failure (NIM endpoints can be slow / rate-limited).
+        Returns ``[]`` if both attempts fail. Results are cached so identical
+        queries don't re-hit the API.
+        """
         # Cache lookup
         if text in self._cache:
             return self._cache[text]
         client = self._ensure_client()
+        emb: list[float] = []  # initialized to prevent UnboundLocalError
         # Retry once on failure (NIM endpoints can be slow / rate-limited).
         for attempt in range(2):
             try:
@@ -193,6 +200,7 @@ class OpenAICompatibleEmbedder:
         return emb
 
     def encode_batch(self, texts: list[str]) -> list[list[float]]:
+        """Embed multiple texts in one API call. Returns ``[[]]`` on failure."""
         client = self._ensure_client()
         results: list[list[float]] = []
         try:
@@ -364,6 +372,11 @@ def get_embedder() -> Embedder | None:
             return _embedder
 
     # Default / fallback: local sentence-transformers.
+    if provider not in ("local", ""):
+        logger.warning(
+            "[Embedder] Unknown provider '%s' — falling back to local. "
+            "Valid: local, openai-compatible", provider,
+        )
     _embedder = LocalSentenceTransformerEmbedder(
         model_name=cfg["model"], dim=cfg["dim"],
     )

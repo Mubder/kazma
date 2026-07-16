@@ -93,13 +93,18 @@ def _resolve_root(workspace_id: str | None = None) -> Path:
         return Path.cwd().resolve()
 
 
-def _git(remote: str, root: Path) -> str | None:
-    """Run a single git command in ``root``; return stripped stdout or None."""
+def _git(command: str, root: Path) -> str | None:
+    """Run a single git command in ``root``; return stripped stdout or None.
+
+    Uses ``shlex.split`` + no shell to avoid command injection (the command
+    is always a hardcoded literal today, but this is the safe pattern).
+    """
+    import shlex
+
     try:
         res = subprocess.run(
-            remote,
+            shlex.split(command),
             cwd=str(root),
-            shell=True,
             capture_output=True,
             text=True,
             timeout=4,
@@ -140,7 +145,21 @@ def detect_repo_slug(root: Path) -> str | None:
 
 
 def _parse_slug(url: str) -> str | None:
-    """Parse owner/repo out of a git remote URL (HTTPS or SSH)."""
+    """Parse owner/repo out of a git remote URL (HTTPS or SSH).
+
+    Delegates to the shared ``github_client.parse_github_slug`` so there is
+    one canonical parser across the codebase. Falls back to a local regex
+    if the gateway module isn't importable (headless / core-only deployments).
+    """
+    try:
+        from kazma_gateway.routers.github_client import parse_github_slug  # type: ignore
+
+        slug = parse_github_slug(url)
+        if slug:
+            return f"{slug[0]}/{slug[1]}"
+    except Exception:
+        pass
+    # Fallback: local regex (handles HTTPS + SSH URLs).
     import re
 
     m = re.search(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", url.strip())

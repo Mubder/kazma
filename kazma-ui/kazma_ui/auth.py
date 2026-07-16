@@ -77,6 +77,7 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/config",
     "/api/git",
     "/api/github",
+    "/api/ide",          # IDE API: file read/write/delete, shell exec, git, swarm dispatch
     "/api/bookmarks",
     "/api/pipelines",
     "/v1/models",
