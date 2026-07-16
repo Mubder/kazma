@@ -116,6 +116,9 @@
     {# Core JS (ES module entry — imports focused modules under /static/js/modules) #}
     <script type="module" src="/static/js/app.js"></script>
 
+    {# SVG icon registry (global — loaded before page scripts) #}
+    <script src="/static/js/icons.js"></script>
+
     {# HTMX #}
     <script src="/static/js/htmx.min.js"></script>
 
