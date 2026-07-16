@@ -755,13 +755,17 @@ class LocalToolRegistry:
                 return "Error: Empty command"
 
             # Restricted PATH — only allow read-only / build-safe binaries
-            # NO interpreters (python, node), NO network tools (curl, wget),
-            # NO container runtimes (docker), NO file modification (chmod, sed)
+            # NO network tools (curl, wget), NO container runtimes (docker),
+            # NO file modification (chmod, sed). Python/node interpreters are
+            # allowed because the agent needs to run scripts (python_exec,
+            # run_tests, run_file) — they're HITL-gated as danger tools.
             _SAFE_BINARIES = {
                 # Read-only system
                 "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
                 "uniq", "echo", "printf", "date", "whoami", "pwd", "env",
                 "df", "du", "free", "uptime", "uname", "hostname",
+                # Interpreters (HITL-gated as danger tools)
+                "python", "python3", "node", "npx", "bash", "sh",
                 # Build tools
                 "git", "uv", "pytest", "ruff", "mypy",
                 # Archive

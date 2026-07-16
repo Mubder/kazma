@@ -120,16 +120,17 @@ class IdeService:
 
     @property
     def root(self) -> Path:
-        return self._root
-
-    def refresh_root(self) -> Path:
-        """Re-resolve the workspace root (call after a workspace switch)."""
+        """The workspace root, re-resolved to honor any active workspace_scope."""
         self._root = _resolve_workspace_root()
         return self._root
 
-    @property
-    def root(self) -> Path:
-        """The workspace root, re-resolved to honor any active workspace_scope."""
+    def refresh_root(self) -> Path:
+        """Re-resolve the workspace root (call after a workspace switch).
+
+        Kept for explicit callers (commands.py, mcp_server.py) that want
+        to force a re-resolution. The ``root`` property also re-resolves
+        automatically, so this is mainly for API compatibility.
+        """
         self._root = _resolve_workspace_root()
         return self._root
 
@@ -442,7 +443,7 @@ class IdeService:
 
             full_context = build_env_context(workspace_id=workspace_id)
         except Exception:
-            logger.debug("[IdeService] env_context build failed", exc_info=True)
+            logger.warning("[IdeService] env_context build failed — dispatched worker may lack workspace awareness", exc_info=True)
         if context:
             full_context = f"{full_context}\n\n--- Task context ---\n{context}"
 

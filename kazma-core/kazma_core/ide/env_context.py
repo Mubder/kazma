@@ -112,7 +112,7 @@ def _git(command: str, root: Path) -> str | None:
         if res.returncode == 0:
             return res.stdout.strip() or None
     except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("[env_context] git %r failed in %s: %s", remote, root, exc)
+        logger.debug("[env_context] git %r failed in %s: %s", command, root, exc)
     return None
 
 

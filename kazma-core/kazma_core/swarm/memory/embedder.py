@@ -264,6 +264,10 @@ def make_chroma_embedding_function(embedder: Embedder) -> Any:
                     # so ChromaDB doesn't crash (the doc just won't match well).
                     emb = embedder.encode(doc)
                 if not emb:
+                    logger.warning(
+                        "[Embedder] embedding failed after retry — using zero vector "
+                        "(recall quality degraded for this document)"
+                    )
                     emb = [0.0] * embedder.dim
                 embeddings.append(emb)
             return np.array(embeddings, dtype=np.float32)
