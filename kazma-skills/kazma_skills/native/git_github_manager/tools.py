@@ -46,19 +46,31 @@ async def git_status() -> str:
 
 
 async def git_commit(message: str, files: list[str] | None = None) -> str:
-    """Commit modified or untracked files with a detailed commit message."""
+    """Commit modified or untracked files with a detailed commit message.
+
+    When bot identity is enabled (``git.bot_identity`` in ``kazma.yaml``),
+    the commit is authored as the bot (e.g. ``Kazma Agent [bot]``) via
+    ``GIT_AUTHOR_*`` / ``GIT_COMMITTER_*`` env vars — without mutating the
+    repo's ``.git/config``.
+    """
     cwd = _get_workspace()
     try:
+        # Resolve bot identity env (no-op when disabled).
+        from kazma_core.git_identity import get_commit_env
+
+        commit_env = get_commit_env()
+
         # Stage files
         add_args = ["git", "add", "."] if not files else ["git", "add"] + files
-        subprocess.run(add_args, cwd=cwd, check=True)
-        
+        subprocess.run(add_args, cwd=cwd, check=True, env=commit_env)
+
         # Commit
         res = subprocess.run(
             ["git", "commit", "-m", message],
             cwd=cwd,
             capture_output=True,
             text=True,
+            env=commit_env,
         )
         return res.stdout.strip() or res.stderr.strip()
     except Exception as e:

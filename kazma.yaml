@@ -68,6 +68,21 @@ memory:
     dim: 4096                     # nv-embed-v1 output dimension
     base_url: https://integrate.api.nvidia.com/v1
     api_key_env: KAZMA_EMBED_API_KEY   # env var name holding the API key (never inline)
+# Bot commit identity — when enabled, Kazma's agent commits as a bot
+# (e.g. "Kazma Agent [bot]") instead of the local git user. Shows up in
+# the GitHub Contributors list with a [bot] label, like Dependabot.
+# For a custom logo/avatar, create a real GitHub App and add app_id +
+# app_private_key_path + app_installation_id + app_email below.
+git:
+  bot_identity:
+    enabled: false             # set true to activate
+    name: "Kazma Agent"
+    email: "kazma-agent[bot]@users.noreply.github.com"
+    # GitHub App (custom logo) — uncomment and fill after creating an app:
+    # app_id: 123456
+    # app_private_key_path: .keys/kazma-app.pem
+    # app_installation_id: 42
+    # app_email: "123456+kazma-agent[bot]@users.noreply.github.com"
 skills:
   path: kazma-skills/manifests/
   auto_discover: true
