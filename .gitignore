@@ -89,3 +89,4 @@ kubernetes/*secrets*.yaml
 
 # ZCode internal artifacts
 .zcode/
+.keys/

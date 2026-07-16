@@ -75,14 +75,13 @@ memory:
 # app_private_key_path + app_installation_id + app_email below.
 git:
   bot_identity:
-    enabled: false             # set true to activate
+    enabled: true
     name: "Kazma Agent"
-    email: "kazma-agent[bot]@users.noreply.github.com"
-    # GitHub App (custom logo) — uncomment and fill after creating an app:
-    # app_id: 123456
-    # app_private_key_path: .keys/kazma-app.pem
-    # app_installation_id: 42
-    # app_email: "123456+kazma-agent[bot]@users.noreply.github.com"
+    email: "4310451+kazma-agent[bot]@users.noreply.github.com"
+    app_id: 4310451
+    app_private_key_path: .keys/kazma-app.pem
+    app_installation_id: 146867168
+    app_email: "4310451+kazma-agent[bot]@users.noreply.github.com"
 skills:
   path: kazma-skills/manifests/
   auto_discover: true
