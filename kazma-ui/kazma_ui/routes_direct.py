@@ -334,18 +334,18 @@ def register_direct_routes(self: Any) -> None:
         # ── Build the package list ──
         try:
             all_dists = {d.metadata["Name"]: d for d in ilm.distributions()}
+            # Build a normalized lookup: lowercase + dashes/underscores unified
+            norm_dists = {
+                k.lower().replace("-", "_"): v for k, v in all_dists.items()
+            }
         except Exception:
             all_dists = {}
+            norm_dists = {}
 
         def _pkg_info(name: str) -> dict:
-            # Try case-insensitive match
-            dist = all_dists.get(name) or all_dists.get(name.lower())
-            if not dist:
-                # Try case-insensitive scan
-                for k, v in all_dists.items():
-                    if k.lower() == name.lower():
-                        dist = v
-                        break
+            # Normalize the search name the same way (lowercase, _ instead of -)
+            norm = name.lower().replace("-", "_")
+            dist = norm_dists.get(norm)
             if dist:
                 return {
                     "name": dist.metadata["Name"],
