@@ -27,7 +27,12 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
     router = APIRouter(tags=["skills"])
 
     async def _get_installed_skills() -> list[dict[str, Any]]:
-        """Get list of installed skills from native skills dir + ToolRegistry + hub."""
+        """Get list of installed skills from native skills dir + hub.
+
+        Only real skill bundles are shown — low-level built-in tools
+        (file_read, shell_exec, etc.) are implementation details that
+        belong to the agent's base toolset, not user-facing skills.
+        """
         skills: list[dict[str, Any]] = []
         seen_names: set[str] = set()
 
@@ -38,9 +43,6 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             from pathlib import Path
 
             try:
-                from kazma_skills.native_loader import NativeSkillLoader
-                native_dir = Path(NativeSkillLoader.__module__).resolve()
-                # Resolve the actual native/ directory from the loader's source.
                 import kazma_skills.native_loader as _nsm
                 native_dir = Path(_nsm.__file__).resolve().parent / "native"
             except Exception:
@@ -80,32 +82,7 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
         except Exception as exc:
             logger.warning("Native skills scan failed: %s", exc)
 
-        # ── 2. Agent LocalToolRegistry — built-in tools (file_read, web_search, …)
-        try:
-            from kazma_core.agent.tool_registry import get_tool_registry
-            reg = get_tool_registry()
-            tools = reg.list_tools()
-            for t in tools:
-                name = t.get("name") or t.get("id") or "unknown"
-                if name in seen_names:
-                    continue
-                seen_names.add(name)
-                skills.append({
-                    "id": f"tool:{name}",
-                    "name": name,
-                    "version": "0.1.0",
-                    "description": t.get("description", ""),
-                    "author": "kazma-core",
-                    "enabled": t.get("enabled", True),
-                    "security_score": t.get("security_score", 100),
-                    "certification_level": t.get("certification_level", "built-in"),
-                    "capabilities": t.get("capabilities", []),
-                    "tags": t.get("tags", ["built-in"]),
-                })
-        except Exception as exc:
-            logger.debug("Tool registry skills load failed: %s", exc)
-
-        # ── 3. Hub-registered skills (remote marketplace installs)
+        # ── 2. Hub-registered skills (remote marketplace installs)
         try:
             from kazma_core.hub.registry import KazmaHub
 
