@@ -205,9 +205,9 @@ Get-Process -Name python -ErrorAction SilentlyContinue |
   Where-Object { (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.Id)).CommandLine -like '*uvicorn*kazma*' } |
   ForEach-Object { Stop-Process -Id $_.Id -Force }
 
-# Start (background), dev port 8090
+# Start (background), dev port 9090
 cd 'G:\GitHubRepos\kazma'
-& '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8090
+& '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090
 ```
 
 ---

@@ -8,7 +8,7 @@ Tests:
 - HITL approval flow: POST /api/approve/{thread_id}
 
 Usage:
-    locust -f loadtests/locustfile_swarm.py --host=http://localhost:8090 --users=50 --spawn-rate=5 --run-time=60s
+    locust -f loadtests/locustfile_swarm.py --host=http://localhost:9090 --users=50 --spawn-rate=5 --run-time=60s
 """
 
 from locust import HttpUser, task, between, events

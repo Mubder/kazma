@@ -54,7 +54,7 @@ Launches the Web UI via `uvicorn kazma_ui.app:create_app --factory`. Default por
 
 ```bash
 kazma serve            # 127.0.0.1:8000
-kazma serve 8090       # 127.0.0.1:8090
+kazma serve 9090       # 127.0.0.1:9090
 KAZMA_SECRET=xxx kazma serve   # 0.0.0.0:8000 (approval endpoints protected)
 ```
 
@@ -131,7 +131,7 @@ If the server is unreachable, the CLI prints `Server not running. Start with: ka
 
 ```bash
 kazma gateway status
-kazma gateway restart --port 8090
+kazma gateway restart --port 9090
 ```
 
 ---

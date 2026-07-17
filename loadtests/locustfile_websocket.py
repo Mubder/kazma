@@ -9,10 +9,10 @@ Tests:
 
 Usage:
     # WebSocket test (requires locust-plugins)
-    locust -f loadtests/locustfile_websocket.py --host=http://localhost:8090 --users=100 --spawn-rate=10
+    locust -f loadtests/locustfile_websocket.py --host=http://localhost:9090 --users=100 --spawn-rate=10
     
     # SSE fallback test
-    locust -f loadtests/locustfile_websocket.py --host=http://localhost:8090 --users=50 --spawn-rate=5 -H "SSE"
+    locust -f loadtests/locustfile_websocket.py --host=http://localhost:9090 --users=50 --spawn-rate=5 -H "SSE"
 """
 
 from locust import HttpUser, task, between, events
@@ -216,14 +216,14 @@ class WebSocketSwarmUser:
     """WebSocket user for real-time swarm updates.
     
     Requires: pip install locust-plugins
-    Usage: locust -f loadtests/locustfile_websocket.py --host=ws://localhost:8090
+    Usage: locust -f loadtests/locustfile_websocket.py --host=ws://localhost:9090
     """
     
     if WEBSOCKET_AVAILABLE:
         # Only define if websocket support is available
         class WebSocketSwarmUserImpl(WebSocketUser):
             wait_time = between(5, 15)
-            host = "ws://localhost:8090"  # WebSocket host
+            host = "ws://localhost:9090"  # WebSocket host
             
             def on_start(self):
                 self.thread_id = f"ws-loadtest-{uuid.uuid4().hex[:8]}"

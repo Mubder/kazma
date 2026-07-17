@@ -134,8 +134,8 @@ def main():
     parser = argparse.ArgumentParser(description="Kazma Load Test Runner")
     parser.add_argument("--scenario", choices=["swarm", "websocket", "mixed", "all", "k6"], 
                         default="swarm", help="Test scenario to run")
-    parser.add_argument("--host", default="http://localhost:8090", 
-                        help="Target host (default: http://localhost:8090)")
+    parser.add_argument("--host", default="http://localhost:9090", 
+                        help="Target host (default: http://localhost:9090)")
     parser.add_argument("--users", type=int, default=50, 
                         help="Number of concurrent users (default: 50)")
     parser.add_argument("--spawn-rate", type=float, default=5, 
@@ -194,7 +194,7 @@ def main():
     if args.start_server:
         print("\n[START] Starting Kazma server...")
         server_cmd = [sys.executable, "-m", "uvicorn", "kazma_ui.app:create_app", 
-                      "--factory", "--host", "0.0.0.0", "--port", "8090"]
+                      "--factory", "--host", "0.0.0.0", "--port", "9090"]
         server_process = subprocess.Popen(server_cmd)
         print(f"[START] Server started (PID: {server_process.pid})")
         time.sleep(5)  # Give server time to start

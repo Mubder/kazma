@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 DEFAULT_TIMEOUT = 10.0
-DEFAULT_PORT = 8000
+DEFAULT_PORT = 9090
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +232,7 @@ def print_help() -> None:
     console.print("  refresh   Hot-reload adapters from config")
     console.print()
     console.print("Options:")
-    console.print("  --port N  Server port (default: 8000, or KAZMA_PORT env var)")
+    console.print("  --port N  Server port (default: 9090, or KAZMA_PORT env var)")
 
 
 # ---------------------------------------------------------------------------

@@ -127,7 +127,7 @@ The retrieved memories are injected into the fresh system message:
 ## Relevant Memories
 1. User prefers dark mode for all interfaces
 2. The API key is stored in the .env file
-3. Last deployment used Docker Compose on port 8090
+3. Last deployment used Docker Compose on port 9090
 ```
 
 ### 2.4 Storage — now with chunking

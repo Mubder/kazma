@@ -47,8 +47,8 @@ export const options = {
   },
 };
 
-const BASE_URL = __ENV.KAZMA_HOST || 'http://localhost:8090';
-const WS_URL = __ENV.KAZMA_WS_HOST || 'ws://localhost:8090';
+const BASE_URL = __ENV.KAZMA_HOST || 'http://localhost:9090';
+const WS_URL = __ENV.KAZMA_WS_HOST || 'ws://localhost:9090';
 
 // Test data
 const SWARM_TASKS = [
