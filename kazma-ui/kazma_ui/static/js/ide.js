@@ -741,5 +741,40 @@ function ideApp() {
       }
       return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     },
+
+    // ── Resizable panes ──────────────────────────────────────────
+    startResize(pane, e) {
+      e.preventDefault();
+      var self = this;
+      var layout = document.querySelector('.ide-layout');
+      if (!layout) return;
+      var startX = e.clientX;
+      var startTree = parseInt(getComputedStyle(layout).getPropertyValue('--ide-tree-w') || '260');
+      var startChat = parseInt(getComputedStyle(layout).getPropertyValue('--ide-chat-w') || '380');
+
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      function onMove(ev) {
+        var dx = ev.clientX - startX;
+        if (pane === 'tree') {
+          var newTree = Math.max(160, Math.min(500, startTree + dx));
+          layout.style.setProperty('--ide-tree-w', newTree + 'px');
+        } else if (pane === 'chat') {
+          var newChat = Math.max(250, Math.min(700, startChat - dx));
+          layout.style.setProperty('--ide-chat-w', newChat + 'px');
+        }
+      }
+
+      function onUp() {
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      }
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
   };
 }

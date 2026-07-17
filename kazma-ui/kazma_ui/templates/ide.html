@@ -27,9 +27,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/jump-to-line.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
-    .ide-layout { display: grid; grid-template-columns: 260px 1fr; gap: 16px; height: calc(100vh - 160px); min-height: 480px; }
-    .ide-layout.with-chat { grid-template-columns: 260px 1fr 380px; }
-    .ide-tree { overflow-y: auto; min-height: 0; padding: 0; }
+    .ide-container { width: 100%; max-width: 100%; margin: 0; padding: 0 1px; }
+    .ide-layout { display: grid; grid-template-columns: var(--ide-tree-w, 260px) 4px 1fr; gap: 0 8px; height: calc(100vh - 160px); min-height: 480px; }
+    .ide-layout.with-chat { grid-template-columns: var(--ide-tree-w, 260px) 4px 1fr 4px var(--ide-chat-w, 380px); }
+    .ide-tree { overflow-y: auto; overflow-x: hidden; min-height: 0; padding: 0; }
     .ide-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; gap: 12px; }
     .ide-editor-wrap { flex: 1 1 0; min-height: 120px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-deep); }
     .ide-editor-wrap .CodeMirror { height: 100%; font-family: var(--font-mono); font-size: 0.85rem; }
@@ -58,13 +59,13 @@
     .ide-panel-title h3 { margin: 0; font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
     .ide-breadcrumb { padding: 5px 10px; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); font-size: 0.72rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
     .ide-breadcrumb code { font-family: var(--font-mono); color: var(--accent); }
-    .ide-tree-row { display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; font-size: 0.8rem; transition: background var(--transition-fast); }
+    .ide-tree-row { display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; font-size: 0.8rem; transition: background var(--transition-fast); box-sizing: border-box; overflow: hidden; }
     .ide-tree-row:hover { background: var(--bg-hover); }
-    .ide-tree-active { background: var(--accent-subtle); border-left: 2px solid var(--accent); }
+    .ide-tree-active { background: var(--accent-subtle); box-shadow: inset 2px 0 0 var(--accent); padding-left: 10px; }
     .ide-tree-up { color: var(--text-secondary); }
     .ide-tree-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
     .ide-tree-icon svg { width: 14px; height: 14px; }
-    .ide-tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ide-tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .ide-tree-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.78rem; }
     /* ── Chat panel ── */
     .ide-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
@@ -80,13 +81,16 @@
     .chat-tool pre { margin: 4px 0 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.68rem; max-height: 120px; overflow: auto; }
     .chat-input-row { flex-shrink: 0; display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border-subtle); }
     .ide-results { background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.78rem; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
-    @media (max-width: 1100px) { .ide-layout.with-chat { grid-template-columns: 220px 1fr 320px; } }
-    @media (max-width: 900px) { .ide-layout, .ide-layout.with-chat { grid-template-columns: 1fr; height: auto; } .ide-chat { min-height: 320px; } }
+    /* ── Resizable pane dividers ── */
+    .ide-resizer { width: 4px; cursor: col-resize; background: transparent; position: relative; z-index: 10; flex-shrink: 0; transition: background var(--transition-fast); border-radius: 2px; }
+    .ide-resizer:hover, .ide-resizer.dragging { background: var(--accent); }
+    @media (max-width: 1100px) { .ide-layout.with-chat { grid-template-columns: var(--ide-tree-w, 220px) 4px 1fr 4px var(--ide-chat-w, 320px); } }
+    @media (max-width: 900px) { .ide-layout, .ide-layout.with-chat { grid-template-columns: 1fr; height: auto; } .ide-chat { min-height: 320px; } .ide-resizer { display: none; } }
   </style>
 {% endblock %}
 
 {% block content %}
-<div class="ide-container" x-data="ideApp()" x-init="init()" style="max-width:1600px;margin:0 auto;">
+<div class="ide-container" x-data="ideApp()" x-init="init()">
 
   <!-- ── Toolbar ── -->
   <div class="card ide-toolbar">
@@ -164,6 +168,9 @@
       </div>
     </div>
 
+    <!-- ── Resizer: tree | editor ── -->
+    <div class="ide-resizer" @mousedown="startResize('tree', $event)" title="Drag to resize"></div>
+
     <!-- ── Editor + Panels ── -->
     <div class="ide-main">
       <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden;border:1px solid var(--border-subtle);min-height:260px;">
@@ -221,6 +228,9 @@
         <pre class="ide-results" x-text="result || '(no output yet)'"></pre>
       </div>
     </div>
+
+    <!-- ── Resizer: editor | chat ── -->
+    <div class="ide-resizer" x-show="chatOpen" x-cloak @mousedown="startResize('chat', $event)" title="Drag to resize"></div>
 
     <!-- ── AI Chat panel (third column; reuses /api/chat/stream) ── -->
     <div class="card ide-chat" x-show="chatOpen" x-cloak
