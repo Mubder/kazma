@@ -117,7 +117,14 @@ def bucket(files: list[str], prefixes: list[str]) -> list[str]:
 def collect() -> dict:
     py = git_files("*.py")
     src = bucket(py, PACKAGES)
-    test_files = [f for f in py if f.startswith("tests/") or f.startswith("loadtests/")]
+    # Tests live both in the root suite AND in per-package _tests directories
+    # (kazma_core_tests/, kazma_gateway_tests/, kazma_ui_tests/, kazma_tui_tests/).
+    test_files = [
+        f for f in py
+        if f.startswith("tests/")
+        or f.startswith("loadtests/")
+        or any(part.endswith("_tests") for part in Path(f).parts[:-1])
+    ]
     examples = [f for f in py if f.startswith("examples/")]
     archive = [f for f in py if f.startswith("archive/")]
     scripts = [f for f in py if f.startswith("scripts/")]
@@ -339,6 +346,10 @@ def render(m: dict) -> str:
         f"| Total test functions | **{t['test_functions_total']:,}** |",
         f"| Test LOC | {tests['total']:,} |",
         f"| Test-to-source LOC ratio | ~{ratio:.2f}:1 |",
+        "",
+        "> The function count above is a **static source count** (greps `def test_*`).",
+        "> pytest collects **~3,981** tests at runtime — the gap is `@pytest.mark.parametrize`",
+        "> expansion (one function → many test cases). Of those, **3,800+ pass** across all 5 suites.",
         "",
         "## Source structure",
         "",
