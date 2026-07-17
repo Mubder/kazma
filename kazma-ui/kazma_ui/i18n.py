@@ -44,6 +44,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "nav.swarm": {"en": "Swarm", "ar": "السرب"},
     "nav.agents": {"en": "Agents", "ar": "الوكلاء"},
     "nav.settings": {"en": "Settings", "ar": "الإعدادات"},
+    "nav.packages": {"en": "Packages", "ar": "الحزم"},
 
     # ── Header ────────────────────────────────────────────────────────
     "header.new_chat": {"en": "New Chat", "ar": "محادثة جديدة"},
@@ -547,6 +548,23 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
 
     # ── MCP ───────────────────────────────────────────────────────────
     "mcp.title": {"en": "MCP Servers", "ar": "خوادم MCP"},
+
+    # ── Packages ──────────────────────────────────────────────────────
+    "packages.title": {"en": "Packages & Dependencies", "ar": "الحزم والتبعيات"},
+    "packages.installed": {"en": "packages installed", "ar": "حزمة مثبتة"},
+    "packages.extras_active": {"en": "Extras Active", "ar": "إضافات نشطة"},
+    "packages.extras_missing": {"en": "Missing", "ar": "مفقودة"},
+    "packages.optional_deps": {"en": "Optional Dependencies", "ar": "التبعيات الاختيارية"},
+    "packages.core_deps": {"en": "Core Dependencies", "ar": "التبعيات الأساسية"},
+    "packages.installed_badge": {"en": "Installed", "ar": "مثبتة"},
+    "packages.missing_badge": {"en": "Missing", "ar": "مفقودة"},
+    "packages.search_ph": {"en": "Search packages…", "ar": "ابحث في الحزم…"},
+    "packages.no_match": {"en": "No matching packages", "ar": "لا توجد حزم مطابقة"},
+    "packages.col_package": {"en": "Package", "ar": "الحزمة"},
+    "packages.col_version": {"en": "Version", "ar": "الإصدار"},
+    "packages.col_description": {"en": "Description", "ar": "الوصف"},
+    "packages.install_all_title": {"en": "Install Everything", "ar": "تثبيت الكل"},
+    "packages.install_all_desc": {"en": "To install all optional dependencies at once:", "ar": "لتثبيت جميع التبعيات الاختيارية دفعة واحدة:"},
 
     # ── Common / Generic ──────────────────────────────────────────────
     "common.loading": {"en": "Loading…", "ar": "جاري التحميل…"},

@@ -244,6 +244,153 @@ def register_direct_routes(self: Any) -> None:
             from fastapi import HTTPException
             raise HTTPException(status_code=500, detail=str(e))
 
+    @self.app.get("/packages", response_class=HTMLResponse)
+    async def _packages_page(request: Request) -> HTMLResponse:
+        """Render the packages/dependencies management page."""
+        templates = self.templates
+        return templates.TemplateResponse(
+            request,
+            "packages.html",
+            {"active_page": "packages"},
+        )
+
+    @self.app.get("/api/system/packages")
+    async def _get_packages():
+        """List installed Python packages with metadata and extras status."""
+        import importlib.metadata as ilm
+
+        # ── Define the extras groups and their member packages ──
+        EXTRA_GROUPS = {
+            "rag": {
+                "description": "Vector memory (ChromaDB) + local embeddings (sentence-transformers). Without this, memory search falls back to FTS5 text-only search.",
+                "packages": ["chromadb", "sentence-transformers"],
+                "install_cmd": 'pip install -e ".[rag]"  # or: uv sync --extra rag',
+            },
+            "dev": {
+                "description": "Development tools — testing (pytest), linting (ruff), type checking (mypy), load testing (locust).",
+                "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "ruff", "mypy", "locust"],
+                "install_cmd": 'pip install -e ".[dev]"  # or: uv sync --extra dev',
+            },
+            "test": {
+                "description": "Test-specific dependencies (lighter than dev). Includes pytest + fakeredis for unit/integration tests.",
+                "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "fakeredis"],
+                "install_cmd": 'pip install -e ".[test]"  # or: uv sync --extra test',
+            },
+            "tui": {
+                "description": "Terminal dashboard UI (Textual) with RTL/bidirectional text rendering (python-bidi).",
+                "packages": ["textual", "python-bidi"],
+                "install_cmd": 'pip install -e ".[tui]"  # or: uv sync --extra tui',
+            },
+            "observability": {
+                "description": "Prometheus metrics export for monitoring Kazma in production (Grafana dashboards, alerting).",
+                "packages": ["prometheus-client"],
+                "install_cmd": 'pip install -e ".[observability]"  # or: uv sync --extra observability',
+            },
+            "web": {
+                "description": "Browser automation via Playwright. Used by the web crawler skill to render JavaScript-heavy pages.",
+                "packages": ["playwright"],
+                "install_cmd": 'pip install -e ".[web]"  # or: uv sync --extra web',
+            },
+        }
+
+        # ── Core dependencies (always installed) ──
+        CORE_PACKAGES = [
+            "fastapi", "uvicorn", "langgraph", "langgraph-checkpoint-sqlite",
+            "aiosqlite", "langfuse", "pyyaml", "httpx", "cryptography",
+            "PyJWT", "jinja2", "python-multipart", "textual", "psutil",
+            "aiogram", "websockets", "duckduckgo-search", "trafilatura",
+            "markdown", "tenacity", "networkx", "click", "rich",
+            "google-cloud-aiplatform", "python-dotenv",
+        ]
+
+        CORE_DESCRIPTIONS = {
+            "fastapi": "Web framework powering the Kazma dashboard + REST API",
+            "uvicorn": "ASGI server that runs the FastAPI app",
+            "langgraph": "LangGraph supervisor brain — the ReAct loop, checkpointing, interrupt()",
+            "langgraph-checkpoint-sqlite": "SQLite-backed checkpoint persistence for LangGraph",
+            "aiosqlite": "Async SQLite driver used by all Kazma data stores",
+            "langfuse": "Observability/tracing platform for LLM calls",
+            "pyyaml": "YAML parser for kazma.yaml config + skill manifests",
+            "httpx": "HTTP client for LLM API calls + web tools",
+            "cryptography": "AES-256-GCM encryption for the secret vault",
+            "PyJWT": "JWT token generation for GitHub App authentication",
+            "jinja2": "HTML template engine for the web UI",
+            "python-multipart": "File upload handling for FastAPI",
+            "textual": "Terminal UI framework (also a core dep for the TUI)",
+            "psutil": "System resource monitoring (CPU, RAM, disk) for telemetry",
+            "aiogram": "Telegram Bot API framework",
+            "websockets": "WebSocket support for real-time chat + gateway",
+            "duckduckgo-search": "Privacy-focused web search (no API key needed)",
+            "trafilatura": "Web content extraction (clean text from URLs)",
+            "markdown": "Markdown rendering for chat messages",
+            "tenacity": "Retry logic with exponential backoff for LLM calls",
+            "networkx": "Graph algorithms for swarm DAG/topology validation",
+            "click": "CLI framework for the `kazma` command",
+            "rich": "Beautiful terminal output (colors, tables, progress bars)",
+            "google-cloud-aiplatform": "Google Vertex AI provider integration",
+            "python-dotenv": ".env file loading for local development",
+        }
+
+        # ── Build the package list ──
+        try:
+            all_dists = {d.metadata["Name"]: d for d in ilm.distributions()}
+        except Exception:
+            all_dists = {}
+
+        def _pkg_info(name: str) -> dict:
+            # Try case-insensitive match
+            dist = all_dists.get(name) or all_dists.get(name.lower())
+            if not dist:
+                # Try case-insensitive scan
+                for k, v in all_dists.items():
+                    if k.lower() == name.lower():
+                        dist = v
+                        break
+            if dist:
+                return {
+                    "name": dist.metadata["Name"],
+                    "version": dist.version,
+                    "installed": True,
+                }
+            return {"name": name, "version": "", "installed": False}
+
+        # Core packages
+        core_list = []
+        for name in CORE_PACKAGES:
+            info = _pkg_info(name)
+            info["description"] = CORE_DESCRIPTIONS.get(name, "")
+            info["group"] = "core"
+            core_list.append(info)
+
+        # Extras
+        extras_list = []
+        for group_name, group_data in EXTRA_GROUPS.items():
+            group_installed = True
+            pkg_list = []
+            for name in group_data["packages"]:
+                info = _pkg_info(name)
+                info["group"] = group_name
+                pkg_list.append(info)
+                if not info["installed"]:
+                    group_installed = False
+            extras_list.append({
+                "name": group_name,
+                "description": group_data["description"],
+                "install_cmd": group_data["install_cmd"],
+                "installed": group_installed,
+                "packages": pkg_list,
+            })
+
+        # Count total installed (from distributions, not just our deps)
+        total_installed = len(all_dists)
+
+        return {
+            "core": core_list,
+            "extras": extras_list,
+            "total_installed": total_installed,
+            "python_version": __import__("sys").version.split()[0],
+        }
+
     @self.app.post("/api/system/memory/backup")
     async def _create_memory_backup():
         from kazma_core.system.maintenance import create_memory_backup
