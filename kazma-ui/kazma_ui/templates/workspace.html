@@ -344,25 +344,25 @@
         <div class="swarm-metrics-grid" style="display:grid;grid-template-columns:repeat(4, 1fr);gap:8px;margin-bottom:10px;">
           <!-- Stars -->
           <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="font-size:1.1rem;margin-bottom:2px;"><span x-html="KazmaIcons.star()"></span></div>
+            <div style="margin-bottom:2px;color:var(--text-muted);"><span class="icon-sm" x-html="KazmaIcons.star({class:'icon-sm'})"></span></div>
             <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghStars">0</div>
             <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_stars') }}</div>
           </div>
           <!-- Forks -->
           <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="font-size:1.1rem;margin-bottom:2px;">🍴</div>
+            <div style="margin-bottom:2px;color:var(--text-muted);"><span x-html="KazmaIcons['git-fork']({class:'icon-sm'})"></span></div>
             <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghForks">0</div>
             <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_forks') }}</div>
           </div>
           <!-- Open Issues -->
           <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="font-size:1.1rem;margin-bottom:2px;">🐛</div>
+            <div style="margin-bottom:2px;color:var(--text-muted);"><span x-html="KazmaIcons.bug({class:'icon-sm'})"></span></div>
             <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenIssues">0</div>
             <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_issues') }}</div>
           </div>
           <!-- Pull Requests -->
           <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="font-size:1.1rem;margin-bottom:2px;">📈</div>
+            <div style="margin-bottom:2px;color:var(--text-muted);"><span x-html="KazmaIcons['git-pull-request']({class:'icon-sm'})"></span></div>
             <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghOpenPrs">0</div>
             <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_prs') }}</div>
           </div>
