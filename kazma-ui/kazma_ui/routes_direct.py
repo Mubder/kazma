@@ -264,32 +264,32 @@ def register_direct_routes(self: Any) -> None:
             "rag": {
                 "description": "Vector memory (ChromaDB) + local embeddings (sentence-transformers). Without this, memory search falls back to FTS5 text-only search.",
                 "packages": ["chromadb", "sentence-transformers"],
-                "install_cmd": 'pip install -e ".[rag]"  # or: uv sync --extra rag',
+                "install_cmd": 'uv pip install -e ".[rag]"   # additive — won\'t remove other extras',
             },
             "dev": {
                 "description": "Development tools — testing (pytest), linting (ruff), type checking (mypy), load testing (locust).",
                 "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "ruff", "mypy", "locust"],
-                "install_cmd": 'pip install -e ".[dev]"  # or: uv sync --extra dev',
+                "install_cmd": 'uv pip install -e ".[dev]"   # additive — won\'t remove other extras',
             },
             "test": {
                 "description": "Test-specific dependencies (lighter than dev). Includes pytest + fakeredis for unit/integration tests.",
                 "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "fakeredis"],
-                "install_cmd": 'pip install -e ".[test]"  # or: uv sync --extra test',
+                "install_cmd": 'uv pip install -e ".[test]"   # additive — won\'t remove other extras',
             },
             "tui": {
                 "description": "Terminal dashboard UI (Textual) with RTL/bidirectional text rendering (python-bidi).",
                 "packages": ["textual", "python-bidi"],
-                "install_cmd": 'pip install -e ".[tui]"  # or: uv sync --extra tui',
+                "install_cmd": 'uv pip install -e ".[tui]"   # additive — won\'t remove other extras',
             },
             "observability": {
                 "description": "Prometheus metrics export for monitoring Kazma in production (Grafana dashboards, alerting).",
                 "packages": ["prometheus-client"],
-                "install_cmd": 'pip install -e ".[observability]"  # or: uv sync --extra observability',
+                "install_cmd": 'uv pip install -e ".[observability]"   # additive — won\'t remove other extras',
             },
             "web": {
                 "description": "Browser automation via Playwright. Used by the web crawler skill to render JavaScript-heavy pages.",
                 "packages": ["playwright"],
-                "install_cmd": 'pip install -e ".[web]"  # or: uv sync --extra web',
+                "install_cmd": 'uv pip install -e ".[web]"   # additive — won\'t remove other extras',
             },
         }
 
