@@ -364,12 +364,31 @@ def create_graph_handler(
                 messages = result_state.get("messages", [])
                 assistant_text = ""
                 for m in reversed(messages):
-                    if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content"):
-                        assistant_text = m["content"]
+                    if not isinstance(m, dict) or m.get("role") != "assistant":
+                        continue
+                    content = m.get("content")
+                    if content and str(content).strip():
+                        assistant_text = str(content).strip()
                         break
 
                 if not assistant_text:
-                    assistant_text = "(No response generated)"
+                    # Last resort: check if there's an assistant message
+                    # with tool_calls but empty content — the LLM routed
+                    # through tools but never produced a final text answer.
+                    # Give a helpful fallback instead of "(No response generated)".
+                    has_tool_msgs = any(
+                        isinstance(m, dict)
+                        and m.get("role") == "assistant"
+                        and m.get("tool_calls")
+                        for m in messages
+                    )
+                    if has_tool_msgs:
+                        assistant_text = (
+                            "I looked into that but couldn't formulate a clear response. "
+                            "Could you rephrase your question?"
+                        )
+                    else:
+                        assistant_text = "(No response generated)"
 
                 # ── Majlis tone adaptation ──────────────────────────
                 # Wrap the LLM's response with cultural tone based on

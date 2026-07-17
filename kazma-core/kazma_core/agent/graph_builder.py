@@ -377,8 +377,41 @@ async def supervisor_node(
 
     # ── Route decision ─────────────────────────────────────────────
     if not response.tool_calls:
+        content = response.content.strip() if response.content else ""
+
+        # ── Empty-response recovery ────────────────────────────────
+        # Some providers (Groq compound-mini, certain Ollama models)
+        # return content="" on the final turn after a tool call —
+        # especially when the tool result (e.g. memory_search JSON)
+        # was large. Without this guard the user sees
+        # "(No response generated)". Retry once with an explicit nudge.
+        if not content and iteration > 0:
+            logger.warning(
+                "[Supervisor] LLM returned empty content after tool calls "
+                "(iteration=%d) — retrying with nudge", iteration,
+            )
+            messages_with_nudge = messages + [
+                {"role": "system", "content": (
+                    "Your previous response was empty. Please provide a "
+                    "clear, helpful text answer to the user based on the "
+                    "conversation and tool results above."
+                )},
+            ]
+            try:
+                nudge_response = await llm.chat(
+                    messages=messages_with_nudge,
+                    tools=[],
+                    model=routed_model,
+                )
+                if nudge_response.content and nudge_response.content.strip():
+                    content = nudge_response.content.strip()
+                    response = nudge_response  # update for tracing/cost
+                    logger.info("[Supervisor] Nudge retry succeeded — content recovered")
+            except Exception as nudge_exc:
+                logger.warning("[Supervisor] Nudge retry failed: %s", nudge_exc)
+
         # Pure text response → RESPOND
-        assistant_msg = {"role": "assistant", "content": response.content}
+        assistant_msg = {"role": "assistant", "content": content or "I apologize, I couldn't generate a response. Please try rephrasing your question."}
         return {
             **breaker_reset,
             "messages": messages + [assistant_msg],
@@ -388,10 +421,15 @@ async def supervisor_node(
             "last_cost_usd": response.cost_usd,
         }
 
-    # Tool calls → build pending list and route to TOOL_WORKER
+    # Tool calls → build pending list and route to TOOL_WORKER.
+    # NOTE: Do NOT convert content to None when it's an empty string.
+    # Some providers (Groq compound-mini, certain Ollama models) return
+    # content="" alongside tool_calls. Converting to None breaks the
+    # message history on the next LLM call (API rejects null content).
+    # Keep the original value — empty string is valid per OpenAI spec.
     assistant_msg: dict[str, Any] = {
         "role": "assistant",
-        "content": response.content or None,
+        "content": response.content if response.content is not None else "",
         "tool_calls": [
             {
                 "id": tc.id,
