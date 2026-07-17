@@ -6,13 +6,14 @@
    ═══════════════════════════════════════════════════════ */
 
 var KazmaIcons = (function () {
-  // Base SVG wrapper — caller controls size via CSS (svg inherits currentColor).
+  // Base SVG wrapper — icons default to 1em (inherit surrounding font-size, like
+  // emoji). The .icon-sm/.icon-md/.icon-lg CSS classes override when needed.
   function wrap(paths, opts) {
     opts = opts || {};
     var sw = opts.strokeWidth || '1.5';
     var fill = opts.fill || 'none';
     var cls = opts.class ? ' class="' + opts.class + '"' : '';
-    return '<svg' + cls + ' fill="' + fill + '" stroke="currentColor" viewBox="0 0 24 24" stroke-width="' + sw + '" stroke-linecap="round" stroke-linejoin="round">' + paths + '</svg>';
+    return '<svg' + cls + ' width="1em" height="1em" fill="' + fill + '" stroke="currentColor" viewBox="0 0 24 24" stroke-width="' + sw + '" stroke-linecap="round" stroke-linejoin="round">' + paths + '</svg>';
   }
 
   var icons = {

@@ -3062,6 +3062,7 @@ body {
   border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
   box-shadow: 0 0 18px var(--accent-glow);
 }
+.metric-icon svg { width: 20px; height: 20px; }
 .metric-value { font-size: var(--fs-fluid-2xl); }
 
 /* Primary buttons get a soft glow */
