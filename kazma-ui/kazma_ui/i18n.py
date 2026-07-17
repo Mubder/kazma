@@ -36,6 +36,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "nav.tools": {"en": "Tools", "ar": "الأدوات"},
     "nav.system": {"en": "System", "ar": "النظام"},
     "nav.workspace": {"en": "Workspace", "ar": "مساحة العمل"},
+    "nav.ide": {"en": "IDE", "ar": "محرر الأكواد"},
     "nav.chat": {"en": "Chat", "ar": "المحادثة"},
     "nav.dashboard": {"en": "Dashboard", "ar": "لوحة التحكم"},
     "nav.skills": {"en": "Skills", "ar": "المهارات"},
