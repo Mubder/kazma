@@ -116,11 +116,13 @@ const ProvidersManager = {
     /**
      * Get status icon for a provider health state.
      * @param {string} status - 'healthy' | 'degraded' | 'down' | 'unknown'
-     * @returns {string} Emoji/icon
+     * @returns {string} SVG status dot
      */
     statusIcon(status) {
-        const icons = { healthy: '🟢', degraded: '🟡', down: '🔴', unknown: '⚪' };
-        return icons[status] || icons.unknown;
+        // Use colored SVG circles instead of emoji for a crisp, premium look.
+        var colors = { healthy: 'var(--success)', degraded: 'var(--warning)', down: 'var(--danger)', unknown: 'var(--text-muted)' };
+        var color = colors[status] || colors.unknown;
+        return '<svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="' + color + '"/></svg>';
     },
 };
 

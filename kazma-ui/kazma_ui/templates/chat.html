@@ -59,7 +59,7 @@
         <div class="welcome-hints">
           <button class="hint-chip" onclick="document.getElementById('chat-input').value='Explain how Kazma swarms work';KazmaChat.sendMessage()">🐝 {{ t('nav.swarm') }}</button>
           <button class="hint-chip" onclick="document.getElementById('chat-input').value='Write a Python script to analyze logs';KazmaChat.sendMessage()">🐍 Python</button>
-          <button class="hint-chip" onclick="document.getElementById('chat-input').value='What can you help me with?';KazmaChat.sendMessage()">❓ {{ t('chat.welcome_subtitle') }}</button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='What can you help me with?';KazmaChat.sendMessage()"><span x-html="KazmaIcons.info()"></span> {{ t('chat.welcome_subtitle') }}</button>
         </div>
       </div>
     </div>

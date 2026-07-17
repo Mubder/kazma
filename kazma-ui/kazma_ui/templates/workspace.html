@@ -30,7 +30,7 @@
       </select>
       
       <button class="btn btn-sm btn-secondary ws-action-btn" @click="showCreateModal = true" style="display:flex;align-items:center;justify-content:center;gap:6px;">
-        <span>➕</span> {{ t('workspace.create') }}
+        <span><span x-html="KazmaIcons.plus()"></span></span> {{ t('workspace.create') }}
       </button>
       <button x-show="ghOAuthConnected" class="btn btn-sm btn-secondary ws-action-btn" @click="openRepoPicker()" style="display:flex;align-items:center;justify-content:center;gap:6px;" x-cloak>
         <span>🐙</span> {{ t('workspace.switch_repo') }}
@@ -52,7 +52,7 @@
   <div x-show="showCreateModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showCreateModal = false">
     <div class="card" style="max-width:520px;width:100%;padding:0;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);display:flex;flex-direction:column;">
       <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">➕ {{ t('workspace.create_modal_title') }}</h3>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span x-html="KazmaIcons.plus()"></span> {{ t('workspace.create_modal_title') }}</h3>
         <button class="btn-icon" @click="showCreateModal = false" style="font-size:1rem;">✕</button>
       </div>
       
@@ -133,7 +133,7 @@
         </div>
       </div>
       <div x-show="ghCloning" style="padding:12px 24px;border-top:1px solid var(--border-subtle);text-align:center;font-size:0.8rem;color:var(--accent);" x-cloak>
-        ⏳ <span x-text="t('workspace.cloning')"></span>
+        <span x-html="KazmaIcons.clock()"></span> <span x-text="t('workspace.cloning')"></span>
       </div>
     </div>
   </div>
@@ -182,7 +182,7 @@
       {{ t('workspace.qa_terminal') }}
     </button>
     <button class="btn btn-sm btn-secondary" @click="refreshAll()" style="margin-left:auto;">
-      ↻ {{ t('workspace.qa_refresh') }}
+      <span x-html="KazmaIcons.refresh()"></span> {{ t('workspace.qa_refresh') }}
     </button>
   </div>
 
@@ -263,7 +263,7 @@
       </div>
 
       <div x-show="!gitIsGit && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);">
-        <div style="font-size:1.5rem;margin-bottom:8px;">⚠️</div>
+        <div style="font-size:1.5rem;margin-bottom:8px;"><span x-html="KazmaIcons.alert()"></span></div>
         <p style="font-size:0.85rem;margin:0;">{{ t('workspace.not_repo') }}</p>
       </div>
     </div>
@@ -344,7 +344,7 @@
         <div class="swarm-metrics-grid" style="display:grid;grid-template-columns:repeat(4, 1fr);gap:8px;margin-bottom:10px;">
           <!-- Stars -->
           <div style="background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:6px;text-align:center;transition:transform 0.2s, box-shadow 0.2s;cursor:pointer;" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='var(--shadow-sm)'" onmouseout="this.style.transform='none';this.style.boxShadow='none'">
-            <div style="font-size:1.1rem;margin-bottom:2px;">⭐</div>
+            <div style="font-size:1.1rem;margin-bottom:2px;"><span x-html="KazmaIcons.star()"></span></div>
             <div style="font-family:var(--font-mono);font-size:1rem;font-weight:700;color:var(--text-primary);" x-text="ghStars">0</div>
             <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:600;margin-top:1px;">{{ t('workspace.gh_stars') }}</div>
           </div>
@@ -510,7 +510,7 @@
 
       <!-- No GitHub repository configuration detected -->
       <div x-show="!ghIsGitHub && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
-        <div style="font-size:1.5rem;margin-bottom:8px;">☁️</div>
+        <div style="font-size:1.5rem;margin-bottom:8px;"><span x-html="KazmaIcons.cloud()"></span></div>
         <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.gh_offline') }}</h4>
         <p style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || t('workspace.gh_offline_body')"></p>
         <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
@@ -543,7 +543,7 @@
       <div class="file-list" style="max-height:180px;overflow-y:auto;">
         <div x-show="currentPath && currentPath !== '/'" @click="goUp()"
              style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;color:var(--text-secondary);font-size:0.8rem;">
-          <span style="width:20px;">⬆️</span>
+          <span style="width:20px;"><span x-html="KazmaIcons['arrow-up']()"></span></span>
           <span style="flex:1;">..</span>
           <span style="font-size:0.75rem;color:var(--text-muted);">{{ t('workspace.up_one_level') }}</span>
         </div>
@@ -572,7 +572,7 @@
     <!-- Recent Activity (replaces Recent Files) -->
     <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
       <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
-        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">⚡ {{ t('workspace.activity_title') }}</h3>
+        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);"><span x-html="KazmaIcons.zap()"></span> {{ t('workspace.activity_title') }}</h3>
         <!-- Filter chips -->
         <div style="display:flex;gap:4px;" x-show="ghOAuthConnected" x-cloak>
           <template x-for="chip in [['all',t('workspace.filter_all')],['commit',t('workspace.filter_commits')],['pr',t('workspace.filter_prs')],['issue',t('workspace.filter_issues')],['ci',t('workspace.filter_ci')]]" :key="chip[0]">

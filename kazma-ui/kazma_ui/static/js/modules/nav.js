@@ -104,4 +104,33 @@ export function initSoftNav() {
             .then(updateActiveNav)
             .catch(() => window.location.reload());
     });
+
+    // ── Keyboard shortcuts (⌘/Ctrl + 1-6 for nav, ⌘/Ctrl + , for settings) ──
+    // The sidebar already shows these as kbd hints but they were never wired.
+    const NAV_SHORTCUTS = {
+        '1': '/workspace',
+        '2': '/ide',
+        '3': '/chat',
+        '4': '/swarm',
+        '5': '/agents',
+        '6': '/dashboard',
+    };
+
+    document.addEventListener('keydown', (e) => {
+        // Only trigger on ⌘/Ctrl + number keys, not when typing in an input.
+        if (!(e.metaKey || e.ctrlKey)) return;
+        const tag = (e.target.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
+
+        if (e.key === ',') {
+            e.preventDefault();
+            window.location.href = '/settings';
+            return;
+        }
+        const target = NAV_SHORTCUTS[e.key];
+        if (target) {
+            e.preventDefault();
+            window.location.href = target;
+        }
+    });
 }
