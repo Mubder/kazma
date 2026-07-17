@@ -83,7 +83,9 @@ var KazmaIcons = (function () {
     'hexagon': function (o) { return wrap('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>', o); },
   };
 
-  return {
+  // Expose every icon as a direct property (KazmaIcons.save(), KazmaIcons.folder(), …)
+  // plus the helper methods. Templates use the direct-property form exclusively.
+  var api = Object.assign({}, icons, {
     get: function (name, opts) {
       var fn = icons[name];
       return fn ? fn(opts) : icons['info'](opts);
@@ -99,8 +101,10 @@ var KazmaIcons = (function () {
     // Register a custom icon at runtime.
     register: function (name, paths) {
       icons[name] = function (o) { return wrap(paths, o); };
+      api[name] = icons[name];  // keep the public alias in sync
     },
-  };
+  });
+  return api;
 })();
 
 // Expose globally for non-module scripts.

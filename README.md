@@ -4,6 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Tests: 3,800+ passing](https://img.shields.io/badge/tests-3%2C800%2B%20passing-brightgreen.svg)](#-development)
 
 ---
 
@@ -211,9 +212,11 @@ kazma-cli/        The `kazma` command surface
 
 ## 🧪 Development
 
+**3,800+ tests passing** across 5 suites (core, gateway, UI, TUI, and root integration).
+
 ```bash
 uv sync --all-extras            # Install all deps (or: pip install -e ".[rag,dev]")
-pytest tests/ -v                # Run tests
+pytest                          # Run all 5 test suites (3,981 collected)
 ruff check kazma-core/          # Lint
 mypy kazma-core/                # Type check
 ```

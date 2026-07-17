@@ -31,6 +31,9 @@
     .ide-layout { display: grid; grid-template-columns: var(--ide-tree-w, 260px) 4px 1fr; gap: 0 8px; height: calc(100vh - 160px); min-height: 480px; }
     .ide-layout.with-chat { grid-template-columns: var(--ide-tree-w, 260px) 4px 1fr 4px var(--ide-chat-w, 380px); }
     .ide-tree { overflow-y: auto; overflow-x: hidden; min-height: 0; padding: 0; }
+    /* IDE panels must not inherit the decorative card hover-lift (translateY) —
+       it shifts the tree/editor on every mouse-enter and feels broken. */
+    .ide-tree:hover, .ide-main > .card:hover, .ide-chat:hover { transform: none !important; }
     .ide-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; gap: 12px; }
     .ide-editor-wrap { flex: 1 1 0; min-height: 120px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-deep); }
     .ide-editor-wrap .CodeMirror { height: 100%; font-family: var(--font-mono); font-size: 0.85rem; }
