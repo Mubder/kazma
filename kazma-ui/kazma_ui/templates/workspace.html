@@ -263,7 +263,7 @@
       </div>
 
       <div x-show="!gitIsGit && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);">
-        <div style="font-size:1.5rem;margin-bottom:8px;"><span x-html="KazmaIcons.alert()"></span></div>
+        <div style="margin-bottom:8px;color:var(--text-muted);"><span x-html="KazmaIcons.alert({class:'icon-lg'})"></span></div>
         <p style="font-size:0.85rem;margin:0;">{{ t('workspace.not_repo') }}</p>
       </div>
     </div>
@@ -510,7 +510,7 @@
 
       <!-- No GitHub repository configuration detected -->
       <div x-show="!ghIsGitHub && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
-        <div style="font-size:1.5rem;margin-bottom:8px;"><span x-html="KazmaIcons.cloud()"></span></div>
+        <div style="margin-bottom:8px;color:var(--text-muted);"><span x-html="KazmaIcons.cloud({class:'icon-lg'})"></span></div>
         <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.gh_offline') }}</h4>
         <p style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || t('workspace.gh_offline_body')"></p>
         <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
@@ -572,7 +572,7 @@
     <!-- Recent Activity (replaces Recent Files) -->
     <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
       <div class="card-header" style="padding:10px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
-        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);"><span x-html="KazmaIcons.zap()"></span> {{ t('workspace.activity_title') }}</h3>
+        <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:6px;"><span x-html="KazmaIcons.zap({class:'icon-md'})"></span> {{ t('workspace.activity_title') }}</h3>
         <!-- Filter chips -->
         <div style="display:flex;gap:4px;" x-show="ghOAuthConnected" x-cloak>
           <template x-for="chip in [['all',t('workspace.filter_all')],['commit',t('workspace.filter_commits')],['pr',t('workspace.filter_prs')],['issue',t('workspace.filter_issues')],['ci',t('workspace.filter_ci')]]" :key="chip[0]">
