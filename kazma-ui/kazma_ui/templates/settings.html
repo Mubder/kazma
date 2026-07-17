@@ -18,6 +18,7 @@
         <button class="settings-tab" :class="{ active: tab === 'account' }" @click="onTabChange('account')">{{ t('settings.tab_account') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'tools' }" @click="onTabChange('tools')">{{ t('settings.tab_tools') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'system' }" @click="onTabChange('system')">{{ t('settings.tab_system') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'packages' }" @click="onTabChange('packages')">{{ t('settings.tab_packages') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
     </nav>
 
@@ -981,7 +982,115 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════
-         TAB 12: IMPORT/EXPORT
+         TAB 12: PACKAGES & DEPENDENCIES
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'packages'" x-transition>
+        <!-- Summary -->
+        <div class="settings-group" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+            <div>
+                <h3>{{ t('packages.title') }}</h3>
+                <p style="font-size:0.82rem;color:var(--text-muted);margin-top:4px;">
+                    <span x-text="pkgTotal"></span> {{ t('packages.installed') }} · Python <span x-text="pkgPythonVer"></span>
+                </p>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <div class="metric-card" style="padding:8px 16px;min-width:120px;text-align:center;">
+                    <div class="metric-value" style="font-size:1.5rem;" x-text="pkgExtras.filter(e => e.installed).length"></div>
+                    <div class="metric-label">{{ t('packages.extras_active') }}</div>
+                </div>
+                <div class="metric-card" style="padding:8px 16px;min-width:120px;text-align:center;">
+                    <div class="metric-value" style="font-size:1.5rem;" x-text="pkgExtras.filter(e => !e.installed).length"></div>
+                    <div class="metric-label">{{ t('packages.extras_missing') }}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Optional Dependencies -->
+        <div class="settings-group" style="padding:0;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border-subtle);">
+                <h4 style="margin:0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('packages.optional_deps') }}</h4>
+            </div>
+            <div x-show="pkgLoading" style="padding:40px;text-align:center;color:var(--text-muted);font-size:0.85rem;">{{ t('common.loading') }}</div>
+            <template x-for="extra in pkgExtras" :key="extra.name">
+                <div style="padding:14px 16px;border-bottom:1px solid var(--border-subtle);">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px;">
+                        <div style="flex:1;">
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                                <span style="font-size:0.88rem;font-weight:600;color:var(--text-primary);" x-text="extra.name"></span>
+                                <span class="badge" :class="extra.installed ? 'badge-success' : 'badge-warning'"
+                                      style="font-size:0.62rem;padding:2px 7px;border-radius:10px;"
+                                      x-text="extra.installed ? '✓ ' + t('packages.installed_badge') : '✗ ' + t('packages.missing_badge')"></span>
+                            </div>
+                            <p style="margin:0;font-size:0.78rem;color:var(--text-secondary);line-height:1.5;" x-text="extra.description"></p>
+                        </div>
+                    </div>
+                    <!-- Package chips -->
+                    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;">
+                        <template x-for="pkg in extra.packages" :key="pkg.name">
+                            <span style="font-family:var(--font-mono);font-size:0.7rem;padding:2px 7px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:var(--bg-elevated);"
+                                  :style="!pkg.installed ? 'opacity:0.5;border-style:dashed;' : ''"
+                                  :title="pkg.installed ? (pkg.name + ' ' + pkg.version) : (pkg.name + ' — not installed')"
+                                  x-text="pkg.installed ? (pkg.name + ' ' + pkg.version) : (pkg.name + ' (missing)')"></span>
+                        </template>
+                    </div>
+                    <!-- Install command (only if not installed) -->
+                    <div x-show="!extra.installed" x-cloak
+                         style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--font-mono);font-size:0.75rem;display:flex;align-items:center;gap:8px;">
+                        <span style="color:var(--text-muted);">$</span>
+                        <code style="flex:1;color:var(--text-primary);" x-text="extra.install_cmd"></code>
+                        <button class="btn btn-xs btn-secondary" @click="copyPkgCmd(extra.install_cmd)" style="font-size:0.62rem;padding:2px 7px;">Copy</button>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Core Dependencies -->
+        <div class="settings-group" style="padding:0;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
+                <h4 style="margin:0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('packages.core_deps') }}</h4>
+                <span style="font-size:0.72rem;color:var(--text-muted);" x-text="'(' + pkgCore.length + ')'"></span>
+            </div>
+            <div style="padding:8px 16px;border-bottom:1px solid var(--border-subtle);">
+                <input type="text" class="form-input" :placeholder="t('packages.search_ph')" x-model="pkgSearch"
+                       style="font-size:0.8rem;padding:6px 10px;width:100%;box-sizing:border-box;">
+            </div>
+            <div style="max-height:400px;overflow-y:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
+                    <thead style="position:sticky;top:0;background:var(--bg-panel);z-index:1;">
+                        <tr style="border-bottom:1px solid var(--border-subtle);">
+                            <th style="text-align:left;padding:6px 16px;font-weight:600;color:var(--text-secondary);font-size:0.72rem;text-transform:uppercase;">{{ t('packages.col_package') }}</th>
+                            <th style="text-align:left;padding:6px 16px;font-weight:600;color:var(--text-secondary);font-size:0.72rem;text-transform:uppercase;">{{ t('packages.col_version') }}</th>
+                            <th style="text-align:left;padding:6px 16px;font-weight:600;color:var(--text-secondary);font-size:0.72rem;text-transform:uppercase;">{{ t('packages.col_description') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="pkg in filteredPkgCore" :key="pkg.name">
+                            <tr style="border-bottom:1px solid var(--tint);">
+                                <td style="padding:5px 16px;font-family:var(--font-mono);font-weight:500;color:var(--accent);font-size:0.78rem;" x-text="pkg.name"></td>
+                                <td style="padding:5px 16px;font-family:var(--font-mono);color:var(--text-muted);font-size:0.72rem;" x-text="pkg.version"></td>
+                                <td style="padding:5px 16px;color:var(--text-secondary);font-size:0.76rem;" x-text="pkg.description"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <div x-show="filteredPkgCore.length === 0 && !pkgLoading" x-cloak style="padding:20px;text-align:center;color:var(--text-muted);font-size:0.8rem;">{{ t('packages.no_match') }}</div>
+            </div>
+        </div>
+
+        <!-- Install all -->
+        <div class="settings-group">
+            <h4 style="margin:0 0 8px 0;font-size:0.88rem;font-weight:600;">{{ t('packages.install_all_title') }}</h4>
+            <p style="margin:0 0 10px 0;font-size:0.78rem;color:var(--text-muted);">{{ t('packages.install_all_desc') }}</p>
+            <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--font-mono);font-size:0.75rem;display:flex;align-items:center;gap:8px;">
+                <span style="color:var(--text-muted);">$</span>
+                <code style="flex:1;color:var(--text-primary);">uv sync --all-extras</code>
+                <button class="btn btn-xs btn-secondary" @click="copyPkgCmd('uv sync --all-extras')" style="font-size:0.62rem;padding:2px 7px;">Copy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 13: IMPORT/EXPORT
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'import'" x-transition>
         <!-- Export -->

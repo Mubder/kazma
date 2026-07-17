@@ -244,16 +244,6 @@ def register_direct_routes(self: Any) -> None:
             from fastapi import HTTPException
             raise HTTPException(status_code=500, detail=str(e))
 
-    @self.app.get("/packages", response_class=HTMLResponse)
-    async def _packages_page(request: Request) -> HTMLResponse:
-        """Render the packages/dependencies management page."""
-        templates = self.templates
-        return templates.TemplateResponse(
-            request,
-            "packages.html",
-            {"active_page": "packages"},
-        )
-
     @self.app.get("/api/system/packages")
     async def _get_packages():
         """List installed Python packages with metadata and extras status."""

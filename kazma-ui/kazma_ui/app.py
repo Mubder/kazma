@@ -323,9 +323,16 @@ class KazmaAppBuilder:
         _STATIC_DIR.mkdir(parents=True, exist_ok=True)
         self.app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
-        # Setup Jinja2 templates
+        # Setup Jinja2 templates (auto_reload=True so template edits
+        # are picked up without restarting — essential for development).
         _TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-        self.templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+        import jinja2 as _jinja2
+        _tpl_env = _jinja2.Environment(
+            loader=_jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
+            autoescape=_jinja2.select_autoescape(),
+            auto_reload=True,
+        )
+        self.templates = Jinja2Templates(env=_tpl_env)
 
         # Global template context for language/direction
         _lang = self.agent.config.language if hasattr(self.agent.config, "language") else "en"

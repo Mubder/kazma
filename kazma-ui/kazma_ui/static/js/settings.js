@@ -116,6 +116,14 @@ function settingsApp() {
         updateInfo: null,
         vaultStatus: { enabled: false, secret_count: 0 },
 
+        // ── Packages Tab ──
+        pkgCore: [],
+        pkgExtras: [],
+        pkgTotal: 0,
+        pkgPythonVer: '',
+        pkgSearch: '',
+        pkgLoading: false,
+
         // ── Import/Export Tab ──
         exportFormat: 'yaml',
         importData: '',
@@ -1430,6 +1438,38 @@ function settingsApp() {
             }
         },
 
+        async loadPackages() {
+            this.pkgLoading = true;
+            try {
+                const data = await this._fetch('/api/system/packages');
+                if (data) {
+                    this.pkgCore = data.core || [];
+                    this.pkgExtras = data.extras || [];
+                    this.pkgTotal = data.total_installed || 0;
+                    this.pkgPythonVer = data.python_version || '';
+                }
+            } catch (e) { /* silent */ }
+            this.pkgLoading = false;
+        },
+
+        get filteredPkgCore() {
+            if (!this.pkgSearch) return this.pkgCore;
+            var q = this.pkgSearch.toLowerCase();
+            return this.pkgCore.filter(function(p) {
+                return (p.name || '').toLowerCase().includes(q) ||
+                       (p.description || '').toLowerCase().includes(q);
+            });
+        },
+
+        copyPkgCmd(cmd) {
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(cmd);
+                if (window.KazmaStream && window.KazmaStream.toast) {
+                    window.KazmaStream.toast('Copied to clipboard', 'success', 2000);
+                }
+            }
+        },
+
         async checkUpdates() {
             try {
                 this.updateInfo = await this._fetch('/api/settings/system/updates');
@@ -1582,6 +1622,7 @@ function settingsApp() {
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); break;
+                case 'packages': await this.loadPackages(); break;
                 case 'import': break;
             }
         },

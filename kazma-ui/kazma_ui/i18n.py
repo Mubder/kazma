@@ -148,6 +148,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.tab_account": {"en": "Account", "ar": "الحساب"},
     "settings.tab_tools": {"en": "Tools", "ar": "الأدوات"},
     "settings.tab_system": {"en": "System", "ar": "النظام"},
+    "settings.tab_packages": {"en": "Packages", "ar": "الحزم"},
     "settings.tab_import": {"en": "Import/Export", "ar": "استيراد/تصدير"},
 
     # Settings — Providers tab
