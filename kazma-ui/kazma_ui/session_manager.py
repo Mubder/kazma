@@ -61,10 +61,16 @@ class ChatSession:
     total_tokens: int = 0
     tenant_id: str = "default"
     thread_id: str = ""
+    updated_at: str = ""
+    title: str = ""
+    archived: bool = False
 
     def __post_init__(self) -> None:
+        now = datetime.now(UTC).isoformat()
         if not self.created_at:
-            self.created_at = datetime.now(UTC).isoformat()
+            self.created_at = now
+        if not self.updated_at:
+            self.updated_at = now
 
     def to_summary(self) -> dict[str, Any]:
         """Return a serializable summary used by the session-list API."""
@@ -72,8 +78,27 @@ class ChatSession:
             "session_id": self.session_id,
             "message_count": len(self.messages),
             "created_at": self.created_at,
+            "updated_at": self.updated_at or self.created_at,
+            "title": self.title or "",
+            "archived": self.archived,
             "total_cost": self.total_cost,
+            "total_tokens": self.total_tokens,
+            "thread_id": self.thread_id,
         }
+
+    def auto_title(self) -> str:
+        """Derive a human-readable title from the first user message."""
+        for msg in self.messages:
+            if msg.get("role") == "user":
+                content = msg.get("content")
+                if isinstance(content, list):
+                    content = " ".join(
+                        b.get("text", "") for b in content
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    )
+                text = str(content or "").strip().replace("\n", " ")
+                return text[:60] + ("\u2026" if len(text) > 60 else "")
+        return ""
 
     def trim_messages(self, max_messages: int = MAX_MESSAGES_PER_SESSION) -> None:
         """Cap the message history to prevent unbounded memory growth."""
@@ -112,7 +137,7 @@ class SessionManager:
         self._load_all_from_db()
 
     def _create_tables(self) -> None:
-        """Create the sessions table if it does not exist."""
+        """Create the sessions table if it does not exist, then migrate."""
         with self._conn:
             self._conn.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
@@ -126,15 +151,31 @@ class SessionManager:
                     PRIMARY KEY (tenant_id, session_id)
                 )
             """)
+            # ── In-place migrations for existing DBs ──
+            # Each ALTER is wrapped in try/except because SQLite errors if
+            # the column already exists (no IF NOT EXISTS for ADD COLUMN).
+            for col, coltype in [
+                ("updated_at", "TEXT DEFAULT ''"),
+                ("title", "TEXT DEFAULT ''"),
+                ("archived", "INTEGER DEFAULT 0"),
+            ]:
+                try:
+                    self._conn.execute(
+                        f"ALTER TABLE sessions ADD COLUMN {col} {coltype}"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # Column already exists — expected on subsequent runs
 
     def _load_all_from_db(self) -> None:
         """Load all sessions from SQLite into the OrderedDict cache."""
         cursor = self._conn.execute(
-            "SELECT tenant_id, session_id, messages, created_at, total_cost, total_tokens, thread_id FROM sessions"
+            "SELECT tenant_id, session_id, messages, created_at, total_cost, "
+            "total_tokens, thread_id, updated_at, title, archived FROM sessions"
         )
         rows = cursor.fetchall()
         for row in rows:
-            tenant_id, session_id, messages_str, created_at, total_cost, total_tokens, thread_id = row
+            (tenant_id, session_id, messages_str, created_at, total_cost,
+             total_tokens, thread_id, updated_at, title, archived) = row
             try:
                 messages = json.loads(messages_str) if messages_str else []
             except Exception:
@@ -146,7 +187,10 @@ class SessionManager:
                 total_cost=total_cost or 0.0,
                 total_tokens=total_tokens or 0,
                 tenant_id=tenant_id or "default",
-                thread_id=thread_id or ""
+                thread_id=thread_id or "",
+                updated_at=updated_at or "",
+                title=title or "",
+                archived=bool(archived),
             )
             key = f"{session.tenant_id}:{session_id}"
             self._sessions[key] = session
@@ -164,6 +208,41 @@ class SessionManager:
                     "DELETE FROM sessions WHERE tenant_id = ? AND session_id = ?",
                     (tenant_id, session_id)
                 )
+
+    # ── DB helpers ──────────────────────────────────────────────────
+
+    def _upsert_db(self, session: ChatSession) -> None:
+        """Insert or update a session row in SQLite (shared by all write paths)."""
+        with self._conn:
+            self._conn.execute(
+                """
+                INSERT INTO sessions (tenant_id, session_id, messages, created_at,
+                                      total_cost, total_tokens, thread_id, updated_at,
+                                      title, archived)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(tenant_id, session_id) DO UPDATE SET
+                    messages=excluded.messages,
+                    created_at=excluded.created_at,
+                    total_cost=excluded.total_cost,
+                    total_tokens=excluded.total_tokens,
+                    thread_id=excluded.thread_id,
+                    updated_at=excluded.updated_at,
+                    title=excluded.title,
+                    archived=excluded.archived
+                """,
+                (
+                    session.tenant_id,
+                    session.session_id,
+                    json.dumps(session.messages),
+                    session.created_at,
+                    session.total_cost,
+                    session.total_tokens,
+                    session.thread_id,
+                    session.updated_at,
+                    session.title,
+                    int(session.archived),
+                ),
+            )
 
     # ── core CRUD ──────────────────────────────────────────────────
 
@@ -195,31 +274,7 @@ class SessionManager:
         key = f"{tenant_id}:{sid}"
         session = ChatSession(session_id=sid, tenant_id=tenant_id)
         self._sessions[key] = session
-
-        # Save to DB
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO sessions (tenant_id, session_id, messages, created_at, total_cost, total_tokens, thread_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(tenant_id, session_id) DO UPDATE SET
-                    messages=excluded.messages,
-                    created_at=excluded.created_at,
-                    total_cost=excluded.total_cost,
-                    total_tokens=excluded.total_tokens,
-                    thread_id=excluded.thread_id
-                """,
-                (
-                    tenant_id,
-                    sid,
-                    json.dumps(session.messages),
-                    session.created_at,
-                    session.total_cost,
-                    session.total_tokens,
-                    session.thread_id
-                )
-            )
-
+        self._upsert_db(session)
         self._evict_if_needed(tenant_id)
         return session
 
@@ -227,36 +282,17 @@ class SessionManager:
         """Insert or replace a session in the store."""
         tenant_id = get_current_tenant_id() or "default"
         session.tenant_id = tenant_id
+        session.updated_at = datetime.now(UTC).isoformat()
+
+        # Auto-generate a title from the first user message if none set.
+        if not session.title:
+            session.title = session.auto_title()
 
         key = f"{tenant_id}:{session.session_id}"
         self._sessions[key] = session
         # LRU: mark as most-recently-used.
         self._sessions.move_to_end(key)
-
-        # Save to DB
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO sessions (tenant_id, session_id, messages, created_at, total_cost, total_tokens, thread_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(tenant_id, session_id) DO UPDATE SET
-                    messages=excluded.messages,
-                    created_at=excluded.created_at,
-                    total_cost=excluded.total_cost,
-                    total_tokens=excluded.total_tokens,
-                    thread_id=excluded.thread_id
-                """,
-                (
-                    tenant_id,
-                    session.session_id,
-                    json.dumps(session.messages),
-                    session.created_at,
-                    session.total_cost,
-                    session.total_tokens,
-                    session.thread_id
-                )
-            )
-
+        self._upsert_db(session)
         self._evict_if_needed(tenant_id)
 
     def delete(self, session_id: str) -> None:
@@ -271,13 +307,47 @@ class SessionManager:
                 (tenant_id, session_id)
             )
 
-    def list_all(self) -> list[ChatSession]:
-        """Return all sessions."""
+    def list_all(self, include_archived: bool = False) -> list[ChatSession]:
+        """Return sessions for the current tenant, newest-first.
+
+        Archived sessions are excluded by default (they clutter the sidebar).
+        Pass ``include_archived=True`` to get everything (for the archive view).
+        """
         tenant_id = get_current_tenant_id() or "default"
-        return [
+        sessions = [
             sess for key, sess in self._sessions.items()
             if key.startswith(f"{tenant_id}:")
+            and (include_archived or not sess.archived)
         ]
+        # Sort by updated_at descending (newest activity first).
+        # Fall back to created_at for old sessions without updated_at.
+        sessions.sort(
+            key=lambda s: s.updated_at or s.created_at or "",
+            reverse=True,
+        )
+        return sessions
+
+    def rename(self, session_id: str, title: str) -> ChatSession | None:
+        """Set a custom title on a session. Returns the session or None."""
+        tenant_id = get_current_tenant_id() or "default"
+        key = f"{tenant_id}:{session_id}"
+        session = self._sessions.get(key)
+        if session is None:
+            return None
+        session.title = title.strip()[:120]
+        self._upsert_db(session)
+        return session
+
+    def set_archived(self, session_id: str, archived: bool) -> ChatSession | None:
+        """Archive or unarchive a session. Returns the session or None."""
+        tenant_id = get_current_tenant_id() or "default"
+        key = f"{tenant_id}:{session_id}"
+        session = self._sessions.get(key)
+        if session is None:
+            return None
+        session.archived = archived
+        self._upsert_db(session)
+        return session
 
     # ── convenience helpers used by SSE transport ──────────────────
 
@@ -301,34 +371,15 @@ class SessionManager:
         session.total_cost = data.get("total_cost", 0.0)
         session.total_tokens = data.get("total_tokens", 0)
         session.thread_id = data.get("thread_id", session.thread_id)
+        session.updated_at = datetime.now(UTC).isoformat()
+
+        # Auto-generate title from first user message if not set.
+        if not session.title:
+            session.title = session.auto_title()
 
         # LRU: mark as most-recently-used.
         self._sessions.move_to_end(key)
-
-        # Save to DB
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO sessions (tenant_id, session_id, messages, created_at, total_cost, total_tokens, thread_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(tenant_id, session_id) DO UPDATE SET
-                    messages=excluded.messages,
-                    created_at=excluded.created_at,
-                    total_cost=excluded.total_cost,
-                    total_tokens=excluded.total_tokens,
-                    thread_id=excluded.thread_id
-                """,
-                (
-                    tenant_id,
-                    session_id,
-                    json.dumps(session.messages),
-                    session.created_at,
-                    session.total_cost,
-                    session.total_tokens,
-                    session.thread_id
-                )
-            )
-
+        self._upsert_db(session)
         self._evict_if_needed(tenant_id)
         return session
 

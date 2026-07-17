@@ -511,6 +511,37 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "agents.model": {"en": "Model", "ar": "النموذج"},
     "agents.sessions": {"en": "Sessions", "ar": "الجلسات"},
 
+    "agents.sessions": {"en": "Sessions", "ar": "الجلسات"},
+
+    # ── Chat sidebar extras (archive/rename) ──────────────────────────
+    "chat.archived": {"en": "Archived", "ar": "المؤرشفة"},
+    "chat.rename": {"en": "Rename", "ar": "إعادة تسمية"},
+    "chat.rename_title": {"en": "Rename session", "ar": "إعادة تسمية الجلسة"},
+    "chat.session_title": {"en": "Session title", "ar": "عنوان الجلسة"},
+    "chat.archive": {"en": "Archive", "ar": "أرشفة"},
+    "chat.restore": {"en": "Restore", "ar": "استرجاع"},
+    "chat.archived_msg": {"en": "Session archived", "ar": "تمت أرشفة الجلسة"},
+    "chat.restored_msg": {"en": "Session restored", "ar": "تم استرجاع الجلسة"},
+    "chat.renamed_msg": {"en": "Session renamed", "ar": "تمت إعادة تسمية الجلسة"},
+    "chat.delete_title": {"en": "Delete session", "ar": "حذف الجلسة"},
+    "chat.deleted_msg": {"en": "Session deleted", "ar": "تم حذف الجلسة"},
+
+    # ── IDE ───────────────────────────────────────────────────────────
+    "ide.title": {"en": "IDE", "ar": "محرر الأكواد"},
+    "ide.save": {"en": "Save", "ar": "حفظ"},
+    "ide.new": {"en": "New", "ar": "جديد"},
+    "ide.delete": {"en": "Delete", "ar": "حذف"},
+    "ide.run": {"en": "Run", "ar": "تشغيل"},
+    "ide.diff": {"en": "Diff", "ar": "الفروقات"},
+    "ide.status": {"en": "Status", "ar": "الحالة"},
+    "ide.git_diff": {"en": "Git diff", "ar": "فروقات Git"},
+    "ide.skill": {"en": "Skill", "ar": "مهارة"},
+    "ide.chat": {"en": "Chat", "ar": "محادثة"},
+    "ide.no_file": {"en": "no file open", "ar": "لا يوجد ملف مفتوح"},
+    "ide.unsaved": {"en": "unsaved", "ar": "غير محفوظ"},
+    "ide.send_to_swarm": {"en": "Send to swarm", "ar": "إرسال للسرب"},
+    "ide.files": {"en": "Files", "ar": "الملفات"},
+
     # ── Skills ────────────────────────────────────────────────────────
     "skills.title": {"en": "Skills", "ar": "المهارات"},
 

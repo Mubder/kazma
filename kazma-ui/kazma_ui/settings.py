@@ -38,6 +38,35 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Keys whose values are secrets and must be masked in API responses.
+_SENSITIVE_KEY_FRAGMENTS = ("api_key", "token", "secret", "password", "passphrase")
+
+
+def _mask_sensitive_values(data: dict[str, dict[str, Any]]) -> None:
+    """Recursively mask values whose key name looks like a secret."""
+    import json
+    for category, settings_dict in data.items():
+        if not isinstance(settings_dict, dict):
+            continue
+        for key, val in list(settings_dict.items()):
+            key_lower = key.lower()
+            if not any(frag in key_lower for frag in _SENSITIVE_KEY_FRAGMENTS):
+                continue
+            # Only mask non-empty string values.
+            raw = val
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if isinstance(raw, str) and raw.strip():
+                settings_dict[key] = "***"
+            elif isinstance(raw, dict):
+                for sub_k, sub_v in list(raw.items()):
+                    if isinstance(sub_v, str) and sub_v.strip():
+                        raw[sub_k] = "***"
+                settings_dict[key] = json.dumps(raw)
+
 
 class SettingsRouterBuilder:
     """Builder that decomposes the massive settings router into modular sub-routers."""
@@ -122,8 +151,10 @@ class SettingsRouterBuilder:
 
         @router.get("/api/settings")
         async def api_get_all_settings() -> dict[str, dict[str, Any]]:
-            """Get all settings grouped by category."""
-            return config_store.get_all()
+            """Get all settings grouped by category (secrets masked)."""
+            data = config_store.get_all()
+            _mask_sensitive_values(data)
+            return data
 
         @router.get("/api/settings/vault/status")
         async def api_vault_status() -> dict[str, Any]:
@@ -137,10 +168,10 @@ class SettingsRouterBuilder:
 
         @router.get("/api/settings/export")
         async def api_export_yaml(fmt: str = Query("yaml", alias="format")) -> Response:
-            """Export settings as YAML or JSON file download."""
+            """Export settings as YAML or JSON file download (secrets masked)."""
             sm = _get_sm()
             try:
-                content = sm.export_config(fmt)
+                content = sm.export_config(fmt, mask_secrets=True)
                 media = "application/json" if fmt == "json" else "text/yaml"
                 ext = "json" if fmt == "json" else "yaml"
                 return Response(

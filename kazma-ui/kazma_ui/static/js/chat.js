@@ -13,6 +13,7 @@
   var sessions = [];
   var messageReactions = {};
   var searchQuery = '';
+  var showArchived = false;
 
   // DOM refs
   var messagesEl, inputEl, sendBtn, typingEl, sessionListEl, searchInputEl;
@@ -122,6 +123,15 @@
 
     // Load available models for the model selector
     loadModels();
+
+    // Refresh the sidebar session list when the tab regains focus.
+    // Lightweight — only reloads the list, never disrupts the active
+    // conversation or re-fetches messages.
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) {
+        if (showArchived) loadArchivedSessions(); else loadSessions();
+      }
+    });
   }
 
   // ── Input handling ────────────────────────────────────
@@ -203,6 +213,7 @@
     fetch('/api/models/saved')
       .then(function(r) { return r.ok ? r.json() : []; })
       .then(function(profiles) {
+        if (!Array.isArray(profiles)) profiles = [];
         if (Array.isArray(profiles)) {
           profiles.forEach(function(p) {
             if (p.model) {
@@ -266,13 +277,24 @@
         populateModelSelector(fallback, savedModels);
       });
 
-    // Resume the last active session across page refreshes (issue: refresh
-    // used to start a brand-new empty session every time). Falls back to a
-    // fresh session only when no prior session id is persisted.
+    // Resume the last active session across page refreshes. On a simple
+    // page refresh we don't re-fetch messages from the API (causes a
+    // visible flash). We only set the chatSessionId and let the welcome
+    // screen show. Messages are fetched when the user clicks a session
+    // in the sidebar (explicit switch) or sends the first message.
     try {
       var savedSid = localStorage.getItem(SESSION_LS_KEY);
       if (savedSid) {
-        loadSession(savedSid);
+        chatSessionId = savedSid;
+        // Show welcome placeholder (no API fetch = no flicker)
+        messagesEl.innerHTML =
+          '<div class="chat-welcome">' +
+            '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
+            '<h2>Kazma</h2>' +
+            '<p>How can I help you today?</p>' +
+          '</div>';
+        updateSessionStats(0, 0);
+        renderSessionList();
       } else {
         newSession();
       }
@@ -438,7 +460,7 @@
         tokenAccum = '';
         activeStream = null;
         enableInput();
-        loadSessions(); // refresh session list
+        if (showArchived) loadArchivedSessions(); else loadSessions(); // refresh session list
       },
 
       onApprovalRequired: function(data) {
@@ -636,14 +658,40 @@
       .catch(function() {});
   }
 
+  function relativeTime(isoStr) {
+    if (!isoStr) return '';
+    try {
+      var then = new Date(isoStr);
+      var now = new Date();
+      var diff = Math.floor((now - then) / 1000);
+      if (diff < 60) return 'just now';
+      if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+      if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
+      return then.toLocaleDateString();
+    } catch (e) { return ''; }
+  }
+
   function renderSessionList() {
     if (!sessionListEl) return;
+    // Backend returns sessions sorted newest-first by updated_at.
+    // Additionally, pin the active session to the top so it's always
+    // visible (matches ChatGPT behavior).
     var filtered = sessions;
     if (searchQuery) {
+      var q = searchQuery.toLowerCase();
       filtered = sessions.filter(function(s) {
-        return (s.session_id || '').toLowerCase().includes(searchQuery);
+        return ((s.title || '').toLowerCase().includes(q) ||
+                (s.session_id || '').toLowerCase().includes(q));
       });
     }
+    // Sort: active session first, then by updated_at descending.
+    filtered = filtered.slice().sort(function(a, b) {
+      var aActive = a.session_id === chatSessionId ? 1 : 0;
+      var bActive = b.session_id === chatSessionId ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+      return (b.updated_at || b.created_at || '').localeCompare(a.updated_at || a.created_at || '');
+    });
 
     if (filtered.length === 0) {
       sessionListEl.innerHTML =
@@ -653,11 +701,25 @@
 
     sessionListEl.innerHTML = filtered.map(function(s) {
       var isActive = s.session_id === chatSessionId;
-      return '<div class="session-item' + (isActive ? ' active' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '">' +
-        '<span class="session-title">' + escapeHtml(s.session_id.slice(0, 8)) + '\u2026</span>' +
-        '<span class="session-meta">' + s.message_count + ' msgs \u00B7 ' + KS.formatTokens(s.total_tokens) + ' tokens</span>' +
-        '<button class="session-delete" data-delete="' + escapeHtml(s.session_id) + '" title="Delete session">\u2715</button>' +
-      '</div>';
+      var title = s.title || (s.session_id || '').slice(0, 8);
+      var meta = s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
+      var html = '<div class="session-item' + (isActive ? ' active' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '">' +
+        '<div class="session-info">' +
+          '<span class="session-title" title="Double-click to rename">' + escapeHtml(title) + '</span>' +
+          '<span class="session-meta">' + meta + '</span>' +
+        '</div>';
+      if (showArchived) {
+        // In archive view: show unarchive + delete buttons
+        html += '<button class="session-unarchive" data-unarchive="' + escapeHtml(s.session_id) + '" title="Restore">\u21BA</button>';
+        html += '<button class="session-delete" data-delete="' + escapeHtml(s.session_id) + '" title="Delete forever">\u2715</button>';
+      } else {
+        // Normal view: show rename + archive + delete buttons
+        html += '<button class="session-rename" data-rename="' + escapeHtml(s.session_id) + '" title="Rename">\u270F</button>';
+        html += '<button class="session-archive" data-archive="' + escapeHtml(s.session_id) + '" title="Archive">\u25A0</button>';
+        html += '<button class="session-delete" data-delete="' + escapeHtml(s.session_id) + '" title="Delete session">\u2715</button>';
+      }
+      html += '</div>';
+      return html;
     }).join('');
 
     // Delete button handlers
@@ -667,6 +729,111 @@
         deleteSession(this.dataset.delete);
       });
     });
+
+    // Rename button handlers
+    sessionListEl.querySelectorAll('[data-rename]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        renameSession(this.dataset.rename);
+      });
+    });
+
+    // Archive button handlers
+    sessionListEl.querySelectorAll('[data-archive]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        archiveSession(this.dataset.archive);
+      });
+    });
+
+    // Unarchive button handlers
+    sessionListEl.querySelectorAll('[data-unarchive]').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        unarchiveSession(this.dataset.unarchive);
+      });
+    });
+  }
+
+  function archiveSession(sessionId) {
+    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/archive', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') {
+          KS.toast('Session archived', 'success', 2000);
+          loadSessions();
+          if (sessionId === chatSessionId) newSession();
+        } else {
+          KS.toast(data.error || 'Archive failed', 'error', 3000);
+        }
+      })
+      .catch(function() { KS.toast('Archive failed', 'error', 3000); });
+  }
+
+  function unarchiveSession(sessionId) {
+    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/unarchive', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') {
+          KS.toast('Session restored', 'success', 2000);
+          loadArchivedSessions();
+        } else {
+          KS.toast(data.error || 'Restore failed', 'error', 3000);
+        }
+      })
+      .catch(function() { KS.toast('Restore failed', 'error', 3000); });
+  }
+
+  function loadArchivedSessions() {
+    fetch('/api/chat/sessions/archived')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        sessions = data || [];
+        renderSessionList();
+      })
+      .catch(function() {});
+  }
+
+  function toggleArchivedView() {
+    showArchived = !showArchived;
+    var headerTitle = document.querySelector('.chat-sidebar-header h3');
+    var newBtn = document.getElementById('new-session-btn');
+    if (showArchived) {
+      if (headerTitle) headerTitle.textContent = 'Archived';
+      if (newBtn) newBtn.style.display = 'none';
+      loadArchivedSessions();
+    } else {
+      if (headerTitle) headerTitle.textContent = 'Sessions';
+      if (newBtn) newBtn.style.display = '';
+      loadSessions();
+    }
+  }
+
+  async function renameSession(sessionId) {
+    var s = sessions.find(function(x) { return x.session_id === sessionId; });
+    var current = s ? (s.title || sessionId.slice(0, 8)) : '';
+    var title = await window.kazmaPrompt({
+      title: 'Rename session',
+      label: 'Session title',
+      defaultValue: current,
+      confirmText: 'Rename',
+    });
+    if (!title || !title.trim()) return;
+    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title.trim() }),
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.status === 'ok') {
+          KS.toast('Session renamed', 'success', 2000);
+          loadSessions();
+        } else {
+          KS.toast(data.error || 'Rename failed', 'error', 3000);
+        }
+      })
+      .catch(function() { KS.toast('Rename failed', 'error', 3000); });
   }
 
   function loadSession(sessionId) {
@@ -675,7 +842,7 @@
     // Clear messages and show loading state
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
-        '<div class="welcome-icon">\u{1F30A}</div>' +
+        '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
         '<h2>Session ' + escapeHtml(sessionId.slice(0, 8)) + '</h2>' +
         '<p>Loading messages\u2026</p>' +
       '</div>';
@@ -695,7 +862,7 @@
         if (!messages || messages.length === 0) {
           messagesEl.innerHTML =
             '<div class="chat-welcome">' +
-              '<div class="welcome-icon">\u{1F30A}</div>' +
+              '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
               '<h2>Session ' + escapeHtml(sessionId.slice(0, 8)) + '</h2>' +
               '<p>No messages in this session yet.</p>' +
             '</div>';
@@ -712,7 +879,7 @@
       .catch(function(err) {
         messagesEl.innerHTML =
           '<div class="chat-welcome">' +
-            '<div class="welcome-icon">\u{1F30A}</div>' +
+            '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
             '<h2>Session ' + escapeHtml(sessionId.slice(0, 8)) + '</h2>' +
             '<p>Failed to load messages: ' + escapeHtml(err.message) + '</p>' +
           '</div>';
@@ -725,7 +892,7 @@
     persistSessionId();
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
-        '<div class="welcome-icon">\u{1F30A}</div>' +
+        '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
         '<h2>Kazma</h2>' +
         '<p>How can I help you today?</p>' +
       '</div>';
@@ -808,5 +975,6 @@
     sendMessage: sendMessage,
     newSession: newSession,
     retry: retry,
+    toggleArchivedView: toggleArchivedView,
   };
 })();

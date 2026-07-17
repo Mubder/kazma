@@ -39,6 +39,7 @@
   --accent-light: #67e8f9;
   --accent-subtle: rgba(34, 211, 238, 0.12);
   --accent-glow: rgba(34, 211, 238, 0.25);
+  --accent-rgb: 34, 211, 238;
   --gradient-accent: linear-gradient(135deg, #22d3ee 0%, #0891b2 100%);
 
   /* Secondary — blue (kazma.ai secondary) */
@@ -1763,6 +1764,7 @@ tbody tr:last-child td {
   --accent-light: #0891b2;
   --accent-subtle: rgba(8, 145, 178, 0.10);
   --accent-glow: rgba(8, 145, 178, 0.22);
+  --accent-rgb: 8, 145, 178;
   --gradient-accent: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
 
   --secondary: #2563eb;
@@ -2473,29 +2475,52 @@ canvas { display: block; border-radius: 4px; }
 }
 .session-item {
   position: relative;
-  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s;
 }
 .session-item:hover { background: var(--bg-hover); }
 .session-item.active { background: rgba(94, 106, 210, 0.1); border: 1px solid rgba(94, 106, 210, 0.2); }
-.session-delete {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
+.session-info { flex: 1; min-width: 0; overflow: hidden; }
+.session-info .session-title {
+  display: block;
+  font-weight: 500;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-info .session-meta {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-rename, .session-delete, .session-archive, .session-unarchive {
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
   font-size: 0.7rem;
-  padding: 2px 6px;
+  padding: 3px 5px;
   border-radius: 3px;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, color 0.15s;
+  flex-shrink: 0;
 }
-.session-item:hover .session-delete { opacity: 1; }
+.session-item:hover .session-rename,
+.session-item:hover .session-delete,
+.session-item:hover .session-archive,
+.session-item:hover .session-unarchive { opacity: 1; }
+.session-rename:hover { color: var(--accent); background: var(--accent-subtle); }
+.session-archive:hover { color: var(--warning); background: var(--warning-bg, rgba(245,158,11,0.1)); }
+.session-unarchive:hover { color: var(--accent); background: var(--accent-subtle); }
 .session-delete:hover { color: var(--danger); background: var(--danger-subtle); }
 .session-empty {
   text-align: center;
@@ -2935,17 +2960,9 @@ canvas { display: block; border-radius: 4px; }
 .table-container::-webkit-scrollbar-thumb:hover,
 .modal-body::-webkit-scrollbar-thumb:hover { background: var(--accent-glow); }
 
-/* Hero glow accent — soft radial behind page heroes */
+/* Hero glow accent — disabled (was neon radial, looked unprofessional) */
 .hero-glow {
-  position: absolute;
-  top: -180px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 760px;
-  height: 480px;
-  background: radial-gradient(ellipse at center, var(--accent-glow), transparent 65%);
-  pointer-events: none;
-  z-index: 0;
+  display: none;
 }
 .hitl-approval-status {
   font-size: 0.75rem;
@@ -3040,37 +3057,34 @@ body {
   transform: translateY(-2px);
 }
 
-/* Metric cards — glowing icon chip + hover halo */
+/* Metric cards — clean, professional (no neon glow) */
 .metric-card {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, #ffffff 3%), var(--bg-panel));
+  background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
   position: relative;
   overflow: hidden;
 }
 .metric-card:hover {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-  box-shadow: var(--shadow-glow);
-  transform: translateY(-2px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
 }
 .metric-icon {
   background: var(--accent-subtle);
   color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
-  box-shadow: 0 0 18px var(--accent-glow);
+  border: 1px solid var(--border-subtle);
 }
 .metric-icon svg { width: 20px; height: 20px; }
 .metric-value { font-size: var(--fs-fluid-2xl); }
 
-/* Primary buttons get a soft glow */
+/* Primary buttons — clean, no glow */
 .btn-primary {
-  box-shadow: var(--shadow-glow);
+  box-shadow: var(--shadow-sm);
 }
 .btn-primary:hover:not(:disabled) {
-  box-shadow: 0 0 28px var(--accent-glow);
+  box-shadow: var(--shadow);
   transform: translateY(-1px);
 }
 
@@ -3102,12 +3116,12 @@ body {
   border-radius: var(--radius);
   background: var(--gradient-accent);
   color: #001016;
-  box-shadow: var(--shadow-glow);
+  box-shadow: var(--shadow-sm);
   transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
 }
 .send-btn:hover:not(:disabled) {
   filter: brightness(1.08);
-  box-shadow: 0 0 22px var(--accent-glow);
+  box-shadow: var(--shadow);
   transform: translateY(-1px);
 }
 

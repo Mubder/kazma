@@ -187,14 +187,14 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
     @router.post("/api/skills/toggle")
     async def api_toggle_skill(req: SkillToggleRequest) -> dict[str, str]:
         """Enable or disable a skill."""
-        # Store toggle state in config
-        from kazma_core.config_store import get_config_store
+        try:
+            from kazma_core.config_store import get_config_store
 
-        store = get_config_store()
-        store.set(f"skills.enabled.{req.skill_id}", req.enabled, category="skills")
-        # Do NOT close the shared ConfigStore singleton — it would break
-        # all other components that use it.
-        return {"status": "ok", "enabled": str(req.enabled)}
+            store = get_config_store()
+            store.set(f"skills.enabled.{req.skill_id}", req.enabled, category="skills")
+            return {"status": "ok", "enabled": str(req.enabled)}
+        except Exception:
+            return {"status": "error", "error": "Internal error"}
 
     @router.post("/api/skills/validate")
     async def api_validate_skill(request: Request) -> dict[str, Any]:

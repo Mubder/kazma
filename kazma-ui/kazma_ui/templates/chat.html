@@ -26,6 +26,7 @@
       <div class="session-empty">{{ t('chat.loading_sessions') }}</div>
     </div>
     <div class="chat-sidebar-footer">
+      <button id="archive-toggle-btn" class="btn btn-xs btn-secondary" style="width:100%;margin-bottom:6px;font-size:0.72rem;" onclick="KazmaChat.toggleArchivedView()">{{ t('chat.archived') }}</button>
       <span style="font-size:0.7rem;color:var(--text-muted);">
         <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+K</kbd> {{ t('chat.search') }}
         <kbd style="background:var(--bg-elevated);border:1px solid var(--border);padding:1px 5px;border-radius:3px;">Ctrl+N</kbd> {{ t('chat.new') }}

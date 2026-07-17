@@ -835,12 +835,49 @@ class SettingsManager:
     # IMPORT / EXPORT
     # ══════════════════════════════════════════════════════════════════
 
-    def export_config(self, fmt: str = "yaml") -> str:
-        """Export configuration as YAML or JSON."""
+    def export_config(self, fmt: str = "yaml", mask_secrets: bool = False) -> str:
+        """Export configuration as YAML or JSON.
+
+        When ``mask_secrets=True``, sensitive values (api keys, tokens,
+        passwords) are replaced with ``***`` to prevent leaking through
+        browser download dialogs or network logs.
+        """
         if fmt == "json":
             all_settings = self._cs.get_all()
+            if mask_secrets:
+                self._mask_secrets_in_dict(all_settings)
             return json.dumps(all_settings, indent=2, ensure_ascii=False)
+        # YAML export
+        if mask_secrets:
+            all_settings = self._cs.get_all()
+            self._mask_secrets_in_dict(all_settings)
+            import yaml as _yaml
+            return _yaml.dump(all_settings, default_flow_style=False, allow_unicode=True)
         return self._cs.export_yaml()
+
+    @staticmethod
+    def _mask_secrets_in_dict(data: dict) -> None:
+        """Recursively replace values whose key looks like a secret with '***'."""
+        _SENSITIVE = ("api_key", "token", "secret", "password", "passphrase")
+        for category, settings_dict in data.items():
+            if not isinstance(settings_dict, dict):
+                continue
+            for key in list(settings_dict.keys()):
+                if any(frag in key.lower() for frag in _SENSITIVE):
+                    raw = settings_dict[key]
+                    if isinstance(raw, str) and raw.strip():
+                        try:
+                            import json as _json
+                            parsed = _json.loads(raw)
+                            if isinstance(parsed, dict):
+                                for sub_k in list(parsed.keys()):
+                                    if isinstance(parsed[sub_k], str) and parsed[sub_k].strip():
+                                        parsed[sub_k] = "***"
+                                settings_dict[key] = _json.dumps(parsed)
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+                        settings_dict[key] = "***"
 
     def import_config(self, data: str, fmt: str = "yaml", selective: bool = False, sections: list[str] | None = None) -> int:
         """Import configuration from YAML or JSON string."""

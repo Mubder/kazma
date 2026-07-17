@@ -577,9 +577,76 @@ def create_sse_chat_router(
 
     @r.delete("/api/chat/sessions/{session_id}")
     async def delete_session(session_id: str) -> dict[str, str]:
-        """Delete a chat session (shared store)."""
-        _get_store().delete(session_id)
-        return {"status": "ok"}
+        """Delete a chat session and its associated checkpoint data."""
+        try:
+            store = _get_store()
+            session = store.get(session_id)
+            thread_id = session.thread_id if session else ""
+            store.delete(session_id)
+
+            if thread_id:
+                try:
+                    from kazma_ui import dashboard as _dash
+                    cm = _dash._checkpoint_manager
+                    if cm and hasattr(cm, "adelete_thread"):
+                        await cm.adelete_thread(thread_id)
+                except Exception as exc:
+                    logger.debug("Checkpoint cleanup for %s failed: %s", thread_id, exc)
+            return {"status": "ok"}
+        except Exception as exc:
+            logger.error("delete_session failed: %s", exc)
+            return {"status": "error", "error": "Internal error"}
+
+    @r.patch("/api/chat/sessions/{session_id}")
+    async def rename_session(session_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Rename a chat session (set a custom title)."""
+        try:
+            title = str(body.get("title") or "").strip()
+            if not title:
+                return {"status": "error", "error": "Title cannot be empty"}
+            session = _get_store().rename(session_id, title)
+            if session is None:
+                return {"status": "error", "error": "Session not found"}
+            return {"status": "ok", "title": session.title}
+        except Exception as exc:
+            logger.error("rename_session failed: %s", exc)
+            return {"status": "error", "error": "Internal error"}
+
+    @r.post("/api/chat/sessions/{session_id}/archive")
+    async def archive_session(session_id: str) -> dict[str, Any]:
+        """Archive a chat session (hide from sidebar without deleting)."""
+        try:
+            session = _get_store().set_archived(session_id, True)
+            if session is None:
+                return {"status": "error", "error": "Session not found"}
+            return {"status": "ok", "archived": True}
+        except Exception as exc:
+            logger.error("archive_session failed: %s", exc)
+            return {"status": "error", "error": "Internal error"}
+
+    @r.post("/api/chat/sessions/{session_id}/unarchive")
+    async def unarchive_session(session_id: str) -> dict[str, Any]:
+        """Restore an archived chat session back to the sidebar."""
+        try:
+            session = _get_store().set_archived(session_id, False)
+            if session is None:
+                return {"status": "error", "error": "Session not found"}
+            return {"status": "ok", "archived": False}
+        except Exception as exc:
+            logger.error("unarchive_session failed: %s", exc)
+            return {"status": "error", "error": "Internal error"}
+
+    @r.get("/api/chat/sessions/archived")
+    async def list_archived_sessions() -> list[dict[str, Any]]:
+        """List archived chat sessions (for the archive view)."""
+        try:
+            return [
+                s.to_summary()
+                for s in _get_store().list_all(include_archived=True)
+                if s.archived
+            ]
+        except Exception:
+            return []
 
     @r.get("/api/chat/sessions/{session_id}/messages")
     async def get_session_messages(session_id: str) -> list[dict[str, Any]]:
