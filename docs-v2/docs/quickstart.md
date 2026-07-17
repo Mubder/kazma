@@ -60,7 +60,7 @@ cp .env.example .env      # then edit .env (see step 3)
 docker compose up -d --build
 ```
 
-The container runs `uvicorn kazma_ui.app:create_app --factory --host 0.0.0.0 --port 8000` as the non-root `kazma` user. Health check hits `/api/gateway/status` every 30 s. See [Deployment](deployment.md).
+The container runs `uvicorn kazma_ui.app:create_app --factory --host 0.0.0.0 --port 9090` as the non-root `kazma` user. Health check hits `/api/gateway/status` every 30 s. See [Deployment](deployment.md).
 
 ### Path C — Windows native (`setup.ps1`)
 
@@ -139,7 +139,7 @@ llm:
 
 ui:
   host: 127.0.0.1
-  port: 8000
+  port: 9090
 ```
 
 The complete key-by-key reference is in [Configuration](configuration.md).
@@ -153,7 +153,7 @@ The complete key-by-key reference is in [Configuration](configuration.md).
 ```bash
 kazma serve
 # or: kazma-web
-# or: python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8000
+# or: python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090
 ```
 
 Open <http://127.0.0.1:8000>. You should see the dashboard. Navigate to **Chat** and send a message.

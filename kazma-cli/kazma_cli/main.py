@@ -44,7 +44,7 @@ def main() -> None:
         _run_status()
 
     elif cmd == "serve":
-        port = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
+        port = int(sys.argv[2]) if len(sys.argv) > 2 else 9090
         _run_serve(port)
 
     elif cmd == "wizard":
@@ -75,7 +75,7 @@ def main() -> None:
         print("Kazma CLI v0.2.0")
         print("Commands:")
         print("  status     Show Kazma status")
-        print("  serve      Start the WebUI server (default port 8000)")
+        print("  serve      Start the WebUI server (default port 9090)")
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")
         print("  docs       Documentation commands (build, serve)")
@@ -86,7 +86,7 @@ def main() -> None:
         print("  update     Check for and install Kazma CLI updates")
         print("")
         print("Options:")
-        print("  serve [port]  Start server on specified port (default: 8000)")
+        print("  serve [port]  Start server on specified port (default: 9090)")
 
     else:
         print(f"Unknown command: {cmd}")
@@ -379,7 +379,7 @@ def _run_status() -> None:
     print()
 
     # --- Server / gateway / swarm health (best-effort) ---------------------
-    port = 8000
+    port = 9090
     env_port = os.environ.get("KAZMA_PORT")
     if env_port:
         try:

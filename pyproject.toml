@@ -4,7 +4,7 @@ version = "0.5.0"
 description = "Kazma — Autonomous AI agent framework with LangGraph, ChromaDB RAG, and Arabic RTL dashboard"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11,<3.15"
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
@@ -64,6 +64,11 @@ observability = [
 ]
 web = [
     "playwright>=1.40",
+]
+# Convenience meta-extra — installs everything at once.
+# Usage: pip install -e ".[all]"  or  uv sync --all-extras
+all = [
+    "kazma[rag,dev,tui,observability,web]",
 ]
 
 [project.scripts]

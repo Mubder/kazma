@@ -28,53 +28,52 @@ Kazma is a multi-platform AI agent framework that lets you build, deploy, and or
 
 ## 🚀 Quick Start
 
+> **Requires Python 3.11+ (3.13 recommended).** Kazma supports Python 3.11 through 3.14.
+
 ### Install
 
 ```bash
 git clone https://github.com/Mubder/kazma && cd kazma
 ```
 
-**Option A — uv (recommended):**
+**Option A — uv (recommended for all platforms):**
 
 ```bash
+# Install uv if you don't have it (one-time):
+#   Linux / macOS / WSL:   curl -LsSf https://astral.sh/uv/install.sh | sh
+#   Windows (PowerShell):  irm https://astral.sh/uv/install.ps1 | iex
+
+# Create venv with Python 3.13 and install ALL dependencies in one step:
+uv venv --python 3.13
 uv sync --all-extras
 ```
 
 **Option B — pip + venv:**
 
-```bash
-python -m venv .venv
-```
-
-**Activate the venv — pick the one for your platform:**
+**Linux / macOS / WSL:**
 
 ```bash
-# Linux / macOS / WSL (bash, zsh)
+python3 -m venv .venv --python 3.13    # or just: python3 -m venv .venv
 source .venv/bin/activate
+pip install -e ".[all]"                # installs core + rag + dev + tui + observability + web
 ```
+
+**Windows (PowerShell):**
 
 ```powershell
-# Windows (PowerShell)
+py -3.13 -m venv .venv
 .venv\Scripts\Activate.ps1
+pip install -e ".[all]"
 ```
 
-```cmd
-:: Windows (CMD)
-.venv\Scripts\activate.bat
-```
-
-```bash
-pip install -e ".[rag,dev]"
-```
+> **WSL note:** If you see `error: externally-managed-environment`, you must use a venv (above) — never `pip install` system-wide on Debian/Ubuntu.
 
 ### Configure
 
 ```bash
 # Linux / macOS / WSL
 cp .env.example .env
-```
 
-```powershell
 # Windows (PowerShell)
 Copy-Item .env.example .env
 ```
@@ -87,7 +86,7 @@ OPENAI_API_KEY=sk-...
 ### Run
 
 ```bash
-kazma serve          # Web UI → http://127.0.0.1:8000
+kazma serve          # Web UI → http://127.0.0.1:9090
 # or
 kazma-tui            # Terminal dashboard
 ```
