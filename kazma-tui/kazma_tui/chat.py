@@ -82,6 +82,7 @@ class ChatPanel(Vertical):
         self._busy: bool = False
         self._ac_matches: list[tuple[str, str]] = []
         self._ac_index: int = 0
+        self._model_cache: list[str] = []
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
@@ -102,7 +103,35 @@ class ChatPanel(Vertical):
             self._ac_matches = []
             return
 
-        partial = val.split()[0] if val.split() else val
+        parts = val.split(None, 2)
+        cmd = parts[0].lower() if parts else val
+
+        # /model set <partial> → show matching models
+        if cmd in ("/model", "/models") and len(parts) >= 2 and parts[1].lower() == "set":
+            partial = parts[2] if len(parts) > 2 else ""
+            if not self._model_cache:
+                self._refresh_model_cache()
+            matches = [
+                (m, "")
+                for m in self._model_cache
+                if partial.lower() in m.lower()
+            ]
+            self._ac_matches = matches[:15]  # cap at 15
+            self._ac_index = 0
+
+            if matches:
+                lines = []
+                for i, (model_name, _) in enumerate(self._ac_matches):
+                    marker = ">" if i == self._ac_index else " "
+                    lines.append(f" {marker} [bold $primary]{model_name}[/]")
+                ac.update("\n".join(lines))
+                ac.styles.display = "block"
+            else:
+                ac.styles.display = "none"
+            return
+
+        # Default: match slash commands
+        partial = parts[0] if parts else val
         matches = [(c, d) for c, d in self.SLASH_COMMANDS if c.startswith(partial)]
         self._ac_matches = matches
         self._ac_index = 0
@@ -116,6 +145,14 @@ class ChatPanel(Vertical):
             ac.styles.display = "block"
         else:
             ac.styles.display = "none"
+
+    def _refresh_model_cache(self) -> None:
+        """Load available model names for autocomplete."""
+        try:
+            from kazma_core.settings.model_registry import get_universal_models
+            self._model_cache = [m["name"] for m in get_universal_models()]
+        except Exception:
+            self._model_cache = []
 
     def on_key(self, event) -> None:
         """Handle Tab/Arrow keys for autocomplete navigation."""
@@ -131,13 +168,23 @@ class ChatPanel(Vertical):
             self._ac_index = (self._ac_index - 1) % len(self._ac_matches)
             self._render_autocomplete()
             event.prevent_default()
-        elif event.key == "enter" and len(self._ac_matches) == 1:
-            # Auto-complete the single match
-            cmd = self._ac_matches[0][0]
+        elif event.key == "enter" and self._ac_matches:
+            # If exactly 1 match, auto-complete; if multiple, pick highlighted
+            idx = min(self._ac_index, len(self._ac_matches) - 1)
+            model_name = self._ac_matches[idx][0]
             inp = self.query_one("#chat-input", Input)
-            inp.value = cmd + " "
-            inp.cursor_position = len(cmd) + 1
+
+            # Check if we're in model set mode
+            parts = inp.value.split(None, 2)
+            if len(parts) >= 2 and parts[0].lower() in ("/model", "/models") and parts[1].lower() == "set":
+                inp.value = f"/model set {model_name}"
+                inp.cursor_position = len(inp.value)
+            else:
+                inp.value = model_name + " "
+                inp.cursor_position = len(inp.value)
+
             ac.styles.display = "none"
+            self._ac_matches = []
             event.prevent_default()
 
     def _render_autocomplete(self) -> None:
@@ -145,7 +192,10 @@ class ChatPanel(Vertical):
         lines = []
         for i, (cmd, desc) in enumerate(self._ac_matches):
             prefix = ">" if i == self._ac_index else " "
-            lines.append(f" {prefix} [bold $primary]{cmd:<10}[/] [dim]{desc}[/]")
+            if desc:
+                lines.append(f" {prefix} [bold $primary]{cmd:<10}[/] [dim]{desc}[/]")
+            else:
+                lines.append(f" {prefix} [bold $primary]{cmd}[/]")
         ac.update("\n".join(lines))
 
     # ── Message display ────────────────────────────────────────────
@@ -240,6 +290,18 @@ class ChatPanel(Vertical):
 
     # ── Input handling ─────────────────────────────────────────────
 
+    def _on_model_picked(self, model_name: str | None) -> None:
+        """Callback when a model is selected from the picker."""
+        if not model_name:
+            return
+        try:
+            from kazma_core.model_registry import get_model_registry
+            registry = get_model_registry()
+            registry.set_active_model(model_name)
+            self.write("system", f"Active model set to: {model_name}")
+        except Exception as e:
+            self.write("error", f"Failed to set model: {e}")
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
         if not text:
@@ -301,12 +363,15 @@ class ChatPanel(Vertical):
                 except Exception as e:
                     self.write("error", f"Failed to set model: {e}")
             else:
+                # Open interactive model picker
                 try:
-                    from kazma_core.settings.model_registry import get_model_list_text
-                    self.write("system", get_model_list_text("tui"))
-                    self.write("system", "\n  Usage: /model set <model-name>")
-                except Exception as e:
-                    self.write("error", f"Model registry: {e}")
+                    from kazma_core.model_registry import get_model_registry
+                    registry = get_model_registry()
+                    active = getattr(registry, "_active_model", "") or ""
+                except Exception:
+                    active = ""
+                from kazma_tui.widgets.model_picker import ModelPicker
+                self.app.push_screen(ModelPicker(active_model=active), self._on_model_picked)
         elif cmd == "/swarm":
             self.app.call_later(self._handle_swarm_command, text)
         else:
