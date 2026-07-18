@@ -31,30 +31,51 @@ class UniversalModelRegistry:
         into a single list with keys: id, name, provider, base_url.
         """
         models: list[dict[str, Any]] = []
+        seen: set[str] = set()
         try:
             from kazma_core.model_registry import get_model_registry
             registry = get_model_registry()
 
             # Saved model profiles
             for profile in registry.list_model_profiles(mask_api_key=True):
-                models.append({
-                    "id": f"profile:{profile['name']}",
-                    "name": profile.get("model", profile["name"]),
-                    "provider": profile.get("provider", ""),
-                    "base_url": profile.get("base_url", ""),
-                    "source": "saved",
-                })
+                model_name = profile.get("model", profile["name"])
+                if model_name not in seen:
+                    seen.add(model_name)
+                    models.append({
+                        "id": f"profile:{profile['name']}",
+                        "name": model_name,
+                        "provider": profile.get("provider", ""),
+                        "base_url": profile.get("base_url", ""),
+                        "source": "saved",
+                    })
 
             # Provider-discovered models
             options = registry.list_unified_options()
             for provider_name, model_list in options.get("provider_models", {}).items():
                 for model_name in model_list:
+                    if model_name not in seen:
+                        seen.add(model_name)
+                        models.append({
+                            "id": f"discovered:{provider_name}:{model_name}",
+                            "name": model_name,
+                            "provider": provider_name,
+                            "base_url": "",
+                            "source": "discovered",
+                        })
+
+            # Flat models set (llm.model, models.default, task defaults)
+            # These come from config but may not be under any enabled provider.
+            # Attribute them to the active provider or "config".
+            active_provider = getattr(registry, "_active_provider", None) or "config"
+            for model_name in options.get("models", []):
+                if model_name and model_name not in seen:
+                    seen.add(model_name)
                     models.append({
-                        "id": f"discovered:{provider_name}:{model_name}",
+                        "id": f"config:{model_name}",
                         "name": model_name,
-                        "provider": provider_name,
+                        "provider": active_provider,
                         "base_url": "",
-                        "source": "discovered",
+                        "source": "config",
                     })
         except Exception as exc:
             logger.warning("[UniversalModelRegistry] get_models failed: %s", exc)

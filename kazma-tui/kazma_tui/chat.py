@@ -33,7 +33,7 @@ class ChatPanel(Vertical):
         ("/help", "Show available commands"),
         ("/clear", "Clear chat history"),
         ("/reset", "Reset conversation context"),
-        ("/model", "Show or switch active model"),
+        ("/model [set <name>]", "Show or switch active model"),
         ("/models", "Alias for /model"),
         ("/status", "Gateway health overview"),
         ("/memory", "Memory store stats"),
@@ -289,11 +289,24 @@ class ChatPanel(Vertical):
         elif cmd == "/quit":
             self.app.exit()
         elif cmd in ("/model", "/models"):
-            try:
-                from kazma_core.settings.model_registry import get_model_list_text
-                self.write("system", get_model_list_text("tui"))
-            except Exception as e:
-                self.write("error", f"Model registry: {e}")
+            parts = text.split(None, 2)
+            sub = parts[1].lower() if len(parts) > 1 else ""
+            if sub == "set" and len(parts) > 2:
+                model_name = parts[2].strip()
+                try:
+                    from kazma_core.model_registry import get_model_registry
+                    registry = get_model_registry()
+                    registry.set_active_model(model_name)
+                    self.write("system", f"Active model set to: {model_name}")
+                except Exception as e:
+                    self.write("error", f"Failed to set model: {e}")
+            else:
+                try:
+                    from kazma_core.settings.model_registry import get_model_list_text
+                    self.write("system", get_model_list_text("tui"))
+                    self.write("system", "\n  Usage: /model set <model-name>")
+                except Exception as e:
+                    self.write("error", f"Model registry: {e}")
         elif cmd == "/swarm":
             self.app.call_later(self._handle_swarm_command, text)
         else:
