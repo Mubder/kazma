@@ -205,6 +205,7 @@ class ChatPanel(Vertical):
         else:
             inp.value = match_text + " "
         inp.cursor_position = len(inp.value)
+        inp.focus()
 
     # ── Message display ────────────────────────────────────────────
 
@@ -311,6 +312,10 @@ class ChatPanel(Vertical):
             self.write("system", f"Active model set to: {model_name}")
         except Exception as e:
             self.write("error", f"Failed to set model: {e}")
+        try:
+            self.query_one("#chat-input", Input).focus()
+        except Exception:
+            pass
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
