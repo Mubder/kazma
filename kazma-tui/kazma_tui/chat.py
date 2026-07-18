@@ -83,6 +83,7 @@ class ChatPanel(Vertical):
     def __init__(self) -> None:
         super().__init__()
         self._last_response: str = ""
+        self._messages: list[dict[str, Any]] = []
         self._pulse_timer = None
         self._busy: bool = False
         self._ac_matches: list[tuple[str, str]] = []
@@ -272,6 +273,7 @@ class ChatPanel(Vertical):
                 return
 
             messages = [{"role": "user", "content": prompt}]
+            self._messages.append({"role": "user", "content": prompt})
             # Inject system prompt from kazma.yaml so the model knows to
             # respond in the user's language and follow Kazma's persona.
             system_prompt = self._get_system_prompt()
@@ -281,6 +283,7 @@ class ChatPanel(Vertical):
             content = getattr(response, "content", "") or ""
             if content:
                 self._last_response = content
+                self._messages.append({"role": "assistant", "content": content})
                 log.write(content)
             else:
                 log.write("[dim](empty response)[/]")
@@ -388,7 +391,7 @@ class ChatPanel(Vertical):
         elif cmd == "/reset":
             self.write("system", "Conversation context reset.")
         elif cmd == "/personality":
-            self._cmd_personality()
+            self._cmd_personality(text)
         elif cmd == "/config":
             self.write("system", "Config wizard available in the Settings tab.")
         elif cmd == "/replay":
@@ -440,29 +443,127 @@ class ChatPanel(Vertical):
             self.write("error", f"Status unavailable: {e}")
 
     def _cmd_cost(self) -> None:
-        self.write("system", "Session cost tracking available in the Web UI dashboard.")
+        try:
+            from kazma_core.tracing import get_trace_store
+            stats = get_trace_store().stats()
+            cost = stats.get("total_cost", 0.0)
+            tokens = stats.get("total_tokens", 0)
+            llm_calls = stats.get("total_llm_calls", 0)
+            tool_calls = stats.get("total_tool_calls", 0)
+            uptime_s = stats.get("uptime_seconds", 0)
+            uptime = f"{int(uptime_s // 60)}m {int(uptime_s % 60)}s"
+            lines = [
+                "Session Cost Report",
+                f"  Total Cost:   ${cost:.4f}",
+                f"  Total Tokens: {tokens:,}",
+                f"  LLM Calls:    {llm_calls}",
+                f"  Tool Calls:   {tool_calls}",
+                f"  Uptime:       {uptime}",
+            ]
+            self.write("system", "\n".join(lines))
+        except Exception as e:
+            self.write("error", f"Cost tracking unavailable: {e}")
 
     def _cmd_context(self) -> None:
-        self.write("system", "Context window usage available in the Web UI dashboard.")
-
-    def _cmd_personality(self) -> None:
         try:
+            from kazma_core.summarizer import estimate_tokens, TOKEN_THRESHOLD
             from kazma_core.config_store import get_config_store
             cs = get_config_store()
-            personality = cs.get("personality") or cs.get("system_prompt", "")
-            if personality:
-                preview = personality[:200] + "..." if len(personality) > 200 else personality
-                self.write("system", f"Current personality:\n{preview}")
-            else:
-                self.write("system", "No personality configured. Use /config to set one.")
+            window = cs.get("memory.max_context_tokens", 128_000)
+            tokens = estimate_tokens(self._messages) if self._messages else 0
+            pct = (tokens / window * 100) if window else 0
+            bar_len = 20
+            filled = int(bar_len * pct / 100)
+            bar = "#" * filled + "-" * (bar_len - filled)
+            lines = [
+                "Context Window",
+                f"  Tokens:    {tokens:,} / {window:,} ({pct:.1f}%)",
+                f"  [{bar}]",
+                f"  Messages:  {len(self._messages)}",
+                f"  Threshold: {TOKEN_THRESHOLD:,} tokens (compaction at 80%)",
+            ]
+            self.write("system", "\n".join(lines))
         except Exception as e:
-            self.write("error", f"Personality unavailable: {e}")
+            self.write("error", f"Context info unavailable: {e}")
+
+    def _cmd_personality(self, text: str = "/personality") -> None:
+        try:
+            from kazma_core.tools.personality_cmd import handle_personality_command
+            response = handle_personality_command(text)
+            self.write("system", response)
+        except Exception as e:
+            self.write("error", f"Personality command failed: {e}")
 
     def _cmd_replay(self, text: str) -> None:
-        self.write("system", "Time travel replay available in the Web UI dashboard.")
+        try:
+            from kazma_core.time_travel import SnapshotStore, DEFAULT_DB_PATH
+            from pathlib import Path
+            db_path = Path(DEFAULT_DB_PATH)
+            if not db_path.exists():
+                self.write("system", "No snapshots available (snapshot DB not found).")
+                return
+            store = SnapshotStore(str(db_path))
+            parts = text.strip().split()
+            sub = parts[1].lower() if len(parts) > 1 else "list"
+            thread_id = "tui-session"
+
+            if sub in ("list", ""):
+                records = store.list_for_thread(thread_id)
+                if not records:
+                    self.write("system", "No snapshots available for this session.")
+                else:
+                    lines = ["Available snapshots:", ""]
+                    for rec in records:
+                        lines.append(f"  Iteration {rec.iteration}  |  {rec.timestamp}  |  model={rec.model_used or '?'}")
+                    self.write("system", "\n".join(lines))
+            elif sub == "clear":
+                count = store.clear_thread(thread_id)
+                self.write("system", f"Cleared {count} snapshot(s) for this session.")
+            else:
+                try:
+                    iteration = int(sub)
+                except ValueError:
+                    self.write("system", "Usage: /replay [list|clear] or /replay <iteration>")
+                    return
+                rec = store.get(thread_id, iteration)
+                if rec is None:
+                    self.write("system", f"No snapshot for iteration {iteration}.")
+                else:
+                    state = rec.get_state()
+                    msg_count = len(state.get("messages", []))
+                    self.write("system", f"Snapshot {rec.iteration}  |  {rec.timestamp}  |  model={rec.model_used or '?'}  |  {msg_count} messages")
+            store.close()
+        except Exception as e:
+            self.write("error", f"Replay command failed: {e}")
 
     def _cmd_export(self) -> None:
-        self.write("system", "Session export available in the Web UI dashboard.")
+        try:
+            from datetime import datetime
+            from pathlib import Path
+            import json
+            export_dir = Path("kazma-data/exports")
+            export_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # Markdown
+            md_path = export_dir / f"chat_{ts}.md"
+            lines = [f"# Kazma Chat Export", f"Date: {datetime.now().isoformat()}", ""]
+            for msg in self._messages:
+                role = msg.get("role", "unknown").upper()
+                content = msg.get("content", "")
+                lines.append(f"## {role}")
+                lines.append("")
+                lines.append(content)
+                lines.append("")
+            md_path.write_text("\n".join(lines), encoding="utf-8")
+
+            # JSON
+            json_path = export_dir / f"chat_{ts}.json"
+            json_path.write_text(json.dumps(self._messages, indent=2, ensure_ascii=False), encoding="utf-8")
+
+            self.write("system", f"Exported {len(self._messages)} messages to:\n  {md_path}\n  {json_path}")
+        except Exception as e:
+            self.write("error", f"Export failed: {e}")
 
     async def _handle_swarm_command(self, text: str) -> None:
         """Handle /swarm commands and bare 'swarm' mentions in the TUI chat.
