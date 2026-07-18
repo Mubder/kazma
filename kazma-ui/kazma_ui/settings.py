@@ -314,15 +314,15 @@ class SettingsRouterBuilder:
             return _get_sm().create_api_token(req.get("name", "unnamed"))
 
 @router.delete("/api/settings/account/tokens/{token_id}")
-        async def api_revoke_token(token_id: str) -> dict[str, Any]:
-            """Revoke an API token."""
-            print(f"[TOKENDIAG] DELETE handler token_id={token_id}", flush=True)
-            removed = _get_sm().revoke_api_token(token_id)
-            print(f"[TOKENDIAG] DELETE handler removed={removed}", flush=True)
-            if not removed:
-                from fastapi import HTTPException
-                raise HTTPException(status_code=404, detail=f"Token '{token_id}' not found")
-            return {"status": "ok", "removed": True, "id": token_id}
+async def api_revoke_token(token_id: str) -> dict[str, Any]:
+    """Revoke an API token."""
+    print(f"[TOKENDIAG] DELETE handler token_id={token_id}", flush=True)
+    removed = _get_sm().revoke_api_token(token_id)
+    print(f"[TOKENDIAG] DELETE handler removed={removed}", flush=True)
+    if not removed:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Token '{token_id}' not found")
+    return {"status": "ok", "removed": True, "id": token_id}
 
         @router.get("/api/settings/account/sessions")
         async def api_get_sessions() -> list[dict[str, Any]]:
