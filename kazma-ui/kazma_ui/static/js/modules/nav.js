@@ -1,8 +1,16 @@
 // ── Kazma modules/nav.js ──
-// Soft navigation: swap #main-content, reinject page scripts, re-init Alpine.
+// Soft navigation: swap .page-body (not the whole chrome), reinject page
+// scripts in order, wait for Alpine factories, then initTree.
 // Failures always fall back to a full page load.
 //
 // Hard-reload (full) for SSE / heavy editors: /chat, /ide, /swarm.
+//
+// Why .page-body (not #main-content)?
+//   #main-content also holds the header + system-alerts banner. Swapping the
+//   whole thing re-inits chrome Alpine roots (always succeed) while page
+//   factories like settingsApp() may still be missing — the old "all unbound"
+//   check then passed and left a header-only shell. Second click worked because
+//   the page script was already on window.
 
 export function initSoftNav() {
     const SOFT_NAV_ENABLED = true;
@@ -62,56 +70,197 @@ export function initSoftNav() {
         } catch (e) { /* ignore */ }
     }
 
+    function sleep(ms) {
+        return new Promise((r) => setTimeout(r, ms));
+    }
+
+    function nextFrame() {
+        return new Promise((r) => requestAnimationFrame(() => r()));
+    }
+
     /**
-     * Load page scripts in document order; wait for external src scripts.
-     * Returns a Promise that resolves when all external scripts have loaded
-     * (or failed — we still resolve so Alpine can init).
+     * Update document title + header chrome from the fetched page without
+     * destroying the header Alpine tree.
      */
-    function reinjectPageScripts(doc) {
+    function syncChrome(doc) {
+        if (doc.title) document.title = doc.title;
+
+        const newTitle = doc.querySelector('.header-title');
+        const oldTitle = document.querySelector('.header-title');
+        if (newTitle && oldTitle) {
+            oldTitle.textContent = newTitle.textContent;
+        }
+
+        const newCrumbs = doc.querySelector('.breadcrumbs');
+        const oldCrumbs = document.querySelector('.breadcrumbs');
+        if (newCrumbs && oldCrumbs) {
+            oldCrumbs.innerHTML = newCrumbs.innerHTML;
+        }
+    }
+
+    /**
+     * Extract Alpine factory names used by x-data="foo()" on a subtree.
+     * Skips object literals like x-data="{ open: false }".
+     */
+    function extractFactoryNames(root) {
+        if (!root) return [];
+        const names = [];
+        root.querySelectorAll('[x-data]').forEach((el) => {
+            const expr = (el.getAttribute('x-data') || '').trim();
+            // Match foo( or foo () — not { ... }
+            const m = expr.match(/^([A-Za-z_$][\w$]*)\s*\(/);
+            if (m) names.push(m[1]);
+        });
+        return [...new Set(names)];
+    }
+
+    /**
+     * Wait until every named factory is a function on window.
+     * Page scripts define settingsApp / agentsPage / skillsApp etc. globally.
+     */
+    async function waitForFactories(names, timeoutMs = 4000) {
+        if (!names.length) return true;
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+            if (names.every((n) => typeof window[n] === 'function')) return true;
+            await sleep(16);
+        }
+        const missing = names.filter((n) => typeof window[n] !== 'function');
+        console.warn('[soft-nav] factories still missing:', missing);
+        return false;
+    }
+
+    function isAlpineBound(el) {
+        return !!(el && (el._x_dataStack || el.__x));
+    }
+
+    function unboundAlpineRoots(root) {
+        if (!root) return [];
+        return Array.from(root.querySelectorAll('[x-data]')).filter((n) => !isAlpineBound(n));
+    }
+
+    /**
+     * Load page scripts in document order (async=false) and wait for each.
+     * Also refreshes i18n payload when present in the fetched document.
+     */
+    async function reinjectPageScripts(doc) {
+        // Drop scripts from the previous soft-nav page
         document.querySelectorAll('script[data-kazma-page-script]').forEach((el) => el.remove());
 
-        const pending = [];
-        const scripts = Array.from(doc.querySelectorAll('script'));
+        // Refresh i18n from the new page (keys differ slightly per render)
+        const i18nScript = Array.from(doc.querySelectorAll('script')).find(
+            (s) => !s.src && s.textContent && s.textContent.includes('window.KAZMA_I18N'),
+        );
+        if (i18nScript && i18nScript.textContent) {
+            try {
+                // eslint-disable-next-line no-new-func
+                new Function(i18nScript.textContent)();
+            } catch (e) {
+                console.warn('[soft-nav] i18n refresh failed:', e);
+            }
+        }
 
-        for (const s of scripts) {
+        const scripts = Array.from(doc.querySelectorAll('script'));
+        const pageScripts = scripts.filter((s) => {
             const src = s.getAttribute('src') || '';
             const type = (s.getAttribute('type') || '').toLowerCase();
-            if (type === 'module' && src.includes('/static/js/app.js')) continue;
-            if (isGlobalLib(src)) continue;
+            if (type === 'module' && src.includes('/static/js/app.js')) return false;
+            if (isGlobalLib(src)) return false;
+            // i18n handled above
+            if (!src && s.textContent && s.textContent.includes('window.KAZMA_I18N')) return false;
+            if (!src && !(s.textContent && s.textContent.trim())) return false;
+            if (!src && !s.textContent) return false;
+            // Skip empty src-less style-adjacent junk
+            return true;
+        });
 
-            // Skip pure i18n re-bootstrap if already present (avoids flicker)
-            if (!src && s.textContent && s.textContent.includes('window.KAZMA_I18N')
-                && window.KAZMA_I18N) {
-                continue;
-            }
-
+        // Sequential load preserves providers.js → models.js → settings.js order.
+        // Dynamically inserted scripts are async by default; force ordered exec.
+        for (const s of pageScripts) {
+            const src = s.getAttribute('src') || '';
+            const type = (s.getAttribute('type') || '').toLowerCase();
             const ns = document.createElement('script');
             ns.setAttribute('data-kazma-page-script', '1');
             if (type) ns.type = type;
 
             if (src) {
                 const sep = src.includes('?') ? '&' : '?';
-                ns.src = src + sep + '_sn=' + Date.now();
-                pending.push(new Promise((resolve) => {
+                // cache-bust so a soft-nav always gets the latest page script
+                const fullSrc = src + sep + '_sn=' + Date.now();
+                await new Promise((resolve) => {
+                    // Must set async=false BEFORE src for ordered execution
+                    ns.async = false;
                     ns.onload = () => resolve();
-                    ns.onerror = () => resolve(); // don't block forever
-                }));
+                    ns.onerror = () => {
+                        console.warn('[soft-nav] script failed to load:', fullSrc);
+                        resolve();
+                    };
+                    ns.src = fullSrc;
+                    document.body.appendChild(ns);
+                });
             } else if (s.textContent && s.textContent.trim()) {
                 ns.textContent = s.textContent;
-            } else {
-                continue;
+                document.body.appendChild(ns);
             }
-            document.body.appendChild(ns);
         }
-        return Promise.all(pending);
     }
 
     function initAlpineOn(el) {
-        if (!window.Alpine || typeof Alpine.initTree !== 'function') return;
+        if (!el || !window.Alpine || typeof Alpine.initTree !== 'function') return;
         try {
             Alpine.initTree(el);
         } catch (e) {
             console.warn('[soft-nav] Alpine.initTree:', e);
+        }
+    }
+
+    function destroyAlpineOn(el) {
+        if (!el || !window.Alpine || typeof Alpine.destroyTree !== 'function') return;
+        try {
+            Alpine.destroyTree(el);
+        } catch (e) { /* ignore */ }
+    }
+
+    /**
+     * Init Alpine on the page body, retrying if any x-data root stays unbound.
+     */
+    async function bindPageAlpine(pageBody, gen) {
+        if (!window.Alpine) {
+            // Alpine is defer-loaded; wait briefly on first paint races
+            const start = Date.now();
+            while (!window.Alpine && Date.now() - start < 3000) {
+                await sleep(30);
+            }
+            if (!window.Alpine) throw new Error('Alpine not available');
+        }
+
+        const factories = extractFactoryNames(pageBody);
+        const ready = await waitForFactories(factories);
+        if (!ready) {
+            throw new Error('page factories not ready: ' + factories.join(', '));
+        }
+        if (gen !== softNavGeneration) return;
+
+        initAlpineOn(pageBody);
+        await nextFrame();
+        if (gen !== softNavGeneration) return;
+        initAlpineOn(pageBody);
+
+        // Retry loop for flaky first bind (x-init races, etc.)
+        for (let attempt = 0; attempt < 5; attempt++) {
+            if (gen !== softNavGeneration) return;
+            const unbound = unboundAlpineRoots(pageBody);
+            if (unbound.length === 0) return;
+            await sleep(40 + attempt * 30);
+            // Re-check factories in case a late script redefined them
+            await waitForFactories(factories, 500);
+            initAlpineOn(pageBody);
+        }
+
+        const still = unboundAlpineRoots(pageBody);
+        if (still.length > 0) {
+            const exprs = still.map((n) => n.getAttribute('x-data')).join('; ');
+            throw new Error('Alpine did not bind page roots: ' + exprs);
         }
     }
 
@@ -148,44 +297,37 @@ export function initSoftNav() {
             }
 
             const doc = new DOMParser().parseFromString(html, 'text/html');
+            const newBody = doc.querySelector('.page-body');
+            const oldBody = document.querySelector('.page-body');
+            // Fall back to full main swap only if shell is missing .page-body
             const newMain = doc.querySelector('#main-content');
             const oldMain = document.querySelector('#main-content');
             if (!newMain || !oldMain) throw new Error('missing #main-content');
+            if (!newBody || !oldBody) {
+                // Legacy / unexpected shell — full main swap
+                destroyAlpineOn(oldMain);
+                oldMain.innerHTML = newMain.innerHTML;
+                if (doc.title) document.title = doc.title;
+                window.scrollTo(0, 0);
+                await reinjectPageScripts(doc);
+                if (gen !== softNavGeneration) return;
+                await bindPageAlpine(oldMain, gen);
+            } else {
+                // Preferred path: keep header/alerts chrome, swap page body only
+                destroyAlpineOn(oldBody);
+                oldBody.innerHTML = newBody.innerHTML;
+                syncChrome(doc);
+                window.scrollTo(0, 0);
 
-            if (window.Alpine && typeof Alpine.destroyTree === 'function') {
-                try { Alpine.destroyTree(oldMain); } catch (e) { /* ignore */ }
+                await reinjectPageScripts(doc);
+                if (gen !== softNavGeneration) return;
+
+                await bindPageAlpine(oldBody, gen);
             }
 
-            oldMain.innerHTML = newMain.innerHTML;
-            if (doc.title) document.title = doc.title;
-            window.scrollTo(0, 0);
-
-            // Wait for page scripts (settings.js, skills.js, …) before Alpine
-            await reinjectPageScripts(doc);
             if (gen !== softNavGeneration) return;
-
-            initAlpineOn(oldMain);
-            // Second pass for deferred factories
-            requestAnimationFrame(() => {
-                if (gen === softNavGeneration) initAlpineOn(oldMain);
-            });
-
             history.pushState({ kazmaSoft: true }, '', url);
             updateActiveNav();
-
-            // Sanity: if page expected an Alpine root and it never bound, hard reload
-            const needsAlpine = oldMain.querySelector('[x-data]');
-            if (needsAlpine && window.Alpine) {
-                await new Promise((r) => setTimeout(r, 80));
-                if (gen !== softNavGeneration) return;
-                // x-data nodes that never got _x_dataStack often mean init failed
-                const unbound = Array.from(oldMain.querySelectorAll('[x-data]')).filter(
-                    (n) => !n._x_dataStack && !n.__x
-                );
-                if (unbound.length > 0 && unbound.length === oldMain.querySelectorAll('[x-data]').length) {
-                    throw new Error('Alpine did not bind any x-data roots');
-                }
-            }
         } finally {
             if (gen === softNavGeneration) setNavigating(false);
         }

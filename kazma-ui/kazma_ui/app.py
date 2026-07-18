@@ -374,12 +374,19 @@ class KazmaAppBuilder:
         self.templates.env.globals["dir"] = _dynamic_dir
         self.templates.env.globals["translations_json"] = _translations_json
 
-        # Cache-busting version for the main stylesheet. Derived from the
-        # CSS file's modification time so every edit forces browsers to
-        # reload (otherwise a stale cached kazma.css shows old/dark UI).
-        # Computed PER REQUEST (not at startup) so CSS edits take effect
-        # immediately without restarting the server.
+        # Cache-busting versions for static assets. Derived from file mtimes
+        # so every edit forces browsers to reload (otherwise a stale cached
+        # kazma.css / app.js keeps old soft-nav bugs alive). Computed PER
+        # REQUEST so edits take effect without restarting the server.
         _css_file = _STATIC_DIR / "css" / "kazma.css"
+        _js_version_files = (
+            _STATIC_DIR / "js" / "app.js",
+            _STATIC_DIR / "js" / "modules" / "nav.js",
+            _STATIC_DIR / "js" / "modules" / "stores.js",
+            _STATIC_DIR / "js" / "modules" / "components.js",
+            _STATIC_DIR / "js" / "modules" / "util.js",
+            _STATIC_DIR / "js" / "icons.js",
+        )
 
         def _css_version() -> int:
             try:
@@ -387,7 +394,17 @@ class KazmaAppBuilder:
             except Exception:
                 return 1
 
+        def _js_version() -> int:
+            latest = 1
+            for path in _js_version_files:
+                try:
+                    latest = max(latest, int(os.path.getmtime(path)))
+                except Exception:
+                    pass
+            return latest
+
         self.templates.env.globals["css_version"] = _css_version
+        self.templates.env.globals["js_version"] = _js_version
 
         @self.app.middleware("http")
         async def language_middleware(request: Request, call_next):

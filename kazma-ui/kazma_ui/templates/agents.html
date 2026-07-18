@@ -171,27 +171,46 @@
     </div>
   </div>
 
-  <!-- ── Configuration + Tools ── -->
+  <!-- ── Runtime Overview + Tools ── -->
   <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px;">
-    <!-- Configuration -->
+    <!-- Runtime Overview (ops snapshot — edit LLM/agent in Settings) -->
     <div class="card">
-      <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:16px;"><span x-html="KazmaIcons.settings()"></span> {{ t('agents.config_title') }}</h3>
-      <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:0.85rem;">
-        <span style="color:var(--text-tertiary);">{{ t('agents.name') }}</span>
-        <span x-text="(agent.config && agent.config.name) || 'kazma'"></span>
-        <span style="color:var(--text-tertiary);">{{ t('agents.version') }}</span>
-        <span x-text="(agent.config && agent.config.version) || '0.1.0'"></span>
-        <span style="color:var(--text-tertiary);">{{ t('agents.model') }}</span>
-        <span x-text="(agent.llm && agent.llm.model) || 'unknown'"></span>
-        <span style="color:var(--text-tertiary);">{{ t('agents.base_url') }}</span>
-        <span style="font-family:var(--font-mono);font-size:0.8rem;word-break:break-all;" x-text="(agent.llm && agent.llm.base_url) || '—'"></span>
-        <span style="color:var(--text-tertiary);">{{ t('agents.max_tokens') }}</span>
-        <span x-text="(agent.llm && agent.llm.max_tokens) || 4096"></span>
-        <span style="color:var(--text-tertiary);">{{ t('agents.temperature') }}</span>
-        <span x-text="(agent.llm && agent.llm.temperature) || 0.7"></span>
-        <span style="color:var(--text-tertiary);">{{ t('agents.language') }}</span>
-        <span x-text="(agent.config && agent.config.language) || 'ar'"></span>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap;">
+        <h3 style="font-size:0.9rem;font-weight:600;margin:0;">
+          <span x-html="KazmaIcons.zap()"></span> {{ t('agents.runtime_title') }}
+        </h3>
+        <a href="/settings?tab=agent" class="btn btn-secondary btn-sm" style="text-decoration:none;font-size:0.75rem;">
+          {{ t('agents.edit_in_settings') }}
+        </a>
       </div>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:8px 16px;font-size:0.85rem;">
+        <span style="color:var(--text-tertiary);">{{ t('agents.state_label') }}</span>
+        <span>
+          <span class="badge" :class="'state-badge state-' + agent.agent_state"
+                style="text-transform:capitalize;" x-text="agent.agent_state || 'idle'"></span>
+          <span style="color:var(--text-muted);margin-left:6px;font-size:0.8rem;"
+                x-text="agent.running ? t('agents.running_badge') : t('agents.stopped')"></span>
+        </span>
+        <span style="color:var(--text-tertiary);">{{ t('agents.active_model') }}</span>
+        <span style="font-family:var(--font-mono);font-size:0.8rem;"
+              x-text="(agent.llm && agent.llm.model) || '—'"></span>
+        <span style="color:var(--text-tertiary);">{{ t('agents.tools_registered') }}</span>
+        <span x-text="((agent.tools && agent.tools.count) || 0) + ' ' + t('agents.available')"></span>
+        <span style="color:var(--text-tertiary);">{{ t('agents.mcp_servers') }}</span>
+        <span x-text="(agent.tools && agent.tools.servers) || 0"></span>
+        <span style="color:var(--text-tertiary);">{{ t('agents.total_tokens') }}</span>
+        <span x-text="(agent.metrics && agent.metrics.total_tokens) || '0'"></span>
+        <span style="color:var(--text-tertiary);">{{ t('agents.total_cost') }}</span>
+        <span x-text="(agent.metrics && agent.metrics.total_cost) || '$0.0000'"></span>
+        <span style="color:var(--text-tertiary);">{{ t('agents.last_activity_label') }}</span>
+        <span style="color:var(--text-muted);" x-text="agent.last_activity || '—'"></span>
+      </div>
+      <p style="margin:16px 0 0;font-size:0.75rem;color:var(--text-tertiary);line-height:1.4;">
+        {{ t('agents.runtime_hint') }}
+        <a href="/settings?tab=providers_connectors" style="color:var(--accent, #3b82f6);">{{ t('agents.providers_link') }}</a>
+        ·
+        <a href="/settings?tab=agent" style="color:var(--accent, #3b82f6);">{{ t('agents.agent_settings_link') }}</a>
+      </p>
     </div>
 
     <!-- Registered Tools -->
