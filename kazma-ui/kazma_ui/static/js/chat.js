@@ -364,6 +364,13 @@
     var attachmentName = inputEl.dataset.attachmentName || '';
     if (!text && !attachment) return;
 
+    // Handle /voice commands locally
+    if (window.KazmaVoice && window.KazmaVoice.handleVoiceCommand(text)) {
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+      return;
+    }
+
     // Build message content
     var content = text;
     if (attachment) {
@@ -455,6 +462,10 @@
               KS.formatCost(data.cost) + ' \u00B7 ' +
               KS.formatDuration(data.duration_ms);
           }
+        }
+        // Play TTS for the assistant's response
+        if (tokenAccum && window.KazmaVoice) {
+          window.KazmaVoice.playTTS(tokenAccum);
         }
         currentMsgEl = null;
         tokenAccum = '';

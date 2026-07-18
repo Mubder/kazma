@@ -708,7 +708,17 @@ def register_direct_routes(self: Any) -> None:
         if telegram_token:
             from kazma_gateway.adapters.telegram import TelegramAdapter
 
-            tg_adapter = TelegramAdapter(token=telegram_token)
+            voice_cfg = self.config.raw.get("gateway", {}).get("voice", {})
+            tg_adapter = TelegramAdapter(
+                token=telegram_token,
+                voice_enabled=voice_cfg.get("enabled", False),
+                voice_provider=voice_cfg.get("stt_provider", "openai"),
+                stt_api_key=None,
+                tts_provider=voice_cfg.get("tts_provider", "edgetts"),
+                tts_voice=voice_cfg.get("tts_voice", "default"),
+                tts_output_format=voice_cfg.get("tts_output_format", "mp3"),
+                stt_language=voice_cfg.get("stt_language", "auto"),
+            )
             allowed = self.config_store.get("connectors.telegram.allowed_users", "")
             if allowed:
                 try:

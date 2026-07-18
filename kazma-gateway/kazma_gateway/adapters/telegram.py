@@ -111,6 +111,10 @@ class TelegramAdapter(BaseAdapter):
         voice_enabled: bool = False,
         voice_provider: str = "openai",
         stt_api_key: str | None = None,
+        tts_provider: str = "edgetts",
+        tts_voice: str = "default",
+        tts_output_format: str = "mp3",
+        stt_language: str = "auto",
         webhook_secret: str | None = None,
     ) -> None:
         super().__init__()
@@ -124,10 +128,14 @@ class TelegramAdapter(BaseAdapter):
         self._rate_limiter = RateLimiter(max_per_second=30)
         # Queue ref stored for webhook ingress (set by start() in BaseAdapter)
         self._queue: asyncio.Queue[IncomingMessage] | None = None
-        # Voice transcription config
+        # Voice config
         self._voice_enabled = voice_enabled
         self._voice_provider = voice_provider
         self._stt_api_key = stt_api_key
+        self._tts_provider = tts_provider
+        self._tts_voice = tts_voice
+        self._tts_output_format = tts_output_format
+        self._stt_language = stt_language
         # Webhook secret token for validating webhook ingress (optional)
         self._webhook_secret = webhook_secret or ""
 
@@ -556,28 +564,77 @@ class TelegramAdapter(BaseAdapter):
 
     async def transcribe_voice(self, audio_bytes: bytes) -> str | None:
         """Transcribe audio bytes using the configured STT provider."""
-        if self._voice_provider == "openai":
-            return await self._transcribe_openai(audio_bytes)
-        elif self._voice_provider == "groq":
-            return await self._transcribe_groq(audio_bytes)
-        elif self._voice_provider == "local":
-            logger.warning("[telegram] Local STT provider not yet implemented")
-            return None
-        else:
-            logger.error("[telegram] Unknown STT provider: %s", self._voice_provider)
-            return None
+        from kazma_core.voice.stt import transcribe
 
-    async def _transcribe_openai(self, audio_bytes: bytes) -> str | None:
-        """Transcribe via OpenAI Whisper API."""
-        from kazma_gateway.adapters.telegram_stt import transcribe_openai
+        return await transcribe(
+            audio_bytes,
+            provider=self._voice_provider,
+            language=self._stt_language,
+            api_key=self._stt_api_key,
+        )
 
-        return await transcribe_openai(audio_bytes, self._stt_api_key)
+    async def synthesize_reply(self, text: str) -> bytes | None:
+        """Synthesize text to audio using the configured TTS provider."""
+        from kazma_core.voice.tts import synthesize
 
-    async def _transcribe_groq(self, audio_bytes: bytes) -> str | None:
-        """Transcribe via Groq Whisper API."""
-        from kazma_gateway.adapters.telegram_stt import transcribe_groq
+        return await synthesize(
+            text,
+            provider=self._tts_provider,
+            voice=self._tts_voice,
+            output_format=self._tts_output_format,
+        )
 
-        return await transcribe_groq(audio_bytes, self._stt_api_key)
+    async def send_voice_reply(self, chat_id: int, audio_bytes: bytes, reply_to: int | None = None) -> bool:
+        """Send an audio voice message to a Telegram chat."""
+        if not self._http:
+            return False
+        try:
+            form_data = httpx.AsyncClient()
+            files = {"voice": ("reply.ogg", audio_bytes, "audio/ogg")}
+            data: dict[str, Any] = {"chat_id": chat_id}
+            if reply_to:
+                data["reply_to_message_id"] = reply_to
+            resp = await self._http.post(
+                "/sendVoice",
+                files=files,
+                data=data,
+            )
+            if resp.status_code == 200:
+                logger.info("[telegram] Voice reply sent to %d (%d bytes)", chat_id, len(audio_bytes))
+                return True
+            logger.warning("[telegram] sendVoice failed: %d", resp.status_code)
+            return False
+        except Exception:
+            logger.exception("[telegram] sendVoice failed")
+            return False
+
+    async def _send_tts_reply(self, chat_id: int, text: str, reply_to: int | None = None) -> None:
+        """Synthesize and send a voice reply after a text response.
+
+        Strips markdown/HTML from the text before synthesis so the TTS
+        engine gets clean spoken text.
+        """
+        if not text or not self._voice_enabled:
+            return
+        try:
+            # Strip markdown/HTML for clean TTS input
+            import re
+            clean = re.sub(r"`[^`]*`", "", text)  # inline code
+            clean = re.sub(r"```.*?```", "", clean, flags=re.DOTALL)  # code blocks
+            clean = re.sub(r"[*_~]+", "", clean)  # bold/italic/strike
+            clean = re.sub(r"<[^>]+>", "", clean)  # HTML tags
+            clean = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", clean)  # links → text
+            clean = clean.strip()
+            if not clean or len(clean) < 5:
+                return
+            # Truncate very long responses for TTS
+            if len(clean) > 2000:
+                clean = clean[:2000] + "... (truncated)"
+            audio = await self.synthesize_reply(clean)
+            if audio:
+                await self.send_voice_reply(chat_id, audio, reply_to=reply_to)
+        except Exception:
+            logger.debug("[telegram] TTS reply failed (non-critical)")
 
     async def _handle_voice_message(self, message: dict[str, Any]) -> str | None:
         """Full voice pipeline: detect -> download -> transcribe -> return text."""
@@ -952,6 +1009,9 @@ class TelegramAdapter(BaseAdapter):
                 asyncio.create_task(
                     self._set_reaction(chat_id, original_msg_id, emoji)
                 )
+            # Send TTS voice reply if original message was voice
+            if self._voice_enabled and outbound.context_metadata.get("voice_transcribed"):
+                asyncio.create_task(self._send_tts_reply(chat_id, outbound.text, original_msg_id))
             return True
         else:
             # React with ❌ on failure

@@ -540,7 +540,17 @@ class KazmaAppBuilder:
 
             tg_adapter: TelegramAdapter | None = None
             if telegram_token:
-                tg_adapter = TelegramAdapter(token=telegram_token)
+                voice_cfg = self.config.raw.get("gateway", {}).get("voice", {})
+                tg_adapter = TelegramAdapter(
+                    token=telegram_token,
+                    voice_enabled=voice_cfg.get("enabled", False),
+                    voice_provider=voice_cfg.get("stt_provider", "openai"),
+                    stt_api_key=None,  # reads from env vars
+                    tts_provider=voice_cfg.get("tts_provider", "edgetts"),
+                    tts_voice=voice_cfg.get("tts_voice", "default"),
+                    tts_output_format=voice_cfg.get("tts_output_format", "mp3"),
+                    stt_language=voice_cfg.get("stt_language", "auto"),
+                )
                 # Set allowed users
                 allowed = self.config_store.get("connectors.telegram.allowed_users", "")
                 if allowed:
@@ -849,6 +859,15 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("SSE chat router failed to initialize: %s", e)
             self._init_errors.append({"subsystem": "sse_chat", "error": str(e)})
+
+        # ── Voice API Route ──
+        try:
+            from kazma_ui.routes_voice import router as voice_router
+
+            self.app.include_router(voice_router)
+            logger.info("Voice API router mounted at /api/voice")
+        except Exception as e:
+            logger.warning("Voice API router failed to initialize: %s", e)
 
         # ── Telemetry SSE Route ──
         try:

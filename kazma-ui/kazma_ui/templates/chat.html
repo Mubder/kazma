@@ -80,6 +80,17 @@
           </svg>
         </button>
         <input type="file" id="file-input" style="display:none;" accept=".txt,.py,.js,.ts,.json,.yaml,.yml,.md,.csv,.log,.html,.css,.sh,.bash,.toml,.ini,.cfg,.env,.xml">
+        <button id="voice-btn" class="btn-icon" title="Record voice (Hold to record)" style="padding:4px;display:none;" onmousedown="KazmaVoice.startRecording()" onmouseup="KazmaVoice.stopRecording()" onmouseleave="KazmaVoice.stopRecording()" ontouchstart="KazmaVoice.startRecording()" ontouchend="KazmaVoice.stopRecording()">
+          <svg id="mic-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+            <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+            <path d="M19 10v2a7 7 0 01-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+          <svg id="mic-recording-icon" width="20" height="20" fill="none" stroke="#ef4444" viewBox="0 0 24 24" stroke-width="2" style="display:none;">
+            <circle cx="12" cy="12" r="10"/>
+          </svg>
+        </button>
         <textarea
           id="chat-input"
           class="chat-input"
@@ -107,5 +118,6 @@
 
 {% block scripts %}
 <script src="/static/js/streaming.js"></script>
+<script src="/static/js/voice.js"></script>
 <script src="/static/js/chat.js"></script>
 {% endblock %}

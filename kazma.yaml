@@ -119,7 +119,11 @@ gateway:
     enabled: true
   voice:
     enabled: false
-    provider: openai  # openai | local | groq
+    stt_provider: openai   # openai | groq | cohere | nvidia | faster-whisper
+    tts_provider: edgetts  # edgetts | openai | nvidia | kokoro | coqui
+    tts_voice: default     # provider-specific voice name
+    stt_language: auto     # auto or ISO-639-1 (en, ar, fr, etc.)
+    tts_output_format: mp3 # mp3 | wav | opus | flac
 
 safety:
   hitl:
