@@ -231,23 +231,11 @@ def make_chroma_embedding_function(embedder: Embedder) -> Any:
 
     ChromaDB's ``EmbeddingFunction.__call__`` must return a ``numpy.ndarray``
     (not a list). This adapter centralizes the numpy coercion so
-    ``vector_store.py`` stays provider-agnostic. Falls back to ChromaDB's
-    built-in ``SentenceTransformerEmbeddingFunction`` when the embedder is a
-    local SentenceTransformer (so ChromaDB can use its own optimized path).
+    ``vector_store.py`` stays provider-agnostic.
+
+    Always uses the generic wrapper — even for local SentenceTransformer
+    — to avoid loading the model twice (the embedder already holds it).
     """
-    # Fast path: for the local ST embedder, let ChromaDB use its native EF
-    # (avoids double-loading the model).
-    if isinstance(embedder, LocalSentenceTransformerEmbedder):
-        try:
-            from chromadb.utils import embedding_functions
-
-            return embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=embedder._model_name,
-            )
-        except Exception:
-            pass  # fall through to the generic wrapper
-
-    # Generic wrapper for remote providers.
     try:
         import numpy as np
         from chromadb.api.types import EmbeddingFunction, Documents, Embeddings

@@ -53,26 +53,26 @@ class FTS5Memory:
     def _create_table(self) -> None:
         """Create FTS5 virtual table if not exists.
 
-        Uses Arabic tokenization if kazma_memory.ArabicTokenizer is available.
-        Falls back to porter unicode61 (English) otherwise.
+        Uses ``unicode61 remove_diacritics 2`` which handles both English and
+        Arabic (diacritics stripped, Arabic script tokenized by Unicode rules).
+        Falls back to ``porter unicode61`` only if the FTS5 build lacks
+        ``remove_diacritics`` support.
         """
         try:
-            # Try to use Arabic tokenization from kazma_memory
-            from kazma_memory.arabic_tokenizer import ArabicTokenizer
-
             self._conn.execute(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS {self._table_name}
                 USING fts5(
                     text,
                     metadata,
                     doc_id UNINDEXED,
-                    timestamp UNINDEXED
+                    timestamp UNINDEXED,
+                    tokenize='unicode61 remove_diacritics 2'
                 )
             """)
             self._conn.commit()
-            logger.info("[FTS5Memory] Using Arabic tokenization via SQLiteMemoryBackend")
-        except ImportError:
-            # Fallback to English tokenizer
+            logger.info("[FTS5Memory] Using unicode61 remove_diacritics 2 tokenizer")
+        except Exception:
+            # Older SQLite without remove_diacritics support
             self._conn.execute(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS {self._table_name}
                 USING fts5(
@@ -84,7 +84,7 @@ class FTS5Memory:
                 )
             """)
             self._conn.commit()
-            logger.info("[FTS5Memory] Using porter unicode61 tokenizer (English)")
+            logger.info("[FTS5Memory] Using porter unicode61 tokenizer (fallback)")
 
     def add(
         self,

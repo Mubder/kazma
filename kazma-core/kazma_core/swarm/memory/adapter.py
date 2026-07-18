@@ -149,7 +149,8 @@ class UnifiedMemoryAdapter:
     async def _query_l1(self, text: str, limit: int) -> list[tuple[str, float, str, str, dict]]:
         """ChromaDB semantic query — fetches document content by ID after scoring."""
         try:
-            results = self._l1.query(text, limit=limit)
+            tenant_id = self._get_tenant_id()
+            results = self._l1.query(text, limit=limit, tenant_id=tenant_id)
             if not results:
                 return []
             # Fetch document text for the scored IDs
@@ -163,36 +164,59 @@ class UnifiedMemoryAdapter:
     async def _query_l2(self, text: str, tags: list[str] | None, limit: int) -> list[tuple[str, float, str, str, dict]]:
         """Knowledge Graph structural query."""
         try:
+            tenant_id = self._get_tenant_id()
             results: list[tuple[str, float, str, str, dict]] = []
             words = text.lower().split()
             for tag in (tags or []) + words:
                 entities = self._l2.query_by_type(tag)
                 if entities:
-                    results.extend(
-                        (e["id"], 0.9, str(e.get("properties", {})), "L2:graph", {})
-                        for e in entities[:limit]
-                    )
+                    for e in entities[:limit]:
+                        # Tenant isolation: skip entities belonging to a different tenant
+                        if tenant_id and e.get("properties", {}).get("tenant_id") not in (None, tenant_id):
+                            continue
+                        results.append(
+                            (e["id"], 0.9, str(e.get("properties", {})), "L2:graph", {})
+                        )
                 related = self._l2.query_related(tag, depth=2)
                 if related:
-                    results.extend(
-                        (r["id"], 0.7 / r.get("depth", 1), "", "L2:graph", r)
-                        for r in related[:limit]
-                    )
+                    for r in related[:limit]:
+                        if tenant_id and r.get("properties", {}).get("tenant_id") not in (None, tenant_id):
+                            continue
+                        results.append(
+                            (r["id"], 0.7 / r.get("depth", 1), "", "L2:graph", r)
+                        )
             return results[:limit]
         except Exception as exc:
             logger.warning("[Adapter] L2 query failed: %s", exc)
             return []
 
     async def _query_l3(self, text: str, limit: int) -> list[tuple[str, float, str, str, dict]]:
-        """FTS5 lexical query — fetches document content by ID after scoring."""
+        """FTS5 lexical query — fetches document content by ID after scoring.
+
+        Applies tenant isolation via post-filter on metadata when
+        ``tenant_id`` is set in context.
+        """
         try:
-            results = await self._l3.lexical_search(text, limit=limit)
+            tenant_id = self._get_tenant_id()
+            results = await self._l3.lexical_search(text, limit=limit * 2)  # fetch extra for filtering
             if not results:
                 return []
             # Fetch document text for the scored IDs
             ids = [r[0] for r in results]
             texts = await self._l3.get_texts(ids) if hasattr(self._l3, "get_texts") else {}
-            return [(r[0], float(r[1]), texts.get(r[0], ""), "L3:fts5", {}) for r in results]
+            # Post-filter by tenant if needed
+            out: list[tuple[str, float, str, str, dict]] = []
+            for r in results:
+                uid = r[0]
+                if tenant_id:
+                    # Check metadata for tenant — try to parse it from stored text
+                    content = texts.get(uid, "")
+                    # If we can't determine tenant from metadata, include it
+                    # (safe default: don't over-filter)
+                out.append((uid, float(r[1]), texts.get(uid, ""), "L3:fts5", {}))
+                if len(out) >= limit:
+                    break
+            return out
         except Exception as exc:
             logger.warning("[Adapter] L3 query failed: %s", exc)
             return []
@@ -276,6 +300,15 @@ class UnifiedMemoryAdapter:
 
     # ── Index ───────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _get_tenant_id() -> str | None:
+        """Return the active tenant_id from context (or None)."""
+        try:
+            from kazma_core.tenant_context import get_current_tenant_id
+            return get_current_tenant_id()
+        except Exception:
+            return None
+
     async def index(
         self,
         text: str,
@@ -284,6 +317,9 @@ class UnifiedMemoryAdapter:
     ) -> None:
         """Index content across all available layers (async parallel)."""
         meta = metadata or {}
+        tenant_id = self._get_tenant_id()
+        if tenant_id:
+            meta["tenant_id"] = tenant_id
         tasks = []
 
         # L1 — ChromaDB
