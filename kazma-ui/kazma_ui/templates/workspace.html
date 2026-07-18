@@ -957,7 +957,27 @@ function workspaceApp() {
       } catch (e) { /* non-fatal */ }
     },
 
-    connectGitHub() {
+    async connectGitHub() {
+      // Check OAuth App config first so we don't open a raw error tab.
+      try {
+        await this.loadOAuthStatus();
+      } catch (e) { /* ignore */ }
+      if (this.ghOAuthChecked && !this.ghOAuthConfigured) {
+        const useSetup = window.kazmaConfirm
+          ? await window.kazmaConfirm({
+              title: 'GitHub OAuth not configured',
+              message: 'Create a GitHub OAuth App and set GITHUB_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_SECRET in .env, then restart Kazma. Or use a Personal Access Token (PAT) on this page instead.',
+              confirmText: 'Open setup guide',
+              cancelText: 'Use PAT instead',
+            })
+          : confirm('GitHub OAuth is not configured. OK = open setup guide, Cancel = stay here for PAT.');
+        if (useSetup) {
+          window.open('/api/github/oauth/start', '_blank');
+        } else if (this.showPatModal !== undefined) {
+          this.showPatModal = true;
+        }
+        return;
+      }
       // Open the GitHub OAuth flow in a new tab.
       window.open('/api/github/oauth/start', '_blank');
       // Poll for connection — the callback tab may not be able to

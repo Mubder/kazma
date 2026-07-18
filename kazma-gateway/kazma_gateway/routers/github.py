@@ -315,8 +315,16 @@ async def oauth_start(request: Request) -> RedirectResponse | JSONResponse:
     from kazma_gateway.routers.github_client import build_authorize_url, oauth_configured
 
     if not oauth_configured():
+        # Browser tab expects HTML, not raw JSON (window.open from Workspace).
+        accept = (request.headers.get("accept") or "").lower()
+        if "text/html" in accept or "Kazma-Soft-Nav" not in request.headers:
+            return _oauth_setup_page(request)
         return JSONResponse(
-            {"error": "GitHub OAuth App is not configured (set GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET)."},
+            {
+                "error": "GitHub OAuth App is not configured",
+                "hint": "Set GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET in .env, "
+                "or paste a Personal Access Token on the Workspace page.",
+            },
             status_code=503,
         )
     state = secrets.token_urlsafe(16)
@@ -405,6 +413,64 @@ async def oauth_revoke() -> JSONResponse:
     clear_oauth_token()
     logger.info("[github/oauth] OAuth token cleared (disconnected)")
     return JSONResponse({"status": "ok", "connected": False})
+
+
+def _oauth_setup_page(request: Request) -> HTMLResponseType:
+    """HTML guide when OAuth App env vars are missing (browser-friendly)."""
+    from fastapi.responses import HTMLResponse
+
+    host = request.headers.get("host") or "127.0.0.1:9090"
+    scheme = request.url.scheme or "http"
+    callback = f"{scheme}://{host}/api/github/oauth/callback"
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>GitHub OAuth setup</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; background: #0f1117; color: #e5e7eb;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; }}
+  .card {{ padding: 28px 32px; border-radius: 12px; background: #1a1d27; border: 1px solid #2a2f3e;
+           max-width: 560px; line-height: 1.5; }}
+  h1 {{ font-size: 1.15rem; margin: 0 0 12px; color: #fbbf24; }}
+  code {{ background: #0f1117; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #67e8f9; }}
+  ol {{ margin: 12px 0; padding-left: 1.25rem; color: #cbd5e1; font-size: 0.9rem; }}
+  li {{ margin-bottom: 8px; }}
+  .cb {{ display: block; margin: 10px 0 16px; padding: 10px 12px; background: #0f1117;
+         border: 1px solid #2a2f3e; border-radius: 8px; word-break: break-all; font-family: ui-monospace, monospace;
+         font-size: 0.8rem; color: #a5f3fc; }}
+  a.btn {{ display: inline-block; margin-top: 8px; margin-right: 8px; padding: 8px 14px; border-radius: 8px;
+           background: #22d3ee; color: #0a0f14; font-weight: 600; text-decoration: none; font-size: 0.88rem; }}
+  a.btn2 {{ background: transparent; color: #94a3b8; border: 1px solid #334155; }}
+  .alt {{ margin-top: 18px; padding-top: 14px; border-top: 1px solid #2a2f3e; font-size: 0.88rem; color: #94a3b8; }}
+</style></head>
+<body><div class="card">
+  <h1>GitHub OAuth App is not configured</h1>
+  <p style="margin:0 0 8px;font-size:0.9rem;color:#cbd5e1">
+    Create a free GitHub OAuth App, put the credentials in <code>.env</code>, restart Kazma, then try again.
+  </p>
+  <ol>
+    <li>Open <a href="https://github.com/settings/developers" style="color:#67e8f9" target="_blank" rel="noopener">GitHub → Developer settings → OAuth Apps</a> → <strong>New OAuth App</strong>.</li>
+    <li>Application name: <code>Kazma</code> (any name).</li>
+    <li>Homepage URL: <code>{scheme}://{host}/</code></li>
+    <li><strong>Authorization callback URL</strong> (must match exactly):</li>
+  </ol>
+  <code class="cb">{callback}</code>
+  <ol start="5">
+    <li>Create the app → copy <strong>Client ID</strong>.</li>
+    <li>Generate a new <strong>Client secret</strong> and copy it.</li>
+    <li>Add to your Kazma <code>.env</code> file:</li>
+  </ol>
+  <code class="cb">GITHUB_OAUTH_CLIENT_ID=Iv1.xxxxxxxx<br>GITHUB_OAUTH_CLIENT_SECRET=xxxxxxxxxxxxxxxx</code>
+  <ol start="8">
+    <li>Restart the Kazma server, then click <strong>Connect GitHub</strong> again.</li>
+  </ol>
+  <div class="alt">
+    <strong>Faster alternative:</strong> on the Workspace page use a
+    <a href="https://github.com/settings/tokens" style="color:#67e8f9" target="_blank" rel="noopener">Personal Access Token</a>
+    (classic, scope <code>repo</code>) via the PAT field — no OAuth App required.
+  </div>
+  <a class="btn" href="/workspace">Back to Workspace</a>
+  <a class="btn btn2" href="https://github.com/settings/developers" target="_blank" rel="noopener">Open GitHub OAuth Apps</a>
+</div></body></html>"""
+    return HTMLResponse(html)
 
 
 def _oauth_result_page(success: bool, message: str) -> HTMLResponseType:
