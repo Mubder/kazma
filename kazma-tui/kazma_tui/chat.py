@@ -8,7 +8,7 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input, ProgressBar, RichLog, Static
+from textual.widgets import Input, ListItem, ListView, ProgressBar, RichLog, Static
 
 __all__ = ["ChatPanel", "ROLE_HEX"]
 
@@ -61,12 +61,17 @@ class ChatPanel(Vertical):
         dock: bottom; offset: 0 -4;
         width: auto; min-width: 30; max-height: 18;
         background: $panel; border: solid $primary;
-        padding: 0 1; display: none;
-        overflow-y: auto;
+        display: none;
+    }
+    ChatPanel > #autocomplete ListItem {
+        padding: 0 1;
+        height: auto;
+    }
+    ChatPanel > #autocomplete ListItem.-highlight {
+        background: $primary 20%;
     }
     ChatPanel > #autocomplete .ac-cmd { color: $primary; text-style: bold; }
     ChatPanel > #autocomplete .ac-desc { color: $text-muted; }
-    ChatPanel > #autocomplete .ac-selected { background: $primary 15%; }
     """
 
     BINDINGS = [
@@ -88,7 +93,7 @@ class ChatPanel(Vertical):
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
         yield ProgressBar(id="chat-progress", total=100, show_eta=False)
         yield Input(placeholder="Type... / for commands", id="chat-input")
-        yield Static("", id="autocomplete")
+        yield ListView(id="autocomplete")
 
     # ── Slash command autocomplete ─────────────────────────────────
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -96,10 +101,10 @@ class ChatPanel(Vertical):
         if event.input.id != "chat-input":
             return
         val = event.value
-        ac = self.query_one("#autocomplete", Static)
+        ac = self.query_one("#autocomplete", ListView)
 
         if not val.startswith("/"):
-            ac.styles.display = "none"
+            ac.display = False
             self._ac_matches = []
             return
 
@@ -116,18 +121,9 @@ class ChatPanel(Vertical):
                 for m in self._model_cache
                 if partial.lower() in m.lower()
             ]
-            self._ac_matches = matches[:15]  # cap at 15
+            self._ac_matches = matches[:15]
             self._ac_index = 0
-
-            if matches:
-                lines = []
-                for i, (model_name, _) in enumerate(self._ac_matches):
-                    marker = ">" if i == self._ac_index else " "
-                    lines.append(f" {marker} [bold $primary]{model_name}[/]")
-                ac.update("\n".join(lines))
-                ac.styles.display = "block"
-            else:
-                ac.styles.display = "none"
+            self._populate_ac_list(ac)
             return
 
         # Default: match slash commands
@@ -135,16 +131,24 @@ class ChatPanel(Vertical):
         matches = [(c, d) for c, d in self.SLASH_COMMANDS if c.startswith(partial)]
         self._ac_matches = matches
         self._ac_index = 0
+        self._populate_ac_list(ac)
 
-        if matches:
-            lines = []
-            for i, (cmd, desc) in enumerate(matches):
-                marker = ">" if i == self._ac_index else " "
-                lines.append(f"{marker} [bold $primary]{cmd:<10}[/] [dim]{desc}[/]")
-            ac.update("\n".join(lines))
-            ac.styles.display = "block"
-        else:
-            ac.styles.display = "none"
+    def _populate_ac_list(self, ac: ListView) -> None:
+        """Fill the autocomplete ListView with current matches."""
+        ac.clear()
+        if not self._ac_matches:
+            ac.display = False
+            return
+        for cmd, desc in self._ac_matches:
+            if desc:
+                label = f" [bold $primary]{cmd}[/]  [dim]{desc}[/]"
+            else:
+                label = f" [bold $primary]{cmd}[/]"
+            ac.append(ListItem(Static(label)))
+        ac.display = True
+        # Highlight the current index
+        if self._ac_index < len(self._ac_matches):
+            ac.index = self._ac_index
 
     def _refresh_model_cache(self) -> None:
         """Load available model names for autocomplete."""
@@ -156,47 +160,50 @@ class ChatPanel(Vertical):
 
     def on_key(self, event) -> None:
         """Handle Tab/Arrow keys for autocomplete navigation."""
-        ac = self.query_one("#autocomplete", Static)
-        if ac.styles.display == "none" or not self._ac_matches:
+        ac = self.query_one("#autocomplete", ListView)
+        if not ac.display or not self._ac_matches:
             return
 
         if event.key in ("tab", "down"):
             self._ac_index = (self._ac_index + 1) % len(self._ac_matches)
-            self._render_autocomplete()
+            ac.index = self._ac_index
             event.prevent_default()
         elif event.key == "up":
             self._ac_index = (self._ac_index - 1) % len(self._ac_matches)
-            self._render_autocomplete()
+            ac.index = self._ac_index
             event.prevent_default()
         elif event.key == "enter" and self._ac_matches:
-            # If exactly 1 match, auto-complete; if multiple, pick highlighted
             idx = min(self._ac_index, len(self._ac_matches) - 1)
-            model_name = self._ac_matches[idx][0]
-            inp = self.query_one("#chat-input", Input)
-
-            # Check if we're in model set mode
-            parts = inp.value.split(None, 2)
-            if len(parts) >= 2 and parts[0].lower() in ("/model", "/models") and parts[1].lower() == "set":
-                inp.value = f"/model set {model_name}"
-                inp.cursor_position = len(inp.value)
-            else:
-                inp.value = model_name + " "
-                inp.cursor_position = len(inp.value)
-
-            ac.styles.display = "none"
+            self._apply_ac_match(idx)
+            ac.display = False
             self._ac_matches = []
             event.prevent_default()
 
-    def _render_autocomplete(self) -> None:
-        ac = self.query_one("#autocomplete", Static)
-        lines = []
-        for i, (cmd, desc) in enumerate(self._ac_matches):
-            prefix = ">" if i == self._ac_index else " "
-            if desc:
-                lines.append(f" {prefix} [bold $primary]{cmd:<10}[/] [dim]{desc}[/]")
-            else:
-                lines.append(f" {prefix} [bold $primary]{cmd}[/]")
-        ac.update("\n".join(lines))
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Mouse click on autocomplete item = select it."""
+        ac = self.query_one("#autocomplete", ListView)
+        if event.list_view is not ac:
+            return
+        idx = event.index if event.index is not None else self._ac_index
+        if idx is not None and 0 <= idx < len(self._ac_matches):
+            self._apply_ac_match(idx)
+            ac.display = False
+            self._ac_matches = []
+
+    def _apply_ac_match(self, idx: int) -> None:
+        """Fill the input with the selected autocomplete match."""
+        if idx < 0 or idx >= len(self._ac_matches):
+            return
+        match_text = self._ac_matches[idx][0]
+        inp = self.query_one("#chat-input", Input)
+
+        # Check if we're in model set mode
+        parts = inp.value.split(None, 2)
+        if len(parts) >= 2 and parts[0].lower() in ("/model", "/models") and parts[1].lower() == "set":
+            inp.value = f"/model set {match_text}"
+        else:
+            inp.value = match_text + " "
+        inp.cursor_position = len(inp.value)
 
     # ── Message display ────────────────────────────────────────────
 
