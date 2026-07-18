@@ -791,20 +791,12 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.post("/api/approve/{thread_id}")
     async def approve_tool(thread_id: str, request: Request) -> _JSONResponse:
-        # Use dynamic secret resolution (checks env AND config_store)
-        from kazma_ui.auth import get_kazma_secret
+        # Use shared auth: KAZMA_SECRET *or* Account API token.
+        from kazma_ui.auth import get_kazma_secret, is_authenticated
 
         _secret = get_kazma_secret()
-        if _secret:
-            import secrets as _secrets
-            from kazma_ui.auth import SECRET_COOKIE
-
-            provided = request.headers.get("X-Kazma-Secret", "")
-            if not provided:
-                provided = request.cookies.get(SECRET_COOKIE, "")
-
-            if not provided or not _secrets.compare_digest(provided, _secret):
-                return _JSONResponse({"error": "Unauthorized"}, status_code=401)
+        if _secret and not is_authenticated(request, _secret):
+            return _JSONResponse({"error": "Unauthorized"}, status_code=401)
 
         try:
             body = await request.json()
@@ -872,10 +864,57 @@ def register_direct_routes(self: Any) -> None:
                 Command(resume=resume_value),
                 config=config,
             )
-            return _JSONResponse({
+
+            # Extract the post-resume assistant reply so the chat UI can show
+            # it. Previously ainvoke ran to completion but the frontend only
+            # painted "Approved ✓" and never displayed the tool result /
+            # final answer — users saw "silence".
+            content = ""
+            if isinstance(result, dict):
+                msgs = result.get("messages") or []
+                if isinstance(msgs, list):
+                    for m in reversed(msgs):
+                        if not isinstance(m, dict):
+                            # LangChain message objects
+                            role = getattr(m, "type", None) or getattr(m, "role", None)
+                            text = getattr(m, "content", None)
+                            if role in ("ai", "assistant") and text:
+                                content = str(text)
+                                break
+                            continue
+                        if m.get("role") == "assistant" and m.get("content"):
+                            content = str(m.get("content") or "")
+                            break
+
+            # Detect a *new* HITL interrupt after resume (chain of danger tools).
+            next_approval: dict[str, Any] | None = None
+            try:
+                snapshot = await graph_ref.aget_state(config)
+                if snapshot and getattr(snapshot, "next", None):
+                    for task in getattr(snapshot, "tasks", []) or []:
+                        for intr in getattr(task, "interrupts", []) or []:
+                            payload = getattr(intr, "value", None)
+                            if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
+                                next_approval = {
+                                    "thread_id": thread_id,
+                                    "tool": payload.get("tool", ""),
+                                    "args": payload.get("args", {}),
+                                    "message": payload.get("message", ""),
+                                }
+                                break
+                        if next_approval:
+                            break
+            except Exception:
+                logger.debug("[HITL] post-resume interrupt probe failed", exc_info=True)
+
+            payload_out: dict[str, Any] = {
                 "status": "approved" if approved else "denied",
                 "thread_id": thread_id,
-            }, status_code=202)
+                "content": content,
+            }
+            if next_approval:
+                payload_out["approval_required"] = next_approval
+            return _JSONResponse(payload_out, status_code=202)
         except Exception:
             logger.exception("[HITL] Failed to resume graph for thread=%s", thread_id)
             return _JSONResponse({"error": "Internal error"}, status_code=500)

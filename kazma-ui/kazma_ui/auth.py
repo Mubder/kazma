@@ -265,7 +265,96 @@ def verify_secret(provided: str, expected: str) -> bool:
     Uses :func:`hmac.compare_digest` (alias of :func:`secrets.compare_digest`).
     Both arguments are coerced to ``str`` before comparison.
     """
-    return hmac.compare_digest(provided, expected)
+    try:
+        return hmac.compare_digest(str(provided or ""), str(expected or ""))
+    except Exception:
+        return False
+
+
+def verify_api_token(provided: str) -> bool:
+    """Return True when *provided* is a valid Account API token (``kazma_…``).
+
+    Tokens are created in Settings → Account. Only the SHA-256 hash is stored
+    (never the raw token). Accepts the raw token string from the create dialog.
+    """
+    if not provided or not str(provided).startswith("kazma_"):
+        return False
+    try:
+        import hashlib
+        import json
+        from datetime import UTC, datetime
+
+        from kazma_core.config_store import get_config_store
+
+        token_hash = hashlib.sha256(provided.encode("utf-8")).hexdigest()
+        raw = get_config_store().get("account.tokens", [])
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                raw = []
+        if not isinstance(raw, list):
+            return False
+        now = datetime.now(UTC)
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("token_hash") != token_hash:
+                continue
+            expires_days = entry.get("expires_days")
+            created = entry.get("created_at") or ""
+            if expires_days and created:
+                try:
+                    created_dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+                    if created_dt.tzinfo is None:
+                        created_dt = created_dt.replace(tzinfo=UTC)
+                    if (now - created_dt).days > int(expires_days):
+                        return False
+                except Exception:
+                    pass
+            return True
+        return False
+    except Exception:
+        logger.debug("[SECURITY] API token verify failed", exc_info=True)
+        return False
+
+
+def extract_provided_credential(request: Request) -> str:
+    """Pull auth material from headers/cookie (secret or API token).
+
+    Order:
+      1. ``X-Kazma-Secret``
+      2. ``X-Api-Token`` / ``X-Kazma-Token``
+      3. ``Authorization: Bearer …``
+      4. ``kazma-secret`` cookie (browser sessions)
+    """
+    provided = (request.headers.get(SECRET_HEADER) or "").strip()
+    if provided:
+        return provided
+    provided = (
+        request.headers.get("X-Api-Token")
+        or request.headers.get("X-Kazma-Token")
+        or ""
+    ).strip()
+    if provided:
+        return provided
+    auth = (request.headers.get("Authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return (request.cookies.get(SECRET_COOKIE) or "").strip()
+
+
+def is_authenticated(request: Request, expected_secret: str = "") -> bool:
+    """True if request carries a valid KAZMA_SECRET or Account API token."""
+    provided = extract_provided_credential(request)
+    if not provided:
+        return False
+    expected = expected_secret or get_kazma_secret()
+    if expected and verify_secret(provided, expected):
+        return True
+    if verify_api_token(provided):
+        return True
+    return False
 
 
 # ── FastAPI Dependency (for manual application) ─────────────────────────
@@ -274,7 +363,7 @@ def verify_secret(provided: str, expected: str) -> bool:
 def require_kazma_secret(
     x_kazma_secret: str = Header(default="", alias=SECRET_HEADER),
 ) -> None:
-    """FastAPI dependency that enforces ``X-Kazma-Secret``.
+    """FastAPI dependency that enforces ``X-Kazma-Secret`` or Account API token.
 
     Raise ``HTTPException(401)`` when the secret is configured and the
     header is missing or incorrect.  When the secret is unset this is a
@@ -283,12 +372,15 @@ def require_kazma_secret(
     expected = get_kazma_secret()
     if not expected:
         return  # Auth disabled — open mode.
-    if not verify_secret(x_kazma_secret, expected):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid X-Kazma-Secret header",
-            headers={"WWW-Authenticate": SECRET_HEADER},
-        )
+    if expected and verify_secret(x_kazma_secret, expected):
+        return
+    if verify_api_token(x_kazma_secret):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Missing or invalid X-Kazma-Secret header (or Account API token)",
+        headers={"WWW-Authenticate": SECRET_HEADER},
+    )
 
 
 # ── Middleware Factory ──────────────────────────────────────────────────
@@ -382,25 +474,28 @@ def create_auth_middleware(
                 )
             return response
 
-        # 3. No secret configured → open mode (backward compatible).
+        # 3. No secret configured → open mode UNLESS the caller presented an
+        #    Account API token (still validate those when present).
+        provided = extract_provided_credential(request)
         if not expected:
+            # Open mode: still accept valid API tokens; otherwise pass through.
+            if provided and provided.startswith("kazma_") and not verify_api_token(provided):
+                return _unauthorized_response(request)
             return await call_next(request)
 
-        # 4. Verify the header or cookie using timing-safe comparison.
-        provided = request.headers.get(SECRET_HEADER, "")
-        if not provided:
-            provided = request.cookies.get(SECRET_COOKIE, "")
-        if not verify_secret(provided, expected):
+        # 4. Verify KAZMA_SECRET (header/cookie/Bearer) OR Account API token.
+        if not is_authenticated(request, expected):
             return _unauthorized_response(request)
 
         response = await call_next(request)
-        # Authenticated request may always refresh the session cookie.
-        if not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected:
-            response.set_cookie(
-                key=SECRET_COOKIE, value=expected,
-                httponly=True, samesite="lax", path="/",  # Lax: works for IP/LAN + OAuth return
-                secure=_is_https(request),
-            )
+        # Only mint/refresh the shared secret cookie for secret auth (not API tokens).
+        if expected and verify_secret(provided, expected):
+            if not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected:
+                response.set_cookie(
+                    key=SECRET_COOKIE, value=expected,
+                    httponly=True, samesite="lax", path="/",  # Lax: works for IP/LAN + OAuth return
+                    secure=_is_https(request),
+                )
         return response
 
     return auth_middleware_with_gate
@@ -512,6 +607,9 @@ __all__: list[str] = [
     "is_always_open",
     "require_kazma_secret",
     "verify_secret",
+    "verify_api_token",
+    "extract_provided_credential",
+    "is_authenticated",
     "create_tenant_middleware",
 ]
 

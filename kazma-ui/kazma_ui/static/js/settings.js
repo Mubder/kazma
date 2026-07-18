@@ -1370,9 +1370,24 @@ function settingsApp() {
                     body: JSON.stringify({ name: this.tokenName }),
                 });
                 const data = await resp.json();
-                showToast('Token created: ' + (data.token || '').substring(0, 12) + '...', 'success');
+                const tok = data.token || '';
                 this.tokenName = '';
                 await this.loadAccount();
+                if (tok && window.kazmaAlert) {
+                    await window.kazmaAlert({
+                        title: 'API token created',
+                        message:
+                            'Copy this token now — it is shown only once.\n\n' +
+                            tok +
+                            '\n\ncurl example:\n' +
+                            'curl -s -H "Authorization: Bearer ' + tok + '" \\\n' +
+                            '  http://127.0.0.1:9090/api/memory/graph/stats\n\n' +
+                            'Or: -H "X-Api-Token: ' + tok + '"\n' +
+                            'Or use KAZMA_SECRET with -H "X-Kazma-Secret: …"',
+                    });
+                } else {
+                    showToast('Token created: ' + tok.substring(0, 16) + '...', 'success');
+                }
             } catch (e) {
                 showToast('Failed: ' + e.message, 'error');
             }
