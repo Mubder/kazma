@@ -131,10 +131,22 @@ class SessionManager:
         # Open SQLite connection with check_same_thread=False
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         apply_sqlite_pragmas(self._conn)
+        # Survive process crashes: flush WAL so chat history is not lost on
+        # restart / git pull when another process briefly opens the DB.
+        try:
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA wal_autocheckpoint=100")
+        except Exception:
+            pass
 
         # Create schemas and load sessions
         self._create_tables()
         self._load_all_from_db()
+        logger.info(
+            "[SessionManager] Loaded %d sessions from %s",
+            len(self._sessions),
+            self.db_path,
+        )
 
     def _create_tables(self) -> None:
         """Create the sessions table if it does not exist, then migrate."""
@@ -213,36 +225,49 @@ class SessionManager:
 
     def _upsert_db(self, session: ChatSession) -> None:
         """Insert or update a session row in SQLite (shared by all write paths)."""
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO sessions (tenant_id, session_id, messages, created_at,
-                                      total_cost, total_tokens, thread_id, updated_at,
-                                      title, archived)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(tenant_id, session_id) DO UPDATE SET
-                    messages=excluded.messages,
-                    created_at=excluded.created_at,
-                    total_cost=excluded.total_cost,
-                    total_tokens=excluded.total_tokens,
-                    thread_id=excluded.thread_id,
-                    updated_at=excluded.updated_at,
-                    title=excluded.title,
-                    archived=excluded.archived
-                """,
-                (
-                    session.tenant_id,
-                    session.session_id,
-                    json.dumps(session.messages),
-                    session.created_at,
-                    session.total_cost,
-                    session.total_tokens,
-                    session.thread_id,
-                    session.updated_at,
-                    session.title,
-                    int(session.archived),
-                ),
+        try:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    INSERT INTO sessions (tenant_id, session_id, messages, created_at,
+                                          total_cost, total_tokens, thread_id, updated_at,
+                                          title, archived)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(tenant_id, session_id) DO UPDATE SET
+                        messages=excluded.messages,
+                        created_at=excluded.created_at,
+                        total_cost=excluded.total_cost,
+                        total_tokens=excluded.total_tokens,
+                        thread_id=excluded.thread_id,
+                        updated_at=excluded.updated_at,
+                        title=excluded.title,
+                        archived=excluded.archived
+                    """,
+                    (
+                        session.tenant_id,
+                        session.session_id,
+                        json.dumps(session.messages, ensure_ascii=False),
+                        session.created_at,
+                        session.total_cost,
+                        session.total_tokens,
+                        session.thread_id,
+                        session.updated_at,
+                        session.title,
+                        int(session.archived),
+                    ),
+                )
+            # Nudge WAL periodically so restarts keep recent chats.
+            try:
+                self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+            except Exception:
+                pass
+        except Exception:
+            logger.exception(
+                "[SessionManager] upsert failed session=%s path=%s",
+                session.session_id,
+                self.db_path,
             )
+            raise
 
     # ── core CRUD ──────────────────────────────────────────────────
 

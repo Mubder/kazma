@@ -212,14 +212,32 @@ var KazmaStream = (function() {
       // Inline code
       html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
 
-      // Links — sanitize URL to prevent javascript: protocol XSS
+      // Markdown links — sanitize URL to prevent javascript: protocol XSS
       html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
         var decodedUrl = url.replace(/&amp;/g, '&');
         if (/^(https?:|mailto:)/i.test(decodedUrl)) {
-          return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener">' + text + '</a>';
+          return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
         }
-        return '<a href="#" rel="noopener">' + text + '</a>';
+        // Relative paths like /workspace or /chat — keep in-app
+        if (/^\/[A-Za-z0-9_./?#&=%-]+$/.test(decodedUrl)) {
+          return '<a href="' + esc(decodedUrl) + '">' + text + '</a>';
+        }
+        return '<span class="dead-link" title="Blocked URL">' + text + '</span>';
       });
+
+      // Autolink bare URLs that were not already turned into <a href>
+      // (esc() turns & into &amp; so match the escaped form too).
+      html = html.replace(
+        /(^|[\s>(])((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?'")\]])/g,
+        function(_, pre, url) {
+          var href = url;
+          if (/^www\./i.test(href)) href = 'https://' + href;
+          // Decode &amp; back for the href attribute only
+          var rawHref = href.replace(/&amp;/g, '&');
+          if (!/^(https?:)/i.test(rawHref)) return pre + url;
+          return pre + '<a href="' + esc(rawHref) + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
+        }
+      );
 
       // Line breaks
       html = html.replace(/\n\n/g, '</p><p>');

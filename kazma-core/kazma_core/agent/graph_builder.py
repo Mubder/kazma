@@ -309,6 +309,28 @@ async def supervisor_node(
         except Exception:
             logger.warning("[Supervisor] per-turn memory retrieval failed — recall degraded", exc_info=True)
 
+    # Per-turn language lock (again at graph level so Telegram/Discord paths
+    # get it even when SSE already injected one — duplicate is harmless).
+    if iteration == 0 and last_user_content:
+        try:
+            from kazma_core.language_lock import language_lock_message
+
+            lock = language_lock_message(last_user_content)
+            if lock and not any(
+                m.get("role") == "system" and "LANGUAGE LOCK" in str(m.get("content", ""))
+                for m in messages
+            ):
+                # Place just before the last user message so it is the nearest
+                # instruction to the model.
+                insert_at = len(messages)
+                for i in range(len(messages) - 1, -1, -1):
+                    if messages[i].get("role") == "user":
+                        insert_at = i
+                        break
+                messages.insert(insert_at, {"role": "system", "content": lock})
+        except Exception:
+            logger.debug("[Supervisor] language lock skipped", exc_info=True)
+
     start = time.monotonic()
     try:
         from kazma_core.retry import friendly_llm_error, load_retry_config

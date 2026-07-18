@@ -556,20 +556,17 @@
           }).then(function(out) {
             if (out.status === 202) {
               setCardState(action === 'approve' ? 'approved' : 'denied',
-                           action === 'approve' ? 'Approved \u2713' : 'Denied \u2717');
+                           action === 'approve' ? 'Approved \u2713 — continuing\u2026' : 'Denied \u2717');
               if (out.body.content) {
                 appendAssistantText(out.body.content);
               } else if (action === 'approve') {
-                appendAssistantText('_Tool approved and executed. (No further assistant text was returned.)_');
+                appendAssistantText('_Tool approved and executed. (No further assistant text was returned — check Dashboard Pending Approvals if the tool did not run.)_');
               } else {
                 appendAssistantText('_Tool denied — continuing without it._');
               }
               if (out.body.approval_required) {
-                // Chain: another danger tool needs approval.
                 var next = out.body.approval_required;
-                // Render a new card for the next interrupt using this same path.
                 setTimeout(function() {
-                  // Use the exported handler if available.
                   if (window.KazmaChat && typeof window.KazmaChat._hitlApproval === 'function') {
                     window.KazmaChat._hitlApproval(next);
                   }
@@ -579,9 +576,16 @@
                 tokenAccum = '';
                 enableInput();
               }
+            } else if (out.status === 409) {
+              // No pending interrupt — often means dashboard already resumed it
+              // or a different graph/checkpointer was used.
+              setCardState('error', 'No pending approval (already resumed?)');
+              appendAssistantText('_' + truncateStr(String((out.body && out.body.error) || 'No pending approval for this thread.'), 200) + '_');
+              enableInput();
             } else {
               var errMsg = (out.body && (out.body.error || out.body.detail)) || ('HTTP ' + out.status);
               setCardState('error', 'Error: ' + truncateStr(String(errMsg), 120));
+              appendAssistantText('_Approval failed: ' + escapeHtml(String(errMsg)) + '_');
               enableInput();
             }
           }).catch(function(err) {

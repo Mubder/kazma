@@ -467,6 +467,12 @@ def create_sse_chat_router(
 
         # ── Build conversation messages ────────────────────────────
         session.messages.append({"role": "user", "content": user_message})
+        # CRITICAL: persist immediately. Previously messages were only mutated
+        # in-memory and never written back to SQLite, so restarts wiped history.
+        try:
+            _get_store().put(session)
+        except Exception:
+            logger.exception("[SSE] failed to persist user message for session=%s", session_id)
 
         messages: list[dict[str, Any]] = []
         has_system = any(m.get("role") == "system" for m in session.messages)
@@ -485,6 +491,17 @@ def create_sse_chat_router(
                 messages.append({"role": "system", "content": env_block})
         except Exception:
             logger.debug("[sse_chat] per-turn env_context refresh skipped", exc_info=True)
+
+        # Per-turn language lock — last system instruction wins over cultural
+        # Arabic context when the user is writing English (or vice versa).
+        try:
+            from kazma_core.language_lock import language_lock_message
+
+            lock = language_lock_message(user_message)
+            if lock:
+                messages.append({"role": "system", "content": lock})
+        except Exception:
+            logger.debug("[sse_chat] language lock skipped", exc_info=True)
 
         messages.extend(
             {k: v for k, v in m.items() if k in ("role", "content")} for m in session.messages
@@ -540,7 +557,7 @@ def create_sse_chat_router(
 
                     yield frame
 
-                # Store assistant response in session history
+                # Store assistant response in session history + persist to disk.
                 if content_acc:
                     session.messages.append(
                         {
@@ -548,13 +565,33 @@ def create_sse_chat_router(
                             "content": content_acc,
                         }
                     )
+                try:
+                    _get_store().put(session)
+                except Exception:
+                    logger.exception(
+                        "[SSE] failed to persist turn for session=%s", session_id
+                    )
 
             except asyncio.CancelledError:
                 logger.warning("SSE generator cancelled for session=%s", session_id)
+                # Still flush whatever we have so a dropped connection doesn't
+                # lose the user message (and partial assistant text).
+                try:
+                    if content_acc:
+                        session.messages.append(
+                            {"role": "assistant", "content": content_acc}
+                        )
+                    _get_store().put(session)
+                except Exception:
+                    pass
                 yield _sse_frame("error", {"content": "Connection closed"})
 
             except Exception as exc:
                 logger.error("SSE generator error: %s", exc, exc_info=True)
+                try:
+                    _get_store().put(session)
+                except Exception:
+                    pass
                 yield _sse_frame("error", {"content": sanitize_error(exc)})
 
         return StreamingResponse(

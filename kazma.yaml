@@ -1,8 +1,8 @@
 agent:
   name: kazma
   version: 0.5.0
-  language: ar
-  rtl: true
+  language: en
+  rtl: false
 models:
   default: gpt-4o-mini
   router: litellm

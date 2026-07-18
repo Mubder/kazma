@@ -104,6 +104,7 @@ function settingsApp() {
         sessions: [],
         passwordForm: { old_password: '', new_password: '', confirm_password: '' },
         tokenName: '',
+        lastCreatedToken: '',
 
         // ── Tools Tab ──
         tools: [],
@@ -1372,24 +1373,35 @@ function settingsApp() {
                 const data = await resp.json();
                 const tok = data.token || '';
                 this.tokenName = '';
+                this.lastCreatedToken = tok;
                 await this.loadAccount();
-                if (tok && window.kazmaAlert) {
-                    await window.kazmaAlert({
-                        title: 'API token created',
-                        message:
-                            'Copy this token now — it is shown only once.\n\n' +
-                            tok +
-                            '\n\ncurl example:\n' +
-                            'curl -s -H "Authorization: Bearer ' + tok + '" \\\n' +
-                            '  http://127.0.0.1:9090/api/memory/graph/stats\n\n' +
-                            'Or: -H "X-Api-Token: ' + tok + '"\n' +
-                            'Or use KAZMA_SECRET with -H "X-Kazma-Secret: …"',
-                    });
-                } else {
-                    showToast('Token created: ' + tok.substring(0, 16) + '...', 'success');
-                }
+                showToast(tok ? 'Token created — copy it below (shown once)' : 'Token created', tok ? 'success' : 'error');
             } catch (e) {
                 showToast('Failed: ' + e.message, 'error');
+            }
+        },
+
+        async copyLastToken() {
+            if (!this.lastCreatedToken) return;
+            try {
+                await navigator.clipboard.writeText(this.lastCreatedToken);
+                showToast('Token copied to clipboard', 'success');
+            } catch (e) {
+                showToast('Copy failed — select the token and copy manually', 'error');
+            }
+        },
+
+        async copyTokenCurl() {
+            if (!this.lastCreatedToken) return;
+            const origin = window.location.origin || 'http://127.0.0.1:9090';
+            const cmd =
+                'curl -s -H "Authorization: Bearer ' + this.lastCreatedToken + '" \\\n  ' +
+                origin + '/api/memory/graph/stats';
+            try {
+                await navigator.clipboard.writeText(cmd);
+                showToast('curl example copied', 'success');
+            } catch (e) {
+                showToast('Copy failed', 'error');
             }
         },
 

@@ -81,8 +81,10 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
     return AgentConfig(
         name=agent_cfg.get("name", "kazma"),
         version=agent_cfg.get("version", "0.5.0"),
-        language=agent_cfg.get("language", "ar"),
-        rtl=agent_cfg.get("rtl", True),
+        # Default to English so cultural Arabic context does not bias every
+        # reply when the user has not set agent.language explicitly.
+        language=agent_cfg.get("language", "en"),
+        rtl=agent_cfg.get("rtl", False),
         default_model=models_cfg.get("default", "gpt-4o-mini"),
         storage_path=storage_cfg.get("path", "data/kazma.db"),
         vector_dim=storage_cfg.get("vector_dim", 384),

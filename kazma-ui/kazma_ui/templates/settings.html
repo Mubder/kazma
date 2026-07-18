@@ -800,9 +800,23 @@
         <!-- API Tokens -->
         <div class="settings-group">
             <h3>{{ t('settings.api_tokens') }}</h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">
+              Use these tokens to call protected APIs from scripts without pasting <code>KAZMA_SECRET</code>.
+              Send as <code>Authorization: Bearer …</code> or <code>X-Api-Token</code>.
+            </p>
             <div style="display:flex;gap:8px;margin-bottom:12px">
                 <input type="text" class="form-input" x-model="tokenName" placeholder="{{ t('settings.token_name') }}" style="flex:1">
                 <button class="btn btn-primary" @click="createToken()">{{ t('settings.create_token') }}</button>
+            </div>
+            <!-- One-time full token reveal -->
+            <div x-show="lastCreatedToken" x-cloak style="margin-bottom:14px;padding:12px 14px;border-radius:8px;border:1px solid rgba(16,185,129,0.35);background:rgba(16,185,129,0.08);">
+              <div style="font-size:0.75rem;font-weight:700;color:#34d399;margin-bottom:6px;">Token created — copy now (shown once)</div>
+              <code style="display:block;word-break:break-all;font-size:0.78rem;color:var(--text-primary);margin-bottom:8px;" x-text="lastCreatedToken"></code>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-sm btn-primary" @click="copyLastToken()">Copy token</button>
+                <button type="button" class="btn btn-sm btn-secondary" @click="copyTokenCurl()">Copy curl example</button>
+                <button type="button" class="btn btn-sm btn-secondary" @click="lastCreatedToken=''">Dismiss</button>
+              </div>
             </div>
             <template x-for="t in apiTokens" :key="t.id">
                 <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
@@ -812,7 +826,7 @@
                     <button class="btn btn-danger btn-sm" @click="revokeToken(t.id)">{{ t('settings.revoke') }}</button>
                 </div>
             </template>
-            <div x-show="apiTokens.length === 0" class="empty-state" style="padding:16px">{{ t('settings.no_api_tokens') }}</div>
+            <div x-show="apiTokens.length === 0 && !lastCreatedToken" class="empty-state" style="padding:16px">{{ t('settings.no_api_tokens') }}</div>
         </div>
 
         <!-- Sessions -->

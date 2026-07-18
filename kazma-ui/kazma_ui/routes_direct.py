@@ -811,7 +811,10 @@ def register_direct_routes(self: Any) -> None:
         if graph_ref is None:
             return _JSONResponse({"error": "Graph not available"}, status_code=503)
 
-        # H-2 / S0-3: enforce ownership — require session_id when owner is known
+        # H-2 / S0-3: ownership for *gateway* threads only. Web chat sessions
+        # live in SessionManager (not gateway session_store) and already pass
+        # session_id from the browser — never 403 web users who legitimately
+        # clicked Approve on their own card just because gateway has no row.
         try:
             if self.session_store is not None:
                 ctx = None
@@ -820,28 +823,27 @@ def register_direct_routes(self: Any) -> None:
                 except Exception as _e:
                     logger.debug("[HITL] Failed to fetch session context for ownership check: %s", _e)
                 if ctx and isinstance(ctx, dict):
-                    # Resolve the owning identity across platforms:
-                    #   - Telegram: sender_id ("telegram:<chat_id>")
-                    #   - Discord/Slack: user_id
-                    #   - Web/SSE: session_id
                     owner = (
                         ctx.get("sender_id")
                         or ctx.get("owner")
                         or ctx.get("session_id")
                         or ctx.get("user_id")
                     )
-                    if owner:
+                    # Only enforce when this is clearly a non-web gateway owner
+                    # (telegram:/discord:/slack: prefixes or numeric platform ids).
+                    owner_s = str(owner or "")
+                    is_gateway_owner = bool(
+                        owner_s
+                        and (
+                            owner_s.startswith("telegram:")
+                            or owner_s.startswith("discord:")
+                            or owner_s.startswith("slack:")
+                            or ":" in owner_s
+                        )
+                    )
+                    if is_gateway_owner:
                         caller_session = body.get("session_id")
-                        if not caller_session:
-                            logger.warning(
-                                "[HITL] Web approve missing session_id for owned thread %s",
-                                thread_id,
-                            )
-                            return _JSONResponse(
-                                {"error": "session_id required to approve this request"},
-                                status_code=403,
-                            )
-                        if str(owner) != str(caller_session):
+                        if caller_session and str(owner) != str(caller_session):
                             logger.warning(
                                 "[HITL] Web approve ownership mismatch for thread %s: owner=%s caller=%s",
                                 thread_id,
@@ -858,24 +860,56 @@ def register_direct_routes(self: Any) -> None:
         try:
             from langgraph.types import Command
 
+            # Prefer the live checkpointed graph (same instance as SSE).
+            graph_ref = _resolve_hitl_graph() or self._graph_holder.get("graph")
+            if graph_ref is None:
+                return _JSONResponse({"error": "Graph not available"}, status_code=503)
+
             config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+
+            # Verify this thread is actually paused before resume — avoids a
+            # silent no-op when the wrong graph/checkpointer is wired.
+            try:
+                pre = await graph_ref.aget_state(config)
+                has_interrupt = False
+                if pre and getattr(pre, "tasks", None):
+                    for task in pre.tasks or []:
+                        if getattr(task, "interrupts", None):
+                            has_interrupt = True
+                            break
+                if pre and getattr(pre, "next", None) and not has_interrupt:
+                    # Pending next but no interrupt payload — still try resume.
+                    has_interrupt = True
+                if not has_interrupt and not (pre and getattr(pre, "next", None)):
+                    logger.warning(
+                        "[HITL] No pending interrupt for thread=%s — approve is a no-op",
+                        thread_id,
+                    )
+                    return _JSONResponse(
+                        {
+                            "status": "noop",
+                            "thread_id": thread_id,
+                            "content": "",
+                            "error": "No pending approval for this thread (already resumed or wrong thread_id).",
+                        },
+                        status_code=409,
+                    )
+            except Exception:
+                logger.debug("[HITL] pre-resume state probe failed", exc_info=True)
+
             resume_value = {"approved": approved, "reason": body.get("reason", "")}
             result = await graph_ref.ainvoke(
                 Command(resume=resume_value),
                 config=config,
             )
 
-            # Extract the post-resume assistant reply so the chat UI can show
-            # it. Previously ainvoke ran to completion but the frontend only
-            # painted "Approved ✓" and never displayed the tool result /
-            # final answer — users saw "silence".
+            # Extract the post-resume assistant reply so the chat UI can show it.
             content = ""
             if isinstance(result, dict):
                 msgs = result.get("messages") or []
                 if isinstance(msgs, list):
                     for m in reversed(msgs):
                         if not isinstance(m, dict):
-                            # LangChain message objects
                             role = getattr(m, "type", None) or getattr(m, "role", None)
                             text = getattr(m, "content", None)
                             if role in ("ai", "assistant") and text:
@@ -885,6 +919,27 @@ def register_direct_routes(self: Any) -> None:
                         if m.get("role") == "assistant" and m.get("content"):
                             content = str(m.get("content") or "")
                             break
+
+            # Persist assistant text into the web chat SessionManager so the
+            # sidebar history survives refresh after an HITL resume.
+            if content:
+                try:
+                    from kazma_ui.session_manager import get_session_manager
+
+                    store = get_session_manager()
+                    # Prefer explicit session_id from the client; else find by thread_id.
+                    sid = (body.get("session_id") or "").strip()
+                    sess = store.get(sid) if sid else None
+                    if sess is None:
+                        for s in store.list_all(include_archived=True):
+                            if s.thread_id == thread_id:
+                                sess = s
+                                break
+                    if sess is not None:
+                        sess.messages.append({"role": "assistant", "content": content})
+                        store.put(sess)
+                except Exception:
+                    logger.debug("[HITL] session persist after resume failed", exc_info=True)
 
             # Detect a *new* HITL interrupt after resume (chain of danger tools).
             next_approval: dict[str, Any] | None = None
