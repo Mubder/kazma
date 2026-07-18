@@ -726,11 +726,7 @@ class ConfigStore:
                 )
                 conn.execute("COMMIT")
                 if key == "account.tokens":
-                    logger.info(
-                        "[TOKENDIAG] set cs_id=%s db=%s wrote n=%d",
-                        id(self), getattr(self, "_db_path", "?"),
-                        len(to_store) if isinstance(to_store, list) else -1,
-                    )
+                    print(f"[TOKENDIAG] set cs_id={id(self)} db={getattr(self, '_db_path', '?')} wrote n={len(to_store) if isinstance(to_store, list) else -1}", flush=True)
                 self._cache.clear()
             except Exception:
                 logger.debug("set() write failed, rolling back for key=%s", key)
