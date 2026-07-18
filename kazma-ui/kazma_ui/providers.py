@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 import time
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from kazma_core.config_store import ConfigStore
+from kazma_core.config_store import ConfigStore, is_vault_ref
 from kazma_core.model_registry import get_model_registry
 
 from kazma_ui.models import (
@@ -35,25 +34,20 @@ _CONNECTOR_PLATFORMS = ("telegram", "discord", "slack", "email", "webhook")
 # Keys that are considered secrets and must be masked before leaving the backend.
 _SECRET_KEY_HINTS = ("token", "secret", "password", "key", "api_key")
 
-# BotFather tokens look like ``123456789:AAH…`` (digits, colon, secret).
-_TELEGRAM_TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]+$")
-
 
 def _normalize_telegram_bot_token(raw: str) -> str:
-    """Strip whitespace/quotes and an accidental ``bot`` prefix from a BotFather token.
+    """Light cleanup only — never invent/reject token shapes.
 
-    Users often paste values from docs that already include the ``bot`` URL
-    prefix (``bot123:AA…``). Building ``/bot{token}/getMe`` then becomes
-    ``/botbot123…/getMe``, which Telegram answers with HTTP 404 Not Found.
-    Leading/trailing spaces produce the same 404.
+    Strips surrounding whitespace/quotes. If the user pasted a full API path
+    fragment like ``bot123:AA…`` (docs style), drop the leading ``bot`` so
+    ``/bot{token}/getMe`` is not doubled. Do **not** regex-reject tokens:
+    BotFather formats vary and vault/env values must pass through as-is.
     """
     token = (raw or "").strip().strip("\"'")
-    if token.lower().startswith("bot") and not token.lower().startswith("bot:"):
-        # ``bot123:AA…`` → ``123:AA…``; leave bare secrets alone.
-        maybe = token[3:]
-        if maybe and (maybe[0].isdigit() or maybe.startswith(":")):
-            token = maybe.lstrip(":")
-    return token.strip()
+    # Only strip a literal docs-style prefix: bot + digits…
+    if len(token) > 4 and token[:3].lower() == "bot" and token[3].isdigit():
+        token = token[3:]
+    return token
 
 
 def _mask_secret(value: str) -> str:
@@ -123,15 +117,29 @@ def _mask_connector_entry(name: str, config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _load_connector_config(config_store: ConfigStore, name: str) -> dict[str, Any]:
-    """Load all config keys under ``connectors.{name}.*``."""
+    """Load all config keys under ``connectors.{name}.*``.
+
+    Uses ``config_store.get()`` (vault-aware) rather than raw ``get_all()``
+    values. Sensitive tokens are stored as ``vault://…`` pointers in the DB;
+    ``get_all()`` returns those pointers unresolved, which broke connector
+    Test (Telegram saw ``/botvault://…/getMe`` → HTTP 404, or later a false
+    "format looks wrong" after a regex gate).
+    """
     prefix = f"connectors.{name}."
     all_settings = config_store.get_all()
     config: dict[str, Any] = {}
     # Flatten DB settings grouped by category
     for category_values in all_settings.values():
         for key, value in category_values.items():
-            if key.startswith(prefix):
-                config[key[len(prefix):]] = value
+            if not key.startswith(prefix):
+                continue
+            # Always re-fetch via get() so vault secrets decrypt.
+            resolved = config_store.get(key, value)
+            if resolved is None or (isinstance(resolved, str) and is_vault_ref(resolved)):
+                # Vault disabled / decrypt failed — treat as missing secret.
+                if key.endswith(".token") or key.rsplit(".", 1)[-1] in _SECRET_KEY_HINTS:
+                    resolved = ""
+            config[key[len(prefix):]] = resolved
     return config
 
 
@@ -431,8 +439,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
     async def test_connector(name: str) -> dict[str, Any]:
         """Run a platform-specific health check for a connector."""
         name = name.strip()
-        config = _load_connector_config(config_store, name)
-        token = str(config.get("token", "")).strip()
+        # Vault-aware direct read (do not rely on get_all raw values).
+        token = str(config_store.get(f"connectors.{name}.token", "") or "").strip()
         # Match gateway boot: fall back to env when ConfigStore has no token.
         if not token and name == "telegram":
             token = (
@@ -444,49 +452,31 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         if not token and name == "slack":
             token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
         if not token:
-            return {"success": False, "error": f"No token configured for {name}"}
+            return {
+                "success": False,
+                "error": (
+                    f"No token configured for {name} "
+                    "(or vault could not decrypt connectors.{name}.token)."
+                ),
+            }
 
         if name == "telegram":
             token = _normalize_telegram_bot_token(token)
-            if not _TELEGRAM_TOKEN_RE.match(token):
-                return {
-                    "success": False,
-                    "error": (
-                        "Token format looks wrong. Paste only the BotFather token "
-                        "(digits:secret), without a leading 'bot' prefix or spaces. "
-                        "Example shape: 123456789:AAH…"
-                    ),
-                }
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
                     if resp.status_code == 200:
                         data = resp.json()
-                        return {"success": True, "bot_name": data.get("result", {}).get("username", "")}
-                    # Surface Telegram's description — 404 almost always means a
-                    # malformed token/URL; 401 means wrong/revoked secret.
+                        return {
+                            "success": True,
+                            "bot_name": data.get("result", {}).get("username", ""),
+                        }
                     detail = ""
                     try:
                         detail = str(resp.json().get("description", "") or "")
                     except Exception:
                         detail = (resp.text or "")[:120]
-                    if resp.status_code == 404:
-                        return {
-                            "success": False,
-                            "error": (
-                                f"HTTP 404 from Telegram ({detail or 'Not Found'}). "
-                                "Token is malformed — re-copy from @BotFather without "
-                                "spaces or a 'bot' prefix."
-                            ),
-                        }
-                    if resp.status_code == 401:
-                        return {
-                            "success": False,
-                            "error": (
-                                f"HTTP 401 from Telegram ({detail or 'Unauthorized'}). "
-                                "Token is invalid or revoked — generate a new one in @BotFather."
-                            ),
-                        }
+                    # Keep Telegram's status but include description — no local format gate.
                     return {
                         "success": False,
                         "error": f"HTTP {resp.status_code}" + (f": {detail}" if detail else ""),

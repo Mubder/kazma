@@ -392,7 +392,11 @@ class SettingsManager:
             self._cs.set(f"connectors.{platform_name}.{key}", value, category="connectors")
 
     async def test_connector(self, platform_name: str) -> dict[str, Any]:
-        """Test a connector connection."""
+        """Test a connector connection.
+
+        Uses ConfigStore.get() so vault-backed secrets decrypt (get_all raw
+        pointers must never be sent to Telegram/Discord).
+        """
         import os
 
         token = str(self._cs.get(f"connectors.{platform_name}.token", "") or "").strip()
@@ -402,12 +406,18 @@ class SettingsManager:
                 or os.environ.get("TELEGRAM_TOKEN", "")
             ).strip()
         if not token:
-            return {"success": False, "error": f"No token configured for {platform_name}"}
+            return {
+                "success": False,
+                "error": (
+                    f"No token configured for {platform_name} "
+                    f"(or vault could not decrypt connectors.{platform_name}.token)."
+                ),
+            }
 
         if platform_name == "telegram":
-            # Keep in sync with providers._normalize_telegram_bot_token
             token = token.strip().strip("\"'")
-            if token.lower().startswith("bot") and len(token) > 3 and token[3:4].isdigit():
+            # Docs-style paste only: leading "bot" + digits.
+            if len(token) > 4 and token[:3].lower() == "bot" and token[3].isdigit():
                 token = token[3:]
             return await self._test_http_connector(
                 f"https://api.telegram.org/bot{token}/getMe",
