@@ -278,14 +278,14 @@
           <h3 style="margin:0;font-size:1rem;font-weight:600;letter-spacing:-0.01em;">{{ t('workspace.gh_title') }}</h3>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <!-- Status indicator badge -->
-          <template x-if="ghIsGitHub && ghHasToken && ghTokenValid">
+          <!-- Status indicator badge: authenticated = OAuth or valid PAT/env token -->
+          <template x-if="ghIsGitHub && ghAuthenticated">
             <span class="badge" style="background:rgba(16, 185, 129, 0.1);color:#10b981;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(16, 185, 129, 0.2);display:inline-flex;align-items:center;gap:4px;">
               <span style="display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;box-shadow:0 0 8px #10b981;animation:pulse 2s infinite;"></span>
               {{ t('workspace.gh_connected') }}
             </span>
           </template>
-          <template x-if="ghIsGitHub && (!ghHasToken || !ghTokenValid)">
+          <template x-if="ghIsGitHub && !ghAuthenticated">
             <span class="badge" style="background:rgba(245, 158, 11, 0.1);color:#f59e0b;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(245, 158, 11, 0.2);display:inline-flex;align-items:center;gap:4px;">
               <span style="display:inline-block;width:6px;height:6px;background:#f59e0b;border-radius:50%;"></span>
               {{ t('workspace.gh_token_missing') }}
@@ -296,8 +296,8 @@
               {{ t('workspace.gh_rate_limited') }}
             </span>
           </template>
-          <!-- Connect / Disconnect (OAuth) -->
-          <button x-show="!ghOAuthConnected" class="btn btn-xs btn-primary" @click="connectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 10px;">
+          <!-- Connect when not authenticated; Disconnect only clears OAuth (PAT stays until replaced) -->
+          <button x-show="!ghAuthenticated" class="btn btn-xs btn-primary" @click="connectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 10px;">
             🔑 {{ t('workspace.gh_connect') }}
           </button>
           <button x-show="ghOAuthConnected" class="btn btn-xs btn-secondary" @click="disconnectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
@@ -306,8 +306,8 @@
         </div>
       </div>
 
-      <!-- OAuth not connected state (only after status has been checked) -->
-      <div x-show="ghIsGitHub && ghOAuthChecked && !ghOAuthConnected" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
+      <!-- Not authenticated (only after status has been checked) — PAT alone counts as connected -->
+      <div x-show="ghIsGitHub && ghOAuthChecked && !ghAuthenticated" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
         <div style="font-size:1.5rem;margin-bottom:8px;">🔒</div>
         <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.gh_connect_heading') }}</h4>
         <p style="font-size:0.75rem;max-width:340px;margin:0 auto 12px auto;line-height:1.5;">{{ t('workspace.gh_connect_body') }} <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span>.</p>
@@ -315,8 +315,10 @@
         <p style="font-size:0.65rem;color:var(--text-tertiary);margin-top:10px;">{{ t('workspace.gh_oauth_note') }}</p>
       </div>
 
-      <!-- Main GitHub Card Body -->
-      <div style="padding:12px;background:var(--bg-surface);" x-show="ghIsGitHub && ghOAuthConnected" x-cloak>
+      <!-- Main GitHub Card Body — OAuth *or* valid PAT/env token -->
+      <div style="padding:12px;background:var(--bg-surface);" x-show="ghIsGitHub && ghAuthenticated" x-cloak>
+        <!-- Surface API errors (rate limit / 403 / private repo) above the zeroed stats -->
+        <div x-show="ghError" x-cloak style="margin-bottom:10px;padding:8px 10px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;font-size:0.75rem;line-height:1.4;" x-text="ghError"></div>
         <!-- Tab navigation -->
         <div style="display:flex;gap:2px;border-bottom:1px solid var(--border-subtle);margin-bottom:10px;overflow-x:auto;">
           <template x-for="tab in [['overview',t('workspace.gh_tab_overview')],['pulls',t('workspace.gh_tab_prs')],['issues',t('workspace.gh_tab_issues')],['commits',t('workspace.gh_tab_commits')],['workflows',t('workspace.gh_tab_actions')],['releases',t('workspace.gh_tab_releases')]]" :key="tab[0]">
@@ -673,6 +675,7 @@ function workspaceApp() {
     showPatModal: false,
     githubPat: '',
     // OAuth + tabbed read-only views
+    // Use get ghAuthenticated() — OAuth connected OR valid PAT/env token.
     ghOAuthConnected: false,
     ghOAuthChecked: false,
     ghOAuthConfigured: false,
@@ -720,11 +723,12 @@ function workspaceApp() {
       setInterval(() => {
         this.loadGitStatus();
         this.loadOAuthStatus();
-        if (this.ghOAuthConnected) this.loadGitHubStatus();
+        // Refresh telemetry when authenticated via OAuth *or* PAT.
+        if (this.ghAuthenticated) this.loadGitHubStatus();
       }, 10000);
       // Lighter poll for the active tab's list (30s).
       setInterval(() => {
-        if (this.ghOAuthConnected && this.ghActiveTab !== 'overview') this.ghLoadTab(this.ghActiveTab);
+        if (this.ghAuthenticated && this.ghActiveTab !== 'overview') this.ghLoadTab(this.ghActiveTab);
       }, 30000);
       // Activity card refreshes every 60s (deliberately slower — protects
       // the rate budget since /activity is a GraphQL + 1 REST call).
@@ -948,9 +952,14 @@ function workspaceApp() {
           const data = await resp.json();
           this.ghOAuthConfigured = data.configured || false;
           this.ghOAuthConnected = data.connected || false;
+          // Server reports any usable token (OAuth or PAT/env) so PAT-only
+          // setups don't sit on the "Connect GitHub" empty state forever.
+          if (data.has_token) {
+            this.ghHasToken = true;
+          }
           this.ghOAuthChecked = true;
-          // If just connected, refresh the overview + first tab.
-          if (this.ghOAuthConnected) {
+          // If just connected (OAuth or token present), refresh overview.
+          if (this.ghOAuthConnected || data.has_token) {
             await this.loadGitHubStatus();
           }
         }
@@ -1051,6 +1060,11 @@ function workspaceApp() {
     },
 
     // Computed: activity filtered by the active chip (client-side, no refetch).
+    // True when we can call the GitHub API: OAuth token or valid PAT/env.
+    get ghAuthenticated() {
+      return !!(this.ghOAuthConnected || (this.ghHasToken && this.ghTokenValid));
+    },
+
     get ghActivityFiltered() {
       if (this.ghActivityFilter === 'all') return this.ghActivity;
       return this.ghActivity.filter(a => a.type === this.ghActivityFilter);
@@ -1157,6 +1171,10 @@ function workspaceApp() {
           KazmaStream.toast(t('workspace.toast_pat_saved'), 'success', 2500);
           this.showPatModal = false;
           this.githubPat = '';
+          // Mark authenticated immediately so telemetry panel unhides before
+          // the status round-trip completes (PAT path, not OAuth).
+          this.ghHasToken = true;
+          this.ghTokenValid = true;
           await this.loadGitHubStatus();
         } else {
           const err = await resp.json();

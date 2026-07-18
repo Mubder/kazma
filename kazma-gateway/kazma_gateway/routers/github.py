@@ -155,69 +155,83 @@ async def github_status() -> JSONResponse:
 
     owner, repo = slug_info
 
-    # 3. Retrieve token from ConfigStore, env, or settings
-    token = ""
-    try:
-        from kazma_core.config_store import get_config_store
-        token = get_config_store().get("connectors.github.token", "")
-    except Exception:
-        pass
+    # 3. Shared token resolution (OAuth → PAT ConfigStore → env).
+    # Must match GitHubClient / get_github_token() — the old path only read
+    # connectors.github.token and ignored OAuth, which caused "Token Missing"
+    # + unauthenticated 60/hr rate limits while the user was OAuth-connected.
+    from kazma_gateway.routers.github_client import get_github_token, is_oauth_connected
 
-    if not token:
-        token = os.environ.get("GITHUB_TOKEN", "") or os.environ.get("GITHUB_PAT", "")
+    token = get_github_token()
+    oauth_connected = is_oauth_connected()
 
     # 4. Fetch details from GitHub API
     headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "Kazma-Agent-Framework"
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Kazma-Agent-Framework",
     }
     if token:
-        headers["Authorization"] = f"token {token}"
+        # Bearer works for OAuth + classic/fine-grained PATs.
+        headers["Authorization"] = f"Bearer {token}"
 
     api_url = f"https://api.github.com/repos/{owner}/{repo}"
     pulls_url = f"https://api.github.com/repos/{owner}/{repo}/pulls?state=open&per_page=1"
     workflows_url = f"https://api.github.com/repos/{owner}/{repo}/actions/runs?per_page=1"
+
+    def _base_payload(**extra: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "is_github": True,
+            "owner": owner,
+            "repo": repo,
+            "has_token": bool(token),
+            "oauth_connected": oauth_connected,
+        }
+        payload.update(extra)
+        return payload
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             # Fetch repo metadata
             repo_resp = await client.get(api_url, headers=headers)
             if repo_resp.status_code == 401:
-                return JSONResponse({
-                    "is_github": True,
-                    "owner": owner,
-                    "repo": repo,
-                    "has_token": bool(token),
-                    "token_valid": False,
-                    "error": "Invalid GitHub Token (401 Unauthorized)."
-                })
+                return JSONResponse(_base_payload(
+                    token_valid=False,
+                    error="Invalid GitHub Token (401 Unauthorized).",
+                ))
             elif repo_resp.status_code == 403:
                 # Check rate limit
                 rate_limit_remaining = repo_resp.headers.get("X-RateLimit-Remaining", "")
                 if rate_limit_remaining == "0":
-                    return JSONResponse({
-                        "is_github": True,
-                        "owner": owner,
-                        "repo": repo,
-                        "has_token": bool(token),
-                        "rate_limited": True,
-                        "error": "GitHub API rate limit exceeded. Please configure a Personal Access Token to lift limits."
-                    })
+                    return JSONResponse(_base_payload(
+                        token_valid=bool(token),
+                        rate_limited=True,
+                        error=(
+                            "GitHub API rate limit exceeded."
+                            if token
+                            else "GitHub API rate limit exceeded (unauthenticated 60/hr). "
+                            "Connect GitHub OAuth or save a Personal Access Token."
+                        ),
+                    ))
                 else:
-                    return JSONResponse({
-                        "is_github": True,
-                        "owner": owner,
-                        "repo": repo,
-                        "has_token": bool(token),
-                        "error": "Access Forbidden (403). For private repositories, please ensure your Personal Access Token has correct access."
-                    })
+                    return JSONResponse(_base_payload(
+                        token_valid=bool(token),
+                        error="Access Forbidden (403). For private repositories, ensure your token has the correct scopes.",
+                    ))
+            elif repo_resp.status_code == 404:
+                return JSONResponse(_base_payload(
+                    token_valid=bool(token),
+                    error=(
+                        "Repository not found (404). It may be private — configure a token with access, "
+                        "or the remote owner/repo may be wrong."
+                        if not token
+                        else "Repository not found (404). Check remote URL and token scopes."
+                    ),
+                ))
             elif repo_resp.status_code != 200:
-                return JSONResponse({
-                    "is_github": True,
-                    "owner": owner,
-                    "repo": repo,
-                    "error": f"Failed to retrieve repository details. HTTP {repo_resp.status_code}"
-                })
+                return JSONResponse(_base_payload(
+                    token_valid=bool(token),
+                    error=f"Failed to retrieve repository details. HTTP {repo_resp.status_code}",
+                ))
 
             repo_data = repo_resp.json()
 
@@ -257,30 +271,23 @@ async def github_status() -> JSONResponse:
             raw_issues = repo_data.get("open_issues_count", 0)
             net_issues = max(0, raw_issues - open_prs_count)
 
-            return JSONResponse({
-                "is_github": True,
-                "owner": owner,
-                "repo": repo,
-                "has_token": bool(token),
-                "token_valid": True,
-                "private": repo_data.get("private", False),
-                "stars": repo_data.get("stargazers_count", 0),
-                "forks": repo_data.get("forks_count", 0),
-                "open_issues": net_issues,
-                "open_prs": open_prs_count,
-                "description": repo_data.get("description", ""),
-                "html_url": repo_data.get("html_url", ""),
-                "latest_workflow": latest_run
-            })
+            return JSONResponse(_base_payload(
+                token_valid=True,
+                private=repo_data.get("private", False),
+                stars=repo_data.get("stargazers_count", 0),
+                forks=repo_data.get("forks_count", 0),
+                open_issues=net_issues,
+                open_prs=open_prs_count,
+                description=repo_data.get("description", ""),
+                html_url=repo_data.get("html_url", ""),
+                latest_workflow=latest_run,
+            ))
 
         except httpx.RequestError as exc:
             logger.error("[github/status] Connection error: %s", exc)
-            return JSONResponse({
-                "is_github": True,
-                "owner": owner,
-                "repo": repo,
-                "error": "Failed to reach GitHub API."
-            })
+            return JSONResponse(_base_payload(
+                error="Failed to reach GitHub API.",
+            ))
 
 
 # ── OAuth flow (read-only integration) ────────────────────────────────
@@ -300,12 +307,22 @@ def _oauth_redirect_uri(request: Request) -> str:
 
 @router.get("/oauth/status")
 async def oauth_status() -> JSONResponse:
-    """Report whether the OAuth App is configured and a token is stored."""
-    from kazma_gateway.routers.github_client import is_oauth_connected, oauth_configured
+    """Report whether the OAuth App is configured and any usable token exists.
+
+    ``connected`` remains OAuth-specific (Disconnect button). ``has_token`` is
+    true for OAuth *or* PAT/env so the Workspace UI can show telemetry after a
+    PAT-only setup without requiring the OAuth flow.
+    """
+    from kazma_gateway.routers.github_client import (
+        get_github_token,
+        is_oauth_connected,
+        oauth_configured,
+    )
 
     return JSONResponse({
         "configured": oauth_configured(),
         "connected": is_oauth_connected(),
+        "has_token": bool(get_github_token()),
     })
 
 
