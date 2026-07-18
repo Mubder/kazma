@@ -874,6 +874,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.memory_degraded": {"en": "DEGRADED", "ar": "مخفّض"},
     "dashboard.memory_desc_degraded": {"en": "System running in degraded mode using keyword-only fallback. ML dependencies missing.", "ar": "النظام يعمل في وضع مخفض باستخدام الكلمات المفتاحية فقط. تبعيات التعلم الآلي مفقودة."},
     "dashboard.install_failed": {"en": "Failed to trigger installation.", "ar": "فشل بدء التثبيت."},
+    "dashboard.memory_components": {"en": "Component health", "ar": "صحة المكوّنات"},
+    "dashboard.memory_probing": {"en": "Probing memory subsystems…", "ar": "جارٍ فحص أنظمة الذاكرة…"},
+    "dashboard.memory_issues": {"en": "Needs attention", "ar": "يحتاج انتباهًا"},
 
     # ── Workspace page ───────────────────────────────────────────────
     "workspace.title": {"en": "Kazma — Workspace", "ar": "كاظمه — مساحة العمل"},

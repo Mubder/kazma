@@ -153,9 +153,10 @@ def register_direct_routes(self: Any) -> None:
     @self.app.get("/api/system/status")
     async def _get_system_status():
         import os as _os
+        import sqlite3
+
         from kazma_core.config_store import get_config_store
         from kazma_core.system.maintenance import get_memory_paths
-        import sqlite3
 
         # Demo mode: report DEMO instead of DEGRADED so the UI hides the
         # install button and shows a clean "demo mode" message.
@@ -166,47 +167,77 @@ def register_direct_routes(self: Any) -> None:
             status = "DEMO"
         else:
             status = store.get("system.memory.status") or "ACTIVE"
-        
+
         fts5_path, vector_path, _ = get_memory_paths()
-        
+
         fts5_size = fts5_path.stat().st_size if fts5_path.exists() else 0
         fts5_count = 0
         if fts5_path.exists():
             try:
                 conn = sqlite3.connect(fts5_path)
                 cursor = conn.cursor()
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'")
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'"
+                )
                 if cursor.fetchone():
                     cursor.execute("SELECT COUNT(*) FROM memory_fts")
                     fts5_count = cursor.fetchone()[0]
                 conn.close()
             except Exception as _e:
                 logger.debug("fts5 count failed: %s", _e)
-                if 'conn' in dir():
+                if "conn" in dir():
                     try:
                         conn.close()
                     except Exception:
                         pass
-                
+
         vector_size = 0
         if vector_path.exists() and vector_path.is_dir():
-            vector_size = sum(f.stat().st_size for f in vector_path.glob("**/*") if f.is_file())
-            
+            vector_size = sum(
+                f.stat().st_size for f in vector_path.glob("**/*") if f.is_file()
+            )
+
         vector_count = 0
         from kazma_core.agent.tool_registry import get_vector_memory
+
         vm = get_vector_memory()
         if vm and not getattr(vm, "degraded", False):
             try:
                 vector_count = vm.count
+                if callable(vector_count):
+                    vector_count = vector_count()
             except Exception as _e:
                 logger.debug("vector count failed: %s", _e)
-                
+
+        # Per-component green/red board for Memory & Governance UI.
+        health: dict = {"components": [], "issues": [], "summary": ""}
+        try:
+            from kazma_core.memory.health import build_memory_health
+
+            health = build_memory_health()
+            live = str(health.get("status") or "")
+            # INSTALLING from ConfigStore takes priority; otherwise live probe wins.
+            if status == "INSTALLING" or live == "INSTALLING":
+                status = "INSTALLING"
+            elif live in ("DEMO", "DEGRADED", "ACTIVE"):
+                status = live
+        except Exception as _e:
+            logger.warning("memory health probe failed: %s", _e)
+            health = {
+                "components": [],
+                "issues": [str(_e)],
+                "summary": "health probe failed",
+            }
+
         return {
             "status": status,
             "fts5_size": fts5_size,
             "fts5_count": fts5_count,
             "vector_size": vector_size,
-            "vector_count": vector_count
+            "vector_count": vector_count,
+            "components": health.get("components", []),
+            "issues": health.get("issues", []),
+            "summary": health.get("summary", ""),
         }
 
     @self.app.post("/api/system/install")
