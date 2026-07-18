@@ -274,7 +274,23 @@ async def supervisor_node(
     # so it fires once per user turn (not per ReAct iteration). This is
     # the key difference from compaction-only retrieval — the agent now
     # has recall on EVERY turn, not just when the context window is full.
-    if iteration == 0 and last_user_content:
+    # Honours memory.per_turn_retrieval in kazma.yaml (default true).
+    _per_turn_on = True
+    try:
+        import yaml
+        from pathlib import Path as _Path
+
+        _cfg_path = _Path("kazma.yaml")
+        if _cfg_path.exists():
+            with open(_cfg_path) as _f:
+                _mcfg = (yaml.safe_load(_f) or {}).get("memory", {}) or {}
+            _per_turn_on = bool(_mcfg.get("per_turn_retrieval", True))
+            if not bool(_mcfg.get("enabled", True)):
+                _per_turn_on = False
+    except Exception:
+        pass
+
+    if _per_turn_on and iteration == 0 and last_user_content:
         try:
             _top_k = _rag_top_k()
             memories = await authority.compactor.retrieve_memories(

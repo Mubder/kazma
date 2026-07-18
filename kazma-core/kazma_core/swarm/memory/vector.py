@@ -125,14 +125,20 @@ class VectorStore:
         if not self.available:
             return False
         embedding = self._encode(text)
-        if embedding is None:
+        # encode() returns [] on failure (not None) — treat empty as miss.
+        if not embedding:
+            logger.warning("[VectorStore] Index skipped — empty embedding for %s", doc_id)
             return False
         try:
+            # ChromaDB rejects empty metadata dicts — always pass at least one key.
+            meta = dict(metadata or {})
+            if not meta:
+                meta = {"source": "memory"}
             self._collection.upsert(
                 ids=[doc_id],
                 embeddings=[embedding],
                 documents=[text[:2000]],
-                metadatas=[metadata or {}],
+                metadatas=[meta],
             )
             return True
         except Exception as exc:
@@ -152,12 +158,16 @@ class VectorStore:
         if not self.available:
             return []
         embedding = self._encode(text)
-        if embedding is None:
+        if not embedding:
+            logger.warning("[VectorStore] Query skipped — empty embedding")
             return []
         try:
+            count = self._collection.count() if hasattr(self._collection, "count") else limit
+            if count <= 0:
+                return []
             results = self._collection.query(
                 query_embeddings=[embedding],
-                n_results=min(limit, self._collection.count() if hasattr(self._collection, "count") else limit),
+                n_results=min(limit, count),
                 where=where,
             )
             if not results or not results.get("ids") or not results["ids"][0]:
