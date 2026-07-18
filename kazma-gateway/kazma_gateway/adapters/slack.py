@@ -36,6 +36,10 @@ from kazma_gateway.gateway import BaseAdapter, IncomingMessage, OutboundMessage
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "SlackAdapter",
+]
+
 _SLACK_API = "https://slack.com/api"
 _POLL_INTERVAL = 2.0
 _MAX_TIMEOUT = 15.0

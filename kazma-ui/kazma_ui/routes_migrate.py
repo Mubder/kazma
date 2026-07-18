@@ -11,6 +11,8 @@ from fastapi import FastAPI, HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["register_migrate_routes"]
+
 _DB_PATHS = {
     "config": "kazma-data/settings.db",
     "task": "kazma-data/tasks.db",

@@ -15,6 +15,8 @@ from kazma_core.hub.manifest_schema import SkillManifest
 from kazma_core.hub.registry import KazmaHub
 from kazma_core.hub.validator import SkillValidator
 
+__all__ = ["badge", "certified", "check_certification", "hub", "info", "install", "list_installed", "main", "register", "search", "sign", "stats", "status", "submit", "uninstall", "validate"]
+
 # ─── Helpers ──────────────────────────────────────────────────────────────
 
 

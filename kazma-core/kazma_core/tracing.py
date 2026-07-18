@@ -142,6 +142,8 @@ class TracingBackend(StrEnum):
 
 from kazma_core.config_schema import TracingConfig
 
+__all__ = ["KazmaTracer", "TraceEntry", "TraceStore", "TracingBackend", "create_tracer", "get_trace_store"]
+
 
 class KazmaTracer:
     """Traces all agent operations.

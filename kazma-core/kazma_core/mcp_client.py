@@ -17,6 +17,8 @@ from typing import Any
 
 import httpx
 
+__all__ = ["MCPClient", "MCPConnectionError", "MCPError", "MCPServerConfig"]
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------

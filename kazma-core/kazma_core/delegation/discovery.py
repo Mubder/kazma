@@ -11,6 +11,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+__all__ = ["AgentDiscovery", "AgentInfo", "DiscoveryResult"]
+
 logger = logging.getLogger(__name__)
 
 

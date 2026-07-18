@@ -47,6 +47,10 @@ from kazma_gateway.gateway import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "TelegramAdapter",
+]
+
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
 # Voice download size cap

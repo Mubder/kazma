@@ -13,6 +13,8 @@ from typing import Any
 
 from kazma_core.providers import PROVIDER_PRESETS
 
+__all__ = ["default_provider_entries", "detect_gcp_project_id", "load_providers", "normalize_models", "normalize_provider_entry", "parse_providers_raw", "save_providers", "seed_missing_presets"]
+
 logger = logging.getLogger(__name__)
 
 

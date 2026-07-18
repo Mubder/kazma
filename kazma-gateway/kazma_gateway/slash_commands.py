@@ -28,6 +28,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "is_slash_command",
+    "resolve_slash_command",
+]
+
 # ── Config path / store ──────────────────────────────────────────────
 #
 # kazma.yaml is treated as a READ-ONLY bootstrap.  All runtime config

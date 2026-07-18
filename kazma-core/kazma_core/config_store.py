@@ -30,6 +30,8 @@ from typing import Any, Protocol
 
 import yaml
 
+__all__ = ["CONFIG_STORE_MIGRATIONS", "ConfigStore", "ConfigStoreProtocol", "Migration", "MigrationRunner", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
+
 logger = logging.getLogger(__name__)
 
 # ── Vault-backed secrets ──────────────────────────────────────────────

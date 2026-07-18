@@ -25,6 +25,8 @@ from kazma_core.swarm.task import (
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
+__all__ = ["TaskStore"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/swarm_tasks.db"

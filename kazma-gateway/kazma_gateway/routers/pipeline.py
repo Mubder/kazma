@@ -17,6 +17,10 @@ from kazma_core.swarm.registry import get_worker_registry
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "create_pipeline_router",
+]
+
 
 def create_pipeline_router() -> APIRouter:
     """Return an APIRouter providing the visual pipeline sandbox endpoints."""

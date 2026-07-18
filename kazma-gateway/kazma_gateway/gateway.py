@@ -50,6 +50,17 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "BaseAdapter",
+    "GatewayManager",
+    "IncomingMessage",
+    "MessageHandler",
+    "MessageMetrics",
+    "OutboundMessage",
+    "RateLimiter",
+    "SessionStore",
+]
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # IncomingMessage — the ONLY message type the Brain ever sees

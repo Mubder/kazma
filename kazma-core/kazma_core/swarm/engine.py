@@ -79,6 +79,8 @@ from kazma_core.swarm.worker_factory import create_worker as _create_worker_impl
 from kazma_core.swarm.worker_factory import register_worker as _register_worker
 from kazma_core.swarm.worker_factory import unregister_worker as _unregister_worker
 
+__all__ = ["SwarmEngine", "get_swarm_engine", "set_swarm_engine"]
+
 logger = logging.getLogger(__name__)
 
 _swarm_engine: SwarmEngine | None = None

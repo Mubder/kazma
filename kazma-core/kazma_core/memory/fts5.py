@@ -17,6 +17,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+__all__ = ["FTS5Memory"]
+
 logger = logging.getLogger(__name__)
 
 

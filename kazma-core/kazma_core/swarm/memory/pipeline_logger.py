@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+__all__ = ["PipelineLogger", "get_pipeline_logger"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/pipeline_logs.db"

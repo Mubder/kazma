@@ -65,6 +65,8 @@ _START_TIME = time.monotonic()
 from kazma_core.settings_providers import ProviderSettingsService  # re-export
 from kazma_core.settings_mcp import MCPSettingsService  # re-export
 
+__all__ = ["DEFAULT_APPEARANCE", "DEFAULT_MODEL_DEFAULTS", "DEFAULT_SHORTCUTS", "SettingsManager"]
+
 
 class SettingsManager:
     """Comprehensive settings manager wrapping ConfigStore."""

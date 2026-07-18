@@ -32,6 +32,10 @@ from .commands import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "create_graph_handler",
+]
+
 
 def _prepare_tg_outbound(
     msg: IncomingMessage,

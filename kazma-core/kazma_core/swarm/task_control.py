@@ -9,6 +9,8 @@ from typing import Any
 from kazma_core.swarm.task import SwarmTask
 from kazma_core.swarm.task_lifecycle import get_task as _hist_get_task
 
+__all__ = ["build_retry_task", "cancel_active_task"]
+
 logger = logging.getLogger(__name__)
 
 

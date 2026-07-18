@@ -19,6 +19,8 @@ import asyncio
 import logging
 from typing import Any, Protocol
 
+__all__ = ["AsyncMemoryAdapter", "wrap_vector_memory"]
+
 logger = logging.getLogger(__name__)
 
 

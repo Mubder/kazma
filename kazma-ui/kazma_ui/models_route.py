@@ -19,6 +19,8 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["OllamaPullRequest", "SaveModelProfileRequest", "create_models_router"]
+
 
 class OllamaPullRequest(BaseModel):
     """Request body for POST /api/ollama/pull."""

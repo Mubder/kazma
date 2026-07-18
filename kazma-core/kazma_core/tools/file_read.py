@@ -21,6 +21,8 @@ from pathlib import Path
 # can import ``configure_workspace`` from either module).
 import kazma_core.tools.file_write as _fw
 
+__all__ = ["MAX_CHARS", "file_read"]
+
 # Re-export helpers so callers can ``from file_read import configure_workspace``
 configure_workspace = _fw.configure_workspace
 _get_workspace = _fw._get_workspace

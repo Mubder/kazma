@@ -99,6 +99,8 @@ def _join_errors(worker_results: list[WorkerResult]) -> str | None:
 
 import time as _time
 
+__all__ = ["ConditionalConfigurationError", "FanOutConfigurationError", "PatternExecution", "PipelineConfigurationError", "execute_conditional", "execute_fan_out", "execute_pipeline", "resume_pipeline"]
+
 async def _synthesize_refined_output(
     task: str,
     worker_results: list[WorkerResult],

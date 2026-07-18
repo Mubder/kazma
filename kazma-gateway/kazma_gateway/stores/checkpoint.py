@@ -34,6 +34,12 @@ from langgraph.checkpoint.serde._msgpack import SAFE_MSGPACK_TYPES
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "CheckpointManager",
+    "create_checkpointer",
+    "create_checkpoint_manager",
+]
+
 # Maximum number of per-thread locks retained in memory.  When exceeded
 # the least-recently-used lock is evicted (LRU via OrderedDict).
 _MAX_THREAD_LOCKS = 10_000

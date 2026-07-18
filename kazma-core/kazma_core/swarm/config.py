@@ -18,6 +18,8 @@ import yaml
 
 from kazma_core.swarm.task import WorkerCapabilities
 
+__all__ = ["OrchestratorConfig", "SwarmConfig", "WorkerConfig"]
+
 logger = logging.getLogger(__name__)
 
 # Worker names are used as SQL identifiers (e.g. per-worker vector tables in

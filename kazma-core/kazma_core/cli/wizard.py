@@ -6,6 +6,8 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+__all__ = ["SkillInstallationWizard", "WizardContext"]
+
 
 class WizardContext:
     """Shared state for wizard steps."""

@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from datetime import UTC
 from typing import Any
 
+__all__ = ["MemoryHit", "UnifiedMemoryAdapter", "get_adapter", "set_adapter"]
+
 logger = logging.getLogger(__name__)
 
 _RRF_K = 60  # smoothing constant

@@ -11,6 +11,8 @@ from kazma_gateway.gateway import IncomingMessage, SessionStore
 
 logger = logging.getLogger(__name__)
 
+__all__: list[str] = []
+
 _MAX_DICT_ENTRIES = 10_000
 
 _PLATFORM_KEYS = frozenset(

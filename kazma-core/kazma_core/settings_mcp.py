@@ -6,6 +6,8 @@ import json
 import logging
 from typing import Any
 
+__all__ = ["MCPSettingsService"]
+
 logger = logging.getLogger(__name__)
 
 class MCPSettingsService:

@@ -13,6 +13,8 @@ from fastapi import FastAPI, HTTPException, Request
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["register_chaos_routes"]
+
 
 def _chaos_enabled() -> bool:
     return os.environ.get("KAZMA_CHAOS_ENABLED", "").strip().lower() in (

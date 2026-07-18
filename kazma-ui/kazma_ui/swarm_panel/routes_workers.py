@@ -15,6 +15,8 @@ from kazma_ui.services import get_swarm_service
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["register_workers_routes"]
+
 
 def _serialize_worker(worker: Any) -> dict[str, Any]:
     """Delegate to service or minimal serialize."""

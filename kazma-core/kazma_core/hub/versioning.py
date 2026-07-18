@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 
 from kazma_core.hub.manifest_schema import SkillManifest
 
+__all__ = ["ConflictResolution", "SkillVersioning"]
+
 
 @dataclass
 class ConflictResolution:

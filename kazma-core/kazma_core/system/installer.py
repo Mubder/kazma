@@ -10,6 +10,8 @@ from pathlib import Path
 
 from kazma_core.config_store import get_config_store
 
+__all__ = ["ALLOWED_EXTRAS", "ALLOWED_PACKAGES", "asynchronous_install_extra", "asynchronous_install_package"]
+
 logger = logging.getLogger(__name__)
 
 # Track active installer tasks to prevent concurrent duplicate installations

@@ -20,6 +20,12 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "WorkspaceCreateRequest",
+    "WorkspaceSwitchRequest",
+    "create_workspaces_router",
+]
+
 
 # ── Pydantic models ────────────────────────────────────────────────────
 

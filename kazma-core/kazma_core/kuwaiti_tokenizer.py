@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
+__all__ = ["DIALECT_MARKERS", "KuwaitiTokenizer", "Token", "TokenType"]
+
 
 class TokenType(Enum):
     """Token classification."""

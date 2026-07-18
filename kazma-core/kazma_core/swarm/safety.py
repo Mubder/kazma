@@ -17,6 +17,8 @@ from typing import Any
 
 from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
 
+__all__ = ["SafetyMiddleware", "SafetyViolationError", "get_safety", "set_safety"]
+
 logger = logging.getLogger(__name__)
 
 # Single source of truth — see kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS.

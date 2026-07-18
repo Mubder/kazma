@@ -28,6 +28,8 @@ from kazma_core.personalities import (
     set_runtime_personality,
 )
 
+__all__ = ["handle_personality_command", "is_personality_command"]
+
 logger = logging.getLogger(__name__)
 
 

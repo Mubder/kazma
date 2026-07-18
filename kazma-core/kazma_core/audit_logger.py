@@ -15,6 +15,8 @@ from pathlib import Path
 
 import aiosqlite
 
+__all__ = ["AuditEntry", "AuditLogger"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = str(Path.cwd() / "kazma-data" / "audit.db")

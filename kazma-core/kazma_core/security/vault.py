@@ -37,6 +37,8 @@ from typing import Any
 from kazma_core.config_store import apply_sqlite_pragmas
 from kazma_core.tenant_context import get_current_tenant_id
 
+__all__ = ["SecretVault", "get_vault", "reset_vault"]
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────

@@ -16,6 +16,8 @@ from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 
+__all__ = ["create_memory_backup", "get_memory_paths", "list_memory_backups", "restore_memory_backup", "run_memory_maintenance"]
+
 logger = logging.getLogger(__name__)
 
 

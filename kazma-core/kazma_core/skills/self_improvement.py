@@ -16,6 +16,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+__all__ = ["SelfImprovementSkill", "get_self_improvement"]
+
 logger = logging.getLogger(__name__)
 
 # Bound self-improvement prompt growth so approved deltas cannot accumulate

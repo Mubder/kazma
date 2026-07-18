@@ -18,6 +18,8 @@ from typing import Any
 
 from kazma_core.swarm.task import SwarmTask, TaskResult, WorkerResult
 
+__all__ = ["HITLCheckpoint", "HITLCheckpointHandler"]
+
 logger = logging.getLogger(__name__)
 
 

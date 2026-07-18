@@ -23,6 +23,12 @@ from pydantic import BaseModel, field_validator
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "BookmarkCreateRequest",
+    "BookmarkUpdateRequest",
+    "create_bookmarks_router",
+]
+
 
 # ── Pydantic models ────────────────────────────────────────────────────
 

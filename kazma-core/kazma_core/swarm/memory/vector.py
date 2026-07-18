@@ -18,6 +18,8 @@ from typing import Any
 
 from kazma_core.swarm.memory.embedder import get_embedder
 
+__all__ = ["VectorStore", "get_encoder"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_COLLECTION = "kazma_global"

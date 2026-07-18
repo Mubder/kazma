@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from typing import Any, TypeVar, cast
 
+__all__ = ["HandoffRecord", "SwarmTask", "TaskResult", "TaskStatus", "TaskType", "WorkerCapabilities", "WorkerResult"]
+
 logger = logging.getLogger(__name__)
 
 EnumT = TypeVar("EnumT", bound=Enum)

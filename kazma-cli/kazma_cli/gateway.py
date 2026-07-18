@@ -24,6 +24,22 @@ console = Console()
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_PORT = 9090
 
+__all__ = [
+    "DEFAULT_PORT",
+    "DEFAULT_TIMEOUT",
+    "ServerNotRunningError",
+    "cmd_refresh",
+    "cmd_restart",
+    "cmd_start",
+    "cmd_status",
+    "cmd_stop",
+    "extract_port",
+    "print_help",
+    "resolve_base_url",
+    "resolve_port",
+    "run",
+]
+
 
 # ---------------------------------------------------------------------------
 # URL / arg helpers

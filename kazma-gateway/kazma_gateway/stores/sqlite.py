@@ -28,6 +28,10 @@ from kazma_core.tenant_context import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "SQLiteSessionStore",
+]
+
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS sessions (
     thread_id TEXT PRIMARY KEY,

@@ -11,6 +11,8 @@ import threading
 
 import httpx
 
+__all__ = ["close_http_client", "get_http_client"]
+
 logger = logging.getLogger(__name__)
 
 _client: httpx.AsyncClient | None = None

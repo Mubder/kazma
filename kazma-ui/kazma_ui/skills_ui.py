@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_skills_router"]
+
 
 def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRouter:
     """Create the skills management router."""

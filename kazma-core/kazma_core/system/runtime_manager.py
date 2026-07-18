@@ -10,6 +10,8 @@ from typing import Set
 
 from kazma_core.config_store import get_config_store
 
+__all__ = ["trigger_package_promotion"]
+
 logger = logging.getLogger(__name__)
 
 # Track active installer tasks to prevent concurrent duplicate installations

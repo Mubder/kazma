@@ -18,6 +18,8 @@ from fastapi.templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_agents_router"]
+
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 

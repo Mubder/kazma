@@ -12,6 +12,8 @@ import os
 import time
 from dataclasses import dataclass, field
 
+__all__ = ["CostCircuitBreaker", "DEFAULT_MAX_COST", "DEFAULT_SILENCE_WINDOW_SECONDS", "create_cost_breaker"]
+
 logger = logging.getLogger(__name__)
 
 # Default: $0.50 max cost, 5 minute user silence window

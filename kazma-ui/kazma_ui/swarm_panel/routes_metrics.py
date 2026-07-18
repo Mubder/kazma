@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse
 
 from kazma_ui.services import get_swarm_service
 
+__all__ = ["register_metrics_routes"]
+
 
 def register_metrics_routes(
     router: APIRouter,

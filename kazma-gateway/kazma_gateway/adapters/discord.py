@@ -39,6 +39,10 @@ from kazma_gateway.gateway import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "DiscordAdapter",
+]
+
 _DISCORD_API = "https://discord.com/api/v10"
 _DISCORD_GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json"
 

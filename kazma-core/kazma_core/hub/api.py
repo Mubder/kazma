@@ -22,6 +22,8 @@ from kazma_core.hub.badges import CertificationBadgeSystem
 from kazma_core.hub.manifest_schema import SkillManifest
 from kazma_core.hub.registry import KazmaHub
 
+__all__ = ["CertificationStatus", "KazmaHubAPI", "SearchResponse", "SkillDetailResponse", "SkillListResponse", "SkillSummary", "StatsResponse", "SubmissionRequest", "SubmissionResponse", "configure_api", "download_skill", "get_certification_status", "get_skill", "get_stats", "health", "list_skills", "search_skills", "submit_skill"]
+
 
 def _require_auth(request: Request) -> None:
     """Require a valid ``X-Kazma-Secret`` header for write endpoints.

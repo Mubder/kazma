@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+__all__ = [
+    "build_approval_keyboard",
+    "build_model_keyboard",
+    "build_personality_keyboard",
+    "build_provider_keyboard",
+]
+
 
 def build_approval_keyboard(request_id: str) -> dict[str, Any]:
     """Build an inline keyboard for HITL approval prompts."""

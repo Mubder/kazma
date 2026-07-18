@@ -24,6 +24,8 @@ from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
+__all__ = ["WorkspaceStore", "get_workspace_store", "reset_workspace_store"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/settings.db"

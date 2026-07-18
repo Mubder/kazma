@@ -17,6 +17,8 @@ from typing import Any
 from kazma_core.swarm.task import WorkerCapabilities
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
 
+__all__ = ["WorkerPhonebook"]
+
 logger = logging.getLogger(__name__)
 
 

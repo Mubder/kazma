@@ -18,6 +18,15 @@ logger = logging.getLogger(__name__)
 SUBCMDS = ["serve", "status", "help", "completion", "wizard", "hub", "docs", "project", "gateway", "swarm", "update"]
 FLAGS = ["--model", "--provider", "--yolo", "--verbose", "--no-banner", "--help", "-h"]
 
+__all__ = [
+    "FLAGS",
+    "SUBCMDS",
+    "generate_completions",
+    "install_completion",
+    "list_available_models",
+    "list_available_providers",
+]
+
 
 def generate_completions(shell: str = "bash") -> str:
     """Generate a shell completion script for *shell* (``bash``, ``zsh``, or ``powershell``)."""

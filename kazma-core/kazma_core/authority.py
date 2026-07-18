@@ -14,6 +14,8 @@ from kazma_core.compaction import CompactionEngine
 from kazma_core.state import AgentState
 from kazma_core.token_counter import TokenCounter
 
+__all__ = ["ContextAuthority", "create_authority"]
+
 logger = logging.getLogger(__name__)
 
 

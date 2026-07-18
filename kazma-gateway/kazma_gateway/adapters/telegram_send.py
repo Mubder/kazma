@@ -13,6 +13,17 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "SEND_BASE_DELAY",
+    "SEND_MAX_RETRIES",
+    "TELEGRAM_MAX_MESSAGE_LEN",
+    "chunk_html_message",
+    "chunk_message",
+    "resolve_chat_id",
+    "send_chunks_with_retry",
+    "strip_telegram_html",
+]
+
 TELEGRAM_MAX_MESSAGE_LEN = 4096
 SEND_MAX_RETRIES = 3
 SEND_BASE_DELAY = 1.0

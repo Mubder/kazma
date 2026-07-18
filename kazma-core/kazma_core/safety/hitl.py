@@ -16,6 +16,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+__all__ = ["CANONICAL_DANGER_TOOLS", "DEFAULT_DANGER_TOOLS", "TOOL_TIERS", "get_hitl_config", "get_tool_tier", "requires_approval"]
+
 logger = logging.getLogger(__name__)
 
 # ── Default tool tiers ────────────────────────────────────────────────

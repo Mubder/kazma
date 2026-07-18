@@ -18,6 +18,8 @@ from kazma_cli.banner import check_config, show_banner, show_help_brief, show_st
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["main"]
+
 
 def main() -> None:
     """CLI entry point — supports wizard, hub, and docs commands."""

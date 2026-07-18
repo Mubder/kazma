@@ -25,6 +25,23 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "GitHubClient",
+    "GitHubError",
+    "build_authorize_url",
+    "clear_oauth_token",
+    "exchange_code_for_token",
+    "get_active_cwd",
+    "get_github_token",
+    "get_oauth_client_id",
+    "get_oauth_client_secret",
+    "is_oauth_connected",
+    "oauth_configured",
+    "parse_github_slug",
+    "resolve_repo",
+    "store_oauth_token",
+]
+
 _API_BASE = "https://api.github.com"
 _GRAPHQL_URL = "https://api.github.com/graphql"
 _DEFAULT_TIMEOUT = httpx.Timeout(15.0, connect=10.0)

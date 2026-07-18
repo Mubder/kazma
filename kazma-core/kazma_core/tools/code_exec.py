@@ -25,6 +25,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+__all__ = ["DEFAULT_DOCKER_IMAGE", "DEFAULT_TIMEOUT", "MAX_OUTPUT_CHARS", "MEMORY_LIMIT_MB", "docker_available", "python_exec", "reset_docker_probe", "use_docker_jail"]
+
 logger = logging.getLogger(__name__)
 
 # The 'resource' module is POSIX-only and does not exist on Windows.

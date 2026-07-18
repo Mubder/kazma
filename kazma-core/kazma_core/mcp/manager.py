@@ -46,6 +46,8 @@ from typing import Any
 
 import httpx
 
+__all__ = ["AsyncMCPManager", "MCPBridgeError", "MCPServerHandle", "UnifiedToolExecutor", "classify_mcp_tool"]
+
 logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════════════

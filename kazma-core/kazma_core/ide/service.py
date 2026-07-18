@@ -31,6 +31,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+__all__ = ["IdeService", "get_ide_service", "reset_ide_service"]
+
 logger = logging.getLogger(__name__)
 
 

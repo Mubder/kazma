@@ -24,6 +24,10 @@ from kazma_core.swarm.bus import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "DiscordBusAdapter",
+]
+
 _APPROVAL_TIMEOUT = 60.0  # seconds
 _DISCORD_API = "https://discord.com/api/v10"
 

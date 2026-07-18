@@ -18,6 +18,8 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+__all__ = ["VectorMemory", "flush_pending_alerts"]
+
 logger = logging.getLogger(__name__)
 
 # Pending degradation alerts scheduled outside an event loop.

@@ -17,6 +17,8 @@ import time
 import urllib.parse
 from pathlib import Path
 
+__all__ = ["DEFAULT_HEIGHT", "DEFAULT_WIDTH", "IMAGE_DIR", "MAX_HEIGHT", "MAX_PROMPT_CHARS", "MAX_WIDTH", "MIN_DIMENSION", "POLLINATIONS_URL", "generate_image"]
+
 # ── Constants ──────────────────────────────────────────────────────────
 
 MAX_PROMPT_CHARS = 1000

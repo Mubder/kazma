@@ -16,6 +16,8 @@ from kazma_core.swarm.reliability import CircuitBreakerOpenError
 from kazma_core.swarm.task import WorkerResult
 from kazma_core.swarm.worker import SwarmWorker
 
+__all__ = ["dispatch_worker"]
+
 if TYPE_CHECKING:
     from kazma_core.swarm.engine import SwarmEngine
 

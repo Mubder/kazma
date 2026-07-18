@@ -15,6 +15,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+__all__ = ["KnowledgeGraph"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PATH = "kazma-data/knowledge_graph.json"

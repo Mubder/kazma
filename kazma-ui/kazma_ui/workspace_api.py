@@ -26,6 +26,8 @@ from fastapi import APIRouter, Query
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_workspace_router"]
+
 # ── Workspace root resolution ──────────────────────────────────────────
 
 _DEFAULT_WORKSPACE_RELS = [

@@ -11,6 +11,18 @@ from typing import Any
 
 import yaml
 
+__all__ = [
+    "DEFAULT_CONTEXT",
+    "DEFAULT_PERSONALITY",
+    "DEFAULT_RULES",
+    "DEFAULT_TOOLS",
+    "init_project",
+    "load_project",
+    "project_exists",
+    "show_project",
+    "validate_project",
+]
+
 # ---------------------------------------------------------------------------
 # Default templates
 # ---------------------------------------------------------------------------

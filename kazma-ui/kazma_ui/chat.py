@@ -21,6 +21,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "chat_websocket_handler",
+    "create_chat_router",
+    "get_or_create_session",
+    "list_sessions",
+    "router",
+]
+
 router = APIRouter(tags=["chat"])
 
 # ── Session management ────────────────────────────────────────────────

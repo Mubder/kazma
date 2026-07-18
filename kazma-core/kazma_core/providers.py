@@ -1,5 +1,7 @@
 """Provider presets with default base URLs and model discovery endpoints."""
 
+__all__ = ["GEMINI_MODELS", "PROVIDER_PRESETS", "get_base_url", "get_preset", "list_providers"]
+
 # Well-known Gemini models available via Vertex AI.
 # These are hardcoded because Vertex AI does not expose a static /models
 # REST endpoint — the base URL is computed dynamically per project/location.

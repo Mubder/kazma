@@ -10,6 +10,8 @@ import logging
 import time
 from typing import Any
 
+__all__ = ["get_metrics_response", "record_llm_call", "record_memory_op", "record_swarm_dispatch", "record_swarm_handoff"]
+
 logger = logging.getLogger(__name__)
 
 # Try to import prometheus_client, gracefully degrade if unavailable

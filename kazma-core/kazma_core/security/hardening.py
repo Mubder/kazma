@@ -607,6 +607,8 @@ class SecurityHardeningRunner:
         )
 import ast as _ast
 
+__all__ = ["HardeningCheck", "HardeningReport", "SecurityHardeningRunner"]
+
 _DANGEROUS_CALLS = {
     "os.system", "subprocess.run", "subprocess.call", "subprocess.Popen",
     "subprocess.check_output", "subprocess.check_call",

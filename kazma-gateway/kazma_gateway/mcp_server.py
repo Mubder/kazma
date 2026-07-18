@@ -42,6 +42,19 @@ import hmac
 
 logger = logging.getLogger("kazma.mcp.ide_server")
 
+__all__ = [
+    "DISPATCH",
+    "MCPServer",
+    "MCPRequest",
+    "MCP_TOOL_TO_SAFETY",
+    "TOOL_MAP",
+    "TOOLS",
+    "main",
+    "make_error",
+    "make_response",
+    "parse_request",
+]
+
 # ═══════════════════════════════════════════════════════════════════
 # Tool definitions
 # ═══════════════════════════════════════════════════════════════════

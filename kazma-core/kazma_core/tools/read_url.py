@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 
+__all__ = ["MAX_CONTENT_CHARS", "read_url"]
+
 logger = logging.getLogger(__name__)
 
 MAX_CONTENT_CHARS = 8000

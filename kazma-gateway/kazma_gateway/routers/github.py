@@ -22,6 +22,14 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "CloneRepoRequest",
+    "TokenSaveRequest",
+    "create_github_router",
+    "parse_github_slug",
+    "save_github_token_to_env",
+]
+
 router = APIRouter(prefix="/api/github", tags=["github"])
 
 

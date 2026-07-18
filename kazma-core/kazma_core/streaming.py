@@ -15,6 +15,8 @@ from typing import Any
 
 import httpx
 
+__all__ = ["StreamEvent", "stream_chat"]
+
 logger = logging.getLogger(__name__)
 
 

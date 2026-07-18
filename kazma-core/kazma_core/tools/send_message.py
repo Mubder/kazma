@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+__all__ = ["register_message_backend", "send_message"]
+
 _message_backends: dict[str, Callable] = {}
 
 

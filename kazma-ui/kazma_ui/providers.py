@@ -28,6 +28,8 @@ from kazma_ui.models import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_providers_router"]
+
 # Connectors whose primary secret is stored under ``connectors.{name}.token``.
 _CONNECTOR_PLATFORMS = ("telegram", "discord", "slack", "email", "webhook")
 

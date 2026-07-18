@@ -28,6 +28,30 @@ logger = logging.getLogger(__name__)
 
 console = Console()
 
+__all__ = [
+    "cmd_approve",
+    "cmd_broadcast",
+    "cmd_circuit_breaker",
+    "cmd_consult",
+    "cmd_dispatch",
+    "cmd_fanout",
+    "cmd_history",
+    "cmd_metrics",
+    "cmd_pipeline",
+    "cmd_reject",
+    "cmd_start",
+    "cmd_stop",
+    "cmd_status",
+    "cmd_task",
+    "cmd_workers",
+    "cmd_worker_add",
+    "cmd_worker_remove",
+    "cmd_worker_spawn",
+    "parse_flags",
+    "print_help",
+    "run",
+]
+
 
 # ---------------------------------------------------------------------------
 # Flag parsing

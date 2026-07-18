@@ -25,6 +25,8 @@ import httpx
 
 from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
 
+__all__ = ["LLMConfig", "LLMError", "LLMProvider", "LLMResponse", "ToolCall"]
+
 logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────

@@ -32,6 +32,8 @@ import httpx
 from kazma_core.llm_provider import LLMConfig, LLMProvider
 from kazma_core.providers import PROVIDER_PRESETS
 
+__all__ = ["ModelRegistry", "get_model_registry", "initialize_model_registry", "reset_model_registry"]
+
 if TYPE_CHECKING:
     from kazma_core.config_store import ConfigStore
 

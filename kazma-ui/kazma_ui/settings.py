@@ -38,6 +38,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["SettingsRouterBuilder", "create_settings_router"]
+
 # Keys whose values are secrets and must be masked in API responses.
 _SENSITIVE_KEY_FRAGMENTS = ("api_key", "token", "secret", "password", "passphrase")
 

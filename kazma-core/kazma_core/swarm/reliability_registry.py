@@ -25,6 +25,8 @@ from kazma_core.swarm.reliability import (
     TimeoutGuard,
 )
 
+__all__ = ["ReliabilityRegistry"]
+
 logger = logging.getLogger(__name__)
 
 

@@ -17,6 +17,14 @@ from kazma_gateway.telegram_format import md_to_tg_html, tg_escape
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "DiscordSwarmOutputTarget",
+    "SlackSwarmOutputTarget",
+    "SwarmOutputTarget",
+    "TelegramSwarmOutputTarget",
+    "send_swarm_output",
+]
+
 
 class SwarmOutputTarget(abc.ABC):
     """Abstract base class for swarm output target adapters."""

@@ -23,6 +23,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "clear_all_sessions",
+    "dashboard",
+    "dashboard_status",
+    "delete_session",
+    "list_sessions",
+    "router",
+    "set_dashboard_context",
+    "set_templates",
+]
+
 router = APIRouter(tags=["dashboard"])
 
 # Start with a fallback templates instance (gets English defaults from the

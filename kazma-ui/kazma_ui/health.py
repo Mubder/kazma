@@ -15,6 +15,15 @@ from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "check_agent_runner",
+    "check_config_store",
+    "check_model_registry",
+    "check_swarm_engine",
+    "get_health_dependencies",
+    "router",
+]
+
 router = APIRouter(tags=["health"])
 
 

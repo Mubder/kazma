@@ -20,6 +20,8 @@ import httpx
 
 from kazma_core.url_utils import normalize_provider_url
 
+__all__ = ["ProviderInfo", "check_ollama_health", "discover_custom_models", "discover_lm_studio_models", "discover_models", "discover_ollama_models", "get_active_local_models", "get_model_base_url", "pull_ollama_model"]
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────

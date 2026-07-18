@@ -35,6 +35,10 @@ from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "create_git_router",
+]
+
 _GIT_TIMEOUT = 5  # seconds per subprocess call
 
 

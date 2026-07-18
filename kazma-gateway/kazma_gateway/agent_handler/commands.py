@@ -18,6 +18,8 @@ from .swarm_dispatch import (
 
 logger = logging.getLogger(__name__)
 
+__all__: list[str] = []
+
 
 async def _try_swarm_command(
     msg: IncomingMessage,

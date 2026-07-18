@@ -30,6 +30,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+__all__ = ["build_env_context", "detect_branch", "detect_repo_slug", "env_context_for_dispatch"]
+
 logger = logging.getLogger(__name__)
 
 # The subset of tools the brain should be told about. These are the

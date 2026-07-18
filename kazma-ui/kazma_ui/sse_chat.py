@@ -30,6 +30,8 @@ from kazma_core.exceptions import sanitize_error
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_sse_chat_router", "router"]
+
 router = APIRouter(tags=["chat-sse"])
 
 

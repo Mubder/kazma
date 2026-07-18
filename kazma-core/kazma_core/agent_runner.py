@@ -31,6 +31,8 @@ from kazma_core.config_schema import TracingConfig
 
 from kazma_core.config_store import apply_sqlite_pragmas_async
 
+__all__ = ["AgentConfig", "CHECKPOINT_DB", "CONFIG_FILE", "KazmaAgent", "MAX_ITERATIONS", "load_config", "main", "run_agent"]
+
 # NOTE: kazma_core.agent.graph_builder / .state are imported lazily inside
 # run()/_ensure_graph() to avoid a circular import — the kazma_core.agent
 # package __init__ re-exports names from this module.

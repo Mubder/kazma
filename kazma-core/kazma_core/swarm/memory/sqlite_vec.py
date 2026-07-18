@@ -15,6 +15,8 @@ import re
 import sqlite3
 from pathlib import Path
 
+__all__ = ["SQLiteVectorStore"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/vector.db"

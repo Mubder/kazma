@@ -15,6 +15,8 @@ from kazma_core.swarm.memory.vector import get_encoder
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
+__all__ = ["SemanticCache"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/semantic_cache.db"

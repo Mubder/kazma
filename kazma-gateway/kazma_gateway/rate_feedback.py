@@ -17,6 +17,10 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+__all__ = [
+    "RateFeedbackManager",
+]
+
 
 @dataclass
 class _UserBucket:

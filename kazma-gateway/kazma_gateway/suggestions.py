@@ -26,6 +26,14 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+__all__ = [
+    "MAX_SUGGESTIONS",
+    "PostTaskSuggester",
+    "Suggestion",
+    "detect_tool_intent",
+    "suggestions_from_config",
+]
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------

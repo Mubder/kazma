@@ -19,6 +19,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+__all__ = ["SubAgentManager", "SubAgentResult", "get_sub_agent_manager", "set_sub_agent_manager"]
+
 logger = logging.getLogger(__name__)
 
 # Module-level singleton — set by app.py at startup

@@ -19,6 +19,8 @@ from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_hitl_approval_router"]
+
 
 def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
     """Extract tool name and arguments from a PregelTask interrupt payload.

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+__all__ = ["configure_workspace", "file_write"]
+
 # ── Workspace resolution ──────────────────────────────────────────────
 
 _WORKSPACE_ROOT: Path | None = None

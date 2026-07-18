@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+__all__ = ["DependabotStyleScanner", "DependencyReport", "DependencyScanner", "OSV_API_URL", "ScanReport", "ScanResult", "SkillScanResult", "Vulnerability"]
+
 try:
     import httpx
 except ImportError:  # pragma: no cover

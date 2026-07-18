@@ -31,6 +31,23 @@ logger = logging.getLogger(__name__)
 
 console = Console()
 
+__all__ = [
+    "PACKAGE_NAME",
+    "PYPI_URL",
+    "check_git_behind",
+    "detect_install_type",
+    "do_git_update",
+    "do_pip_update",
+    "get_current_version",
+    "get_git_commit",
+    "get_latest_pypi_version",
+    "is_newer",
+    "parse_update_flags",
+    "parse_version",
+    "print_help",
+    "run",
+]
+
 PYPI_URL = "https://pypi.org/pypi/kazma/json"
 PACKAGE_NAME = "kazma"
 

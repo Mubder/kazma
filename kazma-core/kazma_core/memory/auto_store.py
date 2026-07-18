@@ -19,6 +19,8 @@ import re
 import time
 from typing import Any
 
+__all__ = ["auto_store_enabled", "auto_store_from_messages", "auto_store_mode", "extract_turn_texts", "looks_durable", "schedule_auto_store", "store_text"]
+
 logger = logging.getLogger(__name__)
 
 # Explicit / strong durable-fact signals (any language-ish patterns we care about).

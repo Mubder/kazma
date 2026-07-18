@@ -18,6 +18,8 @@ from typing import Any
 
 from kazma_core.mcp_client import MCPClient
 
+__all__ = ["ToolSandbox"]
+
 logger = logging.getLogger(__name__)
 
 # Patterns that are NEVER allowed regardless of allowlist — these look like

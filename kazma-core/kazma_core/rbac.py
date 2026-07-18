@@ -15,6 +15,8 @@ from typing import Any
 
 import aiosqlite
 
+__all__ = ["DIVISIONS", "PermissionResult", "RBACEngine", "SENSITIVE_RESOURCES"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = str(Path.cwd() / "kazma-data" / "rbac.db")

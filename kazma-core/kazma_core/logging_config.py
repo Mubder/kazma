@@ -12,6 +12,8 @@ import os
 import sys
 from datetime import datetime, UTC
 
+__all__ = ["StructuredJSONFormatter", "setup_logging"]
+
 
 class StructuredJSONFormatter(logging.Formatter):
     """Zero-dependency JSON formatter for absolute portability."""

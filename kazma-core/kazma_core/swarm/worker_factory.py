@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from kazma_core.swarm.config import WorkerConfig
 from kazma_core.swarm.worker import InProcessWorker, SwarmWorker
 
+__all__ = ["create_worker", "register_worker", "unregister_worker"]
+
 if TYPE_CHECKING:
     pass
 

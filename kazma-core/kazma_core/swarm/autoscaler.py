@@ -34,6 +34,8 @@ from typing import Any
 from kazma_core.swarm.config import WorkerConfig
 from kazma_core.swarm.task import WorkerCapabilities
 
+__all__ = ["AutoScaler", "WorkerTemplate"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TEMPLATES_PATH = Path("swarm_templates.json")

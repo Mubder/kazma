@@ -11,6 +11,8 @@ import logging
 import os
 from typing import Any
 
+__all__ = ["build_memory_health"]
+
 logger = logging.getLogger(__name__)
 
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+__all__ = ["TokenCounter"]
+
 logger = logging.getLogger(__name__)
 
 # Try to import tiktoken; fall back to None if not installed

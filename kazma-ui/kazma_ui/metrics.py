@@ -17,6 +17,8 @@ from fastapi.responses import PlainTextResponse
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_metrics_router"]
+
 
 def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
     """Create a Prometheus metrics router.

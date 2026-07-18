@@ -18,6 +18,8 @@ import asyncio
 import logging
 import warnings
 
+__all__ = ["web_search"]
+
 # Overrides the invasive warnings.simplefilter("always") in duckduckgo_search library
 _original_warn = warnings.warn
 def _custom_warn(message, category=None, stacklevel=1, *args, **kwargs):

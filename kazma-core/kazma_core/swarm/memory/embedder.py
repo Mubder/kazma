@@ -25,6 +25,8 @@ import logging
 import os
 from typing import Any, Protocol, runtime_checkable
 
+__all__ = ["DEFAULT_DIM", "DEFAULT_MODEL", "DEFAULT_PROVIDER", "Embedder", "LocalSentenceTransformerEmbedder", "OpenAICompatibleEmbedder", "get_embedder", "get_embedding_dim", "make_chroma_embedding_function", "reset_embedder"]
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "all-MiniLM-L6-v2"

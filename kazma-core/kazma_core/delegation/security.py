@@ -24,6 +24,8 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
 )
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+__all__ = ["DelegationSecurity"]
+
 logger = logging.getLogger(__name__)
 
 

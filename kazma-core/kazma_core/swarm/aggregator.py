@@ -10,6 +10,8 @@ from typing import Any
 
 from kazma_core.swarm.task import SwarmTask, WorkerResult
 
+__all__ = ["AggregationResult", "ResultAggregator"]
+
 logger = logging.getLogger(__name__)
 
 SynthesisCallable = Callable[

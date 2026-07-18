@@ -6,6 +6,43 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+__all__ = [
+    "AgentConfigUpdate",
+    "AppearanceUpdate",
+    "APITokenCreate",
+    "ChatEvent",
+    "ChatMessage",
+    "ChatRequest",
+    "ConnectorConfigUpdate",
+    "ConnectorTestRequest",
+    "ConnectorTestResponse",
+    "ConnectorUpdateRequest",
+    "ContextSettingsUpdate",
+    "DashboardMetrics",
+    "ImportConfigRequest",
+    "MaskedSecretResponse",
+    "MCPServerAddRequest",
+    "MCPServerTestRequest",
+    "MCPServerToggleRequest",
+    "ModelCompareRequest",
+    "ModelDefaultUpdate",
+    "ModelProfileUpdateRequest",
+    "ModelTestRequest",
+    "PasswordChange",
+    "ProviderAddRequest",
+    "ProviderTestResponse",
+    "ProviderToggleRequest",
+    "ProviderUpdateRequest",
+    "SafetySettingsUpdate",
+    "SettingsUpdate",
+    "ShortcutUpdate",
+    "SkillConfigUpdate",
+    "SkillInstallRequest",
+    "SkillToggleRequest",
+    "ToolTestRequest",
+    "ToolToggleRequest",
+]
+
 # ── Chat ──────────────────────────────────────────────────────────────
 
 

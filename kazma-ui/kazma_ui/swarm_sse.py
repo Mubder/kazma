@@ -28,6 +28,8 @@ from kazma_core.swarm.engine import get_swarm_engine
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["SSEEventBus", "create_sse_router", "wire_engine_events"]
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # SSE frame helper (imported from shared utility)

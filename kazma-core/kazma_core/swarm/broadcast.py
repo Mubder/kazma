@@ -18,6 +18,8 @@ from datetime import UTC, datetime
 
 from kazma_core.swarm.task import SwarmTask, TaskResult, TaskStatus, WorkerResult
 
+__all__ = ["broadcast_task"]
+
 if TYPE_CHECKING:
     from kazma_core.swarm.engine import SwarmEngine
 

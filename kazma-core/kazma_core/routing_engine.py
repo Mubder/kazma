@@ -15,6 +15,8 @@ from kazma_core.swarm.task import SwarmTask, WorkerCapabilities
 from kazma_core.swarm.semantic_router import get_semantic_router
 from kazma_core.router import DialectRouter, AgentRequest
 
+__all__ = ["NoCapableWorkersError", "UnifiedRouter"]
+
 logger = logging.getLogger(__name__)
 
 

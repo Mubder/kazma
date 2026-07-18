@@ -16,6 +16,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse as _J
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["register_direct_routes"]
+
 
 def register_direct_routes(self: Any) -> None:
     """Register direct FastAPI route handlers onto self.app."""

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import contextvars
 
+__all__ = ["get_current_tenant_id", "reset_current_tenant_id", "set_current_tenant_id"]
+
 _current_tenant_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "kazma_tenant_id",
     default=None,

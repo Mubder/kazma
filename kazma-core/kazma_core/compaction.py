@@ -15,6 +15,8 @@ from typing import Any
 
 from kazma_core.state import AgentState
 
+__all__ = ["CompactionEngine"]
+
 logger = logging.getLogger(__name__)
 
 # Summary prompt that instructs the LLM to preserve critical information

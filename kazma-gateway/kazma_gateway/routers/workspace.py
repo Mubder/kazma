@@ -31,6 +31,11 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "WorkspaceSelectRequest",
+    "create_workspace_select_router",
+]
+
 # ── Paths that are never included in tree scans ────────────────────────
 _SKIP_NAMES = frozenset({
     ".git", ".hg", ".svn",
