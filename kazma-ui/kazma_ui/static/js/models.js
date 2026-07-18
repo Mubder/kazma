@@ -3,7 +3,9 @@
  * Used by the Models tab in Settings.
  */
 
-const ModelsManager = {
+// Assign to window so soft-nav can re-inject this file without
+// "Identifier has already been declared" on top-level const.
+var ModelsManager = window.ModelsManager = {
     _cache: [],
 
     /**

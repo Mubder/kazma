@@ -160,8 +160,13 @@ function settingsApp() {
                     if (settings.appearance) {
                         Object.assign(this.appearance, settings.appearance);
                         if (settings.appearance.font_size) {
-                            const root = Alpine.$data(document.querySelector('[x-data]'));
-                            if (root) root.fontSize = settings.appearance.font_size;
+                            try {
+                                const rootEl = document.documentElement;
+                                if (rootEl && rootEl._x_dataStack) {
+                                    const root = Alpine.$data(rootEl);
+                                    if (root) root.fontSize = settings.appearance.font_size;
+                                }
+                            } catch (e) { /* ignore font sync */ }
                         }
                     }
                     if (settings.safety) Object.assign(this.safety, settings.safety);
@@ -179,8 +184,12 @@ function settingsApp() {
                 const saved = await this._fetch('/api/models/saved');
                 if (Array.isArray(saved)) this.savedModels = saved;
 
-                // Load provider presets
-                this.providerPresets = ProvidersManager.getPresetKeys();
+                // Load provider presets (guard: soft-nav may load settings.js before providers.js)
+                if (window.ProvidersManager && typeof ProvidersManager.getPresetKeys === 'function') {
+                    this.providerPresets = ProvidersManager.getPresetKeys();
+                } else {
+                    this.providerPresets = [];
+                }
 
                 // Load unified hub data
                 await Promise.all([
@@ -190,8 +199,10 @@ function settingsApp() {
                 ]);
             } catch (e) {
                 console.error('[Settings] Init failed:', e);
+            } finally {
+                // Always clear loading — never leave the Settings shell stuck
+                this.loading = false;
             }
-            this.loading = false;
 
             // Deep-link: /settings?tab=packages (or any valid tab id)
             try {

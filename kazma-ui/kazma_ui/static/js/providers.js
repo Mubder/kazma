@@ -3,7 +3,9 @@
  * Used by the Services/Providers tab in Settings.
  */
 
-const ProvidersManager = {
+// Assign to window so soft-nav can re-inject this file without
+// "Identifier has already been declared" on top-level const.
+var ProvidersManager = window.ProvidersManager = {
     /** Provider presets with default base URLs */
     PRESETS: {
         openai: { name: 'OpenAI', base_url: 'https://api.openai.com/v1', docs: 'https://platform.openai.com/api-keys' },
