@@ -126,6 +126,9 @@ function settingsApp() {
         pkgPythonVer: '',
         pkgSearch: '',
         pkgLoading: false,
+        pkgInstalling: '',
+        pkgInstallMsg: '',
+        pkgInstallOk: false,
 
         // ── Import/Export Tab ──
         exportFormat: 'yaml',
@@ -1482,6 +1485,67 @@ function settingsApp() {
                     window.KazmaStream.toast('Copied to clipboard', 'success', 2000);
                 }
             }
+        },
+
+        async installExtra(extraName) {
+            if (!extraName || this.pkgInstalling) return;
+            const ok = window.kazmaConfirm
+                ? await window.kazmaConfirm({
+                    title: 'Install optional dependency',
+                    message: `Install the "${extraName}" extra into this Python environment? This runs uv/pip in the background.`,
+                    confirmText: 'Install',
+                })
+                : confirm(`Install optional extra "${extraName}"?`);
+            if (!ok) return;
+
+            this.pkgInstalling = extraName;
+            this.pkgInstallMsg = '';
+            this.pkgInstallOk = false;
+            try {
+                const res = await fetch('/api/system/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ extra: extraName }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || data.status === 'error' || data.status === 'unavailable') {
+                    this.pkgInstallOk = false;
+                    this.pkgInstallMsg = data.message || data.detail || 'Install failed to start';
+                    if (window.showToast) window.showToast(this.pkgInstallMsg, 'error', 4000);
+                } else {
+                    this.pkgInstallOk = true;
+                    this.pkgInstallMsg = `Installing "${extraName}" in the background… Refresh this tab in a minute.`;
+                    if (window.showToast) window.showToast(this.pkgInstallMsg, 'success', 4000);
+                    // Poll status a few times then reload package list
+                    this._pollInstallStatus(extraName);
+                }
+            } catch (e) {
+                this.pkgInstallOk = false;
+                this.pkgInstallMsg = e.message || 'Network error';
+            }
+            this.pkgInstalling = '';
+        },
+
+        async _pollInstallStatus(extraName) {
+            const self = this;
+            let tries = 0;
+            const tick = async () => {
+                tries += 1;
+                try {
+                    const st = await self._fetch('/api/system/install/status');
+                    if (st && (st.status === 'OK' || st.status === 'FAILED')) {
+                        self.pkgInstallOk = st.status === 'OK';
+                        self.pkgInstallMsg = st.status === 'OK'
+                            ? `Installed "${extraName}". Reloading package list…`
+                            : (`Install failed: ${st.error || 'see server logs'}`);
+                        await self.loadPackages();
+                        return;
+                    }
+                } catch (e) { /* ignore */ }
+                if (tries < 20) setTimeout(tick, 3000);
+            };
+            setTimeout(tick, 2500);
         },
 
         async checkUpdates() {

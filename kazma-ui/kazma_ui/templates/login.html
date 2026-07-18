@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kazma — Login</title>
+  <link rel="icon" href="/static/img/favicon.png">
+  <link rel="stylesheet" href="/static/css/kazma.css">
+  <style>
+    body.login-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-deep, #0d0f14);
+      margin: 0;
+      font-family: var(--font-sans, system-ui, sans-serif);
+    }
+    .login-card {
+      width: min(420px, 92vw);
+      background: var(--bg-panel, #161a22);
+      border: 1px solid var(--border-subtle, #2a3140);
+      border-radius: 12px;
+      padding: 28px 24px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    .login-card h1 {
+      margin: 0 0 6px;
+      font-size: 1.25rem;
+      color: var(--text-primary, #e8ecf4);
+    }
+    .login-card p {
+      margin: 0 0 18px;
+      font-size: 0.85rem;
+      color: var(--text-muted, #8b93a7);
+      line-height: 1.45;
+    }
+    .login-card label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--text-secondary, #b4bcd0);
+      margin-bottom: 6px;
+    }
+    .login-card input[type="password"] {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border-subtle, #2a3140);
+      background: var(--bg-deep, #0d0f14);
+      color: var(--text-primary, #e8ecf4);
+      font-size: 0.9rem;
+      margin-bottom: 14px;
+    }
+    .login-card input:focus {
+      outline: 2px solid var(--accent, #5e6ad2);
+      outline-offset: 1px;
+    }
+    .login-card button {
+      width: 100%;
+      padding: 10px 14px;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent, #5e6ad2);
+      color: #fff;
+      font-weight: 600;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .login-card button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .login-error {
+      display: none;
+      margin-bottom: 12px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: rgba(220, 80, 80, 0.15);
+      color: #f0a0a0;
+      font-size: 0.82rem;
+    }
+    .login-error.show { display: block; }
+    .login-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .login-brand img {
+      height: 32px;
+      width: 32px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body class="login-page">
+  <div class="login-card">
+    <div class="login-brand">
+      <img src="/static/img/kazma-icon.png" alt="Kazma">
+      <div>
+        <h1>Sign in</h1>
+      </div>
+    </div>
+    <p>
+      Enter the <code>KAZMA_SECRET</code> for this server to open a secure session cookie.
+      Localhost clients auto-authenticate; remote clients must use this page.
+    </p>
+    <div id="err" class="login-error" role="alert"></div>
+    <form id="loginForm" autocomplete="off">
+      <label for="secret">Server secret</label>
+      <input id="secret" name="secret" type="password" required autofocus
+             placeholder="KAZMA_SECRET value" autocomplete="current-password">
+      <button type="submit" id="btn">Sign in</button>
+    </form>
+  </div>
+  <script>
+    (function () {
+      var form = document.getElementById('loginForm');
+      var err = document.getElementById('err');
+      var btn = document.getElementById('btn');
+      var params = new URLSearchParams(location.search);
+      var next = params.get('next') || '/';
+      // Only allow same-origin relative redirects
+      if (!next.startsWith('/') || next.startsWith('//')) next = '/';
+
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        err.classList.remove('show');
+        err.textContent = '';
+        btn.disabled = true;
+        try {
+          var res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ secret: document.getElementById('secret').value }),
+          });
+          var data = {};
+          try { data = await res.json(); } catch (_) {}
+          if (!res.ok) {
+            err.textContent = data.detail || data.message || 'Invalid secret';
+            err.classList.add('show');
+            btn.disabled = false;
+            return;
+          }
+          window.location.href = next;
+        } catch (ex) {
+          err.textContent = 'Network error — try again';
+          err.classList.add('show');
+          btn.disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

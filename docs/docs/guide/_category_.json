@@ -1,0 +1,10 @@
+{
+  "label": "Guide (Current)",
+  "position": 0,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "Kazma Guide — Current Reference",
+    "description": "Code-audited documentation merged from docs-v2 (July 2026 / v0.5.0). Prefer this section over older Core Concepts pages when they conflict."
+  }
+}

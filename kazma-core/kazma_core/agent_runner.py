@@ -54,7 +54,7 @@ class AgentConfig:
     """Configuration loaded from kazma.yaml."""
 
     name: str = "kazma"
-    version: str = "0.2.0"
+    version: str = "0.5.0"
     language: str = "ar"
     rtl: bool = True
     default_model: str = "gpt-4o-mini"
@@ -80,7 +80,7 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
 
     return AgentConfig(
         name=agent_cfg.get("name", "kazma"),
-        version=agent_cfg.get("version", "0.2.0"),
+        version=agent_cfg.get("version", "0.5.0"),
         language=agent_cfg.get("language", "ar"),
         rtl=agent_cfg.get("rtl", True),
         default_model=models_cfg.get("default", "gpt-4o-mini"),
@@ -618,7 +618,10 @@ class KazmaAgent:
         self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
         await self._checkpointer.setup()
 
-        hitl_config = self.config.raw.get("safety", {}).get("hitl") or None
+        # Prefer get_hitl_config() so ConfigStore / Settings UI overrides
+        # apply on the run path the same way as the streaming graph.
+        from kazma_core.safety.hitl import get_hitl_config
+        hitl_config = get_hitl_config(self.config.raw)
 
         self._graph = build_supervisor_graph(
             llm=self.llm,

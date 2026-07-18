@@ -170,14 +170,13 @@ class KazmaTUI(App[None]):
             # get_config_store() lazily creates a singleton and never raises.
             # Check if the singleton is already set; if not, create one
             # and load values from kazma.yaml.
-            if _cs_mod._config_store is None:
-                cs = ConfigStore()
-                set_config_store(cs)
+            # Always use the process-wide singleton (never ConfigStore() here).
+            cs = get_config_store()
+            try:
                 cs.reconcile_from_yaml()
-                logger.info("[TUI] ConfigStore initialized from kazma.yaml")
-            else:
-                cs = get_config_store()
-                logger.info("[TUI] ConfigStore already initialized")
+            except Exception:
+                pass
+            logger.info("[TUI] ConfigStore ready (singleton)")
         except Exception as e:
             logger.warning("[TUI] ConfigStore init failed: %s", e)
 

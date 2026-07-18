@@ -107,9 +107,11 @@ class SettingsRouterBuilder:
                 from kazma_core.model_registry import get_model_registry
                 reg = get_model_registry()
                 profile = reg.get_active_profile()
+                # Never embed raw API keys in HTML — mask like the API paths.
+                _raw_key = profile.get("api_key") or llm_cfg.get("api_key") or ""
                 model_settings = {
                     "base_url": profile.get("base_url") or llm_cfg["base_url"],
-                    "api_key": profile.get("api_key") or llm_cfg["api_key"],
+                    "api_key": ("****" + str(_raw_key)[-4:]) if _raw_key and len(str(_raw_key)) > 4 else ("***" if _raw_key else ""),
                     "model": profile.get("model") or llm_cfg["model"],
                     "max_tokens": config_store.get("llm.max_tokens", llm_cfg["max_tokens"]),
                     "temperature": config_store.get("llm.temperature", llm_cfg["temperature"]),

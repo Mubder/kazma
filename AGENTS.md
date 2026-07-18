@@ -4,8 +4,9 @@
 
 Kazma is a multi-platform AI agent framework with a LangGraph supervisor brain,
 swarm orchestration, cross-platform dispatch (Telegram/Discord/Slack/Web/TUI),
-and an OpenAI-compatible LLM provider layer. See `architecture.md` for the full
-system architecture and `CHANGELOG.md` for recent work.
+and an OpenAI-compatible LLM provider layer. See `docs/docs/guide/architecture.md`
+(Docusaurus Guide, merged from docs-v2) for the full system architecture and
+`CHANGELOG.md` for recent work. Latest full audit: `docs/audits/AUDIT_FULL_2026-07-18.md`.
 
 ## Package Scope
 
@@ -212,7 +213,8 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 
 ## Key References
 
-- `architecture.md` — Full system architecture with data flow diagram
+- `docs-v2/docs/architecture.md` — Full system architecture with data flow diagram
+- `docs/audits/AUDIT_FULL_2026-07-18.md` — Latest full security/architecture audit
 - `CHANGELOG.md` — Sprint history (Sprint 12 = current swarm pro-grade work)
 - `HANDOFF_PHASE5.md` — Detailed file-by-file handoff from the swarm overhaul
 - `HANDOFF_PROMPT.md` — Ready-to-paste onboarding prompt for new agents

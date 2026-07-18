@@ -51,6 +51,37 @@ def _is_https(request: Request) -> bool:
         or request.headers.get("x-forwarded-proto") == "https"
     )
 
+
+def _is_loopback_client(request: Request) -> bool:
+    """True when the TCP peer is loopback (local single-operator use).
+
+    Used to decide whether the auth cookie may be auto-issued without an
+    explicit secret presentation. Remote clients must authenticate first.
+    """
+    host = ""
+    if request.client is not None:
+        host = (request.client.host or "").strip().lower()
+    # Honour X-Forwarded-For only when the direct peer is already loopback
+    # (local reverse-proxy); never trust it from the open internet.
+    if host in ("127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"):
+        return True
+    return False
+
+
+def _should_auto_issue_cookie(request: Request, expected: str) -> bool:
+    """Whether to Set-Cookie the secret without a prior authenticated request.
+
+    - Loopback clients: yes (local SPA / developer convenience).
+    - Remote clients with a valid X-Kazma-Secret header: yes (session bootstrap).
+    - Otherwise: no — visiting GET / must not grant full API access.
+    """
+    if not expected:
+        return False
+    if _is_loopback_client(request):
+        return True
+    provided = request.headers.get(SECRET_HEADER, "")
+    return bool(provided and verify_secret(provided, expected))
+
 #: API path prefixes that require authentication when the secret is set.
 SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/settings",
@@ -97,6 +128,11 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/health",
     "/api/status",
     "/api/telemetry",
+    # Explicit auth bootstrap (remote clients cannot use loopback auto-cookie)
+    "/login",
+    "/api/auth/login",
+    "/api/auth/logout",
+    "/api/auth/status",
 })
 
 #: Path prefixes that are always open (browser-redirect targets that
@@ -105,6 +141,7 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
 ALWAYS_OPEN_PREFIXES: tuple[str, ...] = (
     "/api/github/oauth/callback",
     "/api/github/oauth/start",
+    "/api/auth/",
 )
 
 
@@ -243,10 +280,19 @@ def create_auth_middleware(
         path = request.url.path
         expected = static_secret if static_secret is not None else get_kazma_secret()
 
-        # 1. Read-only & page routes always pass through (but still get cookie).
+        # 1. Read-only & page routes always pass through.
+        # Cookie auto-issue only for loopback or when secret header is present
+        # (never mint auth cookie for anonymous remote visitors — C2 fix).
         if is_always_open(path):
             response = await call_next(request)
-            if expected and (not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected):
+            if (
+                expected
+                and _should_auto_issue_cookie(request, expected)
+                and (
+                    not request.cookies.get(SECRET_COOKIE)
+                    or request.cookies.get(SECRET_COOKIE) != expected
+                )
+            ):
                 response.set_cookie(
                     key=SECRET_COOKIE, value=expected,
                     httponly=True, samesite="strict", path="/",
@@ -257,7 +303,14 @@ def create_auth_middleware(
         # 2. Only sensitive prefixes are gated.
         if not is_sensitive_path(path):
             response = await call_next(request)
-            if expected and (not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected):
+            if (
+                expected
+                and _should_auto_issue_cookie(request, expected)
+                and (
+                    not request.cookies.get(SECRET_COOKIE)
+                    or request.cookies.get(SECRET_COOKIE) != expected
+                )
+            ):
                 response.set_cookie(
                     key=SECRET_COOKIE, value=expected,
                     httponly=True, samesite="strict", path="/",
@@ -285,6 +338,7 @@ def create_auth_middleware(
             return response
 
         response = await call_next(request)
+        # Authenticated request may always refresh the session cookie.
         if not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected:
             response.set_cookie(
                 key=SECRET_COOKIE, value=expected,
@@ -297,34 +351,39 @@ def create_auth_middleware(
 
 
 def extract_tenant_from_jwt(token: str) -> str | None:
-    """Extract tenant_id or tenant claim from a base64url-encoded JWT token."""
+    """Extract tenant_id only from a *verified* JWT.
+
+    Unverified base64 payload decoding is disabled (forgery risk). Set
+    ``KAZMA_JWT_SECRET`` to enable HS256 verification; otherwise returns None.
+    """
+    secret = os.environ.get("KAZMA_JWT_SECRET", "").strip()
+    if not secret:
+        logger.debug("[TENANT] JWT tenant extraction disabled (KAZMA_JWT_SECRET unset)")
+        return None
     try:
-        parts = token.split(".")
-        if len(parts) == 3:
-            payload_b64 = parts[1]
-            # Add padding if needed for base64 decoding
-            rem = len(payload_b64) % 4
-            if rem > 0:
-                payload_b64 += "=" * (4 - rem)
-            import base64
-            import json
-            decoded = base64.urlsafe_b64decode(payload_b64).decode("utf-8")
-            payload = json.loads(decoded)
-            if isinstance(payload, dict):
-                return payload.get("tenant_id") or payload.get("tenant")
+        import jwt as _jwt  # PyJWT
+        payload = _jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            options={"require": ["exp"]},
+        )
+        if isinstance(payload, dict):
+            tid = payload.get("tenant_id") or payload.get("tenant")
+            return str(tid) if tid else None
     except Exception as exc:
-        logger.debug("[TENANT] Failed to extract tenant from JWT: %s", exc)
+        logger.debug("[TENANT] JWT verification failed: %s", exc)
     return None
 
 
 def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitable[Response]]], Awaitable[Response]]:
     """Create an HTTP middleware that extracts X-Tenant-ID and propagates it using ContextVar.
-    
-    Extracts from:
+
+    Extracts from (in order):
     1. Header: X-Tenant-ID or x-tenant-id
     2. Cookie: X-Tenant-ID, x-tenant-id, or tenant_id
-    3. Authorization header: Bearer JWT (containing tenant_id or tenant claim)
-    4. JWT Cookie fallback: jwt, token, x-tenant-id-jwt, or tenant_jwt
+    3. Authorization Bearer JWT — only if KAZMA_JWT_SECRET is set (verified)
+    4. JWT Cookie fallback — same verification requirement
     """
     from kazma_core.tenant_context import set_current_tenant_id, reset_current_tenant_id
 
@@ -343,14 +402,14 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                 or request.cookies.get("tenant_id")
             )
 
-        # 3. Check Authorization Bearer JWT
+        # 3. Check Authorization Bearer JWT (verified only)
         if not tenant_id:
             auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
             if auth_header and auth_header.lower().startswith("bearer "):
                 token = auth_header[7:].strip()
                 tenant_id = extract_tenant_from_jwt(token)
 
-        # 4. Check Cookie JWT fallback
+        # 4. Check Cookie JWT fallback (verified only)
         if not tenant_id:
             for cookie_name in ("jwt", "token", "x-tenant-id-jwt", "tenant_jwt"):
                 token = request.cookies.get(cookie_name)

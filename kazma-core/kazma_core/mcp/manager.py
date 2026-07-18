@@ -766,11 +766,16 @@ class UnifiedToolExecutor:
 
                             safety = get_safety()
                             if safety.enabled:
+                                # force_danger=True: MCP tool names (write_file,
+                                # run_command, …) are not in the static
+                                # _EXTENDED_DANGER set (file_write, shell_exec).
+                                # Without this flag, check() treats them as safe.
                                 approved = await safety.check(
                                     tool_name=tool_name,
                                     tool_args=_json.dumps(arguments, default=str)[:200],
                                     task_id=str(arguments.get("task_id", "")),
                                     worker_name=f"mcp:{server_name}",
+                                    force_danger=True,
                                 )
                                 if not approved:
                                     return {

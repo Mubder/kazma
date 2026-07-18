@@ -23,8 +23,8 @@ Items are marked:
 | NVIDIA NIM tool-fallback | ✅ | `llm_provider.py:285-300`. |
 | Streaming (SSE) | ✅ | `streaming.py`. |
 | Context compaction (LLM summarise) | ✅ | `compaction.py`. |
-| Compaction with memory retrieval + checkpoint | 🟡 | `create_authority()` called without `memory_store`/`checkpoint_manager` (`agent_runner.py:162-166`). Summarise-only at runtime. |
-| Rate-limit (429) handling | 🔴 | No backoff; `retry.py` skips 4xx. |
+| Compaction with memory retrieval + checkpoint | 🟡 | Memory adapter wired on main paths; checkpoint_manager still optional. |
+| Rate-limit (429) handling | ✅ | Exponential backoff + Retry-After in `llm_provider.py` (2026-07). |
 | Cost breaker auto-wired | 🟡 | Standalone dataclass; agent must drive it. |
 
 ---
@@ -60,7 +60,7 @@ Items are marked:
 | Pipeline HITL checkpoints with auto-reject timeout | ✅ | `checkpoint_manager.py`. |
 | Handoff cycle detection (depth 5, visits 2) | ✅ | `handoff_guards.py`. |
 | Worker autoscaling | 🟡 | `get_autoscaler()` referenced; verify depth. |
-| Prometheus metrics | 🔴 | No `prometheus_client`; no `/metrics`. |
+| Prometheus metrics | ✅ | Optional `prometheus-client` extra; `/metrics` endpoint in `routes_direct.py`. |
 
 ---
 
@@ -74,7 +74,10 @@ Items are marked:
 | Skill HMAC signing + verification | ✅ | `hub/cli.py` + `hub/loader.py`. |
 | Delegation Ed25519 + AES-GCM | ✅ | `delegation/security.py`. |
 | MCP SSE bearer auth | ✅ | `mcp/manager.py:461-466`. |
-| MCP stdio auth | 🔴 | No auth on stdio transport. |
+| MCP stdio auth | ✅ | `auth.type: env` / `arg` injection supported on stdio servers. |
+| Vault-backed ConfigStore secrets | ✅ | Sensitive keys → AES vault when `KAZMA_VAULT_KEY` set (2026-07 audit remediations). |
+| `/undo` / `/edit` checkpoint mutation | ✅ | Live graph path via `aget_state` / `aupdate_state`. |
+| Remote secret login page | ✅ | `/login` + `POST /api/auth/login`. |
 | Cryptographic "trust tiers" | 🔴 | Only a boolean `certified` flag + unused `trust:` string. |
 | Hardening runner enforcement | 🟡 | `kazma-security.yaml` declares policy; verify runtime enforcement. |
 

@@ -3150,3 +3150,26 @@ body {
 .message-avatar.a { background: var(--accent-subtle); color: var(--accent); }
 .message-avatar.u { background: var(--gradient-accent); color: #001016; }
 
+/* ── Soft-nav progress bar (body.kazma-soft-nav while navigating) ── */
+body.kazma-soft-nav::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 99999;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 200% 100%;
+  animation: kazma-soft-nav-slide 0.9s linear infinite;
+  pointer-events: none;
+}
+@keyframes kazma-soft-nav-slide {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+html.kazma-soft-nav #main-content {
+  opacity: 0.92;
+  transition: opacity 0.12s ease;
+}
+

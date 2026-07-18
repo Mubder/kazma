@@ -35,10 +35,49 @@ TOOL_TIERS: dict[str, str] = {
     "file_write": "danger",
     "file_delete": "danger",
     "shell_exec": "danger",
+    "code_exec": "danger",
+    "python_exec": "danger",
+    "spawn_agent": "danger",
+    "spawn_agents": "danger",
+    "schedule_task": "danger",
+    "cancel_scheduled": "danger",
+    "vault_retrieve": "danger",
+    "vault_delete": "danger",
+    "config_save": "danger",
+    "run_tests": "danger",
+    "git_commit": "danger",
+    "git_push_pull": "danger",
+    "github_create_pr": "danger",
+    "install_python_packages": "danger",
+    "install_npm_packages": "danger",
     # Unsafe — always blocked (reserved)
 }
 
-DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec", "vault_retrieve", "vault_delete"]
+# Single source of truth for graph interrupt + swarm bus danger tiers.
+# Keep in sync with kazma.yaml safety.hitl.require_approval_for (parity test).
+CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
+    "file_write",
+    "file_delete",
+    "shell_exec",
+    "code_exec",
+    "python_exec",
+    "spawn_agent",
+    "spawn_agents",
+    "schedule_task",
+    "cancel_scheduled",
+    "vault_retrieve",
+    "vault_delete",
+    "config_save",
+    "run_tests",
+    "git_commit",
+    "git_push_pull",
+    "github_create_pr",
+    "install_python_packages",
+    "install_npm_packages",
+)
+
+# Backward-compatible alias used throughout the codebase / tests.
+DEFAULT_DANGER_TOOLS: list[str] = list(CANONICAL_DANGER_TOOLS)
 
 
 def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:

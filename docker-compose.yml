@@ -1,16 +1,22 @@
-version: "3.8"
-
+# Kazma Docker Compose
+#
+# Container listens on 8000 (Dockerfile EXPOSE). Host default CLI port is 9090.
+# Map host 9090 → container 8000 so local bookmarks match `kazma serve`.
+# Override: HOST_PORT=8000 docker compose up
 services:
   kazma:
     build: .
     container_name: kazma
     ports:
-      - "8000:8000"
+      - "${HOST_PORT:-9090}:8000"
     volumes:
       - kazma_data:/app/kazma-data
       - kazma_vectors:/root/.kazma/vector_memory
     env_file:
       - .env
+    environment:
+      # Require secret when published; auto-gen still works if unset in .env
+      KAZMA_HOST: "0.0.0.0"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/gateway/status"]

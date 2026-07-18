@@ -4,12 +4,13 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
-| < 0.1   | :x:                |
+| 0.5.x   | :white_check_mark: |
+| 0.4.x   | :white_check_mark: (security fixes only) |
+| < 0.4   | :x:                |
 
-Only the latest release in the 0.1.x series receives security patches. Versions
-prior to 0.1 are end-of-life and will not receive updates. Users are strongly
-encouraged to upgrade to the latest supported version.
+Only the latest 0.5.x release receives feature work and security patches.
+0.4.x receives critical security fixes for a limited window. Users are
+strongly encouraged to upgrade to the latest supported version.
 
 ## Reporting a Vulnerability
 

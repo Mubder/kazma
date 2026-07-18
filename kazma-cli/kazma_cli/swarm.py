@@ -1,7 +1,7 @@
 """Swarm CLI commands — manage multi-worker AI agent orchestration.
 
 Talks to the running WebUI server's REST API (``/api/swarm/*``) using
-httpx.  The server is expected at ``http://localhost:8000`` by default;
+httpx.  The server is expected at ``http://localhost:9090`` by default;
 override with ``--port`` or the ``KAZMA_PORT`` env var.
 """
 

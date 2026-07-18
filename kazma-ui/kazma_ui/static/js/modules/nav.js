@@ -1,17 +1,22 @@
 // ── Kazma modules/nav.js ──
-// Soft navigation: intercept same-origin nav clicks, swap only
-// #main-content, re-run page scripts, and re-init Alpine. Any failure
-// falls back to a normal full page load, so the app can never end up
-// in a broken state. /chat is excluded to protect the live SSE stream.
+// Soft navigation: swap #main-content, reinject page scripts, re-init Alpine.
+// Failures always fall back to a full page load.
+//
+// Hard-reload (full) for SSE / heavy editors: /chat, /ide, /swarm.
 
 export function initSoftNav() {
-    // Soft-nav (innerHTML swap + Alpine re-init) is fragile for server-rendered
-    // Alpine pages — swapped content renders uninitialized/broken. Until a proper
-    // SPA shell exists, navigation uses normal full page loads (reliable).
-    // Flip to true once re-init is robust. /chat always does a full reload.
-    const SOFT_NAV_ENABLED = false;
-    const HARD_RELOAD = new Set(['/chat']); // protect SSE + chat.js lifecycle
-    const GLOBAL_LIBS = ['/static/js/app.js', '/static/js/htmx.min.js', '/static/js/alpine.min.js'];
+    const SOFT_NAV_ENABLED = true;
+    // Leaving or entering these always full-reloads (SSE streams, CodeMirror, Mermaid).
+    const HARD_RELOAD_ALWAYS = new Set(['/chat', '/ide', '/swarm']);
+    const GLOBAL_LIBS = [
+        '/static/js/app.js',
+        '/static/js/htmx.min.js',
+        '/static/js/alpine.min.js',
+        '/static/js/icons.js',
+    ];
+
+    let navInFlight = null; // serialize soft-navs
+    let softNavGeneration = 0;
 
     function targetKey(href) {
         try {
@@ -22,9 +27,18 @@ export function initSoftNav() {
         }
     }
 
-    // Sync the sidebar / bottom-nav active highlight with the current path.
-    // The nav lives outside #main-content, so soft-nav must update it manually
-    // (otherwise the old tab stays highlighted after a client-side swap).
+    function pathOnly(href) {
+        try {
+            return new URL(href, location.origin).pathname;
+        } catch (e) {
+            return href;
+        }
+    }
+
+    function needsHardReload(fromPath, toPath) {
+        return HARD_RELOAD_ALWAYS.has(fromPath) || HARD_RELOAD_ALWAYS.has(toPath);
+    }
+
     function updateActiveNav() {
         const path = location.pathname;
         document.querySelectorAll('.nav-link, .bottom-nav a').forEach((el) => {
@@ -36,45 +50,144 @@ export function initSoftNav() {
         });
     }
 
-    async function softNav(url) {
-        const res = await fetch(url, {
-            headers: { 'Kazma-Soft-Nav': 'true' },
-            credentials: 'same-origin',
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const html = await res.text();
-        const doc = new DOMParser().parseFromString(html, 'text/html');
-        const newMain = doc.querySelector('#main-content');
-        const oldMain = document.querySelector('#main-content');
-        if (!newMain || !oldMain) throw new Error('missing #main-content');
+    function isGlobalLib(src) {
+        if (!src) return false;
+        return GLOBAL_LIBS.some((g) => src.endsWith(g) || src.includes(g + '?'));
+    }
 
-        oldMain.innerHTML = newMain.innerHTML;
-        if (doc.title) document.title = doc.title;
-        window.scrollTo(0, 0);
+    function setNavigating(on) {
+        try {
+            document.documentElement.classList.toggle('kazma-soft-nav', !!on);
+            document.body && document.body.classList.toggle('kazma-soft-nav', !!on);
+        } catch (e) { /* ignore */ }
+    }
 
-        // Re-run page scripts (skip global libs that are already loaded).
-        doc.querySelectorAll('script').forEach((s) => {
-            const src = s.getAttribute('src');
-            if (src && GLOBAL_LIBS.some((g) => src.endsWith(g))) return;
+    /**
+     * Load page scripts in document order; wait for external src scripts.
+     * Returns a Promise that resolves when all external scripts have loaded
+     * (or failed — we still resolve so Alpine can init).
+     */
+    function reinjectPageScripts(doc) {
+        document.querySelectorAll('script[data-kazma-page-script]').forEach((el) => el.remove());
+
+        const pending = [];
+        const scripts = Array.from(doc.querySelectorAll('script'));
+
+        for (const s of scripts) {
+            const src = s.getAttribute('src') || '';
+            const type = (s.getAttribute('type') || '').toLowerCase();
+            if (type === 'module' && src.includes('/static/js/app.js')) continue;
+            if (isGlobalLib(src)) continue;
+
+            // Skip pure i18n re-bootstrap if already present (avoids flicker)
+            if (!src && s.textContent && s.textContent.includes('window.KAZMA_I18N')
+                && window.KAZMA_I18N) {
+                continue;
+            }
+
             const ns = document.createElement('script');
+            ns.setAttribute('data-kazma-page-script', '1');
+            if (type) ns.type = type;
+
             if (src) {
-                if (document.querySelector('script[src="' + src + '"]')) return;
-                ns.src = src;
+                const sep = src.includes('?') ? '&' : '?';
+                ns.src = src + sep + '_sn=' + Date.now();
+                pending.push(new Promise((resolve) => {
+                    ns.onload = () => resolve();
+                    ns.onerror = () => resolve(); // don't block forever
+                }));
             } else if (s.textContent && s.textContent.trim()) {
                 ns.textContent = s.textContent;
             } else {
-                return;
+                continue;
             }
             document.body.appendChild(ns);
-        });
-
-        // Alpine's MutationObserver auto-inits new x-data nodes; nudge if available.
-        if (window.Alpine && Alpine.initTree) {
-            try { Alpine.initTree(oldMain); } catch (e) { /* already initialized */ }
         }
-        history.pushState({ kazmaSoft: true }, '', url);
-        // Highlight must sync AFTER the URL changes, or it re-lights the old tab.
-        updateActiveNav();
+        return Promise.all(pending);
+    }
+
+    function initAlpineOn(el) {
+        if (!window.Alpine || typeof Alpine.initTree !== 'function') return;
+        try {
+            Alpine.initTree(el);
+        } catch (e) {
+            console.warn('[soft-nav] Alpine.initTree:', e);
+        }
+    }
+
+    async function softNav(url) {
+        const gen = ++softNavGeneration;
+        setNavigating(true);
+        try {
+            const res = await fetch(url, {
+                headers: { 'Kazma-Soft-Nav': 'true', 'Accept': 'text/html' },
+                credentials: 'same-origin',
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const html = await res.text();
+            if (gen !== softNavGeneration) return; // superseded
+
+            const doc = new DOMParser().parseFromString(html, 'text/html');
+            const newMain = doc.querySelector('#main-content');
+            const oldMain = document.querySelector('#main-content');
+            if (!newMain || !oldMain) throw new Error('missing #main-content');
+
+            if (window.Alpine && typeof Alpine.destroyTree === 'function') {
+                try { Alpine.destroyTree(oldMain); } catch (e) { /* ignore */ }
+            }
+
+            oldMain.innerHTML = newMain.innerHTML;
+            if (doc.title) document.title = doc.title;
+            window.scrollTo(0, 0);
+
+            // Wait for page scripts (settings.js, skills.js, …) before Alpine
+            await reinjectPageScripts(doc);
+            if (gen !== softNavGeneration) return;
+
+            initAlpineOn(oldMain);
+            // Second pass for deferred factories
+            requestAnimationFrame(() => {
+                if (gen === softNavGeneration) initAlpineOn(oldMain);
+            });
+
+            history.pushState({ kazmaSoft: true }, '', url);
+            updateActiveNav();
+
+            // Sanity: if page expected an Alpine root and it never bound, hard reload
+            const needsAlpine = oldMain.querySelector('[x-data]');
+            if (needsAlpine && window.Alpine) {
+                await new Promise((r) => setTimeout(r, 80));
+                if (gen !== softNavGeneration) return;
+                // x-data nodes that never got _x_dataStack often mean init failed
+                const unbound = Array.from(oldMain.querySelectorAll('[x-data]')).filter(
+                    (n) => !n._x_dataStack && !n.__x
+                );
+                if (unbound.length > 0 && unbound.length === oldMain.querySelectorAll('[x-data]').length) {
+                    throw new Error('Alpine did not bind any x-data roots');
+                }
+            }
+        } finally {
+            if (gen === softNavGeneration) setNavigating(false);
+        }
+    }
+
+    function navigateTo(url, { forceFull } = {}) {
+        const toPath = pathOnly(url);
+        if (forceFull || needsHardReload(location.pathname, toPath)) {
+            window.location.href = url;
+            return;
+        }
+        if (!SOFT_NAV_ENABLED) {
+            window.location.href = url;
+            return;
+        }
+        // Serialize: chain after in-flight nav
+        const run = () => softNav(url).catch((err) => {
+            console.warn('[soft-nav] falling back to full load:', err);
+            window.location.href = url;
+        });
+        navInFlight = (navInFlight || Promise.resolve()).then(run, run);
+        return navInFlight;
     }
 
     document.addEventListener('click', (e) => {
@@ -83,54 +196,56 @@ export function initSoftNav() {
         if (!a || !a.href) return;
         if (a.target === '_blank' || a.hasAttribute('download')) return;
         if (a.origin !== location.origin) return;
+        if (a.hasAttribute('data-hard-nav')) return;
         const key = targetKey(a.href);
-        if (key === targetKey(location.href)) return; // same page
-        // Full reload for SSE/scripted pages to guarantee clean teardown/bind.
-        if (HARD_RELOAD.has(new URL(a.href).pathname) || HARD_RELOAD.has(location.pathname)) return;
-        // Soft-nav disabled: let the browser do a normal (reliable) full load.
+        if (key === targetKey(location.href)) return;
+        const toPath = pathOnly(a.href);
+        if (needsHardReload(location.pathname, toPath)) return;
         if (!SOFT_NAV_ENABLED) return;
 
         e.preventDefault();
-        const url = a.href;
-        softNav(url).catch((err) => {
-            console.warn('[soft-nav] falling back to full load:', err);
-            window.location.href = url;
-        });
+        navigateTo(a.href);
     });
 
     window.addEventListener('popstate', () => {
-        if (!SOFT_NAV_ENABLED || HARD_RELOAD.has(location.pathname)) { window.location.reload(); return; }
+        if (!SOFT_NAV_ENABLED || needsHardReload(location.pathname, location.pathname)) {
+            window.location.reload();
+            return;
+        }
         softNav(location.pathname + location.search)
             .then(updateActiveNav)
             .catch(() => window.location.reload());
     });
 
-    // ── Keyboard shortcuts (⌘/Ctrl + 1-6 for nav, ⌘/Ctrl + , for settings) ──
-    // The sidebar already shows these as kbd hints but they were never wired.
+    // Keyboard shortcuts — match sidebar kbd hints
     const NAV_SHORTCUTS = {
         '1': '/workspace',
-        '2': '/ide',
-        '3': '/chat',
-        '4': '/swarm',
-        '5': '/agents',
-        '6': '/dashboard',
+        '2': '/chat',
+        '3': '/dashboard',
+        '4': '/skills',
+        '5': '/mcp',
+        '6': '/swarm',
     };
 
     document.addEventListener('keydown', (e) => {
-        // Only trigger on ⌘/Ctrl + number keys, not when typing in an input.
         if (!(e.metaKey || e.ctrlKey)) return;
         const tag = (e.target.tagName || '').toLowerCase();
         if (tag === 'input' || tag === 'textarea' || e.target.isContentEditable) return;
 
         if (e.key === ',') {
             e.preventDefault();
-            window.location.href = '/settings';
+            navigateTo('/settings');
+            return;
+        }
+        if ((e.key === 'i' || e.key === 'I') && e.shiftKey) {
+            e.preventDefault();
+            window.location.href = '/ide';
             return;
         }
         const target = NAV_SHORTCUTS[e.key];
         if (target) {
             e.preventDefault();
-            window.location.href = target;
+            navigateTo(target);
         }
     });
 }

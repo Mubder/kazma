@@ -53,11 +53,11 @@ Address the critical weaknesses identified in Kazma's architecture, prioritized 
 - Clients should use SSE `/api/chat/stream` for full HITL safety
 - **Status:** Working as designed
 
-### 8. /undo and /edit slash commands — DONE
-- Added `/undo` handler that removes last assistant response
-- Added `/edit <text>` handler that replaces last assistant response
-- Both modify LangGraph checkpoint state directly
-- **Status:** Compiled and verified
+### 8. /undo and /edit slash commands — DONE (graph path)
+- Live path: `agent_handler/graph.py` uses `graph.aget_state` + `graph.aupdate_state`
+- `/undo` removes last assistant turn (+ trailing tool msgs)
+- `/edit <text>` replaces last assistant content in checkpoint
+- `slash_commands.py` keeps fallback text if graph handler is not wired
 
 ---
 
@@ -71,4 +71,4 @@ Address the critical weaknesses identified in Kazma's architecture, prioritized 
 | Metrics endpoint | None | `/metrics` with graceful degradation |
 | Windows portability | `C:\Windows` hardcoded | Uses `WINDIR`/`SystemRoot` env vars |
 | WebSocket chat | Returns 410 Gone | Working as designed (deprecation) |
-| /undo and /edit | Stub commands | Full state modification |
+| /undo and /edit | Stub commands | Still stubs (honest messaging) |

@@ -1,10 +1,12 @@
 # Kazma (كاظمه) — Autonomous Agent Framework
 
-> **Version anchor:** This documentation reflects the codebase as of **July 2026** (`pyproject.toml` → `0.4.0 (current)`). Every factual claim is traceable to source; anything not yet implemented is explicitly marked **Planned / Roadmap**.
+> **Version anchor:** This documentation reflects the codebase as of **July 2026** (`pyproject.toml` → **0.5.0**). Every factual claim is traceable to source; anything not yet implemented is explicitly marked **Planned / Roadmap**. Latest full audit: `docs/audits/AUDIT_FULL_2026-07-18.md`.
 
 Kazma is a multi-platform, autonomous AI agent framework built on a **LangGraph supervisor brain**, **swarm orchestration**, **cross-platform dispatch** (Telegram / Discord / Slack / Web / TUI), and an **OpenAI-compatible LLM provider layer**. It is designed with first-class **Arabic / RTL** support and a Gulf-cultural conversational protocol (*Majlis*).
 
 This `docs-v2/` tree is a **ground-up rewrite** produced by auditing the live codebase — not a repackaging of older notes. It replaces speculative or stale descriptions with verified, source-referenced reference material.
+
+> **Merged into Docusaurus (July 2026):** published copies live at `docs/docs/guide/`. Use the site navbar **Guide**, or edit those files for the live docs. This `docs-v2/` folder is retained as the authoring history / offline map.
 
 ---
 

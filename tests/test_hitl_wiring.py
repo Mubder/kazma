@@ -23,6 +23,26 @@ from kazma_core.swarm.safety import SafetyMiddleware
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# Phase 1b: MCP force_danger parity (C1 regression helpers)
+
+class TestMcpForceDangerParity:
+    """MCP names must be forceable as danger even when not in static list."""
+
+    def test_mcp_names_not_in_static_danger_list(self):
+        from kazma_core.swarm.safety import SafetyMiddleware
+        s = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        for name in ("write_file", "run_command", "execute_code", "delete_file"):
+            assert s.is_danger_tool(name) is False
+            assert s.check_sync(name, force_danger=True) is False
+
+    def test_builtin_names_still_danger(self):
+        from kazma_core.swarm.safety import SafetyMiddleware
+        s = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        for name in ("file_write", "shell_exec", "file_delete"):
+            assert s.is_danger_tool(name) is True
+            assert s.check_sync(name) is False
+
+
 # Phase 2: SafetyMiddleware fail-closed gate
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -143,6 +163,35 @@ class TestHitlConfig:
         assert "shell_exec" in DEFAULT_DANGER_TOOLS
         assert "vault_retrieve" in DEFAULT_DANGER_TOOLS
         assert "vault_delete" in DEFAULT_DANGER_TOOLS
+
+    def test_canonical_danger_list_is_single_source(self):
+        """Graph defaults, swarm bus, and hitl module must share one list."""
+        from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+        from kazma_core.swarm.safety import SafetyMiddleware, _EXTENDED_DANGER
+
+        assert set(DEFAULT_DANGER_TOOLS) == set(CANONICAL_DANGER_TOOLS)
+        assert set(_EXTENDED_DANGER) == set(CANONICAL_DANGER_TOOLS)
+
+        safety = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        for name in CANONICAL_DANGER_TOOLS:
+            assert safety.is_danger_tool(name), f"{name} missing from SafetyMiddleware"
+
+    def test_yaml_require_approval_matches_canonical(self):
+        """kazma.yaml must not drift from CANONICAL_DANGER_TOOLS."""
+        from pathlib import Path
+
+        import yaml
+
+        from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+
+        root = Path(__file__).resolve().parents[1]
+        yaml_path = root / "kazma.yaml"
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        listed = set(data["safety"]["hitl"]["require_approval_for"])
+        assert listed == set(CANONICAL_DANGER_TOOLS), (
+            f"yaml/list drift: missing={set(CANONICAL_DANGER_TOOLS) - listed} "
+            f"extra={listed - set(CANONICAL_DANGER_TOOLS)}"
+        )
 
     def test_tool_tiers(self):
         assert get_tool_tier("file_read") == "read"

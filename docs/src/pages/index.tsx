@@ -12,12 +12,15 @@ function HomepageHeader() {
       <div className="container">
         <h1 className="hero__title">{siteConfig.title}</h1>
         <p className="hero__subtitle">{siteConfig.tagline}</p>
-        <div style={{display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '24px'}}>
-          <Link className="button button--secondary button--lg" to="/docs/getting-started/installation">
-            Get Started
+        <div style={{display: 'flex', gap: '12px', justifyContent: 'center', marginTop: '24px', flexWrap: 'wrap'}}>
+          <Link className="button button--secondary button--lg" to="/docs/guide/quickstart">
+            Quickstart
+          </Link>
+          <Link className="button button--secondary button--outline button--lg" to="/docs/guide/architecture">
+            Architecture
           </Link>
           <Link className="button button--secondary button--outline button--lg" to="/docs/kazma-hub/overview">
-            Browse Skills
+            Skills Hub
           </Link>
         </div>
       </div>

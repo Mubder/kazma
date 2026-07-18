@@ -731,7 +731,22 @@ class LocalToolRegistry:
 
             store = get_config_store()
             val = store.get(key, "")
-            return f"{key} = {val}" if val else f"No value set for {key}"
+            if not val:
+                return f"No value set for {key}"
+            # Never return secrets in plain text (prompt-injection exfil risk).
+            key_l = (key or "").lower()
+            secret_markers = (
+                "api_key", "apikey", "token", "secret", "password",
+                "passwd", "private_key", "credentials", "auth",
+            )
+            if any(m in key_l for m in secret_markers):
+                s = str(val)
+                if len(s) <= 4:
+                    masked = "****"
+                else:
+                    masked = "****" + s[-4:]
+                return f"{key} = {masked}  (masked — secret keys are not readable via tools)"
+            return f"{key} = {val}"
 
         @self.register(
             description="Execute a shell command and return stdout+stderr. Use with caution.",
@@ -754,19 +769,17 @@ class LocalToolRegistry:
             if not args:
                 return "Error: Empty command"
 
-            # Restricted PATH — only allow read-only / build-safe binaries
-            # NO network tools (curl, wget), NO container runtimes (docker),
-            # NO file modification (chmod, sed). Python/node interpreters are
-            # allowed because the agent needs to run scripts (python_exec,
-            # run_tests, run_file) — they're HITL-gated as danger tools.
+            # Restricted PATH — only allow read-only / build-safe binaries.
+            # NO interpreters (python/node/bash/sh) — those are RCE vectors
+            # even after a single HITL approval. Use python_exec / code_exec
+            # for code. Aligns with swarm ShellTool._READ_ONLY_COMMANDS.
+            # NO network tools (curl, wget), NO container runtimes (docker).
             _SAFE_BINARIES = {
                 # Read-only system
                 "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
                 "uniq", "echo", "printf", "date", "whoami", "pwd", "env",
                 "df", "du", "free", "uptime", "uname", "hostname",
-                # Interpreters (HITL-gated as danger tools)
-                "python", "python3", "node", "npx", "bash", "sh",
-                # Build tools
+                # Build tools (no shell interpreters)
                 "git", "uv", "pytest", "ruff", "mypy",
                 # Archive
                 "tar", "gzip", "gunzip", "zip", "unzip",
@@ -774,7 +787,7 @@ class LocalToolRegistry:
                 "ps", "pgrep",
                 # Text processing (read-only)
                 "jq", "tr", "cut",
-                # File ops (write — HITL approval required in practice via safety layer)
+                # File ops (write — HITL-gated via safety layer)
                 "mkdir", "cp", "mv", "touch",
                 # Process control (safe)
                 "sleep",

@@ -59,6 +59,11 @@ htmlcov/
 .env.local
 *.env.*
 
+# Docusaurus (docs site)
+docs/node_modules/
+docs/.docusaurus/
+docs/build/
+
 # Compiled and binary files
 *.class
 *.o

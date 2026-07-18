@@ -192,6 +192,36 @@ def check_swarm_handoff_cycle_detection() -> list[str]:
     return errors
 
 
+def check_architecture_doc_exists() -> list[str]:
+    """Root architecture.md must exist (AGENTS.md / onboarding pointer)."""
+    errors = []
+    path = Path("architecture.md")
+    if not path.exists():
+        errors.append("architecture.md missing at repo root")
+        return errors
+    text = path.read_text(encoding="utf-8")
+    if "docs-v2" not in text:
+        errors.append("architecture.md should point at docs-v2 canonical docs")
+    return errors
+
+
+def check_canonical_danger_tools() -> list[str]:
+    """HITL single-source list must exist and include core danger tools."""
+    errors = []
+    try:
+        from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+        from kazma_core.swarm.safety import _EXTENDED_DANGER
+    except ImportError as e:
+        return [f"Cannot import danger lists: {e}"]
+    required = {"file_write", "shell_exec", "file_delete"}
+    missing = required - set(CANONICAL_DANGER_TOOLS)
+    if missing:
+        errors.append(f"CANONICAL_DANGER_TOOLS missing {missing}")
+    if set(_EXTENDED_DANGER) != set(CANONICAL_DANGER_TOOLS):
+        errors.append("swarm _EXTENDED_DANGER drifted from CANONICAL_DANGER_TOOLS")
+    return errors
+
+
 def main() -> int:
     """Run all checks and return exit code."""
     all_errors = []
@@ -207,6 +237,8 @@ def main() -> int:
         ("TaskStore WAL mode", check_task_store_wal_mode),
         ("LLM tool fallback", check_llm_tool_fallback),
         ("Swarm handoff cycle detection", check_swarm_handoff_cycle_detection),
+        ("Architecture doc pointer", check_architecture_doc_exists),
+        ("Canonical danger tools", check_canonical_danger_tools),
     ]
     
     print("Running doc-code sync checks...")

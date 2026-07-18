@@ -222,8 +222,9 @@ def create_graph_handler(
             return
 
         # ── /edit: Correct last assistant response ─────────────────
+        # None = not an /edit command; "" = bare /edit (show usage)
         edit_match = _extract_edit_command(msg.text)
-        if edit_match:
+        if edit_match is not None:
             corrected_text, edit_result = await _handle_edit(thread_id, config, edit_match)
             ctx = await _store.get(thread_id) or msg.context_metadata
             edit_text, edit_ctx = _prepare_tg_outbound(msg, edit_result, ctx)
@@ -462,75 +463,113 @@ def create_graph_handler(
         except Exception:
             logger.debug("[agent-handler] TTL eviction skipped (store may not support it)", exc_info=True)
 
-    # ── /undo and /edit helpers ──────────────────────────────────
+    # ── /undo and /edit helpers (LangGraph aget_state / aupdate_state) ──
 
     async def _handle_undo(thread_id: str, config: dict[str, Any]) -> str:
-        """Remove the last assistant response from the conversation."""
+        """Remove the last assistant turn (and trailing tool msgs) from checkpoint."""
         try:
-            # Get current state from checkpointer
-            checkpoint = await graph.checkpointer.aget(config)
-            if checkpoint is None:
+            snap = await graph.aget_state(config)
+            if snap is None or not getattr(snap, "values", None):
                 return "↩️ No conversation history to undo."
 
-            state = checkpoint.get("state", {}) or checkpoint.channel_values if hasattr(checkpoint, 'channel_values') else {}
-            messages = state.get("messages", [])
+            messages = list(snap.values.get("messages") or [])
             if not messages:
                 return "↩️ No messages in conversation."
 
-            # Find and remove the last assistant message
-            for i in range(len(messages) - 1, -1, -1):
-                if isinstance(messages[i], dict) and messages[i].get("role") == "assistant":
+            # Drop trailing assistant message; also drop tool results that
+            # immediately precede it (same turn) so the graph is consistent.
+            removed = False
+            i = len(messages) - 1
+            while i >= 0:
+                role = messages[i].get("role") if isinstance(messages[i], dict) else None
+                if role == "assistant":
                     messages.pop(i)
-                    # Update the checkpoint
-                    await graph.checkpointer.aupdate(config, {"messages": messages})
-                    return "✅ Removed last assistant response. You can continue the conversation."
+                    removed = True
+                    # strip tool messages belonging to this turn (before assistant)
+                    j = i - 1
+                    while j >= 0:
+                        r = messages[j].get("role") if isinstance(messages[j], dict) else None
+                        if r == "tool":
+                            messages.pop(j)
+                            j -= 1
+                            continue
+                        # also drop the assistant tool_calls message that
+                        # triggered tools (role=assistant with tool_calls)
+                        if r == "assistant" and messages[j].get("tool_calls"):
+                            messages.pop(j)
+                        break
+                    break
+                i -= 1
 
-            return "↩️ No assistant response to undo."
+            if not removed:
+                return "↩️ No assistant response to undo."
+
+            await graph.aupdate_state(config, {"messages": messages})
+            logger.info("[agent-handler] /undo thread=%s msgs_left=%d", thread_id, len(messages))
+            return "✅ Removed last assistant response. You can continue the conversation."
         except Exception as exc:
-            logger.warning("[agent-handler] /undo failed: %s", exc)
+            logger.warning("[agent-handler] /undo failed: %s", exc, exc_info=True)
             return f"⚠️ Could not undo: {exc}"
 
     def _extract_edit_command(text: str | None) -> str | None:
-        """Extract /edit <corrected text> if present, else None."""
+        """Extract corrected text from ``/edit …``, or empty string if bare ``/edit``."""
         if not text:
             return None
-        text = text.strip()
-        if not text.lower().startswith("/edit"):
+        stripped = text.strip()
+        if not stripped.lower().startswith("/edit"):
             return None
-        # Return the corrected text (everything after /edit)
-        parts = text.split(maxsplit=1)
-        return parts[1] if len(parts) > 1 else None
+        # Bare "/edit" → empty string (show usage); "/edit foo" → "foo"
+        parts = stripped.split(maxsplit=1)
+        if len(parts) < 2:
+            return ""
+        return parts[1]
 
-    async def _handle_edit(thread_id: str, config: dict[str, Any], corrected_text: str) -> tuple[str, str]:
-        """Replace the last assistant response with corrected text.
+    async def _handle_edit(
+        thread_id: str, config: dict[str, Any], corrected_text: str
+    ) -> tuple[str, str]:
+        """Replace the last assistant response with *corrected_text*.
 
-        Returns tuple of (corrected_text, status_message).
+        Returns ``(corrected_text, status_message)``.
         """
+        if not (corrected_text or "").strip():
+            return (
+                corrected_text,
+                "✏️ *Usage:* `/edit <corrected text>`\n\n"
+                "Replaces the last assistant message in conversation history.",
+            )
         try:
-            checkpoint = await graph.checkpointer.aget(config)
-            if checkpoint is None:
+            snap = await graph.aget_state(config)
+            if snap is None or not getattr(snap, "values", None):
                 return corrected_text, "✏️ No conversation history to edit."
 
-            state = checkpoint.get("state", {}) or checkpoint.channel_values if hasattr(checkpoint, 'channel_values') else {}
-            messages = state.get("messages", [])
+            messages = list(snap.values.get("messages") or [])
             if not messages:
                 return corrected_text, "✏️ No messages in conversation."
 
-            # Find and replace the last assistant message
             for i in range(len(messages) - 1, -1, -1):
-                if isinstance(messages[i], dict) and messages[i].get("role") == "assistant":
-                    messages[i] = {"role": "assistant", "content": corrected_text}
-                    # Update the checkpoint
-                    await graph.checkpointer.aupdate(config, {"messages": messages})
-                    return corrected_text, "✅ Replaced last response. You can continue the conversation."
+                msg_i = messages[i]
+                if isinstance(msg_i, dict) and msg_i.get("role") == "assistant":
+                    # Keep tool_calls-only intermediate assistants out of "last reply"
+                    if msg_i.get("tool_calls") and not (msg_i.get("content") or "").strip():
+                        continue
+                    messages[i] = {**msg_i, "role": "assistant", "content": corrected_text}
+                    # Drop tool_calls if we are replacing with plain text
+                    messages[i].pop("tool_calls", None)
+                    await graph.aupdate_state(config, {"messages": messages})
+                    logger.info(
+                        "[agent-handler] /edit thread=%s len=%d",
+                        thread_id, len(corrected_text),
+                    )
+                    return (
+                        corrected_text,
+                        "✅ Replaced last response. You can continue the conversation.",
+                    )
 
-            # If no assistant message found, add as new assistant message
             messages.append({"role": "assistant", "content": corrected_text})
-            await graph.checkpointer.aupdate(config, {"messages": messages})
+            await graph.aupdate_state(config, {"messages": messages})
             return corrected_text, "✅ Added corrected text as new message."
-
         except Exception as exc:
-            logger.warning("[agent-handler] /edit failed: %s", exc)
+            logger.warning("[agent-handler] /edit failed: %s", exc, exc_info=True)
             return corrected_text, f"⚠️ Could not edit: {exc}"
 
     # ── Register telegram backend with core's send_message dispatcher ──

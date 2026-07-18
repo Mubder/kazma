@@ -111,28 +111,34 @@ gateway:
 safety:
   hitl:
     enabled: true
+    # Must match CANONICAL_DANGER_TOOLS in kazma_core.safety.hitl
+    # (parity enforced by tests/test_hitl_wiring.py).
     require_approval_for:
       - file_write
       - file_delete
       - shell_exec
       - code_exec
       - python_exec
-      # Extended for swarm bus parity (spawn/schedule are danger in SafetyMiddleware too)
       - spawn_agent
       - spawn_agents
       - schedule_task
       - cancel_scheduled
-      # Secret vault — retrieving or deleting secrets requires approval
       - vault_retrieve
       - vault_delete
-      # Config changes require approval
       - config_save
+      - run_tests
+      - git_commit
+      - git_push_pull
+      - github_create_pr
+      - install_python_packages
+      - install_npm_packages
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 
 ui:
   host: 127.0.0.1
-  port: 8000
+  # Default matches CLI `kazma serve` / AGENTS.md (override with KAZMA_PORT).
+  port: 9090
   rtl: true
   title: Kazma Dashboard
 logging:

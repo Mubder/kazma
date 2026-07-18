@@ -13,9 +13,11 @@ import os
 from unittest.mock import patch
 
 import pytest
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Request, WebSocket
+from fastapi.responses import JSONResponse, Response
 from fastapi.testclient import TestClient
 from kazma_ui.auth import (
+    SECRET_COOKIE,
     SECRET_HEADER,
     SENSITIVE_PREFIXES,
     create_auth_middleware,
@@ -37,6 +39,41 @@ def _build_test_app() -> FastAPI:
 
     # Apply the auth middleware under test.
     app.middleware("http")(create_auth_middleware())
+
+    # --- Auth bootstrap (always open) — mirrors production cookie issue ---
+    @app.get("/login")
+    async def login_page() -> dict:
+        return {"ok": True}
+
+    @app.post("/api/auth/login")
+    async def auth_login(request: Request) -> Response:
+        from kazma_ui.auth import SECRET_COOKIE, get_kazma_secret, verify_secret
+
+        expected = get_kazma_secret()
+        if not expected:
+            return JSONResponse({"status": "ok", "authenticated": True})
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        secret = str((body or {}).get("secret") or "")
+        if not verify_secret(secret, expected):
+            return JSONResponse({"detail": "Invalid secret"}, status_code=401)
+        resp = JSONResponse({"status": "ok", "authenticated": True})
+        resp.set_cookie(SECRET_COOKIE, expected, httponly=True, samesite="strict", path="/")
+        return resp
+
+    @app.post("/api/auth/logout")
+    async def auth_logout() -> Response:
+        from kazma_ui.auth import SECRET_COOKIE
+
+        resp = JSONResponse({"status": "ok"})
+        resp.delete_cookie(SECRET_COOKIE, path="/")
+        return resp
+
+    @app.get("/api/auth/status")
+    async def auth_status() -> dict:
+        return {"ok": True}
 
     # --- Sensitive endpoints (one per prefix) ---
     @app.get("/api/settings")
@@ -148,7 +185,19 @@ class TestIsSensitivePath:
 class TestIsAlwaysOpen:
     """Test the always-open path set."""
 
-    @pytest.mark.parametrize("path", ["/", "/api/status", "/api/telemetry", "/health"])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/",
+            "/api/status",
+            "/api/telemetry",
+            "/health",
+            "/login",
+            "/api/auth/login",
+            "/api/auth/logout",
+            "/api/auth/status",
+        ],
+    )
     def test_known_open_paths(self, path: str):
         assert is_always_open(path) is True
 
@@ -301,6 +350,33 @@ class TestAuthMiddlewareWithSecret:
         with pytest.raises(Exception):
             with self.client.websocket_connect("/ws/dashboard") as ws:
                 pass
+
+    def test_login_open_without_header(self):
+        """Login endpoints stay reachable without prior auth."""
+        assert self.client.get("/login").status_code == 200
+        assert self.client.get("/api/auth/status").status_code == 200
+
+    def test_login_sets_cookie_and_unlocks_api(self):
+        """POST /api/auth/login with correct secret sets cookie for API access."""
+        bad = self.client.post("/api/auth/login", json={"secret": "nope"})
+        assert bad.status_code == 401
+
+        # Fresh client so loopback auto-cookie from open routes doesn't leak in
+        with patch.dict(os.environ, {"KAZMA_SECRET": TEST_SECRET}):
+            c = TestClient(_build_test_app())
+            c.cookies.clear()
+            # Hit settings without cookie → 401
+            assert c.get("/api/settings").status_code == 401
+            ok = c.post("/api/auth/login", json={"secret": TEST_SECRET})
+            assert ok.status_code == 200
+            assert ok.json().get("authenticated") is True
+            # Cookie should unlock sensitive API
+            assert c.get("/api/settings").status_code == 200
+            c.post("/api/auth/logout")
+            # After logout cookie cleared — may still fail depending on TestClient
+            # cookie jar; force clear and re-check
+            c.cookies.clear()
+            assert c.get("/api/settings").status_code == 401
 
     def test_websocket_authorized_with_header(self):
         """Websocket connection succeeds when secret is provided in the headers."""

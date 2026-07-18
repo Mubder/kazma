@@ -163,7 +163,9 @@ class KazmaAppBuilder:
                         logger.warning("[Vault] Failed to create .env for KAZMA_VAULT_KEY: %s", e)
 
         self.config = load_config(self.config_path)
-        self.config_store = ConfigStore()
+        # Process-wide singleton — never construct ConfigStore() elsewhere.
+        from kazma_core.config_store import get_config_store
+        self.config_store = get_config_store()
         
         # Register as process-wide singleton
         set_config_store(self.config_store)
@@ -297,6 +299,10 @@ class KazmaAppBuilder:
         from fastapi.middleware.cors import CORSMiddleware
 
         _default_cors_origins = [
+            "http://localhost:9090",
+            "http://127.0.0.1:9090",
+            "http://localhost:9091",
+            "http://127.0.0.1:9091",
             "http://localhost:8000",
             "http://127.0.0.1:8000",
             "http://localhost:4321",
@@ -1073,18 +1079,22 @@ def main() -> None:
     """Entry point for `kazma-web` command.
 
     Usage:
-        kazma-web              # port 8000
+        kazma-web              # port 9090 (host default; matches CLI)
         kazma-web --port 8080  # custom port
+        KAZMA_PORT=9091 kazma-web
     """
     import argparse
-
-    parser = argparse.ArgumentParser(description="Kazma Web UI")
-    parser.add_argument("--port", "-p", type=int, default=8000, help="Port to bind (default: 8000)")
-    args, _ = parser.parse_known_args()
-
     import os as _os3
 
     import uvicorn
+
+    _default_port = int(_os3.environ.get("KAZMA_PORT", "9090") or "9090")
+    parser = argparse.ArgumentParser(description="Kazma Web UI")
+    parser.add_argument(
+        "--port", "-p", type=int, default=_default_port,
+        help=f"Port to bind (default: {_default_port} / KAZMA_PORT)",
+    )
+    args, _ = parser.parse_known_args()
 
     # Security: default to localhost.  Use KAZMA_HOST env var to
     # explicitly bind to all interfaces (decoupled from KAZMA_SECRET).
@@ -1093,7 +1103,8 @@ def main() -> None:
         logger.warning(
             "[app] Binding to 0.0.0.0 without KAZMA_SECRET — "
             "anyone on the network can access the UI. "
-            "Set KAZMA_SECRET to enable authentication."
+            "Set KAZMA_SECRET to enable authentication. "
+            "Use /login for remote session cookies."
         )
 
     app = create_app()

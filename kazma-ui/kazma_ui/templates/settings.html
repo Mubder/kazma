@@ -1033,15 +1033,24 @@
                                   x-text="pkg.installed ? (pkg.name + ' ' + pkg.version) : (pkg.name + ' (missing)')"></span>
                         </template>
                     </div>
-                    <!-- Install command (only if not installed) -->
+                    <!-- Install command + one-click (only if not installed) -->
                     <div x-show="!extra.installed" x-cloak
-                         style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--font-mono);font-size:0.75rem;display:flex;align-items:center;gap:8px;">
+                         style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--font-mono);font-size:0.75rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                         <span style="color:var(--text-muted);">$</span>
-                        <code style="flex:1;color:var(--text-primary);" x-text="extra.install_cmd"></code>
+                        <code style="flex:1;color:var(--text-primary);min-width:120px;" x-text="extra.install_cmd"></code>
                         <button class="btn btn-xs btn-secondary" @click="copyPkgCmd(extra.install_cmd)" style="font-size:0.62rem;padding:2px 7px;">Copy</button>
+                        <button class="btn btn-xs btn-primary"
+                                @click="installExtra(extra.name)"
+                                :disabled="pkgInstalling === extra.name"
+                                style="font-size:0.62rem;padding:2px 8px;"
+                                x-text="pkgInstalling === extra.name ? t('packages.installing') : t('packages.install_btn')"></button>
                     </div>
                 </div>
             </template>
+            <div x-show="pkgInstallMsg" x-cloak
+                 style="padding:10px 16px;font-size:0.78rem;border-top:1px solid var(--border-subtle);"
+                 :style="pkgInstallOk ? 'color:var(--success)' : 'color:var(--warning)'"
+                 x-text="pkgInstallMsg"></div>
         </div>
 
         <!-- Core Dependencies -->

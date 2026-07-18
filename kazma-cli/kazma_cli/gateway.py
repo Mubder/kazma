@@ -1,7 +1,7 @@
 """Gateway CLI commands — manage the Kazma omnichannel message-bus gateway.
 
 Talks to the running WebUI server's REST API (``/api/gateway/*``) using
-httpx.  The server is expected to be reachable at ``http://localhost:8000``
+httpx.  The server is expected to be reachable at ``http://localhost:9090``
 by default; override with ``--port`` or the ``KAZMA_PORT`` env var.
 """
 

@@ -14,13 +14,13 @@ app_factory = "kazma_ui.app:create_app"
 try:
     # Start the server
     proc = subprocess.Popen(
-        [python_exe, "-m", "uvicorn", app_factory, "--factory", "--host", "127.0.0.1", "--port", "8000"],
+        [python_exe, "-m", "uvicorn", app_factory, "--factory", "--host", "127.0.0.1", "--port", "9090"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
 
     print(f"Server started with PID {proc.pid}")
-    print("Open http://localhost:8000 in your browser")
+    print("Open http://localhost:9090 in your browser")
     print("Press Ctrl+C to stop\n")
 
     # Wait for server to start

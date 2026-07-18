@@ -105,24 +105,38 @@ async def _handle_hitl_resume(
     # initiated the paused task. Look up the target thread's context
     # and compare sender_id. This prevents any user from approving
     # another user's paused danger-tool execution.
+    # Fail-closed: if the target session is missing, deny cross-thread
+    # approvals rather than skipping the check.
     if target_thread != thread_id:
         target_ctx = await store.get(target_thread)
-        if target_ctx:
-            original_sender = target_ctx.get("sender_id", "")
-            current_sender = msg.sender_id
-            if original_sender and original_sender != current_sender:
-                logger.warning(
-                    "[HITL] Authz denied: %s tried to approve thread %s owned by %s",
-                    current_sender, target_thread, original_sender,
+        if not target_ctx:
+            logger.warning(
+                "[HITL] Authz denied: cross-thread approve for missing session %s by %s",
+                target_thread, msg.sender_id,
+            )
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text="⚠️ Cannot approve: target session not found.",
+                    context_metadata=ctx,
                 )
-                await manager.send(
-                    OutboundMessage(
-                        target_id=_build_target_id(msg.platform, ctx),
-                        text="⚠️ You are not authorized to approve this task.",
-                        context_metadata=ctx,
-                    )
+            )
+            return True
+        original_sender = target_ctx.get("sender_id", "")
+        current_sender = msg.sender_id
+        if original_sender and original_sender != current_sender:
+            logger.warning(
+                "[HITL] Authz denied: %s tried to approve thread %s owned by %s",
+                current_sender, target_thread, original_sender,
+            )
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text="⚠️ You are not authorized to approve this task.",
+                    context_metadata=ctx,
                 )
-                return True
+            )
+            return True
 
     try:
         from langgraph.types import Command

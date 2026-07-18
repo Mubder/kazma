@@ -88,6 +88,7 @@ packages = ["kazma-core/kazma_core", "kazma-memory/kazma_memory", "kazma-skills/
 # ImportPathMismatch with root tests/conftest.py.
 testpaths = [
     "kazma-core/kazma_core_tests",
+    "kazma-core/tests",  # IDE / env_context / embedder suite (was orphaned from CI)
     "kazma-gateway/kazma_gateway_tests",
     "kazma-ui/kazma_ui_tests",
     "kazma-tui/kazma_tui_tests",

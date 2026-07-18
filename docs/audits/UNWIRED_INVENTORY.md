@@ -33,7 +33,7 @@ These are live; listed only for contrast:
 
 | Module / package | LOC (approx) | Tests | Why kept |
 |------------------|-------------:|-------|----------|
-| `kazma_core/delegation/*` | ~1,600 | `test_delegation_*`, `test_swarm.py` | Parallel multi-agent design; not used by SwarmEngine |
+| `kazma_core/delegation/*` | ~1,600 | `test_delegation_*`, `test_swarm.py` | Parallel multi-agent design; not used by SwarmEngine. **Product decision (2026-07-18 audit):** keep as library until SwarmEngine absorbs or archive/ — do not dual-wire. |
 | `authorization_flow.py` | ~350 | `test_authorization_flow.py` | Enterprise cross-division approvals |
 | `division_sandbox.py` | ~280 | `test_division_sandbox.py` | Division-scoped execution |
 | `permissions.py` + `kazma-permissions.yaml` | ~200 | `test_permissions.py` | YAML permission manager (not enforced in runtime) |

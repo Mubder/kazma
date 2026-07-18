@@ -72,7 +72,7 @@ def main() -> None:
         _run_update(sys.argv[2:])
 
     elif cmd in ("--help", "-h", "help"):
-        print("Kazma CLI v0.2.0")
+        print("Kazma CLI v0.5.0")
         print("Commands:")
         print("  status     Show Kazma status")
         print("  serve      Start the WebUI server (default port 9090)")

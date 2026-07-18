@@ -565,6 +565,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "packages.col_description": {"en": "Description", "ar": "الوصف"},
     "packages.install_all_title": {"en": "Install Everything", "ar": "تثبيت الكل"},
     "packages.install_all_desc": {"en": "To install all optional dependencies at once:", "ar": "لتثبيت جميع التبعيات الاختيارية دفعة واحدة:"},
+    "packages.install_btn": {"en": "Install", "ar": "تثبيت"},
+    "packages.installing": {"en": "Installing…", "ar": "جارٍ التثبيت…"},
 
     # ── Common / Generic ──────────────────────────────────────────────
     "common.loading": {"en": "Loading…", "ar": "جاري التحميل…"},

@@ -255,28 +255,30 @@ def _cmd_context(ctx: dict[str, Any]) -> str:
 
 
 def _cmd_undo() -> str:
-    """Undo the last agent response."""
+    """Fallback when /undo is not handled by agent_handler (no graph)."""
     return (
-        "↩️ *Undo* — The `/undo` command removes the last agent response "
-        "from the conversation history.\n\n"
-        "This is handled by the platform adapter (Telegram/Discord/Slack). "
-        "If you're using the Web UI, use the chat interface to delete messages."
+        "↩️ *Undo* is handled by the live agent session.\n\n"
+        "Send `/undo` on Telegram/Discord/Slack while chatting with the "
+        "agent — it removes the last assistant turn from checkpoint state.\n\n"
+        "If you see this message, the graph handler is not wired for this "
+        "channel. Use `/reset` or start a new session instead."
     )
 
 
 def _cmd_edit(text: str) -> str:
-    """Edit the last agent response."""
+    """Fallback when /edit is not handled by agent_handler (no graph)."""
     parts = text.strip().split(maxsplit=1)
     if len(parts) < 2:
         return (
-            "✏️ *Edit* — Correct the last agent response.\n\n"
-            "Usage: `/edit <corrected text>`\n\n"
-            "This replaces the last agent response with your correction."
+            "✏️ *Usage:* `/edit <corrected text>`\n\n"
+            "On live chat platforms this replaces the last assistant "
+            "message in the conversation checkpoint."
         )
     return (
-        f"✏️ *Edit received:* {parts[1]}\n\n"
-        "Note: /edit is not yet implemented. The conversation history "
-        "has not been modified."
+        "✏️ *Edit* is handled by the live agent session.\n\n"
+        f"Correction received (not applied here): {parts[1][:200]}\n\n"
+        "Send `/edit <text>` in Telegram/Discord/Slack while chatting "
+        "with the agent so the graph handler can update the checkpoint."
     )
 
 

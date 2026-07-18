@@ -211,20 +211,62 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.post("/api/system/install")
     async def _post_system_install(req: dict = None):
+        """Install an allowlisted package or pyproject extra in the background.
+
+        Body (JSON)::
+            {"extra": "rag"}                  # preferred — uv pip install -e ".[rag]"
+            {"package_name": "chromadb"}     # single allowlisted package
+
+        Supply-chain safe: only extras/packages in the installer allowlists.
+        """
         req = req or {}
         import os as _os
         # In demo mode, ML deps can't be installed (container has no build
         # tools and not enough RAM). Return a clean message.
         if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
             return {"status": "unavailable", "message": "ML dependencies are not available in demo mode."}
-        package_name = req.get("package_name", "sentence-transformers")
-        # Allowlist — prevent arbitrary package installation (supply-chain risk)
-        _ALLOWED_PACKAGES = {"sentence-transformers", "chromadb"}
-        if package_name not in _ALLOWED_PACKAGES:
-            return {"status": "error", "message": f"Package '{package_name}' is not in the allowed list: {sorted(_ALLOWED_PACKAGES)}"}
-        from kazma_core.system import asynchronous_install_package
+
+        from kazma_core.system import (
+            ALLOWED_EXTRAS,
+            ALLOWED_PACKAGES,
+            asynchronous_install_extra,
+            asynchronous_install_package,
+        )
+
+        extra = (req.get("extra") or "").strip().lower()
+        package_name = (req.get("package_name") or "").strip()
+
+        if extra:
+            if extra not in ALLOWED_EXTRAS:
+                return {
+                    "status": "error",
+                    "message": f"Extra '{extra}' is not in the allowed list: {sorted(ALLOWED_EXTRAS)}",
+                }
+            await asynchronous_install_extra(extra)
+            return {"status": "started", "extra": extra}
+
+        if not package_name:
+            package_name = "sentence-transformers"
+        if package_name not in ALLOWED_PACKAGES:
+            return {
+                "status": "error",
+                "message": f"Package '{package_name}' is not in the allowed list: {sorted(ALLOWED_PACKAGES)}",
+            }
         await asynchronous_install_package(package_name)
         return {"status": "started", "package": package_name}
+
+    @self.app.get("/api/system/install/status")
+    async def _get_install_status() -> dict[str, Any]:
+        """Last background install status (for Settings → Packages UI)."""
+        from kazma_core.config_store import get_config_store
+
+        store = get_config_store()
+        return {
+            "target": store.get("system.install.last_target", ""),
+            "status": store.get("system.install.last_status", ""),
+            "error": store.get("system.install.last_error", ""),
+            "memory_status": store.get("system.memory.status", ""),
+        }
 
     @self.app.get("/api/alerts/recent")
     async def _get_recent_alerts():
@@ -248,6 +290,88 @@ def register_direct_routes(self: Any) -> None:
     async def _packages_redirect() -> RedirectResponse:
         """Legacy /packages page → Settings Packages tab."""
         return RedirectResponse("/settings?tab=packages", status_code=307)
+
+    # ── Auth bootstrap (remote clients — loopback auto-cookie is disabled) ──
+    @self.app.get("/login", response_class=HTMLResponse)
+    async def _login_page(request: Request) -> HTMLResponse:
+        """Render the secret login form for non-loopback browsers."""
+        return self.templates.TemplateResponse(
+            request,
+            "login.html",
+            {},
+        )
+
+    @self.app.get("/api/auth/status")
+    async def _auth_status(request: Request) -> dict[str, Any]:
+        """Whether auth is enabled and whether this request is authenticated."""
+        from kazma_ui.auth import (
+            SECRET_COOKIE,
+            SECRET_HEADER,
+            get_kazma_secret,
+            verify_secret,
+            _is_loopback_client,
+        )
+
+        expected = get_kazma_secret()
+        if not expected:
+            return {"auth_enabled": False, "authenticated": True, "mode": "open"}
+        provided = request.headers.get(SECRET_HEADER, "") or request.cookies.get(SECRET_COOKIE, "")
+        ok = bool(provided and verify_secret(provided, expected))
+        return {
+            "auth_enabled": True,
+            "authenticated": ok,
+            "loopback": _is_loopback_client(request),
+            "mode": "secret",
+        }
+
+    @self.app.post("/api/auth/login")
+    async def _auth_login(request: Request) -> Response:
+        """Exchange KAZMA_SECRET for an HttpOnly session cookie."""
+        from kazma_ui.auth import (
+            SECRET_COOKIE,
+            get_kazma_secret,
+            verify_secret,
+            _is_https,
+        )
+
+        expected = get_kazma_secret()
+        if not expected:
+            return _JSONResponse(
+                {"status": "ok", "message": "Auth disabled (no KAZMA_SECRET)"},
+                status_code=200,
+            )
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        secret = str(body.get("secret") or body.get("password") or "")
+        if not verify_secret(secret, expected):
+            return _JSONResponse(
+                {"detail": "Invalid secret"},
+                status_code=401,
+            )
+        resp = _JSONResponse({"status": "ok", "authenticated": True})
+        resp.set_cookie(
+            key=SECRET_COOKIE,
+            value=expected,
+            httponly=True,
+            samesite="strict",
+            path="/",
+            secure=_is_https(request),
+            max_age=60 * 60 * 24 * 14,  # 14 days
+        )
+        return resp
+
+    @self.app.post("/api/auth/logout")
+    async def _auth_logout() -> Response:
+        """Clear the auth session cookie."""
+        from kazma_ui.auth import SECRET_COOKIE
+
+        resp = _JSONResponse({"status": "ok", "authenticated": False})
+        resp.delete_cookie(SECRET_COOKIE, path="/")
+        return resp
 
     @self.app.get("/api/system/packages")
     async def _get_packages():
