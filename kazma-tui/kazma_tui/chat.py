@@ -33,17 +33,17 @@ class ChatPanel(Vertical):
         ("/help", "Show available commands"),
         ("/clear", "Clear chat history"),
         ("/reset", "Reset conversation context"),
-        ("/model [set <name>]", "Show or switch active model"),
+        ("/model [set <name>]", "Show/switch active model (interactive picker)"),
         ("/models", "Alias for /model"),
         ("/status", "Gateway health overview"),
         ("/memory", "Memory store stats"),
         ("/cost", "Session token spend"),
         ("/context", "Context window usage"),
-        ("/personality", "Show or switch personality"),
+        ("/personality [list|<name>]", "Show/switch personality"),
         ("/config", "Interactive config wizard"),
-        ("/replay", "Time travel: list/replay snapshots"),
+        ("/replay [list|clear|<n>]", "Time travel: list/replay snapshots"),
         ("/export", "Export session to file"),
-        ("/swarm", "Swarm dispatch and management"),
+        ("/swarm [status|list|<task>]", "Swarm dispatch and management"),
         ("/quit", "Exit Kazma TUI"),
     ]
 
@@ -489,12 +489,35 @@ class ChatPanel(Vertical):
     def _cmd_personality(self, text: str = "/personality") -> None:
         try:
             from kazma_core.tools.personality_cmd import handle_personality_command
-            response = handle_personality_command(text)
-            self.write("system", response)
+            from kazma_core.personalities import list_personalities, get_current_personality
+            parts = text.strip().split()
+            sub = parts[1].lower() if len(parts) > 1 else ""
+
+            if not sub or sub == "current":
+                # Show current personality
+                p = get_current_personality()
+                self.write("system", f"Current personality: {p.name} {p.emoji}\n{p.description}")
+                # Also list available
+                names = [f"{x.name} {x.emoji}" for x in list_personalities()]
+                self.write("system", "\nAvailable: " + ", ".join(names) + "\nSwitch: /personality <name>")
+            else:
+                response = handle_personality_command(text)
+                self.write("system", response)
         except Exception as e:
             self.write("error", f"Personality command failed: {e}")
 
     def _cmd_replay(self, text: str) -> None:
+        parts = text.strip().split()
+        sub = parts[1].lower() if len(parts) > 1 else ""
+
+        if not sub:
+            self.write("system",
+                "Replay Commands:\n"
+                "  /replay list          — show available snapshots\n"
+                "  /replay <iteration>   — show snapshot details\n"
+                "  /replay clear         — clear all snapshots")
+            return
+
         try:
             from kazma_core.time_travel import SnapshotStore, DEFAULT_DB_PATH
             from pathlib import Path
@@ -503,11 +526,9 @@ class ChatPanel(Vertical):
                 self.write("system", "No snapshots available (snapshot DB not found).")
                 return
             store = SnapshotStore(str(db_path))
-            parts = text.strip().split()
-            sub = parts[1].lower() if len(parts) > 1 else "list"
             thread_id = "tui-session"
 
-            if sub in ("list", ""):
+            if sub == "list":
                 records = store.list_for_thread(thread_id)
                 if not records:
                     self.write("system", "No snapshots available for this session.")
@@ -523,7 +544,7 @@ class ChatPanel(Vertical):
                 try:
                     iteration = int(sub)
                 except ValueError:
-                    self.write("system", "Usage: /replay [list|clear] or /replay <iteration>")
+                    self.write("system", "Unknown sub-command. Use: /replay list, /replay clear, or /replay <number>")
                     return
                 rec = store.get(thread_id, iteration)
                 if rec is None:
