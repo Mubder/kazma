@@ -357,7 +357,7 @@ def register_direct_routes(self: Any) -> None:
             key=SECRET_COOKIE,
             value=expected,
             httponly=True,
-            samesite="strict",
+            samesite="lax",  # LAN/IP + form POST login
             path="/",
             secure=_is_https(request),
             max_age=60 * 60 * 24 * 14,  # 14 days

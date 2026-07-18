@@ -122,10 +122,30 @@ export function initSoftNav() {
             const res = await fetch(url, {
                 headers: { 'Kazma-Soft-Nav': 'true', 'Accept': 'text/html' },
                 credentials: 'same-origin',
+                redirect: 'follow',
             });
+            // Auth gate: never inject JSON 401 or login fragment into the shell
+            if (res.status === 401 || res.status === 403) {
+                const next = encodeURIComponent(pathOnly(url) + (new URL(url, location.origin).search || ''));
+                window.location.href = '/login?next=' + next;
+                return;
+            }
+            if (res.redirected && /\/login(?:\?|$)/.test(res.url)) {
+                window.location.href = res.url;
+                return;
+            }
             if (!res.ok) throw new Error('HTTP ' + res.status);
+            const ct = (res.headers.get('content-type') || '').toLowerCase();
+            if (ct && !ct.includes('text/html') && !ct.includes('application/xhtml')) {
+                throw new Error('non-HTML response (' + ct + ')');
+            }
             const html = await res.text();
             if (gen !== softNavGeneration) return; // superseded
+            // Guard against raw JSON error bodies mis-parsed as empty pages
+            const trimmed = html.trim();
+            if (trimmed.startsWith('{') && trimmed.includes('"detail"')) {
+                throw new Error('JSON error body instead of HTML');
+            }
 
             const doc = new DOMParser().parseFromString(html, 'text/html');
             const newMain = doc.querySelector('#main-content');

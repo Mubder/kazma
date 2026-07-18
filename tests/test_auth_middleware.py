@@ -300,7 +300,8 @@ class TestAuthMiddlewareWithSecret:
 
     @pytest.fixture(autouse=True)
     def _set_secret(self):
-        with patch.dict(os.environ, {"KAZMA_SECRET": TEST_SECRET}):
+        # TRUST_LAN off so TestClient host is not auto-authed as private LAN
+        with patch.dict(os.environ, {"KAZMA_SECRET": TEST_SECRET, "KAZMA_TRUST_LAN": "0"}):
             # Rebuild app per-class so middleware captures the env.
             self.client = TestClient(_build_test_app())
             yield
@@ -362,7 +363,7 @@ class TestAuthMiddlewareWithSecret:
         assert bad.status_code == 401
 
         # Fresh client so loopback auto-cookie from open routes doesn't leak in
-        with patch.dict(os.environ, {"KAZMA_SECRET": TEST_SECRET}):
+        with patch.dict(os.environ, {"KAZMA_SECRET": TEST_SECRET, "KAZMA_TRUST_LAN": "0"}):
             c = TestClient(_build_test_app())
             c.cookies.clear()
             # Hit settings without cookie → 401
@@ -377,6 +378,21 @@ class TestAuthMiddlewareWithSecret:
             # cookie jar; force clear and re-check
             c.cookies.clear()
             assert c.get("/api/settings").status_code == 401
+
+    def test_html_navigation_redirects_to_login(self):
+        """Browser GET to sensitive page without cookie redirects to /login."""
+        with patch.dict(os.environ, {"KAZMA_SECRET": TEST_SECRET, "KAZMA_TRUST_LAN": "0"}):
+            app = FastAPI()
+            app.middleware("http")(create_auth_middleware())
+
+            @app.get("/dashboard")
+            async def dash():
+                return {"ok": True}
+
+            c = TestClient(app, follow_redirects=False)
+            resp = c.get("/dashboard", headers={"Accept": "text/html"})
+            assert resp.status_code in (302, 303, 307)
+            assert "/login" in resp.headers.get("location", "")
 
     def test_websocket_authorized_with_header(self):
         """Websocket connection succeeds when secret is provided in the headers."""

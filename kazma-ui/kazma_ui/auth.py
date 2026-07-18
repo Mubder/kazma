@@ -52,35 +52,99 @@ def _is_https(request: Request) -> bool:
     )
 
 
-def _is_loopback_client(request: Request) -> bool:
-    """True when the TCP peer is loopback (local single-operator use).
+def _client_host(request: Request) -> str:
+    if request.client is None:
+        return ""
+    return (request.client.host or "").strip().lower()
 
-    Used to decide whether the auth cookie may be auto-issued without an
-    explicit secret presentation. Remote clients must authenticate first.
+
+def _is_loopback_client(request: Request) -> bool:
+    """True when the TCP peer is loopback (local single-operator use)."""
+    host = _client_host(request)
+    return host in ("127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1")
+
+
+def _is_private_lan_client(request: Request) -> bool:
+    """True for RFC1918 / link-local peers (home lab, WSL, Docker bridge)."""
+    host = _client_host(request)
+    if not host:
+        return False
+    try:
+        import ipaddress
+
+        ip = ipaddress.ip_address(host.split("%")[0])  # drop IPv6 zone id
+        return bool(ip.is_private or ip.is_link_local)
+    except ValueError:
+        return False
+
+
+def _trust_lan_enabled() -> bool:
+    """Auto-auth private LAN when secret is set (default on for self-hosted DX).
+
+    Set ``KAZMA_TRUST_LAN=0`` on untrusted networks so only loopback + login
+    receive the session cookie.
     """
-    host = ""
-    if request.client is not None:
-        host = (request.client.host or "").strip().lower()
-    # Honour X-Forwarded-For only when the direct peer is already loopback
-    # (local reverse-proxy); never trust it from the open internet.
-    if host in ("127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1"):
-        return True
-    return False
+    raw = (os.environ.get("KAZMA_TRUST_LAN") or "1").strip().lower()
+    return raw not in ("0", "false", "off", "no")
 
 
 def _should_auto_issue_cookie(request: Request, expected: str) -> bool:
-    """Whether to Set-Cookie the secret without a prior authenticated request.
+    """Whether to Set-Cookie the secret without an explicit login.
 
-    - Loopback clients: yes (local SPA / developer convenience).
-    - Remote clients with a valid X-Kazma-Secret header: yes (session bootstrap).
-    - Otherwise: no — visiting GET / must not grant full API access.
+    - Loopback clients: yes.
+    - Private LAN (when KAZMA_TRUST_LAN=1, default): yes — fixes WSL/LAN UI.
+    - Remote clients with a valid X-Kazma-Secret header: yes.
+    - Public internet clients: no — must use /login.
     """
     if not expected:
         return False
     if _is_loopback_client(request):
         return True
+    if _trust_lan_enabled() and _is_private_lan_client(request):
+        return True
     provided = request.headers.get(SECRET_HEADER, "")
     return bool(provided and verify_secret(provided, expected))
+
+
+def _wants_html_response(request: Request) -> bool:
+    """True when the client expects an HTML document (browser nav / soft-nav)."""
+    if request.headers.get("Kazma-Soft-Nav"):
+        return True
+    accept = (request.headers.get("accept") or "").lower()
+    if "text/html" in accept:
+        return True
+    # Top-level page navigations (not /api/*)
+    if request.method == "GET" and not request.url.path.startswith("/api/"):
+        return True
+    return False
+
+
+def _unauthorized_response(request: Request) -> Response:
+    """401 JSON for APIs; redirect browsers to /login?next=… for HTML pages."""
+    from fastapi.responses import RedirectResponse
+
+    if _wants_html_response(request):
+        nxt = request.url.path
+        if request.url.query:
+            nxt = f"{nxt}?{request.url.query}"
+        # Only same-origin relative next
+        if not nxt.startswith("/") or nxt.startswith("//"):
+            nxt = "/"
+        from urllib.parse import quote
+
+        return RedirectResponse(
+            url=f"/login?next={quote(nxt, safe='/?&=')}",
+            status_code=status.HTTP_303_SEE_OTHER,
+        )
+    response = Response(
+        content='{"detail":"Missing or invalid X-Kazma-Secret header"}',
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        media_type="application/json",
+        headers={"WWW-Authenticate": SECRET_HEADER},
+    )
+    if request.cookies.get(SECRET_COOKIE):
+        response.delete_cookie(SECRET_COOKIE, path="/")
+    return response
 
 #: API path prefixes that require authentication when the secret is set.
 SENSITIVE_PREFIXES: tuple[str, ...] = (
@@ -295,7 +359,7 @@ def create_auth_middleware(
             ):
                 response.set_cookie(
                     key=SECRET_COOKIE, value=expected,
-                    httponly=True, samesite="strict", path="/",
+                    httponly=True, samesite="lax", path="/",
                     secure=_is_https(request),
                 )
             return response
@@ -313,7 +377,7 @@ def create_auth_middleware(
             ):
                 response.set_cookie(
                     key=SECRET_COOKIE, value=expected,
-                    httponly=True, samesite="strict", path="/",
+                    httponly=True, samesite="lax", path="/",
                     secure=_is_https(request),
                 )
             return response
@@ -327,22 +391,14 @@ def create_auth_middleware(
         if not provided:
             provided = request.cookies.get(SECRET_COOKIE, "")
         if not verify_secret(provided, expected):
-            response = Response(
-                content='{"detail":"Missing or invalid X-Kazma-Secret header"}',
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                media_type="application/json",
-                headers={"WWW-Authenticate": SECRET_HEADER},
-            )
-            if request.cookies.get(SECRET_COOKIE):
-                response.delete_cookie(SECRET_COOKIE, path="/")
-            return response
+            return _unauthorized_response(request)
 
         response = await call_next(request)
         # Authenticated request may always refresh the session cookie.
         if not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected:
             response.set_cookie(
                 key=SECRET_COOKIE, value=expected,
-                httponly=True, samesite="strict", path="/",
+                httponly=True, samesite="lax", path="/",  # Lax: works for IP/LAN + OAuth return
                 secure=_is_https(request),
             )
         return response

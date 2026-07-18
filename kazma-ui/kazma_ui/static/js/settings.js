@@ -1668,7 +1668,15 @@ function settingsApp() {
 
         async _fetch(url) {
             try {
-                const resp = await fetch(url);
+                const resp = await fetch(url, { credentials: 'same-origin' });
+                if (resp.status === 401 || resp.status === 403) {
+                    if (!window.__kazmaAuthRedirecting) {
+                        window.__kazmaAuthRedirecting = true;
+                        const next = encodeURIComponent(location.pathname + location.search);
+                        window.location.href = '/login?next=' + next;
+                    }
+                    return null;
+                }
                 if (!resp.ok) return null;
                 return await resp.json();
             } catch (e) {
