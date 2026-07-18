@@ -818,12 +818,12 @@
                 <button type="button" class="btn btn-sm btn-secondary" @click="lastCreatedToken=''">Dismiss</button>
               </div>
             </div>
-            <template x-for="t in apiTokens" :key="t.id">
+            <template x-for="tok in apiTokens" :key="tok.id">
                 <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
-                    <span style="flex:1;font-size:0.9rem" x-text="t.name"></span>
-                    <span style="font-size:0.8rem;color:var(--text-muted);font-family:var(--font-mono)" x-text="(t.token_prefix || '***') + '...'"></span>
-                    <span style="font-size:0.8rem;color:var(--text-muted)" x-text="t.created_at || ''"></span>
-                    <button class="btn btn-danger btn-sm" @click="revokeToken(t.id)">{{ t('settings.revoke') }}</button>
+                    <span style="flex:1;font-size:0.9rem" x-text="tok.name"></span>
+                    <span style="font-size:0.8rem;color:var(--text-muted);font-family:var(--font-mono)" x-text="(tok.token_prefix || '***') + '...'"></span>
+                    <span style="font-size:0.8rem;color:var(--text-muted)" x-text="tok.created_at || ''"></span>
+                    <button type="button" class="btn btn-danger btn-sm" @click="revokeToken(tok.id)" :disabled="!tok.id">{{ t('settings.revoke') }}</button>
                 </div>
             </template>
             <div x-show="apiTokens.length === 0 && !lastCreatedToken" class="empty-state" style="padding:16px">{{ t('settings.no_api_tokens') }}</div>

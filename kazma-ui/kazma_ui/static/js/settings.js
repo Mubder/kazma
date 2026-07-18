@@ -1406,15 +1406,35 @@ function settingsApp() {
         },
 
         async revokeToken(tokenId) {
+            if (!tokenId) {
+                showToast('Missing token id', 'error');
+                return;
+            }
             if (!(await window.kazmaConfirm({
                 title: 'Revoke token',
-                message: 'Revoke this token? This cannot be undone.',
+                message: 'Revoke this token? This cannot be undone. Scripts using it will get 401.',
                 confirmText: 'Revoke',
                 danger: true,
             }))) return;
-            await fetch(`/api/settings/account/tokens/${tokenId}`, { method: 'DELETE' });
-            await this.loadAccount();
-            showToast('Token revoked', 'success');
+            try {
+                const resp = await fetch(
+                    `/api/settings/account/tokens/${encodeURIComponent(tokenId)}`,
+                    { method: 'DELETE' }
+                );
+                if (!resp.ok) {
+                    const err = await resp.json().catch(function() { return {}; });
+                    showToast(err.detail || ('Revoke failed (HTTP ' + resp.status + ')'), 'error');
+                    return;
+                }
+                // Optimistic UI update so the row disappears even if reload is slow.
+                this.apiTokens = (this.apiTokens || []).filter(function(x) {
+                    return String(x.id) !== String(tokenId);
+                });
+                await this.loadAccount();
+                showToast('Token revoked', 'success');
+            } catch (e) {
+                showToast('Revoke failed: ' + e.message, 'error');
+            }
         },
 
         /* ══════════════════════════════════════════════════════════════════

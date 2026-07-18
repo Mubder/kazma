@@ -658,14 +658,22 @@ class SettingsManager:
         return {"status": "ok"}
 
     def get_api_tokens(self) -> list[dict[str, Any]]:
-        """List API tokens."""
+        """List API tokens (metadata only; raw secret is never stored)."""
         tokens = self._cs.get("account.tokens", [])
-        if isinstance(tokens, str):
-            try:
-                tokens = json.loads(tokens)
-            except (json.JSONDecodeError, TypeError):
-                tokens = []
-        return tokens if isinstance(tokens, list) else []
+        # ConfigStore json.dumps on write; older code double-encoded with
+        # json.dumps before set(), so peel nested JSON strings.
+        for _ in range(3):
+            if isinstance(tokens, str):
+                try:
+                    tokens = json.loads(tokens)
+                except (json.JSONDecodeError, TypeError):
+                    tokens = []
+                    break
+            else:
+                break
+        if not isinstance(tokens, list):
+            return []
+        return [t for t in tokens if isinstance(t, dict)]
 
     def create_api_token(self, name: str) -> dict[str, Any]:
         """Generate a new API token."""
@@ -674,7 +682,7 @@ class SettingsManager:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         token_entry = {
             "id": secrets.token_hex(8),
-            "name": name,
+            "name": (name or "unnamed").strip() or "unnamed",
             "token_prefix": token[:16],
             "token_hash": token_hash,
             "created_at": datetime.now(UTC).isoformat(),
@@ -682,14 +690,21 @@ class SettingsManager:
         }
         tokens = self.get_api_tokens()
         tokens.append(token_entry)
-        self._cs.set("account.tokens", json.dumps(tokens), category="account")
+        # Pass a list — ConfigStore already json.dumps; do NOT double-encode.
+        self._cs.set("account.tokens", tokens, category="account")
         return {"status": "ok", "token": token, "id": token_entry["id"]}
 
-    def revoke_api_token(self, token_id: str) -> None:
-        """Revoke an API token."""
+    def revoke_api_token(self, token_id: str) -> bool:
+        """Revoke an API token by id. Returns True if a token was removed."""
+        tid = (token_id or "").strip()
+        if not tid:
+            return False
         tokens = self.get_api_tokens()
-        tokens = [t for t in tokens if t.get("id") != token_id]
-        self._cs.set("account.tokens", json.dumps(tokens), category="account")
+        kept = [t for t in tokens if str(t.get("id", "")) != tid]
+        if len(kept) == len(tokens):
+            return False
+        self._cs.set("account.tokens", kept, category="account")
+        return True
 
     def get_sessions(self) -> list[dict[str, Any]]:
         """List active sessions."""

@@ -288,11 +288,16 @@ def verify_api_token(provided: str) -> bool:
 
         token_hash = hashlib.sha256(provided.encode("utf-8")).hexdigest()
         raw = get_config_store().get("account.tokens", [])
-        if isinstance(raw, str):
-            try:
-                raw = json.loads(raw)
-            except (json.JSONDecodeError, TypeError):
-                raw = []
+        # Peel legacy double-json encoding (create used to json.dumps before set).
+        for _ in range(3):
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    raw = []
+                    break
+            else:
+                break
         if not isinstance(raw, list):
             return False
         now = datetime.now(UTC)
