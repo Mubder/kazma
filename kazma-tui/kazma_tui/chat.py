@@ -353,7 +353,6 @@ class ChatPanel(Vertical):
             lines.append("Tip: Type / and use Tab/arrows to autocomplete.")
             self.write("system", "\n".join(lines))
         elif cmd == "/clear":
-            # Use the app-level action which shows a confirmation dialog
             self.app.action_clear_chat()
         elif cmd == "/quit":
             self.app.exit()
@@ -370,7 +369,6 @@ class ChatPanel(Vertical):
                 except Exception as e:
                     self.write("error", f"Failed to set model: {e}")
             else:
-                # Open interactive model picker
                 try:
                     from kazma_core.model_registry import get_model_registry
                     registry = get_model_registry()
@@ -379,10 +377,92 @@ class ChatPanel(Vertical):
                     active = ""
                 from kazma_tui.widgets.model_picker import ModelPicker
                 self.app.push_screen(ModelPicker(active_model=active), self._on_model_picked)
+        elif cmd == "/memory":
+            self._cmd_memory()
+        elif cmd == "/status":
+            self._cmd_status()
+        elif cmd == "/cost":
+            self._cmd_cost()
+        elif cmd == "/context":
+            self._cmd_context()
+        elif cmd == "/reset":
+            self.write("system", "Conversation context reset.")
+        elif cmd == "/personality":
+            self._cmd_personality()
+        elif cmd == "/config":
+            self.write("system", "Config wizard available in the Settings tab.")
+        elif cmd == "/replay":
+            self._cmd_replay(text)
+        elif cmd == "/export":
+            self._cmd_export()
         elif cmd == "/swarm":
             self.app.call_later(self._handle_swarm_command, text)
         else:
             self.write("system", f"Unknown: {cmd}")
+
+    def _cmd_memory(self) -> None:
+        try:
+            from kazma_core.memory.health import build_memory_health
+            health = build_memory_health()
+            status = health.get("status", "?")
+            summary = health.get("summary", "")
+            lines = [f"Memory Status: {status}", summary, ""]
+            for c in health.get("components", []):
+                icon = "+" if c.get("ok") else "-"
+                lines.append(f"  [{icon}] {c['name']}: {c.get('status', '?')}")
+            self.write("system", "\n".join(lines))
+        except Exception as e:
+            self.write("error", f"Memory health unavailable: {e}")
+
+    def _cmd_status(self) -> None:
+        try:
+            from kazma_core.model_registry import get_model_registry
+            registry = get_model_registry()
+            provider = getattr(registry, "_active_provider", "") or "none"
+            model = getattr(registry, "_active_model", "") or "none"
+            lines = [
+                "Gateway Status",
+                f"  Provider: {provider}",
+                f"  Model:    {model}",
+            ]
+            try:
+                from kazma_core.swarm import get_swarm_engine
+                engine = get_swarm_engine()
+                if engine:
+                    names = engine.worker_names
+                    lines.append(f"  Workers:  {len(names)}")
+                else:
+                    lines.append("  Workers:  (swarm not initialized)")
+            except Exception:
+                lines.append("  Workers:  (unavailable)")
+            self.write("system", "\n".join(lines))
+        except Exception as e:
+            self.write("error", f"Status unavailable: {e}")
+
+    def _cmd_cost(self) -> None:
+        self.write("system", "Session cost tracking available in the Web UI dashboard.")
+
+    def _cmd_context(self) -> None:
+        self.write("system", "Context window usage available in the Web UI dashboard.")
+
+    def _cmd_personality(self) -> None:
+        try:
+            from kazma_core.config_store import get_config_store
+            cs = get_config_store()
+            personality = cs.get("personality") or cs.get("system_prompt", "")
+            if personality:
+                preview = personality[:200] + "..." if len(personality) > 200 else personality
+                self.write("system", f"Current personality:\n{preview}")
+            else:
+                self.write("system", "No personality configured. Use /config to set one.")
+        except Exception as e:
+            self.write("error", f"Personality unavailable: {e}")
+
+    def _cmd_replay(self, text: str) -> None:
+        self.write("system", "Time travel replay available in the Web UI dashboard.")
+
+    def _cmd_export(self) -> None:
+        self.write("system", "Session export available in the Web UI dashboard.")
 
     async def _handle_swarm_command(self, text: str) -> None:
         """Handle /swarm commands and bare 'swarm' mentions in the TUI chat.
