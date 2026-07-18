@@ -89,6 +89,7 @@ class ChatPanel(Vertical):
         self._ac_matches: list[tuple[str, str]] = []
         self._ac_index: int = 0
         self._model_cache: list[str] = []
+        self._ac_suppress: bool = False
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
@@ -100,6 +101,8 @@ class ChatPanel(Vertical):
     def on_input_changed(self, event: Input.Changed) -> None:
         """Show autocomplete suggestions when the user types /."""
         if event.input.id != "chat-input":
+            return
+        if self._ac_suppress:
             return
         val = event.value
         ac = self.query_one("#autocomplete", ListView)
@@ -201,13 +204,24 @@ class ChatPanel(Vertical):
         # Check if we're in model set mode
         parts = inp.value.split(None, 2)
         if len(parts) >= 2 and parts[0].lower() in ("/model", "/models") and parts[1].lower() == "set":
-            inp.value = f"/model set {match_text}"
+            new_val = f"/model set {match_text}"
         else:
-            inp.value = match_text + " "
-        # Place cursor at end, clear any selection
-        end = len(inp.value)
-        inp.selection = (end, end)
+            new_val = match_text + " "
+
+        # Suppress on_input_changed to prevent autocomplete from re-opening
+        self._ac_suppress = True
+        inp.value = new_val
+        # _watch_value does self.selection = self.selection which selects all.
+        # Defer cursor reset to after the watcher runs.
+        pos = len(new_val)
+        self.call_later(self._fix_ac_after_set, inp, pos)
         inp.focus()
+
+    def _fix_ac_after_set(self, inp: Input, pos: int) -> None:
+        """Reset cursor and re-enable autocomplete after programmatic set."""
+        inp.cursor_position = pos
+        inp.selection = (pos, pos)
+        self._ac_suppress = False
 
     # ── Message display ────────────────────────────────────────────
 
