@@ -1,6 +1,9 @@
 /**
- * Settings.js — Alpine.js state management for the 12-tab Kazma Settings panel.
+ * Settings.js — Alpine.js state management for the Kazma Settings panel.
+ * Tabs: providers_connectors, agent, connectors, mcp, skills, appearance,
+ * shortcuts, account, tools, system, packages, import.
  * Each tab section is a separate method/object for clean separation.
+ * Deep-link: /settings?tab=packages
  */
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -186,6 +189,17 @@ function settingsApp() {
                 console.error('[Settings] Init failed:', e);
             }
             this.loading = false;
+
+            // Deep-link: /settings?tab=packages (or any valid tab id)
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const requested = params.get('tab');
+                if (requested && requested !== this.tab) {
+                    await this.onTabChange(requested);
+                }
+            } catch (e) {
+                /* ignore bad query strings */
+            }
         },
 
         /* ══════════════════════════════════════════════════════════════════
@@ -1600,9 +1614,21 @@ function settingsApp() {
 
         /**
          * Tab change handler — lazy-load data when switching tabs.
+         * Keeps ?tab= in the URL for deep-linking / refresh.
          */
         async onTabChange(newTab) {
             this.tab = newTab;
+            try {
+                const url = new URL(window.location.href);
+                if (newTab && newTab !== 'providers_connectors') {
+                    url.searchParams.set('tab', newTab);
+                } else {
+                    url.searchParams.delete('tab');
+                }
+                history.replaceState(null, '', url.pathname + url.search + url.hash);
+            } catch (e) {
+                /* ignore URL sync errors */
+            }
             switch (newTab) {
                 case 'providers': await this.loadProviders(); break;
                 case 'providers_connectors':

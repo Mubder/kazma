@@ -6,7 +6,7 @@
 {% block content %}
 <div x-data="settingsApp()" x-init="init()">
 
-    <!-- ═══ Settings Navigation (11 tabs) ═══ -->
+    <!-- ═══ Settings Navigation ═══ -->
     <nav class="settings-nav">
         <button class="settings-tab" :class="{ active: tab === 'providers_connectors' }" @click="onTabChange('providers_connectors')">{{ t('settings.tab_providers_connectors') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">{{ t('settings.tab_agent') }}</button>

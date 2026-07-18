@@ -44,7 +44,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "nav.swarm": {"en": "Swarm", "ar": "السرب"},
     "nav.agents": {"en": "Agents", "ar": "الوكلاء"},
     "nav.settings": {"en": "Settings", "ar": "الإعدادات"},
-    "nav.packages": {"en": "Packages", "ar": "الحزم"},
 
     # ── Header ────────────────────────────────────────────────────────
     "header.new_chat": {"en": "New Chat", "ar": "محادثة جديدة"},

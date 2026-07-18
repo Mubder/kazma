@@ -244,6 +244,11 @@ def register_direct_routes(self: Any) -> None:
             from fastapi import HTTPException
             raise HTTPException(status_code=500, detail=str(e))
 
+    @self.app.get("/packages")
+    async def _packages_redirect() -> RedirectResponse:
+        """Legacy /packages page → Settings Packages tab."""
+        return RedirectResponse("/settings?tab=packages", status_code=307)
+
     @self.app.get("/api/system/packages")
     async def _get_packages():
         """List installed Python packages with metadata and extras status."""
