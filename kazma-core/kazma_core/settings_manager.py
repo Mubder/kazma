@@ -593,9 +593,7 @@ class SettingsManager:
 
     def reset_shortcuts(self) -> None:
         """Reset shortcuts to defaults."""
-        for action in DEFAULT_SHORTCUTS:
-            self._cs.delete(f"shortcuts.{action}")
-        self._cs.set("shortcuts", json.dumps(DEFAULT_SHORTCUTS), category="shortcuts")
+        self._cs.set("shortcuts", DEFAULT_SHORTCUTS, category="shortcuts")
 
     def detect_conflicts(self, shortcuts: dict[str, str] | None = None) -> list[dict[str, str]]:
         """Find conflicting key bindings."""

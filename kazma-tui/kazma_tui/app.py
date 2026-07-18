@@ -564,7 +564,7 @@ class KazmaTUI(App[None]):
         try:
             header = self.query_one(Header)
             if lang == "ar":
-                header.title_comp.add_class("header-title")
+                header.add_class("header-title")
         except Exception as exc:
             logger.debug("Failed to update header localization: %s", exc)
 

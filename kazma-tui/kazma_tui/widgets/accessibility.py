@@ -333,14 +333,14 @@ class HighContrastMode:
             for css_path, css_text, tie_breaker, scope in self.app._get_default_css():
                 ss.add_source(
                     css_text,
-                    path=css_path,
+                    read_from=css_path,
                     tie_breaker=tie_breaker,
                     scope=scope,
                 )
         except Exception as exc:
             logger.debug("CSS source copy failed: %s", exc)
         # Add high contrast overrides
-        ss.add_source(self.HIGH_CONTRAST_CSS, path="<high-contrast>")
+        ss.add_source(self.HIGH_CONTRAST_CSS, read_from="<high-contrast>")
         ss.apply(self.app)
         self.app.stylesheet = ss
         try:
@@ -364,7 +364,7 @@ class HighContrastMode:
             try:
                 from kazma_tui.themes.theme_manager import ThemeManager
                 tm = ThemeManager()
-                tm.apply_theme("kazma-dark")
+                tm.apply_theme(self.app, "kazma-dark")
             except Exception:
                 logger.debug("[HighContrast] ThemeManager fallback failed", exc_info=True)
     

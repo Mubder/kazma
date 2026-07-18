@@ -318,104 +318,111 @@ class ChatPanel(Vertical):
         # Determine if this is a /swarm command or a bare mention
         is_slash = text.lower().startswith("/swarm")
 
-        if is_slash:
-            parts = text.split(None, 2)  # ["/swarm", sub, rest]
-            if len(parts) < 2:
-                self.write("system",
-                    "Swarm Commands:\n"
-                    "  /swarm <task> — auto-route to best worker\n"
-                    "  /swarm <worker> <task> — dispatch to one worker\n"
-                    "  /swarm broadcast <task> — all workers\n"
-                    "  /swarm status — show swarm status\n"
-                    "  /swarm list — list workers")
-                return
-            sub = parts[1].lower()
-            task_body = parts[2] if len(parts) > 2 else ""
-        else:
-            # Bare mention: strip "swarm" keyword and treat the rest as a task
-            sub = ""
-            # Remove "swarm" (and optional colon) from the start or middle
-            task_body = re.sub(r'\bswarm\b\s*:?\s*', '', text, count=1, flags=re.IGNORECASE).strip()
-            if not task_body:
-                self.write("system",
-                    "Swarm Commands:\n"
-                    "  /swarm <task> — auto-route to best worker\n"
-                    "  /swarm <worker> <task> — dispatch to one worker\n"
-                    "  /swarm broadcast <task> — all workers\n"
-                    "  /swarm status — show swarm status\n"
-                    "  /swarm list — list workers\n"
-                    "  Or just say: swarm <task>")
-                return
-
         try:
-            from kazma_core.swarm import get_swarm_engine
-        except Exception:
-            self.write("error", "Swarm engine not available.")
-            return
+            if is_slash:
+                parts = text.split(None, 2)  # ["/swarm", sub, rest]
+                if len(parts) < 2:
+                    self.write("system",
+                        "Swarm Commands:\n"
+                        "  /swarm <task> — auto-route to best worker\n"
+                        "  /swarm <worker> <task> — dispatch to one worker\n"
+                        "  /swarm broadcast <task> — all workers\n"
+                        "  /swarm status — show swarm status\n"
+                        "  /swarm list — list workers")
+                    return
+                sub = parts[1].lower()
+                task_body = parts[2] if len(parts) > 2 else ""
+            else:
+                # Bare mention: strip "swarm" keyword and treat the rest as a task
+                sub = ""
+                # Remove "swarm" (and optional colon) from the start or middle
+                task_body = re.sub(r'\bswarm\b\s*:?\s*', '', text, count=1, flags=re.IGNORECASE).strip()
+                if not task_body:
+                    self.write("system",
+                        "Swarm Commands:\n"
+                        "  /swarm <task> — auto-route to best worker\n"
+                        "  /swarm <worker> <task> — dispatch to one worker\n"
+                        "  /swarm broadcast <task> — all workers\n"
+                        "  /swarm status — show swarm status\n"
+                        "  /swarm list — list workers\n"
+                        "  Or just say: swarm <task>")
+                    return
 
-        engine = get_swarm_engine()
-        if engine is None:
-            self.write("error", "Swarm engine not initialized.")
-            return
-
-        # sub and task_body are already set above (in the is_slash / else block)
-
-        # ── Known subcommands (only for /swarm prefix) ──────────────
-        if is_slash:
-            # /swarm status
-            if sub == "status":
-                names = engine.worker_names
-                lines = [f"Swarm Status ({len(names)} workers):"]
-                for name in names:
-                    w = engine.get_worker(name)
-                    model = getattr(w, "model", "") or "?"
-                    lines.append(f"  {name} [{model}]")
-                if not names:
-                    lines.append("  (no workers registered)")
-                self.write("system", "\n".join(lines))
+            try:
+                from kazma_core.swarm import get_swarm_engine
+            except Exception:
+                self.write("error", "Swarm engine not available.")
                 return
 
-            # /swarm list
-            if sub == "list":
-                names = engine.worker_names
-                if not names:
-                    self.write("system", "No workers registered. Add workers via the Web UI Swarm panel.")
-                else:
-                    lines = [f"Workers ({len(names)}):"]
+            engine = get_swarm_engine()
+            if engine is None:
+                self.write("error", "Swarm engine not initialized.")
+                return
+
+            # sub and task_body are already set above (in the is_slash / else block)
+
+            # ── Known subcommands (only for /swarm prefix) ──────────────
+            if is_slash:
+                # /swarm status
+                if sub == "status":
+                    names = engine.worker_names
+                    lines = [f"Swarm Status ({len(names)} workers):"]
                     for name in names:
                         w = engine.get_worker(name)
-                        role = getattr(w, "role", "") or ""
-                        model = getattr(w, "model", "") or ""
-                        lines.append(f"  {name}" + (f" ({role})" if role else "") + (f" [{model}]" if model else ""))
+                        model = getattr(w, "model", "") or "?"
+                        lines.append(f"  {name} [{model}]")
+                    if not names:
+                        lines.append("  (no workers registered)")
                     self.write("system", "\n".join(lines))
-                return
-
-            # /swarm broadcast <task>
-            if sub == "broadcast":
-                if not task_body:
-                    self.write("error", "Usage: /swarm broadcast <task>")
                     return
-                await self._dispatch_swarm(task_body, engine, broadcast=True)
-                return
 
-            # /swarm <worker> <task>
-            if sub in [n.lower() for n in engine.worker_names]:
-                if not task_body:
-                    self.write("error", f"Usage: /swarm {sub} <task>")
+                # /swarm list
+                if sub == "list":
+                    names = engine.worker_names
+                    if not names:
+                        self.write("system", "No workers registered. Add workers via the Web UI Swarm panel.")
+                    else:
+                        lines = [f"Workers ({len(names)}):"]
+                        for name in names:
+                            w = engine.get_worker(name)
+                            role = getattr(w, "role", "") or ""
+                            model = getattr(w, "model", "") or ""
+                            lines.append(f"  {name}" + (f" ({role})" if role else "") + (f" [{model}]" if model else ""))
+                        self.write("system", "\n".join(lines))
                     return
-                await self._dispatch_swarm(task_body, engine, worker_name=sub)
+
+                # /swarm broadcast <task>
+                if sub == "broadcast":
+                    if not task_body:
+                        self.write("error", "Usage: /swarm broadcast <task>")
+                        return
+                    await self._dispatch_swarm(task_body, engine, broadcast=True)
+                    return
+
+                # /swarm <worker> <task>
+                if sub in [n.lower() for n in engine.worker_names]:
+                    if not task_body:
+                        self.write("error", f"Usage: /swarm {sub} <task>")
+                        return
+                    await self._dispatch_swarm(task_body, engine, worker_name=sub)
+                    return
+
+                # /swarm <task> — auto-route
+                task = text[len("/swarm "):].strip()
+                if not task:
+                    self.write("error", "Usage: /swarm <task>")
+                    return
+                await self._dispatch_swarm(task, engine)
                 return
 
-            # /swarm <task> — auto-route
-            task = text[len("/swarm "):].strip()
-            if not task:
-                self.write("error", "Usage: /swarm <task>")
-                return
-            await self._dispatch_swarm(task, engine)
-            return
-
-        # Bare mention: dispatch the extracted task body
-        await self._dispatch_swarm(task_body, engine)
+            # Bare mention: dispatch the extracted task body
+            await self._dispatch_swarm(task_body, engine)
+        finally:
+            self._busy = False
+            try:
+                self.query_one("#chat-input", Input).disabled = False
+            except Exception:
+                pass
 
     async def _dispatch_swarm(
         self,
