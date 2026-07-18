@@ -89,6 +89,7 @@ class ChatPanel(Vertical):
         self._ac_matches: list[tuple[str, str]] = []
         self._ac_index: int = 0
         self._model_cache: list[str] = []
+        self._ac_suppress: bool = False
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
@@ -100,6 +101,8 @@ class ChatPanel(Vertical):
     def on_input_changed(self, event: Input.Changed) -> None:
         """Show autocomplete suggestions when the user types /."""
         if event.input.id != "chat-input":
+            return
+        if self._ac_suppress:
             return
         val = event.value
         ac = self.query_one("#autocomplete", ListView)
@@ -205,15 +208,22 @@ class ChatPanel(Vertical):
         else:
             new_val = match_text + " "
 
-        # Bypass Textual's value watcher which selects all text.
-        # Set _value directly, update cursor, refresh display.
-        inp._value = new_val
-        inp._initial_value = False
+        # Set value, then immediately override the selection that _watch_value
+        # stretches. Selection is applied synchronously in the reactive setter.
+        self._ac_suppress = True
+        inp.value = new_val
         pos = len(new_val)
-        inp.cursor_position = pos
         inp.selection = (pos, pos)
-        inp.refresh()
+        inp.cursor_position = pos
         inp.focus()
+        # Second pass: timer fires after all reactive watchers settle
+        self.set_timer(0.05, lambda: self._clear_ac_selection(inp, pos))
+
+    def _clear_ac_selection(self, inp: Input, pos: int) -> None:
+        """Final selection clear after all reactive processing settles."""
+        inp.selection = (pos, pos)
+        inp.cursor_position = pos
+        self._ac_suppress = False
 
     # ── Message display ────────────────────────────────────────────
 
