@@ -818,27 +818,47 @@
                 <button type="button" class="btn btn-sm btn-secondary" @click="lastCreatedToken=''">Dismiss</button>
               </div>
             </div>
-            <template x-for="tok in apiTokens" :key="tok.id">
-                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
-                    <span style="flex:1;font-size:0.9rem" x-text="tok.name"></span>
-                    <span style="font-size:0.8rem;color:var(--text-muted);font-family:var(--font-mono)" x-text="(tok.token_prefix || '***') + '...'"></span>
-                    <span style="font-size:0.8rem;color:var(--text-muted)" x-text="tok.created_at || ''"></span>
+            <!-- Column-aligned token table (not free-form flex rows) -->
+            <div class="account-list-table account-tokens-table" x-show="apiTokens.length > 0">
+              <div class="account-list-head">
+                <span>{{ t('settings.token_name') }}</span>
+                <span>Prefix</span>
+                <span>Created</span>
+                <span></span>
+              </div>
+              <template x-for="tok in apiTokens" :key="tok.id">
+                <div class="account-list-row">
+                  <span class="account-list-name" x-text="tok.name" :title="tok.name"></span>
+                  <span class="account-list-mono" x-text="(tok.token_prefix || '***') + '…'"></span>
+                  <span class="account-list-meta" x-text="tok.created_at ? String(tok.created_at).slice(0, 19).replace('T',' ') : ''"></span>
+                  <span class="account-list-actions">
                     <button type="button" class="btn btn-danger btn-sm" @click="revokeToken(tok.id)" :disabled="!tok.id">{{ t('settings.revoke') }}</button>
+                  </span>
                 </div>
-            </template>
+              </template>
+            </div>
             <div x-show="apiTokens.length === 0 && !lastCreatedToken" class="empty-state" style="padding:16px">{{ t('settings.no_api_tokens') }}</div>
         </div>
 
         <!-- Sessions -->
         <div class="settings-group">
             <h3>{{ t('settings.active_sessions') }}</h3>
-            <template x-for="s in sessions" :key="s.id">
-                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
-                    <span style="flex:1;font-size:0.9rem" x-text="s.platform || t('settings.web')"></span>
-                    <span style="font-size:0.8rem;color:var(--text-muted)" x-text="s.last_active || ''"></span>
+            <div class="account-list-table account-sessions-table" x-show="sessions.length > 0">
+              <div class="account-list-head account-sessions-head">
+                <span>Platform</span>
+                <span>Last active</span>
+                <span></span>
+              </div>
+              <template x-for="s in sessions" :key="s.id || s.platform">
+                <div class="account-list-row account-sessions-row">
+                  <span class="account-list-name" x-text="s.platform || t('settings.web')"></span>
+                  <span class="account-list-meta" x-text="s.last_active || ''"></span>
+                  <span class="account-list-actions">
                     <span class="badge badge-stdio" x-show="s.current">{{ t('settings.current') }}</span>
+                  </span>
                 </div>
-            </template>
+              </template>
+            </div>
             <div x-show="sessions.length === 0" class="empty-state" style="padding:16px">{{ t('settings.no_active_sessions') }}</div>
         </div>
     </div>

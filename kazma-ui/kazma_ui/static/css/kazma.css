@@ -693,6 +693,84 @@ button { cursor: pointer; font-family: inherit; }
 .provider-card { transition: border-color 0.15s; }
 .provider-card:hover { border-color: var(--border-strong) !important; }
 
+/* Account token / session lists — fixed columns so rows stay aligned */
+.account-list-table {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-deep);
+}
+.account-list-head,
+.account-list-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 1.2fr) minmax(110px, 1fr) minmax(140px, 1.2fr) 88px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+}
+.account-sessions-head,
+.account-sessions-row {
+  grid-template-columns: minmax(100px, 1.2fr) minmax(140px, 1.4fr) 88px;
+}
+.account-list-head {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.account-list-row {
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border-subtle);
+  min-height: 44px;
+}
+.account-list-row:last-child { border-bottom: none; }
+.account-list-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-list-mono {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-list-meta {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-list-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 640px) {
+  .account-list-head,
+  .account-list-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 10px;
+  }
+  .account-list-head span:nth-child(3),
+  .account-list-row .account-list-meta { display: none; }
+  .account-list-actions { justify-content: flex-start; }
+  .account-sessions-head,
+  .account-sessions-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 /* ── 7. Buttons ─────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;
