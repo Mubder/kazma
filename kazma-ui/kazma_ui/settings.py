@@ -198,12 +198,6 @@ class SettingsRouterBuilder:
             config_store.set(setting.key, setting.value, category=setting.category)
             return {"status": "ok"}
 
-        @router.delete("/api/settings/{key:path}")
-        async def api_delete_setting(key: str) -> dict[str, str]:
-            """Delete a setting (reverts to YAML default)."""
-            config_store.delete(key)
-            return {"status": "ok"}
-
         @router.put("/api/settings/agent")
         async def api_update_agent(req: AgentConfigUpdate) -> dict[str, str]:
             """Update agent configuration."""
@@ -316,11 +310,10 @@ class SettingsRouterBuilder:
         @router.delete("/api/settings/account/tokens/{token_id}")
         async def api_revoke_token(token_id: str) -> dict[str, Any]:
             """Revoke an API token."""
-            print(f"[TOKENDIAG] DELETE handler token_id={token_id}", flush=True)
             removed = _get_sm().revoke_api_token(token_id)
-            print(f"[TOKENDIAG] DELETE handler removed={removed}", flush=True)
             if not removed:
                 from fastapi import HTTPException
+
                 raise HTTPException(status_code=404, detail=f"Token '{token_id}' not found")
             return {"status": "ok", "removed": True, "id": token_id}
 
@@ -584,6 +577,15 @@ class SettingsRouterBuilder:
         async def api_test_mcp(name: str) -> dict[str, Any]:
             """Test an MCP server connection."""
             return await _get_sm().test_mcp_server(name)
+
+        # Catch-all DELETE must come AFTER all specific routes above,
+        # otherwise it matches paths like /api/settings/account/tokens/{id}
+        # before the specific handler can fire.
+        @router.delete("/api/settings/{key:path}")
+        async def api_delete_setting(key: str) -> dict[str, str]:
+            """Delete a setting (reverts to YAML default)."""
+            config_store.delete(key)
+            return {"status": "ok"}
 
     def build(self) -> APIRouter:
         self._build_general_routes()

@@ -659,7 +659,6 @@ class SettingsManager:
 
     def get_api_tokens(self) -> list[dict[str, Any]]:
         """List API tokens (metadata only; raw secret is never stored)."""
-        print(f"[TOKENDIAG] get cs_id={id(self._cs)} db={getattr(self._cs, '_db_path', '?')}", flush=True)
         tokens = self._cs.get("account.tokens", [])
         # ConfigStore json.dumps on write; older code double-encoded with
         # json.dumps before set(), so peel nested JSON strings.
@@ -700,16 +699,11 @@ class SettingsManager:
         tid = (token_id or "").strip()
         if not tid:
             return False
-        print(f"[TOKENDIAG] revoke id={tid} cs_id={id(self._cs)} db={getattr(self._cs, '_db_path', '?')}", flush=True)
         tokens = self.get_api_tokens()
-        print(f"[TOKENDIAG] revoke before={len(tokens)} ids={[t.get('id') for t in tokens]}", flush=True)
         kept = [t for t in tokens if str(t.get("id", "")) != tid]
         if len(kept) == len(tokens):
-            print(f"[TOKENDIAG] revoke no-match id={tid}", flush=True)
             return False
         self._cs.set("account.tokens", kept, category="account")
-        after = self.get_api_tokens()
-        print(f"[TOKENDIAG] revoke after={len(after)} ids={[t.get('id') for t in after]}", flush=True)
         return True
 
     def get_sessions(self) -> list[dict[str, Any]]:
