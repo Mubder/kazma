@@ -1328,11 +1328,12 @@ function settingsApp() {
 
         async loadAccount() {
             const [tokens, sessions] = await Promise.all([
-                this._fetch('/api/settings/account/tokens'),
-                this._fetch('/api/settings/account/sessions'),
+                this._fetch('/api/settings/account/tokens?_=' + Date.now()),
+                this._fetch('/api/settings/account/sessions?_=' + Date.now()),
             ]);
-            if (Array.isArray(tokens)) this.apiTokens = tokens;
-            if (Array.isArray(sessions)) this.sessions = sessions;
+            // Always replace arrays so Alpine x-for sees a new reference.
+            this.apiTokens = Array.isArray(tokens) ? tokens.slice() : [];
+            this.sessions = Array.isArray(sessions) ? sessions.slice() : [];
         },
 
         async changePassword() {
@@ -1417,20 +1418,34 @@ function settingsApp() {
                 danger: true,
             }))) return;
             try {
+                const id = String(tokenId);
+                // Clear the one-time green “copy me” panel if it was this token.
+                const doomed = (this.apiTokens || []).find(function(x) {
+                    return String(x.id) === id;
+                });
+                if (doomed && this.lastCreatedToken && doomed.token_prefix
+                    && this.lastCreatedToken.indexOf(doomed.token_prefix) === 0) {
+                    this.lastCreatedToken = '';
+                }
+
                 const resp = await fetch(
-                    `/api/settings/account/tokens/${encodeURIComponent(tokenId)}`,
-                    { method: 'DELETE' }
+                    `/api/settings/account/tokens/${encodeURIComponent(id)}?_=${Date.now()}`,
+                    { method: 'DELETE', credentials: 'same-origin', cache: 'no-store' }
                 );
                 if (!resp.ok) {
                     const err = await resp.json().catch(function() { return {}; });
-                    showToast(err.detail || ('Revoke failed (HTTP ' + resp.status + ')'), 'error');
+                    const detail = err.detail || err.error || ('HTTP ' + resp.status);
+                    showToast('Revoke failed: ' + detail, 'error');
+                    await this.loadAccount();
                     return;
                 }
-                // Optimistic UI update so the row disappears even if reload is slow.
+                // Force Alpine to drop the row immediately (new array ref).
                 this.apiTokens = (this.apiTokens || []).filter(function(x) {
-                    return String(x.id) !== String(tokenId);
+                    return String(x.id) !== id;
                 });
-                await this.loadAccount();
+                // Re-fetch with cache bust so a stale GET cannot resurrect the row.
+                const tokens = await this._fetch('/api/settings/account/tokens?_=' + Date.now());
+                this.apiTokens = Array.isArray(tokens) ? tokens.slice() : [];
                 showToast('Token revoked', 'success');
             } catch (e) {
                 showToast('Revoke failed: ' + e.message, 'error');

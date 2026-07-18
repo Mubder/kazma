@@ -436,8 +436,32 @@
     } catch(e) { window.kazmaAlert({ title: 'Error', message: I18N.errorClearing, variant: 'btn-danger' }); }
   };
 
-  document.getElementById('clear-all-btn').addEventListener('click', window._clearAllSessions);
-  _loadSessions();
+  // Prefer dashboard.js handlers (survives soft-nav); fall back to inline.
+  var clearAllBtn = document.getElementById('clear-all-btn');
+  if (clearAllBtn && !window.KazmaDashboard) {
+    clearAllBtn.addEventListener('click', window._clearAllSessions);
+  }
+  // Always run once; dashboard.js boot also calls initSessionManagement.
+  // Guard against missing nodes when soft-nav partially swaps the DOM.
+  try {
+    if (window.KazmaDashboard && typeof window.KazmaDashboard.loadSessions === 'function') {
+      window.KazmaDashboard.loadSessions();
+    } else {
+      _loadSessions();
+    }
+  } catch (e) {
+    try { _loadSessions(); } catch (e2) { /* ignore */ }
+  }
+  // Fail-safe: never leave skeleton forever (first soft-nav race).
+  setTimeout(function() {
+    var loadingEl = document.getElementById('sessions-loading');
+    var emptyEl = document.getElementById('sessions-empty');
+    var tableEl = document.getElementById('sessions-table');
+    if (loadingEl && loadingEl.style.display !== 'none' && tableEl && tableEl.style.display === 'none') {
+      loadingEl.style.display = 'none';
+      if (emptyEl) emptyEl.style.display = 'block';
+    }
+  }, 3000);
 
   // Memory & Governance Polling
   const memoryBadge = document.getElementById('memory-status-badge');

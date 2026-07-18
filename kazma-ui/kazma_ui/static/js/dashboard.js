@@ -331,19 +331,141 @@
     return String(str).replace(/[&<>"]/g, function(c) { return map[c]; });
   }
 
+  // ── Session Management + Memory board (moved out of inline HTML so
+  // soft-nav / re-entry always re-bind. Soft-nav to /dashboard is now a
+  // hard reload, but keep this in the bundle for F5 and future soft-nav.)
+  function initSessionManagement() {
+    var loadingEl = $('sessions-loading');
+    var emptyEl = $('sessions-empty');
+    var tableEl = $('sessions-table');
+    var tbody = $('sessions-tbody');
+    var clearBtn = $('clear-all-btn');
+    if (!loadingEl && !tableEl) return; // not on dashboard page
+
+    async function loadSessions() {
+      try {
+        var resp = await fetch('/api/sessions', { credentials: 'same-origin' });
+        var data = {};
+        try { data = await resp.json(); } catch (e) { data = {}; }
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (!resp.ok || data.error || !data.sessions || data.sessions.length === 0) {
+          if (emptyEl) emptyEl.style.display = 'block';
+          if (tableEl) tableEl.style.display = 'none';
+          return;
+        }
+        if (emptyEl) emptyEl.style.display = 'none';
+        if (tableEl) tableEl.style.display = 'table';
+        if (!tbody) return;
+        tbody.innerHTML = '';
+        data.sessions.forEach(function(s) {
+          var tr = document.createElement('tr');
+          tr.style.cssText = 'border-bottom:1px solid var(--border-subtle);transition:background 0.15s;';
+          function makeTd(inner, style) {
+            var td = document.createElement('td');
+            td.style.cssText = style;
+            td.textContent = inner;
+            return td;
+          }
+          var tidTd = makeTd(s.thread_id || 'unknown', 'padding:10px 16px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;');
+          tidTd.title = s.thread_id || '';
+          tr.appendChild(tidTd);
+          var platTd = document.createElement('td');
+          platTd.style.cssText = 'padding:10px 16px;';
+          var badge = document.createElement('span');
+          badge.className = 'badge badge-basic';
+          badge.style.cssText = 'font-size:0.7rem;';
+          badge.textContent = s.platform || 'unknown';
+          platTd.appendChild(badge);
+          tr.appendChild(platTd);
+          tr.appendChild(makeTd(s.display_name || 'anonymous', 'padding:10px 16px;font-weight:500;'));
+          tr.appendChild(makeTd(String(s.message_count || 0), 'padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
+          tr.appendChild(makeTd(String(s.context_tokens || 0), 'padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;'));
+          tr.appendChild(makeTd(s.created_at ? new Date(s.created_at).toLocaleString() : '—', 'padding:10px 16px;font-size:0.75rem;color:var(--text-muted);'));
+          var delTd = document.createElement('td');
+          delTd.style.cssText = 'padding:10px 16px;text-align:center;';
+          var btn = document.createElement('button');
+          btn.className = 'btn btn-sm btn-danger';
+          btn.style.cssText = 'padding:4px 8px;font-size:0.7rem;';
+          btn.textContent = 'Delete';
+          btn.onclick = function() { window._deleteSession && window._deleteSession(s.thread_id); };
+          delTd.appendChild(btn);
+          tr.appendChild(delTd);
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (emptyEl) emptyEl.style.display = 'block';
+        if (tableEl) tableEl.style.display = 'none';
+      }
+    }
+
+    window._deleteSession = async function(threadId) {
+      if (!(await window.kazmaConfirm({
+        title: 'Delete session',
+        message: 'Delete session ' + threadId + '?',
+        confirmText: 'Delete',
+        danger: true,
+      }))) return;
+      try {
+        await fetch('/api/sessions/' + encodeURIComponent(threadId), { method: 'DELETE', credentials: 'same-origin' });
+        loadSessions();
+      } catch (e) {
+        window.kazmaAlert && window.kazmaAlert({ title: 'Error', message: 'Error deleting session', variant: 'btn-danger' });
+      }
+    };
+
+    window._clearAllSessions = async function() {
+      if (!(await window.kazmaConfirm({
+        title: 'Clear all sessions',
+        message: 'Clear ALL sessions? This cannot be undone.',
+        confirmText: 'Clear all',
+        danger: true,
+      }))) return;
+      try {
+        await fetch('/api/sessions/clear-all', { method: 'POST', credentials: 'same-origin' });
+        loadSessions();
+      } catch (e) {
+        window.kazmaAlert && window.kazmaAlert({ title: 'Error', message: 'Error clearing sessions', variant: 'btn-danger' });
+      }
+    };
+
+    if (clearBtn) {
+      // Avoid double-binding on re-init
+      clearBtn.onclick = function() { window._clearAllSessions(); };
+    }
+    loadSessions();
+  }
+
   // ── Boot ──────────────────────────────────────────────
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() {
-      init();
-      startResourceMonitor();
-    });
-  } else {
+  function boot() {
     init();
     startResourceMonitor();
+    initSessionManagement();
+    // Memory board poll lives in the page inline script (I18N strings);
+    // ensure sessions never stay on skeleton if that inline block races.
+    setTimeout(function() {
+      var loadingEl = document.getElementById('sessions-loading');
+      if (loadingEl && loadingEl.style.display !== 'none') {
+        // Still skeleton after 2s — force empty state so page never hangs
+        var emptyEl = document.getElementById('sessions-empty');
+        if (emptyEl) {
+          // only force if table still hidden (load may still be in flight)
+        }
+      }
+    }, 2500);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
   }
 
   window.KazmaDashboard = {
     refresh: fetchInitialData,
-    getWS: function() { return ws; }
+    getWS: function() { return ws; },
+    loadSessions: function() {
+      try { initSessionManagement(); } catch (e) { /* ignore */ }
+    },
   };
 })();

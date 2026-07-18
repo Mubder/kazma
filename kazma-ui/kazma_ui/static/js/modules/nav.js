@@ -13,11 +13,15 @@ export function initSoftNav() {
     const SOFT_NAV_ENABLED = true;
 
     // Always full document navigation (enter OR leave).
+    // /dashboard uses large inline init (sessions + memory board); soft-nav
+    // reinjects dashboard.js but historically skipped that inline block →
+    // Session Management stuck on skeleton until F5.
     const HARD_RELOAD_ALWAYS = new Set([
         '/chat',
         '/ide',
         '/swarm',
         '/settings',
+        '/dashboard',
         '/agents',
         '/skills',
         '/mcp',
