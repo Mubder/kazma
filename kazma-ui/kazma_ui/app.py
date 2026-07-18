@@ -239,6 +239,28 @@ class KazmaAppBuilder:
                     vector_memory_collection,
                     vector_memory_model,
                 )
+                # Pre-warm embedder + 4-layer adapter at boot so the first
+                # chat turn is not blocked on HuggingFace download / Chroma
+                # open / sqlite-vec load. Failures are non-fatal.
+                try:
+                    from kazma_core.swarm.memory.embedder import get_embedder
+                    from kazma_core.swarm.memory.adapter import get_adapter
+
+                    emb = get_embedder()
+                    if emb is not None:
+                        vec = emb.encode("kazma memory warmup")
+                        logger.info(
+                            "[VectorMemory] Embedder ready (%s, dim=%s, sample=%d)",
+                            type(emb).__name__,
+                            getattr(emb, "dim", "?"),
+                            len(vec or []),
+                        )
+                    adapter = get_adapter()
+                    if adapter is not None:
+                        health = adapter.health()
+                        logger.info("[VectorMemory] Adapter layers: %s", health)
+                except Exception as warm_exc:
+                    logger.warning("[VectorMemory] Pre-warm skipped: %s", warm_exc)
             except Exception as e:
                 logger.warning("[VectorMemory] Not available: %s", e)
                 logger.info(

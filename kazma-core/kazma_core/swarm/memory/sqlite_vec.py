@@ -68,31 +68,57 @@ class SQLiteVectorStore:
     # ── sqlite-vec detection ────────────────────────────────────────────
 
     def _check_vec_available(self) -> bool:
-        """Check if sqlite-vec extension can be loaded.  Caches result."""
+        """Check if sqlite-vec extension can be loaded.  Caches result.
+
+        Prefers the official ``sqlite-vec`` PyPI package (``sqlite_vec.load``),
+        which ships platform wheels. Bare ``load_extension("vec0")`` only works
+        when a system-wide vec0 binary is on the SQLite extension path — that
+        path was failing silently even when ``pip install sqlite-vec`` was done.
+        """
         if self._vec_available is not None:
             return self._vec_available
         conn = self._ensure_conn()
         if conn is None:
             self._vec_available = False
             return False
+
+        # 1) Already loaded into this connection.
         try:
             conn.execute("SELECT vec_version()")
             self._vec_available = True
-            logger.info("[SQLiteVector] sqlite-vec extension loaded")
+            logger.info("[SQLiteVector] sqlite-vec already active")
             return True
         except Exception:
-            try:
-                # Try loading the extension explicitly
-                conn.enable_load_extension(True)
-                conn.load_extension("vec0")
-                conn.execute("SELECT vec_version()")
-                self._vec_available = True
-                logger.info("[SQLiteVector] sqlite-vec loaded via load_extension")
-                return True
-            except Exception:
-                self._vec_available = False
-                logger.warning("[SQLiteVector] sqlite-vec not available — local vector disabled")
-                return False
+            pass
+
+        # 2) Official Python package — correct production path.
+        try:
+            import sqlite_vec
+
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.execute("SELECT vec_version()")
+            self._vec_available = True
+            logger.info("[SQLiteVector] sqlite-vec loaded via sqlite_vec.load()")
+            return True
+        except Exception as exc:
+            logger.debug("[SQLiteVector] sqlite_vec.load failed: %s", exc)
+
+        # 3) Last resort: system extension name.
+        try:
+            conn.enable_load_extension(True)
+            conn.load_extension("vec0")
+            conn.execute("SELECT vec_version()")
+            self._vec_available = True
+            logger.info("[SQLiteVector] sqlite-vec loaded via load_extension(vec0)")
+            return True
+        except Exception:
+            self._vec_available = False
+            logger.warning(
+                "[SQLiteVector] sqlite-vec not available — L4 disabled. "
+                "Install with: pip install sqlite-vec  (or pip install -e '.[rag]')"
+            )
+            return False
 
     @property
     def available(self) -> bool:
@@ -201,6 +227,7 @@ class SQLiteVectorStore:
         if conn is None:
             return False
         table = self._table_name(worker_name)
+        docs_table = f"{table}_docs"
         try:
             # vec0 uses an implicit integer rowid; doc_id lives in an
             # auxiliary column.  Delete-then-insert gives upsert-by-doc_id
@@ -211,11 +238,48 @@ class SQLiteVectorStore:
                 f"INSERT INTO {table} (doc_id, embedding) VALUES (?, ?)",
                 (doc_id, emb_bytes),
             )
+            # Side table so L4 hits can return document text (vec0 only
+            # stores the embedding + aux id).
+            conn.execute(
+                f"""
+                CREATE TABLE IF NOT EXISTS {docs_table} (
+                    doc_id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                f"INSERT OR REPLACE INTO {docs_table} (doc_id, content) VALUES (?, ?)",
+                (doc_id, text[:4000]),
+            )
             conn.commit()
             return True
         except Exception as exc:
             logger.warning("[SQLiteVector] Index failed for %s/%s: %s", worker_name, doc_id, exc)
             return False
+
+    def get_texts(self, worker_name: str, ids: list[str]) -> dict[str, str]:
+        """Fetch stored document text for the given doc_ids (side table)."""
+        if not ids:
+            return {}
+        conn = self._ensure_conn()
+        if conn is None:
+            return {}
+        docs_table = f"{self._table_name(worker_name)}_docs"
+        out: dict[str, str] = {}
+        try:
+            placeholders = ",".join("?" * len(ids))
+            rows = conn.execute(
+                f"SELECT doc_id, content FROM {docs_table} WHERE doc_id IN ({placeholders})",
+                list(ids),
+            ).fetchall()
+            for rid, content in rows:
+                if rid and content:
+                    out[str(rid)] = str(content)
+        except Exception:
+            # Table may not exist yet for this worker.
+            return {}
+        return out
 
     def query(
         self,

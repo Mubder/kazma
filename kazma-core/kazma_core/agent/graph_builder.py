@@ -719,7 +719,8 @@ async def respond_node(state: SupervisorState) -> dict[str, Any]:
     """Respond node — finalizes the turn.
 
     Extracts the last assistant message as the response and increments
-    the iteration counter.
+    the iteration counter. Also schedules automatic long-term memory
+    writes (durable facts / turn snapshots) so recall is not tool-only.
     """
     messages = state.get("messages", [])
     iteration = state.get("iteration", 0) + 1
@@ -729,6 +730,15 @@ async def respond_node(state: SupervisorState) -> dict[str, Any]:
         iteration,
         len(messages),
     )
+
+    # Auto-store durable user facts (and optional turn snapshots) so
+    # per-turn RAG has something to retrieve without requiring memory_store.
+    try:
+        from kazma_core.memory.auto_store import schedule_auto_store
+
+        schedule_auto_store(messages)
+    except Exception:
+        logger.debug("[Respond] auto_store schedule failed", exc_info=True)
 
     return {
         "messages": messages,

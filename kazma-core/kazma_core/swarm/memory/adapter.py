@@ -208,7 +208,18 @@ class UnifiedMemoryAdapter:
                 logger.debug("Worker registry lookup failed: %s", exc)
             for worker in workers:
                 results = self._l4.query(worker, text, limit=limit)
-                all_results.extend((r[0], r[1], "", "L4:sqlite_vec", {"worker": worker}) for r in results)
+                if not results:
+                    continue
+                texts: dict[str, str] = {}
+                if hasattr(self._l4, "get_texts"):
+                    try:
+                        texts = self._l4.get_texts(worker, [r[0] for r in results])
+                    except Exception:
+                        texts = {}
+                all_results.extend(
+                    (r[0], r[1], texts.get(r[0], ""), "L4:sqlite_vec", {"worker": worker})
+                    for r in results
+                )
             return all_results[:limit]
         except Exception as exc:
             logger.warning("[Adapter] L4 query failed: %s", exc)
