@@ -204,7 +204,9 @@ class ChatPanel(Vertical):
             inp.value = f"/model set {match_text}"
         else:
             inp.value = match_text + " "
-        inp.cursor_position = len(inp.value)
+        # Place cursor at end, clear any selection
+        end = len(inp.value)
+        inp.selection = (end, end)
         inp.focus()
 
     # ── Message display ────────────────────────────────────────────
