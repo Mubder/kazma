@@ -245,6 +245,22 @@ class KazmaTUI(App[None]):
         except Exception as e:
             logger.warning("[TUI] SwarmEngine init failed: %s", e)
 
+        # ── VectorMemory (RAG) ─────────────────────────────────────
+        try:
+            import os
+            _demo = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+            if not _demo:
+                from kazma_core.agent.tool_registry import set_vector_memory
+                from kazma_core.memory.vector_store import VectorMemory
+
+                vec_collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
+                vec_model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
+                vm = VectorMemory(collection_name=vec_collection, model_name=vec_model)
+                set_vector_memory(vm)
+                logger.info("[TUI] VectorMemory initialized (collection=%s)", vec_collection)
+        except Exception as e:
+            logger.debug("[TUI] VectorMemory init skipped: %s", e)
+
         # ── Update status bar with active model info ──────────────────
         try:
             from kazma_core.model_registry import get_model_registry
