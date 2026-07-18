@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Kazma serve script - starts the WebUI server."""
 
+import os
 import subprocess
 import sys
 import time
@@ -11,10 +12,20 @@ python_exe = sys.executable
 # Can override the app factory via environment variable
 app_factory = "kazma_ui.app:create_app"
 
+# Bind to all interfaces by default so the server is reachable from the
+# Windows host (via localhost/127.0.0.1) as well as inside WSL. Override with
+# KAZMA_HOST if you need to restrict to a single interface.
+host = os.environ.get("KAZMA_HOST", "0.0.0.0")
+
+# Set a default secret when binding to 0.0.0.0 so app.py doesn't warn about an
+# unsecured public bind. Override with your own strong value if desired.
+if host == "0.0.0.0" and not os.environ.get("KAZMA_SECRET"):
+    os.environ["KAZMA_SECRET"] = "kazma-local-dev-secret"
+
 try:
     # Start the server
     proc = subprocess.Popen(
-        [python_exe, "-m", "uvicorn", app_factory, "--factory", "--host", "127.0.0.1", "--port", "9090"],
+        [python_exe, "-m", "uvicorn", app_factory, "--factory", "--host", host, "--port", "9090"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )

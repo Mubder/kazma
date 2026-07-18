@@ -107,9 +107,12 @@ def _run_serve(port: int) -> None:
     app = create_app()
     import os as _os_cli
     import socket as _socket
-    host = "127.0.0.1"
-    if _os_cli.environ.get("KAZMA_SECRET"):
-        host = "0.0.0.0"
+    # Bind to all interfaces by default so the server is reachable from the
+    # Windows host (via localhost/127.0.0.1) as well as inside WSL. Override
+    # with KAZMA_HOST to restrict to a single interface.
+    host = _os_cli.environ.get("KAZMA_HOST", "0.0.0.0")
+    if host == "0.0.0.0" and not _os_cli.environ.get("KAZMA_SECRET"):
+        _os_cli.environ["KAZMA_SECRET"] = "kazma-local-dev-secret"
 
     # Print the browseable URL — 0.0.0.0 is a bind address, not browsable.
     # Always show 127.0.0.1 (works everywhere), plus the LAN IP if binding to 0.0.0.0.
