@@ -393,11 +393,22 @@ class SettingsManager:
 
     async def test_connector(self, platform_name: str) -> dict[str, Any]:
         """Test a connector connection."""
-        token = self._cs.get(f"connectors.{platform_name}.token", "")
+        import os
+
+        token = str(self._cs.get(f"connectors.{platform_name}.token", "") or "").strip()
+        if not token and platform_name == "telegram":
+            token = (
+                os.environ.get("TELEGRAM_BOT_TOKEN", "")
+                or os.environ.get("TELEGRAM_TOKEN", "")
+            ).strip()
         if not token:
             return {"success": False, "error": f"No token configured for {platform_name}"}
 
         if platform_name == "telegram":
+            # Keep in sync with providers._normalize_telegram_bot_token
+            token = token.strip().strip("\"'")
+            if token.lower().startswith("bot") and len(token) > 3 and token[3:4].isdigit():
+                token = token[3:]
             return await self._test_http_connector(
                 f"https://api.telegram.org/bot{token}/getMe",
                 headers=None,

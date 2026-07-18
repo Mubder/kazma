@@ -8,6 +8,8 @@ CRUD, and test-before-save semantics.
 from __future__ import annotations
 
 import logging
+import os
+import re
 import time
 from typing import Any
 
@@ -32,6 +34,26 @@ _CONNECTOR_PLATFORMS = ("telegram", "discord", "slack", "email", "webhook")
 
 # Keys that are considered secrets and must be masked before leaving the backend.
 _SECRET_KEY_HINTS = ("token", "secret", "password", "key", "api_key")
+
+# BotFather tokens look like ``123456789:AAH…`` (digits, colon, secret).
+_TELEGRAM_TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]+$")
+
+
+def _normalize_telegram_bot_token(raw: str) -> str:
+    """Strip whitespace/quotes and an accidental ``bot`` prefix from a BotFather token.
+
+    Users often paste values from docs that already include the ``bot`` URL
+    prefix (``bot123:AA…``). Building ``/bot{token}/getMe`` then becomes
+    ``/botbot123…/getMe``, which Telegram answers with HTTP 404 Not Found.
+    Leading/trailing spaces produce the same 404.
+    """
+    token = (raw or "").strip().strip("\"'")
+    if token.lower().startswith("bot") and not token.lower().startswith("bot:"):
+        # ``bot123:AA…`` → ``123:AA…``; leave bare secrets alone.
+        maybe = token[3:]
+        if maybe and (maybe[0].isdigit() or maybe.startswith(":")):
+            token = maybe.lstrip(":")
+    return token.strip()
 
 
 def _mask_secret(value: str) -> str:
@@ -376,6 +398,9 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         token = req.token
         if _is_masked_placeholder(token) and existing_config.get("token"):
             token = str(existing_config["token"])
+        elif name == "telegram" and token and not _is_masked_placeholder(token):
+            # Normalize on save so a later Test never builds /botbot…/getMe.
+            token = _normalize_telegram_bot_token(token)
 
         if token:
             config_store.set(f"connectors.{name}.token", token, category="connectors")
@@ -407,18 +432,65 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         """Run a platform-specific health check for a connector."""
         name = name.strip()
         config = _load_connector_config(config_store, name)
-        token = str(config.get("token", ""))
+        token = str(config.get("token", "")).strip()
+        # Match gateway boot: fall back to env when ConfigStore has no token.
+        if not token and name == "telegram":
+            token = (
+                os.environ.get("TELEGRAM_BOT_TOKEN", "")
+                or os.environ.get("TELEGRAM_TOKEN", "")
+            ).strip()
+        if not token and name == "discord":
+            token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+        if not token and name == "slack":
+            token = os.environ.get("SLACK_BOT_TOKEN", "").strip()
         if not token:
             return {"success": False, "error": f"No token configured for {name}"}
 
         if name == "telegram":
+            token = _normalize_telegram_bot_token(token)
+            if not _TELEGRAM_TOKEN_RE.match(token):
+                return {
+                    "success": False,
+                    "error": (
+                        "Token format looks wrong. Paste only the BotFather token "
+                        "(digits:secret), without a leading 'bot' prefix or spaces. "
+                        "Example shape: 123456789:AAH…"
+                    ),
+                }
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
                     if resp.status_code == 200:
                         data = resp.json()
                         return {"success": True, "bot_name": data.get("result", {}).get("username", "")}
-                    return {"success": False, "error": f"HTTP {resp.status_code}"}
+                    # Surface Telegram's description — 404 almost always means a
+                    # malformed token/URL; 401 means wrong/revoked secret.
+                    detail = ""
+                    try:
+                        detail = str(resp.json().get("description", "") or "")
+                    except Exception:
+                        detail = (resp.text or "")[:120]
+                    if resp.status_code == 404:
+                        return {
+                            "success": False,
+                            "error": (
+                                f"HTTP 404 from Telegram ({detail or 'Not Found'}). "
+                                "Token is malformed — re-copy from @BotFather without "
+                                "spaces or a 'bot' prefix."
+                            ),
+                        }
+                    if resp.status_code == 401:
+                        return {
+                            "success": False,
+                            "error": (
+                                f"HTTP 401 from Telegram ({detail or 'Unauthorized'}). "
+                                "Token is invalid or revoked — generate a new one in @BotFather."
+                            ),
+                        }
+                    return {
+                        "success": False,
+                        "error": f"HTTP {resp.status_code}" + (f": {detail}" if detail else ""),
+                    }
             except Exception as exc:
                 logger.debug("Telegram connector test failed: %s", exc)
                 return {"success": False, "error": "Connection test failed"}
@@ -439,7 +511,6 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 return {"success": False, "error": "Connection test failed"}
 
         if name == "slack":
-            app_token = str(config.get("app_token", ""))
             try:
                 async with httpx.AsyncClient(timeout=10.0) as client:
                     resp = await client.post(
