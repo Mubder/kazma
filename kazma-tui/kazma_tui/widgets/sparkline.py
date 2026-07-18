@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from textual.widget import Widget
 
+__all__ = ["Sparkline"]
+
 
 class Sparkline(Widget):
     """Inline mini chart for metrics trend visualization.

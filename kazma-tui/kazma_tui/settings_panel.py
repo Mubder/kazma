@@ -15,6 +15,8 @@ from textual.widgets import SelectionList, Static, Button, Label
 from kazma_tui.themes.theme_manager import ThemeManager
 from kazma_tui.widgets.confirm_dialog import ConfirmDialog
 
+__all__ = ["SettingsPanel"]
+
 logger = logging.getLogger(__name__)
 
 # Toggling this off removes the human-approval gate for danger tools

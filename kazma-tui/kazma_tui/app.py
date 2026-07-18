@@ -42,6 +42,8 @@ from kazma_tui.widgets.toast import Toast
 from kazma_tui.widgets.tutorial import TutorialScreen
 from kazma_tui.widgets.hitl_modal import HitlApprovalScreen
 
+__all__ = ["KazmaTUI", "main"]
+
 logger = logging.getLogger(__name__)
 
 

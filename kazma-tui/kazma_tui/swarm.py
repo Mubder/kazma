@@ -9,6 +9,8 @@ from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, RichLog, Static, TabbedContent, TabPane, Tree
 
+__all__ = ["ActiveTasksLog", "SwarmPanel", "SwarmTasksTable", "WorkerTable", "WorkerTree"]
+
 logger = logging.getLogger(__name__)
 
 _HEARTBEAT_STALE_SECONDS = 60

@@ -3,6 +3,8 @@
 Provides reusable custom widgets for the Kazma terminal dashboard.
 """
 
+from __future__ import annotations
+
 from kazma_tui.widgets.log_stream import LogStream
 from kazma_tui.widgets.toast import Toast
 from kazma_tui.widgets.confirm_dialog import ConfirmDialog

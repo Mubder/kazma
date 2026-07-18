@@ -12,6 +12,8 @@ from textual.widgets import Button, Static
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["HitlApprovalScreen"]
+
 
 class HitlApprovalScreen(ModalScreen[bool]):
     """High-impact color-coded security gate dialog for approving dangerous tool actions.

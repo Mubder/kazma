@@ -9,6 +9,8 @@ from textual.reactive import reactive
 from textual.widget import Widget
 from textual.widgets import Static
 
+__all__ = ["KazmaHeader"]
+
 _FALLBACK_TEXT = "No config"
 
 

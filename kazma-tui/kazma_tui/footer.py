@@ -5,6 +5,8 @@ from __future__ import annotations
 from textual.app import ComposeResult
 from textual.widgets import Footer, Static
 
+__all__ = ["CHAT_SHORTCUTS", "KazmaFooter"]
+
 # Shortcut definitions for display
 CHAT_SHORTCUTS: list[tuple[str, str]] = [
     ("Ctrl+Q", "Quit"),

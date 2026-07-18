@@ -12,6 +12,8 @@ from textual.containers import Horizontal, Vertical
 from textual.widget import Widget
 from textual.widgets import DataTable, Input, RichLog, Static
 
+__all__ = ["TracesPanel"]
+
 logger = logging.getLogger(__name__)
 
 

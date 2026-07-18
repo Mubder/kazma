@@ -12,6 +12,8 @@ from textual.widgets import Input, Static
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["CommandConsole", "from_kazma_tui_toast"]
+
 
 class CommandConsole(ModalScreen[None]):
     """Vim/Tmux-style command line interface overlay at the bottom of the screen."""

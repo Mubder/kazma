@@ -14,6 +14,10 @@ Color sources from kazma-ui/kazma_ui/static/css/kazma.css:
   border:       rgba(255,255,255,0.1)
 """
 
+from __future__ import annotations
+
+__all__ = ["KAZMA_THEME"]
+
 KAZMA_THEME = """
 /* ═══════════════════════════════════════════════════════════════════════
    Kazma TUI Theme — muted, professional palette

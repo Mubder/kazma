@@ -12,6 +12,8 @@ from textual.binding import Binding
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["CommandPalette", "FuzzyMatcher"]
+
 
 class FuzzyMatcher:
     """Simple fuzzy matching algorithm for command search."""

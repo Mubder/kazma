@@ -24,6 +24,8 @@ from textual.widgets import Static
 
 from kazma_tui.widgets.sparkline import Sparkline
 
+__all__ = ["MetricCard", "MetricsDashboard"]
+
 logger = logging.getLogger(__name__)
 
 _NA = "N/A"

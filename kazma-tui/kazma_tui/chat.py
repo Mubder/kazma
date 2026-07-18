@@ -10,6 +10,8 @@ from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Input, ProgressBar, RichLog, Static
 
+__all__ = ["ChatPanel", "ROLE_HEX"]
+
 logger = logging.getLogger(__name__)
 
 ROLE_HEX: dict[str, str] = {
