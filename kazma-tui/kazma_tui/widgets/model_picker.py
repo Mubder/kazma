@@ -168,6 +168,28 @@ class ModelPicker(ModalScreen[str | None]):
     def on_input_changed(self, event: Input.Changed) -> None:
         self._filter(event.value)
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Enter in the search box = select the highlighted model."""
+        self.action_select()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Click or Enter on a list item = select that model."""
+        try:
+            child = event.item
+            if child is None:
+                return
+            # Only select model items, not provider headers
+            static = child.query_one(Static)
+            classes = static.classes
+            if "model-provider" in classes:
+                return  # Ignore clicks on provider headers
+            raw = str(static.render()).strip()
+            model_name = raw.lstrip("* ").strip()
+            if model_name:
+                self.dismiss(model_name)
+        except Exception as exc:
+            logger.debug("Model picker click select failed: %s", exc)
+
     def action_cursor_up(self) -> None:
         try:
             self.query_one("#model-list", ListView).action_cursor_up()
@@ -184,18 +206,46 @@ class ModelPicker(ModalScreen[str | None]):
         try:
             lst = self.query_one("#model-list", ListView)
             child = lst.highlighted_child
+
+            # If nothing highlighted, pick the first model in the filtered list
             if child is None:
+                for item_type, name, _ in self._filtered:
+                    if item_type == "model":
+                        self.dismiss(name)
+                        return
                 return
-            # The child is a ListItem containing a Static.
-            # Extract the text and strip markers/padding.
+
+            # Extract model name from the highlighted ListItem's Static
             static = child.query_one(Static)
+            classes = static.classes
+            # Skip provider headers
+            if "model-provider" in classes:
+                # Find the next model after this provider in filtered list
+                found_provider = False
+                for item_type, name, _ in self._filtered:
+                    if item_type == "provider" and name in str(static.render()):
+                        found_provider = True
+                    elif found_provider and item_type == "model":
+                        self.dismiss(name)
+                        return
+                # Fallback: first model
+                for item_type, name, _ in self._filtered:
+                    if item_type == "model":
+                        self.dismiss(name)
+                        return
+                return
+
             raw = str(static.render()).strip()
-            # Remove the active marker "* " if present
             model_name = raw.lstrip("* ").strip()
             if model_name:
                 self.dismiss(model_name)
         except Exception as exc:
             logger.debug("Model picker select failed: %s", exc)
+            # Fallback: try first model
+            for item_type, name, _ in self._filtered:
+                if item_type == "model":
+                    self.dismiss(name)
+                    return
             self.dismiss(None)
 
     def action_dismiss(self) -> None:
