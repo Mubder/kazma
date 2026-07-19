@@ -229,14 +229,20 @@ class SettingsRouterBuilder:
         @router.get("/api/settings/voice")
         async def api_get_voice_settings() -> dict[str, Any]:
             """Get voice subsystem settings."""
+            def _get_val(key: str, default: str) -> str:
+                v = config_store.get(key)
+                if v is None or str(v).strip() == "" or str(v).strip().lower() == "none":
+                    return default
+                return str(v)
+
             return {
                 "enabled": bool(config_store.get("voice.enabled", False)),
-                "stt_provider": str(config_store.get("voice.stt_provider", "openai")),
-                "stt_model": str(config_store.get("voice.stt_model", "default")),
-                "tts_provider": str(config_store.get("voice.tts_provider", "edgetts")),
-                "tts_voice": str(config_store.get("voice.tts_voice", "default")),
-                "stt_language": str(config_store.get("voice.stt_language", "auto")),
-                "tts_output_format": str(config_store.get("voice.tts_output_format", "mp3")),
+                "stt_provider": _get_val("voice.stt_provider", "openai"),
+                "stt_model": _get_val("voice.stt_model", "default"),
+                "tts_provider": _get_val("voice.tts_provider", "edgetts"),
+                "tts_voice": _get_val("voice.tts_voice", "default"),
+                "stt_language": _get_val("voice.stt_language", "auto"),
+                "tts_output_format": _get_val("voice.tts_output_format", "mp3"),
             }
 
         @router.put("/api/settings/voice")
