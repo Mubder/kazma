@@ -1245,7 +1245,7 @@
                             <input type="text" class="form-control" list="stt-model-suggestions" x-model="voiceForm.stt_model" placeholder="default" @change="saveVoiceSettings()">
                             <datalist id="stt-model-suggestions">
                                 <template x-for="model in sttModels" :key="model">
-                                    <option :value="model" x-text="model"></option>
+                                    <option :value="model"></option>
                                 </template>
                             </datalist>
                             <p class="form-help" style="margin-top:4px;">Select or type a specific transcription model (e.g. whisper-1 or nvidia/whisper-large-v3).</p>
