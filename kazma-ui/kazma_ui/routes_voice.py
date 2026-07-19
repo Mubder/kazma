@@ -30,6 +30,9 @@ async def speech_to_text(
     Returns ``{"text": "..."}`` on success.
     """
     from kazma_core.voice.stt import transcribe
+    import traceback
+    import os
+    from pathlib import Path
 
     audio_bytes = await file.read()
     if not audio_bytes:
@@ -42,15 +45,44 @@ async def speech_to_text(
     elif file.content_type:
         ext = file.content_type.split("/")[-1].split(";")[0]
 
-    text = await transcribe(
-        audio_bytes,
-        provider=provider,
-        language=language,
-        audio_format=ext,
-    )
-    if text is None:
-        raise HTTPException(status_code=502, detail=f"STT provider '{provider}' failed")
-    return {"text": text, "provider": provider}
+    try:
+        text = await transcribe(
+            audio_bytes,
+            provider=provider,
+            language=language,
+            audio_format=ext,
+        )
+        if text is None:
+            log_dir = Path("kazma-data")
+            log_dir.mkdir(exist_ok=True)
+            with open(log_dir / "stt_error.log", "a", encoding="utf-8") as f:
+                f.write(f"\n--- STT FAILURE IN ENDPOINT: provider={provider}, format={ext}, bytes={len(audio_bytes)}, filename={file.filename}, content_type={file.content_type} ---\n")
+                f.write(f"OPENAI_API_KEY set in env: {bool(os.environ.get('OPENAI_API_KEY'))}\n")
+                f.write(f"GROQ_API_KEY set in env: {bool(os.environ.get('GROQ_API_KEY'))}\n")
+                f.write(f"NVIDIA_API_KEY set in env: {bool(os.environ.get('NVIDIA_API_KEY'))}\n")
+                from kazma_core.config_store import get_config_store
+                cs = get_config_store()
+                f.write(f"voice.stt_provider in DB: {cs.get('voice.stt_provider')}\n")
+                f.write(f"voice.stt_model in DB: {cs.get('voice.stt_model')}\n")
+                f.write("transcribe returned None (check API keys or logs above)\n")
+            raise HTTPException(status_code=502, detail=f"STT provider '{provider}' failed")
+        return {"text": text, "provider": provider}
+    except Exception as e:
+        if not isinstance(e, HTTPException):
+            log_dir = Path("kazma-data")
+            log_dir.mkdir(exist_ok=True)
+            with open(log_dir / "stt_error.log", "a", encoding="utf-8") as f:
+                f.write(f"\n--- STT EXCEPTION IN ENDPOINT: provider={provider}, format={ext}, bytes={len(audio_bytes)}, filename={file.filename}, content_type={file.content_type} ---\n")
+                f.write(f"OPENAI_API_KEY set in env: {bool(os.environ.get('OPENAI_API_KEY'))}\n")
+                f.write(f"GROQ_API_KEY set in env: {bool(os.environ.get('GROQ_API_KEY'))}\n")
+                f.write(f"NVIDIA_API_KEY set in env: {bool(os.environ.get('NVIDIA_API_KEY'))}\n")
+                from kazma_core.config_store import get_config_store
+                cs = get_config_store()
+                f.write(f"voice.stt_provider in DB: {cs.get('voice.stt_provider')}\n")
+                f.write(f"voice.stt_model in DB: {cs.get('voice.stt_model')}\n")
+                f.write(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=str(e))
+        raise e
 
 
 @router.post("/tts")
