@@ -1233,11 +1233,22 @@
                         
                         <div class="form-group">
                             <label>STT Provider</label>
-                            <select class="form-select" x-model="voiceForm.stt_provider" @change="saveVoiceSettings()">
+                            <select class="form-select" x-model="voiceForm.stt_provider" @change="saveVoiceSettings(); loadSttModels()">
                                 <template x-for="provider in voiceProviders.stt" :key="provider">
                                     <option :value="provider" x-text="provider"></option>
                                 </template>
                             </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>STT Model</label>
+                            <input type="text" class="form-control" list="stt-model-suggestions" x-model="voiceForm.stt_model" placeholder="default" @change="saveVoiceSettings()">
+                            <datalist id="stt-model-suggestions">
+                                <template x-for="model in sttModels" :key="model">
+                                    <option :value="model" x-text="model"></option>
+                                </template>
+                            </datalist>
+                            <p class="form-help" style="margin-top:4px;">Select or type a specific transcription model (e.g. whisper-1 or nvidia/whisper-large-v3).</p>
                         </div>
 
                         <div class="form-group">

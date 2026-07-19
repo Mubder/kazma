@@ -50,6 +50,22 @@ def _get_provider_api_key_from_db(provider_name: str) -> str | None:
     return None
 
 
+def _get_configured_stt_model(provider_name: str) -> str | None:
+    """Get the custom STT model configured in the database, if any."""
+    try:
+        from kazma_core.config_store import get_config_store
+        cs = get_config_store()
+        stored_provider = cs.get("voice.stt_provider")
+        if stored_provider == provider_name:
+            model = cs.get("voice.stt_model")
+            if model and model != "default":
+                return str(model)
+    except Exception:
+        pass
+    return None
+
+
+
 
 # ── Provider protocol ──────────────────────────────────────────────────
 
@@ -183,7 +199,7 @@ def _openai_stt() -> STTProvider:
                     headers={"Authorization": f"Bearer {key}"},
                     files={"file": (f"audio.{ext}", audio_bytes, mime)},
                     data={
-                        "model": "whisper-1",
+                        "model": _get_configured_stt_model("openai") or "whisper-1",
                         **({} if language == "auto" else {"language": language}),
                     },
                 )
@@ -229,7 +245,7 @@ def _groq_stt() -> STTProvider:
                     headers={"Authorization": f"Bearer {key}"},
                     files={"file": (f"audio.{ext}", audio_bytes, mime)},
                     data={
-                        "model": "whisper-large-v3",
+                        "model": _get_configured_stt_model("groq") or "whisper-large-v3",
                         **({} if language == "auto" else {"language": language}),
                     },
                 )
@@ -348,7 +364,7 @@ def _nvidia_stt() -> STTProvider:
                     },
                     files={"file": (f"audio.{ext}", audio_bytes, mime)},
                     data={
-                        "model": "nvidia/whisper-large-v3",
+                        "model": _get_configured_stt_model("nvidia") or "nvidia/whisper-large-v3",
                         **({} if language == "auto" else {"language": language}),
                     },
                 )
@@ -393,7 +409,7 @@ def _faster_whisper_stt() -> STTProvider:
         import tempfile
         from pathlib import Path
 
-        model_size = os.environ.get("WHISPER_MODEL", "base")
+        model_size = _get_configured_stt_model("faster-whisper") or os.environ.get("WHISPER_MODEL", "base")
         try:
             model = WhisperModel(model_size, device="auto", compute_type="float16")
             # Write audio to temp file (faster-whisper needs a file path)

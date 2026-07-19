@@ -652,12 +652,14 @@ class TestSettingsAPI:
         data = resp.json()
         assert "enabled" in data
         assert "stt_provider" in data
+        assert "stt_model" in data
         assert "tts_provider" in data
 
         # 2. PUT updates
         payload = {
             "enabled": True,
             "stt_provider": "groq",
+            "stt_model": "distil-whisper-large-v3-en",
             "tts_provider": "kokoro",
             "tts_voice": "en-US-1",
             "stt_language": "en",
@@ -673,6 +675,7 @@ class TestSettingsAPI:
         data = resp.json()
         assert data["enabled"] is True
         assert data["stt_provider"] == "groq"
+        assert data["stt_model"] == "distil-whisper-large-v3-en"
         assert data["tts_provider"] == "kokoro"
         assert data["tts_voice"] == "en-US-1"
         assert data["stt_language"] == "en"
@@ -709,6 +712,27 @@ class TestSettingsAPI:
         data = resp.json()
         assert len(data) > 0
         assert "default" in data
+
+    def test_voice_stt_models_get(self, client):
+        """GET /api/voice/stt-models returns transcription models for a provider."""
+        # 1. Test OpenAI
+        resp = client.get("/api/voice/stt-models?provider=openai")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "whisper-1" in data
+
+        # 2. Test Groq
+        resp = client.get("/api/voice/stt-models?provider=groq")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "whisper-large-v3" in data
+
+        # 3. Test Nvidia
+        resp = client.get("/api/voice/stt-models?provider=nvidia")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "nvidia/whisper-large-v3" in data
+
 
 
 

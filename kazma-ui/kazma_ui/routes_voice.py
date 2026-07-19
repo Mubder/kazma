@@ -134,3 +134,19 @@ async def list_voices(provider: str = "edgetts") -> list[str]:
             ]
     return ["default"]
 
+
+@router.get("/stt-models")
+async def list_stt_models(provider: str = "openai") -> list[str]:
+    """Get available STT model IDs for a specific STT provider."""
+    p_lower = provider.strip().lower()
+    if p_lower == "openai":
+        return ["default", "whisper-1"]
+    elif p_lower == "groq":
+        return ["default", "whisper-large-v3", "distil-whisper-large-v3-en"]
+    elif p_lower == "nvidia":
+        return ["default", "nvidia/whisper-large-v3"]
+    elif p_lower == "faster-whisper":
+        return ["default", "tiny", "base", "small", "medium", "large-v3"]
+    return ["default"]
+
+

@@ -232,6 +232,7 @@ class SettingsRouterBuilder:
             return {
                 "enabled": bool(config_store.get("voice.enabled", False)),
                 "stt_provider": str(config_store.get("voice.stt_provider", "openai")),
+                "stt_model": str(config_store.get("voice.stt_model", "default")),
                 "tts_provider": str(config_store.get("voice.tts_provider", "edgetts")),
                 "tts_voice": str(config_store.get("voice.tts_voice", "default")),
                 "stt_language": str(config_store.get("voice.stt_language", "auto")),
@@ -243,6 +244,7 @@ class SettingsRouterBuilder:
             """Save voice subsystem settings."""
             config_store.set("voice.enabled", req.enabled, category="voice")
             config_store.set("voice.stt_provider", req.stt_provider, category="voice")
+            config_store.set("voice.stt_model", req.stt_model, category="voice")
             config_store.set("voice.tts_provider", req.tts_provider, category="voice")
             config_store.set("voice.tts_voice", req.tts_voice, category="voice")
             config_store.set("voice.stt_language", req.stt_language, category="voice")
@@ -288,6 +290,20 @@ class SettingsRouterBuilder:
                         "fr-FR-DeniseNeural",
                         "ar-EG-SalmaNeural",
                     ]
+            return ["default"]
+
+        @router.get("/api/voice/stt-models")
+        async def api_get_voice_stt_models(provider: str = "openai") -> list[str]:
+            """Get available STT model IDs for a specific STT provider."""
+            p_lower = provider.strip().lower()
+            if p_lower == "openai":
+                return ["default", "whisper-1"]
+            elif p_lower == "groq":
+                return ["default", "whisper-large-v3", "distil-whisper-large-v3-en"]
+            elif p_lower == "nvidia":
+                return ["default", "nvidia/whisper-large-v3"]
+            elif p_lower == "faster-whisper":
+                return ["default", "tiny", "base", "small", "medium", "large-v3"]
             return ["default"]
 
 

@@ -140,9 +140,10 @@ function settingsApp() {
         availableSections: ['model', 'agent', 'connectors', 'mcp', 'skills', 'appearance', 'shortcuts', 'tools', 'safety'],
 
         // ── Voice Tab ──
-        voiceForm: { enabled: false, stt_provider: 'openai', tts_provider: 'edgetts', tts_voice: 'default', stt_language: 'auto', tts_output_format: 'mp3' },
+        voiceForm: { enabled: false, stt_provider: 'openai', stt_model: 'default', tts_provider: 'edgetts', tts_voice: 'default', stt_language: 'auto', tts_output_format: 'mp3' },
         voiceProviders: { stt: ['openai', 'groq', 'cohere', 'nvidia', 'faster-whisper'], tts: ['edgetts', 'openai', 'nvidia', 'kokoro', 'coqui'] },
         voiceModels: [],
+        sttModels: [],
 
         /* ══════════════════════════════════════════════════════════════════
            INITIALIZATION
@@ -215,7 +216,10 @@ function settingsApp() {
                         if (Array.isArray(voiceProvs.stt)) this.voiceProviders.stt = voiceProvs.stt;
                         if (Array.isArray(voiceProvs.tts)) this.voiceProviders.tts = voiceProvs.tts;
                     }
-                    await this.loadVoiceModels();
+                    await Promise.all([
+                        this.loadVoiceModels(),
+                        this.loadSttModels()
+                    ]);
                 } catch (e) {
                     console.error('[Settings] Failed to load voice config:', e);
                 }
@@ -1806,6 +1810,18 @@ function settingsApp() {
                 }
             } catch (e) {
                 console.error('[Settings] Failed to load voice models:', e);
+            }
+        },
+
+        async loadSttModels() {
+            try {
+                const provider = this.voiceForm.stt_provider || 'openai';
+                const models = await this._fetch(`/api/voice/stt-models?provider=${provider}`);
+                if (Array.isArray(models)) {
+                    this.sttModels = models;
+                }
+            } catch (e) {
+                console.error('[Settings] Failed to load STT models:', e);
             }
         },
 
