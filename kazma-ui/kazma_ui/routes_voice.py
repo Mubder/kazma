@@ -29,10 +29,20 @@ async def speech_to_text(
     Accepts any audio format (ogg, mp3, wav, flac, webm, m4a).
     Returns ``{"text": "..."}`` on success.
     """
+    from kazma_core.config_store import get_config_store
     from kazma_core.voice.stt import transcribe
     import traceback
     import os
     from pathlib import Path
+
+    cs = get_config_store()
+    db_provider = cs.get("voice.stt_provider")
+    if db_provider and str(db_provider).strip() and str(db_provider).strip().lower() != "none":
+        provider = str(db_provider)
+
+    db_language = cs.get("voice.stt_language")
+    if db_language and str(db_language).strip() and str(db_language).strip().lower() != "none":
+        language = str(db_language)
 
     audio_bytes = await file.read()
     if not audio_bytes:
@@ -96,7 +106,21 @@ async def text_to_speech(
 
     Returns raw audio bytes with the appropriate content type.
     """
+    from kazma_core.config_store import get_config_store
     from kazma_core.voice.tts import synthesize
+
+    cs = get_config_store()
+    db_provider = cs.get("voice.tts_provider")
+    if db_provider and str(db_provider).strip() and str(db_provider).strip().lower() != "none":
+        provider = str(db_provider)
+
+    db_voice = cs.get("voice.tts_voice")
+    if db_voice and str(db_voice).strip() and str(db_voice).strip().lower() != "none":
+        voice = str(db_voice)
+
+    db_output_format = cs.get("voice.tts_output_format")
+    if db_output_format and str(db_output_format).strip() and str(db_output_format).strip().lower() != "none":
+        output_format = str(db_output_format)
 
     if not text.strip():
         raise HTTPException(status_code=400, detail="Empty text")
