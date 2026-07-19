@@ -144,6 +144,8 @@ function settingsApp() {
         voiceProviders: { stt: ['openai', 'groq', 'cohere', 'nvidia', 'faster-whisper'], tts: ['edgetts', 'openai', 'nvidia', 'kokoro', 'coqui'] },
         voiceModels: [],
         sttModels: [],
+        sttModelType: 'default',
+        ttsVoiceType: 'default',
 
         /* ══════════════════════════════════════════════════════════════════
            INITIALIZATION
@@ -1807,6 +1809,11 @@ function settingsApp() {
                 const models = await this._fetch(`/api/voice/voices?provider=${provider}`);
                 if (Array.isArray(models)) {
                     this.voiceModels = models;
+                    if (this.voiceModels.includes(this.voiceForm.tts_voice)) {
+                        this.ttsVoiceType = this.voiceForm.tts_voice;
+                    } else {
+                        this.ttsVoiceType = 'custom';
+                    }
                 }
             } catch (e) {
                 console.error('[Settings] Failed to load voice models:', e);
@@ -1819,9 +1826,28 @@ function settingsApp() {
                 const models = await this._fetch(`/api/voice/stt-models?provider=${provider}`);
                 if (Array.isArray(models)) {
                     this.sttModels = models;
+                    if (this.sttModels.includes(this.voiceForm.stt_model)) {
+                        this.sttModelType = this.voiceForm.stt_model;
+                    } else {
+                        this.sttModelType = 'custom';
+                    }
                 }
             } catch (e) {
                 console.error('[Settings] Failed to load STT models:', e);
+            }
+        },
+
+        onSttModelTypeChange() {
+            if (this.sttModelType !== 'custom') {
+                this.voiceForm.stt_model = this.sttModelType;
+                this.saveVoiceSettings();
+            }
+        },
+
+        onTtsVoiceTypeChange() {
+            if (this.ttsVoiceType !== 'custom') {
+                this.voiceForm.tts_voice = this.ttsVoiceType;
+                this.saveVoiceSettings();
             }
         },
 
