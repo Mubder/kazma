@@ -295,6 +295,9 @@ class SettingsRouterBuilder:
                         "es-ES-ElviraNeural",
                         "fr-FR-DeniseNeural",
                         "ar-EG-SalmaNeural",
+                        "ar-EG-ShakirNeural",
+                        "ar-SA-HamedNeural",
+                        "ar-SA-ZariyahNeural",
                     ]
             return ["default"]
 
