@@ -36,6 +36,21 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _get_provider_api_key_from_db(provider_name: str) -> str | None:
+    """Fallback helper to fetch API key from unified providers database."""
+    try:
+        from kazma_core.config_store import get_config_store
+        from kazma_core.model_registry import ModelRegistry
+        registry = ModelRegistry(get_config_store())
+        entry = registry.get_provider(provider_name)
+        if entry and entry.get("api_key"):
+            return str(entry["api_key"])
+    except Exception:
+        pass
+    return None
+
+
+
 # ── Provider protocol ──────────────────────────────────────────────────
 
 
@@ -156,7 +171,7 @@ def _openai_tts_provider() -> TTSProvider:
         api_key: str | None = None,
         output_format: str = "mp3",
     ) -> bytes | None:
-        key = api_key or os.environ.get("OPENAI_API_KEY")
+        key = api_key or os.environ.get("OPENAI_API_KEY") or _get_provider_api_key_from_db("openai")
         if not key:
             logger.error("[TTS/openai] No API key")
             return None
@@ -202,7 +217,12 @@ def _nvidia_tts_provider() -> TTSProvider:
         api_key: str | None = None,
         output_format: str = "mp3",
     ) -> bytes | None:
-        key = api_key or os.environ.get("NVIDIA_API_KEY") or os.environ.get("NGC_API_KEY")
+        key = (
+            api_key
+            or os.environ.get("NVIDIA_API_KEY")
+            or os.environ.get("NGC_API_KEY")
+            or _get_provider_api_key_from_db("nvidia")
+        )
         if not key:
             logger.error("[TTS/nvidia] No API key (set NVIDIA_API_KEY)")
             return None
