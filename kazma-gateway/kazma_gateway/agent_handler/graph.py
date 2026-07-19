@@ -213,6 +213,29 @@ def create_graph_handler(
             logger.info("[agent-handler] /reset for thread=%s", thread_id)
             return
 
+        # ── /yolo: Toggle session YOLO safety bypass ───────────────
+        if msg.text and msg.text.strip().lower() in ("/yolo", "/yolo on", "/yolo off"):
+            from kazma_core.config_store import get_config_store
+
+            cs = get_config_store()
+            is_off = msg.text.strip().lower() == "/yolo off"
+            if is_off:
+                cs.delete(f"yolo.{thread_id}")
+                reply_msg = "🛡️ Mode YOLO deactivated. Safety gates are active again."
+            else:
+                cs.set(f"yolo.{thread_id}", True)
+                reply_msg = "🚀 Mode YOLO activated! All tools in this session will execute automatically without requesting your approval. Run free!"
+
+            ctx = await _store.get(thread_id) or msg.context_metadata
+            out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=out_text,
+                context_metadata=out_ctx,
+            ))
+            logger.info("[agent-handler] /yolo for thread=%s is_off=%s", thread_id, is_off)
+            return
+
         # ── /undo: Remove last assistant response ──────────────────
         if msg.text and msg.text.strip().lower() == "/undo":
             undo_result = await _handle_undo(thread_id, config)

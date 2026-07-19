@@ -151,6 +151,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.tab_system": {"en": "System", "ar": "النظام"},
     "settings.tab_packages": {"en": "Packages", "ar": "الحزم"},
     "settings.tab_import": {"en": "Import/Export", "ar": "استيراد/تصدير"},
+    "settings.tab_voice": {"en": "Voice", "ar": "الصوت"},
 
     # Settings — Providers tab
     "settings.llm_providers": {"en": "LLM Providers", "ar": "مزودو النماذج"},

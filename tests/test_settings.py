@@ -644,6 +644,51 @@ class TestSettingsAPI:
         assert resp.status_code == 200
         assert "token" in resp.json()
 
+    def test_voice_settings_get_and_put(self, client):
+        """GET and PUT /api/settings/voice fetches and saves voice settings."""
+        # 1. GET defaults
+        resp = client.get("/api/settings/voice")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "enabled" in data
+        assert "stt_provider" in data
+        assert "tts_provider" in data
+
+        # 2. PUT updates
+        payload = {
+            "enabled": True,
+            "stt_provider": "groq",
+            "tts_provider": "kokoro",
+            "tts_voice": "en-US-1",
+            "stt_language": "en",
+            "tts_output_format": "opus"
+        }
+        resp = client.put("/api/settings/voice", json=payload)
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+
+        # 3. Verify GET returns updated values
+        resp = client.get("/api/settings/voice")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["enabled"] is True
+        assert data["stt_provider"] == "groq"
+        assert data["tts_provider"] == "kokoro"
+        assert data["tts_voice"] == "en-US-1"
+        assert data["stt_language"] == "en"
+        assert data["tts_output_format"] == "opus"
+
+    def test_voice_providers_get(self, client):
+        """GET /api/voice/providers returns available STT and TTS providers."""
+        resp = client.get("/api/voice/providers")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "stt" in data
+        assert "tts" in data
+        assert isinstance(data["stt"], list)
+        assert isinstance(data["tts"], list)
+
+
 
 # ══════════════════════════════════════════════════════════════════════
 # TestUnifiedProvidersRouterAPI — New unified providers & connectors hub

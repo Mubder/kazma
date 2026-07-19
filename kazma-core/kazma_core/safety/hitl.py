@@ -13,12 +13,42 @@ LangGraph's HITL mechanism. Config-driven via kazma.yaml:
 
 from __future__ import annotations
 
+import contextvars
 import logging
 from typing import Any
 
-__all__ = ["CANONICAL_DANGER_TOOLS", "DEFAULT_DANGER_TOOLS", "TOOL_TIERS", "get_hitl_config", "get_tool_tier", "requires_approval"]
+__all__ = [
+    "CANONICAL_DANGER_TOOLS",
+    "DEFAULT_DANGER_TOOLS",
+    "TOOL_TIERS",
+    "get_hitl_config",
+    "get_tool_tier",
+    "requires_approval",
+    "set_current_thread_id",
+    "reset_current_thread_id",
+    "get_current_thread_id",
+]
 
 logger = logging.getLogger(__name__)
+
+# Thread-safe context var for tracking active session/thread_id
+_current_thread_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_thread_id", default=None)
+
+
+def set_current_thread_id(thread_id: str | None) -> contextvars.Token[str | None]:
+    """Set the active thread ID for the current async task context."""
+    return _current_thread_id.set(thread_id)
+
+
+def reset_current_thread_id(token: contextvars.Token[str | None]) -> None:
+    """Reset the thread ID context to its previous state."""
+    _current_thread_id.reset(token)
+
+
+def get_current_thread_id() -> str | None:
+    """Get the active thread ID for the current context."""
+    return _current_thread_id.get()
+
 
 # ── Default tool tiers ────────────────────────────────────────────────
 
@@ -106,6 +136,18 @@ def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     approval_timeout_seconds = hitl.get("approval_timeout_seconds", 60)
     auto_deny_on_timeout = hitl.get("auto_deny_on_timeout", True)
 
+    # Check YOLO mode for thread ID override
+    tid = get_current_thread_id()
+    if tid:
+        try:
+            from kazma_core.config_store import get_config_store
+
+            cs = get_config_store()
+            if cs.get(f"yolo.{tid}"):
+                enabled = False
+        except Exception:
+            pass
+
     # Apply ConfigStore overrides (set by SettingsManager.save_safety_settings)
     try:
         from kazma_core.config_store import get_config_store
@@ -114,7 +156,9 @@ def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
         # SettingsManager uses "safety.hitl_enabled" (flat key)
         cs_enabled = cs.get("safety.hitl_enabled")
         if cs_enabled is not None:
-            enabled = bool(cs_enabled)
+            # Only override if YOLO hasn't already forced it to False
+            if enabled:
+                enabled = bool(cs_enabled)
         cs_timeout = cs.get("safety.approval_timeout")
         if cs_timeout is not None:
             approval_timeout_seconds = int(cs_timeout)
@@ -142,6 +186,17 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
     Returns:
         True if the tool requires approval.
     """
+    tid = get_current_thread_id()
+    if tid:
+        try:
+            from kazma_core.config_store import get_config_store
+
+            cs = get_config_store()
+            if cs.get(f"yolo.{tid}"):
+                return False
+        except Exception:
+            pass
+
     if not hitl_config.get("enabled", True):
         return False
     danger_tools = hitl_config.get("require_approval_for", set())

@@ -678,11 +678,16 @@ class KazmaAgent:
         graph_state["messages"] = messages
         config = {"configurable": {"thread_id": self._thread_id}}
 
+        from kazma_core.safety.hitl import set_current_thread_id, reset_current_thread_id
+
+        token = set_current_thread_id(self._thread_id)
         try:
             result = await graph.ainvoke(graph_state, config)
         except Exception as e:
             logger.error("Graph invocation failed: %s", e)
             return "عذراً، حدث خطأ تقني. يرجى المحاولة مرة أخرى."
+        finally:
+            reset_current_thread_id(token)
 
         # Extract the final assistant message text.
         final_messages = result.get("messages", [])

@@ -30,6 +30,7 @@ from kazma_ui.models import (
     ProviderToggleRequest,
     SettingsUpdate,
     ShortcutUpdate,
+    VoiceSettingsUpdate,
 )
 
 if TYPE_CHECKING:
@@ -224,6 +225,38 @@ class SettingsRouterBuilder:
             """Save context window settings."""
             _get_sm().save_context_settings(req)
             return {"status": "ok"}
+
+        @router.get("/api/settings/voice")
+        async def api_get_voice_settings() -> dict[str, Any]:
+            """Get voice subsystem settings."""
+            return {
+                "enabled": bool(config_store.get("voice.enabled", False)),
+                "stt_provider": str(config_store.get("voice.stt_provider", "openai")),
+                "tts_provider": str(config_store.get("voice.tts_provider", "edgetts")),
+                "tts_voice": str(config_store.get("voice.tts_voice", "default")),
+                "stt_language": str(config_store.get("voice.stt_language", "auto")),
+                "tts_output_format": str(config_store.get("voice.tts_output_format", "mp3")),
+            }
+
+        @router.put("/api/settings/voice")
+        async def api_save_voice_settings(req: VoiceSettingsUpdate) -> dict[str, str]:
+            """Save voice subsystem settings."""
+            config_store.set("voice.enabled", req.enabled, category="voice")
+            config_store.set("voice.stt_provider", req.stt_provider, category="voice")
+            config_store.set("voice.tts_provider", req.tts_provider, category="voice")
+            config_store.set("voice.tts_voice", req.tts_voice, category="voice")
+            config_store.set("voice.stt_language", req.stt_language, category="voice")
+            config_store.set("voice.tts_output_format", req.tts_output_format, category="voice")
+            return {"status": "ok"}
+
+        @router.get("/api/voice/providers")
+        async def api_get_voice_providers() -> dict[str, list[str]]:
+            """Get available voice providers for STT and TTS."""
+            return {
+                "stt": ["openai", "groq", "cohere", "nvidia", "faster-whisper"],
+                "tts": ["edgetts", "openai", "nvidia", "kokoro", "coqui"],
+            }
+
 
         @router.get("/api/settings/connectors")
         async def api_get_connectors() -> dict[str, Any]:

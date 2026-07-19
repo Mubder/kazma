@@ -71,180 +71,189 @@ async def _stream_langgraph_events(
     Yields:
         SSE-formatted strings.
     """
+    from kazma_core.safety.hitl import set_current_thread_id, reset_current_thread_id
+
+    tid = config.get("configurable", {}).get("thread_id") if config else None
+    token = set_current_thread_id(tid) if tid else None
+
     total_tokens = 0
     total_cost = 0.0
     turn_start = time.monotonic()
     content_acc = ""  # accumulated assistant text for the done event
 
     try:
-        async for event in graph.astream_events(input_state, config=config, version="v2"):
-            kind = event.get("event", "")
-            data = event.get("data", {})
-            name = event.get("name", "")
-
-            # ── on_chat_model_stream: LLM token delta ──────────────
-            if kind == "on_chat_model_stream":
-                chunk = data.get("chunk")
-                if chunk is not None:
-                    # chunk is an AIMessageChunk — extract content
-                    token_text = ""
-                    if hasattr(chunk, "content"):
-                        token_text = chunk.content or ""
-                    elif isinstance(chunk, dict):
-                        token_text = chunk.get("content", "")
-
-                    if token_text:
-                        content_acc += token_text
-                        yield _sse_frame("token", {"content": token_text})
-
-            # ── on_chat_model_end: LLM finished — extract usage ────
-            elif kind == "on_chat_model_end":
-                output = data.get("output", {})
-                if hasattr(output, "usage_metadata"):
-                    usage = output.usage_metadata or {}
-                    total_tokens = usage.get("total_tokens", total_tokens)
-                elif isinstance(output, dict):
-                    usage = output.get("usage", {})
-                    total_tokens = usage.get("total_tokens", total_tokens)
-                    # Some providers put cost in response_metadata
-                    meta = output.get("response_metadata", {})
-                    if "cost" in meta:
-                        total_cost += meta["cost"]
-
-            # ── on_tool_start: tool execution beginning ────────────
-            elif kind == "on_tool_start":
-                inputs = data.get("input", {})
-                # data.input can be the raw args dict or nested
-                if isinstance(inputs, dict) and "input" in inputs:
-                    inputs = inputs["input"]
-                yield _sse_frame(
-                    "tool_call",
-                    {
-                        "tool_name": name,
-                        "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
-                        if isinstance(inputs, dict)
-                        else str(inputs)[:2000],
-                    },
-                )
-
-            # ── on_tool_end: tool execution finished ───────────────
-            elif kind == "on_tool_end":
-                output = data.get("output", "")
-                if hasattr(output, "content"):
-                    output = output.content
-                elif isinstance(output, dict):
-                    output = output.get("content", json.dumps(output, ensure_ascii=False))
-                yield _sse_frame(
-                    "tool_result",
-                    {
-                        "tool_name": name,
-                        "result": str(output)[:5000],
-                    },
-                )
-
-            # ── on_chain_end at graph terminal: graph finished ─────
-            # LangGraph 1.x emits the terminal on_chain_end with name
-            # "LangGraph"; older versions (and some test mocks) use
-            # "__end__".  Match both so the handler fires in production
-            # and in unit tests.
-            elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
-                # Extract final state if available
-                output = data.get("output", {})
-                if isinstance(output, dict):
-                    # Pull cost/tokens from the final state
-                    final_cost = output.get("last_cost_usd", total_cost)
-                    final_tokens = output.get("last_tokens", total_tokens)
-                    if final_cost:
-                        total_cost = final_cost
-                    if final_tokens:
-                        total_tokens = final_tokens
-
-                    # ── Extract final assistant message from terminal state ──
-                    # CRITICAL FIX (Issue 3): LLMProvider uses custom httpx
-                    # calls (not LangChain BaseChatModel), so
-                    # on_chat_model_stream events never fire.  The response
-                    # exists in output["messages"][-1] but was never emitted.
-                    # Guard with 'if not content_acc' to prevent duplicates
-                    # if real streaming is ever added.
-                    if not content_acc:
-                        messages_list = output.get("messages", [])
-                        if isinstance(messages_list, list) and messages_list:
-                            last_msg = messages_list[-1]
-                            if isinstance(last_msg, dict):
-                                msg_content = last_msg.get("content", "")
-                                if (
-                                    last_msg.get("role") == "assistant"
-                                    and msg_content
-                                ):
-                                    content_acc = msg_content
-                                    yield _sse_frame(
-                                        "token",
-                                        {"content": msg_content},
-                                    )
-
-        # ── HITL: detect interrupt() pause ─────────────────────────
-        # When tool_worker_node calls interrupt() for a danger tool, the
-        # graph checkpoint pauses and astream_events ends WITHOUT the
-        # terminal on_chain_end. Check the graph state for pending
-        # interrupts and surface them so the frontend can prompt for
-        # approval (POST /api/approve/{thread_id}).
-        thread_id = (config.get("configurable") or {}).get("thread_id", "")
-        interrupted = False
         try:
-            snapshot = await graph.aget_state(config)
-            if snapshot and getattr(snapshot, "next", None):
-                # Graph still has work to do — check for interrupt tasks.
-                for task in getattr(snapshot, "tasks", []) or []:
-                    interrupts = getattr(task, "interrupts", []) or []
-                    for intr in interrupts:
-                        payload = getattr(intr, "value", None)
-                        if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
-                            interrupted = True
-                            yield _sse_frame(
-                                "approval_required",
-                                {
-                                    "thread_id": thread_id,
-                                    "tool": payload.get("tool", ""),
-                                    "args": payload.get("args", {}),
-                                    "message": payload.get("message", ""),
-                                },
-                            )
-                            logger.info(
-                                "[SSE] HITL interrupt: thread=%s tool=%s — awaiting approval",
-                                thread_id,
-                                payload.get("tool"),
-                            )
+            async for event in graph.astream_events(input_state, config=config, version="v2"):
+                kind = event.get("event", "")
+                data = event.get("data", {})
+                name = event.get("name", "")
+
+                # ── on_chat_model_stream: LLM token delta ──────────────
+                if kind == "on_chat_model_stream":
+                    chunk = data.get("chunk")
+                    if chunk is not None:
+                        # chunk is an AIMessageChunk — extract content
+                        token_text = ""
+                        if hasattr(chunk, "content"):
+                            token_text = chunk.content or ""
+                        elif isinstance(chunk, dict):
+                            token_text = chunk.get("content", "")
+
+                        if token_text:
+                            content_acc += token_text
+                            yield _sse_frame("token", {"content": token_text})
+
+                # ── on_chat_model_end: LLM finished — extract usage ────
+                elif kind == "on_chat_model_end":
+                    output = data.get("output", {})
+                    if hasattr(output, "usage_metadata"):
+                        usage = output.usage_metadata or {}
+                        total_tokens = usage.get("total_tokens", total_tokens)
+                    elif isinstance(output, dict):
+                        usage = output.get("usage", {})
+                        total_tokens = usage.get("total_tokens", total_tokens)
+                        # Some providers put cost in response_metadata
+                        meta = output.get("response_metadata", {})
+                        if "cost" in meta:
+                            total_cost += meta["cost"]
+
+                # ── on_tool_start: tool execution beginning ────────────
+                elif kind == "on_tool_start":
+                    inputs = data.get("input", {})
+                    # data.input can be the raw args dict or nested
+                    if isinstance(inputs, dict) and "input" in inputs:
+                        inputs = inputs["input"]
+                    yield _sse_frame(
+                        "tool_call",
+                        {
+                            "tool_name": name,
+                            "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
+                            if isinstance(inputs, dict)
+                            else str(inputs)[:2000],
+                        },
+                    )
+
+                # ── on_tool_end: tool execution finished ───────────────
+                elif kind == "on_tool_end":
+                    output = data.get("output", "")
+                    if hasattr(output, "content"):
+                        output = output.content
+                    elif isinstance(output, dict):
+                        output = output.get("content", json.dumps(output, ensure_ascii=False))
+                    yield _sse_frame(
+                        "tool_result",
+                        {
+                            "tool_name": name,
+                            "result": str(output)[:5000],
+                        },
+                    )
+
+                # ── on_chain_end at graph terminal: graph finished ─────
+                # LangGraph 1.x emits the terminal on_chain_end with name
+                # "LangGraph"; older versions (and some test mocks) use
+                # "__end__".  Match both so the handler fires in production
+                # and in unit tests.
+                elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
+                    # Extract final state if available
+                    output = data.get("output", {})
+                    if isinstance(output, dict):
+                        # Pull cost/tokens from the final state
+                        final_cost = output.get("last_cost_usd", total_cost)
+                        final_tokens = output.get("last_tokens", total_tokens)
+                        if final_cost:
+                            total_cost = final_cost
+                        if final_tokens:
+                            total_tokens = final_tokens
+
+                        # ── Extract final assistant message from terminal state ──
+                        # CRITICAL FIX (Issue 3): LLMProvider uses custom httpx
+                        # calls (not LangChain BaseChatModel), so
+                        # on_chat_model_stream events never fire.  The response
+                        # exists in output["messages"][-1] but was never emitted.
+                        # Guard with 'if not content_acc' to prevent duplicates
+                        # if real streaming is ever added.
+                        if not content_acc:
+                            messages_list = output.get("messages", [])
+                            if isinstance(messages_list, list) and messages_list:
+                                last_msg = messages_list[-1]
+                                if isinstance(last_msg, dict):
+                                    msg_content = last_msg.get("content", "")
+                                    if (
+                                        last_msg.get("role") == "assistant"
+                                        and msg_content
+                                    ):
+                                        content_acc = msg_content
+                                        yield _sse_frame(
+                                            "token",
+                                            {"content": msg_content},
+                                        )
+
+            # ── HITL: detect interrupt() pause ─────────────────────────
+            # When tool_worker_node calls interrupt() for a danger tool, the
+            # graph checkpoint pauses and astream_events ends WITHOUT the
+            # terminal on_chain_end. Check the graph state for pending
+            # interrupts and surface them so the frontend can prompt for
+            # approval (POST /api/approve/{thread_id}).
+            thread_id = (config.get("configurable") or {}).get("thread_id", "")
+            interrupted = False
+            try:
+                snapshot = await graph.aget_state(config)
+                if snapshot and getattr(snapshot, "next", None):
+                    # Graph still has work to do — check for interrupt tasks.
+                    for task in getattr(snapshot, "tasks", []) or []:
+                        interrupts = getattr(task, "interrupts", []) or []
+                        for intr in interrupts:
+                            payload = getattr(intr, "value", None)
+                            if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
+                                interrupted = True
+                                yield _sse_frame(
+                                    "approval_required",
+                                    {
+                                        "thread_id": thread_id,
+                                        "tool": payload.get("tool", ""),
+                                        "args": payload.get("args", {}),
+                                        "message": payload.get("message", ""),
+                                    },
+                                )
+                                logger.info(
+                                    "[SSE] HITL interrupt: thread=%s tool=%s — awaiting approval",
+                                    thread_id,
+                                    payload.get("tool"),
+                                )
+            except Exception as exc:
+                # aget_state may be unavailable (no checkpointer). Don't fail
+                # the whole turn over interrupt detection — just log.
+                logger.debug("[SSE] Could not check interrupt state: %s", exc)
+
+            # ── Turn complete ──────────────────────────────────────────
+            duration_ms = (time.monotonic() - turn_start) * 1000
+            logger.info(
+                "SSE turn complete: tokens=%d cost=$%.4f duration=%.0fms content_len=%d interrupted=%s",
+                total_tokens,
+                total_cost,
+                duration_ms,
+                len(content_acc),
+                interrupted,
+            )
+            yield _sse_frame(
+                "done",
+                {
+                    "tokens": total_tokens,
+                    "cost": round(total_cost, 6),
+                    "duration_ms": round(duration_ms, 0),
+                },
+            )
+
+        except asyncio.CancelledError:
+            logger.warning("SSE stream cancelled by client disconnect")
+            yield _sse_frame("error", {"content": "Connection cancelled"})
+
         except Exception as exc:
-            # aget_state may be unavailable (no checkpointer). Don't fail
-            # the whole turn over interrupt detection — just log.
-            logger.debug("[SSE] Could not check interrupt state: %s", exc)
-
-        # ── Turn complete ──────────────────────────────────────────
-        duration_ms = (time.monotonic() - turn_start) * 1000
-        logger.info(
-            "SSE turn complete: tokens=%d cost=$%.4f duration=%.0fms content_len=%d interrupted=%s",
-            total_tokens,
-            total_cost,
-            duration_ms,
-            len(content_acc),
-            interrupted,
-        )
-        yield _sse_frame(
-            "done",
-            {
-                "tokens": total_tokens,
-                "cost": round(total_cost, 6),
-                "duration_ms": round(duration_ms, 0),
-            },
-        )
-
-    except asyncio.CancelledError:
-        logger.warning("SSE stream cancelled by client disconnect")
-        yield _sse_frame("error", {"content": "Connection cancelled"})
-
-    except Exception as exc:
-        logger.error("SSE stream error: %s", exc, exc_info=True)
-        yield _sse_frame("error", {"content": sanitize_error(exc)})
+            logger.error("SSE stream error: %s", exc, exc_info=True)
+            yield _sse_frame("error", {"content": sanitize_error(exc)})
+    finally:
+        if token is not None:
+            reset_current_thread_id(token)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -400,6 +409,41 @@ def create_sse_chat_router(
 
         # ── Resolve session and thread_id (shared store) ───────────
         session, thread_id = _resolve_session(session_id)
+
+        # ── Intercept YOLO command ─────────────────────────────────
+        raw_msg = (body.get("message") or "").strip()
+        if raw_msg.lower() in ("/yolo", "/yolo on", "/yolo off"):
+            from kazma_core.config_store import get_config_store
+
+            cs = get_config_store()
+            is_off = raw_msg.lower() == "/yolo off"
+            if is_off:
+                cs.delete(f"yolo.{thread_id}")
+                confirmation = "🛡️ Mode YOLO deactivated. Safety gates are active again."
+            else:
+                cs.set(f"yolo.{thread_id}", True)
+                confirmation = "🚀 Mode YOLO activated! All tools in this session will execute automatically without requesting your approval. Run free!"
+
+            session.messages.append({"role": "user", "content": raw_msg})
+            session.messages.append({"role": "assistant", "content": confirmation})
+            try:
+                _get_store().put(session)
+            except Exception:
+                logger.exception("[SSE] failed to persist YOLO message")
+
+            async def _yolo_generator() -> AsyncGenerator[str, None]:
+                yield _sse_frame("token", {"content": confirmation})
+                yield _sse_frame("done", {
+                    "tokens": 1,
+                    "cost": 0.0,
+                    "duration_ms": 100,
+                })
+
+            return StreamingResponse(
+                _yolo_generator(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
         # ── Apply model from request body ──────────────────────────
         # The chat frontend sends the selected model so the server can

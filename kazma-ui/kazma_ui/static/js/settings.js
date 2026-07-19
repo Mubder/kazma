@@ -139,6 +139,10 @@ function settingsApp() {
         importSections: [],
         availableSections: ['model', 'agent', 'connectors', 'mcp', 'skills', 'appearance', 'shortcuts', 'tools', 'safety'],
 
+        // ── Voice Tab ──
+        voiceForm: { enabled: false, stt_provider: 'openai', tts_provider: 'edgetts', tts_voice: 'default', stt_language: 'auto', tts_output_format: 'mp3' },
+        voiceProviders: { stt: ['openai', 'groq', 'cohere', 'nvidia', 'faster-whisper'], tts: ['edgetts', 'openai', 'nvidia', 'kokoro', 'coqui'] },
+
         /* ══════════════════════════════════════════════════════════════════
            INITIALIZATION
            ══════════════════════════════════════════════════════════════════ */
@@ -198,6 +202,21 @@ function settingsApp() {
                     this.loadHubConnectors(),
                     this.loadHubProfiles(),
                 ]);
+
+                // Load Voice Subsystem Settings
+                try {
+                    const voiceSettings = await this._fetch('/api/settings/voice');
+                    if (voiceSettings) {
+                        Object.assign(this.voiceForm, voiceSettings);
+                    }
+                    const voiceProvs = await this._fetch('/api/voice/providers');
+                    if (voiceProvs) {
+                        if (Array.isArray(voiceProvs.stt)) this.voiceProviders.stt = voiceProvs.stt;
+                        if (Array.isArray(voiceProvs.tts)) this.voiceProviders.tts = voiceProvs.tts;
+                    }
+                } catch (e) {
+                    console.error('[Settings] Failed to load voice config:', e);
+                }
             } catch (e) {
                 console.error('[Settings] Init failed:', e);
             } finally {
@@ -1757,7 +1776,26 @@ function settingsApp() {
             }
         },
 
-        /**
+        async saveVoiceSettings() {
+            this.saving = true;
+            try {
+                const resp = await fetch('/api/settings/voice', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.voiceForm)
+                });
+                if (!resp.ok) {
+                    throw new Error('HTTP ' + resp.status);
+                }
+                showToast('Voice settings saved', 'success');
+            } catch (e) {
+                showToast('Failed to save voice settings: ' + e.message, 'error');
+            } finally {
+                this.saving = false;
+            }
+        },
+
+                /**
          * Tab change handler — lazy-load data when switching tabs.
          * Keeps ?tab= in the URL for deep-linking / refresh.
          */

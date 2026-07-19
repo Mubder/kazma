@@ -20,6 +20,7 @@
         <button class="settings-tab" :class="{ active: tab === 'system' }" @click="onTabChange('system')">{{ t('settings.tab_system') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'packages' }" @click="onTabChange('packages')">{{ t('settings.tab_packages') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'voice' }" @click="onTabChange('voice')">{{ t('settings.tab_voice') }}</button>
     </nav>
 
     <!-- Loading indicator -->
@@ -1198,6 +1199,87 @@
             <h3>{{ t('settings.reset_to_defaults_section') }}</h3>
             <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.reset_description') }}</p>
             <button class="btn btn-danger" @click="resetToDefaults()">{{ t('settings.reset_all_settings') }}</button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 14: VOICE SETTINGS
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'voice'" x-transition x-cloak>
+        <div class="settings-group">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <div>
+                    <h3 style="margin:0;">Voice Subsystem</h3>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:4px 0 0 0;">Configure speech-to-text (STT) and text-to-speech (TTS) engines.</p>
+                </div>
+                <label class="toggle" style="scale: 1.2;">
+                    <input type="checkbox" x-model="voiceForm.enabled" @change="saveVoiceSettings()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <!-- Voice Controls Section, shown only when enabled -->
+            <div x-show="voiceForm.enabled" x-collapse x-cloak>
+                <div style="height:1px; background:var(--border-subtle); margin:16px 0;"></div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                    <!-- Speech to Text (STT) Configuration -->
+                    <div>
+                        <h4 style="margin:0 0 12px 0; display:flex; align-items:center; gap:8px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-mic"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                            Speech-to-Text (STT)
+                        </h4>
+                        
+                        <div class="form-group">
+                            <label>STT Provider</label>
+                            <select class="form-select" x-model="voiceForm.stt_provider" @change="saveVoiceSettings()">
+                                <template x-for="provider in voiceProviders.stt" :key="provider">
+                                    <option :value="provider" x-text="provider"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>STT Language</label>
+                            <input type="text" class="form-control" x-model="voiceForm.stt_language" placeholder="auto or en, ar, fr..." @change="saveVoiceSettings()">
+                            <p class="form-help" style="margin-top:4px;">Use "auto" or ISO-639-1 format.</p>
+                        </div>
+                    </div>
+
+                    <!-- Text to Speech (TTS) Configuration -->
+                    <div>
+                        <h4 style="margin:0 0 12px 0; display:flex; align-items:center; gap:8px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-volume-2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                            Text-to-Speech (TTS)
+                        </h4>
+
+                        <div class="form-group">
+                            <label>TTS Provider</label>
+                            <select class="form-select" x-model="voiceForm.tts_provider" @change="saveVoiceSettings()">
+                                <template x-for="provider in voiceProviders.tts" :key="provider">
+                                    <option :value="provider" x-text="provider"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Voice Model / Voice ID</label>
+                            <input type="text" class="form-control" x-model="voiceForm.tts_voice" placeholder="default or custom voice model ID" @change="saveVoiceSettings()">
+                            <p class="form-help" style="margin-top:4px;">e.g. "default", provider voice ID, or a local path.</p>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Audio Format</label>
+                            <select class="form-select" x-model="voiceForm.tts_output_format" @change="saveVoiceSettings()">
+                                <option value="mp3">MP3 (standard)</option>
+                                <option value="wav">WAV (uncompressed)</option>
+                                <option value="opus">Opus (highly optimized)</option>
+                                <option value="flac">FLAC (lossless)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

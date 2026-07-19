@@ -131,6 +131,18 @@ class SafetyMiddleware:
         if not self.enabled:
             return True  # development mode
 
+        from kazma_core.safety.hitl import get_current_thread_id
+        tid = get_current_thread_id()
+        if tid:
+            try:
+                from kazma_core.config_store import get_config_store
+                cs = get_config_store()
+                if cs.get(f"yolo.{tid}"):
+                    logger.info("[Safety] YOLO mode active for thread=%s. Auto-approving dangerous tool: %s", tid, tool_name)
+                    return True
+            except Exception:
+                pass
+
         if not force_danger and self.is_sensitive_read(tool_name):
             logger.info("[Safety] Sensitive read allowed: %s (task=%s)", tool_name, task_id)
             return True

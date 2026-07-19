@@ -41,6 +41,7 @@ __all__ = [
     "SkillToggleRequest",
     "ToolTestRequest",
     "ToolToggleRequest",
+    "VoiceSettingsUpdate",
 ]
 
 # ── Chat ──────────────────────────────────────────────────────────────
@@ -379,3 +380,14 @@ class ModelDefaultUpdate(BaseModel):
 
     task_type: str  # 'chat', 'code', 'summarize', 'translate'
     model_name: str
+
+
+class VoiceSettingsUpdate(BaseModel):
+    """Update Voice Subsystem settings."""
+
+    enabled: bool = False
+    stt_provider: str = "openai"
+    tts_provider: str = "edgetts"
+    tts_voice: str = "default"
+    stt_language: str = "auto"
+    tts_output_format: str = "mp3"
