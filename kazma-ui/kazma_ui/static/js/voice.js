@@ -22,6 +22,28 @@
   var TTS_PROVIDER_KEY = 'kazma.ttsProvider';
   var TTS_ENABLED_KEY = 'kazma.ttsEnabled';
 
+  async function syncVoiceSettingsWithBackend() {
+    try {
+      var resp = await fetch('/api/settings/voice');
+      if (resp.ok) {
+        var settings = await resp.json();
+        if (settings) {
+          if (settings.stt_provider) {
+            localStorage.setItem(STT_PROVIDER_KEY, settings.stt_provider);
+          }
+          if (settings.tts_provider) {
+            localStorage.setItem(TTS_PROVIDER_KEY, settings.tts_provider);
+          }
+          if (settings.enabled !== undefined) {
+            localStorage.setItem(TTS_ENABLED_KEY, settings.enabled ? 'true' : 'false');
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Voice] Failed to sync voice settings with backend:', e);
+    }
+  }
+
   function getSttProvider() {
     return localStorage.getItem(STT_PROVIDER_KEY) || 'openai';
   }
@@ -220,9 +242,10 @@
     return false;
   }
 
-  // ── Show mic button if browser supports it ────────────
-
   function initVoiceButton() {
+    // Sync settings from backend
+    syncVoiceSettingsWithBackend();
+
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       var voiceBtn = document.getElementById('voice-btn');
       if (voiceBtn) voiceBtn.style.display = 'block';
