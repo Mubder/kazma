@@ -869,6 +869,29 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("Voice API router failed to initialize: %s", e)
 
+        # ── Voice Streaming WebSocket ──
+        try:
+            from kazma_ui.routes_voice_ws import handle_voice_websocket
+
+            async def _ws_voice(websocket: WebSocket) -> None:
+                from kazma_ui.auth import get_kazma_secret, SECRET_COOKIE
+                import hmac as _hmac
+
+                expected = get_kazma_secret()
+                if expected:
+                    provided = websocket.headers.get("x-kazma-secret", "")
+                    if not provided:
+                        provided = websocket.cookies.get(SECRET_COOKIE, "")
+                    if not provided or not _hmac.compare_digest(provided, expected):
+                        await websocket.close(code=4003, reason="Unauthorized")
+                        return
+                await handle_voice_websocket(websocket)
+
+            self.app.websocket("/ws/voice")(_ws_voice)
+            logger.info("Voice streaming WebSocket mounted at /ws/voice")
+        except Exception as e:
+            logger.warning("Voice WebSocket failed to initialize: %s", e)
+
         # ── Telemetry SSE Route ──
         try:
             from kazma_core.telemetry import HardwareMonitor

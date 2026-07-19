@@ -1131,5 +1131,33 @@
     newSession: newSession,
     retry: retry,
     toggleArchivedView: toggleArchivedView,
+    getOrCreateSessionId: function() {
+      if (!chatSessionId) {
+        chatSessionId = generateSessionId();
+        persistSessionId();
+      }
+      return chatSessionId;
+    },
+
+    // Voice streaming hooks — called by voice.js WebSocket client
+    onUserTranscription: function(text) {
+      appendMessage('user', text);
+      scrollToBottom();
+      KS.showTyping(typingEl, 'Kazma is thinking');
+    },
+    onStreamToken: function(content) {
+      KS.hideTyping(typingEl);
+      if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+      tokenAccum += content;
+      var textEl = currentMsgEl.querySelector('.message-text');
+      if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
+      scrollToBottom();
+    },
+    onStreamDone: function() {
+      currentMsgEl = null;
+      tokenAccum = '';
+      activeStream = null;
+      enableInput();
+    },
   };
 })();
