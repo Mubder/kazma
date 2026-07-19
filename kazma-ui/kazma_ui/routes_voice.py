@@ -99,3 +99,38 @@ async def list_providers() -> dict[str, list[str]]:
         "stt": list_stt_providers(),
         "tts": list_tts_providers(),
     }
+
+
+@router.get("/voices")
+async def list_voices(provider: str = "edgetts") -> list[str]:
+    """Get available voice models/ShortNames for a specific TTS provider."""
+    p_lower = provider.strip().lower()
+    if p_lower == "openai":
+        return ["default", "alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+    elif p_lower == "nvidia":
+        return [
+            "default",
+            "Magpie-Multilingual.EN-US.Aria",
+            "Magpie-Multilingual.EN-US.Benjamin",
+            "Magpie-Multilingual.ES-ES.Alba",
+            "Magpie-Multilingual.FR-FR.Denise",
+            "Magpie-Multilingual.ZH-CN.Xiaoxiao",
+        ]
+    elif p_lower == "edgetts":
+        try:
+            import edge_tts  # type: ignore
+            voices = await edge_tts.VoicesManager.create()
+            return ["default"] + sorted([v["ShortName"] for v in voices.voices])
+        except Exception:
+            return [
+                "default",
+                "en-US-AriaNeural",
+                "en-US-GuyNeural",
+                "en-GB-SoniaNeural",
+                "en-GB-RyanNeural",
+                "es-ES-ElviraNeural",
+                "fr-FR-DeniseNeural",
+                "ar-EG-SalmaNeural",
+            ]
+    return ["default"]
+

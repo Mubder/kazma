@@ -688,6 +688,29 @@ class TestSettingsAPI:
         assert isinstance(data["stt"], list)
         assert isinstance(data["tts"], list)
 
+    def test_voice_voices_get(self, client):
+        """GET /api/voice/voices returns voice list for a provider."""
+        # 1. Test OpenAI
+        resp = client.get("/api/voice/voices?provider=openai")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "alloy" in data
+        assert "shimmer" in data
+
+        # 2. Test Nvidia
+        resp = client.get("/api/voice/voices?provider=nvidia")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "Magpie-Multilingual.EN-US.Aria" in data
+
+        # 3. Test EdgeTTS
+        resp = client.get("/api/voice/voices?provider=edgetts")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) > 0
+        assert "default" in data
+
+
 
 
 # ══════════════════════════════════════════════════════════════════════

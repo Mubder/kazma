@@ -142,6 +142,7 @@ function settingsApp() {
         // ── Voice Tab ──
         voiceForm: { enabled: false, stt_provider: 'openai', tts_provider: 'edgetts', tts_voice: 'default', stt_language: 'auto', tts_output_format: 'mp3' },
         voiceProviders: { stt: ['openai', 'groq', 'cohere', 'nvidia', 'faster-whisper'], tts: ['edgetts', 'openai', 'nvidia', 'kokoro', 'coqui'] },
+        voiceModels: [],
 
         /* ══════════════════════════════════════════════════════════════════
            INITIALIZATION
@@ -214,6 +215,7 @@ function settingsApp() {
                         if (Array.isArray(voiceProvs.stt)) this.voiceProviders.stt = voiceProvs.stt;
                         if (Array.isArray(voiceProvs.tts)) this.voiceProviders.tts = voiceProvs.tts;
                     }
+                    await this.loadVoiceModels();
                 } catch (e) {
                     console.error('[Settings] Failed to load voice config:', e);
                 }
@@ -1792,6 +1794,18 @@ function settingsApp() {
                 showToast('Failed to save voice settings: ' + e.message, 'error');
             } finally {
                 this.saving = false;
+            }
+        },
+
+        async loadVoiceModels() {
+            try {
+                const provider = this.voiceForm.tts_provider || 'edgetts';
+                const models = await this._fetch(`/api/voice/voices?provider=${provider}`);
+                if (Array.isArray(models)) {
+                    this.voiceModels = models;
+                }
+            } catch (e) {
+                console.error('[Settings] Failed to load voice models:', e);
             }
         },
 

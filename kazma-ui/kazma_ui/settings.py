@@ -257,6 +257,40 @@ class SettingsRouterBuilder:
                 "tts": ["edgetts", "openai", "nvidia", "kokoro", "coqui"],
             }
 
+        @router.get("/api/voice/voices")
+        async def api_get_voice_voices(provider: str = "edgetts") -> list[str]:
+            """Get available voice models/ShortNames for a specific TTS provider."""
+            p_lower = provider.strip().lower()
+            if p_lower == "openai":
+                return ["default", "alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+            elif p_lower == "nvidia":
+                return [
+                    "default",
+                    "Magpie-Multilingual.EN-US.Aria",
+                    "Magpie-Multilingual.EN-US.Benjamin",
+                    "Magpie-Multilingual.ES-ES.Alba",
+                    "Magpie-Multilingual.FR-FR.Denise",
+                    "Magpie-Multilingual.ZH-CN.Xiaoxiao",
+                ]
+            elif p_lower == "edgetts":
+                try:
+                    import edge_tts  # type: ignore
+                    voices = await edge_tts.VoicesManager.create()
+                    return ["default"] + sorted([v["ShortName"] for v in voices.voices])
+                except Exception:
+                    return [
+                        "default",
+                        "en-US-AriaNeural",
+                        "en-US-GuyNeural",
+                        "en-GB-SoniaNeural",
+                        "en-GB-RyanNeural",
+                        "es-ES-ElviraNeural",
+                        "fr-FR-DeniseNeural",
+                        "ar-EG-SalmaNeural",
+                    ]
+            return ["default"]
+
+
 
         @router.get("/api/settings/connectors")
         async def api_get_connectors() -> dict[str, Any]:
