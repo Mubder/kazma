@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -110,3 +111,29 @@ def test_reinstall_never_runs_bare_uv_sync(tmp_path):
     for c in calls:
         if len(c) >= 2 and c[0] == "uv" and c[1] == "sync":
             assert "--inexact" in c, f"bare uv sync is forbidden: {c}"
+
+
+def test_needs_extras_repair_when_rag_missing(tmp_path):
+    with patch.object(upd, "_vector_memory_data_present", return_value=True):
+        with patch.object(upd, "_module_available", return_value=False):
+            with patch.object(upd, "detect_active_extras", return_value=["rag"]):
+                assert upd.needs_extras_repair(str(tmp_path)) is True
+
+
+def test_reinstall_via_subprocess_invokes_child(tmp_path):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, cwd=None, timeout=None):
+        calls.append(list(cmd))
+        r = MagicMock()
+        r.returncode = 0
+        r.stdout = ""
+        r.stderr = ""
+        return r
+
+    with patch.object(upd, "_run_cmd", side_effect=fake_run):
+        ok = upd._reinstall_via_subprocess(str(tmp_path))
+    assert ok is True
+    assert calls
+    assert calls[0][0] == sys.executable or "python" in calls[0][0].lower() or calls[0][0].endswith("python.exe")
+    assert "-c" in calls[0]

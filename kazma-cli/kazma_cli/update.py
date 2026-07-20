@@ -78,7 +78,13 @@ _KNOWN_EXTRAS: tuple[str, ...] = (
 )
 
 # Flags that are boolean toggles (no value follows them).
-_UPDATE_BOOL_FLAGS = {"--check", "-c", "--force", "-f", "--yes", "-y", "--help", "-h"}
+_UPDATE_BOOL_FLAGS = {
+    "--check", "-c",
+    "--force", "-f",
+    "--yes", "-y",
+    "--help", "-h",
+    "--reinstall", "-r",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -441,6 +447,26 @@ def _module_available(mod: str) -> bool:
         return False
 
 
+def _memory_was_expected() -> bool:
+    """ConfigStore / alerts imply the user previously had VectorMemory."""
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs = get_config_store()
+        st = str(cs.get("system.memory.status") or "").upper()
+        # DEGRADED is exactly the post-uv-sync wipe state
+        if st in ("ACTIVE", "INSTALLING", "READY", "DEGRADED"):
+            return True
+        extras = cs.get("system.installed_extras") or []
+        if isinstance(extras, list) and "rag" in extras:
+            return True
+        if isinstance(extras, str) and "rag" in extras:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _vector_memory_data_present(cwd: str) -> bool:
     """True if on-disk vector memory exists (implies user had ``rag``)."""
     candidates: list[Path] = []
@@ -455,25 +481,23 @@ def _vector_memory_data_present(cwd: str) -> bool:
         [
             home / ".kazma" / "vector_memory",
             home / ".kazma" / "chroma",
+            home / ".kazma" / "memory",
             Path(cwd) / "kazma-data" / "vector_memory",
             Path(cwd) / "kazma-data" / "chroma",
+            Path(cwd) / "kazma-data" / "memory",
         ]
     )
     for p in candidates:
         try:
             if p.is_dir() and any(p.iterdir()):
                 return True
+            # chromadb often creates a sqlite file at the path root
+            if p.is_file() and p.suffix in (".sqlite3", ".db"):
+                return True
         except Exception:
             continue
-    # ConfigStore memory status historically ACTIVE / INSTALLING
-    try:
-        from kazma_core.config_store import get_config_store
-
-        st = str(get_config_store().get("system.memory.status") or "").upper()
-        if st in ("ACTIVE", "INSTALLING", "READY"):
-            return True
-    except Exception:
-        pass
+    if _memory_was_expected():
+        return True
     return False
 
 
@@ -515,6 +539,13 @@ def _reinstall_local(cwd: str) -> bool:
     4. Fall back to ``python -m pip install -e ".[extras]"``
     """
     extras = detect_active_extras(cwd)
+    # Repair path: packages were wiped but memory status/data still exists
+    if "rag" not in extras and (
+        _vector_memory_data_present(cwd)
+        or not _module_available("chromadb")
+        and _memory_was_expected()
+    ):
+        extras = _normalize_extras([*extras, "rag"])
     if extras:
         persist_extras(extras)
         console.print(
@@ -596,6 +627,81 @@ def _reinstall_local(cwd: str) -> bool:
     )
     # git pull already succeeded — do not fail the whole update
     return True
+
+
+def _reinstall_via_subprocess(cwd: str) -> bool:
+    """Run ``_reinstall_local`` in a *fresh* interpreter after git pull.
+
+    ``kazma update`` loads ``update.py`` at process start. After
+    ``git reset/pull`` the on-disk module is new, but this process still
+    holds the *pre-pull* ``_reinstall_local`` (which used bare ``uv sync``
+    and wiped extras). A child process re-imports from disk and applies
+    the post-pull installer.
+    """
+    console.print(
+        "[cyan]Reinstalling with the post-update installer "
+        "(fresh process — picks up new update logic)…[/cyan]"
+    )
+    # Import path: editable checkout is on sys.path via site-packages .pth
+    # or running from repo. Prefer loading the file under *cwd* explicitly.
+    code = (
+        "import importlib.util, sys\n"
+        "from pathlib import Path\n"
+        f"cwd = {cwd!r}\n"
+        "root = Path(cwd)\n"
+        "sys.path.insert(0, str(root))\n"
+        "sys.path.insert(0, str(root / 'kazma-cli'))\n"
+        "path = root / 'kazma-cli' / 'kazma_cli' / 'update.py'\n"
+        "if not path.is_file():\n"
+        "    # Fallback: import installed package (editable)\n"
+        "    from kazma_cli.update import _reinstall_local\n"
+        "    sys.exit(0 if _reinstall_local(cwd) else 1)\n"
+        "spec = importlib.util.spec_from_file_location('kazma_cli_update_postpull', path)\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "ok = bool(mod._reinstall_local(cwd))\n"
+        "sys.exit(0 if ok else 1)\n"
+    )
+    try:
+        result = _run_cmd(
+            [sys.executable, "-c", code],
+            cwd=cwd,
+            timeout=_INSTALL_TIMEOUT_HEAVY,
+        )
+        if result.returncode == 0:
+            return True
+        err = (result.stderr or result.stdout or "").strip()
+        console.print(
+            f"[yellow]Post-update reinstall process failed "
+            f"(exit {result.returncode}):[/yellow] {err[:500]}"
+        )
+    except subprocess.TimeoutExpired:
+        console.print("[yellow]Post-update reinstall timed out.[/yellow]")
+    except Exception as exc:
+        console.print(f"[yellow]Post-update reinstall error:[/yellow] {exc}")
+
+    # Last resort: in-process (may be stale logic if pre-pull)
+    console.print("[dim]Falling back to in-process reinstall…[/dim]")
+    return _reinstall_local(cwd)
+
+
+def needs_extras_repair(cwd: str | None = None) -> bool:
+    """True when recorded/needed extras are missing from the active venv."""
+    root = cwd or str(_find_git_root() or Path.cwd())
+    # Vector DB on disk but packages gone (the common post-uv-sync failure)
+    if _vector_memory_data_present(root):
+        if not (
+            _module_available("chromadb")
+            and _module_available("sentence_transformers")
+        ):
+            return True
+    for extra in detect_active_extras(root):
+        markers = _EXTRA_MARKERS.get(extra, ())
+        if not markers:
+            continue
+        if not any(_module_available(m) for m in markers):
+            return True
+    return False
 
 
 def _git_status_porcelain(cwd: str) -> str:
@@ -772,7 +878,9 @@ def do_git_update() -> bool:
         console.print(f"[red]git update error:[/red] {exc}")
         return False
 
-    return _reinstall_local(cwd)
+    # Always reinstall via a *new* Python process so we run the update.py
+    # that was just pulled — not the pre-pull function still in memory.
+    return _reinstall_via_subprocess(cwd)
 
 
 # ---------------------------------------------------------------------------
@@ -786,10 +894,17 @@ def print_help() -> None:
     console.print("Usage: kazma update [options]")
     console.print()
     console.print("Options:")
-    console.print("  --check, -c    Only check for updates, don't install (dry run)")
-    console.print("  --force, -f    Force update even if already latest")
-    console.print("  --yes, -y      Skip confirmation prompt")
-    console.print("  --help, -h     Show this help message")
+    console.print("  --check, -c       Only check for updates, don't install (dry run)")
+    console.print("  --force, -f       Force git sync even if already latest")
+    console.print("  --reinstall, -r   Only reinstall packages/extras (no git pull)")
+    console.print("  --yes, -y         Skip confirmation prompt")
+    console.print("  --help, -h        Show this help message")
+    console.print()
+    console.print("Notes:")
+    console.print("  Optional extras (rag/tui/…) are preserved across updates.")
+    console.print("  If VectorMemory packages were wiped, run:")
+    console.print('    [cyan]kazma update --reinstall -y[/cyan]')
+    console.print('    or  [cyan]uv pip install -e ".[rag]"[/cyan]')
     console.print()
     console.print("Git installs (monorepo):")
     console.print("  • Local edits (e.g. kazma.yaml) are [bold]auto-stashed[/bold], then restored")
@@ -907,6 +1022,8 @@ def _run_git_check_and_update(
     )
 
     update_available = commits_behind > 0
+    git_root = _find_git_root()
+    cwd = str(git_root) if git_root else str(Path.cwd())
 
     if update_available:
         console.print()
@@ -926,6 +1043,22 @@ def _run_git_check_and_update(
     else:
         console.print()
         console.print("[green]Already up to date.[/green]")
+        # Repair wiped extras even when git is current (post bare-uv-sync damage)
+        if needs_extras_repair(cwd):
+            console.print()
+            console.print(
+                "[yellow]Optional packages missing "
+                "(e.g. chromadb / sentence-transformers for VectorMemory).[/yellow]\n"
+                "Reinstalling preserved extras now…"
+            )
+            if _reinstall_via_subprocess(cwd):
+                console.print("[green]Package repair finished.[/green]")
+            else:
+                console.print(
+                    "[red]Repair incomplete.[/red] Try:\n"
+                    '  [cyan]uv pip install -e ".[rag]"[/cyan]'
+                )
+                sys.exit(1)
         return
 
     if check_only:
@@ -964,6 +1097,7 @@ def run(args: list[str]) -> None:
     check_only = "--check" in flags or "-c" in flags
     force = "--force" in flags or "-f" in flags
     skip_confirm = "--yes" in flags or "-y" in flags
+    reinstall_only = "--reinstall" in flags or "-r" in flags
 
     install_type = detect_install_type()
     current_version = get_current_version()
@@ -972,6 +1106,36 @@ def run(args: list[str]) -> None:
     console.print("[bold]Kazma Update[/bold]")
     console.print(f"  Install type: [cyan]{install_type}[/cyan]")
     console.print(f"  Current:      [cyan]v{current_version}[/cyan]")
+
+    # Package-only path (no git) — recover from bare uv sync / missing rag
+    if reinstall_only:
+        git_root = _find_git_root()
+        cwd = str(git_root) if git_root else str(Path.cwd())
+        extras = detect_active_extras(cwd)
+        # Always ensure rag when memory data exists or nothing detected but
+        # user asked for reinstall after a wipe — default to rag for recovery.
+        if not extras and _vector_memory_data_present(cwd):
+            extras = ["rag"]
+        if not extras:
+            extras = ["rag"]  # safe recovery default for memory installs
+            console.print(
+                "[dim]No extras recorded — defaulting to [rag] for memory restore.[/dim]"
+            )
+        persist_extras(extras)
+        console.print(f"[cyan]Reinstall extras:[/cyan] {', '.join(extras)}")
+        if not skip_confirm and not _confirm(
+            f"Reinstall packages for extras [{', '.join(extras)}]? [y/N] "
+        ):
+            console.print("Cancelled.")
+            return
+        # In-process is fine: no git pull happened, module matches disk
+        ok = _reinstall_local(cwd)
+        if ok:
+            console.print("[green]Reinstall complete.[/green]")
+        else:
+            console.print("[red]Reinstall failed.[/red]")
+            sys.exit(1)
+        return
 
     if install_type == "git":
         _run_git_check_and_update(current_version, check_only, force, skip_confirm)
