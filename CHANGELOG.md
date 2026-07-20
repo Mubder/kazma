@@ -1,6 +1,20 @@
 # CHANGELOG
 
 
+## v0.2.0 (2026-07-20)
+
+### Features
+
+- **ux**: Hitl supersede cancel, season takeover, STT fix, model search, update CLI
+  ([`bc44412`](https://github.com/Mubder/kazma/commit/bc44412cba3720f7b68c4d897b2d110b55728a6f))
+
+- Auto-deny pending HITL when a new user message arrives (no silent supersede) - Cross-platform
+  seasons: gw-* session_id is thread_id; hydrate Web from checkpointer - NVIDIA STT no longer uses
+  LLM integrate URL; require Speech NIM base URL + model catalog - Discovered-models panel: search
+  box, badges, polished list - kazma update: monorepo/git path + GitHub releases fallback (not
+  broken PyPI-only)
+
+
 ## v0.1.0 (2026-07-20)
 
 ### Bug Fixes
