@@ -151,10 +151,14 @@ def detect_install_type() -> str:
 def get_current_version() -> str:
     """Return the currently installed kazma version.
 
-    Tries ``importlib.metadata`` first (fast, reliable), then falls back
-    to parsing ``pip show kazma`` output, and finally to reading
-    ``pyproject.toml``.
+    For git/monorepo installs prefer ``pyproject.toml`` (source of truth
+    after ``git pull``). Otherwise use importlib / pip metadata.
     """
+    # Git checkout: always trust repo pyproject so version matches HEAD
+    if _find_git_root() is not None:
+        ver = _get_version()
+        if ver and ver != "0.0.0":
+            return ver
     try:
         from importlib.metadata import version as pkg_version
 
@@ -341,6 +345,59 @@ def do_pip_update() -> bool:
         return False
 
 
+def _reinstall_local(cwd: str) -> bool:
+    """Reinstall editable package: prefer ``uv``, then ``pip``.
+
+    Many Kazma installs use ``uv`` venvs without ``pip`` installed
+    (``No module named pip``). Treat a successful ``git pull`` as the
+    critical step; reinstall is best-effort so code updates still apply.
+    """
+    # 1) uv sync / uv pip install -e .
+    for cmd, label in (
+        (["uv", "sync"], "uv sync"),
+        (["uv", "pip", "install", "-e", "."], "uv pip install -e ."),
+    ):
+        console.print(f"[cyan]Reinstalling via {label}...[/cyan]")
+        try:
+            result = _run_cmd(cmd, cwd=cwd, timeout=_INSTALL_TIMEOUT)
+            if result.returncode == 0:
+                console.print(f"[green]{label} completed.[/green]")
+                return True
+            err = (result.stderr or result.stdout or "").strip()
+            console.print(f"[yellow]{label} failed:[/yellow] {err[:400]}")
+        except FileNotFoundError:
+            console.print(f"[dim]{cmd[0]} not on PATH — trying next method.[/dim]")
+        except subprocess.TimeoutExpired:
+            console.print(f"[yellow]{label} timed out.[/yellow]")
+        except Exception as exc:
+            console.print(f"[yellow]{label} error:[/yellow] {exc}")
+
+    # 2) python -m pip (may be missing in uv venvs)
+    console.print("[cyan]Reinstalling via python -m pip install -e ....[/cyan]")
+    try:
+        result = _run_cmd(
+            [sys.executable, "-m", "pip", "install", "-e", "."],
+            cwd=cwd,
+            timeout=_INSTALL_TIMEOUT,
+        )
+        if result.returncode == 0:
+            console.print("[green]pip install -e . completed.[/green]")
+            return True
+        err = (result.stderr or result.stdout or "").strip()
+        console.print(f"[yellow]pip install -e . failed:[/yellow] {err[:400]}")
+    except Exception as exc:
+        console.print(f"[yellow]pip reinstall skipped:[/yellow] {exc}")
+
+    console.print(
+        "[yellow]Code was pulled successfully, but package reinstall did not run.[/yellow]\n"
+        "  For uv installs this is usually fine — restart the server:\n"
+        "  [cyan]kazma serve[/cyan]   or   [cyan]uv run kazma serve[/cyan]\n"
+        "  To force reinstall: [cyan]uv sync[/cyan]"
+    )
+    # git pull already succeeded — do not fail the whole update
+    return True
+
+
 def do_git_update() -> bool:
     """Update kazma from git source (pull + reinstall editable).
 
@@ -360,6 +417,10 @@ def do_git_update() -> bool:
         if result.returncode != 0:
             console.print(f"[red]git pull failed:[/red]\n{result.stderr.strip()}")
             return False
+        out = (result.stdout or "").strip()
+        if out:
+            console.print(f"[dim]{out}[/dim]")
+        console.print("[green]git pull completed.[/green]")
     except subprocess.TimeoutExpired:
         console.print("[red]git pull timed out.[/red]")
         return False
@@ -370,28 +431,7 @@ def do_git_update() -> bool:
         console.print(f"[red]git pull error:[/red] {exc}")
         return False
 
-    # pip install -e .
-    console.print("[cyan]Reinstalling package in editable mode (pip install -e .)...[/cyan]")
-    try:
-        result = _run_cmd(
-            [sys.executable, "-m", "pip", "install", "-e", "."],
-            cwd=cwd,
-            timeout=_INSTALL_TIMEOUT,
-        )
-        if result.returncode == 0:
-            console.print("[green]Reinstall completed.[/green]")
-            return True
-        console.print(f"[red]pip install -e . failed:[/red]\n{result.stderr.strip()}")
-        return False
-    except subprocess.TimeoutExpired:
-        console.print("[red]Reinstall timed out.[/red]")
-        return False
-    except PermissionError:
-        console.print("[red]Permission denied during reinstall.[/red]")
-        return False
-    except Exception as exc:
-        console.print(f"[red]Reinstall error:[/red] {exc}")
-        return False
+    return _reinstall_local(cwd)
 
 
 # ---------------------------------------------------------------------------
