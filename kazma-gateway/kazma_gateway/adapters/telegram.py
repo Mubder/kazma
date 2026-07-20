@@ -1046,6 +1046,9 @@ class TelegramAdapter(BaseAdapter):
             {"command": "undo", "description": "Undo last response"},
             {"command": "edit", "description": "Edit last response"},
             {"command": "swarm", "description": "Swarm orchestration"},
+            {"command": "new", "description": "Create a brand new session/season"},
+            {"command": "compact", "description": "Manually trigger context compaction"},
+            {"command": "yolo", "description": "Toggle session YOLO safety bypass"},
         ]
 
         scopes: list[tuple[str, str]] = [

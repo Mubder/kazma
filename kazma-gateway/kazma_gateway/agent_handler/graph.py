@@ -507,6 +507,24 @@ def create_graph_handler(
         thread_lock = await _get_thread_lock(thread_id)
 
         async with thread_lock:
+            # ── Restore conversation history ─────────────────────
+            # The supervisor state has NO ``add_messages`` reducer, so the
+            # single-message state built by ``_build_initial_state`` would
+            # REPLACE the checkpointed history on every turn — making the
+            # agent "forget" the conversation (symptom: replies as if it has
+            # never seen the previous message). Mirror the Web SSE path: load
+            # the prior messages from the checkpointer and prepend them so the
+            # graph sees the full thread history each turn.
+            if graph is not None and getattr(graph, "checkpointer", None) is not None:
+                try:
+                    snap = await graph.aget_state(config)
+                    prior = (snap.values or {}).get("messages") or [] if snap else []
+                    if prior:
+                        # state["messages"] currently holds only the new user turn.
+                        state = {**state, "messages": list(prior) + list(state.get("messages", []))}
+                except Exception as _e:
+                    logger.debug("[agent-handler] history restore skipped: %s", _e)
+
             # ── Invoke graph ───────────────────────────────────────
             start = time.monotonic()
             try:

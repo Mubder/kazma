@@ -152,6 +152,27 @@ async def _handle_hitl_resume(
             resume_config,
         )
 
+        # Re-surface a chained interrupt (a second danger tool paused in the
+        # same resumed turn). Without this the user sees "Approved — continuing."
+        # while the graph is actually still paused on another tool, so the
+        # agent appears to "do nothing".
+        chained = await _check_graph_interrupt(graph, resume_config)
+        if chained is not None:
+            from .graph import _prepare_tg_outbound
+
+            prompt = _build_approval_prompt(chained, target_thread)
+            prompt_text, send_ctx = _prepare_tg_outbound(msg, prompt["text"], ctx)
+            if prompt.get("markup"):
+                send_ctx["reply_markup"] = prompt["markup"]
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=prompt_text,
+                    context_metadata=send_ctx,
+                )
+            )
+            return True
+
         # Extract the assistant's response from the resumed turn.
         assistant_text = ""
         messages = result_state.get("messages", []) if isinstance(result_state, dict) else []
