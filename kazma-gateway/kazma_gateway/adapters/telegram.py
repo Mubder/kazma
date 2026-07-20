@@ -562,14 +562,50 @@ class TelegramAdapter(BaseAdapter):
             logger.error("[telegram] Failed to download voice file: %s", type(exc).__name__)
             return None
 
+    def _live_voice_settings(self) -> dict[str, str | bool]:
+        """Read voice settings from ConfigStore (Settings UI) with ctor fallbacks.
+
+        Voice is a separate subsystem from LLM providers. Settings saved in the
+        Web UI land in ConfigStore; boot-time yaml/ctor values are defaults only.
+        """
+        out: dict[str, str | bool] = {
+            "enabled": bool(self._voice_enabled),
+            "stt_provider": self._voice_provider,
+            "stt_language": self._stt_language,
+            "tts_provider": self._tts_provider,
+            "tts_voice": self._tts_voice,
+            "tts_output_format": self._tts_output_format,
+        }
+        try:
+            from kazma_core.config_store import get_config_store
+
+            cs = get_config_store()
+            enabled = cs.get("voice.enabled")
+            if enabled is not None:
+                out["enabled"] = str(enabled).lower() in ("1", "true", "yes", "on")
+            for key, attr in (
+                ("voice.stt_provider", "stt_provider"),
+                ("voice.stt_language", "stt_language"),
+                ("voice.tts_provider", "tts_provider"),
+                ("voice.tts_voice", "tts_voice"),
+                ("voice.tts_output_format", "tts_output_format"),
+            ):
+                val = cs.get(key)
+                if val is not None and str(val).strip() and str(val).strip().lower() != "none":
+                    out[attr] = str(val).strip()
+        except Exception:
+            logger.debug("[telegram] live voice settings unavailable", exc_info=True)
+        return out
+
     async def transcribe_voice(self, audio_bytes: bytes) -> str | None:
         """Transcribe audio bytes using the configured STT provider."""
         from kazma_core.voice.stt import transcribe
 
+        cfg = self._live_voice_settings()
         return await transcribe(
             audio_bytes,
-            provider=self._voice_provider,
-            language=self._stt_language,
+            provider=str(cfg["stt_provider"]),
+            language=str(cfg["stt_language"]),
             api_key=self._stt_api_key,
         )
 
@@ -577,11 +613,12 @@ class TelegramAdapter(BaseAdapter):
         """Synthesize text to audio using the configured TTS provider."""
         from kazma_core.voice.tts import synthesize
 
+        cfg = self._live_voice_settings()
         return await synthesize(
             text,
-            provider=self._tts_provider,
-            voice=self._tts_voice,
-            output_format=self._tts_output_format,
+            provider=str(cfg["tts_provider"]),
+            voice=str(cfg["tts_voice"]),
+            output_format=str(cfg["tts_output_format"]),
         )
 
     async def send_voice_reply(self, chat_id: int, audio_bytes: bytes, reply_to: int | None = None) -> bool:
@@ -614,7 +651,7 @@ class TelegramAdapter(BaseAdapter):
         Strips markdown/HTML from the text before synthesis so the TTS
         engine gets clean spoken text.
         """
-        if not text or not self._voice_enabled:
+        if not text or not self._live_voice_settings().get("enabled"):
             return
         try:
             # Strip markdown/HTML for clean TTS input
@@ -641,7 +678,7 @@ class TelegramAdapter(BaseAdapter):
         voice_obj = message.get("voice") or message.get("audio")
         if not voice_obj:
             return None
-        if not self._voice_enabled:
+        if not self._live_voice_settings().get("enabled"):
             return None
         file_id = voice_obj.get("file_id")
         if not file_id:
@@ -991,8 +1028,8 @@ class TelegramAdapter(BaseAdapter):
         Returns:
             True if sent successfully.
         """
-        # Fire typing indicator before sending
-        asyncio.create_task(self._trigger_typing(outbound.target_id))
+        # Typing is kept alive by agent_handler during the whole turn.
+        # One final pulse before send keeps the indicator visible for the reply.
 
         if not self._http:
             self._http = httpx.AsyncClient(
@@ -1036,7 +1073,7 @@ class TelegramAdapter(BaseAdapter):
                     self._set_reaction(chat_id, original_msg_id, emoji)
                 )
             # Send TTS voice reply if original message was voice
-            if self._voice_enabled and outbound.context_metadata.get("voice_transcribed"):
+            if self._live_voice_settings().get("enabled") and outbound.context_metadata.get("voice_transcribed"):
                 asyncio.create_task(self._send_tts_reply(chat_id, outbound.text, original_msg_id))
             return True
         else:

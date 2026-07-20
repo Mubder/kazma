@@ -1,0 +1,92 @@
+# Industrial-grade automatic versioning from conventional commits.
+#
+# On every push to main:
+#   1. Analyze commits since the last tag (feat → minor, fix → patch, BREAKING → major)
+#   2. Bump version in pyproject.toml + kazma.yaml
+#   3. Update CHANGELOG.md
+#   4. Create git tag vX.Y.Z and GitHub Release
+#
+# You never pick a version number — commits drive it.
+# Commit style (required for automation):
+#   feat: …     → 0.x.0 (minor)
+#   fix: …      → 0.0.x (patch)
+#   feat!: … or footer "BREAKING CHANGE:" → 1.0.0 (major)
+#   chore/docs/test/ci → no release (unless configured)
+
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force_level:
+        description: "Optional force bump (patch|minor|major). Leave empty for auto."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Semantic release
+    runs-on: ubuntu-latest
+    # Skip release commits themselves (avoid infinite loop)
+    if: "!contains(github.event.head_commit.message, 'chore(release):')"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install release tooling
+        run: |
+          pip install --upgrade pip
+          pip install python-semantic-release==9.21.1
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run semantic-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_LEVEL: ${{ github.event.inputs.force_level }}
+        run: |
+          set -euo pipefail
+          BEFORE_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo none)"
+          if [ -n "${FORCE_LEVEL:-}" ]; then
+            semantic-release version --${FORCE_LEVEL}
+          else
+            # No-op when nothing to release
+            semantic-release version || true
+          fi
+          AFTER_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo none)"
+          # Keep kazma.yaml agent.version in sync with package version
+          VER="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          python - <<'PY'
+          import re, pathlib, tomllib
+          ver = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          p = pathlib.Path("kazma.yaml")
+          text = p.read_text(encoding="utf-8")
+          new, n = re.subn(r"(?m)^(  version:\s*).+$", rf"\g<1>{ver}", text, count=1)
+          if n:
+              p.write_text(new, encoding="utf-8")
+              print(f"synced kazma.yaml agent.version -> {ver}")
+          else:
+              print("kazma.yaml version line not found; skip")
+          PY
+          if [ "$AFTER_TAG" != "$BEFORE_TAG" ]; then
+            git add kazma.yaml || true
+            git diff --cached --quiet || git commit --amend --no-edit
+            semantic-release publish || true
+          fi

@@ -277,24 +277,13 @@
         populateModelSelector(fallback, savedModels);
       });
 
-    // Resume the last active session across page refreshes. On a simple
-    // page refresh we don't re-fetch messages from the API (causes a
-    // visible flash). We only set the chatSessionId and let the welcome
-    // screen show. Messages are fetched when the user clicks a session
-    // in the sidebar (explicit switch) or sends the first message.
+    // Resume the last active session and HYDRATE messages. Previously we only
+    // set chatSessionId and showed a welcome screen — sessions looked empty
+    // until a manual sidebar click/refresh. Always loadSession for continuity.
     try {
       var savedSid = localStorage.getItem(SESSION_LS_KEY);
       if (savedSid) {
-        chatSessionId = savedSid;
-        // Show welcome placeholder (no API fetch = no flicker)
-        messagesEl.innerHTML =
-          '<div class="chat-welcome">' +
-            '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
-            '<h2>Kazma</h2>' +
-            '<p>How can I help you today?</p>' +
-          '</div>';
-        updateSessionStats(0, 0);
-        renderSessionList();
+        loadSession(savedSid);
       } else {
         newSession();
       }

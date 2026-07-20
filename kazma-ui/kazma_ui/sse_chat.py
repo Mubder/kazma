@@ -610,53 +610,13 @@ def create_sse_chat_router(
         if cost_breaker:
             cost_breaker.record_user_interaction()
 
-        # ── Build conversation messages ────────────────────────────
+        # ── Persist UI projection (display only) ───────────────────
         session.messages.append({"role": "user", "content": user_message})
-        # CRITICAL: persist immediately. Previously messages were only mutated
-        # in-memory and never written back to SQLite, so restarts wiped history.
+        # CRITICAL: persist immediately so restarts keep the sidebar transcript.
         try:
             _get_store().put(session)
         except Exception:
             logger.exception("[SSE] failed to persist user message for session=%s", session_id)
-
-        messages: list[dict[str, Any]] = []
-        has_system = any(m.get("role") == "system" for m in session.messages)
-        if not has_system and system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-
-        # ── Per-turn environment refresh (Phase 2) ─────────────────
-        # Re-resolve workspace/repo/tool facts on every request so a
-        # mid-conversation workspace switch takes effect immediately. The
-        # base system prompt is built once at init; this keeps it current.
-        try:
-            from kazma_core.ide.env_context import build_env_context
-
-            env_block = build_env_context()
-            if env_block:
-                messages.append({"role": "system", "content": env_block})
-        except Exception:
-            logger.debug("[sse_chat] per-turn env_context refresh skipped", exc_info=True)
-
-        # Per-turn language lock — last system instruction wins over cultural
-        # Arabic context when the user is writing English (or vice versa).
-        try:
-            from kazma_core.language_lock import language_lock_message
-
-            lock = language_lock_message(user_message)
-            if lock:
-                messages.append({"role": "system", "content": lock})
-        except Exception:
-            logger.debug("[sse_chat] language lock skipped", exc_info=True)
-
-        messages.extend(
-            {k: v for k, v in m.items() if k in ("role", "content")} for m in session.messages
-        )
-
-        # ── Build SupervisorState for the graph ────────────────────
-        from kazma_core.agent.state import initial_supervisor_state
-
-        input_state = initial_supervisor_state(thread_id=thread_id)
-        input_state["messages"] = messages
 
         # ── LangGraph config with thread_id for checkpointing ──────
         graph_config = {
@@ -665,6 +625,49 @@ def create_sse_chat_router(
                 "checkpoint_ns": "",
             },
         }
+
+        # ── Build agent messages from CHECKPOINTER (source of truth) ─
+        # SessionManager is UI-only. Feeding text-only session history into
+        # ainvoke was overwriting checkpoint tool chains (no add_messages
+        # reducer) → post-HITL / multi-turn amnesia. Mirror the gateway path.
+        system_msgs: list[dict[str, Any]] = []
+        if system_prompt:
+            system_msgs.append({"role": "system", "content": system_prompt})
+
+        try:
+            from kazma_core.ide.env_context import build_env_context
+
+            env_block = build_env_context()
+            if env_block:
+                system_msgs.append({"role": "system", "content": env_block})
+        except Exception:
+            logger.debug("[sse_chat] per-turn env_context refresh skipped", exc_info=True)
+
+        try:
+            from kazma_core.language_lock import language_lock_message
+
+            lock = language_lock_message(user_message)
+            if lock:
+                system_msgs.append({"role": "system", "content": lock})
+        except Exception:
+            logger.debug("[sse_chat] language lock skipped", exc_info=True)
+
+        from kazma_core.agent.turn_input import build_turn_messages
+
+        current_graph = _get_graph()
+        messages = await build_turn_messages(
+            current_graph,
+            graph_config,
+            user_text=user_message,
+            system_messages=system_msgs,
+            fallback_history=session.messages[:-1],  # exclude the user line we just added
+        )
+
+        # ── Build SupervisorState for the graph ────────────────────
+        from kazma_core.agent.state import initial_supervisor_state
+
+        input_state = initial_supervisor_state(thread_id=thread_id)
+        input_state["messages"] = messages
 
         # ── Trace the request ──────────────────────────────────────
         if tracer:
@@ -686,7 +689,6 @@ def create_sse_chat_router(
             content_acc = ""
 
             try:
-                current_graph = _get_graph()
                 async for frame in _stream_langgraph_events(
                     graph=current_graph,
                     input_state=input_state,

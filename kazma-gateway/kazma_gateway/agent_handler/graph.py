@@ -265,6 +265,36 @@ def create_graph_handler(
         # so _build_initial_state can pick it up
         msg.context_metadata["thread_id"] = thread_id
 
+        # ── Typing keepalive (native "…typing" while the agent works) ──
+        # Reactions (👀) are secondary; Telegram typing expires ~5s without refresh.
+        typing_target = _build_target_id(msg.platform, msg.context_metadata)
+        try:
+            from kazma_gateway.typing_keepalive import get_typing_keepalive
+
+            adapter = None
+            for a in getattr(manager, "adapters", []) or []:
+                if getattr(a, "name", None) == msg.platform:
+                    adapter = a
+                    break
+            typing_fn = getattr(adapter, "_trigger_typing", None) if adapter else None
+            if typing_fn is not None:
+                await get_typing_keepalive().start(typing_target, typing_fn)
+        except Exception:
+            logger.debug("[agent-handler] typing keepalive start skipped", exc_info=True)
+
+        try:
+            await _handler_body(msg, thread_id)
+        finally:
+            try:
+                from kazma_gateway.typing_keepalive import get_typing_keepalive
+
+                await get_typing_keepalive().stop(typing_target)
+            except Exception:
+                pass
+
+    async def _handler_body(msg: IncomingMessage, thread_id: str) -> None:
+        """Inner handler body (typing keepalive wraps this)."""
+        sender = msg.sender_id or "unknown"
         # Cost breaker gate
         if cost_breaker and cost_breaker.should_halt():
             # Restore platform context for the reply
@@ -584,22 +614,43 @@ def create_graph_handler(
 
         async with thread_lock:
             # ── Restore conversation history ─────────────────────
-            # The supervisor state has NO ``add_messages`` reducer, so the
-            # single-message state built by ``_build_initial_state`` would
-            # REPLACE the checkpointed history on every turn — making the
-            # agent "forget" the conversation (symptom: replies as if it has
-            # never seen the previous message). Mirror the Web SSE path: load
-            # the prior messages from the checkpointer and prepend them so the
-            # graph sees the full thread history each turn.
-            if graph is not None and getattr(graph, "checkpointer", None) is not None:
-                try:
-                    snap = await graph.aget_state(config)
-                    prior = list((snap.values or {}).get("messages") or []) if snap else []
-                    if prior:
-                        prior = _clean_prior_messages(prior)
-                        state = {**state, "messages": prior + list(state.get("messages", []))}
-                except Exception as _e:
-                    logger.debug("[agent-handler] history restore skipped: %s", _e)
+            # SupervisorState has NO add_messages reducer — input replaces
+            # checkpoint messages. Checkpointer is the sole agent transcript;
+            # shared helper matches the Web SSE path.
+            try:
+                from kazma_core.agent.turn_input import build_turn_messages
+
+                user_text = ""
+                for m in reversed(list(state.get("messages") or [])):
+                    if isinstance(m, dict) and m.get("role") == "user":
+                        user_text = str(m.get("content") or "")
+                        break
+                if not user_text:
+                    user_text = (msg.text or "").strip()
+                rebuilt = await build_turn_messages(
+                    graph,
+                    config,
+                    user_text=user_text,
+                    system_messages=None,
+                    fallback_history=None,
+                )
+                if rebuilt:
+                    state = {**state, "messages": rebuilt}
+            except Exception as _e:
+                logger.debug("[agent-handler] history restore skipped: %s", _e)
+                # Legacy fallback
+                if graph is not None and getattr(graph, "checkpointer", None) is not None:
+                    try:
+                        snap = await graph.aget_state(config)
+                        prior = list((snap.values or {}).get("messages") or []) if snap else []
+                        if prior:
+                            prior = _clean_prior_messages(prior)
+                            state = {
+                                **state,
+                                "messages": prior + list(state.get("messages", [])),
+                            }
+                    except Exception:
+                        pass
 
             # ── Active Agent Skill injection (/skill activate) ─────
             # If the user armed a skill via slash command, load its full

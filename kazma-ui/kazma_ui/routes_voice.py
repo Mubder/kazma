@@ -157,6 +157,88 @@ async def list_providers() -> dict[str, list[str]]:
     }
 
 
+@router.get("/status")
+async def voice_status() -> dict[str, Any]:
+    """Voice readiness — separate from LLM providers (set-and-forget check).
+
+    Returns current STT/TTS settings, whether keys look present, and
+    recommended models. Does **not** list chat/LLM model IDs.
+    """
+    import os
+
+    from kazma_core.config_store import get_config_store
+    from kazma_core.voice.stt import list_stt_providers
+    from kazma_core.voice.tts import list_tts_providers
+
+    cs = get_config_store()
+
+    def _g(key: str, default: str = "") -> str:
+        val = cs.get(key)
+        if val is None or str(val).strip().lower() in ("", "none"):
+            return default
+        return str(val).strip()
+
+    stt = _g("voice.stt_provider", "openai")
+    tts = _g("voice.tts_provider", "edgetts")
+    enabled_raw = cs.get("voice.enabled")
+    enabled = True if enabled_raw is None else str(enabled_raw).lower() in (
+        "1", "true", "yes", "on",
+    )
+
+    def _key_present(provider: str) -> bool:
+        env_map = {
+            "openai": ("OPENAI_API_KEY",),
+            "groq": ("GROQ_API_KEY",),
+            "cohere": ("COHERE_API_KEY",),
+            "nvidia": ("NVIDIA_API_KEY", "NGC_API_KEY"),
+        }
+        for env in env_map.get(provider, ()):
+            if os.environ.get(env):
+                return True
+        try:
+            from kazma_core.model_registry import ModelRegistry
+
+            entry = ModelRegistry(cs).get_provider(provider)
+            if entry and entry.get("api_key"):
+                return True
+        except Exception:
+            pass
+        # Free / local providers need no key
+        if provider in ("edgetts", "faster-whisper", "kokoro", "coqui"):
+            return True
+        return False
+
+    return {
+        "enabled": enabled,
+        "note": (
+            "Voice (STT/TTS) is independent of chat LLM providers. "
+            "Use Speech-to-Text models (e.g. whisper), not chat models "
+            "(e.g. llama / gpt). NVIDIA ASR/TTS use modality-specific endpoints."
+        ),
+        "stt": {
+            "provider": stt,
+            "model": _g("voice.stt_model", "default"),
+            "language": _g("voice.stt_language", "auto"),
+            "key_present": _key_present(stt),
+            "available_providers": list_stt_providers(),
+            "recommended_models": {
+                "openai": ["whisper-1"],
+                "groq": ["whisper-large-v3"],
+                "nvidia": ["nvidia/whisper-large-v3", "default"],
+                "faster-whisper": ["base", "small", "medium"],
+            }.get(stt, ["default"]),
+        },
+        "tts": {
+            "provider": tts,
+            "voice": _g("voice.tts_voice", "default"),
+            "output_format": _g("voice.tts_output_format", "mp3"),
+            "key_present": _key_present(tts),
+            "available_providers": list_tts_providers(),
+        },
+        "ready": enabled and _key_present(stt) and _key_present(tts),
+    }
+
+
 @router.get("/voices")
 async def list_voices(provider: str = "edgetts") -> list[str]:
     """Get available voice models/ShortNames for a specific TTS provider."""

@@ -271,29 +271,73 @@ class SessionManager:
 
     # ── core CRUD ──────────────────────────────────────────────────
 
+    def _load_one_from_db(self, tenant_id: str, session_id: str) -> ChatSession | None:
+        """Load a single session row from SQLite (cache miss path)."""
+        try:
+            cursor = self._conn.execute(
+                "SELECT tenant_id, session_id, messages, created_at, total_cost, "
+                "total_tokens, thread_id, updated_at, title, archived "
+                "FROM sessions WHERE tenant_id = ? AND session_id = ?",
+                (tenant_id, session_id),
+            )
+            row = cursor.fetchone()
+        except Exception:
+            logger.debug("[SessionManager] DB load failed for %s", session_id, exc_info=True)
+            return None
+        if not row:
+            return None
+        (
+            tenant_id, session_id, messages_str, created_at, total_cost,
+            total_tokens, thread_id, updated_at, title, archived,
+        ) = row
+        try:
+            messages = json.loads(messages_str) if messages_str else []
+        except Exception:
+            messages = []
+        return ChatSession(
+            session_id=session_id,
+            messages=messages,
+            created_at=created_at or "",
+            total_cost=total_cost or 0.0,
+            total_tokens=total_tokens or 0,
+            tenant_id=tenant_id or "default",
+            thread_id=thread_id or "",
+            updated_at=updated_at or "",
+            title=title or "",
+            archived=bool(archived),
+        )
+
     def get(self, session_id: str) -> ChatSession | None:
-        """Return the session for ``session_id`` or ``None``."""
+        """Return the session for ``session_id`` or ``None``.
+
+        Cache miss falls back to SQLite so restarts / multi-worker views
+        do not report empty history for sessions that exist on disk.
+        """
         tenant_id = get_current_tenant_id() or "default"
         key = f"{tenant_id}:{session_id}"
         session = self._sessions.get(key)
         if session is not None:
-            # LRU: mark as most-recently-used.
             self._sessions.move_to_end(key)
-        return session
+            return session
+        loaded = self._load_one_from_db(tenant_id, session_id)
+        if loaded is not None:
+            self._sessions[key] = loaded
+            self._sessions.move_to_end(key)
+            return loaded
+        return None
 
     def get_or_create(self, session_id: str | None = None) -> ChatSession:
         """Get an existing session or create a new one.
 
         If ``session_id`` is ``None`` a fresh UUID is generated.  If a
-        session with the given ID already exists it is returned as-is.
+        session with the given ID already exists (memory **or DB**) it is
+        returned as-is — never invent an empty row over existing history.
         """
         tenant_id = get_current_tenant_id() or "default"
         if session_id:
-            key = f"{tenant_id}:{session_id}"
-            if key in self._sessions:
-                # LRU: mark as most-recently-used.
-                self._sessions.move_to_end(key)
-                return self._sessions[key]
+            existing = self.get(session_id)
+            if existing is not None:
+                return existing
 
         sid = session_id or str(uuid.uuid4())
         key = f"{tenant_id}:{sid}"
