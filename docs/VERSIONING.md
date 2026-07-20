@@ -3,6 +3,16 @@
 Kazma uses **industrial automatic versioning**. You never choose a version number
 or release date by hand — **conventional commits** drive everything.
 
+## Current product line
+
+| Version | Notes |
+|---------|--------|
+| **0.6.0** | Restored product line (2026-07-21). After mistaken `0.1–0.2` auto-releases. |
+| 0.5.0 | Last intentional product version before automation glitch |
+| 0.2.x / 0.1.0 | **Invalid line** — created when semantic-release had no `v0.5.0` tag and restarted from zero. Tags may still exist for history; **do not ship from them**. |
+
+Baseline tag for automation: **`v0.6.0`**. Next releases: `0.6.1` (patch), `0.7.0` (minor), etc.
+
 ## How it works
 
 | Commit type | Version bump | Example |
