@@ -13,6 +13,7 @@ Features are listed with their implementation PR/commit where available.
 | ✅ | **IdeService** | Transport-neutral coding backend (read/write/delete/list/search/run/diff/git/swarm). All mutating ops route through the shared LocalToolRegistry + HITL gate. | `kazma_core/ide/service.py` |
 | ✅ | **env_context** | `build_env_context()` resolves workspace root, repo slug, branch, GitHub auth, tools → prompt-injection block. Injected into supervisor + every worker + per-turn SSE chat. | `kazma_core/ide/env_context.py` |
 | ✅ | **workspace_scope** | Per-task workspace targeting via ContextVar — concurrent swarm tasks can operate on different repos. | `kazma_core/ide/workspace_scope.py` |
+| ✅ | **Agent Skills (agentskills.io)** | Full SKILL.md support: discover, progressive disclosure, install from GitHub without Node/npm (`install_agent_skill`, `/skill install owner/repo`, Skills UI). Fixes Telegram skill-install HITL thrash. | `kazma_core/agent_skills/*` |
 | ✅ | **Web IDE** | 3-pane layout (tree \| multi-tab editor \| AI chat), CodeMirror find/replace, file-aware streaming chat, create/delete/save/run/diff/git/grep/skills/swarm. | `ide.html, ide.js, ide_api.py` |
 | ✅ | **TUI Editor** | Full-screen code editor pushed from the Files tab. | `kazma_tui/editor.py` |
 | ✅ | **Cross-platform /ide** | `/ide` commands work on Telegram/Discord/Slack/Web/TUI: ls, open, edit, delete, run, runfile, grep, git, repo (list/switch/clone), skill, swarm. | `commands.py:_try_ide_command` |

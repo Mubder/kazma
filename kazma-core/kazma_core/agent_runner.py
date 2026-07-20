@@ -213,6 +213,28 @@ class KazmaAgent:
         except Exception:
             logger.debug("[agent_runner] env context injection skipped", exc_info=True)
 
+        # Agent Skills catalog (agentskills.io progressive disclosure tier 1).
+        # Only name+description — full body loads via activate_skill.
+        try:
+            from kazma_core.agent_skills.catalog import build_catalog_prompt
+
+            skills_block = build_catalog_prompt()
+            if skills_block and skills_block not in self.system_prompt:
+                self.system_prompt = self.system_prompt.rstrip() + "\n\n" + skills_block
+            elif not skills_block:
+                # Still teach install path when catalog is empty
+                install_hint = (
+                    "\n\n## Agent Skills\n"
+                    "You can install skills from https://agentskills.io/ using "
+                    "`install_agent_skill(source='owner/repo')` "
+                    "(e.g. `shadcn/improve`). Do **not** use npx/npm/shell for "
+                    "skill installs — use install_agent_skill (one approval)."
+                )
+                if "install_agent_skill" not in self.system_prompt:
+                    self.system_prompt = self.system_prompt.rstrip() + install_hint
+        except Exception:
+            logger.debug("[agent_runner] agent skills catalog injection skipped", exc_info=True)
+
         # Universal language directive — injected LAST so it's the final
         # instruction the model sees, after all cultural context. This
         # prevents Arabic cultural context from biasing the model to

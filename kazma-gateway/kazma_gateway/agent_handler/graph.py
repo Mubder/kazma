@@ -26,6 +26,7 @@ from .hitl import (
 from .commands import (
     _try_ide_command,
     _try_model_command,
+    _try_skill_command,
     _try_swarm_command,
     _build_slash_ctx,
 )
@@ -531,6 +532,14 @@ def create_graph_handler(
         )
         if ide_handled:
             return  # IDE command handled, skip graph
+
+        # ── Agent Skills slash-command intercept ──────────────────
+        # /skill install|list|… installs SKILL.md skills without LLM thrash.
+        skill_handled = await _try_skill_command(
+            msg, _store, manager, thread_id,
+        )
+        if skill_handled:
+            return
 
         # ── Majlis cultural fast-path ─────────────────────────────
         # Detect pure greetings/farewells before invoking the LLM.

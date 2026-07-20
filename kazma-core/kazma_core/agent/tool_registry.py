@@ -76,12 +76,38 @@ _hitl_approved_ctx: ContextVar[bool] = ContextVar("_hitl_approved", default=Fals
 _graph_hitl_gate_ctx: ContextVar[bool] = ContextVar("_graph_hitl_gate", default=False)
 
 
+def _is_under_agent_skill_dir(resolved_p: Path) -> bool:
+    """True if path is inside a known Agent Skills install/scan directory.
+
+    Allows progressive disclosure (tier 3) — agents can ``file_read``
+    scripts/references/assets under installed skills without opening the
+    whole filesystem. Write/delete ops must still reject these paths.
+    """
+    try:
+        from kazma_core.agent_skills.discovery import skill_base_dirs
+
+        for _scope, base in skill_base_dirs():
+            if not base.is_dir():
+                continue
+            try:
+                resolved_p.relative_to(base.resolve())
+                return True
+            except ValueError:
+                continue
+    except Exception:
+        pass
+    return False
+
+
 def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     """Return a safety error string if *p* is outside the workspace.
 
     Returns ``None`` when the path is allowed.  Denies by default when
     the workspace module cannot be imported (fail-closed) so a broken
     install never silently opens the whole filesystem.
+
+    Read-like ops (``reads``, ``listings``, ``searches``) may also access
+    Agent Skills directories so skill resources load on demand.
     """
     try:
         from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _get_workspace
@@ -103,6 +129,11 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
                 try:
                     resolved_p.relative_to(sys_temp)
                 except ValueError:
+                    # Allow skill resource reads outside workspace
+                    if op in ("reads", "listings", "searches") and _is_under_agent_skill_dir(
+                        resolved_p
+                    ):
+                        return None
                     return f"Safety: {op} outside workspace are not allowed. Path: {path}"
     return None
 
@@ -823,9 +854,20 @@ class LocalToolRegistry:
                     posix_path.endswith(f"/{b}") or (os.name == "nt" and posix_path.endswith(f"/{b}.exe"))
                     for b in _SAFE_BINARIES
                 ):
+                    hint = ""
+                    low = command.lower()
+                    if binary in ("node", "npm", "npx") or "skills add" in low or "agent-skills" in low:
+                        hint = (
+                            "\n\nTo install an Agent Skill (agentskills.io / SKILL.md), "
+                            "use install_agent_skill(source='owner/repo') instead — "
+                            "e.g. install_agent_skill(source='shadcn/improve'). "
+                            "Node/npm/npx are intentionally blocked; skill install "
+                            "does not need them."
+                        )
                     return (
                         f"Error: '{binary}' is not in the allowed binary list. "
                         f"Allowed: {', '.join(sorted(_SAFE_BINARIES))}"
+                        f"{hint}"
                     )
 
             try:
@@ -1002,6 +1044,54 @@ class LocalToolRegistry:
                 category="utility")
         except ImportError:
             logger.debug("export_session not available")
+
+        # ── Agent Skills (agentskills.io / SKILL.md) ───────────────────
+        try:
+            from kazma_core.agent_skills.tools import (
+                activate_skill,
+                install_agent_skill,
+                list_agent_skills,
+                uninstall_agent_skill,
+            )
+            self.register_function(
+                "list_agent_skills",
+                list_agent_skills,
+                description=(
+                    "List installed Agent Skills (SKILL.md / agentskills.io format). "
+                    "Shows name, description, and location for each skill."
+                ),
+                category="skills",
+            )
+            self.register_function(
+                "activate_skill",
+                activate_skill,
+                description=(
+                    "Load full instructions for an installed Agent Skill into context. "
+                    "Call this when a task matches a skill's description before proceeding. "
+                    "Pass the skill name from list_agent_skills / the available_skills catalog."
+                ),
+                category="skills",
+            )
+            self.register_function(
+                "install_agent_skill",
+                install_agent_skill,
+                description=(
+                    "Install an Agent Skill from GitHub or a local path. "
+                    "Preferred over npx/npm (node is not in the shell allowlist). "
+                    "Accepts owner/repo (e.g. 'shadcn/improve'), a GitHub URL, "
+                    "or a local path with SKILL.md. One approval covers the whole install. "
+                    "Hub: https://agentskills.io/"
+                ),
+                category="skills",
+            )
+            self.register_function(
+                "uninstall_agent_skill",
+                uninstall_agent_skill,
+                description="Uninstall a user-level Agent Skill by name.",
+                category="skills",
+            )
+        except Exception as e:
+            logger.error("Failed to register agent skills tools: %s", e, exc_info=True)
 
         # Load and register Top 10 Native Skills
         try:

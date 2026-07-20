@@ -64,7 +64,16 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     # ── Safety check (mirrors file_write) ─────────────────────────
     within = _is_within_workspace(p, workspace)
     if not within and not _fw._ALLOW_ABSOLUTE:
-        return "Safety: reads outside workspace are not allowed."
+        # Allow Agent Skills resource reads (SKILL.md scripts/references)
+        skill_ok = False
+        try:
+            from kazma_core.agent.tool_registry import _is_under_agent_skill_dir
+
+            skill_ok = _is_under_agent_skill_dir(p)
+        except Exception:
+            skill_ok = False
+        if not skill_ok:
+            return "Safety: reads outside workspace are not allowed."
 
     try:
         if not p.exists():

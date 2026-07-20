@@ -82,6 +82,8 @@ TOOL_TIERS: dict[str, str] = {
     "github_create_pr": "danger",
     "install_python_packages": "danger",
     "install_npm_packages": "danger",
+    "install_agent_skill": "danger",
+    "uninstall_agent_skill": "danger",
     # Unsafe — always blocked (reserved)
 }
 
@@ -106,6 +108,8 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "github_create_pr",
     "install_python_packages",
     "install_npm_packages",
+    "install_agent_skill",
+    "uninstall_agent_skill",
 )
 
 # Backward-compatible alias used throughout the codebase / tests.

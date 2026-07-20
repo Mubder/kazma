@@ -149,6 +149,8 @@ safety:
       - github_create_pr
       - install_python_packages
       - install_npm_packages
+      - install_agent_skill
+      - uninstall_agent_skill
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 
