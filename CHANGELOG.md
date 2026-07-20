@@ -1,6 +1,18 @@
 # CHANGELOG
 
 
+## v0.2.1 (2026-07-20)
+
+### Bug Fixes
+
+- **ui**: Restore discovered models panel and STT model dropdown
+  ([`545a593`](https://github.com/Mubder/kazma/commit/545a593b36e7f20a1ebfd0765075788d58c27ab0))
+
+- Provider cards use vertical layout so discovered models are not squeezed/hidden - Search binds to
+  p._modelQuery (Alpine-safe); filter always returns strings - STT models: normalize API to
+  {id,label}, client fallbacks, reload on Voice tab
+
+
 ## v0.2.0 (2026-07-20)
 
 ### Features
