@@ -131,6 +131,8 @@ class FTS5Memory:
             List of dicts with 'text', 'metadata', 'doc_id', 'score' keys.
         """
         try:
+            safe_query = query.strip().replace('"', '""')
+            safe_query = f'"{safe_query}"' if safe_query else '""'
             rows = self._conn.execute(
                 f"""
                 SELECT text, metadata, doc_id, rank
@@ -139,7 +141,7 @@ class FTS5Memory:
                 ORDER BY rank
                 LIMIT ?
                 """,
-                (query, limit),
+                (safe_query, limit),
             ).fetchall()
 
             results = []

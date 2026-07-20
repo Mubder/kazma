@@ -20,6 +20,21 @@ from kazma_core.tenant_context import get_current_tenant_id
 logger = logging.getLogger(__name__)
 
 
+def _build_fts_query(text: str) -> str:
+    """Build a safe FTS5 MATCH query from arbitrary user input.
+
+    Raw user text (URLs, punctuation like ``?``/``:``/``/``) is not valid
+    FTS5 syntax and raises "syntax error near ...". Wrapping the whole
+    string in a double-quoted phrase makes FTS5 treat it verbatim, and
+    embedded double-quotes are escaped by doubling them.
+    """
+    text = (text or "").strip()
+    if not text:
+        return '""'
+    escaped = text.replace('"', '""')
+    return f'"{escaped}"'
+
+
 class SQLiteMemoryBackend:
     """SQLite-based memory backend with enhanced Arabic search.
 
@@ -198,7 +213,10 @@ class SQLiteMemoryBackend:
         query_arabic = self._arabic_tokenizer.tokenize(query)
         # Use the tokenized form if it produced something different, so
         # the MATCH hits the normalized ``content_arabic`` column.
-        fts_query = query_arabic if query_arabic else query
+        raw_fts_query = query_arabic if query_arabic else query
+        # Wrap in a safe double-quoted phrase to avoid FTS5 syntax errors
+        # from arbitrary input (URLs, "?", ":", "/", etc.).
+        fts_query = _build_fts_query(raw_fts_query)
 
         results = []
 
