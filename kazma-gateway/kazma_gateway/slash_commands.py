@@ -74,10 +74,16 @@ def _get_config_store() -> Any:
 
 
 def _read_bootstrap_yaml() -> dict[str, Any]:
-    """Read the read-only ``kazma.yaml`` bootstrap directly (no caching)."""
-    path = _get_config_path()
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    """Read shipped ``kazma.yaml`` + optional ``kazma.local.yaml`` (no caching)."""
+    try:
+        from kazma_core.config_loader import load_merged_yaml
+
+        path = _get_config_path()
+        return load_merged_yaml(path)
+    except Exception:
+        path = _get_config_path()
+        with open(path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
 
 
 def _apply_overrides(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:

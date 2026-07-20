@@ -504,18 +504,29 @@ class ConfigStore:
             run_config_store_migrations(str(self._db_path))
 
     def _load_yaml(self) -> dict[str, Any]:
-        """Load and cache the base YAML config."""
+        """Load and cache shipped YAML + optional ``kazma.local.yaml`` overrides.
+
+        ``kazma.yaml`` is product defaults (git-tracked). Machine-specific
+        overrides belong in gitignored ``kazma.local.yaml`` so ``git pull``
+        never collides with user settings. Runtime UI still wins via SQLite.
+        """
         if self._yaml_cache is not None:
             return self._yaml_cache
-        if self._yaml_path.exists():
-            with open(self._yaml_path) as f:
-                self._yaml_cache = yaml.safe_load(f) or {}
-        else:
-            self._yaml_cache = {}
+        try:
+            from kazma_core.config_loader import load_merged_yaml
+
+            self._yaml_cache = load_merged_yaml(self._yaml_path)
+        except Exception as exc:
+            logger.warning("[ConfigStore] merged YAML load failed: %s", exc)
+            if self._yaml_path.exists():
+                with open(self._yaml_path, encoding="utf-8") as f:
+                    self._yaml_cache = yaml.safe_load(f) or {}
+            else:
+                self._yaml_cache = {}
         return self._yaml_cache
 
     def invalidate_yaml_cache(self) -> None:
-        """Force re-read of kazma.yaml on next access."""
+        """Force re-read of kazma.yaml (+ local) on next access."""
         self._yaml_cache = None
         with self._lock:
             self._cache.clear()

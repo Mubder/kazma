@@ -67,14 +67,19 @@ class AgentConfig:
 
 
 def load_config(config_path: str | Path | None = None) -> AgentConfig:
-    """Load configuration from YAML file."""
+    """Load configuration from shipped YAML + optional local overrides.
+
+    See :mod:`kazma_core.config_loader` — users should not edit tracked
+    ``kazma.yaml`` for day-to-day settings (use Settings UI or
+    ``kazma.local.yaml``).
+    """
+    from kazma_core.config_loader import load_merged_yaml
+
     path = Path(config_path) if config_path else Path(CONFIG_FILE)
-    if not path.exists():
+    raw = load_merged_yaml(path if path.exists() or config_path else None)
+    if not raw and not path.exists():
         logger.warning("Config file %s not found, using defaults", path)
         return AgentConfig()
-
-    with open(path) as f:
-        raw = yaml.safe_load(f) or {}
 
     agent_cfg = raw.get("agent", {})
     models_cfg = raw.get("models", {})
@@ -82,7 +87,7 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
 
     return AgentConfig(
         name=agent_cfg.get("name", "kazma"),
-        version=agent_cfg.get("version", "0.5.0"),
+        version=agent_cfg.get("version", "0.6.0"),
         # Default to English so cultural Arabic context does not bias every
         # reply when the user has not set agent.language explicitly.
         language=agent_cfg.get("language", "en"),

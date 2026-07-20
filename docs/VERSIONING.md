@@ -13,6 +13,20 @@ or release date by hand — **conventional commits** drive everything.
 
 Baseline tag for automation: **`v0.6.0`**. Next releases: `0.6.1` (patch), `0.7.0` (minor), etc.
 
+## Config vs updates (no dirty-yaml hell)
+
+| Layer | Where | Git? | Day-to-day edits? |
+|-------|--------|------|-------------------|
+| Shipped defaults | `kazma.yaml` | **tracked** | **No** — product defaults only |
+| Local file overrides | `kazma.local.yaml` | **ignored** | Optional (ports, flags) |
+| Runtime / UI | `kazma-data/settings.db` | ignored | **Yes** (Settings, `/config`) |
+
+**Rule for operators:** never put machine secrets or ports only in tracked `kazma.yaml`.
+Use the Web Settings UI, or copy `kazma.local.yaml.example` → `kazma.local.yaml`.
+
+`kazma update` auto-stashes accidental dirty files, but the structural fix above means
+users should rarely need that.
+
 ## How it works
 
 | Commit type | Version bump | Example |

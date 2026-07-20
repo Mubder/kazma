@@ -83,6 +83,11 @@ docs/build/
 kazma-data/
 swarm_registry.json
 
+# Machine-local config overrides (never commit — use Settings UI or this file)
+# Shipped defaults stay in tracked kazma.yaml; edit this for local ports/tokens.
+kazma.local.yaml
+*.local.yaml
+
 # SQLite WAL/SHM files (transient, never commit)
 *.db-wal
 *.db-shm
