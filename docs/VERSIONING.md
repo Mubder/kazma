@@ -7,11 +7,14 @@ or release date by hand — **conventional commits** drive everything.
 
 | Version | Notes |
 |---------|--------|
-| **0.6.0** | Restored product line (2026-07-21). After mistaken `0.1–0.2` auto-releases. |
-| 0.5.0 | Last intentional product version before automation glitch |
-| 0.2.x / 0.1.0 | **Invalid line** — created when semantic-release had no `v0.5.0` tag and restarted from zero. Tags may still exist for history; **do not ship from them**. |
+| **0.6.1** | Current product version (2026-07-21). After false `1.0.0` bot jump. |
+| 0.6.0 | First restore after 0.1/0.2 glitch |
+| 0.5.0 | Last intentional pre-automation product version |
+| **1.0.0** | **NOT a real launch** — bot set `allow_zero_version=false` and forced major. Tag may exist; ignore it. |
+| 0.2.x / 0.1.0 | **Invalid line** — bot restarted from zero. Ignore. |
 
-Baseline tag for automation: **`v0.6.0`**. Next releases: `0.6.1` (patch), `0.7.0` (minor), etc.
+Releases are **manual only** (`workflow_dispatch` on Release workflow) until we
+intentionally ship a real 1.0.0.
 
 ## Config vs updates (no dirty-yaml hell)
 

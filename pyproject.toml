@@ -1,6 +1,6 @@
 [project]
 name = "kazma"
-version = "1.0.0"
+version = "0.6.1"
 description = "Kazma — Autonomous AI agent framework with LangGraph, ChromaDB RAG, and Arabic RTL dashboard"
 readme = "README.md"
 license = { text = "MIT" }
@@ -144,8 +144,9 @@ upload_to_vcs_release = true
 build_command = ""
 commit_message = "chore(release): {version} [skip ci]"
 tag_format = "v{version}"
-# Never restart from 0.x when product was already at 0.5+ (see docs/VERSIONING.md)
-allow_zero_version = false
+# Keep 0.x product line until we intentionally ship 1.0.0
+# (allow_zero_version=false wrongly forced a jump to 1.0.0 — do not re-enable)
+allow_zero_version = true
 
 [tool.semantic_release.changelog]
 changelog_file = "CHANGELOG.md"

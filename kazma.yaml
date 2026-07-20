@@ -1,6 +1,6 @@
 agent:
   name: kazma
-  version: 0.6.0
+  version: 0.6.1
   language: en
   rtl: false
 models:
