@@ -199,9 +199,29 @@ async def _handle_hitl_resume(
             # continuing." while the graph is actually still paused on
             # another tool, so the agent appears to "do nothing".
             chained = await _check_graph_interrupt(graph, resume_config)
-        if chained is not None:
-            from .graph import _prepare_tg_outbound
 
+        from .graph import _prepare_tg_outbound
+
+        # Extract the assistant's response from the resumed turn.
+        assistant_text = ""
+        messages = result_state.get("messages", []) if isinstance(result_state, dict) else []
+        for m in reversed(messages):
+            if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content"):
+                assistant_text = m["content"]
+                break
+
+        # If there is assistant text, send it first
+        if assistant_text:
+            tg_text, tg_ctx = _prepare_tg_outbound(msg, assistant_text, ctx)
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=tg_text,
+                    context_metadata=tg_ctx,
+                )
+            )
+
+        if chained is not None:
             prompt = _build_approval_prompt(chained, target_thread)
             prompt_text, send_ctx = _prepare_tg_outbound(msg, prompt["text"], ctx)
             if prompt.get("markup"):
@@ -215,23 +235,15 @@ async def _handle_hitl_resume(
             )
             return True
 
-        # Extract the assistant's response from the resumed turn.
-        assistant_text = ""
-        messages = result_state.get("messages", []) if isinstance(result_state, dict) else []
-        for m in reversed(messages):
-            if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content"):
-                assistant_text = m["content"]
-                break
         if not assistant_text:
-            assistant_text = "✅ Approved — continuing." if approved else "🚫 Denied."
-
-        await manager.send(
-            OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx),
-                text=assistant_text,
-                context_metadata=ctx,
+            fallback_text = "✅ Approved — continuing." if approved else "🚫 Denied."
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=fallback_text,
+                    context_metadata=ctx,
+                )
             )
-        )
     except Exception:
         logger.exception("[HITL] Resume failed for thread=%s", target_thread)
         await manager.send(

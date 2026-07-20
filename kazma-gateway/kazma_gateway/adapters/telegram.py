@@ -782,13 +782,39 @@ class TelegramAdapter(BaseAdapter):
                 asyncio.create_task(self._answer_callback_query(cb_id, "Not authorized"))
                 return
 
-        # Dismiss loading indicator
-        asyncio.create_task(self._answer_callback_query(cb_id))
-
         from kazma_gateway.adapters.telegram_callbacks import parse_callback_data
 
         action = parse_callback_data(data)
         text = action.text
+
+        # Dismiss loading indicator with status text
+        alert_text = None
+        if action.kind == "hitl":
+            approved = "approve" in data
+            alert_text = "✅ Approved — processing..." if approved else "❌ Denied."
+        asyncio.create_task(self._answer_callback_query(cb_id, alert_text))
+
+        # Immediately deactivate the inline keyboard to prevent double-click or stale interaction
+        if action.kind == "hitl":
+            chat_id = message.get("chat", {}).get("id")
+            message_id = message.get("message_id")
+            if chat_id and message_id:
+                try:
+                    if not self._http:
+                        self._http = httpx.AsyncClient(
+                            base_url=self._api_base,
+                            timeout=httpx.Timeout(30.0, connect=5.0),
+                        )
+                    await self._http.post(
+                        "/editMessageReplyMarkup",
+                        json={
+                            "chat_id": chat_id,
+                            "message_id": message_id,
+                            "reply_markup": {"inline_keyboard": []},
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning("[telegram] Failed to remove HITL keyboard: %s", exc)
 
         if action.kind == "swarm":
             # Swarm HITL approval — resolve bus Event in-process
