@@ -37,40 +37,13 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_workspace_root() -> Path:
-    """Resolve the active workspace root, mirroring ``workspace_api`` precedence.
+    """Resolve the active workspace root — **must match** ``file_write._get_workspace``.
 
-    Order:
-      1. Per-task ``workspace_scope`` ContextVar (Phase 3 — concurrent multi-repo).
-      2. ``KAZMA_WORKSPACE`` env var.
-      3. Active workspace from ``WorkspaceStore``.
-      4. ``kazma_core.tools.file_write`` configured workspace (cwd-based default).
+    Single source of truth: ``kazma_core.tools.file_write._get_workspace``
+    (scope → active WorkspaceStore → configure_workspace pin → env → default).
+    Never invent a parallel precedence that can re-pin IDE to KAZMA_WORKSPACE
+    while chat tools use ShipX after Switch Repo.
     """
-    import os
-
-    # 1. Per-task scope takes top precedence (matches file_write._get_workspace).
-    try:
-        from kazma_core.ide.workspace_scope import resolve_workspace_root
-
-        scoped = resolve_workspace_root()
-        if scoped is not None:
-            return scoped
-    except Exception:
-        pass
-
-    env_ws = os.environ.get("KAZMA_WORKSPACE", "").strip()
-    if env_ws:
-        return Path(env_ws).expanduser().resolve()
-
-    try:
-        from kazma_core.stores import get_workspace_store
-
-        active = get_workspace_store().get_active_workspace()
-        if active and active.get("root_path"):
-            return Path(active["root_path"]).resolve()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("[IdeService] WorkspaceStore lookup failed: %s", exc)
-
-    # Fall back to the file_write module's own resolution (cwd/KAZMA_WORKSPACE).
     try:
         from kazma_core.tools.file_write import _get_workspace
 

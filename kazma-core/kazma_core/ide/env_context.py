@@ -57,8 +57,8 @@ def _resolve_root(workspace_id: str | None = None) -> Path:
     """Resolve the workspace root, honoring an optional workspace_id.
 
     With ``workspace_id`` (Phase 3), the specific WorkspaceStore row is
-    used. Without it, precedence mirrors ``IdeService``: env → active
-    workspace → file_write default.
+    used. Without it, **must** match ``file_write._get_workspace()`` so the
+    brain and tools never disagree (Switch Repo / clone).
     """
     if workspace_id:
         try:
@@ -72,19 +72,6 @@ def _resolve_root(workspace_id: str | None = None) -> Path:
                         return Path(rp).resolve()
         except Exception as exc:  # pragma: no cover - defensive
             logger.debug("[env_context] workspace_id %s lookup failed: %s", workspace_id, exc)
-
-    env_ws = os.environ.get("KAZMA_WORKSPACE", "").strip()
-    if env_ws:
-        return Path(env_ws).expanduser().resolve()
-
-    try:
-        from kazma_core.stores import get_workspace_store
-
-        active = get_workspace_store().get_active_workspace()
-        if active and active.get("root_path"):
-            return Path(active["root_path"]).resolve()
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.debug("[env_context] active workspace lookup failed: %s", exc)
 
     try:
         from kazma_core.tools.file_write import _get_workspace
@@ -207,42 +194,84 @@ def build_env_context(workspace_id: str | None = None) -> str:
     except Exception:  # pragma: no cover - defensive
         root = Path.cwd()
 
-    lines: list[str] = ["## Environment", f"Workspace root: {root}"]
+    ws_name = root.name
+    ws_id = ""
+    try:
+        from kazma_core.stores import get_workspace_store
+
+        active = get_workspace_store().get_active_workspace()
+        if active and active.get("root_path"):
+            try:
+                if Path(active["root_path"]).resolve() == root.resolve():
+                    ws_name = active.get("name") or ws_name
+                    ws_id = str(active.get("id") or "")
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     slug = detect_repo_slug(root)
     branch = detect_branch(root)
+
+    lines: list[str] = [
+        "## Active Workspace (BINDING — not optional)",
+        f"- **Workspace name:** {ws_name}",
+        f"- **Workspace root:** `{root}`",
+    ]
+    if ws_id:
+        lines.append(f"- **Workspace id:** `{ws_id}`")
     if slug:
-        repo_part = f"Repository: {slug}"
+        repo_part = f"- **Repository:** `{slug}`"
         if branch:
-            repo_part += f"  (branch: {branch})"
+            repo_part += f" (branch: `{branch}`)"
         lines.append(repo_part)
     elif branch:
-        lines.append(f"Branch: {branch}")
+        lines.append(f"- **Branch:** `{branch}`")
+    else:
+        lines.append("- **Repository:** (not a git remote / unknown)")
+
+    lines.extend(
+        [
+            "",
+            "### Hard rules (must follow)",
+            "1. **Only this root is in scope.** `file_*`, `shell_exec`, and git tools "
+            "run inside the workspace root above. Prefer **relative paths**.",
+            "2. **Do not audit or edit another project** (including the Kazma agent "
+            "framework host) unless *this* workspace root / Repository line is "
+            "actually that project.",
+            "3. If the user names a repo (e.g. \"ShipX\"), it must match the "
+            "**Workspace name** or **Repository** lines above. If it does not match, "
+            "**stop and ask** — do not invent findings for a different codebase.",
+            "4. Before a multi-file audit, confirm identity: read this workspace's "
+            "`README` / `pyproject.toml` / `package.json` and state the project name "
+            "you found. If it conflicts with the user's request, report the conflict.",
+            "5. Never claim the folder *name* is the product if package metadata "
+            "says otherwise — report both.",
+        ]
+    )
 
     # GitHub integration availability hint.
     try:
         from kazma_gateway.routers.github_client import get_github_token
 
         if get_github_token():
+            lines.append("")
             lines.append("GitHub: authenticated (can create PRs, list issues).")
     except Exception:
         # gateway may be absent in headless/core-only deployments
         token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUB_PAT")
         if token:
+            lines.append("")
             lines.append("GitHub: token detected in environment.")
 
     tools = _list_available_tools()
+    lines.append("")
     if tools:
         lines.append(
-            "You have an IDE workspace. Use relative paths; file/shell/git "
-            "tools run scoped to the workspace root. Available tools: "
-            + ", ".join(tools) + "."
+            "Available workspace tools: " + ", ".join(tools) + "."
         )
     else:
-        lines.append(
-            "You have an IDE workspace. Use relative paths scoped to the "
-            "workspace root."
-        )
+        lines.append("Workspace tools are registered for relative paths under the root.")
 
     lines.append(
         "Danger-tier operations (file_write, shell_exec, git push) require "

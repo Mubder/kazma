@@ -282,17 +282,22 @@ class WorkspaceStore:
     def set_active_workspace(self, workspace_id: str) -> bool:
         """Set the workspace with workspace_id as active and others as inactive.
 
+        Also re-pins ``configure_workspace()`` so file/shell/git tools and
+        ``build_env_context()`` follow Switch Repo / clone without restart.
+
         Returns:
             True if setting succeeded, False if the workspace was not found.
         """
+        root_path: str | None = None
         with self._lock:
             conn = self._get_conn()
-            # Validate workspace exists
+            # Validate workspace exists and capture root for tool pin
             row = conn.execute(
-                "SELECT 1 FROM workspaces WHERE id = ?", (workspace_id,)
+                "SELECT root_path FROM workspaces WHERE id = ?", (workspace_id,)
             ).fetchone()
             if not row:
                 return False
+            root_path = row["root_path"] if isinstance(row, sqlite3.Row) else row[0]
 
             try:
                 conn.execute("BEGIN")
@@ -303,11 +308,29 @@ class WorkspaceStore:
                 )
                 conn.execute("COMMIT")
                 logger.info("[WorkspaceStore] Set active workspace to %s", workspace_id)
-                return True
             except Exception as exc:
                 conn.execute("ROLLBACK")
                 logger.error("[WorkspaceStore] Failed to activate workspace %s: %s", workspace_id, exc)
                 raise exc
+
+        # Outside the lock: re-pin process workspace so tools don't keep a
+        # stale boot-time root (e.g. the Kazma monorepo).
+        if root_path:
+            try:
+                from kazma_core.tools.file_write import configure_workspace
+
+                configure_workspace(workspace=str(root_path))
+                logger.info(
+                    "[WorkspaceStore] Tools re-pinned to workspace root %s",
+                    root_path,
+                )
+            except Exception as pin_exc:
+                logger.warning(
+                    "[WorkspaceStore] configure_workspace failed for %s: %s",
+                    root_path,
+                    pin_exc,
+                )
+        return True
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""

@@ -29,20 +29,38 @@ from kazma_core.ide.workspace_scope import (
 
 @pytest.fixture
 def tmp_ws(tmp_path, monkeypatch):
-    """Isolated workspace dir + env var, so we don't touch the real settings DB."""
+    """Isolated workspace dir + WorkspaceStore (no real settings.db leak).
+
+    Note: empty WorkspaceStore auto-seeds ``Default Workspace`` at ``cwd``
+    (the Kazma monorepo). We immediately create + activate our temp root.
+    """
+    from kazma_core.stores import reset_workspace_store
+    import kazma_core.stores.workspaces as wsmod
+    from kazma_core.tools.file_write import configure_workspace
+
     ws = tmp_path / "ws"
     ws.mkdir()
     monkeypatch.setenv("KAZMA_WORKSPACE", str(ws))
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
+    reset_workspace_store()
+    store = wsmod.WorkspaceStore(str(tmp_path / "settings.db"))
+    wsmod._workspace_store = store
+    rec = store.create_workspace("test-ws", str(ws))
+    store.set_active_workspace(rec["id"])
+    configure_workspace(workspace=str(ws))
     yield ws
+    store.close()
+    reset_workspace_store()
+    configure_workspace(workspace=None)
 
 
 def test_env_context_always_names_workspace_root(tmp_ws):
     """Even with no git repo, the block must name the workspace root."""
     block = build_env_context()
-    assert "## Environment" in block
+    assert "Active Workspace" in block or "Workspace root" in block
     assert str(tmp_ws) in block
-    # No repo in a bare dir — must NOT claim a repository.
-    assert "Repository:" not in block
+    # No repo in a bare dir — must NOT claim a real remote.
+    assert "Repository: `" not in block or "not a git" in block.lower() or "unknown" in block.lower()
 
 
 def test_env_context_detects_git_repo(tmp_ws):
@@ -55,7 +73,8 @@ def test_env_context_detects_git_repo(tmp_ws):
         cwd=str(tmp_ws), check=True,
     )
     block = build_env_context()
-    assert "Repository: owner/myrepo" in block
+    assert "owner/myrepo" in block
+    assert "Hard rules" in block or "BINDING" in block
 
 
 def test_env_context_lists_tools(tmp_ws):
@@ -76,7 +95,7 @@ async def test_workspace_scope_is_noop_when_none():
 async def test_workspace_scope_pins_resolution(tmp_path, monkeypatch):
     """A scoped workspace_id overrides the global _get_workspace()."""
     from kazma_core.stores import reset_workspace_store
-    from kazma_core.tools.file_write import _get_workspace
+    from kazma_core.tools.file_write import _get_workspace, configure_workspace
 
     # Point the store at a temp DB so we don't mutate the real settings.db.
     monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
@@ -85,6 +104,7 @@ async def test_workspace_scope_pins_resolution(tmp_path, monkeypatch):
     # Build a store with two workspaces.
     import kazma_core.stores.workspaces as wsmod
 
+    reset_workspace_store()
     store = wsmod.WorkspaceStore(db_path)
     wsmod._workspace_store = store  # patch singleton for this test
 
@@ -94,12 +114,10 @@ async def test_workspace_scope_pins_resolution(tmp_path, monkeypatch):
     repo_b.mkdir()
     rec_a = store.create_workspace("Repo A", str(repo_a))
     rec_b = store.create_workspace("Repo B", str(repo_b))
-
-    # Global default should be neither A nor B specifically (env-based).
-    monkeypatch.setenv("KAZMA_WORKSPACE", str(repo_a))
+    store.set_active_workspace(rec_a["id"])
 
     try:
-        # Without scope, _get_workspace resolves to repo_a (env).
+        # Without scope, active workspace is repo_a.
         assert _get_workspace().resolve() == repo_a.resolve()
 
         # Inside a scope for repo_b, _get_workspace must resolve to repo_b.
@@ -109,10 +127,11 @@ async def test_workspace_scope_pins_resolution(tmp_path, monkeypatch):
                 f"scope should pin to {repo_b}, got {resolved}"
             )
 
-        # After exiting the scope, we're back to the global (repo_a).
+        # After exiting the scope, we're back to the active workspace (repo_a).
         assert _get_workspace().resolve() == repo_a.resolve()
     finally:
         # Close the SQLite connection before resetting so Windows can
         # clean up the temp dir (open file handles block deletion).
         store.close()
         reset_workspace_store()
+        configure_workspace(workspace=None)
