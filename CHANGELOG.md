@@ -1,6 +1,18 @@
 # CHANGELOG
 
 
+## v0.2.2 (2026-07-20)
+
+### Bug Fixes
+
+- **ui,cli**: Align provider cards and make kazma update work with uv
+  ([`021ab22`](https://github.com/Mubder/kazma/commit/021ab22706fb840656918dd06481e34c99210cf0))
+
+- Provider cards: vertical CSS layout so LLM providers and discovered models align - kazma update:
+  reinstall via uv sync / uv pip when pip is missing; git pull is success - Version display reads
+  pyproject.toml for monorepo installs
+
+
 ## v0.2.1 (2026-07-20)
 
 ### Bug Fixes
