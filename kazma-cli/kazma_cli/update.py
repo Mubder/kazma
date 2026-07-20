@@ -398,10 +398,103 @@ def _reinstall_local(cwd: str) -> bool:
     return True
 
 
-def do_git_update() -> bool:
-    """Update kazma from git source (pull + reinstall editable).
+def _git_status_porcelain(cwd: str) -> str:
+    """Return ``git status --porcelain`` output (empty if clean)."""
+    try:
+        result = _run_cmd(["git", "status", "--porcelain"], cwd=cwd)
+        if result.returncode == 0:
+            return (result.stdout or "").strip()
+    except Exception:
+        pass
+    return ""
 
-    Returns ``True`` on success.
+
+def _commits_ahead_of_origin(cwd: str) -> int:
+    """How many local commits are not on origin/main (0 = safe to reset)."""
+    try:
+        result = _run_cmd(
+            ["git", "rev-list", "--count", "origin/main..HEAD"],
+            cwd=cwd,
+        )
+        if result.returncode == 0 and result.stdout.strip().isdigit():
+            return int(result.stdout.strip())
+    except Exception:
+        pass
+    return 0
+
+
+def _stash_local_changes(cwd: str) -> bool:
+    """Stash tracked + untracked local edits. Returns True if a stash was created."""
+    status = _git_status_porcelain(cwd)
+    if not status:
+        return False
+
+    console.print("[yellow]Local changes detected (would block a normal pull):[/yellow]")
+    for line in status.splitlines()[:20]:
+        console.print(f"  [dim]{line}[/dim]")
+    if status.count("\n") >= 20:
+        console.print("  [dim]…[/dim]")
+
+    msg = "kazma-update-auto"
+    console.print(
+        "[cyan]Stashing local changes so update can run without merge conflicts…[/cyan]"
+    )
+    # Include untracked so new local files don't block either
+    result = _run_cmd(
+        ["git", "stash", "push", "-u", "-m", msg],
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        console.print(
+            f"[red]Could not stash local changes:[/red]\n"
+            f"{(result.stderr or result.stdout or '').strip()}"
+        )
+        console.print(
+            "Fix manually:\n"
+            "  [cyan]git stash push -u -m 'my-local'[/cyan]\n"
+            "  [cyan]git pull origin main[/cyan]\n"
+            "  [cyan]git stash pop[/cyan]"
+        )
+        return False
+
+    # Confirm stash was created (stash push is no-op if nothing to stash)
+    if "No local changes to save" in (result.stdout or ""):
+        return False
+    console.print("[green]Stashed local changes.[/green]")
+    return True
+
+
+def _restore_stash(cwd: str) -> None:
+    """Pop the latest stash; keep it if conflicts so nothing is lost."""
+    console.print("[cyan]Restoring your local changes (git stash pop)…[/cyan]")
+    result = _run_cmd(["git", "stash", "pop"], cwd=cwd)
+    out = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+    if result.returncode == 0:
+        console.print("[green]Local changes restored on top of the update.[/green]")
+        if out:
+            console.print(f"[dim]{out[:500]}[/dim]")
+        return
+
+    # Conflicts or other failure — stash entry remains if pop failed mid-way
+    console.print(
+        "[yellow]Could not auto-apply all local changes (likely a conflict).[/yellow]\n"
+        "Your edits are still safe in the git stash.\n"
+        "  List:   [cyan]git stash list[/cyan]\n"
+        "  Apply:  [cyan]git stash pop[/cyan]\n"
+        "  Drop:   [cyan]git stash drop[/cyan]  (only after you copied what you need)\n"
+        f"[dim]{out[:600]}[/dim]"
+    )
+
+
+def do_git_update() -> bool:
+    """Update kazma from git: stash → sync to origin/main → restore → reinstall.
+
+    Designed so operators never hit interactive merge/edit-file prompts:
+
+    1. Stash local dirty files (e.g. ``kazma.yaml`` runtime tweaks)
+    2. ``git fetch`` + fast-forward (or hard reset if no unique local commits)
+    3. ``git stash pop`` to put local config back
+    4. Best-effort package reinstall (uv/pip)
     """
     git_root = _find_git_root()
     if git_root is None:
@@ -409,26 +502,74 @@ def do_git_update() -> bool:
         return False
 
     cwd = str(git_root)
+    stashed = False
 
-    # git pull
-    console.print("[cyan]Running git pull origin main...[/cyan]")
     try:
-        result = _run_cmd(["git", "pull", "origin", "main"], cwd=cwd)
-        if result.returncode != 0:
-            console.print(f"[red]git pull failed:[/red]\n{result.stderr.strip()}")
+        # ── 1. Stash local edits so pull never aborts ─────────────
+        if _git_status_porcelain(cwd):
+            stashed = _stash_local_changes(cwd)
+            # If still dirty after failed stash, abort
+            if _git_status_porcelain(cwd) and not stashed:
+                console.print("[red]Working tree still dirty — cannot update safely.[/red]")
+                return False
+
+        # ── 2. Fetch + land on origin/main (no merge commits) ─────
+        console.print("[cyan]Fetching origin…[/cyan]")
+        fetch = _run_cmd(["git", "fetch", "origin"], cwd=cwd)
+        if fetch.returncode != 0:
+            console.print(
+                f"[red]git fetch failed:[/red]\n{(fetch.stderr or fetch.stdout or '').strip()}"
+            )
+            if stashed:
+                _restore_stash(cwd)
             return False
-        out = (result.stdout or "").strip()
-        if out:
-            console.print(f"[dim]{out}[/dim]")
-        console.print("[green]git pull completed.[/green]")
-    except subprocess.TimeoutExpired:
-        console.print("[red]git pull timed out.[/red]")
-        return False
+
+        ahead = _commits_ahead_of_origin(cwd)
+        if ahead > 0:
+            console.print(
+                f"[yellow]You have {ahead} local commit(s) not on origin/main.[/yellow]\n"
+                "Trying rebase onto origin/main (no merge commit)…"
+            )
+            result = _run_cmd(
+                ["git", "pull", "--rebase", "origin", "main"],
+                cwd=cwd,
+            )
+            if result.returncode != 0:
+                console.print(
+                    f"[red]git pull --rebase failed:[/red]\n"
+                    f"{(result.stderr or result.stdout or '').strip()}\n"
+                    "Resolve manually, then re-run [cyan]kazma update[/cyan]."
+                )
+                if stashed:
+                    _restore_stash(cwd)
+                return False
+            console.print("[green]Rebased onto origin/main.[/green]")
+        else:
+            # Clean tracking branch: hard reset is the no-merge path
+            console.print("[cyan]Updating to origin/main (fast-forward / reset)…[/cyan]")
+            result = _run_cmd(["git", "reset", "--hard", "origin/main"], cwd=cwd)
+            if result.returncode != 0:
+                console.print(
+                    f"[red]git reset --hard origin/main failed:[/red]\n"
+                    f"{(result.stderr or result.stdout or '').strip()}"
+                )
+                if stashed:
+                    _restore_stash(cwd)
+                return False
+            console.print("[green]Now at origin/main.[/green]")
+
+        # ── 3. Restore local config edits ─────────────────────────
+        if stashed:
+            _restore_stash(cwd)
+
     except FileNotFoundError:
         console.print("[red]git not found. Is Git installed and on PATH?[/red]")
         return False
+    except subprocess.TimeoutExpired:
+        console.print("[red]git update timed out.[/red]")
+        return False
     except Exception as exc:
-        console.print(f"[red]git pull error:[/red] {exc}")
+        console.print(f"[red]git update error:[/red] {exc}")
         return False
 
     return _reinstall_local(cwd)
@@ -449,6 +590,11 @@ def print_help() -> None:
     console.print("  --force, -f    Force update even if already latest")
     console.print("  --yes, -y      Skip confirmation prompt")
     console.print("  --help, -h     Show this help message")
+    console.print()
+    console.print("Git installs (monorepo):")
+    console.print("  • Local edits (e.g. kazma.yaml) are [bold]auto-stashed[/bold], then restored")
+    console.print("  • Uses reset/ff to origin/main — [bold]no merge commit prompts[/bold]")
+    console.print("  • Reinstall prefers [cyan]uv[/cyan] when pip is missing")
 
 
 def _confirm(prompt: str) -> bool:
