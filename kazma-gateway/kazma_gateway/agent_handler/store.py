@@ -129,7 +129,15 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     # never inside context_metadata — but hitl.py's cross-thread approval
     # ownership check reads original_sender from the persisted context, so
     # without this it always sees "" and the authz guard never fires.
-    persisted_ctx = dict(ctx)
+    #
+    # Merge with any existing session keys (e.g. active_agent_skill from
+    # /skill activate) so a normal chat turn does not wipe them.
+    existing: dict[str, Any] = {}
+    try:
+        existing = dict(await store.get(thread_id) or {})
+    except Exception:
+        existing = {}
+    persisted_ctx = {**existing, **dict(ctx)}
     persisted_ctx.setdefault("sender_id", msg.sender_id)
     await store.put(thread_id, persisted_ctx)
 

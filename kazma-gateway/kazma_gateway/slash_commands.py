@@ -231,6 +231,8 @@ def _cmd_help() -> str:
         "• `/context` — Show context window usage\n"
         "• `/skill list` — List installed Agent Skills\n"
         "• `/skill install <owner/repo>` — Install from GitHub (agentskills.io)\n"
+        "• `/skill activate <name>` — Arm a skill for this chat\n"
+        "• `/skill deactivate` — Clear the active skill\n"
         "• `/skill uninstall <name>` — Remove an Agent Skill\n\n"
         "⚙️ *Config*\n"
         "• `/config show` — Display current configuration\n"

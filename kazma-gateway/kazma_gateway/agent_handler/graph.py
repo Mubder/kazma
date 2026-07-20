@@ -601,6 +601,49 @@ def create_graph_handler(
                 except Exception as _e:
                     logger.debug("[agent-handler] history restore skipped: %s", _e)
 
+            # ── Active Agent Skill injection (/skill activate) ─────
+            # If the user armed a skill via slash command, load its full
+            # SKILL.md body into this turn so the agent follows it without
+            # needing a separate tool call.
+            try:
+                sess = await _store.get(thread_id) or {}
+                active_skill = sess.get("active_agent_skill")
+                if active_skill:
+                    from kazma_core.agent_skills.tools import activate_skill
+
+                    skill_body = await activate_skill(name=str(active_skill))
+                    if skill_body and not str(skill_body).startswith("Error:"):
+                        msgs = list(state.get("messages") or [])
+                        skill_sys = {
+                            "role": "system",
+                            "content": (
+                                f"[ACTIVE AGENT SKILL: {active_skill}]\n"
+                                f"{skill_body}\n"
+                                f"[/ACTIVE AGENT SKILL]\n"
+                                "Follow this skill's instructions for the "
+                                "current user request. Prefer its workflow "
+                                "over generic defaults."
+                            ),
+                        }
+                        # Insert before the latest user message when possible
+                        insert_at = len(msgs)
+                        for i in range(len(msgs) - 1, -1, -1):
+                            if isinstance(msgs[i], dict) and msgs[i].get("role") == "user":
+                                insert_at = i
+                                break
+                        msgs.insert(insert_at, skill_sys)
+                        state = {**state, "messages": msgs}
+                        logger.info(
+                            "[agent-handler] injected active skill=%s thread=%s",
+                            active_skill,
+                            thread_id,
+                        )
+            except Exception as _skill_exc:
+                logger.debug(
+                    "[agent-handler] active skill inject skipped: %s",
+                    _skill_exc,
+                )
+
             # ── Invoke graph ───────────────────────────────────────
             start = time.monotonic()
             try:

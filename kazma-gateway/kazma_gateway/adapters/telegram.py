@@ -1058,6 +1058,9 @@ class TelegramAdapter(BaseAdapter):
         Uses the shared ``self._http`` client (already initialized
         in ``listen()`` before this method is called).
         """
+        # Telegram shows only what we register here (menu next to the input).
+        # Handlers may support more commands than this list; keep this in sync
+        # with slash_commands help + gateway intercepts (_try_skill, _try_ide, …).
         commands = [
             {"command": "help", "description": "Show available commands"},
             {"command": "reset", "description": "Clear conversation history"},
@@ -1072,6 +1075,11 @@ class TelegramAdapter(BaseAdapter):
             {"command": "undo", "description": "Undo last response"},
             {"command": "edit", "description": "Edit last response"},
             {"command": "swarm", "description": "Swarm orchestration"},
+            {
+                "command": "skill",
+                "description": "Agent Skills: list / install / activate (agentskills.io)",
+            },
+            {"command": "ide", "description": "IDE: files, git, coding skills"},
             {"command": "new", "description": "Create a brand new session/season"},
             {"command": "compact", "description": "Manually trigger context compaction"},
             {"command": "yolo", "description": "Toggle session YOLO safety bypass"},

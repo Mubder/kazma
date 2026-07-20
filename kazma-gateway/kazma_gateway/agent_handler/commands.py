@@ -925,6 +925,20 @@ def _is_active_model(model_id: str) -> bool:
         return False
 
 
+def _normalize_slash_text(text: str) -> str:
+    """Strip Telegram ``/cmd@BotName`` suffix so intercepts match cleanly."""
+    raw = (text or "").strip()
+    if not raw.startswith("/"):
+        return raw
+    parts = raw.split(None, 1)
+    cmd = parts[0]
+    if "@" in cmd:
+        cmd = cmd.split("@", 1)[0]
+    if len(parts) == 1:
+        return cmd
+    return f"{cmd} {parts[1]}"
+
+
 async def _try_skill_command(
     msg: IncomingMessage,
     store: SessionStore,
@@ -938,13 +952,15 @@ async def _try_skill_command(
         /skill                     — help
         /skill list                — list installed Agent Skills
         /skill install <source>    — install from GitHub owner/repo or URL
+        /skill activate <name>     — load full skill instructions into this chat
         /skill uninstall <name>    — remove a user-level skill
         /skill info <name>         — show skill metadata + location
 
     Returns ``True`` if handled (skip graph), else ``False``.
     """
-    text = (msg.text or "").strip()
-    if not text.lower().startswith("/skill"):
+    text = _normalize_slash_text(msg.text or "")
+    low = text.lower()
+    if not (low == "/skill" or low.startswith("/skill ")):
         return False
 
     parts = text.split(None, 2)
@@ -960,11 +976,13 @@ async def _try_skill_command(
                 "• `/skill list` — installed skills\n"
                 "• `/skill install <owner/repo>` — install from GitHub\n"
                 "    e.g. `/skill install shadcn/improve`\n"
-                "    e.g. `/skill install https://github.com/shadcn/improve`\n"
-                "• `/skill uninstall <name>` — remove a skill\n"
-                "• `/skill info <name>` — skill details\n\n"
+                "• `/skill activate <name>` — arm skill for this chat\n"
+                "    e.g. `/skill activate improve`\n"
+                "• `/skill deactivate` — clear active skill\n"
+                "• `/skill info <name>` — skill details\n"
+                "• `/skill uninstall <name>` — remove a skill\n\n"
                 "No Node/npm required — Kazma downloads SKILL.md bundles directly.\n"
-                "You can also ask the agent: *install skill shadcn/improve*.",
+                "Or ask in chat: *install skill shadcn/improve*.",
             )
             return True
 
@@ -991,6 +1009,68 @@ async def _try_skill_command(
             )
             result = await install_agent_skill(source=rest, scope="user")
             await _send_model_reply(msg, store, manager, thread_id, result)
+            return True
+
+        if sub in ("activate", "use", "load"):
+            if not rest:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "⚠️ Usage: `/skill activate <name>`\n"
+                    "Example: `/skill activate improve`\n"
+                    "See installed names with `/skill list`.",
+                )
+                return True
+            name = rest.split()[0]
+            from kazma_core.agent_skills.tools import activate_skill
+
+            content = await activate_skill(name=name)
+            if content.startswith("Error:"):
+                await _send_model_reply(msg, store, manager, thread_id, content)
+                return True
+
+            # Remember for this thread so the next agent turn can prefer it.
+            try:
+                ctx = await store.get(thread_id) or {}
+                ctx = dict(ctx)
+                ctx["active_agent_skill"] = name
+                await store.put(thread_id, ctx)
+            except Exception:
+                logger.debug(
+                    "[agent-handler] failed to persist active_agent_skill",
+                    exc_info=True,
+                )
+
+            # Keep the chat reply short — full body is injected on next turn.
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"✅ Skill **{name}** is now active for this chat.\n\n"
+                f"Full instructions will load automatically on your next "
+                f"message. Send your task (e.g. *audit the swarm engine* "
+                f"or *run improve quick*).\n\n"
+                f"• `/skill list` — see installed skills\n"
+                f"• `/skill deactivate` — stop using this skill\n"
+                f"• `/skill info {name}` — metadata",
+            )
+            return True
+
+        if sub in ("deactivate", "off", "clear"):
+            try:
+                ctx = await store.get(thread_id) or {}
+                ctx = dict(ctx)
+                had = ctx.pop("active_agent_skill", None)
+                await store.put(thread_id, ctx)
+            except Exception:
+                had = None
+            if had:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"✅ Deactivated skill **{had}** for this chat.",
+                )
+            else:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "No skill was active in this chat.",
+                )
             return True
 
         if sub in ("uninstall", "remove", "rm"):
@@ -1034,6 +1114,9 @@ async def _try_skill_command(
                 lines.append(f"Version: {skill.version}")
             if skill.source:
                 lines.append(f"Source: {skill.source}")
+            lines.append(
+                f"\nActivate: `/skill activate {skill.name}`"
+            )
             await _send_model_reply(
                 msg, store, manager, thread_id, "\n".join(lines),
             )
@@ -1055,7 +1138,7 @@ async def _try_skill_command(
 
         await _send_model_reply(
             msg, store, manager, thread_id,
-            f"Unknown `/skill` subcommand. Try `/skill help`.",
+            "Unknown `/skill` subcommand. Try `/skill help`.",
         )
         return True
     except Exception as exc:
