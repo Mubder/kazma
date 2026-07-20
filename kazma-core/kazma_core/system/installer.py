@@ -140,6 +140,11 @@ async def _run_install_task(
             logger.info("[Installer] Installed successfully: %s", target_label)
             store = get_config_store()
             store.set("system.install.last_status", "OK", category="system")
+            # Remember extras so ``kazma update`` reinstalls them (never bare uv sync).
+            try:
+                _record_installed_extra(extra, package_name)
+            except Exception as rec_exc:
+                logger.debug("[Installer] Could not persist extras list: %s", rec_exc)
             if extra in ("rag", "all") or package_name in (
                 "sentence-transformers", "chromadb", "sentence_transformers",
             ):
@@ -173,6 +178,54 @@ async def _run_install_task(
             pass
     finally:
         _active_installations.discard(track_key)
+
+
+def _record_installed_extra(extra: str | None, package_name: str | None) -> None:
+    """Append installed extras to ConfigStore + ~/.kazma/installed_extras.json."""
+    import json
+    from pathlib import Path
+
+    to_add: list[str] = []
+    if extra:
+        name = extra.strip().lower()
+        if name == "all":
+            to_add = ["rag", "dev", "test", "tui", "observability", "web"]
+        elif name:
+            to_add = [name]
+    elif package_name in (
+        "chromadb", "sentence-transformers", "sentence_transformers",
+    ):
+        to_add = ["rag"]
+    elif package_name == "prometheus-client":
+        to_add = ["observability"]
+    elif package_name == "playwright":
+        to_add = ["web"]
+    elif package_name in ("textual", "python-bidi"):
+        to_add = ["tui"]
+    elif package_name == "fakeredis":
+        to_add = ["test"]
+
+    if not to_add:
+        return
+
+    store = get_config_store()
+    existing = store.get("system.installed_extras") or []
+    if isinstance(existing, str):
+        existing = [p.strip() for p in existing.split(",") if p.strip()]
+    if not isinstance(existing, list):
+        existing = []
+    merged = list(dict.fromkeys([*(str(x) for x in existing), *to_add]))
+    store.set("system.installed_extras", merged, category="system")
+
+    path = Path.home() / ".kazma" / "installed_extras.json"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"extras": merged}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
 
 async def _hot_reload_memory() -> None:

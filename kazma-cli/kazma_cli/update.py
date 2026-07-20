@@ -17,6 +17,7 @@ Flags:
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 import sys
@@ -35,6 +36,7 @@ __all__ = [
     "PACKAGE_NAME",
     "PYPI_URL",
     "check_git_behind",
+    "detect_active_extras",
     "detect_install_type",
     "do_git_update",
     "do_pip_update",
@@ -42,8 +44,10 @@ __all__ = [
     "get_git_commit",
     "get_latest_pypi_version",
     "is_newer",
+    "load_persisted_extras",
     "parse_update_flags",
     "parse_version",
+    "persist_extras",
     "print_help",
     "run",
 ]
@@ -54,7 +58,24 @@ PACKAGE_NAME = "kazma"
 # Timeouts (seconds) for various subprocess operations.
 _CHECK_TIMEOUT = 15.0
 _INSTALL_TIMEOUT = 120.0
+# RAG pulls sentence-transformers + torch — allow a long first install.
+_INSTALL_TIMEOUT_HEAVY = 900.0
 _GIT_TIMEOUT = 60.0
+
+# pyproject optional-dependencies → importable marker modules.
+# Used so ``kazma update`` reinstalls the same extras the user already had
+# (bare ``uv sync`` would prune them and wipe VectorMemory deps).
+_EXTRA_MARKERS: dict[str, tuple[str, ...]] = {
+    "rag": ("chromadb", "sentence_transformers"),
+    "tui": ("textual", "bidi"),
+    "observability": ("prometheus_client",),
+    "web": ("playwright",),
+    "dev": ("pytest", "ruff", "mypy"),
+    "test": ("fakeredis",),
+}
+_KNOWN_EXTRAS: tuple[str, ...] = (
+    "rag", "tui", "observability", "web", "dev", "test",
+)
 
 # Flags that are boolean toggles (no value follows them).
 _UPDATE_BOOL_FLAGS = {"--check", "-c", "--force", "-f", "--yes", "-y", "--help", "-h"}
@@ -345,23 +366,199 @@ def do_pip_update() -> bool:
         return False
 
 
-def _reinstall_local(cwd: str) -> bool:
-    """Reinstall editable package: prefer ``uv``, then ``pip``.
+def _extras_file() -> Path:
+    """User-level file that survives git pull / stash (not in the repo)."""
+    return Path.home() / ".kazma" / "installed_extras.json"
 
-    Many Kazma installs use ``uv`` venvs without ``pip`` installed
-    (``No module named pip``). Treat a successful ``git pull`` as the
-    critical step; reinstall is best-effort so code updates still apply.
+
+def load_persisted_extras() -> list[str]:
+    """Load previously recorded optional extras (ConfigStore + ~/.kazma)."""
+    found: list[str] = []
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw = get_config_store().get("system.installed_extras")
+        if isinstance(raw, list):
+            found.extend(str(x) for x in raw)
+        elif isinstance(raw, str) and raw.strip():
+            found.extend(p.strip() for p in raw.split(",") if p.strip())
+    except Exception:
+        pass
+    try:
+        path = _extras_file()
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                data = data.get("extras") or data.get("installed") or []
+            if isinstance(data, list):
+                found.extend(str(x) for x in data)
+    except Exception:
+        pass
+    return _normalize_extras(found)
+
+
+def persist_extras(extras: list[str]) -> None:
+    """Remember which optional extras the user has installed."""
+    clean = _normalize_extras(extras)
+    try:
+        path = _extras_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"extras": clean}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.debug("Could not write installed_extras.json: %s", exc)
+    try:
+        from kazma_core.config_store import get_config_store
+
+        get_config_store().set(
+            "system.installed_extras", clean, category="system"
+        )
+    except Exception as exc:
+        logger.debug("Could not persist extras to ConfigStore: %s", exc)
+
+
+def _normalize_extras(extras: list[str] | set[str] | tuple[str, ...]) -> list[str]:
+    order = {name: i for i, name in enumerate(_KNOWN_EXTRAS)}
+    out: list[str] = []
+    for e in extras:
+        name = str(e).strip().lower()
+        if name == "all":
+            return list(_KNOWN_EXTRAS)
+        if name in order and name not in out:
+            out.append(name)
+    out.sort(key=lambda n: order.get(n, 99))
+    return out
+
+
+def _module_available(mod: str) -> bool:
+    try:
+        import importlib.util
+
+        return importlib.util.find_spec(mod) is not None
+    except Exception:
+        return False
+
+
+def _vector_memory_data_present(cwd: str) -> bool:
+    """True if on-disk vector memory exists (implies user had ``rag``)."""
+    candidates: list[Path] = []
+    try:
+        from kazma_core.paths import vector_memory_path
+
+        candidates.append(Path(vector_memory_path()))
+    except Exception:
+        pass
+    home = Path.home()
+    candidates.extend(
+        [
+            home / ".kazma" / "vector_memory",
+            home / ".kazma" / "chroma",
+            Path(cwd) / "kazma-data" / "vector_memory",
+            Path(cwd) / "kazma-data" / "chroma",
+        ]
+    )
+    for p in candidates:
+        try:
+            if p.is_dir() and any(p.iterdir()):
+                return True
+        except Exception:
+            continue
+    # ConfigStore memory status historically ACTIVE / INSTALLING
+    try:
+        from kazma_core.config_store import get_config_store
+
+        st = str(get_config_store().get("system.memory.status") or "").upper()
+        if st in ("ACTIVE", "INSTALLING", "READY"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def detect_active_extras(cwd: str | None = None) -> list[str]:
+    """Detect optional extras currently installed (or previously recorded).
+
+    Combines:
+    1. Persisted list (``~/.kazma/installed_extras.json`` + ConfigStore)
+    2. Live import markers in the active venv
+    3. Heuristic: vector memory data on disk → include ``rag``
     """
-    # 1) uv sync / uv pip install -e .
-    for cmd, label in (
-        (["uv", "sync"], "uv sync"),
-        (["uv", "pip", "install", "-e", "."], "uv pip install -e ."),
-    ):
+    extras: set[str] = set(load_persisted_extras())
+    for extra, markers in _EXTRA_MARKERS.items():
+        # Any marker present counts (partial install still means user wanted it)
+        if any(_module_available(m) for m in markers):
+            extras.add(extra)
+    root = cwd or str(_find_git_root() or Path.cwd())
+    if _vector_memory_data_present(root):
+        extras.add("rag")
+    return _normalize_extras(extras)
+
+
+def _editable_spec(extras: list[str]) -> str:
+    if extras:
+        return f".[{','.join(extras)}]"
+    return "."
+
+
+def _reinstall_local(cwd: str) -> bool:
+    """Reinstall editable package without wiping optional extras.
+
+    Bare ``uv sync`` is exact-by-default and **removes** packages not in the
+    default lock set (e.g. chromadb / sentence-transformers from ``[rag]``).
+    That made ``kazma update`` destroy VectorMemory. We now:
+
+    1. Detect + persist active extras
+    2. Prefer **additive** ``uv pip install -e ".[extras]"``
+    3. Fall back to ``uv sync --inexact --extra …`` (never bare ``uv sync``)
+    4. Fall back to ``python -m pip install -e ".[extras]"``
+    """
+    extras = detect_active_extras(cwd)
+    if extras:
+        persist_extras(extras)
+        console.print(
+            f"[cyan]Preserving optional extras:[/cyan] {', '.join(extras)}"
+        )
+    else:
+        console.print(
+            "[dim]No optional extras detected "
+            "(install later via Settings → Packages or "
+            "uv pip install -e \".[rag]\").[/dim]"
+        )
+
+    spec = _editable_spec(extras)
+    timeout = (
+        _INSTALL_TIMEOUT_HEAVY
+        if any(e in extras for e in ("rag", "all", "dev", "web"))
+        else _INSTALL_TIMEOUT
+    )
+
+    # 1) Additive uv pip install (does NOT prune other packages)
+    uv_pip_cmd = [
+        "uv", "pip", "install", "--python", sys.executable, "-e", spec,
+    ]
+    attempts: list[tuple[list[str], str]] = [
+        (uv_pip_cmd, f"uv pip install -e {spec}"),
+    ]
+
+    # 2) uv sync --inexact + extras (retains extraneous packages)
+    sync_cmd = ["uv", "sync", "--inexact"]
+    for e in extras:
+        sync_cmd.extend(["--extra", e])
+    sync_label = "uv sync --inexact" + (
+        " " + " ".join(f"--extra {e}" for e in extras) if extras else ""
+    )
+    attempts.append((sync_cmd, sync_label))
+
+    for cmd, label in attempts:
         console.print(f"[cyan]Reinstalling via {label}...[/cyan]")
         try:
-            result = _run_cmd(cmd, cwd=cwd, timeout=_INSTALL_TIMEOUT)
+            result = _run_cmd(cmd, cwd=cwd, timeout=timeout)
             if result.returncode == 0:
                 console.print(f"[green]{label} completed.[/green]")
+                if extras:
+                    persist_extras(extras)
                 return True
             err = (result.stderr or result.stdout or "").strip()
             console.print(f"[yellow]{label} failed:[/yellow] {err[:400]}")
@@ -372,27 +569,30 @@ def _reinstall_local(cwd: str) -> bool:
         except Exception as exc:
             console.print(f"[yellow]{label} error:[/yellow] {exc}")
 
-    # 2) python -m pip (may be missing in uv venvs)
-    console.print("[cyan]Reinstalling via python -m pip install -e ....[/cyan]")
+    # 3) python -m pip (may be missing in pure uv venvs)
+    console.print(f"[cyan]Reinstalling via python -m pip install -e {spec}...[/cyan]")
     try:
         result = _run_cmd(
-            [sys.executable, "-m", "pip", "install", "-e", "."],
+            [sys.executable, "-m", "pip", "install", "-e", spec],
             cwd=cwd,
-            timeout=_INSTALL_TIMEOUT,
+            timeout=timeout,
         )
         if result.returncode == 0:
-            console.print("[green]pip install -e . completed.[/green]")
+            console.print("[green]pip install -e completed.[/green]")
+            if extras:
+                persist_extras(extras)
             return True
         err = (result.stderr or result.stdout or "").strip()
-        console.print(f"[yellow]pip install -e . failed:[/yellow] {err[:400]}")
+        console.print(f"[yellow]pip install -e failed:[/yellow] {err[:400]}")
     except Exception as exc:
         console.print(f"[yellow]pip reinstall skipped:[/yellow] {exc}")
 
     console.print(
         "[yellow]Code was pulled successfully, but package reinstall did not run.[/yellow]\n"
-        "  For uv installs this is usually fine — restart the server:\n"
-        "  [cyan]kazma serve[/cyan]   or   [cyan]uv run kazma serve[/cyan]\n"
-        "  To force reinstall: [cyan]uv sync[/cyan]"
+        "  Restart the server: [cyan]kazma serve[/cyan]\n"
+        "  To restore memory/RAG deps: [cyan]uv pip install -e \".[rag]\"[/cyan]\n"
+        "  To restore everything optional: [cyan]uv pip install -e \".[all]\"[/cyan]\n"
+        "  Avoid bare [red]uv sync[/red] — it removes extras."
     )
     # git pull already succeeded — do not fail the whole update
     return True
