@@ -648,25 +648,24 @@ class KazmaAppBuilder:
                 try:
                     from kazma_gateway.rate_feedback import RateFeedbackManager
 
-                    # Use the most conservative limit among active adapters
-                    _active_limits = []
+                    # Build per-platform active limits dictionary
+                    _active_limits_dict = {}
                     if tg_adapter is not None and "telegram" in rate_limits_cfg:
-                        _active_limits.append(int(rate_limits_cfg["telegram"]))
+                        _active_limits_dict["telegram"] = int(rate_limits_cfg["telegram"])
                     if discord_token and "discord" in rate_limits_cfg:
-                        _active_limits.append(int(rate_limits_cfg["discord"]))
+                        _active_limits_dict["discord"] = int(rate_limits_cfg["discord"])
                     if slack_bot_token and "slack" in rate_limits_cfg:
-                        _active_limits.append(int(rate_limits_cfg["slack"]))
-                    if _active_limits:
-                        _limit = min(_active_limits)
+                        _active_limits_dict["slack"] = int(rate_limits_cfg["slack"])
+                    if _active_limits_dict:
                         rfm = RateFeedbackManager(
-                            limit=_limit,
+                            limit=_active_limits_dict,
                             window_seconds=60,
                             cooldown_seconds=30,
                         )
                         self.gateway.set_rate_feedback(rfm)
                         logger.info(
-                            "[Gateway] Rate feedback wired (limit=%d/60s, cooldown=30s)",
-                            _limit,
+                            "[Gateway] Rate feedback wired (limits=%s, cooldown=30s)",
+                            _active_limits_dict,
                         )
                 except Exception as e:
                     logger.warning("[Gateway] Rate feedback wiring failed: %s", e)

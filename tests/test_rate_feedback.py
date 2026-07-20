@@ -75,3 +75,25 @@ class TestRateFeedback:
         rfm.is_limited("user:a")  # consume user:a's token
         assert rfm.is_limited("user:a")  # user:a limited
         assert not rfm.is_limited("user:b")  # user:b still has token
+
+    def test_multi_platform_limits(self) -> None:
+        """Rate limits resolve dynamically per platform prefix in user ID."""
+        limits = {"telegram": 5, "slack": 1, "default": 2}
+        rfm = RateFeedbackManager(limit=limits, window_seconds=60, cooldown_seconds=0)
+
+        # Test Slack - limit 1
+        assert not rfm.is_limited("slack:user1")
+        assert rfm.is_limited("slack:user1")
+
+        # Test Telegram - limit 5
+        assert not rfm.is_limited("telegram:user2")
+        assert not rfm.is_limited("telegram:user2")
+        assert not rfm.is_limited("telegram:user2")
+        assert not rfm.is_limited("telegram:user2")
+        assert not rfm.is_limited("telegram:user2")
+        assert rfm.is_limited("telegram:user2")
+
+        # Test default fallback
+        assert not rfm.is_limited("other:user3")
+        assert not rfm.is_limited("other:user3")
+        assert rfm.is_limited("other:user3")

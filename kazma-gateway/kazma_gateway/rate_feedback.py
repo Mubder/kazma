@@ -35,14 +35,14 @@ class RateFeedbackManager:
     """Inbound rate limiter with user-friendly feedback messages.
 
     Args:
-        limit:            Max requests per window (default 30).
+        limit:            Max requests per window (default 30) or dictionary of platform limits.
         window_seconds:   Window duration in seconds (default 60).
         cooldown_seconds: Minimum seconds between feedback messages (default 30).
     """
 
     def __init__(
         self,
-        limit: int = 30,
+        limit: int | dict[str, int] = 30,
         window_seconds: int = 60,
         cooldown_seconds: int = 30,
         enabled: bool = True,
@@ -53,12 +53,20 @@ class RateFeedbackManager:
         self._enabled = enabled
         self._buckets: dict[str, _UserBucket] = {}
 
-    def _refill(self, bucket: _UserBucket) -> None:
+    def _get_limit_for_user(self, user_id: str) -> int:
+        """Get the limit configured for a specific user ID's platform."""
+        if isinstance(self._limit, dict):
+            platform = user_id.split(":", 1)[0] if ":" in user_id else "telegram"
+            return self._limit.get(platform, self._limit.get("default", 30))
+        return self._limit
+
+    def _refill(self, user_id: str, bucket: _UserBucket) -> None:
         """Refill tokens based on elapsed time."""
         now = time.monotonic()
         elapsed = now - bucket.last_refill
-        refill_rate = self._limit / self._window
-        bucket.tokens = min(self._limit, bucket.tokens + elapsed * refill_rate)
+        limit = self._get_limit_for_user(user_id)
+        refill_rate = limit / self._window
+        bucket.tokens = min(float(limit), bucket.tokens + elapsed * refill_rate)
         bucket.last_refill = now
 
     def _get_bucket(self, user_id: str) -> _UserBucket:
@@ -73,8 +81,9 @@ class RateFeedbackManager:
                 ]
                 for uid in stale:
                     del self._buckets[uid]
+            limit = self._get_limit_for_user(user_id)
             self._buckets[user_id] = _UserBucket(
-                tokens=float(self._limit),
+                tokens=float(limit),
                 last_refill=time.monotonic(),
             )
         return self._buckets[user_id]
@@ -89,7 +98,7 @@ class RateFeedbackManager:
             return False
 
         bucket = self._get_bucket(user_id)
-        self._refill(bucket)
+        self._refill(user_id, bucket)
 
         if bucket.tokens >= 1:
             bucket.tokens -= 1
@@ -99,17 +108,18 @@ class RateFeedbackManager:
     def get_remaining(self, user_id: str) -> int:
         """Get remaining tokens for a user (after refill)."""
         bucket = self._get_bucket(user_id)
-        self._refill(bucket)
+        self._refill(user_id, bucket)
         return max(0, int(bucket.tokens))
 
     def get_reset_seconds(self, user_id: str) -> int:
         """Get seconds until the user has at least 1 token available."""
         bucket = self._get_bucket(user_id)
-        self._refill(bucket)
+        self._refill(user_id, bucket)
         if bucket.tokens >= 1:
             return 0
         deficit = 1 - bucket.tokens
-        refill_rate = self._limit / self._window
+        limit = self._get_limit_for_user(user_id)
+        refill_rate = limit / self._window
         return max(1, int(deficit / refill_rate))
 
     def should_send_feedback(self, user_id: str) -> bool:
@@ -125,7 +135,8 @@ class RateFeedbackManager:
         """Generate a user-friendly rate limit feedback message."""
         remaining = self.get_remaining(user_id)
         reset = self.get_reset_seconds(user_id)
-        return f"⏳ Slow down — {remaining}/{self._limit} requests available. Resets in {reset}s."
+        limit = self._get_limit_for_user(user_id)
+        return f"⏳ Slow down — {remaining}/{limit} requests available. Resets in {reset}s."
 
     def record_feedback(self, user_id: str) -> None:
         """Record that feedback was sent (update cooldown timer)."""
