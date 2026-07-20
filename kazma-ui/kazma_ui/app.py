@@ -541,6 +541,11 @@ class KazmaAppBuilder:
             tg_adapter: TelegramAdapter | None = None
             if telegram_token:
                 voice_cfg = self.config.raw.get("gateway", {}).get("voice", {})
+                webhook_secret = (
+                    self.config_store.get("connectors.telegram.webhook_secret", "")
+                    or os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+                    or ""
+                )
                 tg_adapter = TelegramAdapter(
                     token=telegram_token,
                     voice_enabled=voice_cfg.get("enabled", False),
@@ -550,6 +555,7 @@ class KazmaAppBuilder:
                     tts_voice=voice_cfg.get("tts_voice", "default"),
                     tts_output_format=voice_cfg.get("tts_output_format", "mp3"),
                     stt_language=voice_cfg.get("stt_language", "auto"),
+                    webhook_secret=webhook_secret or None,
                 )
                 # Set allowed users
                 allowed = self.config_store.get("connectors.telegram.allowed_users", "")
@@ -1056,14 +1062,37 @@ class KazmaAppBuilder:
             logger.debug("[Startup] flush_pending_alerts: %s", e)
 
     async def _on_shutdown(self) -> None:
-        """Application shutdown: agent, HTTP pool, gateway."""
-        # Shut down the agent (closes MCP processes, LLM clients, checkpointer)
+        """Application shutdown: flag, agent, checkpointer, HTTP pool, gateway."""
+        # Global drain flag so long-lived SSE / telemetry loops exit cleanly
+        try:
+            from kazma_core.shutdown import signal_shutdown
+
+            signal_shutdown()
+            logger.info("[app] signal_shutdown() fired")
+        except Exception as e:
+            logger.warning("[app] signal_shutdown failed: %s", e)
+
+        # Shut down the agent (closes MCP processes, LLM clients)
         if self.agent is not None:
             try:
                 await self.agent.shutdown()
                 logger.info("[app] Agent shut down cleanly")
             except Exception as e:
                 logger.warning("[app] Error during agent shutdown: %s", e)
+
+        # Close app-level checkpointer / CheckpointManager if present
+        try:
+            cp = self._checkpointer
+            if cp is not None:
+                if hasattr(cp, "aclose"):
+                    await cp.aclose()
+                elif hasattr(cp, "close"):
+                    maybe = cp.close()
+                    if asyncio.iscoroutine(maybe):
+                        await maybe
+                logger.info("[app] Checkpointer closed")
+        except Exception as e:
+            logger.warning("[app] Error closing checkpointer: %s", e)
 
         # Close all cached ModelRegistry clients
         try:

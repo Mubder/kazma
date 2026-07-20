@@ -230,3 +230,22 @@ CI gaps: soft Codecov, no Dependabot, no hard pip-audit on main, Playwright out 
 ---
 
 *Audit authored 2026-07-21. Re-run after P0/P1 remediations before any public exposure claim.*
+
+---
+
+## Remediation status (2026-07-21 follow-up)
+
+| ID | Status | Notes |
+|----|--------|-------|
+| C1 secret hardcode | **Fixed** | Still binds `0.0.0.0` for webhooks; generates random secret, rejects known bad default |
+| C2 LAN trust default | **Fixed** | `KAZMA_TRUST_LAN` defaults **off** (set `1` for WSL lab) |
+| C3 YOLO | **Hardened** | Kept `/yolo`; TTL (4h default), audit log, status command |
+| H1 voice auth | **Fixed** | `/api/voice` in SENSITIVE_PREFIXES |
+| H2 webhook secret | **Fixed** | Always validate; ephemeral secret if unset |
+| H3 approve ownership | **Fixed** | `session_id` required for gateway-owned threads |
+| H4 code_exec | **Hardened** | `KAZMA_PRODUCTION=1` forces Docker, no local fallback |
+| H5 shell `env` | **Fixed** | Removed `env` / `hermes` from allowlists |
+| H6 MCP secrets | **Fixed** | Sensitive-read keywords force danger |
+| H8 config_save | **Fixed** | Blocks `is_sensitive_config_key`; no value echo |
+| H9 session delete | **Fixed** | Uses `_session_store` + SessionManager |
+| H10 shutdown | **Fixed** | `signal_shutdown()` + checkpointer close |

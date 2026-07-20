@@ -440,13 +440,23 @@ class TelegramAdapter(BaseAdapter):
             X-Telegram-Bot-Api-Secret-Token header to prevent
             unauthorized webhook posts.
             """
-            # Webhook secret validation (if configured)
-            if self._webhook_secret:
-                import hmac
-                provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-                if not hmac.compare_digest(provided, self._webhook_secret):
-                    logger.warning("[telegram-webhook] Invalid or missing secret token")
-                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            # Always require a webhook secret when this route is mounted (audit H2).
+            # Polling mode never hits this path.
+            import hmac
+            import secrets as _secrets
+
+            if not self._webhook_secret:
+                # Lazy one-time generation so accidental open mount is still gated
+                self._webhook_secret = _secrets.token_urlsafe(24)
+                logger.warning(
+                    "[telegram-webhook] No webhook_secret configured — generated "
+                    "ephemeral secret for this process. Set TELEGRAM_WEBHOOK_SECRET "
+                    "(or connector webhook_secret) and pass it to setWebhook."
+                )
+            provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+            if not provided or not hmac.compare_digest(provided, self._webhook_secret):
+                logger.warning("[telegram-webhook] Invalid or missing secret token")
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
             try:
                 update = await request.json()

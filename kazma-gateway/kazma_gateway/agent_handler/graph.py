@@ -499,18 +499,39 @@ def create_graph_handler(
             logger.info("[agent-handler] /compact completed for thread=%s", thread_id)
             return
 
-        # ── /yolo: Toggle session YOLO safety bypass ───────────────
-        if msg.text and msg.text.strip().lower() in ("/yolo", "/yolo on", "/yolo off"):
-            from kazma_core.config_store import get_config_store
+        # ── /yolo: Toggle session YOLO safety bypass (TTL + audit) ─
+        if msg.text and msg.text.strip().lower() in (
+            "/yolo", "/yolo on", "/yolo off", "/yolo status",
+        ):
+            from kazma_core.safety.yolo import disable_yolo, enable_yolo, yolo_status
 
-            cs = get_config_store()
-            is_off = msg.text.strip().lower() == "/yolo off"
-            if is_off:
-                cs.delete(f"yolo.{thread_id}")
-                reply_msg = "🛡️ Mode YOLO deactivated. Safety gates are active again."
+            cmd = msg.text.strip().lower()
+            actor = msg.sender_id or "gateway"
+            if cmd == "/yolo status":
+                st = yolo_status(thread_id)
+                if st.get("active"):
+                    rem = st.get("remaining_seconds")
+                    ttl_note = f"Expires in ~{rem // 60}m." if rem is not None else "No auto-expiry."
+                    reply_msg = f"🚀 YOLO is **ON**. {ttl_note}\nDisable: `/yolo off`"
+                else:
+                    reply_msg = "🛡️ YOLO is **OFF**. HITL is required for danger tools."
+            elif cmd == "/yolo off":
+                disable_yolo(thread_id, actor=actor)
+                reply_msg = "🛡️ YOLO deactivated. Safety gates are active again."
             else:
-                cs.set(f"yolo.{thread_id}", True)
-                reply_msg = "🚀 Mode YOLO activated! All tools in this session will execute automatically without requesting your approval. Run free!"
+                st = enable_yolo(thread_id, actor=actor)
+                rem = st.get("remaining_seconds")
+                ttl_note = (
+                    f"Auto-expires in ~{rem // 60}m."
+                    if rem is not None
+                    else "No auto-expiry."
+                )
+                reply_msg = (
+                    "🚀 **YOLO ON** for this chat only.\n"
+                    "Danger tools run without approval until `/yolo off` or TTL ends.\n"
+                    f"{ttl_note}\n"
+                    "⚠️ Use only when you fully trust this session."
+                )
 
             ctx = await _store.get(thread_id) or msg.context_metadata
             out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
@@ -519,7 +540,7 @@ def create_graph_handler(
                 text=out_text,
                 context_metadata=out_ctx,
             ))
-            logger.info("[agent-handler] /yolo for thread=%s is_off=%s", thread_id, is_off)
+            logger.info("[agent-handler] /yolo cmd=%s thread=%s", cmd, thread_id)
             return
 
         # ── /undo: Remove last assistant response ──────────────────

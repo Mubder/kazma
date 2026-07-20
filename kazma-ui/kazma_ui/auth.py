@@ -84,8 +84,10 @@ def _trust_lan_enabled() -> bool:
     Set ``KAZMA_TRUST_LAN=0`` on untrusted networks so only loopback + login
     receive the session cookie.
     """
-    raw = (os.environ.get("KAZMA_TRUST_LAN") or "1").strip().lower()
-    return raw not in ("0", "false", "off", "no")
+    # Default OFF for production safety (audit C2). Set KAZMA_TRUST_LAN=1 for
+    # WSL/LAN single-operator labs that need cookie auto-issue without /login.
+    raw = (os.environ.get("KAZMA_TRUST_LAN") or "0").strip().lower()
+    return raw in ("1", "true", "on", "yes")
 
 
 def _should_auto_issue_cookie(request: Request, expected: str) -> bool:
@@ -157,6 +159,8 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/agents", "/api/providers", "/api/provider",
     "/api/connectors",
     "/api/chat", "/api/gateway",
+    # Voice STT/TTS burns provider keys/quota — must not be open (audit H1)
+    "/api/voice",
     # Destructive / privileged routes that must be gated even when
     # other endpoints are open (sessions, HITL approval, system ops).
     "/api/sessions", "/api/session",

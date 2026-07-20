@@ -112,9 +112,26 @@ def _run_serve(port: int) -> None:
     # Bind to all interfaces by default so the server is reachable from the
     # Windows host (via localhost/127.0.0.1) as well as inside WSL. Override
     # with KAZMA_HOST to restrict to a single interface.
+    # Bind 0.0.0.0 by default so GitHub App webhooks / LAN / WSL can reach us.
+    # Security comes from a strong secret — never a fixed well-known string.
     host = _os_cli.environ.get("KAZMA_HOST", "0.0.0.0")
-    if host == "0.0.0.0" and not _os_cli.environ.get("KAZMA_SECRET"):
-        _os_cli.environ["KAZMA_SECRET"] = "kazma-local-dev-secret"
+    _KNOWN_BAD = "kazma-local-dev-secret"
+    existing = (_os_cli.environ.get("KAZMA_SECRET") or "").strip()
+    if existing == _KNOWN_BAD:
+        print(
+            "\n  [SECURITY] KAZMA_SECRET is the old hardcoded default — "
+            "refusing to start. Unset it or set a strong random secret.\n"
+        )
+        sys.exit(1)
+    if not existing:
+        import secrets as _secrets
+
+        generated = _secrets.token_urlsafe(32)
+        _os_cli.environ["KAZMA_SECRET"] = generated
+        print("\n  [SECURITY] Generated KAZMA_SECRET for this process (not persisted):")
+        print(f"    {generated}")
+        print("  Pin it with:  export KAZMA_SECRET='…'  (or put it in .env)")
+        print("  Bind stays 0.0.0.0 for webhooks/LAN — protect with this secret.\n")
 
     # Print the browseable URL — 0.0.0.0 is a bind address, not browsable.
     # Always show 127.0.0.1 (works everywhere), plus the LAN IP if binding to 0.0.0.0.

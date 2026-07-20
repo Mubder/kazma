@@ -854,8 +854,25 @@ def register_direct_routes(self: Any) -> None:
                         )
                     )
                     if is_gateway_owner:
+                        # Fail-closed: require session_id for gateway-owned threads
+                        # (audit H3 — omit used to skip ownership check entirely)
                         caller_session = body.get("session_id")
-                        if caller_session and str(owner) != str(caller_session):
+                        if not caller_session:
+                            logger.warning(
+                                "[HITL] Web approve missing session_id for gateway thread %s owner=%s",
+                                thread_id,
+                                owner,
+                            )
+                            return _JSONResponse(
+                                {
+                                    "error": (
+                                        "session_id required to approve gateway-owned "
+                                        "HITL requests"
+                                    )
+                                },
+                                status_code=403,
+                            )
+                        if str(owner) != str(caller_session):
                             logger.warning(
                                 "[HITL] Web approve ownership mismatch for thread %s: owner=%s caller=%s",
                                 thread_id,

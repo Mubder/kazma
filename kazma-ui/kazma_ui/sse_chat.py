@@ -449,17 +449,42 @@ def create_sse_chat_router(
 
         # ── Intercept YOLO command ─────────────────────────────────
         raw_msg = (body.get("message") or "").strip()
-        if raw_msg.lower() in ("/yolo", "/yolo on", "/yolo off"):
-            from kazma_core.config_store import get_config_store
+        if raw_msg.lower() in ("/yolo", "/yolo on", "/yolo off", "/yolo status"):
+            from kazma_core.safety.yolo import disable_yolo, enable_yolo, yolo_status
 
-            cs = get_config_store()
-            is_off = raw_msg.lower() == "/yolo off"
-            if is_off:
-                cs.delete(f"yolo.{thread_id}")
-                confirmation = "🛡️ Mode YOLO deactivated. Safety gates are active again."
+            cmd = raw_msg.lower().strip()
+            if cmd == "/yolo status":
+                st = yolo_status(thread_id)
+                if st.get("active"):
+                    rem = st.get("remaining_seconds")
+                    ttl_note = (
+                        f"Expires in ~{rem // 60}m." if rem is not None
+                        else "No auto-expiry."
+                    )
+                    confirmation = (
+                        f"🚀 YOLO is **ON** for this session. {ttl_note}\n"
+                        f"Disable: `/yolo off`"
+                    )
+                else:
+                    confirmation = "🛡️ YOLO is **OFF**. HITL approvals are required for danger tools."
+            elif cmd == "/yolo off":
+                disable_yolo(thread_id, actor=f"web:{session_id[:12]}")
+                confirmation = "🛡️ YOLO deactivated. Safety gates are active again."
             else:
-                cs.set(f"yolo.{thread_id}", True)
-                confirmation = "🚀 Mode YOLO activated! All tools in this session will execute automatically without requesting your approval. Run free!"
+                st = enable_yolo(thread_id, actor=f"web:{session_id[:12]}")
+                rem = st.get("remaining_seconds")
+                ttl_note = (
+                    f"Auto-expires in ~{rem // 60} minutes "
+                    f"(set KAZMA_YOLO_TTL_SECONDS to change; 0 = no expiry)."
+                    if rem is not None
+                    else "No auto-expiry (KAZMA_YOLO_TTL_SECONDS=0)."
+                )
+                confirmation = (
+                    "🚀 **YOLO ON** for this session only.\n"
+                    "All danger tools run **without** approval until you `/yolo off` "
+                    f"or TTL ends.\n{ttl_note}\n"
+                    "⚠️ Use only when you fully trust this session."
+                )
 
             session.messages.append({"role": "user", "content": raw_msg})
             session.messages.append({"role": "assistant", "content": confirmation})

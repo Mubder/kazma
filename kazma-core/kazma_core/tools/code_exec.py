@@ -384,14 +384,17 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
         except OSError:
             pass
 
+        prod = (os.environ.get("KAZMA_PRODUCTION") or "").lower() in (
+            "1", "true", "on", "yes",
+        )
+        forced = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").lower() in (
+            "1", "true", "on", "yes", "docker", "force", "required",
+        ) or prod
+
         if use_docker_jail():
             try:
                 return await _run_docker_jail(code_file, tmp_dir, timeout)
             except Exception as exc:
-                # Forced docker mode: surface the error
-                forced = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").lower() in (
-                    "1", "true", "on", "yes", "docker", "force",
-                )
                 if forced:
                     logger.error("[code_exec] Docker jail required but failed: %s", exc)
                     return f"[Exit code: 1]\nDocker jail failed: {exc}"
@@ -400,6 +403,12 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
                 )
                 local = await _run_local_subprocess(code_file, tmp_dir, timeout)
                 return f"[sandbox: local-fallback reason={exc}]\n{local}"
+
+        if forced:
+            return (
+                "[Exit code: 1]\nDocker jail required "
+                "(KAZMA_PRODUCTION or KAZMA_CODE_EXEC_DOCKER=force) but Docker is unavailable."
+            )
 
         return await _run_local_subprocess(code_file, tmp_dir, timeout)
 

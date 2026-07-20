@@ -86,11 +86,11 @@ class ShellTool(BaseTool):
     # fetch tools, no container runtimes — see class docstring.
     _READ_ONLY_COMMANDS = {
         "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
-        "uniq", "echo", "date", "whoami", "pwd", "env", "df", "du",
+        "uniq", "echo", "date", "whoami", "pwd", "df", "du",
         "free", "uptime", "uname", "hostname", "ps", "pgrep",
         "git", "tar", "gzip", "gunzip", "zip", "unzip",
         "jq", "tr", "cut", "mkdir", "cp", "mv", "touch",
-        "hermes", "kazma", "uv", "pytest", "ruff", "mypy",
+        "kazma", "uv", "pytest", "ruff", "mypy",
     }
 
     @classmethod

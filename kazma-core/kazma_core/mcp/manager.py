@@ -64,12 +64,21 @@ _DANGER_KEYWORDS = (
     "replace", "rename", "create", "update", "modify", "alter",
     "truncate", "drop", "grant", "revoke", "clear", "purge",
     "wipe", "overwrite", "reset",
+    # Secret-exfil patterns (must not be treated as safe "get_*")
+    "secret", "password", "passwd", "credential", "token", "apikey",
+    "api_key", "private_key", "privatekey", "auth", "vault",
 )
 
 # Keywords that indicate a safe read-only tool (never requires approval).
 _SAFE_KEYWORDS = (
     "read", "list", "search", "get", "info", "status", "check",
     "describe", "query", "count", "exists", "help",
+)
+
+# Even with a "safe" verb, these substrings force danger (audit H6)
+_SENSITIVE_READ_KEYWORDS = (
+    "secret", "password", "passwd", "credential", "token", "apikey",
+    "api_key", "private", "vault", "auth", "cookie", "session_key",
 )
 
 
@@ -82,12 +91,11 @@ def classify_mcp_tool(tool_name: str) -> str:
         "unknown" — neither pattern matches (treat as danger by default for safety)
     """
     name_lower = tool_name.lower()
-    # Check safe first — "read_file" contains "read" (safe) even though
-    # "file" could theoretically match. But "write_file" has "write" (danger).
-    has_safe = any(kw in name_lower for kw in _SAFE_KEYWORDS)
     has_danger = any(kw in name_lower for kw in _DANGER_KEYWORDS)
-    if has_danger:
+    has_sensitive_read = any(kw in name_lower for kw in _SENSITIVE_READ_KEYWORDS)
+    if has_danger or has_sensitive_read:
         return "danger"
+    has_safe = any(kw in name_lower for kw in _SAFE_KEYWORDS)
     if has_safe:
         return "safe"
     return "unknown"

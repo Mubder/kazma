@@ -752,17 +752,32 @@ class LocalToolRegistry:
             category="system",
         )
         async def config_save(key: str, value: str) -> str:
-            from kazma_core.config_store import get_config_store
+            from kazma_core.config_store import get_config_store, is_sensitive_config_key
 
-            # Block writes to security-critical keys
-            _BLOCKED_PREFIXES = ("security.", "kazma_secret", "vault.")
-            if any(key.startswith(p) for p in _BLOCKED_PREFIXES):
+            # Block security-critical + any secret-class keys (audit H8)
+            _BLOCKED_PREFIXES = (
+                "security.",
+                "kazma_secret",
+                "vault.",
+                "yolo.",
+            )
+            if any(key.startswith(p) or key == p.rstrip(".") for p in _BLOCKED_PREFIXES):
                 return f"Error: Cannot modify restricted key '{key}'."
+            if is_sensitive_config_key(key):
+                return (
+                    f"Error: '{key}' is a sensitive credential. "
+                    "Change it in Settings UI — not via tools."
+                )
 
             store = get_config_store()
-            store.set(key, value, category="connectors" if key.startswith("connectors.") else "general")
+            store.set(
+                key,
+                value,
+                category="connectors" if key.startswith("connectors.") else "general",
+            )
             logger.info("[config_save] Saved setting: %s", key)
-            return f"Setting saved: {key} = {value}"
+            # Never echo secret-like values back into chat
+            return f"Setting saved: {key}"
 
         @self.register(
             description=(
@@ -786,12 +801,9 @@ class LocalToolRegistry:
                 "passwd", "private_key", "credentials", "auth",
             )
             if any(m in key_l for m in secret_markers):
-                s = str(val)
-                if len(s) <= 4:
-                    masked = "****"
-                else:
-                    masked = "****" + s[-4:]
-                return f"{key} = {masked}  (masked — secret keys are not readable via tools)"
+                return (
+                    f"{key} = [set]  (value hidden — secrets are not readable via tools)"
+                )
             return f"{key} = {val}"
 
         @self.register(
@@ -821,9 +833,9 @@ class LocalToolRegistry:
             # for code. Aligns with swarm ShellTool._READ_ONLY_COMMANDS.
             # NO network tools (curl, wget), NO container runtimes (docker).
             _SAFE_BINARIES = {
-                # Read-only system
+                # Read-only system (no `env` — dumps secrets after one HITL)
                 "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
-                "uniq", "echo", "printf", "date", "whoami", "pwd", "env",
+                "uniq", "echo", "printf", "date", "whoami", "pwd",
                 "df", "du", "free", "uptime", "uname", "hostname",
                 # Build tools (no shell interpreters)
                 "git", "uv", "pytest", "ruff", "mypy",
@@ -837,8 +849,8 @@ class LocalToolRegistry:
                 "mkdir", "cp", "mv", "touch",
                 # Process control (safe)
                 "sleep",
-                # Kazma internal
-                "hermes", "kazma",
+                # Kazma internal CLI (still HITL-gated as shell_exec)
+                "kazma",
             }
             import os
 

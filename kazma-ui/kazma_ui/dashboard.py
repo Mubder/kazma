@@ -317,17 +317,27 @@ async def delete_session(thread_id: str) -> JSONResponse:
         )
         await conn.commit()
 
-        # Also delete from session store if available (fixes H3: data leak
-        # where dashboard.py only deleted checkpoints, leaving session store data)
+        # Gateway platform SessionStore (chat_id mapping)
         try:
-            from kazma_gateway.stores.session_store import get_session_store
-            store = get_session_store()
-            if store is not None:
-                await store.delete(thread_id)
+            if _session_store is not None:
+                await _session_store.delete(thread_id)
         except Exception as exc:
-            logger.debug("session store delete skipped (may be uninitialized): %s", exc)
+            logger.debug("gateway session store delete skipped: %s", exc)
 
-        logger.info("Deleted session: %s (checkpoints + session store)", thread_id)
+        # Web UI chat projection
+        try:
+            from kazma_ui.session_manager import get_session_manager
+
+            sm = get_session_manager()
+            sm.delete(thread_id)
+            # Also try platform-prefixed ids that share this thread
+            for s in list(sm.list_all(include_archived=True)):
+                if s.thread_id == thread_id or s.session_id == thread_id:
+                    sm.delete(s.session_id)
+        except Exception as exc:
+            logger.debug("SessionManager delete skipped: %s", exc)
+
+        logger.info("Deleted session: %s (checkpoints + stores)", thread_id)
         return JSONResponse({
             "deleted": True,
             "thread_id": thread_id,

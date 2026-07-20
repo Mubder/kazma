@@ -144,10 +144,9 @@ def get_hitl_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     tid = get_current_thread_id()
     if tid:
         try:
-            from kazma_core.config_store import get_config_store
+            from kazma_core.safety.yolo import is_yolo_active
 
-            cs = get_config_store()
-            if cs.get(f"yolo.{tid}"):
+            if is_yolo_active(tid):
                 enabled = False
         except Exception:
             pass
@@ -193,10 +192,9 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
     tid = get_current_thread_id()
     if tid:
         try:
-            from kazma_core.config_store import get_config_store
+            from kazma_core.safety.yolo import is_yolo_active
 
-            cs = get_config_store()
-            if cs.get(f"yolo.{tid}"):
+            if is_yolo_active(tid):
                 return False
         except Exception:
             pass
