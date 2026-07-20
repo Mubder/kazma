@@ -116,7 +116,7 @@ class TestCompactionEngine:
 
     @pytest.mark.asyncio
     async def test_compact_returns_fresh_state(self) -> None:
-        """compact() should return a new AgentState with system message."""
+        """compact() should return a summary system message plus the last user message."""
         engine = CompactionEngine()
         state = initial_state()
         state["messages"] = [
@@ -127,9 +127,10 @@ class TestCompactionEngine:
         new_state = await engine.compact(state)
 
         assert "messages" in new_state
-        assert len(new_state["messages"]) == 1
+        assert len(new_state["messages"]) == 2
         assert new_state["messages"][0]["role"] == "system"
         assert "CONTEXT SUMMARY" in new_state["messages"][0]["content"]
+        assert new_state["messages"][1] == {"role": "user", "content": "hello"}
 
     @pytest.mark.asyncio
     async def test_compact_preserves_provenance(self) -> None:

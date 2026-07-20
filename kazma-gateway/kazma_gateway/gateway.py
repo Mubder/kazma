@@ -638,8 +638,10 @@ class GatewayManager:
                         continue  # Skip dispatching to handler
 
                 if self._handler:
+                    handler_ok = False
                     try:
                         await self._handler(msg)
+                        handler_ok = True
                     except Exception:
                         logger.exception(
                             "Handler error for message from %s",
@@ -647,16 +649,18 @@ class GatewayManager:
                         )
 
                     # ── Post-task suggestions ────────────────────────
-                    # Send next-step hints after the handler completes.
+                    # Send next-step hints after the handler completes
+                    # successfully — hinting after a failed turn is noise.
                     # detect_tool_intent analyzes the user's message for
-                    # patterns that suggest a tool could help.
-                    if self._suggester is not None and msg.text:
+                    # patterns that suggest a tool could help. Hints are
+                    # already "💡 "-prefixed; do not prefix them again.
+                    if handler_ok and self._suggester is not None and msg.text:
                         try:
                             from kazma_gateway.suggestions import detect_tool_intent
 
                             hints = detect_tool_intent(msg.text)
                             if hints:
-                                hint_text = "\n".join(f"💡 {h}" for h in hints[:2])
+                                hint_text = "\n".join(hints[:2])
                                 try:
                                     await self.send(OutboundMessage(
                                         target_id=msg.reply_target(),

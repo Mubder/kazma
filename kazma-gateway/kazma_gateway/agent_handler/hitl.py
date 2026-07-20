@@ -72,6 +72,7 @@ async def _handle_hitl_resume(
     thread_id: str,
     store: SessionStore,
     manager: Any,
+    lock_getter: Any = None,
 ) -> bool:
     """Process a ``hitl approve|deny <thread_id>`` message.
 
@@ -80,6 +81,17 @@ async def _handle_hitl_resume(
 
     Resumes the paused graph with ``Command(resume=...)`` and sends the
     resulting assistant reply back to the platform.
+
+    ``lock_getter`` is the handler's per-thread lock factory. The resume
+    MUST serialize against regular turns on the same thread: a concurrent
+    ``graph.ainvoke()`` would interleave checkpoint writes and corrupt the
+    message history.
+
+    Stale cards: on langgraph >= 1.x, a new user message on a paused thread
+    silently discards the pending interrupt, and a later ``Command(resume=)``
+    is a silent no-op that replays old state. We therefore verify a pending
+    ``hitl_approval`` interrupt actually exists before resuming, and tell
+    the user when their card has expired instead of pretending to approve.
 
     Returns True if the message was handled (always, for hitl commands).
     """
@@ -141,22 +153,52 @@ async def _handle_hitl_resume(
             return True
 
     try:
+        import contextlib
+
         from langgraph.types import Command
 
-        logger.info(
-            "[HITL] Resume: thread=%s approved=%s action=%s",
-            target_thread, approved, action,
-        )
-        result_state = await graph.ainvoke(
-            Command(resume={"approved": approved, "reason": action}),
-            resume_config,
-        )
+        lock = await lock_getter(target_thread) if lock_getter is not None else None
+        async with (lock if lock is not None else contextlib.AsyncExitStack()):
+            # ── Stale-card guard ────────────────────────────────────
+            # Verify the graph is actually paused on a hitl_approval
+            # interrupt. If not (a newer message superseded the card, or
+            # it was already resolved), Command(resume=...) would be a
+            # silent no-op replaying old state — the "approve did nothing"
+            # bug. Fail loudly instead.
+            pending = await _check_graph_interrupt(graph, resume_config)
+            if pending is None:
+                logger.info(
+                    "[HITL] Stale approval ignored: thread=%s action=%s "
+                    "(no pending interrupt)", target_thread, action,
+                )
+                await manager.send(
+                    OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=(
+                            "⚠️ This approval request has expired — a newer "
+                            "message superseded it or it was already resolved. "
+                            "Nothing was executed. Please repeat your request "
+                            "if you still want the action performed."
+                        ),
+                        context_metadata=ctx,
+                    )
+                )
+                return True
 
-        # Re-surface a chained interrupt (a second danger tool paused in the
-        # same resumed turn). Without this the user sees "Approved — continuing."
-        # while the graph is actually still paused on another tool, so the
-        # agent appears to "do nothing".
-        chained = await _check_graph_interrupt(graph, resume_config)
+            logger.info(
+                "[HITL] Resume: thread=%s approved=%s action=%s",
+                target_thread, approved, action,
+            )
+            result_state = await graph.ainvoke(
+                Command(resume={"approved": approved, "reason": action}),
+                resume_config,
+            )
+
+            # Re-surface a chained interrupt (a second danger tool paused in
+            # the same resumed turn). Without this the user sees "Approved —
+            # continuing." while the graph is actually still paused on
+            # another tool, so the agent appears to "do nothing".
+            chained = await _check_graph_interrupt(graph, resume_config)
         if chained is not None:
             from .graph import _prepare_tg_outbound
 

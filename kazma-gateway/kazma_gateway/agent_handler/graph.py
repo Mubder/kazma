@@ -104,18 +104,28 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
 
 
 def _clean_prior_messages(prior: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Strip incomplete tool-call chains from the loaded checkpoint history.
+    """Repair incomplete tool-call chains in the loaded checkpoint history.
 
-    A checkpoint saved mid-interrupt (graph paused at HITL gate) will contain
-    an assistant message with ``tool_calls`` but no corresponding ``tool``
+    A checkpoint saved mid-interrupt (graph paused at HITL gate) contains an
+    assistant message with ``tool_calls`` but no corresponding ``tool``
     messages.  Sending such a sequence to the LLM provider raises HTTP 400:
     ``"An assistant message with 'toolcalls' must be followed by tool messages"``.
 
-    Walk backwards from the end and remove any trailing assistant tool-call
-    messages that lack their tool responses, so the loaded history always ends
-    on a clean boundary (user message, plain assistant text, or complete
-    tool-response chain).
+    Dangling chains can also sit MID-history: before full sanitization, a 400
+    error turn was committed on top of the broken chain, poisoning the thread
+    permanently (tail-only cleaning never reached it). Prefer the core
+    full-history sanitizer; fall back to tail-only cleaning if kazma_core is
+    unavailable.
     """
+    try:
+        from kazma_core.agent.graph_builder import sanitize_tool_chains
+
+        return sanitize_tool_chains(prior)
+    except ImportError:
+        pass
+
+    # Fallback: walk backwards from the end and remove trailing assistant
+    # tool-call messages that lack their tool responses.
     result = list(prior)
     while result:
         last = result[-1]
@@ -295,6 +305,7 @@ def create_graph_handler(
             if lower_text.startswith("/hitl ") or lower_text.startswith("hitl "):
                 hitl_handled = await _handle_hitl_resume(
                     msg, graph, config, thread_id, _store, manager,
+                    lock_getter=_get_thread_lock,
                 )
                 if hitl_handled:
                     return
@@ -317,10 +328,10 @@ def create_graph_handler(
                 _sessions[sender] = new_thread_id
                 
             # Initialize empty linked session in Web UI's SessionManager
+            username = msg.context_metadata.get("username") or msg.context_metadata.get("display_name") or "user"
             try:
                 from kazma_ui.session_manager import get_session_manager, ChatSession
                 web_store = get_session_manager()
-                username = msg.context_metadata.get("username") or msg.context_metadata.get("display_name") or "user"
                 web_session = ChatSession(
                     session_id=new_thread_id,
                     thread_id=new_thread_id,

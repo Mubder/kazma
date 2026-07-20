@@ -118,6 +118,14 @@ class CompactionEngine:
 
         compacted_messages: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
 
+        # Preserve the in-flight user question. Compaction fires mid-turn
+        # (80% threshold or /compact), so dropping the latest user message
+        # would leave the agent with nothing to answer and lose the request.
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                compacted_messages.append({"role": "user", "content": msg.get("content", "")})
+                break
+
         # Step 5: Build and return new state
         new_state: AgentState = {
             "messages": compacted_messages,

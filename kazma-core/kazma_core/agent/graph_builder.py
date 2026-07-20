@@ -63,7 +63,7 @@ from kazma_core.time_travel import SnapshotRecorder
 from kazma_core.tracing import KazmaTracer
 from kazma_core.config_schema import TracingConfig
 
-__all__ = ["TOOL_RESULT_MAX_CHARS", "build_supervisor_graph", "check_saturation_node", "respond_node", "summarize_node", "supervisor_node", "tool_worker_node", "truncate_tool_result"]
+__all__ = ["TOOL_RESULT_MAX_CHARS", "build_supervisor_graph", "check_saturation_node", "respond_node", "sanitize_tool_chains", "summarize_node", "supervisor_node", "tool_worker_node", "truncate_tool_result"]
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,75 @@ def truncate_tool_result(content: str, max_chars: int = TOOL_RESULT_MAX_CHARS) -
         original_len = len(content)
         return content[:max_chars] + f"\n[truncated {original_len - max_chars} chars]"
     return content
+
+
+def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Repair broken tool-call chains ANYWHERE in the message history.
+
+    OpenAI-compatible providers reject a history in which an assistant
+    message with ``tool_calls`` is not followed by a ``tool`` response for
+    every ``tool_call_id`` (HTTP 400 "insufficient tool messages"). A chain
+    can break mid-history when a HITL interrupt pauses a turn and the error
+    turn is later committed on top of it, poisoning the thread permanently.
+
+    Repairs applied:
+      - assistant ``tool_calls`` entries with no later ``tool`` response are
+        removed; if none remain, the message is kept as plain text (when it
+        has content) or dropped entirely.
+      - orphaned ``tool`` messages (no surviving matching assistant
+        ``tool_calls``) are dropped.
+    """
+    msgs = list(messages)
+
+    # tool_call_id → indices of every tool response (ids can repeat across turns)
+    response_indices: dict[str, list[int]] = {}
+    for i, m in enumerate(msgs):
+        if isinstance(m, dict) and m.get("role") == "tool":
+            tcid = m.get("tool_call_id") or ""
+            if tcid:
+                response_indices.setdefault(tcid, []).append(i)
+
+    valid_ids: set[str] = set()
+    out: list[dict[str, Any]] = []
+    dropped = 0
+    for i, m in enumerate(msgs):
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            kept = [
+                tc for tc in m["tool_calls"]
+                if any(j > i for j in response_indices.get(tc.get("id") or "", []))
+            ]
+            if kept:
+                if len(kept) != len(m["tool_calls"]):
+                    dropped += len(m["tool_calls"]) - len(kept)
+                    m = {**m, "tool_calls": kept}
+                valid_ids.update(tc.get("id") or "" for tc in kept)
+                out.append(m)
+            else:
+                dropped += len(m["tool_calls"])
+                content = m.get("content")
+                if isinstance(content, str) and content.strip():
+                    out.append({k: v for k, v in m.items() if k != "tool_calls"})
+                # else: tool-calls-only message with no responses — drop
+            continue
+        if role == "tool":
+            if (m.get("tool_call_id") or "") in valid_ids:
+                out.append(m)
+            else:
+                dropped += 1
+            continue
+        out.append(m)
+
+    if dropped:
+        logger.warning(
+            "[Sanitize] Repaired broken tool chains: removed %d dangling "
+            "tool_calls/tool entries (%d → %d messages)",
+            dropped, len(msgs), len(out),
+        )
+    return out
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -224,16 +293,17 @@ async def supervisor_node(
         }
 
     # ── 80% context compaction check ───────────────────────────────
+    # On compaction, CONTINUE this supervisor call with the compacted
+    # messages instead of returning early. The old early-return routed to
+    # RESPOND (there is no supervisor self-edge), which ended the turn with
+    # no answer and replaced the checkpoint with just the summary — the
+    # "agent forgot everything and said nothing" bug.
     state_for_check = {**state, "messages": messages}
     compacted_state = await authority.check_and_enforce(state_for_check)
     if compacted_state is not state_for_check:
-        logger.info("[Supervisor] Context compacted — restarting with fresh context")
-        return {
-            **breaker_reset,
-            "messages": compacted_state.get("messages", []),
-            "needs_compaction": False,
-            "next_node": NodeName.SUPERVISOR,  # re-enter supervisor
-        }
+        logger.info("[Supervisor] Context compacted — continuing turn with compacted context")
+        messages = list(compacted_state.get("messages", []))
+        breaker_reset = {**breaker_reset, "needs_compaction": False}
 
     # ── Ensure system prompt and personality are present ───────────
     # The personality prompt is injected at position 0, replacing any
@@ -332,6 +402,13 @@ async def supervisor_node(
                 messages.insert(insert_at, {"role": "system", "content": lock})
         except Exception:
             logger.debug("[Supervisor] language lock skipped", exc_info=True)
+
+    # ── Repair broken tool chains before the LLM call ──────────────
+    # A checkpoint poisoned by a paused HITL turn (assistant tool_calls
+    # with no tool responses, possibly mid-history) would 400 on every
+    # provider call forever. Sanitizing here also heals the thread: the
+    # repaired list is what gets persisted by the return paths below.
+    messages = sanitize_tool_chains(messages)
 
     start = time.monotonic()
     try:

@@ -53,10 +53,12 @@ class TestContextAuthority:
 
         result = await authority.check_and_enforce(state)
 
-        # Should return a different state (compacted)
+        # Should return a different state (compacted): summary system
+        # message plus the preserved in-flight user message.
         assert result is not state
-        assert len(result["messages"]) == 1
+        assert len(result["messages"]) == 2
         assert result["messages"][0]["role"] == "system"
+        assert result["messages"][1]["role"] == "user"
 
     @pytest.mark.asyncio
     async def test_check_and_enforce_exact_boundary(self) -> None:
