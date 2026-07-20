@@ -563,13 +563,25 @@
 
       onDone: function(data) {
         KS.hideTyping(typingEl);
+        // Never leave a blank turn after "Thinking…" (empty stream / missed HITL)
+        if (!tokenAccum && !currentMsgEl && !(data && data.interrupted)) {
+          currentMsgEl = createAssistantMessage();
+          var emptyEl = currentMsgEl.querySelector('.message-text');
+          if (emptyEl) {
+            emptyEl.innerHTML = KS.markdown
+              ? KS.markdown('_No response received. Try again, or check server logs / Pending Approvals._')
+              : '<em>No response received. Try again.</em>';
+          }
+        }
         if (data) {
           updateSessionStats(data.tokens, data.cost);
           if (currentMsgEl) {
             var meta = currentMsgEl.querySelector('.message-meta');
-            meta.textContent = KS.formatTokens(data.tokens) + ' tokens \u00B7 ' +
-              KS.formatCost(data.cost) + ' \u00B7 ' +
-              KS.formatDuration(data.duration_ms);
+            if (meta) {
+              meta.textContent = KS.formatTokens(data.tokens) + ' tokens \u00B7 ' +
+                KS.formatCost(data.cost) + ' \u00B7 ' +
+                KS.formatDuration(data.duration_ms);
+            }
           }
         }
         // Play TTS for the assistant's response

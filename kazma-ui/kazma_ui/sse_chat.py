@@ -70,6 +70,82 @@ def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
     return dicts
 
 
+def _message_text(m: Any) -> str:
+    """Extract plain assistant text from a dict or LangChain message object."""
+    if m is None:
+        return ""
+
+    if isinstance(m, dict):
+        role = (m.get("role") or m.get("type") or "").lower()
+        if role in ("user", "system", "tool", "human"):
+            return ""
+        # assistant / ai / empty role with tool_calls
+        if role and role not in ("assistant", "ai") and not m.get("tool_calls"):
+            return ""
+        text = m.get("content")
+    else:
+        cls = m.__class__.__name__
+        role_attr = (getattr(m, "type", None) or getattr(m, "role", None) or "").lower()
+        if cls not in ("AIMessage", "AIMessageChunk") and role_attr not in (
+            "ai",
+            "assistant",
+            "",
+        ):
+            return ""
+        text = getattr(m, "content", None)
+
+    if isinstance(text, list):
+        parts: list[str] = []
+        for block in text:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+            else:
+                t = getattr(block, "text", None)
+                if t:
+                    parts.append(str(t))
+        text = "".join(parts)
+    if text is None:
+        return ""
+    return str(text).strip()
+
+
+def _extract_hitl_payload(intr: Any) -> dict[str, Any] | None:
+    """Normalize LangGraph interrupt objects into a hitl payload dict."""
+    value = getattr(intr, "value", None)
+    if value is None and isinstance(intr, dict):
+        value = intr.get("value", intr)
+    # Some versions wrap the value in a 1-tuple / list
+    if isinstance(value, (list, tuple)) and value:
+        value = value[0]
+    if not isinstance(value, dict):
+        return None
+    if value.get("type") == "hitl_approval":
+        return value
+    # Fallback: tool/args shape without type tag (still show a card)
+    if "tool" in value or "args" in value or "tools" in value:
+        return {
+            "type": "hitl_approval",
+            "tool": value.get("tool", "unknown"),
+            "args": value.get("args", value.get("arguments", {})),
+            "tools": value.get("tools") or [],
+            "message": value.get("message", ""),
+        }
+    return None
+
+
+def _last_assistant_text(messages: list[Any] | None) -> str:
+    """Return the last non-empty assistant text from a message list."""
+    if not messages:
+        return ""
+    for m in reversed(list(messages)):
+        text = _message_text(m)
+        if text:
+            return text
+    return ""
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # LangGraph event → SSE mapping
 # ══════════════════════════════════════════════════════════════════════════
@@ -193,46 +269,55 @@ async def _stream_langgraph_events(
                         if final_tokens:
                             total_tokens = final_tokens
 
-                        # ── Extract final assistant message from terminal state ──
-                        # CRITICAL FIX (Issue 3): LLMProvider uses custom httpx
-                        # calls (not LangChain BaseChatModel), so
-                        # on_chat_model_stream events never fire.  The response
-                        # exists in output["messages"][-1] but was never emitted.
-                        # Guard with 'if not content_acc' to prevent duplicates
-                        # if real streaming is ever added.
+                        # CRITICAL: LLMProvider uses custom httpx (not
+                        # BaseChatModel), so on_chat_model_stream never fires.
+                        # Surface final assistant text from graph state.
                         if not content_acc:
-                            messages_list = output.get("messages", [])
-                            if isinstance(messages_list, list) and messages_list:
-                                last_msg = messages_list[-1]
-                                if isinstance(last_msg, dict):
-                                    msg_content = last_msg.get("content", "")
-                                    if (
-                                        last_msg.get("role") == "assistant"
-                                        and msg_content
-                                    ):
-                                        content_acc = msg_content
-                                        yield _sse_frame(
-                                            "token",
-                                            {"content": msg_content},
-                                        )
+                            msg_content = _last_assistant_text(
+                                output.get("messages") or []
+                            )
+                            if msg_content:
+                                content_acc = msg_content
+                                yield _sse_frame(
+                                    "token",
+                                    {"content": msg_content},
+                                )
 
-            # ── HITL: detect interrupt() pause ─────────────────────────
-            # When tool_worker_node calls interrupt() for a danger tool, the
-            # graph checkpoint pauses and astream_events ends WITHOUT the
-            # terminal on_chain_end. Check the graph state for pending
-            # interrupts and surface them so the frontend can prompt for
-            # approval (POST /api/approve/{thread_id}).
+            # ── Post-stream: HITL + backfill assistant text ────────────
+            # Custom LLM path never streams tokens. On HITL interrupt,
+            # astream_events ends WITHOUT terminal on_chain_end — so we
+            # must (1) detect interrupt, (2) pull any assistant prose from
+            # checkpoint state, (3) never leave the UI with only "Thinking…".
             thread_id = (config.get("configurable") or {}).get("thread_id", "")
             interrupted = False
+            snapshot = None
             try:
                 snapshot = await graph.aget_state(config)
-                if snapshot and getattr(snapshot, "next", None):
-                    # Graph still has work to do — check for interrupt tasks.
-                    for task in getattr(snapshot, "tasks", []) or []:
-                        interrupts = getattr(task, "interrupts", []) or []
-                        for intr in interrupts:
-                            payload = getattr(intr, "value", None)
-                            if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
+            except Exception as exc:
+                logger.warning("[SSE] aget_state failed after stream: %s", exc)
+
+            if snapshot is not None:
+                # Backfill assistant text from checkpoint (interrupt or complete)
+                if not content_acc:
+                    try:
+                        vals = getattr(snapshot, "values", None) or {}
+                        msgs = vals.get("messages") if isinstance(vals, dict) else None
+                        msg_content = _last_assistant_text(msgs or [])
+                        if msg_content:
+                            content_acc = msg_content
+                            yield _sse_frame("token", {"content": msg_content})
+                    except Exception:
+                        logger.debug("[SSE] post-stream text backfill failed", exc_info=True)
+
+                # HITL interrupt detection (strict type OR tool/args fallback)
+                try:
+                    next_nodes = getattr(snapshot, "next", None) or ()
+                    if next_nodes:
+                        for task in getattr(snapshot, "tasks", []) or []:
+                            for intr in getattr(task, "interrupts", []) or []:
+                                payload = _extract_hitl_payload(intr)
+                                if not payload:
+                                    continue
                                 interrupted = True
                                 yield _sse_frame(
                                     "approval_required",
@@ -249,10 +334,41 @@ async def _stream_langgraph_events(
                                     thread_id,
                                     payload.get("tool"),
                                 )
-            except Exception as exc:
-                # aget_state may be unavailable (no checkpointer). Don't fail
-                # the whole turn over interrupt detection — just log.
-                logger.debug("[SSE] Could not check interrupt state: %s", exc)
+                                break
+                            if interrupted:
+                                break
+                        # Paused mid-graph but no parseable HITL payload
+                        if not interrupted and not content_acc:
+                            logger.warning(
+                                "[SSE] Graph paused (next=%s) without HITL payload "
+                                "thread=%s — emitting recovery notice",
+                                list(next_nodes),
+                                thread_id,
+                            )
+                            notice = (
+                                "⚠️ The agent paused mid-turn (no approval card could be "
+                                "built). Try again, or open **Dashboard → Pending Approvals**. "
+                                f"Thread: `{thread_id}`"
+                            )
+                            content_acc = notice
+                            yield _sse_frame("token", {"content": notice})
+                except Exception as exc:
+                    logger.warning("[SSE] interrupt scan failed: %s", exc, exc_info=True)
+
+            # Never leave the chat blank after "Thinking…"
+            if not content_acc and not interrupted:
+                notice = (
+                    "⚠️ No assistant text was returned for this turn "
+                    "(model may have failed silently or only planned tools). "
+                    "Please try again or check server logs."
+                )
+                content_acc = notice
+                yield _sse_frame("token", {"content": notice})
+                logger.warning(
+                    "[SSE] Empty turn with no HITL — thread=%s tokens=%s",
+                    thread_id,
+                    total_tokens,
+                )
 
             # ── Turn complete ──────────────────────────────────────────
             duration_ms = (time.monotonic() - turn_start) * 1000
@@ -270,6 +386,8 @@ async def _stream_langgraph_events(
                     "tokens": total_tokens,
                     "cost": round(total_cost, 6),
                     "duration_ms": round(duration_ms, 0),
+                    "interrupted": interrupted,
+                    "empty": (not content_acc and not interrupted),
                 },
             )
 

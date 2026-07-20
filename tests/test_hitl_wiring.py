@@ -411,9 +411,10 @@ class _MockTask:
 
 class _MockSnapshot:
     """Mock StateSnapshot."""
-    def __init__(self, next_nodes, tasks):
+    def __init__(self, next_nodes, tasks, values=None):
         self.next = next_nodes
         self.tasks = tasks
+        self.values = values if values is not None else {}
 
 
 class _MockGraph:
@@ -469,7 +470,11 @@ class TestSseApprovalFrame:
         from kazma_ui.sse_chat import _stream_langgraph_events
 
         # snapshot.next is empty → graph completed normally
-        snapshot = _MockSnapshot(next_nodes=(), tasks=[])
+        snapshot = _MockSnapshot(
+            next_nodes=(),
+            tasks=[],
+            values={"messages": [{"role": "assistant", "content": "Hello"}]},
+        )
         graph = _MockGraph(snapshot)
         config = {"configurable": {"thread_id": "sse-test-2"}}
 
@@ -479,3 +484,45 @@ class TestSseApprovalFrame:
 
         approval_frames = [f for f in frames if "approval_required" in f]
         assert len(approval_frames) == 0, "No approval frame on normal completion"
+        # Custom LLM path has no stream events — backfill from checkpoint
+        token_frames = [f for f in frames if "event: token" in f or '"content"' in f and "Hello" in f]
+        assert any("Hello" in f for f in frames)
+
+    @pytest.mark.asyncio
+    async def test_empty_turn_emits_recovery_notice(self):
+        """Never leave the UI with only Thinking… — emit a recovery token."""
+        from kazma_ui.sse_chat import _stream_langgraph_events
+
+        snapshot = _MockSnapshot(next_nodes=(), tasks=[], values={"messages": []})
+        graph = _MockGraph(snapshot)
+        config = {"configurable": {"thread_id": "sse-empty"}}
+
+        frames = []
+        async for frame in _stream_langgraph_events(graph, {"messages": []}, config):
+            frames.append(frame)
+
+        assert any("No assistant text" in f or "try again" in f.lower() for f in frames)
+        assert any("event: done" in f or "done" in f for f in frames)
+
+    @pytest.mark.asyncio
+    async def test_hitl_payload_without_type_tag(self):
+        """tool/args shape without type=hitl_approval still surfaces a card."""
+        from kazma_ui.sse_chat import _stream_langgraph_events
+
+        snapshot = _MockSnapshot(
+            next_nodes=("tool_worker",),
+            tasks=[_MockTask([_MockInterrupt({
+                "tool": "shell_exec",
+                "args": {"command": "ls"},
+                "message": "need approval",
+            })])],
+        )
+        graph = _MockGraph(snapshot)
+        config = {"configurable": {"thread_id": "sse-fallback-type"}}
+
+        frames = []
+        async for frame in _stream_langgraph_events(graph, {"messages": []}, config):
+            frames.append(frame)
+
+        assert any("approval_required" in f for f in frames)
+        assert any("shell_exec" in f for f in frames)
