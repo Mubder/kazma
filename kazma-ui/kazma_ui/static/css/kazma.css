@@ -1343,9 +1343,15 @@ tbody tr:last-child td {
 }
 .hitl-approval-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-2);
   margin-top: var(--sp-3);
   align-items: center;
+}
+.hitl-approval-actions .btn-warning {
+  background: var(--warning, #f59e0b);
+  border-color: var(--warning, #f59e0b);
+  color: #111;
 }
 .hitl-approval-card.hitl-approved { border-color: var(--success); }
 .hitl-approval-card.hitl-denied { border-color: var(--danger); }

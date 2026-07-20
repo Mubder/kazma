@@ -240,6 +240,7 @@ async def _stream_langgraph_events(
                                         "thread_id": thread_id,
                                         "tool": payload.get("tool", ""),
                                         "args": payload.get("args", {}),
+                                        "tools": payload.get("tools") or [],
                                         "message": payload.get("message", ""),
                                     },
                                 )
@@ -455,6 +456,16 @@ def create_sse_chat_router(
             cmd = raw_msg.lower().strip()
             if cmd == "/yolo status":
                 st = yolo_status(thread_id)
+                grant_note = ""
+                try:
+                    from kazma_core.safety.hitl_grants import list_grants
+
+                    grants = list_grants(thread_id)
+                    if grants:
+                        names = ", ".join(g["tool"] for g in grants)
+                        grant_note = f"\nPer-tool grants active: `{names}`"
+                except Exception:
+                    pass
                 if st.get("active"):
                     rem = st.get("remaining_seconds")
                     ttl_note = (
@@ -463,13 +474,20 @@ def create_sse_chat_router(
                     )
                     confirmation = (
                         f"🚀 YOLO is **ON** for this session. {ttl_note}\n"
-                        f"Disable: `/yolo off`"
+                        f"Disable: `/yolo off`{grant_note}"
                     )
                 else:
-                    confirmation = "🛡️ YOLO is **OFF**. HITL approvals are required for danger tools."
+                    confirmation = (
+                        "🛡️ YOLO is **OFF**. HITL approvals are required for danger tools."
+                        f"{grant_note}\n"
+                        "Tip: on an approval card use **Allow tool (session)** to stop "
+                        "repeat prompts for one tool without full YOLO."
+                    )
             elif cmd == "/yolo off":
                 disable_yolo(thread_id, actor=f"web:{session_id[:12]}")
-                confirmation = "🛡️ YOLO deactivated. Safety gates are active again."
+                confirmation = (
+                    "🛡️ YOLO deactivated. Safety gates and tool grants are cleared."
+                )
             else:
                 st = enable_yolo(thread_id, actor=f"web:{session_id[:12]}")
                 rem = st.get("remaining_seconds")

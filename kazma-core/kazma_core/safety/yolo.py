@@ -63,6 +63,13 @@ def disable_yolo(thread_id: str, *, actor: str = "unknown") -> None:
 
     cs = get_config_store()
     cs.delete(f"yolo.{thread_id}")
+    # Also drop per-tool grants so /yolo off fully restores HITL.
+    try:
+        from kazma_core.safety.hitl_grants import clear_grants
+
+        clear_grants(thread_id, actor=actor)
+    except Exception:
+        pass
     logger.warning(
         "[SECURITY] YOLO DISABLED thread=%s actor=%s",
         thread_id,

@@ -818,6 +818,14 @@ def register_direct_routes(self: Any) -> None:
 
         action = body.get("action", "deny")
         approved = action == "approve"
+        # scope: once (default) | tool (session grant for this tool) | yolo
+        scope = str(body.get("scope") or "once").strip().lower()
+        if scope not in ("once", "tool", "yolo", "allow_tool", "session"):
+            scope = "once"
+        if scope == "allow_tool":
+            scope = "tool"
+        if scope == "session":
+            scope = "yolo"
 
         graph_ref = _resolve_hitl_graph()
         if graph_ref is None:
@@ -898,6 +906,11 @@ def register_direct_routes(self: Any) -> None:
 
             # Verify this thread is actually paused before resume — avoids a
             # silent no-op when the wrong graph/checkpointer is wired.
+            # Also snapshot messages + pending tools for scope grants / delta text.
+            pre = None
+            pre_msg_count = 0
+            pending_tool_name = ""
+            pending_tools: list[Any] = []
             try:
                 pre = await graph_ref.aget_state(config)
                 has_interrupt = False
@@ -923,52 +936,140 @@ def register_direct_routes(self: Any) -> None:
                         },
                         status_code=409,
                     )
+                if pre is not None:
+                    vals = getattr(pre, "values", None) or {}
+                    if isinstance(vals, dict):
+                        pre_msgs = vals.get("messages") or []
+                        pre_msg_count = len(pre_msgs) if isinstance(pre_msgs, list) else 0
+                    for task in getattr(pre, "tasks", None) or []:
+                        for intr in getattr(task, "interrupts", None) or []:
+                            payload = getattr(intr, "value", None)
+                            if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
+                                pending_tool_name = str(payload.get("tool") or "")
+                                pending_tools = list(payload.get("tools") or [])
+                                break
             except Exception:
                 logger.debug("[HITL] pre-resume state probe failed", exc_info=True)
 
-            resume_value = {"approved": approved, "reason": body.get("reason", "")}
-            result = await graph_ref.ainvoke(
-                Command(resume=resume_value),
-                config=config,
+            # Apply scope grants *before* resume so subsequent danger tools in
+            # later supervisor rounds skip interrupt entirely.
+            actor = f"web:{(body.get('session_id') or '')[:12] or 'anon'}"
+            grant_info: dict[str, Any] | None = None
+            if approved and scope == "yolo":
+                try:
+                    from kazma_core.safety.yolo import enable_yolo
+
+                    grant_info = enable_yolo(thread_id, actor=actor)
+                except Exception:
+                    logger.exception("[HITL] failed to enable YOLO scope")
+            elif approved and scope == "tool":
+                try:
+                    from kazma_core.safety.hitl_grants import grant_tool
+
+                    tools_to_grant: list[str] = []
+                    if pending_tools:
+                        for t in pending_tools:
+                            if isinstance(t, dict) and t.get("name"):
+                                tools_to_grant.append(str(t["name"]))
+                    elif pending_tool_name and " tools" not in pending_tool_name:
+                        tools_to_grant.append(pending_tool_name)
+                    # Client may also pass explicit tool name
+                    explicit = body.get("tool") or body.get("grant_tool")
+                    if explicit:
+                        tools_to_grant.append(str(explicit))
+                    tools_to_grant = list(dict.fromkeys(tools_to_grant))  # dedupe
+                    grant_info = {"tools": []}
+                    for tname in tools_to_grant:
+                        st = grant_tool(thread_id, tname, actor=actor)
+                        grant_info["tools"].append(st)
+                except Exception:
+                    logger.exception("[HITL] failed to apply tool grant")
+
+            resume_value: dict[str, Any] = {
+                "approved": approved,
+                "reason": body.get("reason", ""),
+                "scope": scope,
+            }
+            if isinstance(body.get("approved_ids"), list):
+                resume_value["approved_ids"] = body["approved_ids"]
+
+            # Thread id for requires_approval/grants during the resumed run
+            from kazma_core.safety.hitl import (
+                reset_current_thread_id,
+                set_current_thread_id,
             )
 
-            # Extract the post-resume assistant reply so the chat UI can show it.
+            _tid_token = set_current_thread_id(thread_id)
+            try:
+                result = await graph_ref.ainvoke(
+                    Command(resume=resume_value),
+                    config=config,
+                )
+            finally:
+                reset_current_thread_id(_tid_token)
+
+            def _assistant_text(m: Any) -> str:
+                if isinstance(m, dict):
+                    role = m.get("role") or m.get("type")
+                    text = m.get("content")
+                else:
+                    role = getattr(m, "type", None) or getattr(m, "role", None)
+                    text = getattr(m, "content", None)
+                if role not in ("assistant", "ai"):
+                    return ""
+                if isinstance(text, list):
+                    parts: list[str] = []
+                    for block in text:
+                        if isinstance(block, str):
+                            parts.append(block)
+                        elif isinstance(block, dict) and block.get("type") == "text":
+                            parts.append(str(block.get("text") or ""))
+                        else:
+                            t = getattr(block, "text", None)
+                            if t:
+                                parts.append(str(t))
+                    text = "".join(parts)
+                if text is None:
+                    return ""
+                s = str(text).strip()
+                return s
+
+            # Extract only *new* assistant text produced after resume.
             content = ""
+            msgs: list[Any] = []
             if isinstance(result, dict):
                 msgs = result.get("messages") or []
-                if isinstance(msgs, list):
-                    for m in reversed(msgs):
-                        if not isinstance(m, dict):
-                            role = getattr(m, "type", None) or getattr(m, "role", None)
-                            text = getattr(m, "content", None)
-                            if role in ("ai", "assistant") and text:
-                                content = str(text)
-                                break
-                            continue
-                        if m.get("role") == "assistant" and m.get("content"):
-                            content = str(m.get("content") or "")
-                            break
-
-            # Persist assistant text into the web chat SessionManager so the
-            # sidebar history survives refresh after an HITL resume.
-            if content:
+            if not msgs:
                 try:
-                    from kazma_ui.session_manager import get_session_manager
-
-                    store = get_session_manager()
-                    # Prefer explicit session_id from the client; else find by thread_id.
-                    sid = (body.get("session_id") or "").strip()
-                    sess = store.get(sid) if sid else None
-                    if sess is None:
-                        for s in store.list_all(include_archived=True):
-                            if s.thread_id == thread_id:
-                                sess = s
-                                break
-                    if sess is not None:
-                        sess.messages.append({"role": "assistant", "content": content})
-                        store.put(sess)
+                    post = await graph_ref.aget_state(config)
+                    vals = getattr(post, "values", None) or {}
+                    if isinstance(vals, dict):
+                        msgs = vals.get("messages") or []
                 except Exception:
-                    logger.debug("[HITL] session persist after resume failed", exc_info=True)
+                    pass
+            if isinstance(msgs, list) and msgs:
+                new_msgs = msgs[pre_msg_count:] if pre_msg_count else msgs
+                # If pre_msg_count was 0 or wrong, still prefer trailing new AI text
+                candidates = [
+                    _assistant_text(m) for m in new_msgs if _assistant_text(m)
+                ]
+                if candidates:
+                    content = candidates[-1]
+                else:
+                    # Fallback: last assistant in full history that is *not*
+                    # identical to the last pre-resume assistant (avoid replay).
+                    pre_last = ""
+                    if pre_msg_count and pre_msg_count <= len(msgs):
+                        for m in reversed(msgs[:pre_msg_count]):
+                            t = _assistant_text(m)
+                            if t:
+                                pre_last = t
+                                break
+                    for m in reversed(msgs):
+                        t = _assistant_text(m)
+                        if t and t != pre_last:
+                            content = t
+                            break
 
             # Detect a *new* HITL interrupt after resume (chain of danger tools).
             next_approval: dict[str, Any] | None = None
@@ -983,6 +1084,7 @@ def register_direct_routes(self: Any) -> None:
                                     "thread_id": thread_id,
                                     "tool": payload.get("tool", ""),
                                     "args": payload.get("args", {}),
+                                    "tools": payload.get("tools") or [],
                                     "message": payload.get("message", ""),
                                 }
                                 break
@@ -991,11 +1093,44 @@ def register_direct_routes(self: Any) -> None:
             except Exception:
                 logger.debug("[HITL] post-resume interrupt probe failed", exc_info=True)
 
+            # If the turn finished with no new prose, give the UI a clear note
+            # instead of going silent (common after long shell_exec chains).
+            if approved and not content and not next_approval:
+                content = (
+                    "_Tools finished. The model did not return more text — "
+                    "ask a follow-up, or check tool results above._"
+                )
+            elif approved and not content and next_approval:
+                # Mid-chain: don't spam old text; optional quiet status
+                content = ""
+
+            # Persist *new* assistant text into SessionManager (not replays).
+            if content and not content.startswith("_Tools finished"):
+                try:
+                    from kazma_ui.session_manager import get_session_manager
+
+                    store = get_session_manager()
+                    sid = (body.get("session_id") or "").strip()
+                    sess = store.get(sid) if sid else None
+                    if sess is None:
+                        for s in store.list_all(include_archived=True):
+                            if s.thread_id == thread_id:
+                                sess = s
+                                break
+                    if sess is not None:
+                        sess.messages.append({"role": "assistant", "content": content})
+                        store.put(sess)
+                except Exception:
+                    logger.debug("[HITL] session persist after resume failed", exc_info=True)
+
             payload_out: dict[str, Any] = {
                 "status": "approved" if approved else "denied",
                 "thread_id": thread_id,
                 "content": content,
+                "scope": scope,
             }
+            if grant_info is not None:
+                payload_out["grant"] = grant_info
             if next_approval:
                 payload_out["approval_required"] = next_approval
             return _JSONResponse(payload_out, status_code=202)

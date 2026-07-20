@@ -78,8 +78,14 @@
         (message ? '<div class="hitl-approval-message">' + message + '</div>' : '') +
         '  <div class="hitl-approval-args"><pre>' + argsStr + '</pre></div>' +
         '  <div class="hitl-approval-actions">' +
-        '    <button class="btn btn-sm btn-success hitl-approve-btn" data-thread-id="' + threadId + '">' +
-        '      ✓ Approve' +
+        '    <button class="btn btn-sm btn-success hitl-approve-btn" data-thread-id="' + threadId + '" data-scope="once">' +
+        '      ✓ Once' +
+        '    </button>' +
+        '    <button class="btn btn-sm btn-primary hitl-approve-tool-btn" data-thread-id="' + threadId + '" data-scope="tool" data-tool="' + toolName + '">' +
+        '      Allow tool' +
+        '    </button>' +
+        '    <button class="btn btn-sm btn-warning hitl-approve-yolo-btn" data-thread-id="' + threadId + '" data-scope="yolo">' +
+        '      YOLO' +
         '    </button>' +
         '    <button class="btn btn-sm btn-danger hitl-deny-btn" data-thread-id="' + threadId + '">' +
         '      ✕ Deny' +
@@ -91,14 +97,20 @@
     }).join('');
 
     // Wire up buttons
-    list.querySelectorAll('.hitl-approve-btn').forEach(function (btn) {
+    list.querySelectorAll('.hitl-approve-btn, .hitl-approve-tool-btn, .hitl-approve-yolo-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        submitApproval(btn.getAttribute('data-thread-id'), true, btn);
+        submitApproval(
+          btn.getAttribute('data-thread-id'),
+          true,
+          btn,
+          btn.getAttribute('data-scope') || 'once',
+          btn.getAttribute('data-tool') || ''
+        );
       });
     });
     list.querySelectorAll('.hitl-deny-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        submitApproval(btn.getAttribute('data-thread-id'), false, btn);
+        submitApproval(btn.getAttribute('data-thread-id'), false, btn, 'once', '');
       });
     });
   }
@@ -109,10 +121,12 @@
    * @param {boolean} approve
    * @param {HTMLElement} btn - the clicked button
    */
-  async function submitApproval(threadId, approve, btn) {
+  async function submitApproval(threadId, approve, btn, scope, tool) {
     var card = btn.closest('.hitl-approval-card');
     var statusEl = card ? card.querySelector('.hitl-approval-status') : null;
     var buttons = card ? card.querySelectorAll('button') : [];
+    scope = scope || 'once';
+    tool = tool || '';
 
     // Disable buttons while request is in-flight
     buttons.forEach(function (b) { b.disabled = true; });
@@ -125,7 +139,11 @@
       var resp = await fetch('/api/approve/' + encodeURIComponent(threadId), {
         method: 'POST',
         headers: approvalHeaders(),
-        body: JSON.stringify({ action: approve ? 'approve' : 'deny' }),
+        body: JSON.stringify({
+          action: approve ? 'approve' : 'deny',
+          scope: scope,
+          tool: tool,
+        }),
         credentials: 'same-origin',
       });
 

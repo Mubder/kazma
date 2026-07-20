@@ -198,6 +198,13 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
                 return False
         except Exception:
             pass
+        try:
+            from kazma_core.safety.hitl_grants import has_tool_grant
+
+            if has_tool_grant(tid, tool_name):
+                return False
+        except Exception:
+            pass
 
     if not hitl_config.get("enabled", True):
         return False

@@ -67,8 +67,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.welcome_subtitle": {"en": "How can I help you today?", "ar": "كيف يمكنني مساعدتك اليوم؟"},
     "chat.thinking": {"en": "Kazma is thinking…", "ar": "كاظمه تفكر…"},
     "chat.placeholder": {
-        "en": "Type your message… (Enter to send, Shift+Enter for newline)",
-        "ar": "اكتب رسالتك… (Enter للإرسال، Shift+Enter لسطر جديد)",
+        "en": "Type a message or /yolo … (Enter to send, / for commands)",
+        "ar": "اكتب رسالة أو /yolo … (Enter للإرسال، / للأوامر)",
     },
     "chat.send": {"en": "Send", "ar": "إرسال"},
     "chat.attach_file": {"en": "Attach file", "ar": "إرفاق ملف"},

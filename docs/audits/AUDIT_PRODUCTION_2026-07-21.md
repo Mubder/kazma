@@ -249,3 +249,6 @@ CI gaps: soft Codecov, no Dependabot, no hard pip-audit on main, Playwright out 
 | H8 config_save | **Fixed** | Blocks `is_sensitive_config_key`; no value echo |
 | H9 session delete | **Fixed** | Uses `_session_store` + SessionManager |
 | H10 shutdown | **Fixed** | `signal_shutdown()` + checkpointer close |
+| UX YOLO web | **Fixed** | Slash menu + welcome chip + `/help`; backend already handled `/yolo` |
+| UX HITL flood | **Fixed** | Combined batch interrupt; **Allow tool (session)** grants (~30m); YOLO button on card |
+| UX silent after approve | **Fixed** | Delta post-resume assistant text; thread_id on resume; no stale "Let me check…" replay |

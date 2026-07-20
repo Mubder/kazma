@@ -730,35 +730,67 @@ async def tool_worker_node(
         if safe_tools:
             results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
 
-        # ── HITL: interrupt for each danger tool ──────────────────────
-        for tc in danger_tools:
+        # ── HITL: one combined interrupt for the whole danger batch ──
+        # (stops N-click floods when the model emits several danger tools
+        # in one turn). Scope grants (tool/yolo) are applied by /api/approve
+        # *before* resume so later turns skip the gate entirely.
+        if danger_tools:
+            tools_payload = [
+                {
+                    "id": tc.get("id"),
+                    "name": tc["name"],
+                    "args": tc.get("arguments") or {},
+                }
+                for tc in danger_tools
+            ]
+            if len(danger_tools) == 1:
+                tc0 = danger_tools[0]
+                message = f"Agent wants to run: {tc0['name']}({tc0.get('arguments') or {}})"
+                primary_tool = tc0["name"]
+                primary_args = tc0.get("arguments") or {}
+            else:
+                names = ", ".join(tc["name"] for tc in danger_tools)
+                message = (
+                    f"Agent wants to run {len(danger_tools)} danger tools: {names}"
+                )
+                primary_tool = f"{len(danger_tools)} tools"
+                primary_args = {"tools": [t["name"] for t in tools_payload]}
+
             approval_input = {
                 "type": "hitl_approval",
-                "tool": tc["name"],
-                "args": tc["arguments"],
-                "message": f"Agent wants to run: {tc['name']}({tc['arguments']})",
+                "tool": primary_tool,
+                "args": primary_args,
+                "tools": tools_payload,
+                "message": message,
             }
 
             # interrupt() pauses the graph — resumes when /api/approve calls
             # graph.ainvoke(Command(resume=...), config)
             approval = interrupt(approval_input)
 
-            if isinstance(approval, dict) and approval.get("approved", False):
-                logger.info("[ToolWorker] HITL approved: %s", tc["name"])
-                # Set the ContextVar so tool_registry.execute() and
-                # UnifiedToolExecutor.execute() skip the redundant swarm-bus
-                # check (double-gating prevention). Using a ContextVar instead
-                # of an argument flag prevents LLM prompt-injection bypass.
-                from kazma_core.agent.tool_registry import _hitl_approved_ctx
+            approved = isinstance(approval, dict) and approval.get("approved", False)
+            # Optional selective ids; None/missing → all tools in the batch.
+            approved_ids = None
+            if isinstance(approval, dict):
+                raw_ids = approval.get("approved_ids")
+                if isinstance(raw_ids, list):
+                    approved_ids = {str(x) for x in raw_ids}
 
-                _token = _hitl_approved_ctx.set(True)
-                try:
-                    results.append(await _exec_one(tc))
-                finally:
-                    _hitl_approved_ctx.reset(_token)
-            else:
-                logger.info("[ToolWorker] HITL denied: %s", tc["name"])
-                results.append(_denied_result(tc))
+            from kazma_core.agent.tool_registry import _hitl_approved_ctx
+
+            for tc in danger_tools:
+                tc_id = str(tc.get("id") or "")
+                allow = approved and (approved_ids is None or tc_id in approved_ids)
+                if allow:
+                    logger.info("[ToolWorker] HITL approved: %s", tc["name"])
+                    _token = _hitl_approved_ctx.set(True)
+                    try:
+                        results.append(await _exec_one(tc))
+                    finally:
+                        _hitl_approved_ctx.reset(_token)
+                else:
+                    logger.info("[ToolWorker] HITL denied: %s", tc["name"])
+                    results.append(_denied_result(tc))
 
         # ── Empty-Result Circuit Breaker ──────────────────────────────
         consecutive_failures = state.get("consecutive_tool_failures", 0)

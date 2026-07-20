@@ -134,19 +134,91 @@
     });
   }
 
+  // ── Slash commands (discoverable in Web UI) ───────────
+  var SLASH_COMMANDS = [
+    { cmd: '/yolo', desc: 'Skip danger-tool approvals for this session (TTL)' },
+    { cmd: '/yolo off', desc: 'Restore HITL approvals + clear tool grants' },
+    { cmd: '/yolo status', desc: 'Show YOLO / grant status for this session' },
+    { cmd: '/new', desc: 'Start a new chat session' },
+    { cmd: '/reset', desc: 'Clear this conversation history' },
+    { cmd: '/help', desc: 'List available slash commands' },
+  ];
+
+  function ensureSlashMenu() {
+    var menu = document.getElementById('chat-slash-menu');
+    if (menu) return menu;
+    menu = document.createElement('div');
+    menu.id = 'chat-slash-menu';
+    menu.className = 'chat-slash-menu';
+    menu.style.cssText =
+      'display:none;position:absolute;bottom:100%;left:0;right:0;max-height:220px;' +
+      'overflow:auto;background:var(--bg-elevated);border:1px solid var(--border);' +
+      'border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:50;margin-bottom:6px;';
+    var wrapper = document.querySelector('.input-wrapper') || (inputEl && inputEl.parentElement);
+    if (wrapper) {
+      if (getComputedStyle(wrapper).position === 'static') wrapper.style.position = 'relative';
+      wrapper.appendChild(menu);
+    }
+    return menu;
+  }
+
+  function hideSlashMenu() {
+    var menu = document.getElementById('chat-slash-menu');
+    if (menu) menu.style.display = 'none';
+  }
+
+  function showSlashMenu(filter) {
+    var menu = ensureSlashMenu();
+    var q = (filter || '/').toLowerCase();
+    var matches = SLASH_COMMANDS.filter(function(c) {
+      return c.cmd.indexOf(q) === 0 || c.cmd.indexOf(q.replace(/^\//, '')) >= 0;
+    });
+    if (!matches.length) { hideSlashMenu(); return; }
+    menu.innerHTML = matches.map(function(c) {
+      return '<button type="button" class="chat-slash-item" data-cmd="' + escapeHtml(c.cmd) + '" ' +
+        'style="display:flex;flex-direction:column;align-items:flex-start;width:100%;' +
+        'padding:8px 12px;border:0;background:transparent;color:var(--text-primary);' +
+        'cursor:pointer;text-align:left;border-bottom:1px solid var(--border-subtle);">' +
+        '<code style="font-size:0.85rem;color:var(--accent);">' + escapeHtml(c.cmd) + '</code>' +
+        '<span style="font-size:0.72rem;color:var(--text-muted);">' + escapeHtml(c.desc) + '</span>' +
+        '</button>';
+    }).join('');
+    menu.style.display = 'block';
+    menu.querySelectorAll('.chat-slash-item').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        inputEl.value = btn.getAttribute('data-cmd') || '';
+        hideSlashMenu();
+        inputEl.focus();
+        sendMessage();
+      });
+      btn.addEventListener('mouseenter', function() {
+        btn.style.background = 'var(--bg-surface)';
+      });
+      btn.addEventListener('mouseleave', function() {
+        btn.style.background = 'transparent';
+      });
+    });
+  }
+
   // ── Input handling ────────────────────────────────────
   function onInputKeydown(e) {
     // Enter (without Shift and without Ctrl) sends the message.
     // Ctrl+Enter also sends the message (so users who press Ctrl+Enter
     // from muscle-memory get the expected behaviour).
+    if (e.key === 'Escape') {
+      hideSlashMenu();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
       e.preventDefault();
+      hideSlashMenu();
       sendMessage();
       return;
     }
     // Ctrl+Enter or Cmd+Enter sends the message
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
+      hideSlashMenu();
       sendMessage();
       return;
     }
@@ -156,15 +228,25 @@
   function onInputResize() {
     this.style.height = 'auto';
     this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+    var v = (this.value || '');
+    if (v.startsWith('/') && v.indexOf('\n') < 0 && v.length < 40) {
+      showSlashMenu(v.toLowerCase());
+    } else {
+      hideSlashMenu();
+    }
   }
 
   function disableInput() {
     if (inputEl) { inputEl.disabled = true; inputEl.placeholder = 'Kazma is thinking\u2026'; }
     if (sendBtn) sendBtn.disabled = true;
+    hideSlashMenu();
   }
 
   function enableInput() {
-    if (inputEl) { inputEl.disabled = false; inputEl.placeholder = 'Type your message\u2026 (Enter to send)'; }
+    if (inputEl) {
+      inputEl.disabled = false;
+      inputEl.placeholder = 'Type a message or /yolo \u2026 (Enter to send)';
+    }
     if (sendBtn) sendBtn.disabled = false;
     if (inputEl) inputEl.focus();
   }
@@ -353,8 +435,23 @@
     var attachmentName = inputEl.dataset.attachmentName || '';
     if (!text && !attachment) return;
 
+    hideSlashMenu();
+
     // Handle /voice commands locally
     if (window.KazmaVoice && window.KazmaVoice.handleVoiceCommand(text)) {
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+      return;
+    }
+
+    // Handle /help locally (list slash commands)
+    if (text.toLowerCase() === '/help') {
+      var helpLines = SLASH_COMMANDS.map(function(c) {
+        return '`' + c.cmd + '` — ' + c.desc;
+      }).join('\n');
+      appendMessage('user', text);
+      appendMessage('assistant', '**Slash commands**\n\n' + helpLines +
+        '\n\nOn danger tools you can also **Allow tool (session)** to stop repeat prompts without full YOLO.');
       inputEl.value = '';
       inputEl.style.height = 'auto';
       return;
@@ -487,202 +584,10 @@
       },
 
       onApprovalRequired: function(data) {
-        // HITL: graph paused at an interrupt() for a danger tool.
-        // Render an Approve/Deny card; the user's choice POSTs to
-        // /api/approve/{thread_id}, which resumes the graph and returns
-        // the post-resume assistant content (fixes silent-after-approve).
+        // HITL: graph paused — render scope-aware approval card.
         KS.hideTyping(typingEl);
-        if (!currentMsgEl) currentMsgEl = createAssistantMessage();
-        var content = currentMsgEl.querySelector('.message-content');
         activeStream = null;
-
-        var card = document.createElement('div');
-        card.className = 'hitl-approval-card';
-        card.innerHTML =
-          '<div class="hitl-approval-header">\u26A0 Approval Required</div>' +
-          '<div class="hitl-approval-body">' +
-            '<p><strong>Tool:</strong> <code>' + escapeHtml(data.tool || '') + '</code></p>' +
-            '<p><strong>Args:</strong> <code>' + escapeHtml(truncateStr(JSON.stringify(data.args || {}), 300)) + '</code></p>' +
-            '<p class="hitl-message">' + escapeHtml(data.message || '') + '</p>' +
-          '</div>' +
-          '<div class="hitl-approval-actions">' +
-            '<button class="btn btn-sm btn-success hitl-approve">Approve</button>' +
-            '<button class="btn btn-sm btn-danger hitl-deny">Deny</button>' +
-          '</div>';
-        content.appendChild(card);
-        scrollToBottom();
-
-        function setCardState(state, label) {
-          card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-          card.className = 'hitl-approval-card hitl-' + state;
-          var actions = card.querySelector('.hitl-approval-actions');
-          if (actions) actions.innerHTML = '<span class="hitl-status hitl-' + state + '">' + label + '</span>';
-        }
-
-        function appendAssistantText(text) {
-          if (!text) return;
-          if (!currentMsgEl) currentMsgEl = createAssistantMessage();
-          var textEl = currentMsgEl.querySelector('.message-text');
-          if (!textEl) {
-            textEl = document.createElement('div');
-            textEl.className = 'message-text';
-            currentMsgEl.querySelector('.message-content').appendChild(textEl);
-          }
-          // Append after prior tool/approval UI rather than replacing it.
-          var existing = textEl.innerHTML || '';
-          var rendered = KS.markdown ? KS.markdown(text) : escapeHtml(text);
-          textEl.innerHTML = existing
-            ? existing + '<hr style="border:none;border-top:1px solid var(--border-subtle);margin:10px 0;">' + rendered
-            : rendered;
-          scrollToBottom();
-        }
-
-        function showNextApproval(nextData) {
-          if (!nextData || !nextData.thread_id) return;
-          // Recursively render another approval card on the same message.
-          onApprovalRequiredHandler(nextData);
-        }
-
-        // Hoist so chained approvals can re-enter this handler.
-        function onApprovalRequiredHandler(nextData) {
-          // Call the outer handler again via a nested card on a fresh assistant bubble.
-          var prev = currentMsgEl;
-          currentMsgEl = createAssistantMessage();
-          // Reuse the same callback body by simulating the structure.
-          // Simpler: just re-dispatch through a thin wrapper.
-          window.KazmaChat && window.KazmaChat._hitlApproval
-            ? window.KazmaChat._hitlApproval(nextData)
-            : null;
-          if (!window.KazmaChat || !window.KazmaChat._hitlApproval) {
-            // Fallback: render inline notice
-            appendAssistantText('Another tool needs approval: ' + (nextData.tool || 'tool'));
-            currentMsgEl = prev;
-          }
-        }
-
-        function submitApproval(action) {
-          setCardState('pending', action === 'approve' ? 'Running approved tool\u2026' : 'Denying\u2026');
-          fetch('/api/approve/' + encodeURIComponent(data.thread_id), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: action,
-              session_id: chatSessionId || '',
-            }),
-            credentials: 'same-origin',
-          }).then(function(res) {
-            return res.json().then(function(body) {
-              return { status: res.status, body: body || {} };
-            }).catch(function() {
-              return { status: res.status, body: {} };
-            });
-          }).then(function(out) {
-            if (out.status === 202) {
-              setCardState(action === 'approve' ? 'approved' : 'denied',
-                           action === 'approve' ? 'Approved \u2713 — continuing\u2026' : 'Denied \u2717');
-              if (out.body.content) {
-                appendAssistantText(out.body.content);
-              } else if (action === 'approve') {
-                appendAssistantText('_Tool approved and executed. (No further assistant text was returned — check Dashboard Pending Approvals if the tool did not run.)_');
-              } else {
-                appendAssistantText('_Tool denied — continuing without it._');
-              }
-              if (out.body.approval_required) {
-                var next = out.body.approval_required;
-                setTimeout(function() {
-                  if (window.KazmaChat && typeof window.KazmaChat._hitlApproval === 'function') {
-                    window.KazmaChat._hitlApproval(next);
-                  }
-                }, 50);
-              } else {
-                currentMsgEl = null;
-                tokenAccum = '';
-                enableInput();
-              }
-            } else if (out.status === 409) {
-              // No pending interrupt — often means dashboard already resumed it
-              // or a different graph/checkpointer was used.
-              setCardState('error', 'No pending approval (already resumed?)');
-              appendAssistantText('_' + truncateStr(String((out.body && out.body.error) || 'No pending approval for this thread.'), 200) + '_');
-              enableInput();
-            } else {
-              var errMsg = (out.body && (out.body.error || out.body.detail)) || ('HTTP ' + out.status);
-              setCardState('error', 'Error: ' + truncateStr(String(errMsg), 120));
-              appendAssistantText('_Approval failed: ' + escapeHtml(String(errMsg)) + '_');
-              enableInput();
-            }
-          }).catch(function(err) {
-            setCardState('error', 'Error: ' + err.message);
-            enableInput();
-          });
-        }
-
-        card.querySelector('.hitl-approve').addEventListener('click', function() { submitApproval('approve'); });
-        card.querySelector('.hitl-deny').addEventListener('click', function() { submitApproval('deny'); });
-
-        // Export so chained approvals can re-enter.
-        if (window.KazmaChat) {
-          window.KazmaChat._hitlApproval = function(nextData) {
-            // Open a fresh assistant bubble + card for the next tool.
-            currentMsgEl = createAssistantMessage();
-            // Reuse onApprovalRequired by calling the same structure:
-            // build a minimal recursive card.
-            var fake = nextData || {};
-            var c = currentMsgEl.querySelector('.message-content');
-            var card2 = document.createElement('div');
-            card2.className = 'hitl-approval-card';
-            card2.innerHTML =
-              '<div class="hitl-approval-header">\u26A0 Approval Required</div>' +
-              '<div class="hitl-approval-body">' +
-                '<p><strong>Tool:</strong> <code>' + escapeHtml(fake.tool || '') + '</code></p>' +
-                '<p><strong>Args:</strong> <code>' + escapeHtml(truncateStr(JSON.stringify(fake.args || {}), 300)) + '</code></p>' +
-                '<p class="hitl-message">' + escapeHtml(fake.message || '') + '</p>' +
-              '</div>' +
-              '<div class="hitl-approval-actions">' +
-                '<button class="btn btn-sm btn-success hitl-approve">Approve</button>' +
-                '<button class="btn btn-sm btn-danger hitl-deny">Deny</button>' +
-              '</div>';
-            c.appendChild(card2);
-            scrollToBottom();
-            // Wire buttons by re-invoking the outer handler logic via a synthetic data object.
-            // Simpler path: temporarily replace and call submit with next thread.
-            function setState2(state, label) {
-              card2.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-              card2.className = 'hitl-approval-card hitl-' + state;
-              var actions = card2.querySelector('.hitl-approval-actions');
-              if (actions) actions.innerHTML = '<span class="hitl-status hitl-' + state + '">' + label + '</span>';
-            }
-            function submit2(action) {
-              setState2('pending', action === 'approve' ? 'Running approved tool\u2026' : 'Denying\u2026');
-              fetch('/api/approve/' + encodeURIComponent(fake.thread_id), {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: action, session_id: chatSessionId || '' }),
-                credentials: 'same-origin',
-              }).then(function(res) {
-                return res.json().then(function(body) { return { status: res.status, body: body || {} }; })
-                  .catch(function() { return { status: res.status, body: {} }; });
-              }).then(function(out) {
-                if (out.status === 202) {
-                  setState2(action === 'approve' ? 'approved' : 'denied',
-                    action === 'approve' ? 'Approved \u2713' : 'Denied \u2717');
-                  if (out.body.content) appendAssistantText(out.body.content);
-                  if (out.body.approval_required) {
-                    window.KazmaChat._hitlApproval(out.body.approval_required);
-                  } else {
-                    currentMsgEl = null;
-                    enableInput();
-                  }
-                } else {
-                  setState2('error', 'Error');
-                  enableInput();
-                }
-              }).catch(function() { setState2('error', 'Error'); enableInput(); });
-            }
-            card2.querySelector('.hitl-approve').addEventListener('click', function() { submit2('approve'); });
-            card2.querySelector('.hitl-deny').addEventListener('click', function() { submit2('deny'); });
-          };
-        }
+        renderHitlCard(data);
       },
 
       onError: function(msg) {
@@ -779,6 +684,167 @@
 
   function createAssistantMessage() {
     return appendMessage('assistant', '');
+  }
+
+  /**
+   * HITL approval card with scope options:
+   *  - Approve once
+   *  - Allow this tool for the session (stops flood for shell_exec etc.)
+   *  - YOLO (all danger tools for this session)
+   *  - Deny
+   */
+  function renderHitlCard(data) {
+    if (!data || !data.thread_id) return;
+    if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+    var content = currentMsgEl.querySelector('.message-content');
+    if (!content) return;
+
+    var tools = Array.isArray(data.tools) ? data.tools : [];
+    var toolsHtml = '';
+    if (tools.length > 1) {
+      toolsHtml = '<ul class="hitl-tools-list" style="margin:6px 0;padding-left:18px;font-size:0.8rem;">' +
+        tools.map(function(t) {
+          return '<li><code>' + escapeHtml(t.name || '') + '</code> ' +
+            '<span style="color:var(--text-muted);">' +
+            escapeHtml(truncateStr(JSON.stringify(t.args || {}), 120)) +
+            '</span></li>';
+        }).join('') + '</ul>';
+    }
+
+    var card = document.createElement('div');
+    card.className = 'hitl-approval-card';
+    card.innerHTML =
+      '<div class="hitl-approval-header">\u26A0 Approval Required</div>' +
+      '<div class="hitl-approval-body">' +
+        '<p><strong>Tool:</strong> <code>' + escapeHtml(data.tool || '') + '</code></p>' +
+        (tools.length <= 1
+          ? '<p><strong>Args:</strong> <code>' + escapeHtml(truncateStr(JSON.stringify(data.args || {}), 300)) + '</code></p>'
+          : toolsHtml) +
+        '<p class="hitl-message">' + escapeHtml(data.message || '') + '</p>' +
+        '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
+          'Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. ' +
+          '<strong>YOLO</strong> skips all danger tools (TTL). Or type <code>/yolo</code> anytime.' +
+        '</p>' +
+      '</div>' +
+      '<div class="hitl-approval-actions" style="flex-wrap:wrap;gap:6px;">' +
+        '<button class="btn btn-sm btn-success hitl-approve" data-scope="once" title="This call only">Approve once</button>' +
+        '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="Allow this tool for ~30m in this session">Allow tool (session)</button>' +
+        '<button class="btn btn-sm btn-warning hitl-approve-yolo" data-scope="yolo" title="Skip all danger tools for this session">YOLO session</button>' +
+        '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">Deny</button>' +
+      '</div>';
+    content.appendChild(card);
+    scrollToBottom();
+
+    function setCardState(state, label) {
+      card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+      card.className = 'hitl-approval-card hitl-' + state;
+      var actions = card.querySelector('.hitl-approval-actions');
+      if (actions) actions.innerHTML = '<span class="hitl-status hitl-' + state + '">' + label + '</span>';
+    }
+
+    function appendAssistantText(text) {
+      if (!text) return;
+      if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+      var textEl = currentMsgEl.querySelector('.message-text');
+      if (!textEl) {
+        textEl = document.createElement('div');
+        textEl.className = 'message-text';
+        currentMsgEl.querySelector('.message-content').appendChild(textEl);
+      }
+      var existing = textEl.innerHTML || '';
+      var rendered = KS.markdown ? KS.markdown(text) : escapeHtml(text);
+      textEl.innerHTML = existing
+        ? existing + '<hr style="border:none;border-top:1px solid var(--border-subtle);margin:10px 0;">' + rendered
+        : rendered;
+      scrollToBottom();
+    }
+
+    function submitApproval(action, scope) {
+      scope = scope || 'once';
+      var pendingLabel = action === 'deny'
+        ? 'Denying\u2026'
+        : (scope === 'yolo' ? 'YOLO on \u2014 running\u2026'
+          : (scope === 'tool' ? 'Granting tool \u2014 running\u2026' : 'Running approved tool\u2026'));
+      setCardState('pending', pendingLabel);
+
+      var payload = {
+        action: action,
+        scope: scope,
+        session_id: chatSessionId || '',
+        tool: data.tool || '',
+      };
+
+      fetch('/api/approve/' + encodeURIComponent(data.thread_id), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'same-origin',
+      }).then(function(res) {
+        return res.json().then(function(body) {
+          return { status: res.status, body: body || {} };
+        }).catch(function() {
+          return { status: res.status, body: {} };
+        });
+      }).then(function(out) {
+        if (out.status === 202) {
+          var okLabel = action === 'deny' ? 'Denied \u2717'
+            : (scope === 'yolo' ? 'YOLO on \u2713'
+              : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
+          setCardState(action === 'approve' ? 'approved' : 'denied', okLabel);
+
+          if (out.body.content) {
+            appendAssistantText(out.body.content);
+          } else if (action === 'deny') {
+            appendAssistantText('_Tool denied — continuing without it._');
+          } else if (out.body.approval_required) {
+            // Mid-chain with no new prose: quiet continue
+          } else if (action === 'approve') {
+            // Final turn with empty model text — server usually sends a note
+            appendAssistantText('_Tool finished. Ask a follow-up if you need a summary._');
+          }
+
+          if (scope === 'tool' && KS.toast) {
+            KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
+          }
+          if (scope === 'yolo' && KS.toast) {
+            KS.toast('YOLO on for this session — danger tools auto-approved', 'warning', 4000);
+          }
+
+          if (out.body.approval_required) {
+            var next = out.body.approval_required;
+            setTimeout(function() {
+              currentMsgEl = createAssistantMessage();
+              renderHitlCard(next);
+            }, 40);
+          } else {
+            currentMsgEl = null;
+            tokenAccum = '';
+            enableInput();
+          }
+        } else if (out.status === 409) {
+          setCardState('error', 'No pending approval (already resumed?)');
+          appendAssistantText('_' + truncateStr(String((out.body && out.body.error) || 'No pending approval for this thread.'), 200) + '_');
+          enableInput();
+        } else {
+          var errMsg = (out.body && (out.body.error || out.body.detail)) || ('HTTP ' + out.status);
+          setCardState('error', 'Error: ' + truncateStr(String(errMsg), 120));
+          appendAssistantText('_Approval failed: ' + escapeHtml(String(errMsg)) + '_');
+          enableInput();
+        }
+      }).catch(function(err) {
+        setCardState('error', 'Error: ' + (err && err.message ? err.message : 'network'));
+        enableInput();
+      });
+    }
+
+    var onceBtn = card.querySelector('.hitl-approve');
+    var toolBtn = card.querySelector('.hitl-approve-tool');
+    var yoloBtn = card.querySelector('.hitl-approve-yolo');
+    var denyBtn = card.querySelector('.hitl-deny');
+    if (onceBtn) onceBtn.addEventListener('click', function() { submitApproval('approve', 'once'); });
+    if (toolBtn) toolBtn.addEventListener('click', function() { submitApproval('approve', 'tool'); });
+    if (yoloBtn) yoloBtn.addEventListener('click', function() { submitApproval('approve', 'yolo'); });
+    if (denyBtn) denyBtn.addEventListener('click', function() { submitApproval('deny', 'once'); });
   }
 
   function editMessage(msgEl) {
@@ -1147,6 +1213,7 @@
     newSession: newSession,
     retry: retry,
     toggleArchivedView: toggleArchivedView,
+    _hitlApproval: renderHitlCard,
     getOrCreateSessionId: function() {
       if (!chatSessionId) {
         chatSessionId = generateSessionId();
