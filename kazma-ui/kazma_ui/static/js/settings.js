@@ -78,6 +78,8 @@ function settingsApp() {
         hubTestingProvider: null,
         hubTestingConnector: null,
         hubDiscoveringProvider: null,
+        /** Per-provider filter text for the discovered-models panel */
+        modelSearch: {},
         hubTestResult: null,
 
         // ── MCP Tab ──
@@ -140,12 +142,34 @@ function settingsApp() {
         availableSections: ['model', 'agent', 'connectors', 'mcp', 'skills', 'appearance', 'shortcuts', 'tools', 'safety'],
 
         // ── Voice Tab ──
-        voiceForm: { enabled: false, stt_provider: 'openai', stt_model: 'default', tts_provider: 'edgetts', tts_voice: 'default', stt_language: 'auto', tts_output_format: 'mp3' },
+        voiceForm: {
+            enabled: false,
+            stt_provider: 'openai',
+            stt_model: 'default',
+            stt_base_url: '',
+            tts_provider: 'edgetts',
+            tts_voice: 'default',
+            stt_language: 'auto',
+            tts_output_format: 'mp3',
+        },
         voiceProviders: { stt: ['openai', 'groq', 'cohere', 'nvidia', 'faster-whisper'], tts: ['edgetts', 'openai', 'nvidia', 'kokoro', 'coqui'] },
         voiceModels: [],
         sttModels: [],
         sttModelType: 'default',
         ttsVoiceType: 'default',
+
+        get sttModelsNormalized() {
+            return (this.sttModels || []).map(function (m) {
+                if (m && typeof m === 'object') {
+                    return {
+                        id: m.id || m.model || '',
+                        label: m.label || m.id || String(m),
+                        note: m.note || '',
+                    };
+                }
+                return { id: String(m), label: String(m), note: '' };
+            }).filter(function (m) { return m.id; });
+        },
 
         /* ══════════════════════════════════════════════════════════════════
            INITIALIZATION
@@ -842,6 +866,17 @@ function settingsApp() {
             this.hubDiscoveringProvider = null;
         },
 
+        filteredDiscoveredModels(provider) {
+            if (!provider || !provider.discovered_models) return [];
+            const q = ((this.modelSearch && this.modelSearch[provider.name]) || '')
+                .trim()
+                .toLowerCase();
+            if (!q) return provider.discovered_models;
+            return provider.discovered_models.filter(function (m) {
+                return String(m).toLowerCase().indexOf(q) !== -1;
+            });
+        },
+
         async toggleModelSelection(providerName, model, checked) {
             const p = this.hubProviders.find(x => x.name === providerName);
             if (!p) return;
@@ -865,8 +900,18 @@ function settingsApp() {
         async toggleAllModels(providerName) {
             const p = this.hubProviders.find(x => x.name === providerName);
             if (!p || !p.discovered_models) return;
-            const allSelected = (p.selected_models || []).length === p.discovered_models.length;
-            p.selected_models = allSelected ? [] : [...p.discovered_models];
+            // Toggle only the currently filtered set when searching
+            const visible = this.filteredDiscoveredModels(p);
+            const allVisibleSelected = visible.length > 0 && visible.every(
+                m => (p.selected_models || []).includes(m)
+            );
+            if (allVisibleSelected) {
+                p.selected_models = (p.selected_models || []).filter(m => !visible.includes(m));
+            } else {
+                const set = new Set(p.selected_models || []);
+                visible.forEach(m => set.add(m));
+                p.selected_models = Array.from(set);
+            }
             try {
                 await fetch(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
                     method: 'POST',
@@ -1826,7 +1871,8 @@ function settingsApp() {
                 const models = await this._fetch(`/api/voice/stt-models?provider=${provider}`);
                 if (Array.isArray(models)) {
                     this.sttModels = models;
-                    if (this.sttModels.includes(this.voiceForm.stt_model)) {
+                    const ids = this.sttModelsNormalized.map(function (m) { return m.id; });
+                    if (ids.includes(this.voiceForm.stt_model)) {
                         this.sttModelType = this.voiceForm.stt_model;
                     } else {
                         this.sttModelType = 'custom';

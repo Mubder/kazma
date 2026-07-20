@@ -379,9 +379,18 @@ def create_sse_chat_router(
 
         Creates the ChatSession in the shared store on first use so the
         WebSocket transport can see it immediately.
+
+        Cross-platform continuity: platform sessions use ids like
+        ``gw-telegram-…``. Those ids **are** the LangGraph thread_id, so
+        Web and Telegram share one checkpointer season.
         """
         session = _get_store().get_or_create(session_id)
-        if not session.thread_id:
+        # Platform-linked seasons: session_id == thread_id always.
+        if session_id.startswith("gw-"):
+            if session.thread_id != session_id:
+                session.thread_id = session_id
+                _get_store().put(session)
+        elif not session.thread_id:
             session.thread_id = str(uuid.uuid4())
             _get_store().put(session)
         return session, session.thread_id
@@ -652,9 +661,26 @@ def create_sse_chat_router(
         except Exception:
             logger.debug("[sse_chat] language lock skipped", exc_info=True)
 
+        from kazma_core.agent.hitl_supersede import cancel_pending_hitl
         from kazma_core.agent.turn_input import build_turn_messages
 
         current_graph = _get_graph()
+        # If user sent a new message while HITL is waiting, auto-deny so
+        # tool chains close cleanly (no silent supersede / amnesia).
+        try:
+            cancelled = await cancel_pending_hitl(
+                current_graph,
+                graph_config,
+                reason="superseded by new user message",
+            )
+            if cancelled:
+                logger.info(
+                    "[SSE] cancelled pending HITL before new turn thread=%s",
+                    thread_id[:16],
+                )
+        except Exception:
+            logger.debug("[SSE] HITL supersede cancel skipped", exc_info=True)
+
         messages = await build_turn_messages(
             current_graph,
             graph_config,
@@ -836,20 +862,62 @@ def create_sse_chat_router(
     async def get_session_messages(session_id: str) -> list[dict[str, Any]]:
         """Return the message history for a chat session (shared store).
 
-        Each message dict has ``role`` ("user" | "assistant") and ``content``.
-        Returns an empty list if the session does not exist (e.g. it was
-        created on a different transport or has already been deleted).
+        Cross-platform seasons: if the UI projection is empty but a
+        LangGraph checkpointer has history for this thread (e.g. Telegram
+        session opened in Web), hydrate from the checkpointer and persist
+        back to SessionManager so takeover is seamless.
         """
         session = _get_store().get(session_id)
         if not session:
-            return []
-        # Return only role/content pairs so we don't leak internal keys
+            # Platform seasons may not be in store yet — create shell
+            if session_id.startswith("gw-"):
+                session = _get_store().get_or_create(session_id)
+                session.thread_id = session_id
+            else:
+                return []
+
+        messages = list(session.messages or [])
+        if not messages:
+            # Hydrate from checkpointer (source of truth for agent seasons)
+            try:
+                live = _get_graph()
+                tid = session.thread_id or (
+                    session_id if session_id.startswith("gw-") else ""
+                )
+                if live and tid and getattr(live, "checkpointer", None):
+                    from kazma_core.agent.turn_input import load_checkpoint_messages
+
+                    prior = await load_checkpoint_messages(
+                        live,
+                        {"configurable": {"thread_id": tid, "checkpoint_ns": ""}},
+                    )
+                    ui = [
+                        {"role": m.get("role", "user"), "content": m.get("content", "")}
+                        for m in prior
+                        if isinstance(m, dict)
+                        and m.get("role") in ("user", "assistant", "system")
+                        and (m.get("content") or "").strip()
+                    ]
+                    if ui:
+                        session.messages = ui
+                        if session_id.startswith("gw-"):
+                            session.thread_id = session_id
+                        _get_store().put(session)
+                        messages = ui
+            except Exception:
+                logger.debug(
+                    "[SSE] checkpointer hydrate failed for %s",
+                    session_id,
+                    exc_info=True,
+                )
+
         return [
             {
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", ""),
             }
-            for msg in session.messages
+            for msg in messages
+            if msg.get("role") in ("user", "assistant", "system")
         ]
 
     # ── Provider profile management (continued) ───────────────────

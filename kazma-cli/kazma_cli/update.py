@@ -116,10 +116,25 @@ def _run_cmd(
 def detect_install_type() -> str:
     """Detect whether kazma is pip-installed or git/editable-installed.
 
-    Returns ``"git"`` for editable installs, ``"pip"`` for regular pip
-    installs.  Uses ``pip show`` to check for the ``Editable project
-    location`` marker.
+    Returns ``"git"`` for editable installs or when a monorepo ``.git``
+    root is found (typical developer install), ``"pip"`` for wheel installs
+    without a local git tree.  Uses ``pip show`` for the editable marker.
     """
+    # Prefer git when the monorepo is present — Kazma is not always on PyPI.
+    if _find_git_root() is not None:
+        try:
+            result = _run_pip(["show", PACKAGE_NAME])
+            if result.returncode == 0 and "Editable project location:" in result.stdout:
+                return "git"
+            # Non-editable but repo present (uv/pip path into monorepo)
+            if result.returncode == 0 and "Location:" in result.stdout:
+                git_root = _find_git_root()
+                if git_root and str(git_root) in result.stdout.replace("\\", "/"):
+                    return "git"
+        except Exception as exc:
+            logger.debug("pip show failed during install-type detection: %s", exc)
+        # Developer checkout: always use git update path
+        return "git"
     try:
         result = _run_pip(["show", PACKAGE_NAME])
         if result.returncode == 0 and "Editable project location:" in result.stdout:
@@ -159,22 +174,50 @@ def get_current_version() -> str:
 
 
 def get_latest_pypi_version() -> str | None:
-    """Fetch the latest kazma version from PyPI.
+    """Fetch the latest kazma version from PyPI, then GitHub releases.
 
     Returns the version string, or ``None`` on network/parse errors.
     """
     try:
         import httpx
 
-        with httpx.Client(timeout=_CHECK_TIMEOUT) as client:
-            response = client.get(PYPI_URL)
-            response.raise_for_status()
-            data = response.json()
-            version = data.get("info", {}).get("version")
-            if version:
-                return str(version)
+        with httpx.Client(timeout=_CHECK_TIMEOUT, follow_redirects=True) as client:
+            try:
+                response = client.get(PYPI_URL)
+                if response.status_code == 200:
+                    data = response.json()
+                    version = data.get("info", {}).get("version")
+                    if version:
+                        return str(version)
+            except Exception as exc:
+                logger.debug("PyPI version fetch failed: %s", exc)
+
+            # Fallback: GitHub Releases (primary distribution for monorepo)
+            for url in (
+                "https://api.github.com/repos/Mubder/kazma/releases/latest",
+                "https://api.github.com/repos/Mubder/kazma/tags?per_page=1",
+            ):
+                try:
+                    response = client.get(
+                        url,
+                        headers={"Accept": "application/vnd.github+json"},
+                    )
+                    if response.status_code != 200:
+                        continue
+                    data = response.json()
+                    if isinstance(data, dict):
+                        tag = data.get("tag_name") or data.get("name") or ""
+                    elif isinstance(data, list) and data:
+                        tag = data[0].get("name") or ""
+                    else:
+                        tag = ""
+                    tag = str(tag).lstrip("v").strip()
+                    if tag:
+                        return tag
+                except Exception as exc:
+                    logger.debug("GitHub version fetch failed: %s", exc)
     except Exception as exc:
-        logger.warning("Failed to fetch PyPI version: %s", exc)
+        logger.warning("Failed to fetch remote version: %s", exc)
     return None
 
 
@@ -408,13 +451,20 @@ def _print_version_table(
 def _run_pip_check_and_update(
     current_version: str, check_only: bool, force: bool, skip_confirm: bool
 ) -> None:
-    """Check PyPI for updates and optionally upgrade via pip."""
+    """Check PyPI/GitHub for updates and optionally upgrade via pip."""
+    # If a monorepo is present, prefer git update even when pip-installed
+    if _find_git_root() is not None:
+        console.print("[dim]Local git repo detected — using git update path.[/dim]")
+        _run_git_check_and_update(current_version, check_only, force, skip_confirm)
+        return
+
     latest = get_latest_pypi_version()
 
     if latest is None:
         console.print()
-        console.print("[red]Could not fetch version info from PyPI.[/red]")
-        console.print("Check your network connection and try again.")
+        console.print("[red]Could not fetch version info from PyPI or GitHub.[/red]")
+        console.print("If you cloned the repo, run from the monorepo: [cyan]git pull[/cyan]")
+        console.print("Or check network / GitHub releases: https://github.com/Mubder/kazma")
         sys.exit(1)
 
     console.print(f"  Latest:       [cyan]v{latest}[/cyan] (PyPI)")

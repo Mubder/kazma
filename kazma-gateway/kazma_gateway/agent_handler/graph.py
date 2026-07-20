@@ -86,20 +86,55 @@ def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
 
 
 def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[str, Any], messages: list) -> None:
-    """Synchronize platform session messages to the Web UI's shared SessionManager."""
+    """Synchronize platform session to Web UI for seamless season takeover.
+
+    The web session_id **is** the gateway thread_id (``gw-telegram-…``), so
+    opening that season in the chat sidebar continues the same LangGraph
+    checkpointer used by Telegram/Discord/Slack.
+    """
     try:
         from kazma_ui.session_manager import get_session_manager
         store = get_session_manager()
+        # Canonical id: platform thread_id == web session_id
         session = store.get_or_create(thread_id)
         session.thread_id = thread_id
-        session.messages = _convert_messages_to_dicts(messages)
-        
-        if not session.title:
-            username = metadata.get("username") or metadata.get("display_name") or "user"
-            session.title = f"Linked {platform.capitalize()} ({username})"
-            
+        converted = _convert_messages_to_dicts(messages)
+        # Prefer richer checkpoint-derived history when available; never wipe
+        # a longer UI transcript with an empty convert.
+        if converted and len(converted) >= len(session.messages):
+            session.messages = converted
+        elif converted and not session.messages:
+            session.messages = converted
+        elif converted:
+            # Merge: keep UI rows, append new tail from platform if missing
+            existing_keys = {
+                (m.get("role"), (m.get("content") or "")[:80])
+                for m in session.messages
+            }
+            for m in converted:
+                key = (m.get("role"), (m.get("content") or "")[:80])
+                if key not in existing_keys:
+                    session.messages.append(m)
+                    existing_keys.add(key)
+
+        username = metadata.get("username") or metadata.get("display_name") or "user"
+        plat = (platform or "chat").capitalize()
+        if not session.title or session.title.startswith("Linked "):
+            session.title = f"{plat} · {username}"
+        # Tag for UI badges (platform takeover)
+        try:
+            meta = dict(getattr(session, "metadata", None) or {})
+        except Exception:
+            meta = {}
+        # ChatSession may not have metadata field — store on title prefix only
+        # and put platform into a lightweight side channel via title convention.
         store.put(session)
-        logger.info("[agent-handler] Synchronized platform session %s to Web UI", thread_id)
+        logger.info(
+            "[agent-handler] Synced platform season %s → web (platform=%s msgs=%d)",
+            thread_id,
+            platform,
+            len(session.messages),
+        )
     except Exception as exc:
         logger.debug("[agent-handler] Failed to sync session to Web UI: %s", exc)
 
@@ -613,6 +648,26 @@ def create_graph_handler(
         thread_lock = await _get_thread_lock(thread_id)
 
         async with thread_lock:
+            # ── Cancel stale HITL if user sent a new normal message ──
+            # Without this, LangGraph discards the interrupt silently and
+            # incomplete tool_calls get stripped — agent amnesia.
+            if msg.text and not (msg.text or "").strip().lower().startswith(
+                ("/hitl", "hitl ", "hitl\t")
+            ):
+                try:
+                    from kazma_core.agent.hitl_supersede import cancel_pending_hitl
+
+                    await cancel_pending_hitl(
+                        graph,
+                        config,
+                        reason="superseded by new user message",
+                    )
+                except Exception:
+                    logger.debug(
+                        "[agent-handler] HITL supersede cancel skipped",
+                        exc_info=True,
+                    )
+
             # ── Restore conversation history ─────────────────────
             # SupervisorState has NO add_messages reducer — input replaces
             # checkpoint messages. Checkpointer is the sole agent transcript;

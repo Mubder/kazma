@@ -67,28 +67,44 @@
                             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="p.models && p.models.length">
                                 {{ t('settings.models_label') }} <span x-text="(p.models || []).join(', ')"></span>
                             </div>
-                            <div x-show="p.discovered_models && p.discovered_models.length" style="margin-top:6px">
-                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-                                    <div style="font-size:0.7rem;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.06em">
-                                        <span x-text="t('settings.discovered_n', {n: p.discovered_models.length})"></span>
-                                        <span x-show="p.selected_models && p.selected_models.length" style="color:var(--text-muted);margin-left:6px">
-                                            <span x-text="t('settings.selected_n', {n: (p.selected_models || []).length})"></span>
-                                        </span>
+                            <div x-show="p.discovered_models && p.discovered_models.length" class="discovered-models-panel" style="margin-top:10px">
+                                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+                                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                        <span class="badge" style="background:var(--accent);color:#fff;font-size:0.65rem;padding:2px 8px;border-radius:999px;font-weight:600"
+                                              x-text="t('settings.discovered_n', {n: p.discovered_models.length})"></span>
+                                        <span class="badge" style="background:rgba(255,255,255,0.08);color:var(--text-muted);font-size:0.65rem;padding:2px 8px;border-radius:999px"
+                                              x-show="(p.selected_models || []).length"
+                                              x-text="t('settings.selected_n', {n: (p.selected_models || []).length})"></span>
                                     </div>
                                     <button class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(p.name)" x-text="t('settings.all_none')"></button>
                                 </div>
-                                <div style="display:flex;flex-direction:column;gap:2px;max-height:160px;overflow-y:auto;padding:4px;border:1px solid var(--border);border-radius:4px;background:rgba(0,0,0,0.15)">
-                                    <template x-for="m in p.discovered_models" :key="m">
-                                        <label style="display:flex;align-items:center;gap:6px;font-size:0.72rem;font-family:var(--font-mono);cursor:pointer;padding:1px 4px;border-radius:2px" class="model-check-label">
+                                <div style="position:relative;margin-bottom:6px">
+                                    <input type="search"
+                                           class="form-input"
+                                           style="font-size:0.75rem;padding:6px 10px 6px 28px;width:100%"
+                                           :placeholder="'Search ' + p.discovered_models.length + ' models…'"
+                                           x-model="modelSearch[p.name]"
+                                           @click.stop>
+                                    <span style="position:absolute;left:8px;top:50%;transform:translateY(-50%);opacity:0.45;font-size:0.8rem;pointer-events:none">⌕</span>
+                                </div>
+                                <div style="display:flex;flex-direction:column;gap:1px;max-height:200px;overflow-y:auto;padding:4px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2, rgba(0,0,0,0.15))">
+                                    <template x-for="m in filteredDiscoveredModels(p)" :key="m">
+                                        <label style="display:flex;align-items:center;gap:8px;font-size:0.72rem;font-family:var(--font-mono);cursor:pointer;padding:5px 8px;border-radius:6px;transition:background 0.12s"
+                                               class="model-check-label"
+                                               :style="(p.selected_models || []).includes(m) ? 'background:rgba(var(--accent-rgb, 99,102,241),0.12)' : ''">
                                             <input type="checkbox"
                                                 :checked="(p.selected_models || []).includes(m)"
                                                 @change="toggleModelSelection(p.name, m, $event.target.checked)"
-                                                style="width:auto;margin:0;cursor:pointer">
-                                            <span x-text="m"></span>
+                                                style="width:auto;margin:0;cursor:pointer;accent-color:var(--accent)">
+                                            <span x-text="m" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
                                         </label>
                                     </template>
+                                    <div x-show="filteredDiscoveredModels(p).length === 0"
+                                         style="padding:12px;text-align:center;font-size:0.72rem;color:var(--text-muted)">
+                                        No models match your search
+                                    </div>
                                 </div>
-                                <div style="font-size:0.65rem;color:var(--text-tertiary);margin-top:3px">
+                                <div style="font-size:0.65rem;color:var(--text-tertiary);margin-top:4px">
                                     {{ t('settings.checked_models_hint') }}
                                 </div>
                             </div>
@@ -1243,17 +1259,32 @@
                         <div class="form-group">
                             <label>STT Model</label>
                             <select class="form-select" x-model="sttModelType" @change="onSttModelTypeChange()">
-                                <template x-for="model in sttModels" :key="model">
-                                    <option :value="model" x-text="model"></option>
+                                <template x-for="model in sttModelsNormalized" :key="model.id">
+                                    <option :value="model.id" x-text="model.label"></option>
                                 </template>
                                 <option value="custom">Custom model ID...</option>
                             </select>
+                            <p class="form-help" style="margin-top:4px" x-show="voiceForm.stt_provider === 'nvidia'">
+                                NVIDIA Whisper is a <strong>Speech NIM</strong> (self-hosted), not a chat model on integrate.api.nvidia.com.
+                                Set the ASR base URL below, or use <code>groq</code>/<code>openai</code> for cloud STT.
+                            </p>
                         </div>
 
                         <div class="form-group" x-show="sttModelType === 'custom'" style="margin-top:8px;">
                             <label>Custom STT Model ID</label>
-                            <input type="text" class="form-control" x-model="voiceForm.stt_model" placeholder="e.g. nvidia/whisper-large-v3" @change="saveVoiceSettings()">
+                            <input type="text" class="form-control" x-model="voiceForm.stt_model" placeholder="e.g. openai/whisper-large-v3" @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">Type any specific custom transcription model name.</p>
+                        </div>
+
+                        <div class="form-group" x-show="voiceForm.stt_provider === 'nvidia'" style="margin-top:8px;">
+                            <label>NVIDIA ASR base URL (Speech NIM)</label>
+                            <input type="text" class="form-control" x-model="voiceForm.stt_base_url"
+                                   placeholder="http://127.0.0.1:9000/v1"
+                                   @change="saveVoiceSettings()">
+                            <p class="form-help" style="margin-top:4px;">
+                                OpenAI-compatible root of your Speech NIM (must expose <code>/v1/audio/transcriptions</code>).
+                                Do <em>not</em> use the LLM integrate.api.nvidia.com URL.
+                            </p>
                         </div>
 
                         <div class="form-group">

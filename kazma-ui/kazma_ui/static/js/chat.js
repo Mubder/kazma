@@ -869,10 +869,14 @@
     sessionListEl.innerHTML = filtered.map(function(s) {
       var isActive = s.session_id === chatSessionId;
       var title = s.title || (s.session_id || '').slice(0, 8);
-      var meta = s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
-      var html = '<div class="session-item' + (isActive ? ' active' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '">' +
+      var plat = s.platform || 'web';
+      var platIcon = ({
+        telegram: 'TG', discord: 'DC', slack: 'SL', gateway: 'GW', web: 'Web'
+      })[plat] || plat;
+      var meta = platIcon + ' \u00B7 ' + s.message_count + ' msgs \u00B7 ' + relativeTime(s.updated_at || s.created_at);
+      var html = '<div class="session-item' + (isActive ? ' active' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
         '<div class="session-info">' +
-          '<span class="session-title" title="Double-click to rename">' + escapeHtml(title) + '</span>' +
+          '<span class="session-title" title="Double-click to rename — same season continues on ' + escapeHtml(plat) + '">' + escapeHtml(title) + '</span>' +
           '<span class="session-meta">' + meta + '</span>' +
         '</div>';
       if (showArchived) {

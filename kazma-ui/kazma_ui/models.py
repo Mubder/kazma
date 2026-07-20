@@ -388,6 +388,7 @@ class VoiceSettingsUpdate(BaseModel):
     enabled: bool = False
     stt_provider: str = "openai"
     stt_model: str = "default"
+    stt_base_url: str = ""
     tts_provider: str = "edgetts"
     tts_voice: str = "default"
     stt_language: str = "auto"

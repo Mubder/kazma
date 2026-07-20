@@ -239,6 +239,7 @@ class SettingsRouterBuilder:
                 "enabled": bool(config_store.get("voice.enabled", False)),
                 "stt_provider": _get_val("voice.stt_provider", "openai"),
                 "stt_model": _get_val("voice.stt_model", "default"),
+                "stt_base_url": _get_val("voice.stt_base_url", ""),
                 "tts_provider": _get_val("voice.tts_provider", "edgetts"),
                 "tts_voice": _get_val("voice.tts_voice", "default"),
                 "stt_language": _get_val("voice.stt_language", "auto"),
@@ -251,6 +252,7 @@ class SettingsRouterBuilder:
             config_store.set("voice.enabled", req.enabled, category="voice")
             config_store.set("voice.stt_provider", req.stt_provider, category="voice")
             config_store.set("voice.stt_model", req.stt_model, category="voice")
+            config_store.set("voice.stt_base_url", req.stt_base_url or "", category="voice")
             config_store.set("voice.tts_provider", req.tts_provider, category="voice")
             config_store.set("voice.tts_voice", req.tts_voice, category="voice")
             config_store.set("voice.stt_language", req.stt_language, category="voice")
@@ -302,18 +304,11 @@ class SettingsRouterBuilder:
             return ["default"]
 
         @router.get("/api/voice/stt-models")
-        async def api_get_voice_stt_models(provider: str = "openai") -> list[str]:
-            """Get available STT model IDs for a specific STT provider."""
-            p_lower = provider.strip().lower()
-            if p_lower == "openai":
-                return ["default", "whisper-1"]
-            elif p_lower == "groq":
-                return ["default", "whisper-large-v3", "distil-whisper-large-v3-en"]
-            elif p_lower == "nvidia":
-                return ["default", "nvidia/whisper-large-v3"]
-            elif p_lower == "faster-whisper":
-                return ["default", "tiny", "base", "small", "medium", "large-v3"]
-            return ["default"]
+        async def api_get_voice_stt_models(provider: str = "openai") -> list[Any]:
+            """Get available STT models (delegates to voice router catalog)."""
+            from kazma_ui.routes_voice import list_stt_models
+
+            return await list_stt_models(provider=provider)
 
 
 

@@ -274,17 +274,71 @@ async def list_voices(provider: str = "edgetts") -> list[str]:
 
 
 @router.get("/stt-models")
-async def list_stt_models(provider: str = "openai") -> list[str]:
-    """Get available STT model IDs for a specific STT provider."""
+async def list_stt_models(provider: str = "openai") -> list[Any]:
+    """Get available STT model IDs for a specific STT provider.
+
+    NVIDIA returns rich objects ``{id, label, note}`` so the UI can show
+    that Whisper is a **Speech NIM**, not an integrate.api chat model.
+    Other providers return plain string ids (backward compatible).
+    """
     p_lower = provider.strip().lower()
     if p_lower == "openai":
-        return ["default", "whisper-1"]
-    elif p_lower == "groq":
-        return ["default", "whisper-large-v3", "distil-whisper-large-v3-en"]
-    elif p_lower == "nvidia":
-        return ["default", "nvidia/whisper-large-v3"]
-    elif p_lower == "faster-whisper":
-        return ["default", "tiny", "base", "small", "medium", "large-v3"]
+        return ["whisper-1"]
+    if p_lower == "groq":
+        # Prefer live discovery from Groq when key present
+        models = await _discover_groq_stt_models()
+        return models or [
+            "whisper-large-v3",
+            "whisper-large-v3-turbo",
+            "distil-whisper-large-v3-en",
+        ]
+    if p_lower == "nvidia":
+        from kazma_core.voice.stt import list_nvidia_stt_models
+
+        return list_nvidia_stt_models()
+    if p_lower == "faster-whisper":
+        return ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"]
+    if p_lower == "cohere":
+        return ["cohere-transcribe-03-2026", "cohere-transcribe-arabic-07-2026"]
     return ["default"]
+
+
+async def _discover_groq_stt_models() -> list[str]:
+    """Best-effort list of Groq Whisper models via /v1/models."""
+    import os
+
+    key = os.environ.get("GROQ_API_KEY")
+    if not key:
+        try:
+            from kazma_core.model_registry import ModelRegistry
+            from kazma_core.config_store import get_config_store
+
+            entry = ModelRegistry(get_config_store()).get_provider("groq")
+            if entry:
+                key = entry.get("api_key") or key
+        except Exception:
+            pass
+    if not key:
+        return []
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data") or []
+            whisper = sorted(
+                m["id"]
+                for m in data
+                if isinstance(m, dict)
+                and "whisper" in str(m.get("id", "")).lower()
+            )
+            return whisper
+    except Exception:
+        logger.debug("Groq STT model discovery failed", exc_info=True)
+        return []
 
 

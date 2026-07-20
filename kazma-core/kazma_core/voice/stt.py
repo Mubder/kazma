@@ -27,6 +27,7 @@ import httpx
 __all__ = [
     "STTProvider",
     "get_stt_provider",
+    "list_nvidia_stt_models",
     "list_stt_providers",
     "register_stt_provider",
     "transcribe",
@@ -331,11 +332,81 @@ def _cohere_stt() -> STTProvider:
     return _transcribe
 
 
-def _nvidia_stt() -> STTProvider:
-    """NVIDIA NIM ASR cloud API STT provider.
+def _nvidia_asr_base_url() -> str | None:
+    """Resolve ASR base URL — never the LLM chat integrate URL.
 
-    Uses the NVIDIA hosted ASR endpoint (Whisper Large v3 or Parakeet).
-    Requires an NGC API key.
+    NVIDIA's ``integrate.api.nvidia.com/v1`` hosts *chat* models only.
+    Whisper/Riva ASR is a separate OpenAI-compatible NIM you self-host
+    (or set explicitly via ``voice.stt_base_url`` / ``NVIDIA_ASR_URL``).
+    """
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs = get_config_store()
+        explicit = cs.get("voice.stt_base_url")
+        if explicit and str(explicit).strip():
+            return str(explicit).strip().rstrip("/")
+    except Exception:
+        pass
+    env = os.environ.get("NVIDIA_ASR_URL") or os.environ.get("NVIDIA_STT_URL")
+    if env:
+        return env.strip().rstrip("/")
+    return None
+
+
+def _is_llm_only_nvidia_url(url: str) -> bool:
+    """True if URL is the chat integrate API (no /audio/transcriptions)."""
+    low = url.lower()
+    return "integrate.api.nvidia.com" in low and "/asr" not in low
+
+
+def list_nvidia_stt_models() -> list[dict[str, str]]:
+    """Catalog of NVIDIA ASR models (not LLM chat models).
+
+    Dynamic: includes any model set in ConfigStore + known NIM ids.
+    """
+    models: list[dict[str, str]] = [
+        {
+            "id": "openai/whisper-large-v3",
+            "label": "Whisper Large v3 (NIM)",
+            "note": "Self-hosted NVIDIA Speech NIM — set voice.stt_base_url",
+        },
+        {
+            "id": "whisper-large-v3",
+            "label": "Whisper Large v3 (short id)",
+            "note": "Alias used by some NIM containers",
+        },
+        {
+            "id": "nvidia/parakeet-ctc-1.1b-en-us",
+            "label": "Parakeet CTC 1.1B (EN)",
+            "note": "Riva/NIM English ASR",
+        },
+        {
+            "id": "nvidia/canary-1b",
+            "label": "Canary 1B",
+            "note": "Multilingual NIM ASR when deployed",
+        },
+    ]
+    try:
+        configured = _get_configured_stt_model("nvidia")
+        if configured and not any(m["id"] == configured for m in models):
+            models.insert(0, {
+                "id": configured,
+                "label": f"{configured} (configured)",
+                "note": "From voice.stt_model",
+            })
+    except Exception:
+        pass
+    return models
+
+
+def _nvidia_stt() -> STTProvider:
+    """NVIDIA Speech NIM ASR (OpenAI-compatible /v1/audio/transcriptions).
+
+    Requires a **Speech NIM** base URL (local or remote), e.g.
+    ``http://localhost:9000/v1`` — **not** the LLM integrate.api.nvidia.com
+    endpoint. Reuses the NVIDIA API key from the LLM providers registry
+    when the NIM requires auth.
     """
 
     async def _transcribe(
@@ -351,9 +422,6 @@ def _nvidia_stt() -> STTProvider:
             or os.environ.get("NGC_API_KEY")
             or _get_provider_api_key_from_db("nvidia")
         )
-        if not key:
-            logger.error("[STT/nvidia] No API key (set NVIDIA_API_KEY)")
-            return None
         ext = audio_format or "ogg"
         mime = {
             "ogg": "audio/ogg",
@@ -363,52 +431,85 @@ def _nvidia_stt() -> STTProvider:
             "m4a": "audio/mp4",
             "webm": "audio/webm",
         }.get(ext, f"audio/{ext}")
-        # Use the configured NVIDIA ASR base URL (cloud, local NIM or remote)
-        db_base_url = _get_provider_base_url_from_db("nvidia")
-        base_url = (
-            os.environ.get("NVIDIA_ASR_URL")
-            or db_base_url
-            or "https://ai.api.nvidia.com/v1/asr"
-        )
-        
-        # Symmetrically construct the transcription endpoint URL
+
+        base_url = _nvidia_asr_base_url()
+        # Legacy mistake: using LLM provider base_url (integrate.api…) → 404
+        if not base_url:
+            llm_url = _get_provider_base_url_from_db("nvidia")
+            if llm_url and not _is_llm_only_nvidia_url(llm_url):
+                base_url = llm_url.rstrip("/")
+            elif llm_url and _is_llm_only_nvidia_url(llm_url):
+                logger.error(
+                    "[STT/nvidia] LLM base URL %s has no ASR. "
+                    "Deploy a Speech NIM and set voice.stt_base_url "
+                    "(e.g. http://localhost:9000/v1) or use STT provider "
+                    "openai/groq for cloud Whisper.",
+                    llm_url,
+                )
+                return None
+
+        if not base_url:
+            logger.error(
+                "[STT/nvidia] No ASR endpoint configured. "
+                "Set voice.stt_base_url to your Speech NIM root "
+                "(OpenAI-compatible, e.g. http://127.0.0.1:9000/v1). "
+                "Cloud integrate.api.nvidia.com does not host Whisper. "
+                "For set-and-forget cloud STT use provider=groq or openai."
+            )
+            return None
+
+        # Build /v1/audio/transcriptions from base
         target_url = base_url
-        if not target_url.endswith("/transcriptions"):
-            if target_url.endswith("/audio"):
-                target_url = f"{target_url}/transcriptions"
-            elif target_url.endswith("/v1"):
-                target_url = f"{target_url}/audio/transcriptions"
-            else:
-                target_url = f"{target_url}/transcriptions"
+        if target_url.endswith("/transcriptions"):
+            pass
+        elif target_url.endswith("/audio"):
+            target_url = f"{target_url}/transcriptions"
+        elif target_url.rstrip("/").endswith("/v1"):
+            target_url = f"{target_url.rstrip('/')}/audio/transcriptions"
+        else:
+            target_url = f"{target_url.rstrip('/')}/v1/audio/transcriptions"
+
+        model = (
+            _get_configured_stt_model("nvidia")
+            or "openai/whisper-large-v3"
+        )
+        headers: dict[str, str] = {"Accept": "application/json"}
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=90.0) as client:
                 resp = await client.post(
                     target_url,
-                    headers={
-                        "Authorization": f"Bearer {key}",
-                        "Accept": "application/json",
-                    },
+                    headers=headers,
                     files={"file": (f"audio.{ext}", audio_bytes, mime)},
                     data={
-                        "model": _get_configured_stt_model("nvidia") or "nvidia/whisper-large-v3",
+                        "model": model,
                         **({} if language == "auto" else {"language": language}),
                     },
                 )
+                if resp.status_code == 404:
+                    logger.error(
+                        "[STT/nvidia] 404 at %s — this is not a Speech NIM. "
+                        "Model=%s. Configure voice.stt_base_url to a real ASR "
+                        "NIM, or switch STT provider to groq/openai.",
+                        target_url,
+                        model,
+                    )
+                    return None
                 resp.raise_for_status()
                 result = resp.json()
-                # NVIDIA ASR returns {"text": "..."} or {"transcriptions": [...]}
                 text = result.get("text", "")
                 if not text and "transcriptions" in result:
                     transcriptions = result["transcriptions"]
                     if transcriptions:
                         text = transcriptions[0].get("text", "")
-                text = text.strip()
+                text = (text or "").strip()
                 if text:
-                    logger.info("[STT/nvidia] Transcribed: %.100s", text)
+                    logger.info("[STT/nvidia] Transcribed via %s: %.100s", model, text)
                 return text or None
         except Exception:
-            logger.exception("[STT/nvidia] Failed")
+            logger.exception("[STT/nvidia] Failed url=%s model=%s", target_url, model)
             return None
 
     return _transcribe

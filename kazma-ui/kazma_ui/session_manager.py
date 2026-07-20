@@ -74,6 +74,16 @@ class ChatSession:
 
     def to_summary(self) -> dict[str, Any]:
         """Return a serializable summary used by the session-list API."""
+        platform = "web"
+        sid = self.session_id or ""
+        if sid.startswith("gw-telegram"):
+            platform = "telegram"
+        elif sid.startswith("gw-discord"):
+            platform = "discord"
+        elif sid.startswith("gw-slack"):
+            platform = "slack"
+        elif sid.startswith("gw-"):
+            platform = "gateway"
         return {
             "session_id": self.session_id,
             "message_count": len(self.messages),
@@ -84,6 +94,7 @@ class ChatSession:
             "total_cost": self.total_cost,
             "total_tokens": self.total_tokens,
             "thread_id": self.thread_id,
+            "platform": platform,
         }
 
     def auto_title(self) -> str:
