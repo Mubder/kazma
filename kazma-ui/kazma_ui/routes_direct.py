@@ -514,22 +514,27 @@ def register_direct_routes(self: Any) -> None:
             info["group"] = "core"
             core_list.append(info)
 
-        # Extras
+        # Extras — fully installed only when *every* member package is present.
+        # Partial (e.g. pytest from [dev] but no fakeredis) is reported so the
+        # UI does not look like a broken install when only one niche dep is missing.
         extras_list = []
         for group_name, group_data in EXTRA_GROUPS.items():
-            group_installed = True
             pkg_list = []
             for name in group_data["packages"]:
                 info = _pkg_info(name)
                 info["group"] = group_name
                 pkg_list.append(info)
-                if not info["installed"]:
-                    group_installed = False
+            n_total = len(pkg_list)
+            n_ok = sum(1 for p in pkg_list if p["installed"])
+            group_installed = n_total > 0 and n_ok == n_total
             extras_list.append({
                 "name": group_name,
                 "description": group_data["description"],
                 "install_cmd": group_data["install_cmd"],
                 "installed": group_installed,
+                "partial": n_ok > 0 and n_ok < n_total,
+                "installed_count": n_ok,
+                "package_count": n_total,
                 "packages": pkg_list,
             })
 

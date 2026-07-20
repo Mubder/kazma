@@ -561,6 +561,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "packages.core_deps": {"en": "Core Dependencies", "ar": "التبعيات الأساسية"},
     "packages.installed_badge": {"en": "Installed", "ar": "مثبتة"},
     "packages.missing_badge": {"en": "Missing", "ar": "مفقودة"},
+    "packages.partial_badge": {"en": "Partial", "ar": "جزئي"},
     "packages.search_ph": {"en": "Search packages…", "ar": "ابحث في الحزم…"},
     "packages.no_match": {"en": "No matching packages", "ar": "لا توجد حزم مطابقة"},
     "packages.col_package": {"en": "Package", "ar": "الحزمة"},
