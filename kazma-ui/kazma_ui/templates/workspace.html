@@ -35,6 +35,12 @@
       <button x-show="ghOAuthConnected" class="btn btn-sm btn-secondary ws-action-btn" @click="openRepoPicker()" style="display:flex;align-items:center;justify-content:center;gap:6px;" x-cloak>
         <span>🐙</span> {{ t('workspace.switch_repo') }}
       </button>
+      <button class="btn btn-sm btn-danger ws-action-btn" @click="deleteActiveWorkspace()"
+              :disabled="!activeWorkspaceId"
+              style="display:flex;align-items:center;justify-content:center;gap:6px;"
+              title="{{ t('workspace.delete_title') }}">
+        <span>🗑</span> {{ t('workspace.delete') }}
+      </button>
     </div>
   </div>
 
@@ -771,6 +777,69 @@ function workspaceApp() {
         }
       } catch (e) {
         KazmaStream.toast(t('workspace.toast_error', {msg: e.message}), 'error', 3000);
+      }
+    },
+
+    async deleteActiveWorkspace() {
+      const id = this.activeWorkspaceId;
+      if (!id) return;
+      const ws = (this.workspaces || []).find(w => w.id === id) || {};
+      const name = ws.name || id.slice(0, 8);
+      const path = ws.root_path || '';
+
+      const okRemove = window.kazmaConfirm
+        ? await window.kazmaConfirm({
+            title: t('workspace.delete_title'),
+            message: t('workspace.delete_confirm', { name: name, path: path }),
+            confirmLabel: t('workspace.delete_registry'),
+            danger: true,
+          })
+        : confirm('Remove workspace "' + name + '" from the list?');
+      if (!okRemove) return;
+
+      let deleteFiles = false;
+      if (path) {
+        deleteFiles = window.kazmaConfirm
+          ? await window.kazmaConfirm({
+              title: t('workspace.delete_files_title'),
+              message: t('workspace.delete_files_confirm', { path: path }),
+              confirmLabel: t('workspace.delete_files_btn'),
+              danger: true,
+            })
+          : confirm('Also DELETE all files on disk at:\n' + path + '\n\nThis cannot be undone.');
+      }
+
+      try {
+        const resp = await fetch('/api/workspaces/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspace_id: id, delete_files: !!deleteFiles }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          KazmaStream.toast(
+            t('workspace.toast_error', { msg: data.detail || data.error || ('HTTP ' + resp.status) }),
+            'error',
+            4000
+          );
+          return;
+        }
+        const msg = data.files_deleted
+          ? t('workspace.toast_deleted_with_files', { name: name })
+          : t('workspace.toast_deleted', { name: name });
+        KazmaStream.toast(msg, 'success', 3000);
+        await this.loadWorkspaces();
+        if (data.active_workspace_id) {
+          this.activeWorkspaceId = data.active_workspace_id;
+          if (data.active_workspace && data.active_workspace.root_path) {
+            this.absoluteRoot = data.active_workspace.root_path;
+          }
+        } else {
+          this.activeWorkspaceId = '';
+        }
+        await this.refreshAll();
+      } catch (e) {
+        KazmaStream.toast(t('workspace.toast_error', { msg: e.message }), 'error', 3000);
       }
     },
 

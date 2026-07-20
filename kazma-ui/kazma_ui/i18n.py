@@ -889,6 +889,27 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "workspace.engine_desc": {"en": "Manage separate project environments and contexts dynamically.", "ar": "إدارة بيئات وسياقات مشاريع منفصلة ديناميكياً."},
     "workspace.active_env": {"en": "Active Environment:", "ar": "البيئة النشطة:"},
     "workspace.create": {"en": "Create Workspace", "ar": "إنشاء مساحة عمل"},
+    "workspace.delete": {"en": "Delete", "ar": "حذف"},
+    "workspace.delete_title": {"en": "Delete workspace", "ar": "حذف مساحة العمل"},
+    "workspace.delete_confirm": {
+        "en": "Remove workspace “{name}” from Kazma?\n\nPath: {path}\n\nYou can choose next whether to also delete files on disk.",
+        "ar": "إزالة مساحة العمل “{name}” من كاظمه؟\n\nالمسار: {path}\n\nيمكنك بعدها اختيار حذف الملفات من القرص.",
+    },
+    "workspace.delete_registry": {"en": "Remove from list", "ar": "إزالة من القائمة"},
+    "workspace.delete_files_title": {"en": "Delete files on disk?", "ar": "حذف الملفات من القرص؟"},
+    "workspace.delete_files_confirm": {
+        "en": "Also permanently delete all files at:\n\n{path}\n\nOnly allowed under ~/kazma-repos (or KAZMA_CLONE_DIR). Cannot be undone.",
+        "ar": "هل تريد أيضاً حذف كل الملفات نهائياً في:\n\n{path}\n\nمسموح فقط تحت ~/kazma-repos. لا يمكن التراجع.",
+    },
+    "workspace.delete_files_btn": {"en": "Delete files too", "ar": "احذف الملفات أيضاً"},
+    "workspace.toast_deleted": {
+        "en": "Workspace “{name}” removed (files kept on disk)",
+        "ar": "أُزيلت مساحة “{name}” (الملفات بقيت على القرص)",
+    },
+    "workspace.toast_deleted_with_files": {
+        "en": "Workspace “{name}” and its files deleted",
+        "ar": "حُذفت مساحة “{name}” وملفاتها",
+    },
     "workspace.switch_repo": {"en": "Switch Repo", "ar": "تبديل المستودع"},
 
     # Create Workspace modal

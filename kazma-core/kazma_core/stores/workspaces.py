@@ -279,6 +279,51 @@ class WorkspaceStore:
             "is_github": bool(row["is_github"]) if row["is_github"] is not None else None,
         }
 
+    def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
+        """Return one workspace by id, or None."""
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                f"SELECT id, name, root_path, created_at, is_active, {_REPO_COLS} "
+                "FROM workspaces WHERE id = ?",
+                (workspace_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return self._row_to_dict(row)
+
+    def delete_workspace(self, workspace_id: str) -> dict[str, Any] | None:
+        """Remove a workspace registration. Returns the deleted record or None.
+
+        Does **not** delete files on disk — the API layer decides that.
+        If the deleted row was active, no workspace remains active (caller
+        should activate another or re-pin tools).
+        """
+        record = self.get_workspace(workspace_id)
+        if not record:
+            return None
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute("BEGIN")
+                conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+                conn.execute("COMMIT")
+            except Exception as exc:
+                conn.execute("ROLLBACK")
+                logger.error(
+                    "[WorkspaceStore] Failed to delete workspace %s: %s",
+                    workspace_id,
+                    exc,
+                )
+                raise
+        logger.info(
+            "[WorkspaceStore] Deleted workspace %r (%s) root=%s",
+            record.get("name"),
+            workspace_id,
+            record.get("root_path"),
+        )
+        return record
+
     def set_active_workspace(self, workspace_id: str) -> bool:
         """Set the workspace with workspace_id as active and others as inactive.
 
