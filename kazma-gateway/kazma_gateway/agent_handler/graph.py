@@ -103,6 +103,62 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         logger.debug("[agent-handler] Failed to sync session to Web UI: %s", exc)
 
 
+def _clean_prior_messages(prior: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Strip incomplete tool-call chains from the loaded checkpoint history.
+
+    A checkpoint saved mid-interrupt (graph paused at HITL gate) will contain
+    an assistant message with ``tool_calls`` but no corresponding ``tool``
+    messages.  Sending such a sequence to the LLM provider raises HTTP 400:
+    ``"An assistant message with 'toolcalls' must be followed by tool messages"``.
+
+    Walk backwards from the end and remove any trailing assistant tool-call
+    messages that lack their tool responses, so the loaded history always ends
+    on a clean boundary (user message, plain assistant text, or complete
+    tool-response chain).
+    """
+    result = list(prior)
+    while result:
+        last = result[-1]
+        role = last.get("role")
+        # If last message is an assistant with tool_calls, check if all
+        # tool_call_ids have matching tool responses in the NEXT message(s).
+        if role == "assistant" and last.get("tool_calls"):
+            tc_ids = {tc.get("id") for tc in last["tool_calls"]}
+            # Check next messages (they would follow this assistant msg)
+            # But since this is the LAST message, there ARE no next messages.
+            # This means tool responses are missing — drop this message.
+            result.pop()
+            continue
+        # If last message is a tool response, verify the preceding assistant
+        # message's tool_calls are all accounted for.
+        if role == "tool":
+            tool_call_id = last.get("tool_call_id")
+            # Walk backwards to find the preceding assistant tool_calls message
+            # and verify all its tool_call_ids have responses.
+            idx = len(result) - 2
+            pending_ids: set[str] = set()
+            while idx >= 0:
+                m = result[idx]
+                if m.get("role") == "assistant" and m.get("tool_calls"):
+                    pending_ids = {tc.get("id") for tc in m["tool_calls"]}
+                    break
+                idx -= 1
+            if pending_ids:
+                # Collect all tool_call_ids that have responses AFTER the assistant msg
+                responded: set[str] = set()
+                for m in result[idx + 1:]:
+                    if m.get("role") == "tool":
+                        responded.add(m.get("tool_call_id", ""))
+                missing = pending_ids - responded
+                if missing:
+                    # Incomplete chain — truncate from the assistant message onward
+                    result = result[:idx]
+                    continue
+            break  # Last message is a complete tool response
+        break  # Last message is user or plain assistant — clean
+    return result
+
+
 def create_graph_handler(
     graph: Any,
     manager: Any,  # GatewayManager (avoid circular import)
@@ -518,10 +574,10 @@ def create_graph_handler(
             if graph is not None and getattr(graph, "checkpointer", None) is not None:
                 try:
                     snap = await graph.aget_state(config)
-                    prior = (snap.values or {}).get("messages") or [] if snap else []
+                    prior = list((snap.values or {}).get("messages") or []) if snap else []
                     if prior:
-                        # state["messages"] currently holds only the new user turn.
-                        state = {**state, "messages": list(prior) + list(state.get("messages", []))}
+                        prior = _clean_prior_messages(prior)
+                        state = {**state, "messages": prior + list(state.get("messages", []))}
                 except Exception as _e:
                     logger.debug("[agent-handler] history restore skipped: %s", _e)
 
