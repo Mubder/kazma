@@ -66,6 +66,15 @@ logger = logging.getLogger(__name__)
 #: stripped and never honored (prevents prompt-injection bypass).
 _hitl_approved_ctx: ContextVar[bool] = ContextVar("_hitl_approved", default=False)
 
+#: ContextVar set by the supervisor graph's tool_worker_node whenever the
+#: graph is compiled WITH a HITL config (i.e. the graph's interrupt() gate
+#: is the authority for single-agent chat). When True, ``execute()`` skips
+#: the SwarmMessageBus ``safety.check()`` (mechanism B) so a graph-gated
+#: danger tool is not prompted twice — once by the graph interrupt and
+#: again by the bus. The bus gate remains the authority for /swarm dispatch
+#: and IDE paths (which do not set this ContextVar).
+_graph_hitl_gate_ctx: ContextVar[bool] = ContextVar("_graph_hitl_gate", default=False)
+
 
 def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     """Return a safety error string if *p* is outside the workspace.
@@ -397,8 +406,12 @@ class LocalToolRegistry:
         # Use the async check() so a real bus adapter can post an approval
         # request and await the operator's response. check_sync() only
         # blocks; it can never approve. Skip when the graph's interrupt()
-        # gate already approved this call.
-        if not _hitl_already_approved:
+        # gate already approved this call, OR when the supervisor graph
+        # itself is the HITL authority (single-agent chat) — in that case
+        # the graph's interrupt() is the only gate and a second bus prompt
+        # would deadlock the turn (the bus waits for an approval the user
+        # already gave to the graph).
+        if not _hitl_already_approved and not _graph_hitl_gate_ctx.get():
             try:
                 import json as _json
 

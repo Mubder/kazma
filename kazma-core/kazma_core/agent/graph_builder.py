@@ -584,7 +584,16 @@ async def tool_worker_node(
         safe_tools: list[PendingToolCall] = []
         danger_tools: list[PendingToolCall] = []
 
+        # Signal the tool registry that the graph is the HITL authority for
+        # this turn, so LocalToolRegistry.execute() skips the redundant
+        # SwarmMessageBus safety.check() (mechanism B) — the graph's
+        # interrupt() is the sole gate for single-agent chat. Restored in
+        # the finally below.
+        _graph_gate_token = None
         if hitl_config:
+            from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+
+            _graph_gate_token = _graph_hitl_gate_ctx.set(True)
             for tc in pending:
                 if requires_approval(tc["name"], hitl_config):
                     danger_tools.append(tc)
@@ -737,6 +746,10 @@ async def tool_worker_node(
         # Always restore the prior ContextVar value, even if a tool
         # raised or the graph was interrupted by HITL.
         reset_current_session_messages(_messages_token)
+        if _graph_gate_token is not None:
+            from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+
+            _graph_hitl_gate_ctx.reset(_graph_gate_token)
 
 
 async def respond_node(state: SupervisorState) -> dict[str, Any]:
