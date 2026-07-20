@@ -371,6 +371,29 @@
       return;
     }
 
+    // Handle /new command locally
+    if (text.toLowerCase() === '/new') {
+      newSession();
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+      return;
+    }
+
+    // Handle /reset command locally
+    if (text.toLowerCase() === '/reset') {
+      messagesEl.innerHTML =
+        '<div class="chat-welcome">' +
+          '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
+          '<h2>Kazma</h2>' +
+          '<p>How can I help you today?</p>' +
+        '</div>';
+      updateSessionStats(0, 0);
+      currentMsgEl = null;
+      tokenAccum = '';
+      if (activeStream) { activeStream.abort(); activeStream = null; }
+      renderSessionList();
+    }
+
     // Build message content
     var content = text;
     if (attachment) {

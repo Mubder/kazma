@@ -93,6 +93,16 @@ class TestSlashCommands:
         assert result is not None
         assert "/help" in result.lower() or "/reset" in result
 
+    def test_new_command_resolves_to_none(self):
+        """/new returns None (handled by agent_handler directly)."""
+        result = resolve_slash_command("/new")
+        assert result is None
+
+    def test_compact_command_resolves_to_none(self):
+        """/compact returns None (handled by agent_handler directly)."""
+        result = resolve_slash_command("/compact")
+        assert result is None
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Typing indicator tests

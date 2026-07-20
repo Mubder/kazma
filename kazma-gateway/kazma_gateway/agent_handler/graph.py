@@ -56,6 +56,53 @@ def _prepare_tg_outbound(
     return md_to_tg_html(text), out_ctx
 
 
+def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
+    dicts = []
+    for m in langgraph_messages:
+        role = "user"
+        content = ""
+        if isinstance(m, dict):
+            role = m.get("role") or "user"
+            content = m.get("content") or ""
+        else:
+            cls_name = m.__class__.__name__
+            if cls_name == "AIMessage":
+                role = "assistant"
+            elif cls_name == "SystemMessage":
+                role = "system"
+            else:
+                role = "user"
+            content = getattr(m, "content", "")
+        
+        if role in ("system", "user", "assistant") and content:
+            if isinstance(content, list):
+                content = " ".join(
+                    b.get("text", "") if isinstance(b, dict) else str(b)
+                    for b in content
+                )
+            dicts.append({"role": role, "content": str(content).strip()})
+    return dicts
+
+
+def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[str, Any], messages: list) -> None:
+    """Synchronize platform session messages to the Web UI's shared SessionManager."""
+    try:
+        from kazma_ui.session_manager import get_session_manager
+        store = get_session_manager()
+        session = store.get_or_create(thread_id)
+        session.thread_id = thread_id
+        session.messages = _convert_messages_to_dicts(messages)
+        
+        if not session.title:
+            username = metadata.get("username") or metadata.get("display_name") or "user"
+            session.title = f"Linked {platform.capitalize()} ({username})"
+            
+        store.put(session)
+        logger.info("[agent-handler] Synchronized platform session %s to Web UI", thread_id)
+    except Exception as exc:
+        logger.debug("[agent-handler] Failed to sync session to Web UI: %s", exc)
+
+
 def create_graph_handler(
     graph: Any,
     manager: Any,  # GatewayManager (avoid circular import)
@@ -196,21 +243,127 @@ def create_graph_handler(
                 if hitl_handled:
                     return
 
-        # ── /reset: Clear conversation for this thread ──────────────
-        # Send confirmation and skip graph so the next message starts fresh.
-        if msg.text and msg.text.strip().lower() == "/reset":
-            ctx_reset = await _store.get(thread_id)
-            if not ctx_reset:
-                ctx_reset = msg.context_metadata
-            reset_text, reset_ctx = _prepare_tg_outbound(
-                msg, "🔄 Conversation cleared. Starting fresh.", ctx_reset
+        # ── /new: Create a brand new session/season ───────────────
+        if msg.text and msg.text.strip().lower() == "/new":
+            import uuid
+            new_thread_id = f"gw-{msg.platform}-{sender.replace(':', '_')}-{uuid.uuid4().hex[:8]}"
+            
+            # Persist mapping in ConfigStore
+            try:
+                from kazma_core.config_store import get_config_store
+                cs = get_config_store()
+                cs.set(f"active_thread.{sender}", new_thread_id)
+            except Exception as exc:
+                logger.error("[agent-handler] Failed to persist active thread mapping: %s", exc)
+                
+            # Update in-memory session cache
+            async with _sessions_lock:
+                _sessions[sender] = new_thread_id
+                
+            # Initialize empty linked session in Web UI's SessionManager
+            try:
+                from kazma_ui.session_manager import get_session_manager, ChatSession
+                web_store = get_session_manager()
+                username = msg.context_metadata.get("username") or msg.context_metadata.get("display_name") or "user"
+                web_session = ChatSession(
+                    session_id=new_thread_id,
+                    thread_id=new_thread_id,
+                    title=f"Linked {msg.platform.capitalize()} ({username})",
+                    messages=[]
+                )
+                web_store.put(web_session)
+            except Exception as exc:
+                logger.debug("[agent-handler] Failed to create empty Web UI session: %s", exc)
+                
+            reply_msg = (
+                f"🆕 Created a brand new season/session!\n\n"
+                f"All your future messages here will be kept in a separate thread.\n"
+                f"You can view or continue it in the Web UI as: **Linked {msg.platform.capitalize()} ({username})**"
             )
+            ctx = msg.context_metadata
+            out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
             await manager.send(OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx_reset),
-                text=reset_text,
-                context_metadata=reset_ctx,
+                target_id=_build_target_id(msg.platform, ctx),
+                text=out_text,
+                context_metadata=out_ctx,
             ))
-            logger.info("[agent-handler] /reset for thread=%s", thread_id)
+            logger.info("[agent-handler] /new for thread=%s (new_thread=%s)", thread_id, new_thread_id)
+            return
+
+        # ── /reset: Clear conversation checkpoints and settings ───
+        if msg.text and msg.text.strip().lower() == "/reset":
+            # 1. Delete checkpoints
+            if hasattr(graph, "checkpointer") and graph.checkpointer:
+                try:
+                    await graph.checkpointer.adelete_thread(thread_id)
+                except Exception as exc:
+                    logger.error("[agent-handler] Failed to delete checkpoints on /reset: %s", exc)
+            
+            # 2. Delete ConfigStore active mapping
+            try:
+                from kazma_core.config_store import get_config_store
+                cs = get_config_store()
+                cs.delete(f"active_thread.{sender}")
+            except Exception as exc:
+                logger.debug("[agent-handler] ConfigStore delete active_thread failed: %s", exc)
+                
+            # 3. Clear in-memory session cache
+            async with _sessions_lock:
+                _sessions.pop(sender, None)
+                
+            # 4. Delete from Web UI SessionManager
+            try:
+                from kazma_ui.session_manager import get_session_manager
+                web_store = get_session_manager()
+                for sess in web_store.list_all(include_archived=True):
+                    if sess.thread_id == thread_id or sess.session_id == thread_id:
+                        sess.messages = []
+                        sess.title = ""
+                        web_store.put(sess)
+                        break
+            except Exception as exc:
+                logger.debug("[agent-handler] Web UI session clear failed on /reset: %s", exc)
+                
+            # 5. Delete from platform session store
+            try:
+                await _store.delete(thread_id)
+            except Exception as exc:
+                logger.debug("[agent-handler] _store.delete failed: %s", exc)
+
+            reply_msg = "🔄 Conversation cleared and reset to default. Starting fresh!"
+            ctx = msg.context_metadata
+            out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=out_text,
+                context_metadata=out_ctx,
+            ))
+            logger.info("[agent-handler] /reset completed for thread=%s", thread_id)
+            return
+
+        # ── /compact: Force manually triggered context compaction ─
+        if msg.text and msg.text.strip().lower() == "/compact":
+            try:
+                state_obj = await graph.aget_state(config)
+                if state_obj and state_obj.values:
+                    current_values = dict(state_obj.values)
+                    current_values["needs_compaction"] = True
+                    await graph.ainvoke(current_values, config)
+                    reply_msg = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
+                else:
+                    reply_msg = "🗜️ No conversation history found to compact yet."
+            except Exception as exc:
+                logger.error("[agent-handler] /compact failed for thread=%s: %s", thread_id, exc)
+                reply_msg = "⚠️ Failed to compact context. (Compaction error)"
+
+            ctx = await _store.get(thread_id) or msg.context_metadata
+            out_text, out_ctx = _prepare_tg_outbound(msg, reply_msg, ctx)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=out_text,
+                context_metadata=out_ctx,
+            ))
+            logger.info("[agent-handler] /compact completed for thread=%s", thread_id)
             return
 
         # ── /yolo: Toggle session YOLO safety bypass ───────────────
@@ -444,6 +597,13 @@ def create_graph_handler(
                     duration_ms,
                     thread_id,
                     msg.platform,
+                )
+
+                _sync_platform_session_to_web(
+                    thread_id,
+                    msg.platform,
+                    msg.context_metadata,
+                    result_state.get("messages", []),
                 )
 
                 # ── Restore platform IDs from SessionStore ─────────

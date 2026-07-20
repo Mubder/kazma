@@ -45,7 +45,7 @@ class ContextAuthority:
         """
         messages = state.get("messages", [])
 
-        if self.counter.should_compact(messages):
+        if self.counter.should_compact(messages) or state.get("needs_compaction"):
             logger.info(
                 "Context compaction triggered: %d/%d tokens (threshold=%d)",
                 self.counter.count(messages),

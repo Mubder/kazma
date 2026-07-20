@@ -185,6 +185,10 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
         return _cmd_help()
     if cmd == "/reset":
         return None  # Handled by agent_handler directly (clears state)
+    if cmd == "/new":
+        return None  # Handled by agent_handler directly (creates new session)
+    if cmd == "/compact":
+        return None  # Handled by agent_handler directly (manual context compaction)
     if cmd == "/status":
         return _cmd_status(ctx)
     if cmd in ("/model", "/models"):
@@ -213,7 +217,9 @@ def _cmd_help() -> str:
     return (
         "*Available commands:*\n\n"
         "🔄 *Session*\n"
-        "• `/reset` — Clear conversation history\n"
+        "• `/new` — Create a brand new session/season\n"
+        "• `/reset` — Clear conversation history and starting fresh\n"
+        "• `/compact` — Manually trigger context window compaction\n"
         "• `/replay list` — Show available snapshots\n"
         "• `/replay <iteration>` — Replay from iteration\n"
         "• `/replay compare <a> <b>` — Compare two runs\n"

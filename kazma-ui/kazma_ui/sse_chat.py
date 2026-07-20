@@ -42,6 +42,34 @@ router = APIRouter(tags=["chat-sse"])
 from kazma_ui.sse_utils import sse_frame as _sse_frame
 
 
+def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
+    dicts = []
+    for m in langgraph_messages:
+        role = "user"
+        content = ""
+        if isinstance(m, dict):
+            role = m.get("role") or "user"
+            content = m.get("content") or ""
+        else:
+            cls_name = m.__class__.__name__
+            if cls_name == "AIMessage":
+                role = "assistant"
+            elif cls_name == "SystemMessage":
+                role = "system"
+            else:
+                role = "user"
+            content = getattr(m, "content", "")
+        
+        if role in ("system", "user", "assistant") and content:
+            if isinstance(content, list):
+                content = " ".join(
+                    b.get("text", "") if isinstance(b, dict) else str(b)
+                    for b in content
+                )
+            dicts.append({"role": role, "content": str(content).strip()})
+    return dicts
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # LangGraph event → SSE mapping
 # ══════════════════════════════════════════════════════════════════════════
@@ -441,6 +469,77 @@ def create_sse_chat_router(
 
             return StreamingResponse(
                 _yolo_generator(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+        # ── Intercept RESET command ────────────────────────────────
+        if raw_msg.lower() == "/reset":
+            live_graph = _get_graph()
+            if live_graph and hasattr(live_graph, "checkpointer") and live_graph.checkpointer:
+                try:
+                    await live_graph.checkpointer.adelete_thread(thread_id)
+                except Exception as exc:
+                    logger.debug("[SSE] failed to delete thread checkpoints on /reset: %s", exc)
+            
+            session.messages = []
+            session.title = ""
+            try:
+                _get_store().put(session)
+            except Exception:
+                logger.exception("[SSE] failed to persist /reset")
+
+            confirmation = "🔄 Conversation cleared. Starting fresh."
+
+            async def _reset_generator() -> AsyncGenerator[str, None]:
+                yield _sse_frame("token", {"content": confirmation})
+                yield _sse_frame("done", {
+                    "tokens": 1,
+                    "cost": 0.0,
+                    "duration_ms": 100,
+                })
+
+            return StreamingResponse(
+                _reset_generator(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+        # ── Intercept COMPACT command ──────────────────────────────
+        if raw_msg.lower() == "/compact":
+            live_graph = _get_graph()
+            if live_graph:
+                try:
+                    config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+                    state_obj = await live_graph.aget_state(config)
+                    if state_obj and state_obj.values:
+                        current_values = dict(state_obj.values)
+                        current_values["needs_compaction"] = True
+                        
+                        result_state = await live_graph.ainvoke(current_values, config)
+                        
+                        session.messages = _convert_messages_to_dicts(result_state.get("messages", []))
+                        _get_store().put(session)
+                        
+                        confirmation = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
+                    else:
+                        confirmation = "🗜️ No conversation history found to compact yet."
+                except Exception as exc:
+                    logger.error("[SSE] failed to compact context: %s", exc)
+                    confirmation = "⚠️ Failed to compact context. (Compaction error)"
+            else:
+                confirmation = "⚠️ Live graph not loaded."
+
+            async def _compact_generator() -> AsyncGenerator[str, None]:
+                yield _sse_frame("token", {"content": confirmation})
+                yield _sse_frame("done", {
+                    "tokens": 1,
+                    "cost": 0.0,
+                    "duration_ms": 100,
+                })
+
+            return StreamingResponse(
+                _compact_generator(),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )

@@ -53,12 +53,23 @@ def _resolve_thread(msg: IncomingMessage) -> str:
     if ctx.get("thread_id"):
         return ctx["thread_id"]
 
-    # 2. Deterministic from sender_id (e.g. "telegram:12345" → "gw-telegram-12345")
+    # 2. Persistent active thread mapping in ConfigStore
+    if msg.sender_id:
+        try:
+            from kazma_core.config_store import get_config_store
+            cs = get_config_store()
+            persisted = cs.get(f"active_thread.{msg.sender_id}")
+            if persisted:
+                return str(persisted)
+        except Exception:
+            pass
+
+    # 3. Deterministic from sender_id (e.g. "telegram:12345" → "gw-telegram-12345")
     if msg.sender_id and ":" in msg.sender_id:
         platform, sender = msg.sender_id.split(":", 1)
         return f"gw-{platform}-{sender}"
 
-    # 3. Fallback UUID
+    # 4. Fallback UUID
     return f"gw-{uuid.uuid4().hex[:12]}"
 
 
