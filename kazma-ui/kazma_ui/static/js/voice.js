@@ -140,7 +140,7 @@
     formData.append('language', 'auto');
 
     try {
-      showToast('Transcribing (' + provider + ')...', 'info', 2000);
+      showToast('Transcribing...', 'info', 2000);
       var resp = await fetch('/api/voice/stt', { method: 'POST', body: formData });
       if (!resp.ok) {
         var err = await resp.json().catch(function() { return { detail: 'STT failed' }; });

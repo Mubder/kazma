@@ -50,6 +50,20 @@ def _get_provider_api_key_from_db(provider_name: str) -> str | None:
     return None
 
 
+def _get_provider_base_url_from_db(provider_name: str) -> str | None:
+    """Fallback helper to fetch base URL from unified providers database."""
+    try:
+        from kazma_core.config_store import get_config_store
+        from kazma_core.model_registry import ModelRegistry
+        registry = ModelRegistry(get_config_store())
+        entry = registry.get_provider(provider_name)
+        if entry and entry.get("base_url"):
+            return str(entry["base_url"])
+    except Exception:
+        pass
+    return None
+
+
 def _get_configured_stt_model(provider_name: str) -> str | None:
     """Get the custom STT model configured in the database, if any."""
     try:
@@ -349,15 +363,28 @@ def _nvidia_stt() -> STTProvider:
             "m4a": "audio/mp4",
             "webm": "audio/webm",
         }.get(ext, f"audio/{ext}")
-        # Use the cloud-hosted NVIDIA ASR endpoint
-        base_url = os.environ.get(
-            "NVIDIA_ASR_URL",
-            "https://ai.api.nvidia.com/v1/asr",
+        # Use the configured NVIDIA ASR base URL (cloud, local NIM or remote)
+        db_base_url = _get_provider_base_url_from_db("nvidia")
+        base_url = (
+            os.environ.get("NVIDIA_ASR_URL")
+            or db_base_url
+            or "https://ai.api.nvidia.com/v1/asr"
         )
+        
+        # Symmetrically construct the transcription endpoint URL
+        target_url = base_url
+        if not target_url.endswith("/transcriptions"):
+            if target_url.endswith("/audio"):
+                target_url = f"{target_url}/transcriptions"
+            elif target_url.endswith("/v1"):
+                target_url = f"{target_url}/audio/transcriptions"
+            else:
+                target_url = f"{target_url}/transcriptions"
+
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post(
-                    f"{base_url}/transcriptions",
+                    target_url,
                     headers={
                         "Authorization": f"Bearer {key}",
                         "Accept": "application/json",

@@ -506,7 +506,7 @@ class ModelRegistry:
         # (e.g. cloud metadata 169.254.169.254, localhost services).
         try:
             from kazma_core.security.ssrf import SSRFError, validate_url
-            validate_url(url, block_unresolved=True, allow_private=False)
+            validate_url(url, block_unresolved=True, allow_private=True)
         except SSRFError as exc:
             logger.warning("discover_models: SSRF blocked %r for %r: %s", url, clean_name, exc)
             return []

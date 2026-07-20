@@ -462,7 +462,9 @@ def create_auth_middleware(
             return response
 
         # 2. Only sensitive prefixes are gated.
-        if not is_sensitive_path(path):
+        # Exempt GET /api/settings/voice from authentication gating so frontend can sync active voice settings on load.
+        is_exempt = (path == "/api/settings/voice" and request.method == "GET")
+        if is_exempt or not is_sensitive_path(path):
             response = await call_next(request)
             if (
                 expected
