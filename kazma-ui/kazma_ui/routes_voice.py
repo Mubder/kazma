@@ -274,33 +274,52 @@ async def list_voices(provider: str = "edgetts") -> list[str]:
 
 
 @router.get("/stt-models")
-async def list_stt_models(provider: str = "openai") -> list[Any]:
-    """Get available STT model IDs for a specific STT provider.
+async def list_stt_models(provider: str = "openai") -> list[dict[str, str]]:
+    """Get STT models as ``[{id, label}]`` for the Settings dropdown.
 
-    NVIDIA returns rich objects ``{id, label, note}`` so the UI can show
-    that Whisper is a **Speech NIM**, not an integrate.api chat model.
-    Other providers return plain string ids (backward compatible).
+    Always returns a non-empty list so the UI never looks "broken".
+    NVIDIA entries include NIM notes in the label.
     """
-    p_lower = provider.strip().lower()
-    if p_lower == "openai":
-        return ["whisper-1"]
-    if p_lower == "groq":
-        # Prefer live discovery from Groq when key present
-        models = await _discover_groq_stt_models()
-        return models or [
-            "whisper-large-v3",
-            "whisper-large-v3-turbo",
-            "distil-whisper-large-v3-en",
-        ]
-    if p_lower == "nvidia":
-        from kazma_core.voice.stt import list_nvidia_stt_models
+    p_lower = (provider or "openai").strip().lower()
 
-        return list_nvidia_stt_models()
+    def _pack(ids: list[str], labels: dict[str, str] | None = None) -> list[dict[str, str]]:
+        labels = labels or {}
+        return [{"id": i, "label": labels.get(i, i)} for i in ids if i]
+
+    if p_lower == "openai":
+        return _pack(["whisper-1"])
+    if p_lower == "groq":
+        models = await _discover_groq_stt_models()
+        if not models:
+            models = [
+                "whisper-large-v3",
+                "whisper-large-v3-turbo",
+                "distil-whisper-large-v3-en",
+            ]
+        return _pack(models)
+    if p_lower == "nvidia":
+        try:
+            from kazma_core.voice.stt import list_nvidia_stt_models
+
+            rich = list_nvidia_stt_models()
+            return [
+                {
+                    "id": str(m.get("id", "")),
+                    "label": str(m.get("label") or m.get("id") or ""),
+                }
+                for m in rich
+                if m.get("id")
+            ] or _pack(["openai/whisper-large-v3", "whisper-large-v3"])
+        except Exception:
+            logger.exception("NVIDIA STT model catalog failed")
+            return _pack(["openai/whisper-large-v3", "whisper-large-v3"])
     if p_lower == "faster-whisper":
-        return ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"]
+        return _pack(["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo"])
     if p_lower == "cohere":
-        return ["cohere-transcribe-03-2026", "cohere-transcribe-arabic-07-2026"]
-    return ["default"]
+        return _pack(
+            ["cohere-transcribe-03-2026", "cohere-transcribe-arabic-07-2026"]
+        )
+    return _pack(["default"])
 
 
 async def _discover_groq_stt_models() -> list[str]:

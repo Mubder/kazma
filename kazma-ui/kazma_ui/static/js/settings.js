@@ -154,22 +154,11 @@ function settingsApp() {
         },
         voiceProviders: { stt: ['openai', 'groq', 'cohere', 'nvidia', 'faster-whisper'], tts: ['edgetts', 'openai', 'nvidia', 'kokoro', 'coqui'] },
         voiceModels: [],
-        sttModels: [],
+        /** Normalized STT options: always [{id, label}] for Alpine x-for */
+        sttModelOptions: [],
+        sttModelsLoading: false,
         sttModelType: 'default',
         ttsVoiceType: 'default',
-
-        get sttModelsNormalized() {
-            return (this.sttModels || []).map(function (m) {
-                if (m && typeof m === 'object') {
-                    return {
-                        id: m.id || m.model || '',
-                        label: m.label || m.id || String(m),
-                        note: m.note || '',
-                    };
-                }
-                return { id: String(m), label: String(m), note: '' };
-            }).filter(function (m) { return m.id; });
-        },
 
         /* ══════════════════════════════════════════════════════════════════
            INITIALIZATION
@@ -646,7 +635,19 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/providers');
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                this.hubProviders = await resp.json();
+                const raw = await resp.json();
+                // Normalize so Alpine x-for always gets string arrays
+                this.hubProviders = (Array.isArray(raw) ? raw : []).map(function (p) {
+                    var disc = p.discovered_models;
+                    if (!Array.isArray(disc)) disc = [];
+                    p.discovered_models = disc.map(function (m) {
+                        if (m && typeof m === 'object') return String(m.id || m.name || m);
+                        return String(m);
+                    }).filter(Boolean);
+                    if (!Array.isArray(p.selected_models)) p.selected_models = [];
+                    if (p._modelQuery === undefined) p._modelQuery = '';
+                    return p;
+                });
             } catch (e) {
                 console.error('[Hub] Failed to load providers:', e);
                 this.hubProviders = [];
@@ -867,13 +868,18 @@ function settingsApp() {
         },
 
         filteredDiscoveredModels(provider) {
-            if (!provider || !provider.discovered_models) return [];
-            const q = ((this.modelSearch && this.modelSearch[provider.name]) || '')
-                .trim()
-                .toLowerCase();
-            if (!q) return provider.discovered_models;
-            return provider.discovered_models.filter(function (m) {
-                return String(m).toLowerCase().indexOf(q) !== -1;
+            if (!provider) return [];
+            var list = provider.discovered_models;
+            if (!Array.isArray(list)) return [];
+            // Coerce entries to strings (API should return strings)
+            var models = list.map(function (m) {
+                if (m && typeof m === 'object') return String(m.id || m.name || m);
+                return String(m);
+            }).filter(Boolean);
+            var q = String(provider._modelQuery || '').trim().toLowerCase();
+            if (!q) return models;
+            return models.filter(function (m) {
+                return m.toLowerCase().indexOf(q) !== -1;
             });
         },
 
@@ -1865,21 +1871,89 @@ function settingsApp() {
             }
         },
 
+        _normalizeSttModels(raw) {
+            var list = Array.isArray(raw) ? raw : [];
+            var out = [];
+            var seen = {};
+            list.forEach(function (m) {
+                var id = '';
+                var label = '';
+                if (m && typeof m === 'object') {
+                    id = String(m.id || m.model || m.name || '').trim();
+                    label = String(m.label || id).trim();
+                } else {
+                    id = String(m || '').trim();
+                    label = id;
+                }
+                if (!id || seen[id]) return;
+                seen[id] = true;
+                out.push({ id: id, label: label });
+            });
+            return out;
+        },
+
+        _sttFallbackModels(provider) {
+            var p = (provider || 'openai').toLowerCase();
+            var map = {
+                openai: [{ id: 'whisper-1', label: 'whisper-1' }],
+                groq: [
+                    { id: 'whisper-large-v3', label: 'whisper-large-v3' },
+                    { id: 'whisper-large-v3-turbo', label: 'whisper-large-v3-turbo' },
+                    { id: 'distil-whisper-large-v3-en', label: 'distil-whisper-large-v3-en' },
+                ],
+                nvidia: [
+                    { id: 'openai/whisper-large-v3', label: 'Whisper Large v3 (NIM)' },
+                    { id: 'whisper-large-v3', label: 'whisper-large-v3' },
+                    { id: 'nvidia/parakeet-ctc-1.1b-en-us', label: 'Parakeet CTC 1.1B (EN)' },
+                ],
+                'faster-whisper': [
+                    { id: 'tiny', label: 'tiny' },
+                    { id: 'base', label: 'base' },
+                    { id: 'small', label: 'small' },
+                    { id: 'medium', label: 'medium' },
+                    { id: 'large-v3', label: 'large-v3' },
+                ],
+                cohere: [
+                    { id: 'cohere-transcribe-03-2026', label: 'cohere-transcribe-03-2026' },
+                    { id: 'cohere-transcribe-arabic-07-2026', label: 'cohere-transcribe-arabic-07-2026' },
+                ],
+            };
+            return map[p] || [{ id: 'default', label: 'default' }];
+        },
+
         async loadSttModels() {
+            var provider = this.voiceForm.stt_provider || 'openai';
+            this.sttModelsLoading = true;
+            // Show fallback immediately so the dropdown is never empty
+            this.sttModelOptions = this._sttFallbackModels(provider);
             try {
-                const provider = this.voiceForm.stt_provider || 'openai';
-                const models = await this._fetch(`/api/voice/stt-models?provider=${provider}`);
-                if (Array.isArray(models)) {
-                    this.sttModels = models;
-                    const ids = this.sttModelsNormalized.map(function (m) { return m.id; });
-                    if (ids.includes(this.voiceForm.stt_model)) {
-                        this.sttModelType = this.voiceForm.stt_model;
-                    } else {
-                        this.sttModelType = 'custom';
+                var url = '/api/voice/stt-models?provider=' + encodeURIComponent(provider);
+                var resp = await fetch(url, { credentials: 'same-origin' });
+                if (resp.ok) {
+                    var models = await resp.json();
+                    var normalized = this._normalizeSttModels(models);
+                    if (normalized.length) {
+                        this.sttModelOptions = normalized;
                     }
+                } else {
+                    console.warn('[Settings] STT models HTTP', resp.status, '— using fallback for', provider);
+                }
+                var ids = this.sttModelOptions.map(function (m) { return m.id; });
+                if (ids.indexOf(this.voiceForm.stt_model) !== -1) {
+                    this.sttModelType = this.voiceForm.stt_model;
+                } else if (this.voiceForm.stt_model && this.voiceForm.stt_model !== 'default') {
+                    this.sttModelType = 'custom';
+                } else if (ids.length) {
+                    this.sttModelType = ids[0];
+                    this.voiceForm.stt_model = ids[0];
+                } else {
+                    this.sttModelType = 'custom';
                 }
             } catch (e) {
                 console.error('[Settings] Failed to load STT models:', e);
+                this.sttModelOptions = this._sttFallbackModels(provider);
+            } finally {
+                this.sttModelsLoading = false;
             }
         },
 
@@ -1935,6 +2009,9 @@ function settingsApp() {
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); break;
                 case 'packages': await this.loadPackages(); break;
                 case 'import': break;
+                case 'voice':
+                    await Promise.all([this.loadVoiceModels(), this.loadSttModels()]);
+                    break;
             }
         },
     };
