@@ -1,6 +1,20 @@
 # CHANGELOG
 
 
+## v1.0.0 (2026-07-20)
+
+### Bug Fixes
+
+- **cli**: Kazma update auto-stashes local files and avoids merge prompts
+  ([`8a3e332`](https://github.com/Mubder/kazma/commit/8a3e332872edabf5b6ec5fb51ccbf61076383593))
+
+Stash dirty tree (e.g. kazma.yaml), reset/ff to origin/main, restore stash, then uv/pip reinstall.
+  Operators no longer hit 'would be overwritten by merge'.
+
+
+## v0.6.0 (2026-07-21)
+
+
 ## v0.2.2 (2026-07-20)
 
 ### Bug Fixes

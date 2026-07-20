@@ -1,6 +1,6 @@
 [project]
 name = "kazma"
-version = "0.6.0"
+version = "1.0.0"
 description = "Kazma — Autonomous AI agent framework with LangGraph, ChromaDB RAG, and Arabic RTL dashboard"
 readme = "README.md"
 license = { text = "MIT" }
