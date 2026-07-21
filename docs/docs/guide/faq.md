@@ -2,7 +2,7 @@
 id: faq
 title: FAQ
 sidebar_label: FAQ
-description: Kazma FAQ — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma FAQ — code-audited reference (unified docs, v0.6.1+)
 ---
 > Short answers to the questions operators and integrators actually ask.
 
@@ -148,4 +148,4 @@ Not recommended. WAL allows one writer. If you scale horizontally, give each pro
 
 ## Documentation audit notes
 
-This FAQ reflects verified behavior. If an answer here contradicts older README text, this FAQ is the accurate one as of July 2026.
+This FAQ reflects verified behavior. If an answer here contradicts older README text, this FAQ is the accurate one as of v0.6.1+.

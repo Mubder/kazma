@@ -1,9 +1,5 @@
----
-id: roadmap-legacy
-title: Roadmap (Legacy)
-sidebar_label: Roadmap (Legacy)
-description: Kazma Roadmap (Legacy) — code-audited reference (unified docs, v0.6.1+)
----
+# 🇰🇼 Kazma Feature Roadmap
+
 > **Last updated:** July 10, 2026  
 > **Version:** 0.4.0  
 > **Status:** All originally planned features shipped ✅ + deep audit remediation ✅ + GitHub OAuth integration ✅ + full Arabic i18n ✅  

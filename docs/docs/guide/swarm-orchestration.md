@@ -2,7 +2,7 @@
 id: swarm-orchestration
 title: Swarm Orchestration
 sidebar_label: Swarm Orchestration
-description: Kazma Swarm Orchestration — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Swarm Orchestration — code-audited reference (unified docs, v0.6.1+)
 ---
 > The complete swarm system: the engine, six dispatch patterns, aggregation strategies, the reliability layer (circuit breakers, retries, timeouts, validators, concurrency), the worker registry, pipeline checkpoints, and metrics — all source-referenced.
 

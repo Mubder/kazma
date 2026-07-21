@@ -2,7 +2,7 @@
 id: architecture
 title: Architecture
 sidebar_label: Architecture
-description: Kazma Architecture — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Architecture — code-audited reference (unified docs, v0.6.1+)
 ---
 > A deep, source-referenced breakdown of the Kazma engine: the supervisor brain, the data path from user intent to tool execution, and the subsystems that make it durable, safe, and multilingual.
 

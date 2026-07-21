@@ -2,7 +2,7 @@
 id: configuration
 title: Configuration
 sidebar_label: Configuration
-description: Kazma Configuration — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Configuration — code-audited reference (unified docs, v0.6.1+)
 ---
 > **The exhaustive reference.** Every key in `kazma.yaml`, every environment variable, the ConfigStore override model, the provider/model registry, and the security config files — all traceable to source.
 

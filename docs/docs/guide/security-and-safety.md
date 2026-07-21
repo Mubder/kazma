@@ -2,7 +2,7 @@
 id: security-and-safety
 title: Security & Safety
 sidebar_label: Security & Safety
-description: Kazma Security & Safety — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Security & Safety — code-audited reference (unified docs, v0.6.1+)
 ---
 > Kazma's safety model in full: the **three independent HITL gates**, the three danger-tool lists, fail-closed behavior everywhere, cryptographic integrity (HMAC skills, Ed25519 delegation), and hardening recommendations. Every claim is source-referenced.
 

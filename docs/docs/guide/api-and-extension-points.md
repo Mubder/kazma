@@ -2,7 +2,7 @@
 id: api-and-extension-points
 title: API & Extension Points
 sidebar_label: API & Extension Points
-description: Kazma API & Extension Points — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma API & Extension Points — code-audited reference (unified docs, v0.6.1+)
 ---
 > The HTTP/SSE surface of the Kazma Web UI, the SSE event contract, and the concrete places to extend the framework (tools, providers, adapters, skills, MCP).
 

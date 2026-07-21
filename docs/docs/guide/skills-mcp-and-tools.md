@@ -2,7 +2,7 @@
 id: skills-mcp-and-tools
 title: Skills, MCP & Tools
 sidebar_label: Skills, MCP & Tools
-description: Kazma Skills, MCP & Tools — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Skills, MCP & Tools — code-audited reference (unified docs, v0.6.1+)
 ---
 > Skill manifests, cryptographic signing, MCP transports, tool classification, the Hub, and how to extend Kazma with new tools — all source-referenced.
 

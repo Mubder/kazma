@@ -16,7 +16,7 @@ const config = {
     defaultLocale: 'en',
     locales: ['en'],
   },
-  // Mermaid diagrams from docs-v2 (architecture, swarm, HITL flows)
+  // Mermaid diagrams (architecture, swarm, HITL flows)
   markdown: {
     mermaid: true,
     hooks: {
@@ -72,39 +72,27 @@ const config = {
         items: [
           {
             type: 'docSidebar',
-            sidebarId: 'guide',
+            sidebarId: 'docs',
             position: 'left',
-            label: 'Guide',
+            label: 'Docs',
           },
           {
             type: 'docSidebar',
-            sidebarId: 'gettingStarted',
-            position: 'left',
-            label: 'Getting Started',
-          },
-          {
-            type: 'docSidebar',
-            sidebarId: 'coreConcepts',
-            position: 'left',
-            label: 'Legacy Concepts',
-          },
-          {
-            type: 'docSidebar',
-            sidebarId: 'skillDev',
+            sidebarId: 'skills',
             position: 'left',
             label: 'Skills',
-          },
-          {
-            type: 'docSidebar',
-            sidebarId: 'apiReference',
-            position: 'left',
-            label: 'API',
           },
           {
             type: 'docSidebar',
             sidebarId: 'security',
             position: 'left',
             label: 'Security',
+          },
+          {
+            type: 'docSidebar',
+            sidebarId: 'contributing',
+            position: 'left',
+            label: 'Contributing',
           },
           {
             href: 'https://github.com/kazma-ai/kazma',
@@ -117,23 +105,23 @@ const config = {
         style: 'dark',
         links: [
           {
-            title: 'Guide (current)',
+            title: 'Docs',
             items: [
+              { label: 'Home', to: '/docs/' },
               { label: 'Quickstart', to: '/docs/guide/quickstart' },
               { label: 'Architecture', to: '/docs/guide/architecture' },
-              { label: 'Configuration', to: '/docs/guide/configuration' },
+              { label: 'Tools catalog', to: '/docs/reference/tools-catalog' },
               { label: 'Security & Safety', to: '/docs/guide/security-and-safety' },
-              { label: 'Swarm', to: '/docs/guide/swarm-orchestration' },
             ],
           },
           {
-            title: 'More',
+            title: 'Products & Ops',
             items: [
-              { label: 'Deployment', to: '/docs/guide/deployment' },
+              { label: 'Web UI', to: '/docs/products/web-ui' },
+              { label: 'IDE', to: '/docs/products/ide' },
+              { label: 'Production checklist', to: '/docs/ops/production-checklist' },
               { label: 'Troubleshooting', to: '/docs/guide/troubleshooting-and-workarounds' },
               { label: 'FAQ', to: '/docs/guide/faq' },
-              { label: 'Hub', to: '/docs/kazma-hub/overview' },
-              { label: 'Contributing', to: '/docs/contributing/development-setup' },
             ],
           },
           {
@@ -145,7 +133,7 @@ const config = {
             ],
           },
         ],
-        copyright: `Copyright © ${new Date().getFullYear()} Kazma AI. Docs include the docs-v2 merge (v0.5.0). Built with Docusaurus.`,
+        copyright: `Copyright © ${new Date().getFullYear()} Kazma AI. Unified docs under docs/ (v0.6.1+). Built with Docusaurus.`,
       },
       prism: {
         theme: prismThemes.github,

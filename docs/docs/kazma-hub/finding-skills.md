@@ -4,43 +4,47 @@ sidebar_position: 3
 
 # Finding Skills
 
-Discover and install skills from Kazma Hub.
+Discover and install skills from the Hub registry and built-in natives.
 
 ## Search
 
 ```bash
-# Basic search
 kazma hub search "weather"
-
-# Search by capability
 kazma hub search --capabilities "image_analysis,data_processing"
-
-# Search by tag
-kazma hub search --tags "utility,beginner-friendly"
-
-# Search by author
+kazma hub search --tags "utility"
 kazma hub search --author "kazma-team"
 ```
 
-## Browse
+## Browse installed
 
 ```bash
-# List all installed skills
 kazma hub list
-
-# View detailed info
 kazma hub info author/skill-name
+kazma hub stats
 ```
 
 ## Install
 
 ```bash
-# Install specific version
+kazma hub install author/skill-name
+# or with version if your registry uses @version ids:
 kazma hub install author/skill-name@1.0.0
 
-# Install latest
-kazma hub install author/skill-name
-
-# Install using the wizard
+# Interactive installer
 kazma wizard
 ```
+
+Uninstall:
+
+```bash
+kazma hub uninstall author/skill-name
+```
+
+## Built-in native skills
+
+Many tools ship in-repo under `kazma-skills/kazma_skills/native/` and load automatically (vault, git, cron, web crawl, …). You do **not** need hub install for those — see [Tools catalog](../reference/tools-catalog).
+
+## Related
+
+- [Hub overview](./overview)  
+- [Creating skills](../skill-development/creating-skills)  

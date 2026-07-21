@@ -2,7 +2,7 @@
 id: arabic-cultural-features
 title: Arabic & Cultural Features
 sidebar_label: Arabic & Cultural Features
-description: Kazma Arabic & Cultural Features — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Arabic & Cultural Features — code-audited reference (unified docs, v0.6.1+)
 ---
 > Kazma is Arabic-native by default. This document covers the three components that implement it: the Arabic tokenizer, the i18n + RTL UI layer, and the Majlis cultural protocol — all source-referenced, with honest notes on scope.
 

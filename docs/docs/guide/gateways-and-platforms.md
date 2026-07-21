@@ -2,7 +2,7 @@
 id: gateways-and-platforms
 title: Gateways & Platforms
 sidebar_label: Gateways & Platforms
-description: Kazma Gateways & Platforms — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Gateways & Platforms — code-audited reference (unified docs, v0.6.1+)
 ---
 > How Kazma's one brain talks to many channels: the adapter layer, platform isolation, the session store, slash commands, and a feature-parity matrix — all verified against `kazma-gateway/`.
 

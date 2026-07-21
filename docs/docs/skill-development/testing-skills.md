@@ -4,67 +4,58 @@ sidebar_position: 4
 
 # Testing Skills
 
-Write tests for your skills using pytest and Kazma test utilities.
+Prefer **pytest** against your tool functions and hub validation against the package path.
 
-## Test structure
+## Native tools skill
 
-```
-my-skill/
+```text
+my_skill/
   skill_manifest.yaml
-  main.py
+  tools.py
   tests/
-    __init__.py
-    conftest.py
-    test_my_skill.py
+    test_tools.py
 ```
-
-## Writing tests
 
 ```python
-# tests/test_my_skill.py
+# tests/test_tools.py
 import pytest
-from my_skill import MySkill
-
-@pytest.fixture
-def skill():
-    return MySkill()
+from tools import example_echo  # or import path under kazma_skills.native…
 
 @pytest.mark.asyncio
-async def test_execute(skill):
-    result = await skill.execute({
-        "message": "Hello",
-        "agent_id": "test-agent",
-    })
-    assert "result" in result
-    assert "Hello" in result["result"]
+async def test_example_echo():
+    out = await example_echo(message="Hello")
+    assert "Hello" in out
 ```
 
-## Validation tests
+## Hub package validation
 
-Test that your manifest validates correctly:
+```bash
+kazma hub validate ./my_skill
+kazma hub check-certification ./my_skill
+```
+
+Manifest unit test:
 
 ```python
 import yaml
-from kazma_core.hub.manifest_schema import SkillManifest
+from pathlib import Path
 
-def test_manifest_valid():
-    with open("skill_manifest.yaml") as f:
-        data = yaml.safe_load(f)
-
-    manifest = SkillManifest.from_dict(data)
-    result = manifest.validate()
-    assert result.passed, f"Validation failed: {result.errors}"
+def test_manifest_loads():
+    data = yaml.safe_load(Path("skill_manifest.yaml").read_text(encoding="utf-8"))
+    assert data.get("name")
+    assert "tools" in data or data.get("entry_point")
 ```
 
-## Running tests
+## Danger / HITL
 
-```bash
-# Run all tests
-pytest tests/
+If a tool is on the danger list, integration tests should either:
 
-# Run with coverage
-pytest tests/ --cov=my_skill
+- Mock the safety bus, or  
+- Pass the graph’s approved path only in controlled fixtures  
 
-# Run validation only
-kazma hub validate ./my-skill
-```
+Do not disable HITL in production-like tests without an explicit escape hatch flag.
+
+## Related
+
+- [Creating skills](./creating-skills)  
+- [Tools catalog](../reference/tools-catalog)  

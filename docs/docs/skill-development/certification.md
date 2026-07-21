@@ -4,65 +4,43 @@ sidebar_position: 5
 
 # Certification
 
-Kazma Hub certifies skills that meet quality, security, and functionality standards.
+Certification is a **local readiness check** plus an optional **remote submit** to a hub API. It is not a fully hosted “app store review” unless you deploy that API yourself.
 
-## Certification levels
-
-| Level | Badge | Requirements |
-|---|---|---|
-| Basic | certified-basic | Manifest valid, tests pass |
-| Standard | certified-standard | + Security audit passed, documentation |
-| Premium | certified-premium | + Performance benchmarks, i18n, advanced security |
-
-## Certification process
-
-### 1. Self-validation
+## Local check (always available)
 
 ```bash
 kazma hub validate ./my-skill
+kazma hub check-certification ./my-skill
+# JSON:
+kazma hub check-certification ./my-skill --json
 ```
 
-### 2. Security audit
+`check-certification` reports which requirements pass/fail (manifest valid, security lint score, entry point present, etc.) — implemented in `hub/cli.py`.
+
+## Levels (guidance, not separate CLI flags)
+
+Documentation and badge assets describe Basic / Standard / Premium tiers. **There is no** `kazma hub submit --level standard` flag. Levels are product/guidance labels; local scoring is pass/fail per requirement, not a CLI enum.
+
+| Label | Intent |
+|-------|--------|
+| Basic | Manifest valid, tools load, basic tests |
+| Standard | + security lint pass, docs |
+| Premium | + deeper review / benchmarks (operator-defined process) |
+
+## Remote submit (optional)
 
 ```bash
-kazma hub validate ./my-skill --security-audit
+kazma hub submit ./my-skill --source-url https://github.com/org/skill
+kazma hub status <submission_id>
 ```
 
-The audit checks:
-- No dangerous code patterns (eval, exec, os.system)
-- No hardcoded secrets
-- Permissions are minimal and justified
-- Dependencies have known vulnerabilities
+Requires a reachable hub API. If the POST fails, the skill is still usable after local `register`.
 
-### 3. Submit for certification
+## Badges in manifests
 
-```bash
-kazma hub submit ./my-skill --level standard
-```
+Some skills may include certification metadata in YAML. Treat remote `certified_by` claims as trustworthy only when you control the signing/cert pipeline.
 
-### 4. Review
+## Related
 
-The hub team reviews:
-- Code quality and style
-- Documentation completeness
-- Test coverage
-- Security posture
-- Performance characteristics
-
-## Certification badges
-
-Skills that pass certification receive a badge in their manifest:
-
-```yaml
-certification:
-  level: standard
-  certified_at: "2026-06-20"
-  certified_by: kazma-team
-  expires_at: "2027-06-20"
-```
-
-## Maintaining certification
-
-- Recertify annually
-- Update dependencies regularly
-- Respond to security advisories within 48 hours
+- [Security auditing](../kazma-hub/security-auditing)  
+- [Publishing](../kazma-hub/publishing-skills)  

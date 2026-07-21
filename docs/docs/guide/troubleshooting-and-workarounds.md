@@ -2,7 +2,7 @@
 id: troubleshooting-and-workarounds
 title: Troubleshooting
 sidebar_label: Troubleshooting
-description: Kazma Troubleshooting — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Troubleshooting — code-audited reference (unified docs, v0.6.1+)
 ---
 > Practical fixes for the issues you will actually hit: provider limits, Windows/Docker specifics, SQLite concurrency, Arabic tokenization edge cases, and the known codebase gaps the audit uncovered. Every item is source-referenced.
 
@@ -311,20 +311,20 @@ When something is wrong, run through these:
 kazma status
 
 # 2. Health
-curl -s http://127.0.0.1:8000/health/details | jq
+curl -s http://127.0.0.1:9090/health/details | jq
 
 # 3. Active provider/model
-curl -s http://127.0.0.1:8000/api/provider/active | jq
+curl -s http://127.0.0.1:9090/api/provider/active | jq
 
 # 4. Gateway adapters
-curl -s http://127.0.0.1:8000/api/gateway/status | jq
+curl -s http://127.0.0.1:9090/api/gateway/status | jq
 
 # 5. Swarm status + breaker states
-curl -s http://127.0.0.1:8000/api/swarm/status | jq
-curl -s http://127.0.0.1:8000/api/swarm/circuit-breakers | jq
+curl -s http://127.0.0.1:9090/api/swarm/status | jq
+curl -s http://127.0.0.1:9090/api/swarm/circuit-breakers | jq
 
 # 6. Pending HITL approvals
-curl -s http://127.0.0.1:8000/api/pending-approvals | jq
+curl -s http://127.0.0.1:9090/api/pending-approvals | jq
 ```
 
 Enable JSON logging for structured diagnostics:
@@ -597,7 +597,7 @@ Restart the shell (or source the printed path) after install.
 ```bash
 kazma swarm circuit-breaker worker-1              # inspect
 kazma swarm circuit-breaker worker-1 --reset      # reset once the root cause is fixed
-curl -X POST http://localhost:8000/api/swarm/workers/worker-1/circuit-breaker/reset
+curl -X POST http://localhost:9090/api/swarm/workers/worker-1/circuit-breaker/reset
 ```
 Raise the per-task timeout for genuinely long work: `\{"workers": ["worker-1"], "task": "...", "timeout": 600\}`.
 
@@ -609,12 +609,12 @@ Raise the per-task timeout for genuinely long work: `\{"workers": ["worker-1"], 
 1. Confirm `wire_engine_events()` ran and the engine was obtained **after** the SSE bus was available.
 2. Check the dispatch response for `task_id`:
    ```bash
-   curl -X POST http://localhost:8000/api/swarm/dispatch -H "Content-Type: application/json" \
+   curl -X POST http://localhost:9090/api/swarm/dispatch -H "Content-Type: application/json" \
      -d '{"workers":["worker-1"],"task":"test"}'
    ```
 3. Open the browser console for `swarm.js` errors; confirm the SSE stream responds:
    ```bash
-   curl -N http://localhost:8000/api/swarm/tasks/&lt;task_id&gt;/stream
+   curl -N http://localhost:9090/api/swarm/tasks/&lt;task_id&gt;/stream
    ```
 
 ### 14.4 Results Dashboard empty / task-detail modal blank
@@ -623,7 +623,7 @@ Raise the per-task timeout for genuinely long work: `\{"workers": ["worker-1"], 
 
 **Fix:**
 ```bash
-curl http://localhost:8000/api/swarm/tasks/&lt;task_id&gt;
+curl http://localhost:9090/api/swarm/tasks/&lt;task_id&gt;
 ```
 The response should carry `task_id`, `status`, `worker_results`, `aggregated_output`, `synthesized_output`, `duration_seconds`, `total_cost`, `total_tokens` at the top level. If a new field is missing, promote it from the nested `result` dict in `_flatten_swarm_task()`. Confirm the `task-detail-modal` element exists in `templates/swarm.html` and that `swarm.js` `renderTaskDetailHTML()` reads `task.worker_results` / `task.individual_opinions` / `task.synthesized_output`.
 
@@ -667,23 +667,50 @@ payload = {
 }
 ```
 ```bash
-curl -X POST http://localhost:8000/api/swarm/tasks/&lt;task_id&gt;/approve
-curl -X POST http://localhost:8000/api/swarm/tasks/&lt;task_id&gt;/reject
+curl -X POST http://localhost:9090/api/swarm/tasks/&lt;task_id&gt;/approve
+curl -X POST http://localhost:9090/api/swarm/tasks/&lt;task_id&gt;/reject
 ```
 Ensure `restore_paused_tasks()` runs on startup (else paused tasks auto-reject on their `checkpoint_timeout` — see [§3.3](#33-pipeline-tasks-stay-paused-after-restart)).
 
 ---
 
+## 15. Production bind & auth (v0.6.1+)
+
+### 15.1 Server won't start on public bind without secret
+
+**Cause:** CLI/serve refuse non-loopback bind when `KAZMA_SECRET` is missing, or refuse the known-bad historical default secret.
+
+**Fix:**
+
+```bash
+# set a strong secret, then:
+export KAZMA_SECRET='…'          # PowerShell: $env:KAZMA_SECRET='…'
+export KAZMA_HOST=0.0.0.0
+kazma serve 9090
+```
+
+Default local port is **9090** (not 8000). Prefer loopback for single-operator: `KAZMA_HOST=127.0.0.1`.
+
+### 15.2 YOLO / danger tools in production
+
+With `KAZMA_PRODUCTION=1`, YOLO is hard-blocked unless `KAZMA_ALLOW_YOLO=1` (avoid in real prod). NullBus is fail-closed. See [Production checklist](../ops/production-checklist).
+
+### 15.3 API returns 401 on every `/api/*` call
+
+**Cause:** Auth default-deny when a secret is configured; cookie/session missing; wrong secret header.
+
+**Fix:** Log in via `/login`, send the session cookie, or use the documented secret header for single-operator automation. Open routes: `/health`, `/health/live`, `/health/ready`.
+
+---
+
 ## Documentation Audit Notes
 
-This file consolidates the **actionable** findings from the whole audit plus operational debugging from prior operator docs. The most important gotchas for new operators:
+This file consolidates audits plus the former operator guide (`archive/docs-loose/TROUBLESHOOTING.md` — folded into §1.6–1.9 and §9–14). Gotchas:
 
 1. **Memory is opt-in (§2.1)** — don't assume recall.
 2. **Three HITL lists (§3.2)** — adding a danger tool in one place isn't enough.
 3. **`KAZMA_SECRET` gates approval auth (§3.2)** — set it always.
-4. **K8s manifests deploy the wrong thing (Deployment §4)** — don't apply them for the main agent.
+4. **Default port 9090** (§15.1) — old samples may say 8000.
 5. **No 429 handling (§1.4)** — proxy or throttle externally.
-6. **Two HITL mechanisms (§3.2 vs §14.6)** — agent tool-call approval (`/api/approve/\{thread_id\}`) ≠ swarm/pipeline checkpoints (`/api/swarm/tasks/\{id\}/approve`).
-7. **Always `get_config_store()`** (§4.1, §1.9) — never construct `ConfigStore()` directly for the shared DB.
-
-> **Provenance:** §1.6–§1.9, §9.1–§9.4, and §10–§14 were ported from the original operator troubleshooting guide and re-verified; stale `TelegramWorker`/`hermes` references and direct `ConfigStore()` construction were corrected.
+6. **Two HITL mechanisms (§3.2 vs §14.6)** — `/api/approve/{thread_id}` vs swarm task approve.
+7. **Always `get_config_store()`** (§4.1, §1.9) — never construct `ConfigStore()` for the shared DB.

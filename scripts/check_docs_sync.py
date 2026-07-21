@@ -200,8 +200,16 @@ def check_architecture_doc_exists() -> list[str]:
         errors.append("architecture.md missing at repo root")
         return errors
     text = path.read_text(encoding="utf-8")
-    if "docs-v2" not in text:
-        errors.append("architecture.md should point at docs-v2 canonical docs")
+    if "docs/docs/" not in text and "docs/docs/guide" not in text:
+        errors.append(
+            "architecture.md should point at docs/docs/ (Docusaurus) canonical docs"
+        )
+    if "docs-v2/" in text and "archive" not in text.lower():
+        # Allow historical mentions only when clearly archived
+        if "archive/docs-v2" not in text and "Archived" not in text:
+            errors.append(
+                "architecture.md should not point at live docs-v2/ (use docs/docs/)"
+            )
     return errors
 
 

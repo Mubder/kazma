@@ -97,23 +97,25 @@ That's it. Open the dashboard, go to Chat, and start talking.
 
 ## 📖 Documentation
 
-All technical documentation lives in [`docs-v2/`](docs-v2/):
+All technical documentation lives under [`docs/docs/`](docs/docs/) (Docusaurus).  
+Build/serve: `cd docs && npm start` → <http://localhost:3000/kazma/>
 
 | Document | What's inside |
 |---|---|
-| [Quickstart](docs-v2/docs/quickstart.md) | Install paths, minimal config, first message |
-| [Architecture](docs-v2/docs/architecture.md) | Engine internals, data-flow diagrams, observability |
-| [Configuration](docs-v2/docs/configuration.md) | Every `kazma.yaml` key, every env var, override precedence |
-| [CLI Reference](docs-v2/docs/cli-reference.md) | Complete command tree with examples |
-| [Swarm Orchestration](docs-v2/docs/swarm-orchestration.md) | Patterns, aggregation, reliability, self-improvement |
-| [Memory & RAG](docs-v2/docs/memory-and-rag.md) | ChromaDB, FTS5, compaction injection, Arabic tokenizer |
-| [Security & Safety](docs-v2/docs/security-and-safety.md) | Three HITL gates, danger-tool lists, vault |
-| [Skills, MCP & Tools](docs-v2/docs/skills-mcp-and-tools.md) | Skill manifests, HMAC signing, MCP, secret vault |
-| [Gateways & Platforms](docs-v2/docs/gateways-and-platforms.md) | Telegram/Discord/Slack/Web/TUI adapters |
-| [Arabic & Cultural](docs-v2/docs/arabic-cultural-features.md) | i18n, RTL, Majlis protocol, dialect support |
-| [Deployment](docs-v2/docs/deployment.md) | Docker, Kubernetes, Windows, production checklist |
-| [Troubleshooting](docs-v2/docs/troubleshooting-and-workarounds.md) | Provider limits, SQLite, known gotchas |
-| [Roadmap](docs-v2/docs/roadmap-and-future.md) | What exists vs. what's planned |
+| [Docs home](docs/docs/intro.md) | Full documentation map |
+| [Quickstart](docs/docs/guide/quickstart.md) | Install paths, minimal config, first message |
+| [Architecture](docs/docs/guide/architecture.md) | Engine internals, data-flow diagrams, observability |
+| [Configuration](docs/docs/guide/configuration.md) | `kazma.yaml` keys, ConfigStore, providers |
+| [Environment variables](docs/docs/reference/environment-variables.md) | Every important env var |
+| [Tools catalog](docs/docs/reference/tools-catalog.md) | Built-in + native skill tools |
+| [CLI Reference](docs/docs/guide/cli-reference.md) | Complete command tree with examples |
+| [Slash commands](docs/docs/reference/slash-commands.md) | Gateway slash command reference |
+| [Swarm](docs/docs/guide/swarm-orchestration.md) | Patterns, reliability, checkpoints |
+| [IDE](docs/docs/products/ide.md) | Web/TUI/chat coding backend |
+| [Security & Safety](docs/docs/guide/security-and-safety.md) | Three HITL gates, danger tools, vault |
+| [Production checklist](docs/docs/ops/production-checklist.md) | Go-live checklist |
+| [Troubleshooting](docs/docs/guide/troubleshooting-and-workarounds.md) | Provider limits, SQLite, known gotchas |
+| [System map](docs/ARCHITECTURE_AND_SYSTEM_MAP.md) | Full monorepo engineering map |
 
 ---
 
@@ -146,7 +148,7 @@ Kazma has **three independent HITL gates** so dangerous tools never run silently
 2. **Swarm bus** — `/swarm` dispatches require approval for danger tools
 3. **Pipeline checkpoints** — multi-stage pipelines can pause at configured steps
 
-All gates are **fail-closed** by default. See [Security & Safety](docs-v2/docs/security-and-safety.md).
+All gates are **fail-closed** by default. See [Security & Safety](docs/docs/guide/security-and-safety.md).
 
 ---
 
@@ -166,7 +168,7 @@ Then in chat:
 > **You:** "What's my OpenAI key?"
 > **Kazma:** calls `vault_retrieve("openai_key")` → *HITL approval required* → returns value
 
-AES-256-GCM + PBKDF2 (600k iterations). Retrieval and deletion require human approval. See [Skills & Tools → Secret Vault](docs-v2/docs/skills-mcp-and-tools.md#6-secret-vault-encrypted-credential-storage).
+AES-256-GCM + PBKDF2 (600k iterations). Retrieval and deletion require human approval. See [Skills & Tools → Secret Vault](docs/docs/guide/skills-mcp-and-tools.md).
 
 ---
 
@@ -191,7 +193,7 @@ SwarmEngine (when multi-agent is needed)
     └── UnifiedMemoryAdapter (ChromaDB + FTS5 + sqlite-vec, pluggable embeddings)
 ```
 
-Full diagrams in [Architecture](docs-v2/docs/architecture.md).
+Full diagrams in [Architecture](docs/docs/guide/architecture.md).
 
 ---
 
@@ -222,7 +224,7 @@ mypy kazma-core/                # Type check
 
 > **Windows PowerShell:** the venv activation command is `.venv\Scripts\Activate.ps1`, not `source .venv/bin/activate`. See [Quick Start](#-quick-start) above.
 
-See [Development](docs-v2/docs/development.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
+See [Development](docs/docs/guide/development.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

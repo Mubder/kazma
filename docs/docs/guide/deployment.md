@@ -2,7 +2,7 @@
 id: deployment
 title: Deployment
 sidebar_label: Deployment
-description: Kazma Deployment — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Deployment — code-audited reference (unified docs, v0.6.1+)
 ---
 > Production deployment paths for Kazma: Docker Compose (primary), Kubernetes (Hub service), Windows native, and server management. Honest notes on what each artifact actually deploys.
 

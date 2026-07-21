@@ -2,7 +2,7 @@
 id: development
 title: Development
 sidebar_label: Development
-description: Kazma Development — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Development — code-audited reference (unified docs, v0.6.1+)
 ---
 > Repository layout, environment setup, and the test/lint/typecheck commands used across the Kazma monorepo.
 
@@ -17,13 +17,14 @@ kazma/
 ├── kazma-ui/            # FastAPI app, SSE chat, swarm panel, settings, i18n, static assets
 ├── kazma-tui/           # Textual TUI dashboard
 ├── kazma-memory/        # Arabic tokenizer + SQLite/FTS5 search backend
-├── kazma-skills/        # Skill manifests (data)
+├── kazma-skills/        # Native skills + manifests
 ├── kazma-cli/           # The `kazma` command surface
-├── docs/                # Existing Docusaurus site (v3.4)
-├── docs-v2/             # This rewrite
+├── docs/                # Docusaurus site — single SoT (content under docs/docs/)
+├── archive/             # Retired docs (former docs-v2, legacy pages)
 ├── tests/               # Cross-cutting tests
 ├── examples/            # Example skills (e.g. almuhalab_custom_skills)
-├── kubernetes/          # Hub API manifests (see Deployment §4)
+├── scripts/             # Ops: migrate, smoke, tools-catalog regen, …
+├── kubernetes/          # Sample K8s manifests (verify ports vs compose)
 ├── kazma.yaml           # Main config
 ├── kazma-permissions.yaml
 ├── kazma-security.yaml
@@ -141,14 +142,26 @@ commands:
 
 ## 5. The Docusaurus docs site (`docs/`)
 
-The existing docs site is Docusaurus 3.4 (`docs/package.json`):
+Single documentation tree: **`docs/docs/`** (Docusaurus 3.x). Config: `docs/sidebars.js`, `docs/docusaurus.config.js`.
 
 ```bash
-kazma docs build        # npm install && npm run build
-kazma docs serve        # npm run start (port 3000)
+cd docs
+npm install
+npm start               # http://localhost:3000/kazma/
+npm run build
+
+# or via CLI:
+kazma docs build
+kazma docs serve
 ```
 
-This `docs-v2/` tree is **content** intended to be folded into that site (see the integration note in the audit summary). The Docusaurus `sidebars.js` and `docusaurus.config.js` live in `docs/`.
+Regenerate the tools catalog after adding tools:
+
+```bash
+python scripts/generate_tools_catalog.py
+```
+
+Plan & archive policy: `docs/DOCS_CONSOLIDATION_PLAN.md`, `archive/README.md`.
 
 ---
 

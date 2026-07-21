@@ -5,8 +5,10 @@
 Kazma is a multi-platform AI agent framework with a LangGraph supervisor brain,
 swarm orchestration, cross-platform dispatch (Telegram/Discord/Slack/Web/TUI),
 and an OpenAI-compatible LLM provider layer. See `docs/docs/guide/architecture.md`
-(Docusaurus Guide, merged from docs-v2) for the full system architecture and
-`CHANGELOG.md` for recent work. Latest full audit: `docs/audits/AUDIT_FULL_2026-07-18.md`.
+(Docusaurus docs under `docs/docs/`) for the full system architecture and
+`CHANGELOG.md` for recent work. Latest production audit:
+`docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md`. System map:
+`docs/ARCHITECTURE_AND_SYSTEM_MAP.md`.
 
 ## Package Scope
 
@@ -213,8 +215,12 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 
 ## Key References
 
-- `docs-v2/docs/architecture.md` — Full system architecture with data flow diagram
-- `docs/audits/AUDIT_FULL_2026-07-18.md` — Latest full security/architecture audit
-- `CHANGELOG.md` — Sprint history (Sprint 12 = current swarm pro-grade work)
-- `HANDOFF_PHASE5.md` — Detailed file-by-file handoff from the swarm overhaul
-- `HANDOFF_PROMPT.md` — Ready-to-paste onboarding prompt for new agents
+- `docs/docs/intro.md` — Documentation map (single SoT under `docs/docs/`)
+- `docs/docs/guide/architecture.md` — Full system architecture with data flow diagram
+- `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
+- `docs/docs/reference/tools-catalog.md` — Built-in + native tools
+- `docs/docs/ops/production-checklist.md` — Production go-live checklist
+- `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Latest production audit
+- `docs/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan
+- `CHANGELOG.md` — Sprint history
+- `archive/` — Retired docs trees (former `docs-v2`, legacy pages)

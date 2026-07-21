@@ -2,9 +2,9 @@
 id: memory-and-rag
 title: Memory & RAG
 sidebar_label: Memory & RAG
-description: Kazma Memory & RAG — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Memory & RAG — code-audited reference (unified docs, v0.6.1+)
 ---
-> A precise, source-referenced map of Kazma's memory subsystems — **updated July 2026** to reflect the comprehensive memory overhaul (Phases 1–4). All previously-documented bugs and wiring gaps have been fixed.
+> A precise, source-referenced map of Kazma's memory subsystems — post overhaul (Phases 1–4) and kept current for **v0.6.1+**. All previously-documented wiring gaps are closed.
 
 ---
 
@@ -274,6 +274,17 @@ Hardcoded `int(window * 0.8)`. With the default `memory.max_context_tokens: 1280
 
 `TokenCounter` uses `tiktoken` if installed, else a **chars/4 heuristic**. `tiktoken` is **not** a declared dependency — the heuristic is the default.
 
+### 6.5 Before / after (operator intuition)
+
+| State | Rough size | Contents |
+|-------|------------|----------|
+| **Before** (long thread) | Tens of thousands of tokens | Full user/assistant/tool history |
+| **After compaction** | Order of ~1–3k tokens + memories | One system message: conversation summary + `## Relevant Memories` (top hits) |
+
+Goal of compaction: free context window while keeping task goal, key decisions, tool outcomes, and user constraints. Permanent memory still only grows via `memory_store` or compaction auto-store (see honest notes).
+
+> Deeper historical write-up (diagrams, factory params) lives in `archive/docs-loose/compaction.md` — **§6 above is the live SoT**.
+
 ---
 
 ## 7. Honest status notes (updated) {#honest-status-notes}
@@ -296,7 +307,7 @@ These are the items that remain as design decisions or future work (all the bugs
 
 ## Documentation Audit Notes
 
-- **All 8 previously-documented gaps are now closed.** This file was substantially rewritten for the July 2026 memory overhaul.
-- The "three disjoint subsystems" framing is retained but each is now correctly wired — they serve different consumers (chat / swarm / FTS5-layer) rather than being broken duplicates.
-- The `storage.vector_dim: 1536` vs actual 384-d mismatch remains as cosmetic drift (documented, not load-bearing).
-- For the full list of code changes, see the commit history for the memory overhaul (Phases 1–4).
+- **All 8 previously-documented gaps are closed** (memory overhaul Phases 1–4).  
+- Subsystems serve different consumers (chat / swarm / FTS5) — not broken duplicates.  
+- `storage.vector_dim: 1536` vs actual 384-d embedding size remains cosmetic drift.  
+- Archived long-form compaction essay: `archive/docs-loose/compaction.md` (folded into §6).  

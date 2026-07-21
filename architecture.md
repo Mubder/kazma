@@ -1,19 +1,24 @@
 # Kazma Architecture
 
-> **Canonical documentation lives in docs-v2.**
+> **Canonical documentation lives under `docs/docs/` (Docusaurus).**
 
 This root file is a pointer so agent onboarding and `AGENTS.md` links resolve
 without searching.
 
 | Doc | Path |
 |-----|------|
-| Full architecture | [`docs/docs/guide/architecture.md`](docs/docs/guide/architecture.md) (Docusaurus **Guide**) |
+| Docs home | [`docs/docs/intro.md`](docs/docs/intro.md) |
+| Full architecture (Guide) | [`docs/docs/guide/architecture.md`](docs/docs/guide/architecture.md) |
+| Monorepo system map | [`docs/ARCHITECTURE_AND_SYSTEM_MAP.md`](docs/ARCHITECTURE_AND_SYSTEM_MAP.md) |
 | Security & HITL | [`docs/docs/guide/security-and-safety.md`](docs/docs/guide/security-and-safety.md) |
 | Configuration | [`docs/docs/guide/configuration.md`](docs/docs/guide/configuration.md) |
+| Tools catalog | [`docs/docs/reference/tools-catalog.md`](docs/docs/reference/tools-catalog.md) |
 | Swarm | [`docs/docs/guide/swarm-orchestration.md`](docs/docs/guide/swarm-orchestration.md) |
-| Offline map (history) | [`docs-v2/README.md`](docs-v2/README.md) |
-| Latest audit | [`docs/audits/AUDIT_FULL_2026-07-18.md`](docs/audits/AUDIT_FULL_2026-07-18.md) |
+| IDE | [`docs/docs/products/ide.md`](docs/docs/products/ide.md) |
+| Production checklist | [`docs/docs/ops/production-checklist.md`](docs/docs/ops/production-checklist.md) |
+| Latest production audit | [`docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md`](docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md) |
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
+| Archived old docs trees | [`archive/`](archive/) |
 
 ## Package map (quick)
 

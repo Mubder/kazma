@@ -2,7 +2,7 @@
 id: quickstart
 title: Quickstart
 sidebar_label: Quickstart
-description: Kazma Quickstart — code-audited reference (docs-v2 merge, July 2026)
+description: Kazma Quickstart — code-audited reference (unified docs, v0.6.1+)
 ---
 > Get Kazma running and answering messages in under 10 minutes. This guide covers the three install paths and the shortest path to a working chat.
 
