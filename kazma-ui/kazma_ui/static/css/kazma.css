@@ -2334,16 +2334,24 @@ tbody tr:last-child td {
 /* ── Bottom navigation (shown only on Tier 2 phones/tablets) ── */
 .bottom-nav { display: none; }
 @media (max-width: 768px) {
+  /* Shared height so chat/composer can sit above the dock, not under it */
+  :root {
+    --bottom-nav-height: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
   .bottom-nav {
     display: flex;
     position: fixed;
     bottom: 0; left: 0; right: 0;
-    z-index: 250;
+    /* Below chat composer (z-index 260) so the input/mic bar is never covered */
+    z-index: 200;
+    height: var(--bottom-nav-height);
+    box-sizing: border-box;
     background: rgba(14, 20, 27, 0.94);
     backdrop-filter: blur(16px);
     border-top: 1px solid var(--border-subtle);
-    padding: 6px max(8px, env(safe-area-inset-bottom)) 6px;
+    padding: 6px 8px max(6px, env(safe-area-inset-bottom, 0px));
     justify-content: space-around;
+    align-items: center;
   }
   .bottom-nav a, .bottom-nav button.bottom-nav-more {
     flex: 1;
@@ -2355,9 +2363,32 @@ tbody tr:last-child td {
   }
   .bottom-nav a.active { color: var(--accent); }
   .bottom-nav svg { width: 22px; height: 22px; }
-  /* keep content clear of the fixed bottom bar */
-  .page-body { padding-bottom: calc(var(--sp-8) + 56px); }
-  .chat-container { height: calc(100vh - var(--header-height) - 56px) !important; }
+  /* keep page content clear of the fixed bottom bar */
+  .page-body { padding-bottom: calc(var(--sp-8) + var(--bottom-nav-height)); }
+  /* Chat fills space above bottom nav; composer is sticky above the dock */
+  .chat-container {
+    height: calc(100dvh - var(--header-height) - var(--bottom-nav-height)) !important;
+    max-height: calc(100dvh - var(--header-height) - var(--bottom-nav-height)) !important;
+  }
+  .chat-input-area {
+    position: sticky;
+    bottom: 0;
+    z-index: 260;
+    flex-shrink: 0;
+    /* Sit visually above the fixed bottom-nav */
+    margin-bottom: 0;
+    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.28);
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-panel);
+  }
+  /* IDE chat composer — same clearance when mobile dock is visible */
+  .ide-chat-panel .chat-input-row,
+  .chat-input-row {
+    position: sticky;
+    bottom: 0;
+    z-index: 260;
+    background: var(--bg-panel);
+  }
 }
 
 /* Touch devices: guarantee ≥44px tap targets (non-touch stays compact) */
@@ -2456,9 +2487,10 @@ tbody tr:last-child td {
   .breadcrumbs { display: none; }
 
   /* ── Chat layout adjustments ──
-     Override the inline margin:-24px / calc(100vh - 60px) from chat.html. */
+     Keep height clearance for bottom-nav (do not wipe --bottom-nav-height). */
   .chat-container {
-    height: calc(100vh - var(--header-height)) !important;
+    height: calc(100dvh - var(--header-height) - var(--bottom-nav-height, 0px)) !important;
+    max-height: calc(100dvh - var(--header-height) - var(--bottom-nav-height, 0px)) !important;
     margin: 0 !important;
   }
   .chat-messages { padding: var(--sp-3); }
