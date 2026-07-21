@@ -194,52 +194,95 @@ var KazmaIcons = (function () {
     span: function (name, opts) {
       opts = opts || {};
       var cls = 'ki' + (opts.class ? ' ' + opts.class : '');
-      return '<span class="' + cls + '" data-icon="' + name + '" aria-hidden="true">' +
+      // data-ki-done prevents MutationObserver re-writing SVG forever (CPU peg)
+      return '<span class="' + cls + '" data-icon="' + name +
+        '" data-ki-done="' + name + '" aria-hidden="true">' +
         api.get(name, opts) + '</span>';
     },
     /**
-     * Fill every [data-icon] in root with SVG.
+     * Fill every [data-icon] in root with SVG (once per node).
      * Safe to call after Alpine/dynamic HTML inserts.
      */
     hydrate: function (root) {
-      root = root || document;
-      if (!root.querySelectorAll) return;
-      var nodes = root.querySelectorAll('[data-icon]');
-      for (var i = 0; i < nodes.length; i++) {
-        var el = nodes[i];
-        var name = el.getAttribute('data-icon');
-        if (!name) continue;
-        // Avoid double-wrapping if already has svg child matching
-        el.innerHTML = api.get(name);
+      if (api._hydrating) return;
+      api._hydrating = true;
+      try {
+        root = root || document;
+        if (!root || !root.querySelectorAll) return;
+        var list = [];
+        if (root.nodeType === 1 && root.hasAttribute && root.hasAttribute('data-icon')) {
+          list.push(root);
+        }
+        var found = root.querySelectorAll
+          ? root.querySelectorAll('[data-icon]')
+          : [];
+        for (var i = 0; i < found.length; i++) list.push(found[i]);
+        for (var j = 0; j < list.length; j++) {
+          var el = list[j];
+          var name = el.getAttribute('data-icon');
+          if (!name) continue;
+          // Already filled with the same icon — do NOT set innerHTML again
+          // (re-setting SVG children re-triggers MutationObserver → CPU spiral)
+          if (el.getAttribute('data-ki-done') === name && el.querySelector('svg')) {
+            continue;
+          }
+          el.innerHTML = api.get(name);
+          el.setAttribute('data-ki-done', name);
+        }
+      } finally {
+        api._hydrating = false;
       }
     },
   });
 
-  // Auto-hydrate on DOM ready + light mutation observer for dynamic panels
+  // Auto-hydrate on DOM ready. Observer is debounced + re-entrancy safe so
+  // Alpine/chat/dashboard DOM churn cannot peg the CPU.
   if (typeof document !== 'undefined') {
     function boot() {
       try { api.hydrate(document); } catch (e) { /* ignore */ }
-      if (typeof MutationObserver !== 'undefined') {
-        var mo = new MutationObserver(function (mutations) {
-          for (var i = 0; i < mutations.length; i++) {
-            var m = mutations[i];
-            if (m.type === 'childList' && m.addedNodes && m.addedNodes.length) {
-              for (var j = 0; j < m.addedNodes.length; j++) {
-                var n = m.addedNodes[j];
-                if (n.nodeType === 1) {
-                  if (n.hasAttribute && n.hasAttribute('data-icon')) {
-                    n.innerHTML = api.get(n.getAttribute('data-icon'));
-                  }
-                  if (n.querySelectorAll) api.hydrate(n);
-                }
-              }
-            }
-          }
-        });
-        if (document.body) {
-          mo.observe(document.body, { childList: true, subtree: true });
+      if (typeof MutationObserver === 'undefined' || !document.body) return;
+
+      var scheduled = null;
+      var pendingRoots = [];
+
+      function flush() {
+        scheduled = null;
+        if (api._hydrating) return;
+        var roots = pendingRoots;
+        pendingRoots = [];
+        for (var i = 0; i < roots.length; i++) {
+          try { api.hydrate(roots[i]); } catch (e) { /* ignore */ }
         }
       }
+
+      function enqueue(node) {
+        if (!node || node.nodeType !== 1) return;
+        // Skip pure SVG subtrees we just injected
+        if (node.tagName === 'svg' || node.tagName === 'path' ||
+            node.tagName === 'line' || node.tagName === 'polyline' ||
+            node.tagName === 'polygon' || node.tagName === 'circle' ||
+            node.tagName === 'rect' || node.tagName === 'g') {
+          return;
+        }
+        pendingRoots.push(node);
+        if (scheduled == null) {
+          scheduled = (typeof requestAnimationFrame === 'function')
+            ? requestAnimationFrame(flush)
+            : setTimeout(flush, 32);
+        }
+      }
+
+      var mo = new MutationObserver(function (mutations) {
+        if (api._hydrating) return;
+        for (var i = 0; i < mutations.length; i++) {
+          var m = mutations[i];
+          if (m.type !== 'childList' || !m.addedNodes || !m.addedNodes.length) continue;
+          for (var j = 0; j < m.addedNodes.length; j++) {
+            enqueue(m.addedNodes[j]);
+          }
+        }
+      });
+      mo.observe(document.body, { childList: true, subtree: true });
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', boot);
