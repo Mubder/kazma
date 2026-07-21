@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse
@@ -365,6 +365,23 @@ class KazmaAppBuilder:
         # Mount static files
         _STATIC_DIR.mkdir(parents=True, exist_ok=True)
         self.app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+        # Browsers always request /favicon.ico (ignores <link rel="icon"> alone)
+        _favicon = _STATIC_DIR / "img" / "favicon.png"
+        if not _favicon.is_file():
+            _favicon = _STATIC_DIR / "img" / "kazma-icon.png"
+
+        @self.app.get("/favicon.ico", include_in_schema=False)
+        async def _favicon_ico() -> FileResponse:
+            if not _favicon.is_file():
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=404, detail="favicon not found")
+            return FileResponse(
+                path=str(_favicon),
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
 
         # Setup Jinja2 templates (auto_reload=True so template edits
         # are picked up without restarting — essential for development).

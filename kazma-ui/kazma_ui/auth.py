@@ -186,6 +186,7 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/health/ready",
     "/api/status",
     "/api/telemetry",
+    "/favicon.ico",
     # Explicit auth bootstrap (remote clients cannot use loopback auto-cookie)
     "/login",
     "/api/auth/login",
