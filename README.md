@@ -130,7 +130,7 @@ kazma-tui
 
 | Symptom | Likely cause | Fix |
 |---------|----------------|-----|
-| **ERR_CONNECTION_RESET** on `:9090` (Windows) | Port **9090 is forwarded by WSL/Docker `portproxy`**, not Kazma | Run `netsh interface portproxy show all` — if you see `127.0.0.1 9090 → …`, use **`kazma serve 9091`** (or delete that proxy rule) |
+| **ERR_CONNECTION_RESET** on `:9090` (Windows) | Stale WSL/Docker **portproxy** or WSL IP changed | Admin: `.\scripts\wsl_fixed_access.ps1 -Distro Hermes_API_1 -Port 9090` then open **http://127.0.0.1:9090/** (see [WSL fixed access](docs/docs/ops/wsl-fixed-access.md)) |
 | Connection refused | Server not running / wrong port | Start `kazma serve` and use the printed URL |
 | Instant exit: “old hardcoded default” secret | `KAZMA_SECRET=kazma-local-dev-secret` | Unset it or set a new random secret |
 | Instant exit: non-loopback needs secret | `KAZMA_HOST=0.0.0.0` without secret | Set `KAZMA_SECRET` or use `KAZMA_HOST=127.0.0.1` |

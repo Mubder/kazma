@@ -379,6 +379,47 @@ def is_authenticated(request: Request, expected_secret: str = "") -> bool:
     return False
 
 
+def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> bool:
+    """Auth for WebSocket handshakes (cookies/headers only — no middleware path).
+
+    Accepts the same credentials as HTTP:
+      1. ``X-Kazma-Secret`` header
+      2. ``Authorization: Bearer …``
+      3. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
+      4. ``kazma-secret`` legacy cookie
+
+    Without this, browsers that only hold ``kazma-session`` get HTTP 200 on
+    ``/api/*`` but WebSocket ``/ws/dashboard`` 403 (legacy secret-cookie only).
+    """
+    expected = expected_secret or get_kazma_secret()
+    if not expected:
+        return True
+
+    provided = (websocket.headers.get(SECRET_HEADER) or "").strip()
+    if not provided:
+        auth = (websocket.headers.get("authorization") or "").strip()
+        if auth.lower().startswith("bearer "):
+            provided = auth[7:].strip()
+    if not provided:
+        sess = (websocket.cookies.get(SESSION_COOKIE) or "").strip()
+        if sess:
+            try:
+                from kazma_core.security.web_sessions import validate_session
+
+                return bool(validate_session(sess))
+            except Exception:
+                return False
+    if not provided:
+        provided = (websocket.cookies.get(SECRET_COOKIE) or "").strip()
+    if not provided:
+        return False
+    if verify_secret(provided, expected):
+        return True
+    if verify_api_token(provided):
+        return True
+    return False
+
+
 def get_request_principal(request: Request) -> dict[str, Any] | None:
     """Return authenticated principal {username, role, user_id, source} or None."""
     provided = extract_provided_credential(request)
@@ -687,6 +728,7 @@ __all__: list[str] = [
     "verify_api_token",
     "extract_provided_credential",
     "is_authenticated",
+    "websocket_is_authenticated",
     "create_tenant_middleware",
 ]
 

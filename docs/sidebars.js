@@ -59,6 +59,7 @@ const sidebars = {
         'ops/disaster-recovery',
         'ops/multi-region',
         'ops/oidc-setup',
+        'ops/wsl-fixed-access',
       ],
     },
   ],

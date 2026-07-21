@@ -772,17 +772,11 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.websocket("/ws/dashboard")
     async def ws_dashboard(websocket: WebSocket) -> None:
-        from kazma_ui.auth import get_kazma_secret, SECRET_COOKIE
-        expected = get_kazma_secret()
-        if expected:
-            provided = websocket.headers.get("x-kazma-secret", "")
-            if not provided:
-                provided = websocket.cookies.get(SECRET_COOKIE, "")
-            import hmac as _hmac
+        from kazma_ui.auth import websocket_is_authenticated
 
-            if not provided or not _hmac.compare_digest(provided, expected):
-                await websocket.close(code=4003, reason="Unauthorized")
-                return
+        if not websocket_is_authenticated(websocket):
+            await websocket.close(code=4003, reason="Unauthorized")
+            return
         await websocket.accept()
         from kazma_core.shutdown import is_shutting_down
         from kazma_core.tracing import get_trace_store
@@ -815,17 +809,11 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.websocket("/ws/chat")
     async def ws_chat(websocket: WebSocket) -> None:
-        from kazma_ui.auth import get_kazma_secret, SECRET_COOKIE
-        expected2 = get_kazma_secret()
-        if expected2:
-            provided2 = websocket.headers.get("x-kazma-secret", "")
-            if not provided2:
-                provided2 = websocket.cookies.get(SECRET_COOKIE, "")
-            import hmac as _hmac2
+        from kazma_ui.auth import websocket_is_authenticated
 
-            if not provided2 or not _hmac2.compare_digest(provided2, expected2):
-                await websocket.close(code=4003, reason="Unauthorized")
-                return
+        if not websocket_is_authenticated(websocket):
+            await websocket.close(code=4003, reason="Unauthorized")
+            return
         from kazma_ui.chat import chat_websocket_handler
 
         await chat_websocket_handler(websocket, self.agent)
