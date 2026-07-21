@@ -165,7 +165,23 @@ def _run_serve(port: int) -> None:
         print(f"\n  Kazma WebUI running: http://{host}:{port}\n")
 
     import uvicorn
-    uvicorn.run(app, host=host, port=port, log_level="info", timeout_graceful_shutdown=15)
+
+    try:
+        uvicorn.run(app, host=host, port=port, log_level="info", timeout_graceful_shutdown=15)
+    except OSError as exc:
+        # Windows: port often "busy" via WSL/Docker portproxy (svchost), not another Kazma.
+        err = str(exc).lower()
+        if "address already in use" in err or "10048" in err or "errno 98" in err or "errno 48" in err:
+            print(
+                f"\n  [ERROR] Cannot bind {host}:{port} — port is already in use.\n"
+                f"  Try:  kazma serve {port + 1}\n"
+                "  On Windows, check WSL/Docker portproxy:\n"
+                "    netsh interface portproxy show all\n"
+                "  If 127.0.0.1:9090 forwards elsewhere, browsers get ERR_CONNECTION_RESET\n"
+                "  even when Kazma is not running — pick a free port (e.g. 9091).\n"
+            )
+            sys.exit(1)
+        raise
 
 
 def _run_wizard() -> None:

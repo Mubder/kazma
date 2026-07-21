@@ -25,6 +25,8 @@ description: Kazma Quickstart — code-audited reference (unified docs, v0.6.1+)
 
 Choose one path. All three produce the same console scripts: `kazma`, `kazma-tui`, `kazma-web`.
 
+> **Repo README** also has a short Windows-friendly Quick Start (ports, `ERR_CONNECTION_RESET`). Prefer this guide for depth.
+
 ### Path A — Editable install (recommended for development)
 
 ```bash
@@ -52,6 +54,7 @@ source .venv/bin/activate
 
 ```bash
 pip install -e ".[rag,dev]"
+# or: uv sync --all-extras
 ```
 
 - `[rag]` adds `chromadb>=0.5.0` + `sentence-transformers>=3.0.0`.
@@ -155,14 +158,22 @@ The complete key-by-key reference is in [Configuration](configuration).
 ### Web UI (most common)
 
 ```bash
-kazma serve
-# or: kazma-web
-# or: python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090
+kazma serve              # default host 127.0.0.1, port 9090
+kazma serve 9091         # if 9090 is taken (common on Windows + WSL/Docker)
+# or:
+python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9091
 ```
 
-Open `http://127.0.0.1:8000`. You should see the dashboard. Navigate to **Chat** and send a message.
+Open the URL printed in the terminal (e.g. `http://127.0.0.1:9090` or `:9091`). Use **http**, not https. Navigate to **Chat** and send a message.
 
-> **Binding security:** `kazma serve` binds to `127.0.0.1` by default. It switches to `0.0.0.0` only when `KAZMA_SECRET` is set (`kazma-cli/.../main.py:110`). Never expose the server publicly without setting `KAZMA_SECRET` — the HITL approval endpoint is otherwise unauthenticated.
+Smoke-test:
+
+```bash
+curl http://127.0.0.1:9091/health
+```
+
+> **Binding security:** Default host is **`127.0.0.1`**. Non-loopback (`KAZMA_HOST=0.0.0.0`) **requires** a strong `KAZMA_SECRET` or the process exits. On loopback, a secret is auto-generated for the process if unset (not persisted).  
+> **Windows `ERR_CONNECTION_RESET` on :9090:** often a stale WSL/Docker **portproxy** on 9090, not Kazma — see [Troubleshooting §15.0](troubleshooting-and-workarounds#150-browser-err_connection_reset-on-http1270019090-windows) and run `kazma serve 9091`.
 
 ### TUI
 

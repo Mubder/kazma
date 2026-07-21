@@ -28,70 +28,123 @@ Kazma is a multi-platform AI agent framework that lets you build, deploy, and or
 
 ## 🚀 Quick Start
 
-> **Requires Python 3.11+ (3.13 recommended).** Kazma supports Python 3.11 through 3.14.
+> **Requires Python 3.11+** (3.12–3.13 recommended). Declared range: 3.11–3.14.
 
-### Install
+### 1. Clone
 
 ```bash
-git clone https://github.com/Mubder/kazma && cd kazma
+git clone https://github.com/Mubder/kazma.git
+cd kazma
 ```
 
-**Option A — uv (recommended for all platforms):**
+### 2. Install
+
+**Option A — uv (recommended):**
 
 ```bash
-# Install uv if you don't have it (one-time):
-#   Linux / macOS / WSL:   curl -LsSf https://astral.sh/uv/install.sh | sh
-#   Windows (PowerShell):  irm https://astral.sh/uv/install.ps1 | iex
+# Install uv once if needed:
+#   Linux/macOS/WSL:  curl -LsSf https://astral.sh/uv/install.sh | sh
+#   Windows PS:       irm https://astral.sh/uv/install.ps1 | iex
 
-# Create venv with Python 3.13 and install ALL dependencies in one step:
 uv venv --python 3.13
 uv sync --all-extras
+# Activate (optional for `uv run`, required for bare `kazma`):
+#   Linux/macOS:  source .venv/bin/activate
+#   Windows PS:   .venv\Scripts\Activate.ps1
 ```
 
 **Option B — pip + venv:**
 
-**Linux / macOS / WSL:**
-
 ```bash
-python3 -m venv .venv --python 3.13    # or just: python3 -m venv .venv
+# Linux / macOS / WSL
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[all]"                # installs core + rag + dev + tui + observability + web
+pip install -e ".[rag,dev]"
 ```
-
-**Windows (PowerShell):**
 
 ```powershell
+# Windows (PowerShell)
 py -3.13 -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -e ".[all]"
+pip install -e ".[rag,dev]"
 ```
 
-> **WSL note:** If you see `error: externally-managed-environment`, you must use a venv (above) — never `pip install` system-wide on Debian/Ubuntu.
+> **WSL:** If you see `externally-managed-environment`, always use a venv — never system-wide `pip install`.  
+> **Extras:** `rag` = vector memory; `dev` = tests/lint. For a fuller install: `pip install -e ".[all]"` if that extra is defined in your checkout, or `uv sync --all-extras`.
 
-### Configure
+### 3. Configure
 
 ```bash
 # Linux / macOS / WSL
 cp .env.example .env
+```
 
-# Windows (PowerShell)
+```powershell
+# Windows
 Copy-Item .env.example .env
 ```
 
-Edit `.env` — set at least one provider key:
+Edit `.env` — set **at least one** LLM key (example for OpenAI-compatible):
+
 ```dotenv
 OPENAI_API_KEY=sk-...
+# Optional for any non-loopback / multi-user deploy (auto-generated on loopback if unset):
+# KAZMA_SECRET=long-random-string
+# KAZMA_HOST=127.0.0.1
 ```
 
-### Run
+Other providers (DeepSeek, Anthropic, …) are usually configured in the Web UI **Settings → Providers** or `kazma.yaml` after first start — see [Configuration](docs/docs/guide/configuration.md).
+
+### 4. Run the Web UI
 
 ```bash
-kazma serve          # Web UI → http://127.0.0.1:9090
-# or
-kazma-tui            # Terminal dashboard
+# Default bind: 127.0.0.1 , default port: 9090
+kazma serve
+# or explicit port:
+kazma serve 9091
 ```
 
-That's it. Open the dashboard, go to Chat, and start talking.
+```powershell
+# Windows (from repo root, venv active):
+kazma serve 9091
+# equivalent:
+python -m kazma_cli.main serve 9091
+```
+
+Then open the URL printed in the terminal, e.g. **http://127.0.0.1:9091/**  
+(Use **http**, not https, for local serve.)
+
+Health check (server must be running):
+
+```bash
+curl http://127.0.0.1:9091/health
+```
+
+**TUI instead of browser:**
+
+```bash
+kazma-tui
+```
+
+### 5. If the browser can’t open the page
+
+| Symptom | Likely cause | Fix |
+|---------|----------------|-----|
+| **ERR_CONNECTION_RESET** on `:9090` (Windows) | Port **9090 is forwarded by WSL/Docker `portproxy`**, not Kazma | Run `netsh interface portproxy show all` — if you see `127.0.0.1 9090 → …`, use **`kazma serve 9091`** (or delete that proxy rule) |
+| Connection refused | Server not running / wrong port | Start `kazma serve` and use the printed URL |
+| Instant exit: “old hardcoded default” secret | `KAZMA_SECRET=kazma-local-dev-secret` | Unset it or set a new random secret |
+| Instant exit: non-loopback needs secret | `KAZMA_HOST=0.0.0.0` without secret | Set `KAZMA_SECRET` or use `KAZMA_HOST=127.0.0.1` |
+
+Confirm what is listening:
+
+```powershell
+# Windows
+Get-NetTCPConnection -LocalPort 9090 -State Listen -ErrorAction SilentlyContinue |
+  Select-Object OwningProcess
+# Expect a python process when Kazma is up — not only svchost/iphlpsvc
+```
+
+Full guide: [Quickstart](docs/docs/guide/quickstart.md) · [Troubleshooting](docs/docs/guide/troubleshooting-and-workarounds.md) · [Production checklist](docs/docs/ops/production-checklist.md)
 
 ---
 

@@ -676,6 +676,40 @@ Ensure `restore_paused_tasks()` runs on startup (else paused tasks auto-reject o
 
 ## 15. Production bind & auth (v0.6.1+)
 
+### 15.0 Browser ERR_CONNECTION_RESET on http://127.0.0.1:9090 (Windows)
+
+**Symptom:** Edge/Chrome shows “can’t reach this page” / `ERR_CONNECTION_RESET` on port **9090**. Health curl also fails. You may think Kazma is broken after a pull.
+
+**Cause (common):** Windows **IP Helper / `portproxy`** (WSL2, Docker Desktop, Hyper-V) is listening on `127.0.0.1:9090` and forwarding to a **dead WSL IP**. That is **not** the Kazma Python process. Confirm:
+
+```powershell
+netsh interface portproxy show all
+# typical bad row:
+# 127.0.0.1  9090  →  172.x.x.x  9090
+
+Get-NetTCPConnection -LocalPort 9090 -State Listen |
+  Select-Object OwningProcess
+# if OwningProcess is svchost (iphlpsvc), Kazma is not serving that port
+```
+
+**Fix:**
+
+```powershell
+# Easiest: run Kazma on a free port
+kazma serve 9091
+# open http://127.0.0.1:9091/
+
+# Optional: remove stale proxy (Admin PowerShell) if you own that rule:
+# netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=9090
+```
+
+Verify Kazma (not the proxy):
+
+```powershell
+curl http://127.0.0.1:9091/health
+# expect JSON with "status":"ok"
+```
+
 ### 15.1 Server won't start on public bind without secret
 
 **Cause:** CLI/serve refuse non-loopback bind when `KAZMA_SECRET` is missing, or refuse the known-bad historical default secret.
