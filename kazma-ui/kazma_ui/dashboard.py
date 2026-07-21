@@ -104,20 +104,43 @@ def _get_trace_data() -> list[dict[str, Any]]:
     return traces
 
 
+def _format_uptime(uptime_seconds: float) -> str:
+    """Human-readable process uptime for the dashboard card."""
+    secs = max(0, int(uptime_seconds))
+    if secs < 60:
+        return f"{secs}s"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m"
+    hours = mins // 60
+    rem_m = mins % 60
+    if hours < 48:
+        return f"{hours}h {rem_m}m"
+    days = hours // 24
+    rem_h = hours % 24
+    return f"{days}d {rem_h}h"
+
+
 def _get_metrics() -> dict[str, Any]:
-    """Get aggregate metrics from the trace store."""
+    """Get aggregate metrics from the in-memory TraceStore.
+
+    Returns **numeric** totals for cost/tokens/calls so the dashboard JS can
+    format them (legacy string forms like ``"$0.12"`` / ``"1,234"`` broke
+    ``Number()`` and painted NaN/0 on refresh).
+    """
     from kazma_core.tracing import get_trace_store
 
     store = get_trace_store()
     stats = store.stats()
-    uptime_mins = int(stats["uptime_seconds"] / 60)
+    uptime_s = float(stats.get("uptime_seconds") or 0)
     return {
-        "total_cost": f"${stats['total_cost']:.4f}",
-        "total_tokens": f"{stats['total_tokens']:,}",
-        "total_llm_calls": stats["total_llm_calls"],
-        "total_tool_calls": stats["total_tool_calls"],
-        "total_traces": stats["total_traces"],
-        "uptime": f"{uptime_mins}m" if uptime_mins < 60 else f"{uptime_mins // 60}h {uptime_mins % 60}m",
+        "total_cost": float(stats.get("total_cost") or 0.0),
+        "total_tokens": int(stats.get("total_tokens") or 0),
+        "total_llm_calls": int(stats.get("total_llm_calls") or 0),
+        "total_tool_calls": int(stats.get("total_tool_calls") or 0),
+        "total_traces": int(stats.get("total_traces") or 0),
+        "uptime_seconds": uptime_s,
+        "uptime": _format_uptime(uptime_s),
     }
 
 
@@ -157,6 +180,21 @@ async def dashboard(request: Request) -> HTMLResponse:
     if _tracer:
         tracing_backend = _tracer.backend.value
 
+    raw_metrics = _get_metrics()
+    # Prefer TraceStore totals for the cost card when the cost breaker is
+    # still at zero (e.g. breaker not yet wired) but LLM traces accumulated.
+    display_cost = max(float(cost_current or 0.0), float(raw_metrics.get("total_cost") or 0.0))
+    if display_cost > cost_current:
+        cost_current = display_cost
+        cost_headroom = max(0.0, cost_max - cost_current)
+
+    # Template expects display strings for some fields (legacy SSR)
+    metrics_ssr = {
+        **raw_metrics,
+        "total_cost": f"${raw_metrics['total_cost']:.4f}",
+        "total_tokens": f"{raw_metrics['total_tokens']:,}",
+    }
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -170,7 +208,7 @@ async def dashboard(request: Request) -> HTMLResponse:
             "silence_info": silence_info,
             "tracing_backend": tracing_backend,
             "traces": _get_trace_data(),
-            "metrics": _get_metrics(),
+            "metrics": metrics_ssr,
             "active_page": "dashboard",
         },
     )

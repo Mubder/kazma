@@ -36,20 +36,25 @@ async def web_search_duckduckgo(query: str, limit: int = 5) -> str:
         return f"Error executing web search: {e}"
 
 
-async def crawl_page(url: str) -> str:
-    """Fetch **one** public URL and extract readable text (``read_url`` alias).
+async def crawl_page(
+    url: str,
+    offset: int = 0,
+    max_chars: int | None = None,
+) -> str:
+    """Fetch **one** public URL and extract a readable text window (``read_url``).
 
-    Not a multi-page site crawler. Uses httpx + extraction, then optional
-    Playwright for bot walls / thin JS shells.
+    Not a multi-page site crawler. Supports offset/max_chars paging.
 
     Args:
         url: The URL of the web page to fetch.
+        offset: Character offset into the full extract.
+        max_chars: Window size (default from KAZMA_READ_URL_MAX_CHARS).
 
     Returns:
         Extracted text content, or an error message.
     """
     try:
-        return await read_url(url)
+        return await read_url(url, offset=offset, max_chars=max_chars)
     except Exception as e:
         logger.error("Error crawling webpage: %s", e)
         return f"Error crawling webpage: {e}"

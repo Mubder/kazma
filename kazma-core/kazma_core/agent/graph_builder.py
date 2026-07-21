@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -74,14 +75,47 @@ logger = logging.getLogger(__name__)
 
 _PERSONALITY_MARKER = "[KAZMA_PERSONALITY]"
 
-TOOL_RESULT_MAX_CHARS = 4000
+# Default cap for ordinary tools (env-overridable).
+TOOL_RESULT_MAX_CHARS = int(
+    os.environ.get("KAZMA_TOOL_RESULT_MAX_CHARS", "4000") or "4000"
+)
+# Higher cap for research / web-read tools so long pages can reach the model.
+TOOL_RESULT_RESEARCH_MAX_CHARS = int(
+    os.environ.get("KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS", "16000") or "16000"
+)
+_RESEARCH_TOOL_NAMES = frozenset(
+    {
+        "read_url",
+        "crawl_page",
+        "crawl_site",
+        "read_url_to_file",
+        "list_research_chunks",
+        "read_research_chunk",
+        "summarize_research_file",
+        "digest_research_file",
+        "web_search",
+        "web_search_duckduckgo",
+    }
+)
 
 
-def truncate_tool_result(content: str, max_chars: int = TOOL_RESULT_MAX_CHARS) -> str:
-    """Truncate tool result content to *max_chars* with a truncation marker.
+def truncate_tool_result(
+    content: str,
+    max_chars: int | None = None,
+    *,
+    tool_name: str | None = None,
+) -> str:
+    """Truncate tool result content with a truncation marker.
 
-    If *content* is shorter than *max_chars*, it is returned unchanged.
+    Research tools (``read_url``, chunk tools, …) use a higher default cap
+    (``KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS``, default 16000) so paging and
+    research workflows are not cut to 4k after a successful scrape.
     """
+    if max_chars is None:
+        if tool_name and tool_name in _RESEARCH_TOOL_NAMES:
+            max_chars = max(4000, min(100_000, TOOL_RESULT_RESEARCH_MAX_CHARS))
+        else:
+            max_chars = max(500, min(100_000, TOOL_RESULT_MAX_CHARS))
     if len(content) > max_chars:
         original_len = len(content)
         return content[:max_chars] + f"\n[truncated {original_len - max_chars} chars]"
@@ -701,7 +735,7 @@ async def tool_worker_node(
 
             # ── Truncation middleware ──────────────────────────────────
             raw_content = result.get("content", "")
-            content = truncate_tool_result(raw_content)
+            content = truncate_tool_result(raw_content, tool_name=tc.get("name"))
             if len(content) != len(raw_content):
                 logger.info(
                     "[ToolWorker] Truncated result from %s (%d → %d chars)", tc["name"], len(raw_content), len(content)

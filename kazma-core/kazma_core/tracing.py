@@ -75,11 +75,14 @@ class TraceStore:
                     "cost": f"${entry.cost:.4f}",
                 },
                 "metrics": {
-                    "total_cost": f"${self._total_cost:.4f}",
-                    "total_tokens": f"{self._total_tokens:,}",
+                    # Numeric values only — UI formats for display.
+                    # (String forms like "$0.00" / "1,234" break Number() in JS.)
+                    "total_cost": round(self._total_cost, 6),
+                    "total_tokens": self._total_tokens,
                     "total_llm_calls": self._total_llm_calls,
                     "total_tool_calls": self._total_tool_calls,
                     "total_traces": len(self._traces),
+                    "uptime_seconds": time.time() - self._start_time,
                 },
             }
         )

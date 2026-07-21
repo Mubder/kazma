@@ -1100,19 +1100,91 @@ class LocalToolRegistry:
             logger.debug("web_search not available (missing duckduckgo-search)")
 
         try:
-            from kazma_core.tools.read_url import read_url
+            from kazma_core.tools.read_url import (
+                digest_research_file,
+                list_research_chunks,
+                read_research_chunk,
+                read_url,
+                read_url_to_file,
+                summarize_research_file,
+            )
+
             self.register_function(
                 "read_url",
                 read_url,
                 description=(
-                    "Fetch one public URL and extract readable text (httpx + trafilatura; "
-                    "Playwright stealth if bot wall or thin JS shell). SSRF-safe. "
-                    "Single page only, ~8k char cap — not a multi-page crawler or anti-bot guarantee."
+                    "Fetch one public URL; text window (default ~16k, KAZMA_READ_URL_MAX_CHARS). "
+                    "Args: url, offset=0, max_chars=None. Optional backends: "
+                    "KAZMA_FIRECRAWL_API_KEY, KAZMA_JINA_READER=1, KAZMA_FETCH_BACKEND. "
+                    "Full page: read_url_to_file; multi-page: crawl_site; long digest: digest_research_file."
+                ),
+                category="search",
+            )
+            self.register_function(
+                "read_url_to_file",
+                read_url_to_file,
+                description=(
+                    "Fetch URL and save FULL extract anywhere under the workspace "
+                    "(default folder KAZMA_RESEARCH_DIR=research). Args: url, path=workspace-relative."
+                ),
+                category="search",
+            )
+            self.register_function(
+                "list_research_chunks",
+                list_research_chunks,
+                description=(
+                    "List chunk indices and previews for a saved research file. "
+                    "Args: path, chunk_size=4000."
+                ),
+                category="search",
+            )
+            self.register_function(
+                "read_research_chunk",
+                read_research_chunk,
+                description=(
+                    "Read one chunk of a saved research file. "
+                    "Args: path, chunk_index=0, chunk_size=4000."
+                ),
+                category="search",
+            )
+            self.register_function(
+                "summarize_research_file",
+                summarize_research_file,
+                description=(
+                    "Light extractive outline (per-chunk previews). "
+                    "Args: path, chunk_size=4000, max_chunks=40."
+                ),
+                category="search",
+            )
+            self.register_function(
+                "digest_research_file",
+                digest_research_file,
+                description=(
+                    "Walk ALL chunks in-tool and return one bounded extractive digest "
+                    "(default ~12k via KAZMA_RESEARCH_DIGEST_MAX). Context-safe for long files. "
+                    "Args: path, chunk_size=4000, max_output_chars=12000."
                 ),
                 category="search",
             )
         except ImportError:
-            logger.debug("read_url not available (missing trafilatura)")
+            logger.debug("read_url / research tools not available (missing trafilatura)")
+
+        try:
+            from kazma_core.tools.web_research import crawl_site
+
+            self.register_function(
+                "crawl_site",
+                crawl_site,
+                description=(
+                    "Bounded multi-page crawl (same-domain by default). "
+                    "Args: start_url, max_pages=8 (hard max 50), max_depth=2, same_domain_only=True, "
+                    "delay_ms=300, save=True, path_prefix=optional. Saves pages under workspace; "
+                    "returns markdown index. SSRF-safe; not unlimited spidering."
+                ),
+                category="search",
+            )
+        except ImportError:
+            logger.debug("crawl_site not available")
 
         try:
             from kazma_core.tools.image_gen import generate_image

@@ -77,8 +77,9 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 ### What you can do for the user
 1. **Chat & reason** — answer, plan, research with tools.
 2. **Code in the workspace** — `file_read` / `file_write` / `file_list` / `file_search`, `shell_exec`, `python_exec` / `code_exec` (HITL on writes/exec).
-3. **Web** — `web_search` (SearXNG → DuckDuckGo → Bing), `read_url` / `crawl_page` (one URL; Playwright fallback for bot walls / thin JS shells). Native skill `advanced-web-crawler` wraps these + `parse_document`. **Not** multi-page crawl or anti-bot invincible.
+3. **Web / research** — `web_search`; `read_url` (paging); `read_url_to_file` (full save **anywhere in workspace**, default `KAZMA_RESEARCH_DIR`); `crawl_site` (bounded same-domain multi-page); `list_research_chunks` / `read_research_chunk` / `summarize_research_file` / **`digest_research_file`** (all chunks → one context-safe digest). Optional harder fetch: `KAZMA_FIRECRAWL_API_KEY`, `KAZMA_JINA_READER=1`. Still not anti-bot invincible; crawl is capped.
 4. **Git & GitHub** — status, commit, push/pull, PRs/issues when tools + auth available.
+
 5. **Swarm** — multi-worker tasks via `/swarm` or IDE *send to swarm*; workers get workspace env context.
 6. **Memory** — recall prior facts when RAG is on; store durable notes with memory tools if available.
 7. **Configure guidance** — explain Settings → Providers, `kazma.yaml`, env vars (`KAZMA_SECRET`, `KAZMA_HOST`, `KAZMA_WORKSPACE`, `OPENAI_API_KEY`, `KAZMA_SEARXNG_URL`, …). Never invent secrets; never print raw vault keys.

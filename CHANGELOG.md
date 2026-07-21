@@ -32,6 +32,9 @@ Security and reliability hardening from
 - **Product knowledge**: inject Kazma self-knowledge into supervisor prompt (capabilities, how-to, troubleshooting); enforce Arabic brand **كاظمه/كاظمة** and forbid **كازما** (language lock + workers)
 - **Chat SSE**: prevent double `onDone` that painted a false “No response received” bubble after good replies
 - **Web tools**: browser-like UA; Playwright on thin/JS shells as well as bot walls; honest tool/skill descriptions (single-page, not anti-bot invincible)
+- **Dashboard metrics**: return numeric cost/tokens (API + WS); JS no longer `Number("$0.00")` → NaN after refresh; cost card uses max(trace store, cost breaker)
+- **Research web tools**: `KAZMA_READ_URL_MAX_CHARS` (default 16k) + `offset`/`max_chars` paging; higher graph truncate for research tools (`KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS`); `read_url_to_file` + `list_research_chunks` / `read_research_chunk` / `summarize_research_file`
+- **Research depth**: `crawl_site` (bounded same-domain multi-page); optional Firecrawl/Jina backends; workspace-anywhere saves (`KAZMA_RESEARCH_DIR`); `digest_research_file` for context-safe full-file digests
 
 ### Phase 3–4 follow-up
 - Turn wall-clock timeout (`KAZMA_TURN_TIMEOUT_SECONDS`, default 600s)

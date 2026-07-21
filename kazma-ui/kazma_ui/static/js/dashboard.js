@@ -80,46 +80,99 @@
   }
 
   // ── Metrics Rendering ─────────────────────────────────
+  /** Parse "$1.23" / "1,234" / 1234 into a finite number (legacy-safe). */
+  function parseMetricNumber(value) {
+    if (value == null || value === '') return 0;
+    if (typeof value === 'number' && isFinite(value)) return value;
+    var s = String(value).replace(/[$,\s]/g, '').trim();
+    var n = Number(s);
+    return isFinite(n) ? n : 0;
+  }
+
+  function formatUptime(seconds) {
+    var secs = Math.max(0, Math.floor(Number(seconds) || 0));
+    if (secs < 60) return secs + 's';
+    var mins = Math.floor(secs / 60);
+    if (mins < 60) return mins + 'm';
+    var hours = Math.floor(mins / 60);
+    var remM = mins % 60;
+    if (hours < 48) return hours + 'h ' + remM + 'm';
+    var days = Math.floor(hours / 24);
+    return days + 'd ' + (hours % 24) + 'h';
+  }
+
   function updateMetrics(data) {
     var metrics = data.metrics || data;
 
-    // Metric cards
-    setMetric('metric-cost', '$' + (Number(metrics.total_cost || '0').toFixed(4)));
-    setMetric('metric-tokens', KS.formatTokens(metrics.total_tokens));
-    setMetric('metric-tools', String(metrics.total_tool_calls || 0));
-    setMetric('metric-traces', String(metrics.total_traces || 0));
-    setMetric('metric-llm-calls', String(metrics.total_llm_calls || 0));
-    setMetric('metric-uptime', metrics.uptime || '0m');
+    var totalCost = parseMetricNumber(metrics.total_cost);
+    var totalTokens = parseMetricNumber(metrics.total_tokens);
+    var toolCalls = parseMetricNumber(metrics.total_tool_calls);
+    var traces = parseMetricNumber(metrics.total_traces);
+    var llmCalls = parseMetricNumber(metrics.total_llm_calls);
 
-    // Circuit breaker
+    // Cost: prefer max(trace-store total, cost-breaker current) so cards stay real
+    var breakerCost = data.cost ? parseMetricNumber(data.cost.current) : 0;
+    var displayCost = Math.max(totalCost, breakerCost);
+    var headroom = data.cost ? parseMetricNumber(data.cost.headroom) : 0;
+    if (data.cost && breakerCost < totalCost) {
+      var maxBudget = parseMetricNumber(data.cost.max) || 0.5;
+      headroom = Math.max(0, maxBudget - totalCost);
+    }
+
+    setMetric('metric-cost', '$' + displayCost.toFixed(4));
+    // Keep trailing label from SSR when present (i18n "headroom")
+    var headEl = $('metric-headroom');
+    if (headEl) {
+      var headLabel = (headEl.textContent || '').replace(/\$[\d.,]+/, '').trim() || 'headroom';
+      headEl.textContent = '$' + headroom.toFixed(4) + (headLabel ? ' ' + headLabel : '');
+    }
+    setMetric('metric-tokens', KS.formatTokens(totalTokens));
+    setMetric('metric-tools', String(Math.round(toolCalls)));
+    // Sub-lines under tokens / tools cards — preserve SSR labels when possible
+    var llmEl = $('metric-llm-calls');
+    if (llmEl) {
+      var llmLabel = (llmEl.textContent || '').replace(/^[\d,.\s]+/, '').trim() || 'LLM calls';
+      llmEl.textContent = Math.round(llmCalls) + ' ' + llmLabel;
+    }
+    var tracesEl = $('metric-traces');
+    if (tracesEl) {
+      var trLabel = (tracesEl.textContent || '').replace(/^[\d,.\s]+/, '').trim() || 'traces';
+      tracesEl.textContent = Math.round(traces) + ' ' + trLabel;
+    }
+
+    if (metrics.uptime) {
+      setMetric('metric-uptime', metrics.uptime);
+    } else if (metrics.uptime_seconds != null) {
+      setMetric('metric-uptime', formatUptime(metrics.uptime_seconds));
+    }
+
+    // Cost circuit breaker (budget halt) — not swarm worker breakers
     if (data.circuit_breaker) {
       var cb = data.circuit_breaker;
       var breakerEl = $('metric-breaker');
       if (cb.is_halted) {
         if (breakerEl) { breakerEl.textContent = 'HALTED'; breakerEl.style.color = 'var(--danger)'; }
+      } else if (displayCost > 0 && headroom < 0.01 && data.cost) {
+        if (breakerEl) { breakerEl.textContent = 'WARNING'; breakerEl.style.color = 'var(--warning)'; }
       } else {
         if (breakerEl) { breakerEl.textContent = 'OK'; breakerEl.style.color = 'var(--success)'; }
       }
     }
 
-    // Cost info
-    if (data.cost) {
-      var headroom = data.cost.headroom || 0;
-      var current = data.cost.current || 0;
-      setMetric('metric-cost', '$' + current.toFixed(4));
-      setMetric('metric-headroom', '$' + headroom.toFixed(4));
-      var costEl = $('metric-cost');
-      if (headroom < 0.01 && costEl) costEl.style.color = 'var(--danger)';
-      else if (headroom < 0.10 && costEl) costEl.style.color = 'var(--warning)';
+    var costEl = $('metric-cost');
+    if (costEl) {
+      if (headroom < 0.01 && data.cost) costEl.style.color = 'var(--danger)';
+      else if (headroom < 0.10 && data.cost) costEl.style.color = 'var(--warning)';
+      else costEl.style.color = 'var(--text-primary)';
     }
 
     // Add to history for charts
     historyData.push({
       time: Date.now(),
-      tokens: Number(metrics.total_tokens || 0),
-      cost: Number(metrics.total_cost || 0),
-      tools: Number(metrics.total_tool_calls || 0),
-      traces: Number(metrics.total_traces || 0),
+      tokens: totalTokens,
+      cost: displayCost,
+      tools: toolCalls,
+      traces: traces,
     });
     if (historyData.length > maxHistory) historyData.shift();
   }

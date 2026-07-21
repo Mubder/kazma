@@ -43,11 +43,18 @@ def test_should_try_playwright_for_thin() -> None:
     assert ru._should_try_playwright("<p>ok</p>", 200, extracted="x" * 300) is False
 
 
-def test_truncate() -> None:
-    short = "hello"
-    assert ru._truncate(short) == "hello"
-    long = "z" * (ru.MAX_CONTENT_CHARS + 50)
-    out = ru._truncate(long)
-    assert "truncated" in out
-    assert out.startswith("z" * ru.MAX_CONTENT_CHARS)
-    assert len(long) == ru.MAX_CONTENT_CHARS + 50
+def test_slice_window_paging() -> None:
+    full = "A" * 5000 + "B" * 5000
+    first = ru._slice_window(full, offset=0, max_chars=1000)
+    assert "chars 0:1000 of 10000" in first
+    assert "next offset=1000" in first
+    assert first.endswith("A" * 1000) or "A" * 1000 in first
+    second = ru._slice_window(full, offset=1000, max_chars=1000)
+    assert "chars 1000:2000 of 10000" in second
+
+
+def test_slice_window_default_max_from_env(monkeypatch) -> None:
+    monkeypatch.setenv("KAZMA_READ_URL_MAX_CHARS", "2000")
+    full = "x" * 5000
+    out = ru._slice_window(full, offset=0, max_chars=None)
+    assert "chars 0:2000 of 5000" in out
