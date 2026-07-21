@@ -29,6 +29,7 @@ Security and reliability hardening from
 - docker-compose: vector path for `USER kazma`, `/health` check, prod env defaults
 - `.env.example` + `SECURITY.md` threat model updated for 0.6.x
 - **Portability hygiene**: `rbac` / `audit_logger` default DBs via `paths.py` (project root, not bare CWD); restored `docs/docs/ops/portability.md`
+- **Product knowledge**: inject Kazma self-knowledge into supervisor prompt (capabilities, how-to, troubleshooting); enforce Arabic brand **كاظمه/كاظمة** and forbid **كازما** (language lock + workers)
 
 ### Phase 3–4 follow-up
 - Turn wall-clock timeout (`KAZMA_TURN_TIMEOUT_SECONDS`, default 600s)

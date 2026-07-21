@@ -236,6 +236,13 @@ The ChromaDB-backed memory used by the `memory_search`/`memory_store` tools (`me
 
 ---
 
+## K
+
+**Kazma (كاظمه)**
+The product name in Latin script is **Kazma**. Correct Arabic brand forms are **كاظمه** (preferred) and **كاظمة**. The spelling **كازما** (with ز) is wrong and must not be used. Product self-knowledge is injected via `kazma_core.product_knowledge` into the supervisor system prompt.
+
+---
+
 ## W
 
 **Worker**

@@ -196,6 +196,22 @@ class KazmaAgent:
         )
         self.system_prompt = self.config.system_prompt or self._default_system_prompt()
 
+        # ── Product self-knowledge (identity, Arabic name, how-to) ──
+        # Always append unless already present so ConfigStore/YAML overrides
+        # still get correct branding + capability map.
+        try:
+            from kazma_core.product_knowledge import (
+                build_product_knowledge,
+                knowledge_already_present,
+            )
+
+            if not knowledge_already_present(self.system_prompt):
+                self.system_prompt = (
+                    self.system_prompt.rstrip() + "\n\n" + build_product_knowledge()
+                )
+        except Exception:
+            logger.debug("[agent_runner] product knowledge injection skipped", exc_info=True)
+
         # Inject cultural context enrichment
         try:
             from kazma_core.cultural_context_enrichment import get_cultural_prompt_suffix
@@ -264,11 +280,13 @@ class KazmaAgent:
 
     def _default_system_prompt(self) -> str:
         return (
-            "You are Kazma, an autonomous AI agent framework. "
+            "You are Kazma (Arabic: كاظمه / كاظمة — never كازما), "
+            "an autonomous multi-platform AI agent framework. "
             "You are capable of understanding Arabic dialects including Kuwaiti/Gulf Arabic "
             "when the user speaks Arabic, but your default response language is always "
             "determined by the user's input language. "
-            "\n\nBe helpful, precise, and culturally aware. "
+            "\n\nBe helpful, precise, and culturally aware. Teach users how to use Kazma "
+            "(chat, IDE, swarm, settings, HITL, memory) when they ask about the product. "
             "\n\nCRITICAL LANGUAGE RULE: You MUST respond in the EXACT language the user "
             "writes in. Arabic input = Arabic output. English input = English output. "
             "If they mix, match their pattern. If the input is gibberish or unclear, "

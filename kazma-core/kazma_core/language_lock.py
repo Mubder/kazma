@@ -44,23 +44,31 @@ def detect_user_language(text: str) -> str:
 def language_lock_message(user_text: str) -> str:
     """System message enforcing reply language for this turn only."""
     lang = detect_user_language(user_text)
+    # Branding: كاظمه/كاظمة only — never the wrong phonetic كازما.
+    _name_ar = (
+        "NAME: In Arabic refer to yourself as كاظمه (or كاظمة). "
+        "Never write كازما."
+    )
     if lang == "en":
         return (
             "LANGUAGE LOCK (this turn): The user wrote in ENGLISH. "
             "You MUST reply in English only. Do NOT use Arabic script. "
             "Do NOT greet in Arabic. Cultural context does NOT override this. "
-            "Code, paths, and tool names stay as-is."
+            "Code, paths, and tool names stay as-is. "
+            "Your English product name is Kazma."
         )
     if lang == "ar":
         return (
             "LANGUAGE LOCK (this turn): The user wrote in ARABIC. "
-            "You MUST reply in Arabic. English only for code/paths/identifiers."
+            "You MUST reply in Arabic. English only for code/paths/identifiers. "
+            f"{_name_ar}"
         )
     if lang == "mixed":
         return (
             "LANGUAGE LOCK (this turn): The user mixed Arabic and English. "
             "Mirror their mix; default the bulk of the reply to the language "
-            "they used more. Do not force pure Arabic or pure English."
+            "they used more. Do not force pure Arabic or pure English. "
+            f"{_name_ar}"
         )
     return (
         "LANGUAGE LOCK (this turn): User language unclear — reply in English "
