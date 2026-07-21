@@ -133,7 +133,7 @@
                         <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>
                     </template>
                     <template x-if="!hubTestResult.success">
-                        <span class="text-error">✗ <span x-text="hubTestResult.error"></span></span>
+                        <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
             </div>
@@ -209,7 +209,7 @@
                         <span class="text-success">{{ t('settings.connected') }} <span x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
                     </template>
                     <template x-if="!hubTestResult.success">
-                        <span class="text-error">✗ <span x-text="hubTestResult.error"></span></span>
+                        <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
             </div>
@@ -259,7 +259,7 @@
                                 <label>{{ t('settings.api_key') }}</label>
                                 <div class="input-with-toggle">
                                     <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" placeholder="AI Studio Key (AIzaSy...)">
-                                    <button class="btn btn-icon" @click="hubShowProviderKey = !hubShowProviderKey" x-text="hubShowProviderKey ? '🙈' : '👁'"></button>
+                                    <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? 'Hide' : 'Show'" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -298,7 +298,7 @@
                             <label>{{ t('settings.api_key') }}</label>
                             <div class="input-with-toggle">
                                 <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" placeholder="sk-...">
-                                <button class="btn btn-icon" @click="hubShowProviderKey = !hubShowProviderKey" x-text="hubShowProviderKey ? '🙈' : '👁'"></button>
+                                <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? 'Hide' : 'Show'" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                             </div>
                             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>
                         </div>
@@ -347,7 +347,7 @@
                     <label>{{ t('settings.token') }}</label>
                     <div class="input-with-toggle">
                         <input :type="hubShowConnectorToken ? 'text' : 'password'" class="form-input" x-model="hubEditingConnector.token" placeholder="token / key">
-                        <button class="btn btn-icon" @click="hubShowConnectorToken = !hubShowConnectorToken" x-text="hubShowConnectorToken ? '🙈' : '👁'"></button>
+                        <button class="btn btn-icon" type="button" @click="hubShowConnectorToken = !hubShowConnectorToken" :title="hubShowConnectorToken ? 'Hide' : 'Show'" x-html="hubShowConnectorToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                     </div>
                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>
                 </div>
@@ -445,7 +445,7 @@
                     <label>{{ t('settings.api_key') }}</label>
                     <div class="input-with-toggle">
                         <input :type="hubShowProfileKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProfile.api_key" placeholder="sk-...">
-                        <button class="btn btn-icon" @click="hubShowProfileKey = !hubShowProfileKey" x-text="hubShowProfileKey ? '🙈' : '👁'"></button>
+                        <button class="btn btn-icon" type="button" @click="hubShowProfileKey = !hubShowProfileKey" :title="hubShowProfileKey ? 'Hide' : 'Show'" x-html="hubShowProfileKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                     </div>
                 </div>
                 <div class="form-group">
@@ -1032,7 +1032,7 @@
 
         <!-- Secret Vault -->
         <div class="settings-group">
-            <h3>🔐 Secret Vault</h3>
+            <h3><span class="ki" data-icon="lock" aria-hidden="true"></span> Secret Vault</h3>
             <div style="padding:12px 16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
                 <div>
                     <div style="font-weight:600;font-size:0.95rem">
@@ -1137,12 +1137,12 @@
                                 <span style="font-size:0.88rem;font-weight:600;color:var(--text-primary);" x-text="extra.name"></span>
                                 <span class="badge"
                                       :class="extra.installed ? 'badge-success' : (extra.partial ? 'badge-warning' : 'badge-warning')"
-                                      style="font-size:0.62rem;padding:2px 7px;border-radius:10px;"
-                                      x-text="extra.installed
-                                        ? ('✓ ' + t('packages.installed_badge'))
+                                      style="font-size:0.62rem;padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:4px;"
+                                      x-html="extra.installed
+                                        ? (KazmaIcons.get('check') + ' ' + t('packages.installed_badge'))
                                         : (extra.partial
                                           ? ('~ Partial (' + (extra.installed_count || 0) + '/' + (extra.package_count || 0) + ')')
-                                          : ('✗ ' + t('packages.missing_badge')))"></span>
+                                          : (KazmaIcons.get('x') + ' ' + t('packages.missing_badge')))"></span>
                             </div>
                             <p style="margin:0;font-size:0.78rem;color:var(--text-secondary);line-height:1.5;" x-text="extra.description"></p>
                         </div>

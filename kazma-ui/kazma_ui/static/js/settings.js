@@ -1840,7 +1840,7 @@ function settingsApp() {
         async systemReset() {
             if (!(await window.kazmaConfirm({
                 title: 'Reset all settings',
-                message: '⚠️ This will reset ALL settings to defaults. Are you sure?',
+                message: '[!]  This will reset ALL settings to defaults. Are you sure?',
                 confirmText: 'Reset',
                 danger: true,
             }))) return;

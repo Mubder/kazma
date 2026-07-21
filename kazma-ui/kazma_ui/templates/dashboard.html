@@ -50,25 +50,25 @@
   <!-- ── Metrics Row ── -->
   <div class="metrics-grid">
     <div class="metric-card">
-      <div class="metric-icon">💰</div>
+      <div class="metric-icon"><span class="ki" data-icon="dollar-sign" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('dashboard.total_cost') }}</div>
       <div class="metric-value" id="metric-cost">${{ "%.4f"|format(cost_current) }}</div>
       <div class="metric-sub" id="metric-headroom">${{ "%.4f"|format(cost_headroom) }} {{ t('dashboard.headroom') }}</div>
     </div>
     <div class="metric-card">
-      <div class="metric-icon">🔢</div>
+      <div class="metric-icon"><span class="ki" data-icon="hash" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('dashboard.total_tokens') }}</div>
       <div class="metric-value" id="metric-tokens">{{ metrics.total_tokens }}</div>
       <div class="metric-sub" id="metric-llm-calls">{{ metrics.total_llm_calls }} {{ t('dashboard.llm_calls') }}</div>
     </div>
     <div class="metric-card">
-      <div class="metric-icon">🔧</div>
+      <div class="metric-icon"><span class="ki" data-icon="wrench" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('dashboard.tool_calls') }}</div>
       <div class="metric-value" id="metric-tools">{{ metrics.total_tool_calls }}</div>
       <div class="metric-sub" id="metric-traces">{{ metrics.total_traces }} {{ t('dashboard.traces_count') }}</div>
     </div>
     <div class="metric-card">
-      <div class="metric-icon">🔌</div>
+      <div class="metric-icon"><span class="ki" data-icon="plug" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('dashboard.circuit_breaker') }}</div>
       <div class="metric-value {{ breaker_color }}" id="metric-breaker">{{ breaker_status }}</div>
       <div class="metric-sub">{{ tracing_backend }} {{ t('dashboard.backend') }}</div>
@@ -118,7 +118,7 @@
   <!-- ── Memory & Governance ── -->
   <div id="memory-governance-section" class="chart-card" style="margin-bottom:1.5rem;">
     <h3 class="chart-title" style="display:flex;align-items:center;justify-content:space-between;margin:0;">
-      <span>🧠 {{ t('dashboard.memory_governance') }}</span>
+      <span><span class="ki" data-icon="brain" aria-hidden="true"></span> {{ t('dashboard.memory_governance') }}</span>
       <span id="memory-status-badge" style="font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;">{{ t('dashboard.memory_active') }}</span>
     </h3>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border-subtle);padding-bottom:14px;">
@@ -147,7 +147,7 @@
     <!-- Expansion Deck Toggle -->
     <div style="margin-top:12px;">
       <button id="toggle-maintenance-deck" style="background:transparent;border:none;color:var(--text-link);font-size:0.85rem;font-weight:600;cursor:pointer;padding:4px 0;display:flex;align-items:center;gap:6px;outline:none;">
-        <span id="deck-toggle-arrow">▶</span> {{ t('dashboard.backup_maintenance') }}
+        <span id="deck-toggle-arrow"><span class="ki" data-icon="play" aria-hidden="true"></span></span> {{ t('dashboard.backup_maintenance') }}
       </button>
     </div>
 
@@ -174,7 +174,7 @@
         <div style="display:flex;flex-direction:column;justify-content:center;gap:10px;background:rgba(255,255,255,0.01);border:1px dashed var(--border-subtle);border-radius:8px;padding:12px 16px;">
           <button id="trigger-backup-btn" class="btn btn-sm btn-success" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <span class="spinner" id="backup-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
-            💾 {{ t('dashboard.create_backup') }}
+            <span class="ki" data-icon="save" aria-hidden="true"></span> {{ t('dashboard.create_backup') }}
           </button>
           <button id="trigger-optimize-btn" class="btn btn-sm btn-primary" style="width:100%;font-size:0.8rem;padding:8px;border-radius:6px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:6px;">
             <span class="spinner" id="optimize-spinner" style="display:none;width:12px;height:12px;border:2px solid #fff;border-top-color:transparent;border-radius:50%;animation:spin 0.8s linear infinite;"></span>
@@ -225,7 +225,7 @@
         <div class="skeleton" style="height:40px;"></div>
       </div>
       <div id="sessions-empty" style="display:none;text-align:center;padding:40px 20px;color:var(--text-muted);">
-        <div style="font-size:2rem;margin-bottom:8px;">📭</div>
+        <div style="font-size:2rem;margin-bottom:8px;"><span class="ki" data-icon="inbox" aria-hidden="true"></span></div>
         <p>{{ t('dashboard.no_active_sessions') }}</p>
         <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.sessions_hint') }}</p>
       </div>
@@ -286,7 +286,7 @@
     </div>
     {% if not traces %}
     <div style="text-align:center;padding:40px 20px;color:var(--text-muted);">
-      <div style="font-size:2rem;margin-bottom:8px;">📊</div>
+      <div style="font-size:2rem;margin-bottom:8px;"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span></div>
       <p>{{ t('dashboard.no_traces') }}</p>
       <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('dashboard.no_traces_hint') }}</p>
     </div>
@@ -745,11 +745,11 @@
   toggleBtn.addEventListener('click', () => {
     if (deck.style.display === 'none') {
       deck.style.display = 'block';
-      arrow.textContent = '▼';
+      arrow.innerHTML = (window.KazmaIcons ? KazmaIcons.get('chevron-down') : '');
       loadBackups();
     } else {
       deck.style.display = 'none';
-      arrow.textContent = '▶';
+      arrow.innerHTML = (window.KazmaIcons ? KazmaIcons.get('play') : '');
     }
   });
 

@@ -322,7 +322,7 @@ function ideApp() {
     async newFile() {
       var name = window.kazmaPrompt
         ? await window.kazmaPrompt({
-            title: '📄 New file',
+            title: 'New file',
             message: 'Path (relative to workspace root)',
             placeholder: 'e.g. src/new_module.py',
             defaultValue: 'new_file.py',
@@ -630,13 +630,13 @@ function ideApp() {
             self.chatStream = null;
           },
           onError: function (errMsg) {
-            self.chatMessages[asstIdx].content += '\n\n⚠️ ' + (errMsg || 'Stream error');
+            self.chatMessages[asstIdx].content += '\n\n[!] ' + (errMsg || 'Stream error');
             self.chatBusy = false;
             self.chatStream = null;
           },
         });
       } catch (err) {
-        self.chatMessages[asstIdx].content += '\n\n⚠️ ' + err;
+        self.chatMessages[asstIdx].content += '\n\n[!] ' + err;
         self.chatBusy = false;
         self.chatStream = null;
       }

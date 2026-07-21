@@ -875,6 +875,30 @@ button { cursor: pointer; font-family: inherit; }
 .btn svg, .btn-xs svg, .btn-sm svg { width: 14px; height: 14px; flex-shrink: 0; }
 .btn-lg svg { width: 18px; height: 18px; flex-shrink: 0; }
 
+/* KazmaIcons host (.ki) — high-quality SVG stand-in for emoji */
+.ki {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: -0.125em;
+  line-height: 1;
+  color: inherit;
+  flex-shrink: 0;
+}
+.ki svg {
+  width: 1em;
+  height: 1em;
+  display: block;
+}
+.ki.icon-sm svg, .icon-sm.ki svg { width: 14px; height: 14px; }
+.ki.icon-md svg, .icon-md.ki svg { width: 16px; height: 16px; }
+.ki.icon-lg svg, .icon-lg.ki svg { width: 20px; height: 20px; }
+.metric-icon .ki svg { width: 1.25rem; height: 1.25rem; }
+.nav-icon .ki svg,
+.nav-icon svg { width: 18px; height: 18px; }
+.btn .ki { margin-inline-end: 0.15em; }
+.btn .ki:only-child { margin-inline-end: 0; }
+
 .btn-icon {
   padding: var(--sp-1);
   background: none;

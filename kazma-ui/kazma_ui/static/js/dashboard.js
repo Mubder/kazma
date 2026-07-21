@@ -50,12 +50,12 @@
     var el = $('connection-status');
     if (!el) return;
     var states = {
-      'connected': { text: '● Live', color: 'var(--success)' },
-      'disconnected': { text: '● Disconnected', color: 'var(--danger)' },
-      'connecting': { text: '● Connecting…', color: 'var(--warning)' },
-      'reconnecting': { text: '● Reconnecting…', color: 'var(--warning)' },
+      'connected': { text: '• Live', color: 'var(--success)' },
+      'disconnected': { text: '• Disconnected', color: 'var(--danger)' },
+      'connecting': { text: '• Connecting…', color: 'var(--warning)' },
+      'reconnecting': { text: '• Reconnecting…', color: 'var(--warning)' },
     };
-    var state = states[status] || { text: '● ' + status, color: 'var(--text-muted)' };
+    var state = states[status] || { text: '• ' + status, color: 'var(--text-muted)' };
     el.textContent = state.text;
     el.style.color = state.color;
   }

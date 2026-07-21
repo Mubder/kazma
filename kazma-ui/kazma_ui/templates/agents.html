@@ -58,7 +58,7 @@
       <div class="metric-sub" x-text="agent.running ? (agent.agent_state === 'idle' ? t('agents.waiting') : agent.agent_state) : (agent.last_activity || t('agents.idle'))"></div>
     </div>
     <div class="metric-card">
-      <div class="metric-icon">🧠</div>
+      <div class="metric-icon"><span class="ki" data-icon="brain" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('agents.state_label') }}</div>
       <div class="metric-value" id="metric-state">
         <span x-text="agent.agent_state"
@@ -67,7 +67,7 @@
       <div class="metric-sub">{{ t('agents.state_hint') }}</div>
     </div>
     <div class="metric-card">
-      <div class="metric-icon">🔧</div>
+      <div class="metric-icon"><span class="ki" data-icon="wrench" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('agents.tool_calls') }}</div>
       <div class="metric-value" id="metric-tool-calls"
             x-text="(agent.metrics && agent.metrics.total_tool_calls) || 0"
@@ -75,7 +75,7 @@
       <div class="metric-sub">{{ t('agents.executions') }}</div>
     </div>
     <div class="metric-card">
-      <div class="metric-icon">🔢</div>
+      <div class="metric-icon"><span class="ki" data-icon="hash" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('agents.llm_calls') }}</div>
       <div class="metric-value" id="metric-llm-calls"
             x-text="(agent.metrics && agent.metrics.total_llm_calls) || 0"
@@ -83,7 +83,7 @@
       <div class="metric-sub">{{ t('agents.inferences') }}</div>
     </div>
     <div class="metric-card">
-      <div class="metric-icon">📊</div>
+      <div class="metric-icon"><span class="ki" data-icon="bar-chart" aria-hidden="true"></span></div>
       <div class="metric-label">{{ t('agents.sessions') }}</div>
       <div class="metric-value" id="metric-sessions"
             x-text="agent.session_count || 0"
@@ -106,7 +106,7 @@
       <div style="max-height:420px;overflow-y:auto;">
         <template x-if="toolHistory.length === 0">
           <div style="text-align:center;padding:40px 20px;color:var(--text-muted);">
-            <div style="font-size:2rem;margin-bottom:8px;">🔧</div>
+            <div style="font-size:2rem;margin-bottom:8px;"><span class="ki" data-icon="wrench" aria-hidden="true"></span></div>
             <p>{{ t('agents.no_executions') }}</p>
             <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('agents.executions_hint') }}</p>
           </div>
@@ -143,7 +143,7 @@
       <div style="max-height:420px;overflow-y:auto;">
         <template x-if="reasoningSteps.length === 0">
           <div style="text-align:center;padding:40px 20px;color:var(--text-muted);">
-            <div style="font-size:2rem;margin-bottom:8px;">🧠</div>
+            <div style="font-size:2rem;margin-bottom:8px;"><span class="ki" data-icon="brain" aria-hidden="true"></span></div>
             <p>{{ t('agents.no_traces') }}</p>
             <p style="font-size:0.8rem;color:var(--text-tertiary);">{{ t('agents.traces_hint') }}</p>
           </div>
@@ -216,7 +216,7 @@
     <!-- Registered Tools -->
     <div class="card">
       <h3 style="font-size:0.9rem;font-weight:600;margin-bottom:16px;">
-        🛠️ {{ t('agents.registered_tools') }}
+        <span class="ki" data-icon="wrench" aria-hidden="true"></span> {{ t('agents.registered_tools') }}
         <span style="font-size:0.75rem;color:var(--text-muted);font-weight:400;margin-left:8px;"
               x-text="((agent.tools && agent.tools.count) || 0) + ' ' + t('agents.available')"></span>
       </h3>

@@ -58,9 +58,9 @@
         <h2>{{ t('chat.welcome_title') }}</h2>
         <p>{{ t('chat.welcome_subtitle') }}</p>
         <div class="welcome-hints">
-          <button class="hint-chip" onclick="document.getElementById('chat-input').value='Explain how Kazma swarms work';KazmaChat.sendMessage()">🐝 {{ t('nav.swarm') }}</button>
-          <button class="hint-chip" onclick="document.getElementById('chat-input').value='Write a Python script to analyze logs';KazmaChat.sendMessage()">🐍 Python</button>
-          <button class="hint-chip" onclick="document.getElementById('chat-input').value='/yolo';KazmaChat.sendMessage()" title="Skip danger-tool approvals for this session">🚀 /yolo</button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='Explain how Kazma swarms work';KazmaChat.sendMessage()"><span class="ki" data-icon="swarm" aria-hidden="true"></span> {{ t('nav.swarm') }}</button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='Write a Python script to analyze logs';KazmaChat.sendMessage()"><span class="ki" data-icon="code" aria-hidden="true"></span> Python</button>
+          <button class="hint-chip" onclick="document.getElementById('chat-input').value='/yolo';KazmaChat.sendMessage()" title="Skip danger-tool approvals for this session"><span class="ki" data-icon="rocket" aria-hidden="true"></span> /yolo</button>
           <button class="hint-chip" onclick="document.getElementById('chat-input').value='/help';KazmaChat.sendMessage()">/? help</button>
         </div>
       </div>

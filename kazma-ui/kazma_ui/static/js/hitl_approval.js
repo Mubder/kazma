@@ -72,14 +72,15 @@
       return (
         '<div class="hitl-approval-card" data-thread-id="' + threadId + '">' +
         '  <div class="hitl-approval-header">' +
-        '    <span class="hitl-tool-name">🔧 ' + toolName + '</span>' +
+        '    <span class="hitl-tool-name">' +
+        (window.KazmaIcons ? KazmaIcons.span('wrench') : '') + ' ' + toolName + '</span>' +
         '    <span class="hitl-thread-id">' + threadId + '</span>' +
         '  </div>' +
         (message ? '<div class="hitl-approval-message">' + message + '</div>' : '') +
         '  <div class="hitl-approval-args"><pre>' + argsStr + '</pre></div>' +
         '  <div class="hitl-approval-actions">' +
         '    <button class="btn btn-sm btn-success hitl-approve-btn" data-thread-id="' + threadId + '" data-scope="once">' +
-        '      ✓ Once' +
+        '      ' + (window.KazmaIcons ? KazmaIcons.span('check') : '') + ' Once' +
         '    </button>' +
         '    <button class="btn btn-sm btn-primary hitl-approve-tool-btn" data-thread-id="' + threadId + '" data-scope="tool" data-tool="' + toolName + '">' +
         '      Allow tool' +
@@ -88,7 +89,7 @@
         '      YOLO' +
         '    </button>' +
         '    <button class="btn btn-sm btn-danger hitl-deny-btn" data-thread-id="' + threadId + '">' +
-        '      ✕ Deny' +
+        '      ' + (window.KazmaIcons ? KazmaIcons.span('x') : '') + ' Deny' +
         '    </button>' +
         '    <span class="hitl-approval-status" style="display:none;"></span>' +
         '  </div>' +
@@ -149,7 +150,13 @@
 
       if (resp.status === 202) {
         if (statusEl) {
-          statusEl.textContent = approve ? '✓ Approved — agent resuming' : '✕ Denied';
+          if (window.KazmaIcons) {
+            statusEl.innerHTML = approve
+              ? (KazmaIcons.span('check') + ' Approved — agent resuming')
+              : (KazmaIcons.span('x') + ' Denied');
+          } else {
+            statusEl.textContent = approve ? 'Approved — agent resuming' : 'Denied';
+          }
           statusEl.className = 'hitl-approval-status hitl-status-' + (approve ? 'ok' : 'denied');
         }
         // Remove the card after a short delay
