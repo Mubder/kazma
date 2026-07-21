@@ -1086,17 +1086,31 @@ class LocalToolRegistry:
         # ── Register tools from kazma_core/tools/ ──────────────────────
         try:
             from kazma_core.tools.web_search import web_search
-            self.register_function("web_search", web_search,
-                description="Search the web using DuckDuckGo. Returns markdown results with titles, URLs, and snippets.",
-                category="search")
+            self.register_function(
+                "web_search",
+                web_search,
+                description=(
+                    "Search the public web (SearXNG if configured, else DuckDuckGo, "
+                    "Bing HTML last). Returns markdown titles/URLs/snippets. "
+                    "Not guaranteed against rate limits; prefer KAZMA_SEARXNG_URL for reliability."
+                ),
+                category="search",
+            )
         except ImportError:
             logger.debug("web_search not available (missing duckduckgo-search)")
 
         try:
             from kazma_core.tools.read_url import read_url
-            self.register_function("read_url", read_url,
-                description="Fetch and extract readable content from a URL. Returns text content.",
-                category="search")
+            self.register_function(
+                "read_url",
+                read_url,
+                description=(
+                    "Fetch one public URL and extract readable text (httpx + trafilatura; "
+                    "Playwright stealth if bot wall or thin JS shell). SSRF-safe. "
+                    "Single page only, ~8k char cap — not a multi-page crawler or anti-bot guarantee."
+                ),
+                category="search",
+            )
         except ImportError:
             logger.debug("read_url not available (missing trafilatura)")
 

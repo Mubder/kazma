@@ -194,14 +194,24 @@ class ToolRegistry:
     def _register_builtin_tools(self) -> None:
         """Register all pre-existing tools as registry entries."""
         # Register directly — simpler than tuple mapping
-        self._register_builtin("web_search", "kazma_core.tools.web_search", "web_search",
-                               PermissionLevel.READ_ONLY, "DuckDuckGo web search")
+        self._register_builtin(
+            "web_search",
+            "kazma_core.tools.web_search",
+            "web_search",
+            PermissionLevel.READ_ONLY,
+            "Web search (SearXNG / DuckDuckGo / Bing fallback)",
+        )
         self._register_builtin("file_read", "kazma_core.tools.file_read", "file_read",
                                PermissionLevel.READ_ONLY, "Read local files")
         self._register_builtin("file_write", "kazma_core.tools.file_write", "file_write",
                                PermissionLevel.SYSTEM_EXEC, "Write files to disk")
-        self._register_builtin("read_url", "kazma_core.tools.read_url", "read_url",
-                               PermissionLevel.READ_ONLY, "Read web pages")
+        self._register_builtin(
+            "read_url",
+            "kazma_core.tools.read_url",
+            "read_url",
+            PermissionLevel.READ_ONLY,
+            "Fetch one URL and extract text (Playwright fallback)",
+        )
         self._register_builtin("vision_analyze", "kazma_core.tools.vision_analyze", "analyze_image",
                                PermissionLevel.READ_ONLY, "AI vision analysis")
 

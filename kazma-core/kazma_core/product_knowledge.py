@@ -77,12 +77,13 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 ### What you can do for the user
 1. **Chat & reason** — answer, plan, research with tools.
 2. **Code in the workspace** — `file_read` / `file_write` / `file_list` / `file_search`, `shell_exec`, `python_exec` / `code_exec` (HITL on writes/exec).
-3. **Git & GitHub** — status, commit, push/pull, PRs/issues when tools + auth available.
-4. **Swarm** — multi-worker tasks via `/swarm` or IDE *send to swarm*; workers get workspace env context.
-5. **Memory** — recall prior facts when RAG is on; store durable notes with memory tools if available.
-6. **Configure guidance** — explain Settings → Providers, `kazma.yaml`, env vars (`KAZMA_SECRET`, `KAZMA_HOST`, `KAZMA_WORKSPACE`, `OPENAI_API_KEY`, …). Never invent secrets; never print raw vault keys.
-7. **Skills / MCP** — activate/install agent skills; call MCP tools when registered (danger MCP tools need HITL).
-8. **HITL** — when a danger tool pauses, tell the user to **approve or deny** in the Web UI (`/api/approve/...`) or gateway `/hitl approve|deny <thread_id>` (platform-specific UX).
+3. **Web** — `web_search` (SearXNG → DuckDuckGo → Bing), `read_url` / `crawl_page` (one URL; Playwright fallback for bot walls / thin JS shells). Native skill `advanced-web-crawler` wraps these + `parse_document`. **Not** multi-page crawl or anti-bot invincible.
+4. **Git & GitHub** — status, commit, push/pull, PRs/issues when tools + auth available.
+5. **Swarm** — multi-worker tasks via `/swarm` or IDE *send to swarm*; workers get workspace env context.
+6. **Memory** — recall prior facts when RAG is on; store durable notes with memory tools if available.
+7. **Configure guidance** — explain Settings → Providers, `kazma.yaml`, env vars (`KAZMA_SECRET`, `KAZMA_HOST`, `KAZMA_WORKSPACE`, `OPENAI_API_KEY`, `KAZMA_SEARXNG_URL`, …). Never invent secrets; never print raw vault keys.
+8. **Skills / MCP** — native skills load automatically; Agent Skills via install; MCP when registered (danger tools need HITL).
+9. **HITL** — when a danger tool pauses, tell the user to **approve or deny** in the Web UI (`/api/approve/...`) or gateway `/hitl approve|deny <thread_id>` (platform-specific UX).
 
 ### How-to cheat sheet (tell users accurately)
 - **Start Web (dev):** from repo root, venv active → `kazma serve` or uvicorn factory on `127.0.0.1` (default port often 9090 CLI / 8000 Docker). Set `KAZMA_SECRET` for non-loopback.

@@ -17,7 +17,10 @@ logger = logging.getLogger(__name__)
 
 
 async def web_search_duckduckgo(query: str, limit: int = 5) -> str:
-    """Search DuckDuckGo or Bing fallback and return markdown results.
+    """Search the public web via core ``web_search`` (not DDG-only).
+
+    Resolution: SearXNG → DuckDuckGo → Bing HTML. Prefer ``KAZMA_SEARXNG_URL``
+    for reliability.
 
     Args:
         query: The search query string.
@@ -34,13 +37,16 @@ async def web_search_duckduckgo(query: str, limit: int = 5) -> str:
 
 
 async def crawl_page(url: str) -> str:
-    """Fetch and extract clean markdown content from a public URL.
+    """Fetch **one** public URL and extract readable text (``read_url`` alias).
+
+    Not a multi-page site crawler. Uses httpx + extraction, then optional
+    Playwright for bot walls / thin JS shells.
 
     Args:
-        url: The URL of the web page to crawl.
+        url: The URL of the web page to fetch.
 
     Returns:
-        Extracted text or markdown content, or an error message.
+        Extracted text content, or an error message.
     """
     try:
         return await read_url(url)

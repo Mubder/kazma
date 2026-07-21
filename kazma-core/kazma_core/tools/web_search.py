@@ -1,11 +1,12 @@
 """Web search tool — SearXNG / DuckDuckGo / Bing search returning markdown.
 
 Resolution order:
-    1. SearXNG (if KAZMA_SEARXNG_URL set or localhost:8088 detected) — aggregates 70+ engines
-    2. DuckDuckGo library (always available)
-    3. Bing HTML scrape (fallback)
+    1. SearXNG (if KAZMA_SEARXNG_URL set or localhost:8088 responds) — best free reliability
+    2. DuckDuckGo library (may rate-limit)
+    3. Bing HTML scrape (fragile last resort)
 
-All paths are optional — Kazma works without SearXNG installed.
+Not a paid search API (Tavily/Brave/Serper). For production reliability, run
+SearXNG and set ``KAZMA_SEARXNG_URL``. Kazma works without it.
 
 Usage:
     from kazma_core.tools.web_search import web_search
@@ -131,7 +132,12 @@ def _run_search(query: str, max_results: int) -> list[dict[str, str]]:
         import urllib.parse
 
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0'
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
         }
         url = f"https://www.bing.com/search?q={urllib.parse.quote_plus(query)}"
         r = httpx.get(url, headers=headers, follow_redirects=True, timeout=10)
@@ -247,7 +253,10 @@ def _run_search(query: str, max_results: int) -> list[dict[str, str]]:
 
 
 async def web_search(query: str, max_results: int = 5) -> str:
-    """Search the web using DuckDuckGo or Bing fallback and return results as markdown.
+    """Search the public web; return markdown titles, URLs, and snippets.
+
+    Prefers SearXNG when available, then DuckDuckGo, then Bing HTML.
+    Results can be empty under rate limits — not an anti-block guarantee.
 
     Args:
         query: Search query string.

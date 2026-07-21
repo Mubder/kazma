@@ -30,6 +30,8 @@ Security and reliability hardening from
 - `.env.example` + `SECURITY.md` threat model updated for 0.6.x
 - **Portability hygiene**: `rbac` / `audit_logger` default DBs via `paths.py` (project root, not bare CWD); restored `docs/docs/ops/portability.md`
 - **Product knowledge**: inject Kazma self-knowledge into supervisor prompt (capabilities, how-to, troubleshooting); enforce Arabic brand **كاظمه/كاظمة** and forbid **كازما** (language lock + workers)
+- **Chat SSE**: prevent double `onDone` that painted a false “No response received” bubble after good replies
+- **Web tools**: browser-like UA; Playwright on thin/JS shells as well as bot walls; honest tool/skill descriptions (single-page, not anti-bot invincible)
 
 ### Phase 3–4 follow-up
 - Turn wall-clock timeout (`KAZMA_TURN_TIMEOUT_SECONDS`, default 600s)
