@@ -733,7 +733,7 @@
       var hfEl = $('handoff-' + taskId);
       if (hfEl) {
         hfEl.style.display = 'block';
-        hfEl.innerHTML += '<span class="badge badge-info" style="margin-right:4px;">' + esc(data.from) + ' → ' + esc(data.to) + '</span>';
+        hfEl.innerHTML += '<span class="badge badge-info" style="margin-right:4px;">' + esc(data.from) + ' -> ' + esc(data.to) + '</span>';
       }
     });
 
@@ -989,7 +989,7 @@
           html += '<span style="padding:4px 8px;border-radius:var(--radius-xs);background:rgba(255,255,255,0.04);font-size:0.75rem;border:1px solid var(--border-subtle);">';
           html += '<span style="color:' + stepColor + ';">' + esc(wr.worker) + '</span>';
           html += '</span>';
-          if (idx < r.worker_results.length - 1) html += '<span style="color:var(--text-muted);">→</span>';
+          if (idx < r.worker_results.length - 1) html += '<span style="color:var(--text-muted);">-></span>';
         });
         html += '</div>';
       } else if (pattern === 'fan_out' && r.worker_results && r.worker_results.length) {
@@ -1288,7 +1288,7 @@
       return;
     }
 
-    var patternIcons = {dispatch:'',broadcast:'',pipeline:'🔗',fan_out:'🌀',consult:'',conditional:''};
+    var patternIcons = {dispatch:'',broadcast:'',pipeline:'',fan_out:'',consult:'',conditional:''};
     tbody.innerHTML = tasks.map(function(t) {
       var icon = patternIcons[t.type] || '';
       var statusColor = t.status === 'completed' ? 'var(--success)' : (t.status === 'failed' || t.status === 'cancelled') ? 'var(--danger)' : 'var(--warning)';
@@ -1457,7 +1457,7 @@
         if (wr.error) html += '<div style="color:var(--danger);font-size:0.8rem;margin-top:4px;">[!]  ' + esc(wr.error) + '</div>';
         // Handoffs
         if (wr.handoffs && wr.handoffs.length) {
-          html += '<div style="margin-top:6px;font-size:0.8rem;color:var(--info);">' + esc(t('swarm.handoff')) + wr.handoffs.map(function(h) { return esc(h.from_worker) + ' → ' + esc(h.to_worker); }).join(', ') + '</div>';
+          html += '<div style="margin-top:6px;font-size:0.8rem;color:var(--info);">' + esc(t('swarm.handoff')) + wr.handoffs.map(function(h) { return esc(h.from_worker) + ' -> ' + esc(h.to_worker); }).join(', ') + '</div>';
         }
         html += '</div>';
       });
@@ -1965,7 +1965,7 @@
         updatePipelineDiagram();
       };
       hitlLabel.appendChild(hitlCheck);
-      hitlLabel.appendChild(document.createTextNode('⏸ HITL'));
+      hitlLabel.appendChild(document.createTextNode(' HITL'));
       card.appendChild(hitlLabel);
 
       var timeoutInput = document.createElement('input');
@@ -1983,7 +1983,7 @@
 
       var btnUp = document.createElement('button');
       btnUp.className = 'btn btn-sm btn-secondary';
-      btnUp.innerHTML = '▲';
+      btnUp.innerHTML = '';
       btnUp.style.cssText = 'padding:2px 6px;font-size:0.65rem;height:24px;line-height:1;';
       btnUp.disabled = (index === 0);
       btnUp.onclick = function(e) {
@@ -1994,7 +1994,7 @@
 
       var btnDown = document.createElement('button');
       btnDown.className = 'btn btn-sm btn-secondary';
-      btnDown.innerHTML = '▼';
+      btnDown.innerHTML = '';
       btnDown.style.cssText = 'padding:2px 6px;font-size:0.65rem;height:24px;line-height:1;';
       btnDown.disabled = (index === pipelineStages.length - 1);
       btnDown.onclick = function(e) {
@@ -2006,7 +2006,7 @@
 
       var btnDelete = document.createElement('button');
       btnDelete.className = 'btn btn-sm btn-danger';
-      btnDelete.innerHTML = '🗑️';
+      btnDelete.innerHTML = '';
       btnDelete.style.cssText = 'padding:2px 6px;font-size:0.7rem;height:24px;line-height:1;';
       btnDelete.onclick = function(e) {
         e.stopPropagation();
@@ -2113,7 +2113,7 @@
       var stepNum = index + 1;
       var label = t('swarm.step_n', {n: stepNum}) + ': ' + escapeMermaidLabel(stage.worker);
       if (stage.hitl) {
-        label = '⏸ ' + label;
+        label = ' ' + label;
       }
       var nodeName = 'Step' + stepNum;
       lines.push('  ' + nodeName + '["' + label + '"]');
@@ -2327,7 +2327,7 @@
 
     source.addEventListener('checkpoint', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('⏸', esc(t('swarm.hitl_checkpoint')) + (Number(d.step) || 0) + esc(t('swarm.awaiting_confirm')));
+      addPipelineTerminalLine('', esc(t('swarm.hitl_checkpoint')) + (Number(d.step) || 0) + esc(t('swarm.awaiting_confirm')));
       
       var hitlGate = $('pipeline-hitl-gate');
       var hitlPreview = $('pipeline-hitl-preview');
@@ -2340,7 +2340,7 @@
 
     source.addEventListener('handoff', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('', esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
+      addPipelineTerminalLine((window.KazmaIcons ? '-> ' : ''), esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span>  <span class="badge badge-accent">' + esc(d.to) + '</span>');
     });
 
     source.addEventListener('task_completed', function(e) {
@@ -2606,7 +2606,7 @@
 
     source.addEventListener('checkpoint', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('⏸', esc(t('swarm.hitl_checkpoint')) + (Number(d.step) || 0) + esc(t('swarm.awaiting_confirm')));
+      addTerminalLine('', esc(t('swarm.hitl_checkpoint')) + (Number(d.step) || 0) + esc(t('swarm.awaiting_confirm')));
       
       var hitlGate = $('play-hitl-gate');
       var hitlPreview = $('play-hitl-preview');
@@ -2622,7 +2622,7 @@
 
     source.addEventListener('handoff', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('', esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
+      addTerminalLine('', esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span>  <span class="badge badge-accent">' + esc(d.to) + '</span>');
     });
 
     source.addEventListener('task_completed', function(e) {

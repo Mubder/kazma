@@ -119,6 +119,11 @@ var KazmaIcons = (function () {
     'sliders': function (o) { return wrap('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>', o); },
     'log-out': function (o) { return wrap('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>', o); },
     'user': function (o) { return wrap('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>', o); },
+    'smile': function (o) { return wrap('<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>', o); },
+    'book': function (o) { return wrap('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>', o); },
+    'pause': function (o) { return wrap('<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>', o); },
+    'chevron-left': function (o) { return wrap('<polyline points="15 18 9 12 15 6"/>', o); },
+    'chevron-up': function (o) { return wrap('<polyline points="18 15 12 9 6 15"/>', o); },
     'monitor': function (o) { return wrap('<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>', o); },
     'construction': function (o) { return wrap('<rect x="2" y="6" width="20" height="8" rx="1"/><path d="M17 14v7"/><path d="M7 14v7"/><path d="M17 3v3"/><path d="M7 3v3"/><path d="M10 14 2.3 6.3"/><path d="m14 6 7.7 7.7"/><path d="m8 6 8 8"/>', o); },
     'box': function (o) { return wrap('<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" y1="22" x2="12" y2="12"/>', o); },
@@ -156,6 +161,16 @@ var KazmaIcons = (function () {
     '🐳': 'box',
     '📢': 'volume',
     '☰': 'list',
+    '😊': 'smile', '🙂': 'smile',
+    '⚡': 'zap',
+    '📚': 'book',
+    '🐧': 'bot',
+    '⏸': 'pause', '⏸️': 'pause',
+    '⏹': 'square', '⏹️': 'square',
+    '↻': 'refresh', '↺': 'refresh',
+    '←': 'chevron-left', '→': 'chevron-right',
+    '▲': 'chevron-up', '▼': 'chevron-down',
+    '➜': 'chevron-right',
   };
 
   // Expose every icon as a direct property (KazmaIcons.save(), KazmaIcons.folder(), …)
@@ -235,54 +250,12 @@ var KazmaIcons = (function () {
     },
   });
 
-  // Auto-hydrate on DOM ready. Observer is debounced + re-entrancy safe so
-  // Alpine/chat/dashboard DOM churn cannot peg the CPU.
+  // Hydrate once on DOM ready only — no MutationObserver.
+  // Dynamic HTML should use KazmaIcons.span()/get() (already includes SVG) or
+  // call KazmaIcons.hydrate(root) explicitly after insert.
   if (typeof document !== 'undefined') {
     function boot() {
       try { api.hydrate(document); } catch (e) { /* ignore */ }
-      if (typeof MutationObserver === 'undefined' || !document.body) return;
-
-      var scheduled = null;
-      var pendingRoots = [];
-
-      function flush() {
-        scheduled = null;
-        if (api._hydrating) return;
-        var roots = pendingRoots;
-        pendingRoots = [];
-        for (var i = 0; i < roots.length; i++) {
-          try { api.hydrate(roots[i]); } catch (e) { /* ignore */ }
-        }
-      }
-
-      function enqueue(node) {
-        if (!node || node.nodeType !== 1) return;
-        // Skip pure SVG subtrees we just injected
-        if (node.tagName === 'svg' || node.tagName === 'path' ||
-            node.tagName === 'line' || node.tagName === 'polyline' ||
-            node.tagName === 'polygon' || node.tagName === 'circle' ||
-            node.tagName === 'rect' || node.tagName === 'g') {
-          return;
-        }
-        pendingRoots.push(node);
-        if (scheduled == null) {
-          scheduled = (typeof requestAnimationFrame === 'function')
-            ? requestAnimationFrame(flush)
-            : setTimeout(flush, 32);
-        }
-      }
-
-      var mo = new MutationObserver(function (mutations) {
-        if (api._hydrating) return;
-        for (var i = 0; i < mutations.length; i++) {
-          var m = mutations[i];
-          if (m.type !== 'childList' || !m.addedNodes || !m.addedNodes.length) continue;
-          for (var j = 0; j < m.addedNodes.length; j++) {
-            enqueue(m.addedNodes[j]);
-          }
-        }
-      });
-      mo.observe(document.body, { childList: true, subtree: true });
     }
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', boot);

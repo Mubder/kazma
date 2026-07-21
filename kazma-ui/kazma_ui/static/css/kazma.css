@@ -673,6 +673,27 @@ button { cursor: pointer; font-family: inherit; }
   margin-bottom: var(--sp-4);
   padding-bottom: var(--sp-2);
   border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+/* Section title icons stay neutral (not accent/cyan “emoji plate”) */
+.settings-group h3 .ki,
+.settings-group h3 .ki svg,
+.card-header h3 .ki,
+.card-header h3 .ki svg,
+.card-title .ki,
+.card-title .ki svg {
+  color: var(--text-secondary);
+  width: 1.05em;
+  height: 1.05em;
+  flex-shrink: 0;
+}
+.personality-card-icon svg {
+  width: 1.35rem;
+  height: 1.35rem;
+  color: var(--text-secondary);
 }
 
 /* Settings navigation (12-tab system) */
@@ -2502,7 +2523,16 @@ tbody tr:last-child td {
   transition: border-color 0.15s;
 }
 .metric-card:hover { border-color: var(--border-strong); }
-.metric-icon { font-size: 1.25rem; margin-bottom: 4px; }
+.metric-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  margin: 0 auto 8px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+}
 .metric-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
 .metric-value { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.03em; margin-bottom: 2px; }
 .metric-sub { font-size: 0.72rem; color: var(--text-tertiary); }
@@ -3220,12 +3250,27 @@ body {
   border-color: var(--border-strong);
   box-shadow: var(--shadow);
 }
+/* Neutral icon row above metric values — no accent/green “emoji plate” */
 .metric-icon {
-  background: var(--accent-subtle);
-  color: var(--accent);
-  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 8px;
+  width: auto;
+  height: auto;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
-.metric-icon svg { width: 20px; height: 20px; }
+.metric-icon svg,
+.metric-icon .ki svg {
+  width: 20px;
+  height: 20px;
+  opacity: 0.9;
+}
 .metric-value { font-size: var(--fs-fluid-2xl); }
 
 /* Primary buttons — clean, no glow */

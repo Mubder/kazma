@@ -46,12 +46,12 @@
   <div class="card" style="margin-bottom:1.5rem;">
     <div style="display:flex;align-items:center;justify-content:space-between;">
       <div>
-        <span id="swarm-status-text" style="font-size:0.9rem;color:var(--text-muted);">● {{ t('swarm.loading_status') }}</span>
+        <span id="swarm-status-text" style="font-size:0.9rem;color:var(--text-muted);display:inline-flex;align-items:center;gap:6px"><span class="ki" data-icon="dot" aria-hidden="true"></span> {{ t('swarm.loading_status') }}</span>
       </div>
       <div style="display:flex;gap:8px;">
         <button id="swarm-start" class="btn btn-primary" onclick="KazmaSwarm.start()" {% if started %}disabled{% endif %}><span x-html="KazmaIcons.play()"></span> {{ t('swarm.start_all') }}</button>
         <button id="swarm-stop" class="btn btn-danger" onclick="KazmaSwarm.stop()" {% if not started %}disabled{% endif %}><span x-html="KazmaIcons.square()"></span> {{ t('swarm.stop_all') }}</button>
-        <button class="btn btn-secondary" onclick="KazmaSwarm.refresh()" title="{{ t('swarm.refresh') }}">↻</button>
+        <button class="btn btn-secondary" onclick="KazmaSwarm.refresh()" title="{{ t('swarm.refresh') }}"><span class="ki" data-icon="refresh" aria-hidden="true"></span></button>
       </div>
     </div>
   </div>
@@ -414,7 +414,7 @@
           <!-- HITL approval container inside the playground -->
           <div id="play-hitl-gate" style="display:none;padding:12px;border:1px solid var(--warning);border-radius:var(--radius);background:rgba(210,153,34,0.06);margin-top:8px;">
             <div style="font-weight:600;font-size:0.85rem;color:var(--warning);display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-              <span>⏸</span> {{ t('swarm.hitl_approval') }}
+              <span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('swarm.hitl_approval') }}
             </div>
             <div id="play-hitl-preview" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);background:rgba(0,0,0,0.15);border:1px solid var(--border-subtle);border-radius:4px;padding:6px;max-height:80px;overflow-y:auto;margin-bottom:10px;"></div>
             <div style="display:flex;gap:8px;">
@@ -515,7 +515,7 @@
               </div>
               <div style="display:flex;gap:4px;">
                 <button class="btn btn-sm btn-success" data-worker="{{ w.name }}" data-action="start" title="{{ t('swarm.start_worker') }}" {% if w.get('status') == 'online' or w.get('status') == 'busy' %}disabled{% endif %}><span class="ki" data-icon="play" aria-hidden="true"></span></button>
-                <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="stop" title="{{ t('swarm.stop_worker') }}" {% if w.get('status') == 'offline' %}disabled{% endif %}>⏹</button>
+                <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="stop" title="{{ t('swarm.stop_worker') }}" {% if w.get('status') == 'offline' %}disabled{% endif %}><span class="ki" data-icon="square" aria-hidden="true"></span></button>
                 <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="edit" title="{{ t('swarm.edit_worker') }}"><span class="ki" data-icon="edit" aria-hidden="true"></span></button>
                 <button class="btn btn-sm btn-secondary" data-worker="{{ w.name }}" data-action="logs" title="{{ t('swarm.view_logs') }}"><span class="ki" data-icon="clipboard" aria-hidden="true"></span></button>
                 <button class="btn btn-sm btn-danger" data-worker="{{ w.name }}" data-action="remove" title="{{ t('swarm.remove_worker') }}"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
@@ -663,7 +663,7 @@
             <option value="partial">{{ t('swarm.status_partial') }}</option>
           </select>
         </div>
-        <button class="btn btn-secondary" onclick="KazmaSwarm.loadTaskHistory()" title="{{ t('swarm.refresh') }}">↻</button>
+        <button class="btn btn-secondary" onclick="KazmaSwarm.loadTaskHistory()" title="{{ t('swarm.refresh') }}"><span class="ki" data-icon="refresh" aria-hidden="true"></span></button>
       </div>
     </div>
 
@@ -695,9 +695,9 @@
       <div id="history-pagination" style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-top:1px solid var(--border-subtle);font-size:0.8rem;color:var(--text-muted);">
         <span id="history-count">0 {{ t('swarm.tasks_count') }}</span>
         <div style="display:flex;gap:8px;">
-          <button class="btn btn-sm btn-secondary" id="history-prev" onclick="KazmaSwarm.historyPrev()" disabled>← {{ t('swarm.prev') }}</button>
+          <button class="btn btn-sm btn-secondary" id="history-prev" onclick="KazmaSwarm.historyPrev()" disabled><span class="ki" data-icon="chevron-right" aria-hidden="true" style="transform:rotate(180deg);display:inline-flex"></span> {{ t('swarm.prev') }}</button>
           <span id="history-page-info">{{ t('swarm.page') }} 1</span>
-          <button class="btn btn-sm btn-secondary" id="history-next" onclick="KazmaSwarm.historyNext()" disabled>{{ t('swarm.next') }} →</button>
+          <button class="btn btn-sm btn-secondary" id="history-next" onclick="KazmaSwarm.historyNext()" disabled>{{ t('swarm.next') }} <span class="ki" data-icon="chevron-right" aria-hidden="true"></span></button>
         </div>
       </div>
     </div>
