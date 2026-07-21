@@ -363,32 +363,25 @@ async def create_checkpoint_manager(
                 dsn = "postgresql://" + dsn[len("postgres://") :]
             try:
                 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
+                from psycopg.rows import dict_row  # type: ignore
+                from psycopg_pool import AsyncConnectionPool  # type: ignore
 
-                # AsyncPostgresSaver.from_conn_string is an async context manager
-                # in some versions; also support constructor + setup.
-                try:
-                    from psycopg_pool import AsyncConnectionPool  # type: ignore
-
-                    pool = AsyncConnectionPool(
-                        conninfo=dsn,
-                        min_size=1,
-                        max_size=10,
-                        open=False,
-                    )
-                    await pool.open()
-                    saver = AsyncPostgresSaver(conn=pool, serde=serde)  # type: ignore[arg-type]
-                except TypeError:
-                    # Older API: from_conn_string
-                    cm = AsyncPostgresSaver.from_conn_string(dsn)
-                    if hasattr(cm, "__aenter__"):
-                        saver = await cm.__aenter__()
-                    else:
-                        saver = cm
-                    if hasattr(saver, "serde"):
-                        try:
-                            saver.serde = serde  # type: ignore[misc]
-                        except Exception:
-                            pass
+                # LangGraph setup() may run CREATE INDEX CONCURRENTLY, which
+                # requires autocommit (not a transaction block). Official
+                # from_conn_string() uses autocommit=True; the pool must match.
+                pool = AsyncConnectionPool(
+                    conninfo=dsn,
+                    min_size=1,
+                    max_size=10,
+                    kwargs={
+                        "autocommit": True,
+                        "prepare_threshold": 0,
+                        "row_factory": dict_row,
+                    },
+                    open=False,
+                )
+                await pool.open()
+                saver = AsyncPostgresSaver(conn=pool, serde=serde)  # type: ignore[arg-type]
 
                 if hasattr(saver, "setup"):
                     await saver.setup()
