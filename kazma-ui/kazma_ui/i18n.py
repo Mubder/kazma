@@ -884,7 +884,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     # ── Dashboard: Memory & Governance ─────────────────────────────
     "dashboard.memory_governance": {"en": "Memory & Governance", "ar": "الذاكرة والحوكمة"},
     "dashboard.memory_active": {"en": "ACTIVE", "ar": "نشط"},
-    "dashboard.memory_desc_active": {"en": "ChromaDB Vector Store and sentence-transformers models are fully operational.", "ar": "مخزن ChromaDB للمتجهات ونماذج sentence-transformers تعمل بكامل طاقتها."},
+    "dashboard.memory_desc_active": {"en": "Memory stack healthy.", "ar": "مكوّنات الذاكرة تعمل بشكل سليم."},
+    "dashboard.persistence": {"en": "Persistence", "ar": "التخزين"},
+    "packages.db_backend": {"en": "Active DB backend", "ar": "خلفية قاعدة البيانات النشطة"},
+    "packages.db_postgres": {"en": "Postgres (multi-replica)", "ar": "Postgres (متعدد النسخ)"},
+    "packages.db_sqlite": {"en": "SQLite (local single-node)", "ar": "SQLite (عقدة محلية واحدة)"},
     "dashboard.install_ml": {"en": "Install ML Dependencies", "ar": "تثبيت تبعيات التعلم الآلي"},
     "dashboard.backup_maintenance": {"en": "Backup & Database Maintenance", "ar": "النسخ الاحتياطي وصيانة قاعدة البيانات"},
     "dashboard.fts5_db": {"en": "FTS5 Keyword DB", "ar": "قاعدة بيانات الكلمات المفتاحية FTS5"},

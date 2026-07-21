@@ -571,9 +571,14 @@
       if (status === 'ACTIVE') {
         memoryBadge.textContent = I18N.memoryActive;
         memoryBadge.style.cssText = 'font-size:0.75rem;padding:4px 10px;border-radius:12px;font-weight:600;background:rgba(46, 213, 115, 0.15);color:#2ed573;border:1px solid rgba(46, 213, 115, 0.3);';
-        memoryDesc.textContent = data.summary
-          ? (I18N.memoryDescActive + ' ' + data.summary)
-          : I18N.memoryDescActive;
+        // Prefer live headline (Postgres + vector status) over static Chroma-only copy
+        if (data.headline) {
+          memoryDesc.textContent = data.headline + (data.summary ? ' · ' + data.summary : '');
+        } else {
+          memoryDesc.textContent = data.summary
+            ? (I18N.memoryDescActive + ' ' + data.summary)
+            : I18N.memoryDescActive;
+        }
         installBtn.style.display = 'none';
         installBtn.disabled = false;
         installBtn.textContent = I18N.installMl;

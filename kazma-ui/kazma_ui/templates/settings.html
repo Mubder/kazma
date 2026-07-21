@@ -1110,6 +1110,14 @@
                 <p style="font-size:0.82rem;color:var(--text-muted);margin-top:4px;">
                     <span x-text="pkgTotal"></span> {{ t('packages.installed') }} · Python <span x-text="pkgPythonVer"></span>
                 </p>
+                <p style="font-size:0.8rem;color:var(--text-secondary);margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span style="color:var(--text-muted);">{{ t('packages.db_backend') }}:</span>
+                    <span class="badge" style="font-size:0.7rem;padding:3px 8px;border-radius:10px;"
+                          :class="pkgDbBackend === 'postgres' ? 'badge-success' : 'badge-secondary'"
+                          x-text="pkgDbBackend === 'postgres' ? t('packages.db_postgres') : t('packages.db_sqlite')"></span>
+                    <span x-show="pkgDbBackend === 'postgres'" style="font-size:0.72rem;color:var(--text-muted);">KAZMA_DATABASE_URL set</span>
+                    <span x-show="pkgDbBackend !== 'postgres'" style="font-size:0.72rem;color:var(--text-muted);">Set KAZMA_DATABASE_URL + install <code style="font-size:0.7rem;">.[postgres]</code> for multi-replica</span>
+                </p>
             </div>
             <div style="display:flex;gap:8px;">
                 <div class="metric-card" style="padding:8px 16px;min-width:120px;text-align:center;">

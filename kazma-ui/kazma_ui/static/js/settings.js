@@ -133,6 +133,8 @@ function settingsApp() {
         pkgExtras: [],
         pkgTotal: 0,
         pkgPythonVer: '',
+        pkgDbBackend: 'sqlite',
+        pkgDbUrlSet: false,
         pkgSearch: '',
         pkgLoading: false,
         pkgInstalling: '',
@@ -1729,6 +1731,8 @@ function settingsApp() {
                     this.pkgExtras = data.extras || [];
                     this.pkgTotal = data.total_installed || 0;
                     this.pkgPythonVer = data.python_version || '';
+                    this.pkgDbBackend = data.db_backend || 'sqlite';
+                    this.pkgDbUrlSet = !!data.db_url_set;
                 }
             } catch (e) { /* silent */ }
             this.pkgLoading = false;

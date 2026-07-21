@@ -240,6 +240,8 @@ def register_direct_routes(self: Any) -> None:
             "components": health.get("components", []),
             "issues": health.get("issues", []),
             "summary": health.get("summary", ""),
+            "headline": health.get("headline", ""),
+            "backend": health.get("backend", {}),
         }
 
     @self.app.post("/api/system/install")
@@ -606,6 +608,11 @@ def register_direct_routes(self: Any) -> None:
                 "packages": ["chromadb", "sentence-transformers"],
                 "install_cmd": 'uv pip install -e ".[rag]"   # additive — won\'t remove other extras',
             },
+            "postgres": {
+                "description": "Multi-replica / SaaS shared state: ConfigStore, chat sessions, swarm tasks, and LangGraph checkpoints on Postgres (psycopg + langgraph-checkpoint-postgres). Set KAZMA_DATABASE_URL after install.",
+                "packages": ["psycopg", "langgraph-checkpoint-postgres"],
+                "install_cmd": 'uv pip install -e ".[postgres]"   # then set KAZMA_DATABASE_URL + migrate',
+            },
             "dev": {
                 "description": "Development tools — testing (pytest), linting (ruff), type checking (mypy), load testing (locust).",
                 "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "ruff", "mypy", "locust"],
@@ -647,8 +654,8 @@ def register_direct_routes(self: Any) -> None:
             "fastapi": "Web framework powering the Kazma dashboard + REST API",
             "uvicorn": "ASGI server that runs the FastAPI app",
             "langgraph": "LangGraph supervisor brain — the ReAct loop, checkpointing, interrupt()",
-            "langgraph-checkpoint-sqlite": "SQLite-backed checkpoint persistence for LangGraph",
-            "aiosqlite": "Async SQLite driver used by all Kazma data stores",
+            "langgraph-checkpoint-sqlite": "SQLite-backed LangGraph checkpoints (default single-node; Postgres uses langgraph-checkpoint-postgres extra)",
+            "aiosqlite": "Async SQLite driver for default local stores (settings, sessions, swarm when not on Postgres)",
             "langfuse": "Observability/tracing platform for LLM calls",
             "pyyaml": "YAML parser for kazma.yaml config + skill manifests",
             "httpx": "HTTP client for LLM API calls + web tools",
@@ -670,6 +677,16 @@ def register_direct_routes(self: Any) -> None:
             "google-cloud-aiplatform": "Google Vertex AI provider integration",
             "python-dotenv": ".env file loading for local development",
         }
+
+        # Runtime DB backend badge for the Packages tab
+        try:
+            from kazma_core.db.backend import is_postgres, get_database_url
+
+            _db_backend = "postgres" if is_postgres() else "sqlite"
+            _db_url = get_database_url() or ""
+        except Exception:
+            _db_backend = "sqlite"
+            _db_url = ""
 
         # ── Build the package list ──
         try:
@@ -734,6 +751,8 @@ def register_direct_routes(self: Any) -> None:
             "extras": extras_list,
             "total_installed": total_installed,
             "python_version": __import__("sys").version.split()[0],
+            "db_backend": _db_backend,
+            "db_url_set": bool(_db_url),
         }
 
     @self.app.post("/api/system/memory/backup")

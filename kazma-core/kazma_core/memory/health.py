@@ -286,9 +286,43 @@ def build_memory_health() -> dict[str, Any]:
         ("pkg_chromadb", "Package: chromadb", "chromadb", "Required for VectorMemory / L1."),
         ("pkg_st", "Package: sentence-transformers", "sentence_transformers", "Required for local MiniLM embeddings."),
         ("pkg_sqlite_vec", "Package: sqlite-vec", "sqlite_vec", "Required for L4 local vectors."),
+        (
+            "pkg_psycopg",
+            "Package: psycopg",
+            "psycopg",
+            "Required for Postgres multi-replica stores. Fix: pip install -e '.[postgres]'",
+        ),
+        (
+            "pkg_lg_pg",
+            "Package: langgraph-checkpoint-postgres",
+            "langgraph.checkpoint.postgres",
+            "Required for Postgres graph checkpoints. Fix: pip install -e '.[postgres]'",
+        ),
     ]
     for id_, name, mod, why in pkgs:
         present = _has_mod(mod)
+        # Postgres packages are optional unless backend is postgres
+        if id_ in ("pkg_psycopg", "pkg_lg_pg"):
+            try:
+                from kazma_core.db.backend import is_postgres
+
+                want_pg = is_postgres()
+            except Exception:
+                want_pg = False
+            if not want_pg and not present:
+                components.append(_comp(
+                    id_, name,
+                    ok=True, status="off",
+                    detail=f"{mod} not installed (optional until KAZMA_DATABASE_URL is set).",
+                ))
+                continue
+            if want_pg and not present:
+                components.append(_comp(
+                    id_, name,
+                    ok=False, status="error",
+                    detail=f"{mod} missing while Postgres is configured — {why}",
+                ))
+                continue
         components.append(_comp(
             id_, name,
             ok=present,
@@ -300,9 +334,121 @@ def build_memory_health() -> dict[str, Any]:
             ),
         ))
 
+    # ── Persistence backends (ConfigStore / swarm / checkpoints) ──────
+    backend_meta: dict[str, str] = {
+        "config": "sqlite",
+        "swarm_tasks": "sqlite",
+        "checkpoints": "sqlite",
+    }
+    try:
+        from kazma_core.db.backend import get_database_url, is_postgres
+
+        if is_postgres():
+            backend_meta["config"] = "postgres"
+            backend_meta["swarm_tasks"] = "postgres"
+            dsn = get_database_url() or ""
+            # Redact password for UI
+            safe_dsn = dsn
+            if "@" in dsn and "://" in dsn:
+                try:
+                    scheme, rest = dsn.split("://", 1)
+                    if "@" in rest:
+                        creds, hostpart = rest.rsplit("@", 1)
+                        user = creds.split(":")[0] if creds else "user"
+                        safe_dsn = f"{scheme}://{user}:***@{hostpart}"
+                except Exception:
+                    safe_dsn = "postgresql://***"
+            components.append(_comp(
+                "store_config",
+                "ConfigStore",
+                ok=True,
+                status="ok",
+                detail=f"Postgres backend active ({safe_dsn}). Settings / sessions / swarm tasks share this DB.",
+                meta={"backend": "postgres"},
+            ))
+            # Probe connectivity
+            try:
+                from kazma_core.db.postgres_pool import get_postgres_pool
+
+                pool = get_postgres_pool()
+                if pool is None:
+                    components[-1] = _comp(
+                        "store_config", "ConfigStore",
+                        ok=False, status="error",
+                        detail="KAZMA_DATABASE_URL set but Postgres pool is unavailable.",
+                        meta={"backend": "postgres"},
+                    )
+                else:
+                    pool.execute_one("SELECT 1 AS ok")
+            except Exception as exc:
+                components[-1] = _comp(
+                    "store_config", "ConfigStore",
+                    ok=False, status="error",
+                    detail=f"Postgres pool probe failed: {exc}",
+                    meta={"backend": "postgres"},
+                )
+        else:
+            components.append(_comp(
+                "store_config",
+                "ConfigStore",
+                ok=True,
+                status="ok",
+                detail="SQLite backend (kazma-data/settings.db). Set KAZMA_DATABASE_URL for multi-replica Postgres.",
+                meta={"backend": "sqlite"},
+            ))
+    except Exception as exc:
+        components.append(_comp(
+            "store_config", "ConfigStore",
+            ok=False, status="warn",
+            detail=f"Could not resolve DB backend: {exc}",
+        ))
+
+    # Checkpointer backend is best-effort (module may not expose status)
+    try:
+        from kazma_core.db.backend import is_postgres
+
+        if is_postgres() and _has_mod("langgraph.checkpoint.postgres"):
+            backend_meta["checkpoints"] = "postgres"
+            components.append(_comp(
+                "store_checkpoints",
+                "LangGraph checkpoints",
+                ok=True,
+                status="ok",
+                detail="Postgres checkpointer available (AsyncPostgresSaver). HITL pause/resume can share state across replicas.",
+                meta={"backend": "postgres"},
+            ))
+        elif is_postgres():
+            backend_meta["checkpoints"] = "sqlite_fallback"
+            components.append(_comp(
+                "store_checkpoints",
+                "LangGraph checkpoints",
+                ok=False,
+                status="warn",
+                detail=(
+                    "Postgres URL is set but checkpoint-postgres package or setup failed — "
+                    "graph state may use SQLite fallback. pip install -e '.[postgres]' and restart."
+                ),
+                meta={"backend": "sqlite_fallback"},
+            ))
+        else:
+            components.append(_comp(
+                "store_checkpoints",
+                "LangGraph checkpoints",
+                ok=True,
+                status="ok",
+                detail="SQLite checkpointer (default single-node).",
+                meta={"backend": "sqlite"},
+            ))
+    except Exception as exc:
+        components.append(_comp(
+            "store_checkpoints", "LangGraph checkpoints",
+            ok=False, status="warn",
+            detail=f"Checkpoint probe failed: {exc}",
+        ))
+
     # ── Overall rollup ────────────────────────────────────────────────
     # Core path: embedder + VectorMemory + at least one of L1/L3 for recall.
-    critical_ids = {"embedder", "vector_memory"}
+    critical_ids = {"embedder", "vector_memory", "store_config"}
     core_errors = [
         c for c in components
         if c["id"] in critical_ids and c["status"] == "error"
@@ -332,9 +478,22 @@ def build_memory_health() -> dict[str, Any]:
     ]
 
     ok_n = sum(1 for c in components if c["status"] == "ok")
+    cfg_backend = backend_meta.get("config", "sqlite")
+    ckpt_backend = backend_meta.get("checkpoints", "sqlite")
+    vector_bit = (
+        "ChromaDB vector store + embeddings operational"
+        if any(c["id"] == "vector_memory" and c["status"] == "ok" for c in components)
+        else "vector memory degraded or offline"
+    )
+    headline = (
+        f"Persistence: {cfg_backend} (config/sessions/swarm); "
+        f"checkpoints: {ckpt_backend}. {vector_bit}."
+    )
     return {
         "status": overall,
         "components": components,
         "issues": issues[:12],
         "summary": f"{ok_n}/{len(components)} components healthy",
+        "headline": headline,
+        "backend": backend_meta,
     }
