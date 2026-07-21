@@ -184,6 +184,8 @@ spec:
 
 ## 5. Windows native (`setup.ps1`)
 
+Cross-platform path policy and data layout: **[Portability](../ops/portability)**.
+
 `setup.ps1` is the deterministic, fail-fast, idempotent Windows bootstrap (PowerShell 5.0+). It:
 
 1. Validates the environment (Python 3.11+, `uv`, `kazma.yaml`).

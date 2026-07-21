@@ -3,17 +3,17 @@
 These tests validate VAL-PORT-001, VAL-PORT-002, and VAL-PORT-003:
 - No /tmp in kazma.yaml or certified_servers.yaml
 - No /var/log or /usr/bin in production source
-- rbac.py and audit_logger.py use CWD-relative paths, not __file__-relative
+- rbac.py and audit_logger.py use project-root paths via kazma_core.paths
 """
 
 from __future__ import annotations
 
 import inspect
-import os
 from pathlib import Path
 
 import pytest
 from kazma_core import audit_logger, rbac
+from kazma_core.paths import audit_db, get_project_root, rbac_db
 
 # Repository root (tests/ is one level below)
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -82,32 +82,36 @@ class TestNoHardcodedUnixPathsInProductionCode:
         )
 
 
-# ─── VAL-PORT-003: rbac.py and audit_logger.py use CWD-relative paths ─
+# ─── VAL-PORT-003: rbac / audit use project-root paths (paths.py) ─────
 
 
-class TestRbacPathIsCwdRelative:
-    """rbac.py must not use __file__-derived paths for runtime data."""
+class TestRbacPathIsProjectRoot:
+    """rbac.py defaults must go through paths.py (project root), not __file__."""
 
     def test_no_file_in_rbac_source(self) -> None:
         """rbac.py must not contain __file__ in path construction."""
         source = inspect.getsource(rbac)
         assert "__file__" not in source, "rbac.py still uses __file__ for paths"
 
-    def test_default_db_is_cwd_relative(self) -> None:
-        """_DEFAULT_DB should be relative to CWD, not install location."""
-        default_db = rbac._DEFAULT_DB
-        # Should use the CWD as base, containing 'kazma-data' directory
+    def test_default_db_uses_paths_module(self) -> None:
+        """Default DB resolves via rbac_db() under the project root."""
+        default_db = rbac._default_db()
+        assert default_db == rbac_db()
         assert "kazma-data" in default_db
-        assert "rbac.db" in default_db
-        # The path should be based on CWD (Path.cwd()), not __file__ location
-        cwd_str = str(Path.cwd())
-        assert default_db.startswith(cwd_str), (
-            f"_DEFAULT_DB ({default_db}) does not start with CWD ({cwd_str})"
+        assert Path(default_db).name == "rbac.db"
+        root = str(get_project_root())
+        assert default_db.startswith(root), (
+            f"default db ({default_db}) is not under project root ({root})"
         )
 
+    def test_engine_default_uses_paths(self) -> None:
+        """RBACEngine() without db_path uses the centralized rbac_db() path."""
+        engine = rbac.RBACEngine()
+        assert engine.db_path == rbac_db()
 
-class TestAuditLoggerPathIsCwdRelative:
-    """audit_logger.py must not use __file__-derived paths for runtime data."""
+
+class TestAuditLoggerPathIsProjectRoot:
+    """audit_logger.py defaults must go through paths.py (project root), not __file__."""
 
     def test_no_file_in_audit_logger_source(self) -> None:
         """audit_logger.py must not contain __file__ in path construction."""
@@ -116,15 +120,21 @@ class TestAuditLoggerPathIsCwdRelative:
             "audit_logger.py still uses __file__ for paths"
         )
 
-    def test_default_db_is_cwd_relative(self) -> None:
-        """_DEFAULT_DB should be relative to CWD, not install location."""
-        default_db = audit_logger._DEFAULT_DB
+    def test_default_db_uses_paths_module(self) -> None:
+        """Default DB resolves via audit_db() under the project root."""
+        default_db = audit_logger._default_db()
+        assert default_db == audit_db()
         assert "kazma-data" in default_db
-        assert "audit.db" in default_db
-        cwd_str = str(Path.cwd())
-        assert default_db.startswith(cwd_str), (
-            f"_DEFAULT_DB ({default_db}) does not start with CWD ({cwd_str})"
+        assert Path(default_db).name == "audit.db"
+        root = str(get_project_root())
+        assert default_db.startswith(root), (
+            f"default db ({default_db}) is not under project root ({root})"
         )
+
+    def test_logger_default_uses_paths(self) -> None:
+        """AuditLogger() without db_path uses the centralized audit_db() path."""
+        logger = audit_logger.AuditLogger()
+        assert logger.db_path == audit_db()
 
 
 # ─── VAL-PORT-002: code_exec.py consistency check ────────────────────
@@ -150,19 +160,18 @@ class TestCrossPlatformPathSafety:
     """Verify that default paths use proper OS path separators."""
 
     def test_rbac_default_db_uses_os_sep(self) -> None:
-        """_DEFAULT_DB in rbac.py uses os-appropriate separators."""
-        # On Windows, path uses backslash; on Unix, forward slash.
-        # Path() handles this automatically, so just verify it's valid.
-        db_path = Path(rbac._DEFAULT_DB)
+        """rbac default uses Path-native separators via paths.rbac_db()."""
+        db_path = Path(rbac._default_db())
         assert db_path.name == "rbac.db"
 
     def test_audit_logger_default_db_uses_os_sep(self) -> None:
-        """_DEFAULT_DB in audit_logger.py uses os-appropriate separators."""
-        db_path = Path(audit_logger._DEFAULT_DB)
+        """audit_logger default uses Path-native separators via paths.audit_db()."""
+        db_path = Path(audit_logger._default_db())
         assert db_path.name == "audit.db"
 
-    def test_os_module_used_in_rbac_for_portability(self) -> None:
-        """rbac.py or the path construction uses portable approach."""
-        # The key check is that __file__ is not used. We use Path.cwd() instead.
-        # This test ensures the path is dynamically resolved at import time.
-        assert os.path.exists(Path(rbac._DEFAULT_DB).parent) or True  # parent may not exist yet
+    def test_paths_module_is_project_root_based(self) -> None:
+        """paths helpers anchor under get_project_root(), not the package install dir."""
+        root = get_project_root()
+        assert (root / "pyproject.toml").is_file() or root == Path.cwd()
+        assert Path(rbac_db()).is_absolute()
+        assert Path(audit_db()).is_absolute()

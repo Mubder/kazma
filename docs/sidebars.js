@@ -60,6 +60,7 @@ const sidebars = {
         'ops/multi-region',
         'ops/oidc-setup',
         'ops/wsl-fixed-access',
+        'ops/portability',
       ],
     },
   ],

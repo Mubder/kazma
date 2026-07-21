@@ -26,7 +26,26 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-__all__ = ["audit_db", "backups_dir", "checkpoints_db", "data_dir", "fts5_memory_path", "get_project_root", "hub_registry_db", "installed_skills_dir", "log_file", "settings_db", "snapshots_db", "swarm_tasks_db", "tui_state_dir", "tui_themes_dir", "user_home", "vault_db_path", "vector_memory_path"]
+__all__ = [
+    "audit_db",
+    "backups_dir",
+    "checkpoints_db",
+    "data_dir",
+    "fts5_memory_path",
+    "get_project_root",
+    "hub_registry_db",
+    "installed_skills_dir",
+    "log_file",
+    "rbac_db",
+    "settings_db",
+    "snapshots_db",
+    "swarm_tasks_db",
+    "tui_state_dir",
+    "tui_themes_dir",
+    "user_home",
+    "vault_db_path",
+    "vector_memory_path",
+]
 
 # ── Project root resolution ────────────────────────────────────────────────
 
@@ -124,6 +143,11 @@ def swarm_tasks_db() -> str:
 def audit_db() -> str:
     """Audit log database."""
     return str(data_dir() / "audit.db")
+
+
+def rbac_db() -> str:
+    """RBAC engine database (roles / division permissions)."""
+    return str(data_dir() / "rbac.db")
 
 
 def log_file() -> Path:

@@ -21,15 +21,15 @@ if [ -n "$VIOLATIONS" ]; then
     echo "$VIOLATIONS"
     echo ""
     echo "Fix: use Path.home() or os.path.expanduser('~') instead."
-    echo "See docs/portability.md for the full policy."
+    echo "See docs/docs/ops/portability.md for the full policy."
     exit 1
 fi
 
 echo "✅ No hardcoded absolute paths detected."
 echo ""
 echo "Portability invariants:"
-echo "  - All user state: ~/.kazma/"
-echo "  - All data paths: relative to repo root"
+echo "  - Project data: kazma-data/ under project root (paths.py)"
+echo "  - User prefs: ~/.kazma/ (hub, skills, TUI)"
 echo "  - No /home/, /Users/, /root/, or /mnt/c/Users/ in shipped code"
 echo ""
-echo "See docs/portability.md for the full policy."
+echo "See docs/docs/ops/portability.md for the full policy."

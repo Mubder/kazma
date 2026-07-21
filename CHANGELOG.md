@@ -28,6 +28,7 @@ Security and reliability hardening from
 ### Ops
 - docker-compose: vector path for `USER kazma`, `/health` check, prod env defaults
 - `.env.example` + `SECURITY.md` threat model updated for 0.6.x
+- **Portability hygiene**: `rbac` / `audit_logger` default DBs via `paths.py` (project root, not bare CWD); restored `docs/docs/ops/portability.md`
 
 ### Phase 3–4 follow-up
 - Turn wall-clock timeout (`KAZMA_TURN_TIMEOUT_SECONDS`, default 600s)

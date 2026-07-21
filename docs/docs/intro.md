@@ -46,6 +46,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 
 - [Production checklist](ops/production-checklist) · [Postgres & SaaS](ops/postgres-and-saas)
 - [Disaster recovery](ops/disaster-recovery) · [Multi-region / HA](ops/multi-region) · [OIDC](ops/oidc-setup)
+- [Portability](ops/portability) · [WSL fixed access](ops/wsl-fixed-access)
 
 ### Skills · Security · Contributing
 
