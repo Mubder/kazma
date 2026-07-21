@@ -1068,9 +1068,9 @@ class ConfigStore:
 
         This is the startup reconciliation step that makes ConfigStore the
         authoritative source: on first run (or when new YAML keys appear),
-        YAML values are copied into SQLite so all components read from one
-        place. Existing DB keys are **never overwritten** — user-made
-        settings changes always win.
+        YAML values are copied into the active store (SQLite or Postgres) so
+        all components read from one place. Existing DB keys are **never
+        overwritten** — user-made settings changes always win.
 
         Returns the number of new keys seeded.
         """
@@ -1096,11 +1096,20 @@ class ConfigStore:
 
         _flatten(data)
 
-        # Find which keys are NOT already in the DB.
+        # Find which keys are NOT already in the active backend.
         with self._lock:
-            conn = self._get_conn()
-            existing_rows = conn.execute("SELECT key FROM settings").fetchall()
-            existing_keys = {row["key"] for row in existing_rows}
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    raise RuntimeError("Postgres pool unavailable")
+                rows = pool.execute("SELECT key FROM kazma_settings")
+                existing_keys = {row["key"] for row in rows}
+                backend_label = "Postgres"
+            else:
+                conn = self._get_conn()
+                existing_rows = conn.execute("SELECT key FROM settings").fetchall()
+                existing_keys = {row["key"] for row in existing_rows}
+                backend_label = "SQLite"
 
         new_items = [
             (key, value, cat)
@@ -1112,14 +1121,26 @@ class ConfigStore:
             return 0
 
         logger.info(
-            "[ConfigStore] Reconciling %d new keys from kazma.yaml into SQLite",
+            "[ConfigStore] Reconciling %d new keys from kazma.yaml into %s",
             len(new_items),
+            backend_label,
         )
         return self.batch_set(new_items)
 
     def reset_all(self) -> int:
         """Delete all DB settings (reverts to YAML defaults). Returns count deleted."""
         with self._lock:
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    raise RuntimeError("Postgres pool unavailable")
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM kazma_settings")
+                        deleted = cur.rowcount
+                    conn.commit()
+                self._cache.clear()
+                return int(deleted or 0)
             conn = self._get_conn()
             try:
                 conn.execute("BEGIN")
@@ -1136,6 +1157,7 @@ class ConfigStore:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+        self._pg = None
 
 
 # ══════════════════════════════════════════════════════════════════════════
