@@ -78,6 +78,29 @@ Generic `ConfigStore.get()` does **not** automatically overlay every env var —
 
 ---
 
+## Web search, scrape & research
+
+See [Web research](../guide/web-research) for playbooks. Tools are used from **chat** (no `/research` slash command).
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `KAZMA_SEARXNG_URL` | auto `http://localhost:8088` if up | Preferred search backend for `web_search`. |
+| `KAZMA_READ_URL_MAX_CHARS` | `16000` | Default window size for one `read_url` / `crawl_page` response. |
+| `KAZMA_TOOL_RESULT_MAX_CHARS` | `4000` | Graph truncate cap for ordinary tools. |
+| `KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS` | `16000` | Higher graph truncate for research tools (`read_url`, digests, `crawl_site`, …). |
+| `KAZMA_RESEARCH_DIR` | `research` | Default workspace subfolder for auto-named `read_url_to_file` / crawl saves. |
+| `KAZMA_RESEARCH_DIGEST_MAX` | `12000` | Max output size of `digest_research_file`. |
+| `KAZMA_CRAWL_MAX_PAGES` | `50` | Hard ceiling for `crawl_site` `max_pages`. |
+| `KAZMA_CRAWL_MAX_DEPTH` | `5` | Hard ceiling for `crawl_site` `max_depth`. |
+| `KAZMA_FETCH_BACKEND` | `auto` | `auto` \| `httpx` \| `jina` \| `firecrawl`. |
+| `KAZMA_FIRECRAWL_API_KEY` | unset | Optional Firecrawl scrape API. |
+| `KAZMA_FIRECRAWL_URL` | `https://api.firecrawl.dev` | Firecrawl API base (self-host OK). |
+| `KAZMA_JINA_READER` | unset | Set `1` / `true` to try Jina Reader (`r.jina.ai`). |
+
+Optional package: Playwright via `pip install 'kazma[web]'` then `playwright install chromium` (bot walls / thin JS shells).
+
+---
+
 ## OIDC / multi-user
 
 | Variable | Default | Prod required? | Purpose |

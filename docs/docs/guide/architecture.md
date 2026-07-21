@@ -272,6 +272,7 @@ See [Arabic & Cultural Features](arabic-cultural-features).
 | Structured logs | `logging` (JSON format option in `kazma.yaml`) | ✅ Active |
 | Swarm metrics | `MetricsCollector` (in-memory + SQLite) — `tasks_completed`, `tasks_failed`, `avg_latency`, `total_tokens`, `total_cost` | ✅ Active |
 | Tracing spans | In-house `TraceStore` (ring buffer + WebSocket to dashboard) + `TracingEmitter` (swarm, stdlib-only) | ✅ Active |
+| Web research tools | `read_url` / `web_search` / `crawl_site` / research save+digest (`tools/read_url.py`, `web_research.py`) | ✅ Active — [Web research](web-research) |
 | SSE telemetry | `/api/chat/stream` events; telemetry router | ✅ Active |
 | **Langfuse** | `KazmaTracer` with `backend="langfuse"`; enabled via `logging.langfuse.enabled: true` + keys | ✅ **Wired and functional** (dormant by default — activate with keys) |
 | **OpenTelemetry** | — | 🔴 **Removed** (dead code + dead deps purged; Langfuse + Console remain) |

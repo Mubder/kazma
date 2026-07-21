@@ -24,10 +24,27 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 | Page | Path | Purpose |
 |------|------|---------|
 | Chat | `/` or chat route | SSE streaming agent chat (`sse_chat.py`, `streaming.js`) |
+| Dashboard | `/dashboard` | Observability: cost, tokens, tool calls, cost breaker, uptime, traces |
 | Settings | `/settings` | Models, providers, safety, account |
 | Swarm / Command Center | `/swarm` | Workers, live tasks, dispatch UI |
 | IDE | `/ide` | Workspace files, run, git, AI-assisted edit |
 | Login | `/login` | Secret / local user / OIDC |
+
+## Dashboard metrics
+
+Cards are fed by the in-memory **`TraceStore`** (LLM/tool traces) plus the **cost circuit breaker** budget state:
+
+| Card | Source | Notes |
+|------|--------|--------|
+| Total Cost | TraceStore total + cost breaker | API returns **numbers**; UI formats `$…`. Resets on process restart. |
+| Total Tokens | TraceStore | Same process lifetime as traces. |
+| Tool Calls | TraceStore (`trace_type=tool`) | Supervisor tool worker traces. |
+| Circuit Breaker | **Cost** breaker (OK / WARNING / HALTED) | Not swarm worker breakers. |
+| Uptime | TraceStore start time | Process lifetime of the store singleton. |
+
+`GET /api/dashboard/status` and WebSocket `/ws/dashboard` push numeric metrics (legacy string forms like `"$0.00"` / `"1,234"` are parsed safely in `dashboard.js`). Chat footer token/cost on a turn still comes from the SSE `done` event for that session.
+
+Research / scrape runs through **chat tools** (see [Web research](../guide/web-research)), not a separate dashboard action.
 
 ## Auth
 

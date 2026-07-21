@@ -6,6 +6,8 @@ description: Gateway slash commands reference (instant, no LLM)
 ---
 Kazma's gateway intercepts slash commands and resolves them **instantly (&lt;50ms)** without any LLM call. Commands that involve `kazma_core` tools (marked `[core]`) are processed by the agent's tool layer with minimal overhead.
 
+> **Web research** is **not** a slash command. There is no `/research`. Ask in normal chat or use `/swarm research …`. See [Web research](../guide/web-research).
+
 ---
 
 ## 🔄 Session Commands

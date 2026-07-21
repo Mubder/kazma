@@ -241,6 +241,9 @@ The ChromaDB-backed memory used by the `memory_search`/`memory_store` tools (`me
 **Kazma (كاظمه)**
 The product name in Latin script is **Kazma**. Correct Arabic brand forms are **كاظمه** (preferred) and **كاظمة**. The spelling **كازما** (with ز) is wrong and must not be used. Product self-knowledge is injected via `kazma_core.product_knowledge` into the supervisor system prompt.
 
+**Web research tools**
+Built-in search/scrape/research stack: `web_search`, `read_url` (paging), `read_url_to_file`, `crawl_site` (bounded multi-page), chunk/digest helpers. Used from chat (no `/research` slash). Guide: [Web research](web-research).
+
 ---
 
 ## W

@@ -35,6 +35,16 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `spawn_agents` | delegation | **danger** |  |
 | `python_exec` | code | **danger** |  |
 | `context_info` | diagnostics | safe/read |  |
+| `web_search` | search | safe/read | Public web search: SearXNG → DuckDuckGo → Bing HTML. Prefer `KAZMA_SEARXNG_URL`. |
+| `read_url` | search | safe/read | Fetch one public URL; paged window (`offset`, `max_chars`; default ~16k). SSRF-safe; optional Firecrawl/Jina. |
+| `read_url_to_file` | search | safe/read | Full extract saved under workspace (default `KAZMA_RESEARCH_DIR`). |
+| `list_research_chunks` | search | safe/read | Chunk index + previews for a saved research file. |
+| `read_research_chunk` | search | safe/read | One chunk by index from a saved research file. |
+| `summarize_research_file` | search | safe/read | Light extractive outline (per-chunk previews). |
+| `digest_research_file` | search | safe/read | Process all chunks in-tool; return one bounded extractive digest (context-safe). |
+| `crawl_site` | search | safe/read | Bounded same-domain multi-page crawl; saves pages + markdown index. |
+
+**Research workflow (chat, not `/research`):** see [Web research](../guide/web-research). Caps: `KAZMA_READ_URL_MAX_CHARS`, `KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS`, `KAZMA_RESEARCH_DIGEST_MAX`.
 
 ### Related tool modules (`kazma_core/tools/`)
 
@@ -47,7 +57,8 @@ These modules implement or support tools (some registered at startup, some via s
 - `file_write.py`
 - `image_gen.py`
 - `personality_cmd.py`
-- `read_url.py`
+- `read_url.py` — paging, research save/chunk/digest, optional backends
+- `web_research.py` — `crawl_site`
 - `registry.py`
 - `send_message.py`
 - `vision_analyze.py`
@@ -57,8 +68,8 @@ These modules implement or support tools (some registered at startup, some via s
 
 | Tool | Skill | Category | Danger (typical) | Description |
 |------|-------|----------|------------------|-------------|
-| `web_search_duckduckgo` | advanced-web-crawler | web | safe/read | Search DuckDuckGo or Bing fallback and return markdown results. |
-| `crawl_page` | advanced-web-crawler | web | safe/read | Fetch and extract clean markdown content from a public URL. |
+| `web_search_duckduckgo` | advanced-web-crawler | web | safe/read | Wrapper around core `web_search` (SearXNG / DDG / Bing). |
+| `crawl_page` | advanced-web-crawler | web | safe/read | Alias of `read_url` (supports `offset` / `max_chars`). Single page only. |
 | `parse_document` | advanced-web-crawler | filesystem | safe/read | Parse structured text from local files including CSV, JSON, XLS, or PDF. |
 | `arabic_translate` | arabic-bilingual-nlp | nlp | safe/read | Translate context-preserving between Arabic and English. |
 | `hijri_convert` | arabic-bilingual-nlp | nlp | safe/read | Convert dates between Gregorian calendar (YYYY-MM-DD) and Hijri calendar. |

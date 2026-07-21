@@ -486,15 +486,47 @@ Save is disabled for any provider/connector until **Test Connection** succeeds (
 
 ---
 
-## 12. TUI (`kazma-tui`)
+## 12. Web research & dashboard metrics
 
-### 12.1 Dashboard freezes / metrics stop updating
+### 12.1 Long page only shows the beginning
+
+**Cause:** `read_url` returns a **window** (default 16k). The graph used to also hard-cap research tools at 4k; research tools now use `KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS` (default 16k).
+
+**Fix:** Page with `offset` / `max_chars`, or `read_url_to_file` then `digest_research_file` / `read_research_chunk`. See [Web research](web-research).
+
+### 12.2 Search returns nothing / flaky results
+
+**Cause:** DuckDuckGo rate limits; Bing HTML fallback is fragile.
+
+**Fix:** Run SearXNG and set `KAZMA_SEARXNG_URL`. Optionally raise reliability with `KAZMA_JINA_READER=1` or `KAZMA_FIRECRAWL_API_KEY` for **page fetch**, not search.
+
+### 12.3 Bot wall / empty extract
+
+**Cause:** CDN challenge or JS SPA shell.
+
+**Fix:** Install Playwright (`pip install 'kazma[web]'` + `playwright install chromium`). Or enable Jina/Firecrawl backends. Not all sites can be opened automatically.
+
+### 12.4 Dashboard Total Cost / Tokens show `$0` / `0` after a chat turn
+
+**Cause (historical):** API/WS sent strings like `"$0.0043"` / `"27,127"` and JS `Number(...)` became `NaN`. Fixed to numeric metrics + safe parsing.
+
+**Still true:** totals are **process-local** `TraceStore` — restart resets them. Cost breaker budget is separate from durable billing. Dashboard “Circuit Breaker” is the **cost** breaker, not swarm worker breakers. Hard-refresh `/dashboard` after upgrade.
+
+### 12.5 There is no `/research` command
+
+**Expected.** Use natural-language chat or `/swarm research …`. See [Web research](web-research) and [FAQ](faq).
+
+---
+
+## 13. TUI (`kazma-tui`)
+
+### 13.1 Dashboard freezes / metrics stop updating
 
 **Cause:** a synchronous call in the 2 s refresh path is blocking the Textual event loop. `MetricsDashboard._do_refresh()` (`kazma-tui/kazma_tui/dashboard.py`) calls `TraceStore.recent()`, `MetricsCollector.get_all_metrics()`, and `SwarmEngine._workers` synchronously — any block freezes the UI. An exception every refresh leaves metrics stuck at their last good value.
 
 **Fix:** check logs for `Dashboard refresh failed`; ensure `psutil` is installed and `kazma-core` importable. To isolate a blocking custom source, inject it from the constructor (`MetricsDashboard(hardware_monitor=..., trace_store=..., ...)`).
 
-### 12.2 Dashboard shows "N/A" everywhere
+### 13.2 Dashboard shows "N/A" everywhere
 
 **Cause:** the dashboard is read-only and falls back to `N/A` when any source is missing: `psutil` absent (`HardwareMonitor` import fails); `TraceStore` empty (RPM `None`); `MetricsCollector`/`SwarmEngine` unavailable; or running outside an event loop.
 
@@ -504,7 +536,7 @@ uv pip install -e ".[tui]"     # or: pip install textual psutil
 ```
 Verify the sources import, then generate some trace activity (RPM is `N/A` when idle).
 
-### 12.3 VRAM card shows N/A / 0.0
+### 13.3 VRAM card shows N/A / 0.0
 
 **Cause:** `kazma_core/telemetry.py` shells out to `nvidia-smi`. If it's not in `PATH`, the driver is missing, the subprocess times out, or the GPU is non-NVIDIA, it falls back to zeros (debug-level log).
 
@@ -514,7 +546,7 @@ nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total --format=csv,noh
 ```
 If that fails, the TUI can't show VRAM — install the NVIDIA driver / add `nvidia-smi` to `PATH`. On non-NVIDIA systems, `N/A` is expected (graceful degradation).
 
-### 12.4 TUI crashes on startup (import error / Python &lt; 3.11)
+### 13.4 TUI crashes on startup (import error / Python &lt; 3.11)
 
 **Cause:** `textual` not installed; Python older than 3.11; `ModelRegistry` not initialized before the TUI header composes (`header.py` calls `get_model_registry()`); or a `kazma-core` import failing.
 

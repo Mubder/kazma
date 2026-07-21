@@ -20,7 +20,15 @@ Arabic, RTL (`agent.language: ar`, `agent.rtl: true`). Set to `en` for English. 
 
 ### What's "Kazma" mean?
 
-Kazma (كاظمة) — the framework's namesake. The Majlis protocol (`majlis.py`) implements Gulf Arabic conversational rhythms.
+**Kazma** in Latin script; Arabic brand **كاظمه** (preferred) or **كاظمة**. The spelling **كازما** is wrong. The Majlis protocol (`majlis.py`) implements Gulf Arabic conversational rhythms.
+
+### How do I make the agent research the web?
+
+There is **no** `/research` slash command. Ask in **chat** (e.g. “Research X and cite sources”) or use **`/swarm research …`** for multi-worker dispatch. The agent uses `web_search`, `read_url` / `read_url_to_file`, optional `crawl_site`, and `digest_research_file`. See [Web research](web-research).
+
+### Why is a long page truncated?
+
+`read_url` returns a **window** (default 16k, env `KAZMA_READ_URL_MAX_CHARS`) and supports `offset` / `max_chars` paging. For the full page, use `read_url_to_file` then `digest_research_file` or `read_research_chunk`. Graph results for research tools allow a higher truncate cap (`KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS`).
 
 ---
 

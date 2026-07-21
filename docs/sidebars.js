@@ -15,6 +15,7 @@ const sidebars = {
         'guide/gateways-and-platforms',
         'guide/cli-reference',
         'guide/skills-mcp-and-tools',
+        'guide/web-research',
         'guide/api-and-extension-points',
         'guide/swarm-orchestration',
         'guide/memory-and-rag',

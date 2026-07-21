@@ -27,8 +27,11 @@ description: Kazma Skills, MCP & Tools — code-audited reference (unified docs,
   1. Pops `_hitl_approved` from args (line 349) — the double-gate flag.
   2. For danger tools, calls `await safety.check(...)` unless already approved (lines 384-417).
   3. **Fail-closed:** any exception in the safety check returns `is_error=True` "blocked — SafetyMiddleware unavailable" (lines 411-417).
-- **Built-in tools** include `memory_search` (line 591), `memory_store` (line 607), and others registered at startup.
-- **Vector memory** is injected via `set_vector_memory(...)` (`tool_registry.py:95-98`), stored in a module global.
+- **Built-in tools** include `memory_search`, `memory_store`, filesystem/shell tools, and the **web research** set (`web_search`, `read_url`, `read_url_to_file`, `crawl_site`, chunk/digest helpers) registered at startup.
+- **Vector memory** is injected via `set_vector_memory(...)` (`tool_registry.py`), stored in a module global.
+- **Native skills** (e.g. `advanced-web-crawler`) auto-load via `NativeSkillLoader` — distinct from installable Agent Skills.
+
+Web research playbooks: [Web research](web-research). Full list: [Tools catalog](../reference/tools-catalog).
 
 See [Security & Safety](security-and-safety) for the danger-tool classification that governs execution.
 
