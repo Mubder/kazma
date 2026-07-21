@@ -569,7 +569,13 @@ def create_sse_chat_router(
         # ── Intercept YOLO command ─────────────────────────────────
         raw_msg = (body.get("message") or "").strip()
         if raw_msg.lower() in ("/yolo", "/yolo on", "/yolo off", "/yolo status"):
-            from kazma_core.safety.yolo import disable_yolo, enable_yolo, yolo_status
+            from kazma_core.safety.yolo import (
+                YoloDisabledError,
+                disable_yolo,
+                enable_yolo,
+                yolo_allowed,
+                yolo_status,
+            )
 
             cmd = raw_msg.lower().strip()
             if cmd == "/yolo status":
@@ -595,9 +601,15 @@ def create_sse_chat_router(
                         f"Disable: `/yolo off`{grant_note}"
                     )
                 else:
+                    prod_note = ""
+                    if not yolo_allowed():
+                        prod_note = (
+                            "\nProduction mode blocks YOLO "
+                            "(set `KAZMA_ALLOW_YOLO=1` to opt in)."
+                        )
                     confirmation = (
                         "🛡️ YOLO is **OFF**. HITL approvals are required for danger tools."
-                        f"{grant_note}\n"
+                        f"{grant_note}{prod_note}\n"
                         "Tip: on an approval card use **Allow tool (session)** to stop "
                         "repeat prompts for one tool without full YOLO."
                     )
@@ -607,20 +619,23 @@ def create_sse_chat_router(
                     "🛡️ YOLO deactivated. Safety gates and tool grants are cleared."
                 )
             else:
-                st = enable_yolo(thread_id, actor=f"web:{session_id[:12]}")
-                rem = st.get("remaining_seconds")
-                ttl_note = (
-                    f"Auto-expires in ~{rem // 60} minutes "
-                    f"(set KAZMA_YOLO_TTL_SECONDS to change; 0 = no expiry)."
-                    if rem is not None
-                    else "No auto-expiry (KAZMA_YOLO_TTL_SECONDS=0)."
-                )
-                confirmation = (
-                    "🚀 **YOLO ON** for this session only.\n"
-                    "All danger tools run **without** approval until you `/yolo off` "
-                    f"or TTL ends.\n{ttl_note}\n"
-                    "⚠️ Use only when you fully trust this session."
-                )
+                try:
+                    st = enable_yolo(thread_id, actor=f"web:{session_id[:12]}")
+                    rem = st.get("remaining_seconds")
+                    ttl_note = (
+                        f"Auto-expires in ~{rem // 60} minutes "
+                        f"(set KAZMA_YOLO_TTL_SECONDS to change; 0 = no expiry)."
+                        if rem is not None
+                        else "No auto-expiry (KAZMA_YOLO_TTL_SECONDS=0)."
+                    )
+                    confirmation = (
+                        "🚀 **YOLO ON** for this session only.\n"
+                        "All danger tools run **without** approval until you `/yolo off` "
+                        f"or TTL ends.\n{ttl_note}\n"
+                        "⚠️ Use only when you fully trust this session."
+                    )
+                except YoloDisabledError as yde:
+                    confirmation = f"🛡️ {yde}"
 
             session.messages.append({"role": "user", "content": raw_msg})
             session.messages.append({"role": "assistant", "content": confirmation})

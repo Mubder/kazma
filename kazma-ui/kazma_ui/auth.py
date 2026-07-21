@@ -41,7 +41,14 @@ SECRET_HEADER = "X-Kazma-Secret"
 SECRET_ENV_VAR = "KAZMA_SECRET"
 
 #: Cookie name used to pass the secret in browser sessions (HttpOnly).
+#: Prefer opaque sessions (``SESSION_COOKIE``) — raw secret cookie is legacy.
 SECRET_COOKIE = "kazma-secret"
+
+# Re-export opaque session cookie name
+try:
+    from kazma_core.security.web_sessions import SESSION_COOKIE as SESSION_COOKIE
+except Exception:  # pragma: no cover
+    SESSION_COOKIE = "kazma-session"
 
 
 def _is_https(request: Request) -> bool:
@@ -79,13 +86,12 @@ def _is_private_lan_client(request: Request) -> bool:
 
 
 def _trust_lan_enabled() -> bool:
-    """Auto-auth private LAN when secret is set (default on for self-hosted DX).
+    """Auto-auth private LAN when secret is set.
 
-    Set ``KAZMA_TRUST_LAN=0`` on untrusted networks so only loopback + login
-    receive the session cookie.
+    Default **OFF** for production safety (audit C2). Set
+    ``KAZMA_TRUST_LAN=1`` for WSL/LAN single-operator labs that need cookie
+    auto-issue without ``/login``.
     """
-    # Default OFF for production safety (audit C2). Set KAZMA_TRUST_LAN=1 for
-    # WSL/LAN single-operator labs that need cookie auto-issue without /login.
     raw = (os.environ.get("KAZMA_TRUST_LAN") or "0").strip().lower()
     return raw in ("1", "true", "on", "yes")
 
@@ -94,7 +100,7 @@ def _should_auto_issue_cookie(request: Request, expected: str) -> bool:
     """Whether to Set-Cookie the secret without an explicit login.
 
     - Loopback clients: yes.
-    - Private LAN (when KAZMA_TRUST_LAN=1, default): yes — fixes WSL/LAN UI.
+    - Private LAN when ``KAZMA_TRUST_LAN=1``: yes.
     - Remote clients with a valid X-Kazma-Secret header: yes.
     - Public internet clients: no — must use /login.
     """
@@ -148,44 +154,26 @@ def _unauthorized_response(request: Request) -> Response:
         response.delete_cookie(SECRET_COOKIE, path="/")
     return response
 
-#: API path prefixes that require authentication when the secret is set.
+#: Explicit sensitive prefixes (kept for docs / tests). Auth now **default-denies**
+#: all ``/api/*`` and selected admin HTML pages when a secret is set (audit M1).
 SENSITIVE_PREFIXES: tuple[str, ...] = (
-    "/api/settings",
-    "/api/swarm",
-    "/api/mcp",
-    "/api/skills",
-    "/api/models",
-    "/api/ollama",
-    "/api/agents", "/api/providers", "/api/provider",
-    "/api/connectors",
-    "/api/chat", "/api/gateway",
-    # Voice STT/TTS burns provider keys/quota — must not be open (audit H1)
-    "/api/voice",
-    # Destructive / privileged routes that must be gated even when
-    # other endpoints are open (sessions, HITL approval, system ops).
-    "/api/sessions", "/api/session",
-    "/api/approve", "/api/system",
-    "/api/workspace", "/api/workspaces", "/api/memory",
-    "/api/pending-approvals", "/api/metrics",
-    "/api/telemetry/stream", "/api/telemetry/snapshot",
-    "/api/telemetry/typing",
-    "/api/alerts",
+    "/api/",  # default-deny: any /api/* not in ALWAYS_OPEN_* is gated
     "/metrics",
-    # Sprint 19 / Phase 3 surfaces (chaos, migrations, workspace tooling)
-    "/api/chaos",
-    "/api/config",
-    "/api/git",
-    "/api/github",
-    "/api/ide",          # IDE API: file read/write/delete, shell exec, git, swarm dispatch
-    "/api/bookmarks",
-    "/api/pipelines",
     "/v1/models",
-    # Observability dashboard: unlike the SPA page shells (/, /chat,
-    # /workspace), this route renders real cost/session/trace data
-    # server-side into the HTML itself, not just via a later AJAX call —
-    # so the page route and its JSON API both need to be gated.
+    # Admin HTML shells (audit M2)
     "/dashboard",
-    "/api/dashboard",
+    "/settings",
+    "/ide",
+    "/swarm",
+    "/agents",
+    "/workspace",
+    "/workspaces",
+    "/memory",
+    "/mcp",
+    "/skills",
+    "/pipelines",
+    "/cron",
+    "/observability",
 )
 
 #: Exact read-only paths that are always open regardless of secret config.
@@ -194,6 +182,8 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
 ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/",
     "/health",
+    "/health/live",
+    "/health/ready",
     "/api/status",
     "/api/telemetry",
     # Explicit auth bootstrap (remote clients cannot use loopback auto-cookie)
@@ -201,6 +191,8 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/api/auth/login",
     "/api/auth/logout",
     "/api/auth/status",
+    "/api/auth/oidc/start",
+    "/api/auth/oidc/callback",
 })
 
 #: Path prefixes that are always open (browser-redirect targets that
@@ -247,10 +239,20 @@ def get_kazma_secret() -> str:
 
 
 def is_sensitive_path(path: str) -> bool:
-    """Return *True* if *path* falls under a sensitive API prefix."""
+    """Return *True* if *path* requires auth when a secret is configured.
+
+    Policy (audit M1): default-deny all ``/api/*`` and admin page shells.
+    Paths in :data:`ALWAYS_OPEN_PATHS` / :data:`ALWAYS_OPEN_PREFIXES` are
+    handled separately by the middleware and never gated.
+    """
     # Normalise trailing slashes so "/api/settings/" matches the prefix.
     normalised = path.rstrip("/") or "/"
+    # Default-deny every API route (new endpoints cannot ship open by omission).
+    if normalised == "/api" or normalised.startswith("/api/"):
+        return True
     for prefix in SENSITIVE_PREFIXES:
+        if prefix in ("/api/", "/api"):
+            continue
         if normalised == prefix or normalised.startswith(prefix + "/"):
             return True
     return False
@@ -329,13 +331,14 @@ def verify_api_token(provided: str) -> bool:
 
 
 def extract_provided_credential(request: Request) -> str:
-    """Pull auth material from headers/cookie (secret or API token).
+    """Pull auth material from headers/cookie (secret, session, or API token).
 
     Order:
       1. ``X-Kazma-Secret``
       2. ``X-Api-Token`` / ``X-Kazma-Token``
       3. ``Authorization: Bearer …``
-      4. ``kazma-secret`` cookie (browser sessions)
+      4. ``kazma-session`` opaque cookie (preferred)
+      5. ``kazma-secret`` cookie (legacy shared-secret cookie)
     """
     provided = (request.headers.get(SECRET_HEADER) or "").strip()
     if provided:
@@ -350,20 +353,114 @@ def extract_provided_credential(request: Request) -> str:
     auth = (request.headers.get("Authorization") or "").strip()
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
+    sess = (request.cookies.get(SESSION_COOKIE) or "").strip()
+    if sess:
+        return f"session:{sess}"
     return (request.cookies.get(SECRET_COOKIE) or "").strip()
 
 
 def is_authenticated(request: Request, expected_secret: str = "") -> bool:
-    """True if request carries a valid KAZMA_SECRET or Account API token."""
+    """True if request carries a valid secret, opaque session, or API token."""
     provided = extract_provided_credential(request)
     if not provided:
         return False
+    if provided.startswith("session:"):
+        try:
+            from kazma_core.security.web_sessions import validate_session
+
+            return validate_session(provided[8:])
+        except Exception:
+            return False
     expected = expected_secret or get_kazma_secret()
     if expected and verify_secret(provided, expected):
         return True
     if verify_api_token(provided):
         return True
     return False
+
+
+def get_request_principal(request: Request) -> dict[str, Any] | None:
+    """Return authenticated principal {username, role, user_id, source} or None."""
+    provided = extract_provided_credential(request)
+    if not provided:
+        return None
+    if provided.startswith("session:"):
+        try:
+            from kazma_core.security.web_sessions import get_session_payload
+
+            payload = get_session_payload(provided[8:])
+            if not payload:
+                return None
+            return {
+                "username": payload.get("username") or payload.get("actor") or "session",
+                "role": payload.get("role") or "admin",
+                "user_id": payload.get("user_id") or "",
+                "source": "session",
+            }
+        except Exception:
+            return None
+    expected = get_kazma_secret()
+    if expected and verify_secret(provided, expected):
+        return {
+            "username": "operator",
+            "role": "admin",
+            "user_id": "shared-secret",
+            "source": "secret",
+        }
+    if verify_api_token(provided):
+        return {
+            "username": "api-token",
+            "role": "operator",
+            "user_id": "api-token",
+            "source": "api_token",
+        }
+    return None
+
+
+def _mint_auth_cookie(response: Response, request: Request, expected: str) -> None:
+    """Set browser auth cookie — opaque session preferred (audit H1)."""
+    try:
+        from kazma_core.security.web_sessions import (
+            SESSION_COOKIE as _SC,
+            create_session,
+            use_opaque_sessions,
+        )
+
+        if use_opaque_sessions():
+            # Don't re-mint if valid session already present
+            existing = (request.cookies.get(_SC) or "").strip()
+            if existing:
+                from kazma_core.security.web_sessions import validate_session
+
+                if validate_session(existing):
+                    return
+            sid = create_session(actor="auto-cookie")
+            response.set_cookie(
+                key=_SC,
+                value=sid,
+                httponly=True,
+                samesite="lax",
+                path="/",
+                secure=_is_https(request),
+                max_age=60 * 60 * 24 * 14,
+            )
+            # Drop legacy secret cookie if present
+            if request.cookies.get(SECRET_COOKIE):
+                response.delete_cookie(SECRET_COOKIE, path="/")
+            return
+    except Exception as exc:
+        logger.debug("[auth] opaque session mint failed: %s", exc)
+
+    # Legacy: cookie = shared secret
+    if not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected:
+        response.set_cookie(
+            key=SECRET_COOKIE,
+            value=expected,
+            httponly=True,
+            samesite="lax",
+            path="/",
+            secure=_is_https(request),
+        )
 
 
 # ── FastAPI Dependency (for manual application) ─────────────────────────
@@ -411,33 +508,7 @@ def create_auth_middleware(
     # Capture a static secret when provided; otherwise resolve per-request.
     static_secret = secret
 
-    async def auth_middleware(
-        request: Request,
-        call_next: Callable[[Request], Awaitable[Response]],
-    ) -> Response:
-        path = request.url.path
-        expected = static_secret if static_secret is not None else get_kazma_secret()
-
-        # Set HttpOnly cookie on all responses when secret is configured
-        # (so browser-based JS can make authenticated API calls without
-        # the secret being exposed in page source).
-        response = await call_next(request)
-        if expected and (not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected):
-            response.set_cookie(
-                key=SECRET_COOKIE,
-                value=expected,
-                httponly=True,
-                samesite="strict",
-                path="/",
-                secure=_is_https(request),
-            )
-        return response
-
-    # ── Separate gate for sensitive paths ────────────────────────────
-    # We need to check auth BEFORE the route handler, but set cookies
-    # AFTER. So we use a two-pass approach: check first, then set cookie
-    # on the response.
-
+    # ── Gate for sensitive paths (dead always-cookie middleware removed — L1)
     async def auth_middleware_with_gate(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
@@ -450,39 +521,16 @@ def create_auth_middleware(
         # (never mint auth cookie for anonymous remote visitors — C2 fix).
         if is_always_open(path):
             response = await call_next(request)
-            if (
-                expected
-                and _should_auto_issue_cookie(request, expected)
-                and (
-                    not request.cookies.get(SECRET_COOKIE)
-                    or request.cookies.get(SECRET_COOKIE) != expected
-                )
-            ):
-                response.set_cookie(
-                    key=SECRET_COOKIE, value=expected,
-                    httponly=True, samesite="lax", path="/",
-                    secure=_is_https(request),
-                )
+            if expected and _should_auto_issue_cookie(request, expected):
+                _mint_auth_cookie(response, request, expected)
             return response
 
-        # 2. Only sensitive prefixes are gated.
-        # Exempt GET /api/settings/voice from authentication gating so frontend can sync active voice settings on load.
-        is_exempt = (path == "/api/settings/voice" and request.method == "GET")
-        if is_exempt or not is_sensitive_path(path):
+        # 2. Only sensitive paths are gated (default-deny /api/* + admin shells).
+        # Static assets and non-admin HTML remain open for soft-nav shells.
+        if not is_sensitive_path(path):
             response = await call_next(request)
-            if (
-                expected
-                and _should_auto_issue_cookie(request, expected)
-                and (
-                    not request.cookies.get(SECRET_COOKIE)
-                    or request.cookies.get(SECRET_COOKIE) != expected
-                )
-            ):
-                response.set_cookie(
-                    key=SECRET_COOKIE, value=expected,
-                    httponly=True, samesite="lax", path="/",
-                    secure=_is_https(request),
-                )
+            if expected and _should_auto_issue_cookie(request, expected):
+                _mint_auth_cookie(response, request, expected)
             return response
 
         # 3. No secret configured → open mode UNLESS the caller presented an
@@ -494,19 +542,39 @@ def create_auth_middleware(
                 return _unauthorized_response(request)
             return await call_next(request)
 
-        # 4. Verify KAZMA_SECRET (header/cookie/Bearer) OR Account API token.
+        # 4. Verify KAZMA_SECRET / opaque session / Account API token.
         if not is_authenticated(request, expected):
             return _unauthorized_response(request)
 
+        # 4b. Platform RBAC (Phase 4.4) when multi-user is enabled
+        try:
+            from kazma_core.security.platform_rbac import multi_user_enabled, role_allows
+
+            if multi_user_enabled():
+                principal = get_request_principal(request)
+                role = (principal or {}).get("role") or "viewer"
+                # Shared-secret and admin still full access
+                if (principal or {}).get("source") != "secret" and role != "admin":
+                    if not role_allows(str(role), path, request.method):
+                        logger.warning(
+                            "[RBAC] denied role=%s %s %s",
+                            role,
+                            request.method,
+                            path,
+                        )
+                        return Response(
+                            content='{"detail":"Forbidden for your role"}',
+                            status_code=403,
+                            media_type="application/json",
+                        )
+        except Exception as exc:
+            logger.debug("[RBAC] check skipped: %s", exc)
+
         response = await call_next(request)
-        # Only mint/refresh the shared secret cookie for secret auth (not API tokens).
-        if expected and verify_secret(provided, expected):
-            if not request.cookies.get(SECRET_COOKIE) or request.cookies.get(SECRET_COOKIE) != expected:
-                response.set_cookie(
-                    key=SECRET_COOKIE, value=expected,
-                    httponly=True, samesite="lax", path="/",  # Lax: works for IP/LAN + OAuth return
-                    secure=_is_https(request),
-                )
+        # Refresh cookie only for secret-header auth (not API tokens)
+        if expected and provided and not provided.startswith("session:") and not provided.startswith("kazma_"):
+            if verify_secret(provided, expected):
+                _mint_auth_cookie(response, request, expected)
         return response
 
     return auth_middleware_with_gate
@@ -539,13 +607,11 @@ def extract_tenant_from_jwt(token: str) -> str | None:
 
 
 def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitable[Response]]], Awaitable[Response]]:
-    """Create an HTTP middleware that extracts X-Tenant-ID and propagates it using ContextVar.
+    """Create an HTTP middleware that extracts tenant id and propagates it.
 
-    Extracts from (in order):
-    1. Header: X-Tenant-ID or x-tenant-id
-    2. Cookie: X-Tenant-ID, x-tenant-id, or tenant_id
-    3. Authorization Bearer JWT — only if KAZMA_JWT_SECRET is set (verified)
-    4. JWT Cookie fallback — same verification requirement
+    Production (``KAZMA_PRODUCTION=1``): client-supplied ``X-Tenant-ID`` header
+    and cookies are **ignored** unless a verified JWT is present (audit H11).
+    Single-tenant default is ``default``.
     """
     from kazma_core.tenant_context import set_current_tenant_id, reset_current_tenant_id
 
@@ -553,43 +619,43 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        # 1. Check header
-        tenant_id = request.headers.get("X-Tenant-ID") or request.headers.get("x-tenant-id")
+        prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+            "1", "true", "on", "yes",
+        )
+        tenant_id: str | None = None
 
-        # 2. Check cookie fallback
-        if not tenant_id:
-            tenant_id = (
-                request.cookies.get("X-Tenant-ID")
-                or request.cookies.get("x-tenant-id")
-                or request.cookies.get("tenant_id")
-            )
-
-        # 3. Check Authorization Bearer JWT (verified only)
-        if not tenant_id:
-            auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
-            if auth_header and auth_header.lower().startswith("bearer "):
-                token = auth_header[7:].strip()
-                tenant_id = extract_tenant_from_jwt(token)
-
-        # 4. Check Cookie JWT fallback (verified only)
+        # Always try verified JWT first
+        auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            tenant_id = extract_tenant_from_jwt(auth_header[7:].strip())
         if not tenant_id:
             for cookie_name in ("jwt", "token", "x-tenant-id-jwt", "tenant_jwt"):
-                token = request.cookies.get(cookie_name)
-                if token:
-                    tenant_id = extract_tenant_from_jwt(token)
+                tok = request.cookies.get(cookie_name)
+                if tok:
+                    tenant_id = extract_tenant_from_jwt(tok)
                     if tenant_id:
                         break
 
-        # Log active tenant context if found
+        # Spoofable header/cookie only outside production
+        if not tenant_id and not prod:
+            tenant_id = request.headers.get("X-Tenant-ID") or request.headers.get("x-tenant-id")
+            if not tenant_id:
+                tenant_id = (
+                    request.cookies.get("X-Tenant-ID")
+                    or request.cookies.get("x-tenant-id")
+                    or request.cookies.get("tenant_id")
+                )
+        elif not tenant_id and prod:
+            # Single-tenant default — never trust client header
+            tenant_id = "default"
+
         if tenant_id:
             logger.debug("[TENANT] Inbound request scoped to tenant_id: %s", tenant_id)
 
-        # Set tenant context variable
         token = set_current_tenant_id(tenant_id)
         try:
             response = await call_next(request)
-            # Propagate tenant_id cookie on response for subsequent requests
-            if tenant_id:
+            if tenant_id and not prod:
                 if request.cookies.get("X-Tenant-ID") != tenant_id:
                     response.set_cookie(
                         key="X-Tenant-ID",

@@ -1,5 +1,70 @@
 # CHANGELOG
 
+## Unreleased — Production readiness remediation (2026-07-21)
+
+Security and reliability hardening from
+`docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` /
+`docs/audits/REMEDIATION_PLAN_2026-07-21.md`:
+
+### Security
+- **serve.py / CLI**: refuse known default secret; default bind `127.0.0.1`; non-loopback requires `KAZMA_SECRET`
+- **Auth**: default-deny all `/api/*` + admin HTML shells; remove dead always-cookie middleware
+- **NullBus**: `request_approval` fail-closed (`False`)
+- **YOLO**: disabled when `KAZMA_PRODUCTION=1` unless `KAZMA_ALLOW_YOLO=1`
+- **SSRF**: validate model discovery OpenAI-compatible URLs
+- **code_exec**: expand local import blocklist; production forces Docker
+- **shell_exec**: scrub env, workspace path policy, git denylist, drop `ps`/`kazma` in prod
+- **HITL**: empty `sender_id` fail-closed; web ownership errors deny
+- **Workspaces**: `KAZMA_WORKSPACE_ROOT` required in production
+
+### Reliability
+- App shutdown drains cron + swarm before agent/gateway close
+- Swarm `reject_checkpoint` clears active maps; cancel single-finalize
+- Circuit breaker `release_probe` on cancel paths
+- LLM `reconfigure` acloses old httpx client
+- Cron: concurrency cap, stale RUNNING recovery, shutdown-aware poll
+- BoundedConcurrency instances cached per limit
+
+### Ops
+- docker-compose: vector path for `USER kazma`, `/health` check, prod env defaults
+- `.env.example` + `SECURITY.md` threat model updated for 0.6.x
+
+### Phase 3–4 follow-up
+- Turn wall-clock timeout (`KAZMA_TURN_TIMEOUT_SECONDS`, default 600s)
+- SessionManager lock + capped warm cache; FTS5 lock; VectorMemory.close()
+- Semantic cache TTL + max-row eviction
+- MCP untrusted tools force HITL (prod / non-allowlist)
+- Sub-agent `build_child_graph` honors hitl_config + full danger list
+- OAuth redirect prefers `KAZMA_PUBLIC_URL`
+- Settings mask: constant `***` (no last-4)
+- Production requires explicit `KAZMA_VAULT_KEY` (no silent invent)
+- Opaque web sessions (`kazma-session` cookie) + tenant header ignored in prod
+
+### Phase 4.3–4.5 (SaaS foundation)
+- **Postgres backend**: `kazma_core.db` + pool (`KAZMA_DATABASE_URL`); optional `[postgres]` extra
+- **docker-compose.postgres.yml** for app + Postgres 16
+- **Platform RBAC**: viewer/operator/admin + local users + middleware gates
+- **OIDC**: `/api/auth/oidc/start|callback`, PKCE, JWKS verify best-effort
+- **DR**: `scripts/backup_kazma.py`, `scripts/restore_kazma.py`, `docs/ops/DISASTER_RECOVERY.md`
+
+### Full store cutover + SaaS UI
+- **ConfigStore Postgres cutover**: get/set/batch_set/delete/get_all when `KAZMA_DATABASE_URL` set
+- **SessionManager Postgres**: full chat history on `kazma_chat_sessions`
+- **TaskStore Postgres**: tasks + worker metrics on `kazma_swarm_*`
+- **LangGraph AsyncPostgresSaver** when URL set (`create_checkpointer` + agent_runner)
+- **migrate_sqlite_to_postgres.py** migrates settings + chat + swarm in one shot
+- **SaaS API** `/api/saas/*` users + tenants admin
+- **Login UI**: user / secret / OIDC; **Settings → Account** user & tenant management
+- **Header** principal badge + real logout
+- **docs/ops/SAAS_AND_POSTGRES.md**
+
+### Ops polish / multi-replica
+- **docker-compose.ha.yml** + `deploy/nginx-ha.conf` multi-replica demo
+- **/health/ready** pings Postgres when configured; open paths for LB probes
+- **Dockerfile** installs `[rag,postgres]`; entrypoint optional auto-migrate
+- **scripts/smoke_production.py** operator smoke suite
+- **docs/ops/MULTI_REGION.md**, **OIDC_IDP_SETUP.md**
+- **i18n** en/ar for SaaS account strings; dual-backend unit tests
 
 ## v1.0.0 (2026-07-20)
 

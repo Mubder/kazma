@@ -3,6 +3,13 @@
 # Container listens on 8000 (Dockerfile EXPOSE). Host default CLI port is 9090.
 # Map host 9090 → container 8000 so local bookmarks match `kazma serve`.
 # Override: HOST_PORT=8000 docker compose up
+#
+# Production checklist (set in .env):
+#   KAZMA_SECRET=<strong random>
+#   KAZMA_VAULT_KEY=<fernet key>
+#   KAZMA_PRODUCTION=1
+#   KAZMA_CODE_EXEC_DOCKER=force
+#   KAZMA_TRUST_LAN=0
 services:
   kazma:
     build: .
@@ -11,15 +18,22 @@ services:
       - "${HOST_PORT:-9090}:8000"
     volumes:
       - kazma_data:/app/kazma-data
-      - kazma_vectors:/root/.kazma/vector_memory
+      # Match Dockerfile USER kazma home (not /root/...)
+      - kazma_vectors:/home/kazma/.kazma/vector_memory
     env_file:
       - .env
     environment:
-      # Require secret when published; auto-gen still works if unset in .env
+      # Required inside Docker so published ports reach the process.
+      # Security boundary: strong KAZMA_SECRET + reverse proxy TLS, not bind alone.
       KAZMA_HOST: "0.0.0.0"
+      KAZMA_TRUST_LAN: "${KAZMA_TRUST_LAN:-0}"
+      KAZMA_PRODUCTION: "${KAZMA_PRODUCTION:-1}"
+      KAZMA_CODE_EXEC_DOCKER: "${KAZMA_CODE_EXEC_DOCKER:-force}"
+      KAZMA_VECTOR_PATH: "/home/kazma/.kazma/vector_memory"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/gateway/status"]
+      # /health is always open; /api/gateway/status requires auth when secret set
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3

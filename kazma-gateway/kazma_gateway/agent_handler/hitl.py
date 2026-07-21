@@ -151,12 +151,15 @@ async def _handle_hitl_resume(
                 )
             )
             return True
-        original_sender = target_ctx.get("sender_id", "")
-        current_sender = msg.sender_id
-        if original_sender and original_sender != current_sender:
+        original_sender = (target_ctx.get("sender_id") or "").strip()
+        current_sender = (msg.sender_id or "").strip()
+        # Fail-closed (audit M6): empty owner or mismatch → deny
+        if not original_sender or not current_sender or original_sender != current_sender:
             logger.warning(
                 "[HITL] Authz denied: %s tried to approve thread %s owned by %s",
-                current_sender, target_thread, original_sender,
+                current_sender or "(empty)",
+                target_thread,
+                original_sender or "(empty)",
             )
             await manager.send(
                 OutboundMessage(

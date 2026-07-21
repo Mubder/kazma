@@ -46,12 +46,17 @@ _IS_UNIX = sys.platform != "win32" and _resource_module is not None
 # Defense-in-depth for local fallback: block imports that enable network,
 # process spawn, or native code escapes.
 _BLOCKED_IMPORT_ROOTS: frozenset[str] = frozenset({
+    # Network / process / native escapes
     "socket", "ssl", "select", "selectors",
     "subprocess", "multiprocessing", "concurrent",
     "ctypes", "cffi",
     "http", "urllib", "urllib3", "requests", "httpx", "aiohttp",
     "ftplib", "smtplib", "poplib", "imaplib", "telnetlib", "xmlrpc",
     "webbrowser", "pty", "fcntl", "resource",
+    # Host FS / interpreter escapes (audit H3 — local fallback is not a jail)
+    "os", "sys", "pathlib", "shutil", "io", "tempfile",
+    "importlib", "runpy", "code", "codeop", "builtins",
+    "pickle", "marshal", "shelve", "sqlite3",
 })
 
 _SANDBOX_PREAMBLE = f'''\

@@ -131,6 +131,19 @@ class KazmaAppBuilder:
 
             # Ensure KAZMA_VAULT_KEY is configured (for the encrypted secret vault)
             _vault_key = os.environ.get("KAZMA_VAULT_KEY", "").strip()
+            _prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+                "1", "true", "on", "yes",
+            )
+            if not _vault_key and _prod:
+                # Production must not invent vault keys silently (audit M5 / 3.4)
+                logger.error(
+                    "[Vault] KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY — "
+                    "set a Fernet key before starting (see .env.example)"
+                )
+                raise RuntimeError(
+                    "KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY to be set. "
+                    "Generate one: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
             if not _vault_key:
                 import secrets as _sec2
                 _vault_generated = _sec2.token_hex(32)
@@ -786,8 +799,18 @@ class KazmaAppBuilder:
             try:
                 from kazma_core.agent.sub_agent import SubAgentManager, set_sub_agent_manager
 
+                def _sub_graph_builder(**kwargs: Any) -> Any:
+                    """Honor hitl_config + tools (audit M19)."""
+                    agent = self.agent
+                    if agent is not None and hasattr(agent, "build_child_graph"):
+                        return agent.build_child_graph(
+                            tools=kwargs.get("tools"),
+                            hitl_config=kwargs.get("hitl_config"),
+                        )
+                    return agent.get_streaming_graph()
+
                 sub_agent_mgr = SubAgentManager(
-                    graph_builder=lambda **kwargs: self.agent.get_streaming_graph(),
+                    graph_builder=_sub_graph_builder,
                     max_concurrent=3,
                 )
                 set_sub_agent_manager(sub_agent_mgr)
@@ -837,6 +860,13 @@ class KazmaAppBuilder:
         # Mount routers
         self.app.include_router(chat_router)
         self.app.include_router(settings_router)
+        try:
+            from kazma_ui.saas_api import create_saas_router
+
+            self.app.include_router(create_saas_router())
+            logger.info("[SaaS] multi-user / tenant API mounted at /api/saas")
+        except Exception as e:
+            logger.warning("[SaaS] router not available: %s", e)
         self.app.include_router(skills_router)
         self.app.include_router(mcp_router)
         self.app.include_router(agents_router)
@@ -1062,7 +1092,7 @@ class KazmaAppBuilder:
             logger.debug("[Startup] flush_pending_alerts: %s", e)
 
     async def _on_shutdown(self) -> None:
-        """Application shutdown: flag, agent, checkpointer, HTTP pool, gateway."""
+        """Application shutdown: flag, cron, swarm, agent, stores, gateway."""
         # Global drain flag so long-lived SSE / telemetry loops exit cleanly
         try:
             from kazma_core.shutdown import signal_shutdown
@@ -1072,7 +1102,43 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[app] signal_shutdown failed: %s", e)
 
-        # Shut down the agent (closes MCP processes, LLM clients)
+        # 1) Stop cron first so no new jobs fire (audit C3)
+        try:
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            cron_sched = get_cron_scheduler()
+            if cron_sched is not None and hasattr(cron_sched, "stop"):
+                maybe = cron_sched.stop()
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+                logger.info("[app] Cron scheduler stopped")
+        except Exception as e:
+            logger.warning("[app] cron stop failed: %s", e)
+
+        # 2) Drain swarm in-flight tasks
+        try:
+            engine = getattr(self, "swarm_engine", None) or getattr(self, "_swarm_engine", None)
+            if engine is None:
+                try:
+                    from kazma_core.swarm.engine import get_swarm_engine
+
+                    engine = get_swarm_engine()
+                except Exception:
+                    engine = None
+            if engine is not None:
+                handles = getattr(engine, "_task_handles", None) or {}
+                for _tid, handle in list(handles.items()):
+                    if handle is not None and hasattr(handle, "done") and not handle.done():
+                        handle.cancel()
+                if hasattr(engine, "stop_all"):
+                    maybe = engine.stop_all()
+                    if asyncio.iscoroutine(maybe):
+                        await maybe
+                logger.info("[app] Swarm engine drained")
+        except Exception as e:
+            logger.warning("[app] swarm drain failed: %s", e)
+
+        # 3) Shut down the agent (closes MCP processes, LLM clients)
         if self.agent is not None:
             try:
                 await self.agent.shutdown()
@@ -1080,7 +1146,7 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[app] Error during agent shutdown: %s", e)
 
-        # Close app-level checkpointer / CheckpointManager if present
+        # 4) Close app-level checkpointer / CheckpointManager if present
         try:
             cp = self._checkpointer
             if cp is not None:
@@ -1094,7 +1160,7 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[app] Error closing checkpointer: %s", e)
 
-        # Close all cached ModelRegistry clients
+        # 5) Close all cached ModelRegistry clients
         try:
             from kazma_core.model_registry import get_model_registry
 
@@ -1110,6 +1176,26 @@ class KazmaAppBuilder:
             await close_http_client()
         except Exception as e:
             logger.warning("[app] Error closing http client during shutdown: %s", e)
+
+        # 6) Best-effort vector memory close
+        try:
+            from kazma_core.memory import vector_store as _vs
+
+            vm = getattr(_vs, "_instance", None) or getattr(_vs, "VectorMemory", None)
+            for attr in ("get_vector_memory", "get_default", "default_memory"):
+                fn = getattr(_vs, attr, None)
+                if callable(fn):
+                    try:
+                        vm = fn()
+                        break
+                    except Exception:
+                        pass
+            if vm is not None and hasattr(vm, "close"):
+                maybe = vm.close()
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+        except Exception as e:
+            logger.debug("[app] vector memory close: %s", e)
 
         if self.gateway is None:
             return

@@ -880,6 +880,71 @@
             </div>
             <div x-show="sessions.length === 0" class="empty-state" style="padding:16px">{{ t('settings.no_active_sessions') }}</div>
         </div>
+
+        <!-- Platform users (SaaS multi-user) — admin only -->
+        <div class="settings-group" x-show="saasStatus && (saasStatus.principal?.role === 'admin' || saasStatus.principal?.source === 'secret')">
+            <h3>{{ t('settings.platform_users') }}</h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">
+              {{ t('settings.platform_users_help') }} {{ t('settings.backend_label') }}
+              <code x-text="saasStatus?.backend || 'sqlite'"></code>
+              <span x-show="saasStatus?.postgres"> · {{ t('settings.postgres_ready') }}</span>
+              <span x-show="saasStatus?.oidc"> · {{ t('settings.oidc_enabled') }}</span>
+            </p>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                <input type="text" class="form-input" x-model="newUser.username" placeholder="{{ t('settings.username') }}" style="flex:1;min-width:120px">
+                <input type="password" class="form-input" x-model="newUser.password" placeholder="{{ t('settings.password_min8') }}" style="flex:1;min-width:120px">
+                <select class="form-input" x-model="newUser.role" style="width:auto">
+                  <option value="viewer">viewer</option>
+                  <option value="operator" selected>operator</option>
+                  <option value="admin">admin</option>
+                </select>
+                <button class="btn btn-primary" type="button" @click="createPlatformUser()">{{ t('settings.add_user') }}</button>
+            </div>
+            <div class="account-list-table" x-show="platformUsers.length > 0">
+              <div class="account-list-head">
+                <span>{{ t('settings.username') }}</span>
+                <span>{{ t('settings.role') }}</span>
+                <span>Status</span>
+                <span></span>
+              </div>
+              <template x-for="u in platformUsers" :key="u.user_id || u.username">
+                <div class="account-list-row">
+                  <span class="account-list-name" x-text="u.username"></span>
+                  <span>
+                    <select class="form-input" style="width:auto;padding:4px 8px;font-size:0.8rem"
+                            :value="u.role"
+                            @change="patchPlatformUser(u.username, { role: $event.target.value })">
+                      <option value="viewer">viewer</option>
+                      <option value="operator">operator</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  </span>
+                  <span class="account-list-meta" x-text="u.enabled === false ? '{{ t('settings.status_disabled') }}' : '{{ t('settings.status_active') }}'"></span>
+                  <span class="account-list-actions">
+                    <button type="button" class="btn btn-sm btn-secondary"
+                            @click="patchPlatformUser(u.username, { enabled: u.enabled === false })"
+                            x-text="u.enabled === false ? '{{ t('settings.enable') }}' : '{{ t('settings.disable') }}'"></button>
+                    <button type="button" class="btn btn-danger btn-sm" @click="deletePlatformUser(u.username)">{{ t('settings.delete') }}</button>
+                  </span>
+                </div>
+              </template>
+            </div>
+            <div x-show="platformUsers.length === 0" class="empty-state" style="padding:16px">
+              {{ t('settings.no_platform_users') }}
+            </div>
+
+            <h3 style="margin-top:24px">{{ t('settings.tenants') }}</h3>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                <input type="text" class="form-input" x-model="newTenant.id" placeholder="{{ t('settings.tenant_id') }}" style="flex:1;min-width:100px">
+                <input type="text" class="form-input" x-model="newTenant.name" placeholder="{{ t('settings.display_name_tenant') }}" style="flex:1;min-width:100px">
+                <button class="btn btn-primary" type="button" @click="createTenant()">{{ t('settings.add_tenant') }}</button>
+            </div>
+            <ul style="margin:0;padding-left:18px;color:var(--text-secondary);font-size:0.85rem;">
+              <template x-for="t in tenants" :key="t.id">
+                <li><strong x-text="t.id"></strong> — <span x-text="t.name"></span></li>
+              </template>
+            </ul>
+        </div>
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════

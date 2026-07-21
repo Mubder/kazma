@@ -66,10 +66,15 @@ observability = [
 web = [
     "playwright>=1.40",
 ]
+# Multi-replica / SaaS shared state (Phase 4.3)
+postgres = [
+    "psycopg[binary,pool]>=3.1.0",
+    "langgraph-checkpoint-postgres>=2.0.0",
+]
 # Convenience meta-extra — installs everything at once.
 # Usage: pip install -e ".[all]"  or  uv sync --all-extras
 all = [
-    "kazma[rag,dev,tui,observability,web]",
+    "kazma[rag,dev,tui,observability,web,postgres]",
 ]
 
 [project.scripts]

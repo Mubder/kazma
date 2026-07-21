@@ -306,10 +306,23 @@ async def github_status() -> JSONResponse:
 
 
 def _oauth_redirect_uri(request: Request) -> str:
-    """Build the callback URL from the incoming request."""
+    """Build the callback URL from the incoming request.
+
+    Prefer ``KAZMA_PUBLIC_URL`` (audit M4) so Host-header spoofing cannot
+    redirect the OAuth callback to an attacker-controlled host.
+    """
+    import os
+
+    public = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
+    if public:
+        return f"{public}/api/github/oauth/callback"
     # Prefer the Host header (handles reverse proxies) over request.url.
     host = request.headers.get("host") or f"{request.url.hostname}:{request.url.port}"
     scheme = request.url.scheme
+    # Prefer X-Forwarded-Proto when behind TLS-terminating proxy
+    xf = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    if xf in ("http", "https"):
+        scheme = xf
     return f"{scheme}://{host}/api/github/oauth/callback"
 
 

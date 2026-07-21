@@ -100,12 +100,45 @@ def check_agent_runner() -> dict[str, Any]:
         return {"status": "failed", "component": "agent_runner", "error": str(e)}
 
 
+def check_database() -> dict[str, Any]:
+    """Check configured DB backend (SQLite always ok; Postgres must ping)."""
+    try:
+        from kazma_core.db.backend import get_backend, is_postgres
+
+        backend = get_backend().value
+        if not is_postgres():
+            return {"status": "ok", "component": "database", "backend": backend}
+        from kazma_core.db.postgres_pool import get_postgres_pool
+
+        pool = get_postgres_pool()
+        if pool is None:
+            return {
+                "status": "failed",
+                "component": "database",
+                "backend": backend,
+                "error": "pool unavailable",
+            }
+        row = pool.execute_one("SELECT 1 AS ok")
+        if not row:
+            return {
+                "status": "failed",
+                "component": "database",
+                "backend": backend,
+                "error": "ping empty",
+            }
+        return {"status": "ok", "component": "database", "backend": backend}
+    except Exception as e:
+        logger.error("Database health check failed: %s", e)
+        return {"status": "failed", "component": "database", "error": str(e)}
+
+
 @router.get("/health/live")
 async def liveness():
     """Liveness probe - returns 200 if process is alive.
     
     This endpoint should never fail - it only checks that the
     Python process is running and can respond to HTTP requests.
+    Used by multi-replica load balancers / Kubernetes.
     """
     return {"status": "alive", "timestamp": time.time()}
 
@@ -115,32 +148,42 @@ async def readiness():
     """Readiness probe - returns 200 if all critical dependencies are healthy.
     
     Checks:
-    - ConfigStore (SQLite or in-memory fallback)
+    - ConfigStore
+    - Database backend (Postgres ping when configured)
     - SwarmEngine (if enabled)
     - ModelRegistry
     - AgentRunner
     
-    Returns 200 if all critical components are "ok",
-    503 if any critical component has "failed" status.
+    Returns 200 if ready, 503 if critical dependency failed
+    (so LB / multi-replica can stop routing traffic).
     """
     checks = {}
     
     # Run all health checks
     checks["config_store"] = check_config_store()
+    checks["database"] = check_database()
     checks["swarm_engine"] = check_swarm_engine()
     checks["model_registry"] = check_model_registry()
     checks["agent_runner"] = check_agent_runner()
     
-    # Determine overall status
+    # Determine overall status — database + config_store are critical
+    critical_failed = [
+        name
+        for name, check in checks.items()
+        if name in ("config_store", "database") and check.get("status") == "failed"
+    ]
     failed = [name for name, check in checks.items() if check.get("status") == "failed"]
     not_initialized = [name for name, check in checks.items() if check.get("status") == "not_initialized"]
     
-    if failed:
-        overall_status = "degraded"
+    if critical_failed:
+        overall_status = "not_ready"
         http_status = 503
-    elif not_initialized:
+    elif failed:
         overall_status = "degraded"
-        http_status = 200  # Not initialized is not a failure
+        http_status = 200  # non-critical failure still accepts traffic
+    elif not_initialized:
+        overall_status = "starting"
+        http_status = 200
     else:
         overall_status = "ready"
         http_status = 200

@@ -53,6 +53,7 @@ class ReliabilityRegistry:
         self._timeout_guards: dict[str, TimeoutGuard] = {}
         self._default_timeout_guard = TimeoutGuard()
         self._output_validators: dict[str, OutputValidator] = {}
+        self._concurrency_cache: dict[int, BoundedConcurrency] = {}
 
     # ── Worker removal cleanup ──────────────────────────────────────
 
@@ -189,9 +190,14 @@ class ReliabilityRegistry:
         self,
         task_max_concurrent: int | None = None,
     ) -> BoundedConcurrency:
-        """Return a BoundedConcurrency instance for the given concurrency limit.
+        """Return a shared BoundedConcurrency for the given limit (audit M12).
 
         Task-level override takes precedence over the engine default.
+        Instances are cached per limit so concurrent callers share one semaphore.
         """
         limit = task_max_concurrent or self._default_max_concurrent
-        return BoundedConcurrency(max_concurrent=limit)
+        cached = self._concurrency_cache.get(limit)
+        if cached is None:
+            cached = BoundedConcurrency(max_concurrent=limit)
+            self._concurrency_cache[limit] = cached
+        return cached

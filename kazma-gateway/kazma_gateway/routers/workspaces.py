@@ -191,9 +191,19 @@ def create_workspaces_router() -> APIRouter:
         ):
             raise HTTPException(status_code=403, detail="Suspicious path traversal attempt blocked.")
 
-        # Optional confinement: if KAZMA_WORKSPACE_ROOT is set, the workspace
-        # path must live beneath it. Opt-in hardening for multi-project setups.
+        # Confinement: KAZMA_WORKSPACE_ROOT required in production (audit H12).
         allow_root = os.environ.get("KAZMA_WORKSPACE_ROOT", "").strip()
+        prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+            "1", "true", "on", "yes",
+        )
+        if prod and not allow_root:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "KAZMA_WORKSPACE_ROOT is required when KAZMA_PRODUCTION=1. "
+                    "Set it to the parent directory of allowed workspaces."
+                ),
+            )
         if allow_root:
             allow_resolved = Path(allow_root).resolve()
             try:

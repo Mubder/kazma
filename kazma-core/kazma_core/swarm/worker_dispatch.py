@@ -56,8 +56,19 @@ async def dispatch_worker(
         )
 
     # Circuit breaker pre-check: reject immediately if open.
+    probe_held = False
     try:
+        # allow_probe sets _probe_in_flight in half-open; track so finally can release
+        before_probe = getattr(breaker, "_probe_in_flight", False)
         breaker.check_or_raise(worker.name)
+        probe_held = getattr(breaker, "_probe_in_flight", False) and not before_probe
+        # Also true when half-open was already our probe
+        if breaker.state.name == "HALF_OPEN" or str(breaker.state) in (
+            "CircuitState.HALF_OPEN",
+            "half_open",
+            "HALF_OPEN",
+        ):
+            probe_held = True
     except CircuitBreakerOpenError as exc:
         logger.warning("[SwarmEngine] %s", exc)
         if dispatch_span:
@@ -75,6 +86,7 @@ async def dispatch_worker(
 
     # Execute with retry policy.
     started = perf_counter()
+    recorded = False
 
     # Emit worker_started (for SSE / observers)
     worker_name = worker.name if hasattr(worker, "name") else str(worker)
@@ -95,120 +107,137 @@ async def dispatch_worker(
     if isinstance(context, SwarmDispatchContext):
         _ws_id = context.metadata.get("workspace_id")
 
-    async def _attempt() -> dict[str, Any]:
-        worker.mark_dispatched(prompt)
-        # Record activity for auto-scaler reaping
-        if engine._autoscaler is not None:
-            engine._autoscaler.record_activity(worker.name)
+    try:
+        async def _attempt() -> dict[str, Any]:
+            worker.mark_dispatched(prompt)
+            # Record activity for auto-scaler reaping
+            if engine._autoscaler is not None:
+                engine._autoscaler.record_activity(worker.name)
 
-        async def _do_dispatch():
-            """Run the worker dispatch, honoring any per-task workspace scope."""
-            if _ws_id:
-                from kazma_core.ide.workspace_scope import workspace_scope
+            async def _do_dispatch():
+                """Run the worker dispatch, honoring any per-task workspace scope."""
+                if _ws_id:
+                    from kazma_core.ide.workspace_scope import workspace_scope
 
-                async with workspace_scope(_ws_id):
-                    return await worker.dispatch(prompt, context=context)
-            return await worker.dispatch(prompt, context=context)
+                    async with workspace_scope(_ws_id):
+                        return await worker.dispatch(prompt, context=context)
+                return await worker.dispatch(prompt, context=context)
 
-        try:
-            raw_result = await timeout_guard.execute(
-                _do_dispatch,
-                timeout=timeout,
-                worker_name=worker.name,
-            )
-        except HandoffRequest as handoff_req:
-            # Capture the handoff request for the outer handler.
-            captured_handoff["request"] = handoff_req
-            # Return success so the retry loop exits immediately.
-            return {
-                "worker": worker.name,
-                "task_id": "",
-                "status": "success",
-                "output": "",
-                "error": None,
-            }
-        except Exception as exc:
-            logger.exception(
-                "[SwarmEngine] dispatch failed for worker '%s'", worker.name
-            )
-            raw_result = {
-                "worker": worker.name,
-                "task_id": "",
-                "status": "error",
-                "output": "",
-                "error": str(exc)[:500],
-            }
-
-        # Validate output on success.
-        if raw_result.get("status") == "success" and output_validator is not None:
-            validation_error = output_validator.validate(
-                raw_result.get("output", "")
-            )
-            if validation_error is not None:
-                raw_result["status"] = "error"
-                raw_result["error"] = (
-                    f"Output validation failed: {validation_error}"
+            try:
+                raw_result = await timeout_guard.execute(
+                    _do_dispatch,
+                    timeout=timeout,
+                    worker_name=worker.name,
                 )
+            except HandoffRequest as handoff_req:
+                # Capture the handoff request for the outer handler.
+                captured_handoff["request"] = handoff_req
+                # Return success so the retry loop exits immediately.
+                return {
+                    "worker": worker.name,
+                    "task_id": "",
+                    "status": "success",
+                    "output": "",
+                    "error": None,
+                }
+            except Exception as exc:
+                logger.exception(
+                    "[SwarmEngine] dispatch failed for worker '%s'", worker.name
+                )
+                raw_result = {
+                    "worker": worker.name,
+                    "task_id": "",
+                    "status": "error",
+                    "output": "",
+                    "error": str(exc)[:500],
+                }
 
-        return raw_result
+            # Validate output on success.
+            if raw_result.get("status") == "success" and output_validator is not None:
+                validation_error = output_validator.validate(
+                    raw_result.get("output", "")
+                )
+                if validation_error is not None:
+                    raw_result["status"] = "error"
+                    raw_result["error"] = (
+                        f"Output validation failed: {validation_error}"
+                    )
 
-    raw_result = await retry_policy.execute_with_retry(
-        _attempt, worker_name=worker.name
-    )
+            return raw_result
 
-    # Handle handoff if one was captured during _attempt.
-    if captured_handoff.get("request") is not None:
-        handoff_req: HandoffRequest = captured_handoff["request"]
-        # End the dispatch span before handoff.
-        if dispatch_span:
-            engine._tracing_emitter.end_span(dispatch_span, status="ok")
-        return await engine._handle_handoff(
-            handoff_req=handoff_req,
-            source_worker=worker,
-            prompt=prompt,
-            context=context,
-            timeout=timeout,
-            validation_schema=validation_schema,
-            started=started,
-            breaker=breaker,
-            trace_id=trace_id,
-            _visited=_visited,
-            _depth=_depth + 1,
+        raw_result = await retry_policy.execute_with_retry(
+            _attempt, worker_name=worker.name
         )
 
-    worker_result = WorkerResult.from_dict(raw_result)
-    if worker_result.duration_seconds <= 0:
-        worker_result.duration_seconds = perf_counter() - started
+        # Handle handoff if one was captured during _attempt.
+        if captured_handoff.get("request") is not None:
+            handoff_req: HandoffRequest = captured_handoff["request"]
+            # End the dispatch span before handoff.
+            if dispatch_span:
+                engine._tracing_emitter.end_span(dispatch_span, status="ok")
+            # Handoff path records on the target chain; release our probe flag.
+            breaker.record_success()
+            recorded = True
+            return await engine._handle_handoff(
+                handoff_req=handoff_req,
+                source_worker=worker,
+                prompt=prompt,
+                context=context,
+                timeout=timeout,
+                validation_schema=validation_schema,
+                started=started,
+                breaker=breaker,
+                trace_id=trace_id,
+                _visited=_visited,
+                _depth=_depth + 1,
+            )
 
-    # End the dispatch span.
-    if dispatch_span:
-        span_status = "ok" if worker_result.status == "success" else "error"
-        if worker_result.error:
-            dispatch_span.set_attribute("error.message", worker_result.error[:200])
-        engine._tracing_emitter.end_span(dispatch_span, status=span_status)
+        worker_result = WorkerResult.from_dict(raw_result)
+        if worker_result.duration_seconds <= 0:
+            worker_result.duration_seconds = perf_counter() - started
 
-    # Update circuit breaker based on outcome.
-    if worker_result.status == "success":
-        breaker.record_success()
-    else:
-        breaker.record_failure()
+        # End the dispatch span.
+        if dispatch_span:
+            span_status = "ok" if worker_result.status == "success" else "error"
+            if worker_result.error:
+                dispatch_span.set_attribute("error.message", worker_result.error[:200])
+            engine._tracing_emitter.end_span(dispatch_span, status=span_status)
 
-    worker.mark_completed(worker_result.status)
+        # Update circuit breaker based on outcome.
+        if worker_result.status == "success":
+            breaker.record_success()
+        else:
+            breaker.record_failure()
+        recorded = True
 
-    # Emit worker_completed for observers (SSE etc.)
-    output_preview = ""
-    task_id_for_sse = ""
-    if isinstance(context, SwarmDispatchContext):
-        task_id_for_sse = context.task_id or ""
-    if worker_result.output:
-        output_preview = str(worker_result.output)[:200]
-    engine._emit_sse(
-        task_id_for_sse,
-        "worker_completed",
-        {
-            "worker": worker.name if hasattr(worker, "name") else str(worker),
-            "status": worker_result.status,
-            "output_preview": output_preview,
-        },
-    )
-    return [worker_result]
+        worker.mark_completed(worker_result.status)
+
+        # Emit worker_completed for observers (SSE etc.)
+        output_preview = ""
+        task_id_for_sse = ""
+        if isinstance(context, SwarmDispatchContext):
+            task_id_for_sse = context.task_id or ""
+        if worker_result.output:
+            output_preview = str(worker_result.output)[:200]
+        engine._emit_sse(
+            task_id_for_sse,
+            "worker_completed",
+            {
+                "worker": worker.name if hasattr(worker, "name") else str(worker),
+                "status": worker_result.status,
+                "output_preview": output_preview,
+            },
+        )
+        return [worker_result]
+    except BaseException:
+        if not recorded:
+            try:
+                breaker.record_failure()
+                recorded = True
+            except Exception:
+                pass
+        raise
+    finally:
+        # Audit H8: never leave half-open stuck if cancel/timeout skipped record_*.
+        if not recorded and hasattr(breaker, "release_probe"):
+            breaker.release_probe()

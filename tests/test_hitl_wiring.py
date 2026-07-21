@@ -85,10 +85,10 @@ class TestSafetyFailClosedAsync:
     """check (async) must mirror check_sync and block danger tools when no
     real bus adapter is wired.
 
-    Regression guard: the async path used to call
-    ``NullBusAdapter.request_approval()`` which returns ``True``,
-    silently auto-approving every danger tool in headless / web-only
-    deployments. Both paths must now fail-closed consistently.
+    Regression guard: the async path must not call through to a
+    fail-open adapter. ``NullBusAdapter.request_approval()`` returns
+    ``False`` (fail-closed); SafetyMiddleware also short-circuits before
+    the bus when only NullBus is present. Both paths must stay fail-closed.
     """
 
     @pytest.fixture(autouse=True)

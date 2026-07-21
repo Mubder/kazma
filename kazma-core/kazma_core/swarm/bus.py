@@ -114,7 +114,9 @@ class NullBusAdapter(BusAdapter):
         pass
 
     async def request_approval(self, approval: ApprovalRequest) -> bool:
-        return True  # auto-approve when no adapter is present
+        # Fail-closed (audit M9): headless danger must go through
+        # SafetyMiddleware.allow_headless_danger, not silent auto-approve.
+        return False
 
     async def send_alert(
         self,

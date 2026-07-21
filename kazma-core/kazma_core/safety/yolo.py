@@ -16,12 +16,33 @@ __all__ = [
     "disable_yolo",
     "enable_yolo",
     "is_yolo_active",
+    "yolo_allowed",
     "yolo_status",
+    "YoloDisabledError",
 ]
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TTL_SECONDS = 4 * 3600  # 4 hours
+
+
+class YoloDisabledError(PermissionError):
+    """Raised when YOLO is blocked by production policy."""
+
+
+def _truthy(raw: str | None) -> bool:
+    return (raw or "").strip().lower() in ("1", "true", "on", "yes")
+
+
+def yolo_allowed() -> bool:
+    """Return True when YOLO may be enabled.
+
+    Production (``KAZMA_PRODUCTION=1``) disables YOLO unless the operator
+    explicitly opts in with ``KAZMA_ALLOW_YOLO=1``.
+    """
+    if not _truthy(os.environ.get("KAZMA_PRODUCTION")):
+        return True
+    return _truthy(os.environ.get("KAZMA_ALLOW_YOLO"))
 
 
 def _ttl_seconds() -> int:
@@ -35,7 +56,24 @@ def _ttl_seconds() -> int:
 
 
 def enable_yolo(thread_id: str, *, actor: str = "unknown") -> dict[str, Any]:
-    """Enable YOLO for *thread_id*. Returns status dict for the user message."""
+    """Enable YOLO for *thread_id*. Returns status dict for the user message.
+
+    Raises:
+        YoloDisabledError: When production mode blocks YOLO (unless
+            ``KAZMA_ALLOW_YOLO=1``).
+    """
+    if not yolo_allowed():
+        logger.warning(
+            "[SECURITY] YOLO blocked (KAZMA_PRODUCTION without KAZMA_ALLOW_YOLO) "
+            "thread=%s actor=%s",
+            thread_id,
+            actor,
+        )
+        raise YoloDisabledError(
+            "YOLO is disabled in production. "
+            "Set KAZMA_ALLOW_YOLO=1 to opt in, or unset KAZMA_PRODUCTION."
+        )
+
     from kazma_core.config_store import get_config_store
 
     cs = get_config_store()

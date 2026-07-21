@@ -42,20 +42,34 @@ logger = logging.getLogger(__name__)
 __all__ = ["SettingsRouterBuilder", "create_settings_router"]
 
 # Keys whose values are secrets and must be masked in API responses.
-_SENSITIVE_KEY_FRAGMENTS = ("api_key", "token", "secret", "password", "passphrase")
+_SENSITIVE_KEY_FRAGMENTS = (
+    "api_key", "apikey", "token", "secret", "password", "passphrase",
+    "passwd", "credential", "private_key", "authorization", "webhook",
+    "pat", "bearer",
+)
 
 
 def _mask_sensitive_values(data: dict[str, dict[str, Any]]) -> None:
     """Recursively mask values whose key name looks like a secret."""
     import json
+    try:
+        from kazma_core.config_store import is_sensitive_config_key
+    except Exception:
+        is_sensitive_config_key = lambda k: False  # noqa: E731
+
     for category, settings_dict in data.items():
         if not isinstance(settings_dict, dict):
             continue
         for key, val in list(settings_dict.items()):
             key_lower = key.lower()
-            if not any(frag in key_lower for frag in _SENSITIVE_KEY_FRAGMENTS):
+            sensitive = any(frag in key_lower for frag in _SENSITIVE_KEY_FRAGMENTS)
+            try:
+                sensitive = sensitive or bool(is_sensitive_config_key(key))
+            except Exception:
+                pass
+            if not sensitive:
                 continue
-            # Only mask non-empty string values.
+            # Only mask non-empty string values — constant *** (no last-4).
             raw = val
             if isinstance(raw, str):
                 try:
@@ -114,7 +128,7 @@ class SettingsRouterBuilder:
                 _raw_key = profile.get("api_key") or llm_cfg.get("api_key") or ""
                 model_settings = {
                     "base_url": profile.get("base_url") or llm_cfg["base_url"],
-                    "api_key": ("****" + str(_raw_key)[-4:]) if _raw_key and len(str(_raw_key)) > 4 else ("***" if _raw_key else ""),
+                    "api_key": ("***" if _raw_key else ""),
                     "model": profile.get("model") or llm_cfg["model"],
                     "max_tokens": config_store.get("llm.max_tokens", llm_cfg["max_tokens"]),
                     "temperature": config_store.get("llm.temperature", llm_cfg["temperature"]),

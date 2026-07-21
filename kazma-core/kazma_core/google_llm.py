@@ -380,7 +380,6 @@ class GeminiProvider(LLMProvider):
                 capture_output=True,
                 text=True,
                 check=False,
-                shell=True,
             )
             if res.returncode == 0:
                 gcloud_project = res.stdout.strip()

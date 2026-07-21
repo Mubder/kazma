@@ -82,10 +82,10 @@ def _utc_today() -> str:
 
 
 class TaskStore:
-    """SQLite-backed persistence for swarm tasks and worker metrics.
+    """Persistence for swarm tasks and worker metrics.
 
-    Thread-safe via a reentrant lock.  The database file is created
-    automatically if it does not exist.
+    Uses SQLite by default, or Postgres (``kazma_swarm_tasks``) when
+    ``KAZMA_DATABASE_URL`` is configured.
     """
 
     def __init__(self, db_path: str | None = None) -> None:
@@ -93,10 +93,19 @@ class TaskStore:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
+        self._pg = False
+        try:
+            from kazma_core.db.pg_helpers import use_postgres
+
+            self._pg = use_postgres()
+        except Exception:
+            self._pg = False
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
         """Return (or create) the SQLite connection."""
+        if self._pg:
+            raise RuntimeError("SQLite connection requested while Postgres backend active")
         if self._conn is None:
             self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
@@ -105,10 +114,41 @@ class TaskStore:
 
     def _init_db(self) -> None:
         """Create tables if they do not exist."""
+        if self._pg:
+            from kazma_core.db.pg_helpers import get_pool
+
+            get_pool()
+            # Extra columns for full task fidelity on Postgres
+            pool = get_pool()
+            ddl_extra = """
+            ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS dependencies JSONB DEFAULT '[]'::jsonb;
+            ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS fallback_chain JSONB DEFAULT '[]'::jsonb;
+            ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS validation_schema TEXT DEFAULT '';
+            ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS aggregation TEXT DEFAULT '';
+            ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS timeout DOUBLE PRECISION;
+            CREATE TABLE IF NOT EXISTS kazma_swarm_worker_metrics (
+                worker TEXT NOT NULL,
+                date TEXT NOT NULL,
+                tasks_completed INTEGER DEFAULT 0,
+                tasks_failed INTEGER DEFAULT 0,
+                avg_latency DOUBLE PRECISION DEFAULT 0.0,
+                total_tokens INTEGER DEFAULT 0,
+                total_cost DOUBLE PRECISION DEFAULT 0.0,
+                PRIMARY KEY (worker, date)
+            );
+            """
+            try:
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(ddl_extra)
+                    conn.commit()
+            except Exception as exc:
+                logger.debug("[TaskStore] pg schema ensure: %s", exc)
+            logger.info("[TaskStore] using Postgres backend")
+            return
         with self._lock:
             conn = self._get_conn()
             conn.executescript(_SCHEMA)
-            # Migrate: add columns if they don't exist (for existing DBs)
             existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(swarm_tasks)").fetchall()}
             migrations = [
                 ("context", "TEXT DEFAULT ''"),
@@ -123,7 +163,7 @@ class TaskStore:
                     try:
                         conn.execute(f"ALTER TABLE swarm_tasks ADD COLUMN {col_name} {col_def}")
                     except Exception:
-                        pass  # Column might already exist
+                        pass
             conn.commit()
 
     def close(self) -> None:
@@ -135,6 +175,12 @@ class TaskStore:
     def clear(self) -> None:
         """Delete all rows from both tables. Useful for test isolation."""
         with self._lock:
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                get_pool().execute("DELETE FROM kazma_swarm_tasks")
+                get_pool().execute("DELETE FROM kazma_swarm_worker_metrics")
+                return
             conn = self._get_conn()
             conn.execute("DELETE FROM swarm_tasks")
             conn.execute("DELETE FROM swarm_worker_metrics")
@@ -160,7 +206,64 @@ class TaskStore:
             cost = task.result.total_cost
             tokens = task.result.total_tokens
 
+        type_s = task.type.value if isinstance(task.type, TaskType) else str(task.type)
+        status_s = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
+        workers_j = json.dumps(task.workers, ensure_ascii=False)
+        deps_j = json.dumps(getattr(task, "dependencies", []), ensure_ascii=False)
+        fb_j = json.dumps(getattr(task, "fallback_chain", []), ensure_ascii=False)
+        vs = (
+            json.dumps(getattr(task, "validation_schema", None), ensure_ascii=False)
+            if getattr(task, "validation_schema", None)
+            else ""
+        )
+        meta_j = json.dumps(task.metadata, ensure_ascii=False, default=str)
+
         with self._lock:
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                get_pool().execute(
+                    """
+                    INSERT INTO kazma_swarm_tasks (
+                        id, type, prompt, status, workers, result, context,
+                        dependencies, fallback_chain, validation_schema, aggregation,
+                        timeout, created_at, started_at, completed_at, cost, tokens, metadata
+                    ) VALUES (
+                        %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s,
+                        %s::jsonb, %s::jsonb, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s::jsonb
+                    )
+                    ON CONFLICT (id) DO UPDATE SET
+                        type = EXCLUDED.type,
+                        prompt = EXCLUDED.prompt,
+                        status = EXCLUDED.status,
+                        workers = EXCLUDED.workers,
+                        result = EXCLUDED.result,
+                        context = EXCLUDED.context,
+                        dependencies = EXCLUDED.dependencies,
+                        fallback_chain = EXCLUDED.fallback_chain,
+                        validation_schema = EXCLUDED.validation_schema,
+                        aggregation = EXCLUDED.aggregation,
+                        timeout = EXCLUDED.timeout,
+                        created_at = EXCLUDED.created_at,
+                        started_at = EXCLUDED.started_at,
+                        completed_at = EXCLUDED.completed_at,
+                        cost = EXCLUDED.cost,
+                        tokens = EXCLUDED.tokens,
+                        metadata = EXCLUDED.metadata
+                    """,
+                    (
+                        task.id, type_s, task.prompt, status_s, workers_j,
+                        result_json or "null",
+                        task.context or "",
+                        deps_j, fb_j, vs,
+                        getattr(task, "aggregation", "") or "",
+                        getattr(task, "timeout", None),
+                        task.created_at, task.started_at, task.completed_at,
+                        cost, tokens, meta_j,
+                    ),
+                )
+                return
             conn = self._get_conn()
             conn.execute(
                 """INSERT OR REPLACE INTO swarm_tasks
@@ -170,24 +273,12 @@ class TaskStore:
                     created_at, started_at, completed_at, cost, tokens, metadata)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    task.id,
-                    task.type.value if isinstance(task.type, TaskType) else str(task.type),
-                    task.prompt,
-                    task.status.value if isinstance(task.status, TaskStatus) else str(task.status),
-                    json.dumps(task.workers, ensure_ascii=False),
-                    result_json,
-                    task.context or "",
-                    json.dumps(getattr(task, "dependencies", []), ensure_ascii=False),
-                    json.dumps(getattr(task, "fallback_chain", []), ensure_ascii=False),
-                    json.dumps(getattr(task, "validation_schema", None), ensure_ascii=False) if getattr(task, "validation_schema", None) else "",
+                    task.id, type_s, task.prompt, status_s, workers_j, result_json,
+                    task.context or "", deps_j, fb_j, vs,
                     getattr(task, "aggregation", "") or "",
                     getattr(task, "timeout", None),
-                    task.created_at,
-                    task.started_at,
-                    task.completed_at,
-                    cost,
-                    tokens,
-                    json.dumps(task.metadata, ensure_ascii=False, default=str),
+                    task.created_at, task.started_at, task.completed_at,
+                    cost, tokens, meta_j,
                 ),
             )
             conn.commit()
@@ -195,6 +286,15 @@ class TaskStore:
     def get_task(self, task_id: str) -> SwarmTask | None:
         """Retrieve a persisted task by its id, or ``None``."""
         with self._lock:
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                row = get_pool().execute_one(
+                    "SELECT * FROM kazma_swarm_tasks WHERE id = %s", (task_id,)
+                )
+                if row is None:
+                    return None
+                return self._dict_to_task(row)
             conn = self._get_conn()
             row = conn.execute(
                 "SELECT * FROM swarm_tasks WHERE id = ?", (task_id,)
@@ -234,30 +334,59 @@ class TaskStore:
         page_size = max(1, min(page_size, 100))
         offset = (page - 1) * page_size
 
-        conditions: list[str] = []
-        params: list[Any] = []
-
-        if status:
-            conditions.append("status = ?")
-            params.append(status)
-        if task_type:
-            conditions.append("type = ?")
-            params.append(task_type)
-        if worker:
-            # Workers stored as JSON array — use json_each for exact match
-            conditions.append(
-                "EXISTS (SELECT 1 FROM json_each(workers) WHERE value = ?)"
-            )
-            params.append(worker)
-
-        where_clause = ""
-        if conditions:
-            where_clause = "WHERE " + " AND ".join(conditions)
-
         with self._lock:
-            conn = self._get_conn()
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
 
-            # Total count.
+                conditions: list[str] = []
+                params: list[Any] = []
+                if status:
+                    conditions.append("status = %s")
+                    params.append(status)
+                if task_type:
+                    conditions.append("type = %s")
+                    params.append(task_type)
+                if worker:
+                    conditions.append("workers @> %s::jsonb")
+                    params.append(json.dumps([worker]))
+                where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+                total = 0
+                if include_count:
+                    count_row = get_pool().execute_one(
+                        f"SELECT COUNT(*) AS cnt FROM kazma_swarm_tasks {where_clause}",
+                        params,
+                    )
+                    total = int(count_row["cnt"]) if count_row else 0
+                rows = get_pool().execute(
+                    f"""SELECT * FROM kazma_swarm_tasks {where_clause}
+                        ORDER BY COALESCE(completed_at, created_at) DESC
+                        LIMIT %s OFFSET %s""",
+                    params + [page_size, offset],
+                )
+                tasks = [self._dict_to_task(r) for r in rows]
+                if include_count:
+                    return tasks, total
+                return tasks
+
+            conditions = []
+            params = []
+            if status:
+                conditions.append("status = ?")
+                params.append(status)
+            if task_type:
+                conditions.append("type = ?")
+                params.append(task_type)
+            if worker:
+                conditions.append(
+                    "EXISTS (SELECT 1 FROM json_each(workers) WHERE value = ?)"
+                )
+                params.append(worker)
+
+            where_clause = ""
+            if conditions:
+                where_clause = "WHERE " + " AND ".join(conditions)
+
+            conn = self._get_conn()
             total = 0
             if include_count:
                 count_row = conn.execute(
@@ -265,8 +394,6 @@ class TaskStore:
                     params,
                 ).fetchone()
                 total = count_row["cnt"] if count_row else 0
-
-            # Paginated results.
             rows = conn.execute(
                 f"""SELECT * FROM swarm_tasks {where_clause}
                     ORDER BY COALESCE(completed_at, created_at) DESC
@@ -275,7 +402,6 @@ class TaskStore:
             ).fetchall()
 
         tasks = [self._row_to_task(row) for row in rows]
-
         if include_count:
             return tasks, total
         return tasks
@@ -283,6 +409,14 @@ class TaskStore:
     def get_paused_tasks(self) -> list[SwarmTask]:
         """Return all tasks with status='paused' (for HITL restore on restart)."""
         with self._lock:
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                rows = get_pool().execute(
+                    "SELECT * FROM kazma_swarm_tasks WHERE status = %s ORDER BY created_at DESC",
+                    ("paused",),
+                )
+                return [self._dict_to_task(r) for r in rows]
             conn = self._get_conn()
             rows = conn.execute(
                 "SELECT * FROM swarm_tasks WHERE status = ? ORDER BY created_at DESC",
@@ -314,6 +448,55 @@ class TaskStore:
         total_tasks = tasks_completed + tasks_failed
 
         with self._lock:
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                existing = get_pool().execute_one(
+                    """SELECT tasks_completed, tasks_failed, avg_latency,
+                              total_tokens, total_cost
+                       FROM kazma_swarm_worker_metrics
+                       WHERE worker = %s AND date = %s""",
+                    (worker, metric_date),
+                )
+                if existing:
+                    prev_completed = int(existing["tasks_completed"] or 0)
+                    prev_failed = int(existing["tasks_failed"] or 0)
+                    prev_avg_latency = float(existing["avg_latency"] or 0)
+                    prev_tokens = int(existing["total_tokens"] or 0)
+                    prev_cost = float(existing["total_cost"] or 0)
+                    new_completed = prev_completed + tasks_completed
+                    new_failed = prev_failed + tasks_failed
+                    prev_total = prev_completed + prev_failed
+                    new_total = prev_total + total_tasks
+                    new_avg = (
+                        ((prev_avg_latency * prev_total) + (latency * total_tasks)) / new_total
+                        if new_total > 0
+                        else 0.0
+                    )
+                    get_pool().execute(
+                        """UPDATE kazma_swarm_worker_metrics
+                           SET tasks_completed = %s, tasks_failed = %s,
+                               avg_latency = %s, total_tokens = %s, total_cost = %s
+                           WHERE worker = %s AND date = %s""",
+                        (
+                            new_completed, new_failed, new_avg,
+                            prev_tokens + tokens, prev_cost + cost,
+                            worker, metric_date,
+                        ),
+                    )
+                else:
+                    get_pool().execute(
+                        """INSERT INTO kazma_swarm_worker_metrics
+                           (worker, date, tasks_completed, tasks_failed,
+                            avg_latency, total_tokens, total_cost)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                        (
+                            worker, metric_date, tasks_completed, tasks_failed,
+                            latency if total_tasks > 0 else 0.0, tokens, cost,
+                        ),
+                    )
+                return
+
             conn = self._get_conn()
             existing = conn.execute(
                 """SELECT tasks_completed, tasks_failed, avg_latency,
@@ -335,7 +518,6 @@ class TaskStore:
                 prev_total_tasks = prev_completed + prev_failed
                 new_total_tasks = prev_total_tasks + total_tasks
 
-                # Weighted average latency.
                 if new_total_tasks > 0:
                     new_avg_latency = (
                         (prev_avg_latency * prev_total_tasks) + (latency * total_tasks)
@@ -349,13 +531,9 @@ class TaskStore:
                            avg_latency = ?, total_tokens = ?, total_cost = ?
                        WHERE worker = ? AND date = ?""",
                     (
-                        new_completed,
-                        new_failed,
-                        new_avg_latency,
-                        prev_tokens + tokens,
-                        prev_cost + cost,
-                        worker,
-                        metric_date,
+                        new_completed, new_failed, new_avg_latency,
+                        prev_tokens + tokens, prev_cost + cost,
+                        worker, metric_date,
                     ),
                 )
             else:
@@ -372,6 +550,18 @@ class TaskStore:
     def get_worker_metrics(self, worker: str) -> list[dict[str, Any]]:
         """Return daily metrics for a given worker, newest first."""
         with self._lock:
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                rows = get_pool().execute(
+                    """SELECT worker, date, tasks_completed, tasks_failed,
+                              avg_latency, total_tokens, total_cost
+                       FROM kazma_swarm_worker_metrics
+                       WHERE worker = %s
+                       ORDER BY date DESC""",
+                    (worker,),
+                )
+                return [dict(r) for r in rows]
             conn = self._get_conn()
             rows = conn.execute(
                 """SELECT worker, date, tasks_completed, tasks_failed,
@@ -386,6 +576,20 @@ class TaskStore:
     def get_all_worker_metrics(self) -> list[dict[str, Any]]:
         """Return aggregated metrics for all workers."""
         with self._lock:
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                rows = get_pool().execute(
+                    """SELECT worker, SUM(tasks_completed) AS tasks_completed,
+                              SUM(tasks_failed) AS tasks_failed,
+                              AVG(avg_latency) AS avg_latency,
+                              SUM(total_tokens) AS total_tokens,
+                              SUM(total_cost) AS total_cost
+                       FROM kazma_swarm_worker_metrics
+                       GROUP BY worker
+                       ORDER BY worker""",
+                )
+                return [dict(r) for r in rows]
             conn = self._get_conn()
             rows = conn.execute(
                 """SELECT worker, SUM(tasks_completed) AS tasks_completed,
@@ -403,6 +607,47 @@ class TaskStore:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @classmethod
+    def _dict_to_task(cls, row: dict[str, Any]) -> SwarmTask:
+        """Convert a Postgres dict row into a SwarmTask."""
+        def _j(key: str, default: Any = None) -> Any:
+            val = row.get(key)
+            if val is None:
+                return default
+            if isinstance(val, (dict, list)):
+                return val
+            if isinstance(val, str) and val:
+                try:
+                    return json.loads(val)
+                except Exception:
+                    return default
+            return default
+
+        result_data = _j("result")
+        metadata = _j("metadata") or {}
+        workers = _j("workers") or []
+        task = SwarmTask(
+            id=row["id"],
+            type=row["type"],
+            prompt=row["prompt"],
+            status=row["status"],
+            workers=workers if isinstance(workers, list) else [],
+            result=TaskResult.from_dict(result_data) if isinstance(result_data, dict) else None,
+            created_at=row.get("created_at") or "",
+            started_at=row.get("started_at"),
+            completed_at=row.get("completed_at"),
+            cost_estimate=float(row.get("cost") or 0),
+            metadata=metadata if isinstance(metadata, dict) else {},
+        )
+        task.context = row.get("context") or ""
+        task.dependencies = _j("dependencies", []) or []
+        task.fallback_chain = _j("fallback_chain", []) or []
+        task.validation_schema = _j("validation_schema", None)
+        task.aggregation = row.get("aggregation") or ""
+        if row.get("timeout") is not None:
+            task.timeout = float(row["timeout"])
+        return task
+
     @staticmethod
     def _row_to_task(row: sqlite3.Row) -> SwarmTask:
         """Convert a SQLite row into a :class:`SwarmTask`."""
@@ -410,7 +655,6 @@ class TaskStore:
         metadata = json.loads(row["metadata"]) if row["metadata"] else {}
         workers = json.loads(row["workers"]) if row["workers"] else []
 
-        # Restore fields that were lost in the original schema
         def _safe_json(key: str, default: Any) -> Any:
             try:
                 val = row[key] if key in row.keys() else None
@@ -431,9 +675,6 @@ class TaskStore:
             cost_estimate=float(row["cost"] or 0),
             metadata=metadata,
         )
-        # Restore context — stored as raw text, not JSON (natural-language
-        # context is not JSON-parseable; the old _safe_json call silently
-        # wiped it). Just read the raw value.
         task.context = row["context"] if "context" in row.keys() else ""
         if "dependencies" in row.keys():
             task.dependencies = _safe_json("dependencies", [])

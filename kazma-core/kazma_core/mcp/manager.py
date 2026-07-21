@@ -767,8 +767,30 @@ class UnifiedToolExecutor:
                     self._mcp.get_server_trust(server_name) == "trusted"
                 )
                 if not _hitl_already_approved and not _server_trusted:
+                    # Audit M10 / WP-3.6: untrusted MCP — force HITL for all
+                    # tools except explicit allowlist. "safe" name patterns are
+                    # not enough (list_keys, get_env, export_data, …).
+                    import os as _os_mcp
+
+                    allow_raw = (
+                        _os_mcp.environ.get("KAZMA_MCP_SAFE_ALLOWLIST") or ""
+                    ).strip()
+                    allowlist = {
+                        a.strip().lower()
+                        for a in allow_raw.split(",")
+                        if a.strip()
+                    }
                     tier = classify_mcp_tool(tool_name)
-                    if tier in ("danger", "unknown"):
+                    prod = (_os_mcp.environ.get("KAZMA_PRODUCTION") or "").lower() in (
+                        "1", "true", "on", "yes",
+                    )
+                    # Production: HITL for every tool not on the allowlist.
+                    # Dev/default: danger + unknown only (safe name patterns skip).
+                    if prod:
+                        force_hitl = tool_name.lower() not in allowlist
+                    else:
+                        force_hitl = tier in ("danger", "unknown")
+                    if force_hitl:
                         try:
                             import json as _json
 
@@ -779,7 +801,6 @@ class UnifiedToolExecutor:
                                 # force_danger=True: MCP tool names (write_file,
                                 # run_command, …) are not in the static
                                 # _EXTENDED_DANGER set (file_write, shell_exec).
-                                # Without this flag, check() treats them as safe.
                                 approved = await safety.check(
                                     tool_name=tool_name,
                                     tool_args=_json.dumps(arguments, default=str)[:200],

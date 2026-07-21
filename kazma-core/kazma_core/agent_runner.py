@@ -627,6 +627,45 @@ class KazmaAgent:
         )
         return self._streaming_graph
 
+    def build_child_graph(
+        self,
+        *,
+        tools: list[str] | None = None,
+        hitl_config: dict[str, Any] | None = None,
+    ) -> Any:
+        """Build a one-shot supervisor graph for sub-agents (audit M19).
+
+        Not cached — each spawn can carry auto-deny HITL and tool filters.
+        """
+        from kazma_core.agent.graph_builder import build_supervisor_graph
+        from kazma_core.safety.hitl import get_hitl_config
+
+        tool_defs = list(self.tools.get_tool_definitions())
+        if tools:
+            allow = {str(t).lower() for t in tools}
+            tool_defs = [
+                d for d in tool_defs
+                if str(d.get("function", d).get("name", d.get("name", ""))).lower()
+                in allow
+                or str(d.get("name", "")).lower() in allow
+            ]
+
+        hitl = hitl_config if hitl_config is not None else get_hitl_config(self.config.raw)
+        if isinstance(hitl, dict) and not hitl.get("enabled", True):
+            hitl = None
+
+        return build_supervisor_graph(
+            llm=self.llm,
+            system_prompt=self.system_prompt,
+            tool_definitions=tool_defs,
+            tool_executor=self.tools,
+            cost_breaker=self.cost_breaker,
+            authority=self.authority,
+            tracer=self.tracer,
+            hitl_config=hitl,
+            checkpointer=None,
+        )
+
     async def _ensure_graph(self) -> Any:
         """Build (once) the LangGraph supervisor graph this agent runs on.
 
@@ -640,14 +679,35 @@ class KazmaAgent:
 
         from kazma_core.agent.graph_builder import build_supervisor_graph
 
-        # Durable checkpointer (SIGKILL-safe). One connection per agent,
-        # closed in shutdown().
+        # Durable checkpointer — Postgres when multi-replica, else SQLite.
         db_path = self.config.raw.get("storage", {}).get("checkpoint_path", CHECKPOINT_DB)
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._checkpoint_conn = await aiosqlite.connect(db_path)
-        await apply_sqlite_pragmas_async(self._checkpoint_conn)
-        self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
-        await self._checkpointer.setup()
+        self._checkpointer = None
+        self._checkpoint_conn = None
+        try:
+            from kazma_core.db.backend import get_database_url, is_postgres
+
+            if is_postgres():
+                dsn = get_database_url() or ""
+                if dsn.startswith("postgres://"):
+                    dsn = "postgresql://" + dsn[len("postgres://") :]
+                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
+                from psycopg_pool import AsyncConnectionPool  # type: ignore
+
+                pool = AsyncConnectionPool(conninfo=dsn, min_size=1, max_size=8, open=False)
+                await pool.open()
+                self._checkpointer = AsyncPostgresSaver(conn=pool)  # type: ignore[arg-type]
+                await self._checkpointer.setup()
+                logger.info("KazmaAgent checkpointer: AsyncPostgresSaver")
+        except Exception as exc:
+            logger.debug("Postgres checkpointer unavailable (%s) — SQLite", exc)
+
+        if self._checkpointer is None:
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            self._checkpoint_conn = await aiosqlite.connect(db_path)
+            await apply_sqlite_pragmas_async(self._checkpoint_conn)
+            self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
+            await self._checkpointer.setup()
+            logger.info("KazmaAgent checkpointer: AsyncSqliteSaver path=%s", db_path)
 
         # Prefer get_hitl_config() so ConfigStore / Settings UI overrides
         # apply on the run path the same way as the streaming graph.
@@ -665,7 +725,7 @@ class KazmaAgent:
             checkpointer=self._checkpointer,
             hitl_config=hitl_config,
         )
-        logger.info("KazmaAgent run path bound to supervisor graph (checkpoint=%s)", db_path)
+        logger.info("KazmaAgent run path bound to supervisor graph")
         return self._graph
 
     async def run(self, user_input: str, state: AgentState | None = None) -> str:
@@ -709,7 +769,34 @@ class KazmaAgent:
 
         token = set_current_thread_id(self._thread_id)
         try:
-            result = await graph.ainvoke(graph_state, config)
+            import os as _os_to
+
+            # Wall-clock turn budget (audit M14). Override: KAZMA_TURN_TIMEOUT_SECONDS
+            raw_to = (_os_to.environ.get("KAZMA_TURN_TIMEOUT_SECONDS") or "600").strip()
+            try:
+                turn_timeout = float(raw_to)
+            except ValueError:
+                turn_timeout = 600.0
+            if turn_timeout <= 0:
+                result = await graph.ainvoke(graph_state, config)
+            else:
+                import asyncio as _asyncio
+
+                try:
+                    result = await _asyncio.wait_for(
+                        graph.ainvoke(graph_state, config),
+                        timeout=turn_timeout,
+                    )
+                except _asyncio.TimeoutError:
+                    logger.error(
+                        "Graph turn timed out after %.0fs (thread=%s)",
+                        turn_timeout,
+                        self._thread_id,
+                    )
+                    return (
+                        f"⚠️ Turn timed out after {int(turn_timeout)}s. "
+                        "Try a shorter request or raise KAZMA_TURN_TIMEOUT_SECONDS."
+                    )
         except Exception as e:
             logger.error("Graph invocation failed: %s", e)
             return "عذراً، حدث خطأ تقني. يرجى المحاولة مرة أخرى."

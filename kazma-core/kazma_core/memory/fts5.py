@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,12 +43,15 @@ class FTS5Memory:
         self._db_path = str(Path(db_path).expanduser().resolve())
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._table_name = table_name
-        self._conn = sqlite3.connect(self._db_path)
+        # check_same_thread=False + lock: concurrent async tool use (audit M16)
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         from kazma_core.config_store import apply_sqlite_pragmas
 
         apply_sqlite_pragmas(self._conn)
         self._conn.row_factory = sqlite3.Row
-        self._create_table()
+        with self._lock:
+            self._create_table()
         logger.info("[FTS5Memory] Initialized at %s (table=%s)", self._db_path, table_name)
 
     def _create_table(self) -> None:
@@ -106,11 +110,12 @@ class FTS5Memory:
         meta_json = json.dumps(metadata or {"source": "agent"})
         timestamp = datetime.now(UTC).isoformat()
 
-        self._conn.execute(
-            f"INSERT INTO {self._table_name} (text, metadata, doc_id, timestamp) VALUES (?, ?, ?, ?)",
-            (text, meta_json, doc_id, timestamp),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                f"INSERT INTO {self._table_name} (text, metadata, doc_id, timestamp) VALUES (?, ?, ?, ?)",
+                (text, meta_json, doc_id, timestamp),
+            )
+            self._conn.commit()
         logger.debug("[FTS5Memory] Stored doc %s: %.80s", doc_id, text)
         return doc_id
 
@@ -133,16 +138,17 @@ class FTS5Memory:
         try:
             safe_query = query.strip().replace('"', '""')
             safe_query = f'"{safe_query}"' if safe_query else '""'
-            rows = self._conn.execute(
-                f"""
-                SELECT text, metadata, doc_id, rank
-                FROM {self._table_name}
-                WHERE {self._table_name} MATCH ?
-                ORDER BY rank
-                LIMIT ?
-                """,
-                (safe_query, limit),
-            ).fetchall()
+            with self._lock:
+                rows = self._conn.execute(
+                    f"""
+                    SELECT text, metadata, doc_id, rank
+                    FROM {self._table_name}
+                    WHERE {self._table_name} MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                    """,
+                    (safe_query, limit),
+                ).fetchall()
 
             results = []
             for row in rows:
@@ -163,26 +169,33 @@ class FTS5Memory:
 
     def delete(self, doc_id: str) -> bool:
         """Delete a document by ID."""
-        cursor = self._conn.execute(
-            f"DELETE FROM {self._table_name} WHERE doc_id = ?",
-            (doc_id,),
-        )
-        self._conn.commit()
-        return cursor.rowcount > 0
+        with self._lock:
+            cursor = self._conn.execute(
+                f"DELETE FROM {self._table_name} WHERE doc_id = ?",
+                (doc_id,),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
 
     def count(self) -> int:
         """Number of stored fragments."""
-        row = self._conn.execute(
-            f"SELECT COUNT(*) FROM {self._table_name}"
-        ).fetchone()
-        return row[0] if row else 0
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT COUNT(*) FROM {self._table_name}"
+            ).fetchone()
+            return row[0] if row else 0
 
     def clear(self) -> int:
         """Delete all documents. Returns count deleted."""
-        cursor = self._conn.execute(f"DELETE FROM {self._table_name}")
-        self._conn.commit()
-        return cursor.rowcount
+        with self._lock:
+            cursor = self._conn.execute(f"DELETE FROM {self._table_name}")
+            self._conn.commit()
+            return cursor.rowcount
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        with self._lock:
+            try:
+                self._conn.close()
+            except Exception:
+                pass

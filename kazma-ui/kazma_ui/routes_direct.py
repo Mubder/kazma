@@ -338,34 +338,73 @@ def register_direct_routes(self: Any) -> None:
     async def _auth_status(request: Request) -> dict[str, Any]:
         """Whether auth is enabled and whether this request is authenticated."""
         from kazma_ui.auth import (
-            SECRET_COOKIE,
-            SECRET_HEADER,
             get_kazma_secret,
-            verify_secret,
+            get_request_principal,
+            is_authenticated,
             _is_loopback_client,
         )
 
         expected = get_kazma_secret()
+        oidc = False
+        multi_user = False
+        try:
+            from kazma_core.security.oidc import oidc_configured
+            from kazma_core.security.platform_rbac import multi_user_enabled
+
+            oidc = oidc_configured()
+            multi_user = multi_user_enabled()
+        except Exception:
+            pass
         if not expected:
-            return {"auth_enabled": False, "authenticated": True, "mode": "open"}
-        provided = request.headers.get(SECRET_HEADER, "") or request.cookies.get(SECRET_COOKIE, "")
-        ok = bool(provided and verify_secret(provided, expected))
+            return {
+                "auth_enabled": False,
+                "authenticated": True,
+                "mode": "open",
+                "oidc": oidc,
+                "multi_user": multi_user,
+            }
+        ok = is_authenticated(request, expected)
+        principal = get_request_principal(request) if ok else None
         return {
             "auth_enabled": True,
             "authenticated": ok,
             "loopback": _is_loopback_client(request),
             "mode": "secret",
+            "oidc": oidc,
+            "multi_user": multi_user,
+            "principal": principal,
         }
+
+    # Login brute-force throttle (audit M3) — in-process sliding window per IP
+    _login_failures: dict[str, list[float]] = {}
+    _LOGIN_WINDOW_S = 300.0
+    _LOGIN_MAX_FAILS = 10
 
     @self.app.post("/api/auth/login")
     async def _auth_login(request: Request) -> Response:
         """Exchange KAZMA_SECRET for an HttpOnly session cookie."""
+        import time as _time
+
         from kazma_ui.auth import (
             SECRET_COOKIE,
             get_kazma_secret,
             verify_secret,
             _is_https,
         )
+
+        client_ip = (request.client.host if request.client else "") or "unknown"
+        now = _time.time()
+        recent = [
+            t for t in _login_failures.get(client_ip, [])
+            if now - t < _LOGIN_WINDOW_S
+        ]
+        _login_failures[client_ip] = recent
+        if len(recent) >= _LOGIN_MAX_FAILS:
+            logger.warning("[auth] login rate limit hit for %s", client_ip)
+            return _JSONResponse(
+                {"detail": "Too many failed login attempts — try again later"},
+                status_code=429,
+            )
 
         expected = get_kazma_secret()
         if not expected:
@@ -379,13 +418,82 @@ def register_direct_routes(self: Any) -> None:
             body = {}
         if not isinstance(body, dict):
             body = {}
-        secret = str(body.get("secret") or body.get("password") or "")
-        if not verify_secret(secret, expected):
+        secret = str(body.get("secret") or "").strip()
+        username = str(body.get("username") or "").strip()
+        password = str(body.get("password") or "").strip()
+        session_user = None
+        session_role = "admin"
+        session_uid = None
+        authenticated = False
+
+        # Path A: multi-user local username + password (Phase 4.4)
+        if username and password:
+            try:
+                from kazma_core.security.platform_rbac import authenticate_local_user
+
+                pu = authenticate_local_user(username, password)
+                if pu is not None:
+                    authenticated = True
+                    session_user = pu.username
+                    session_role = pu.role
+                    session_uid = pu.user_id
+            except Exception:
+                logger.debug("[auth] local user auth failed", exc_info=True)
+
+        # Path B: shared operator secret
+        if not authenticated:
+            check = secret or password
+            if check and verify_secret(check, expected):
+                authenticated = True
+                session_user = "operator"
+                session_role = "admin"
+                session_uid = "shared-secret"
+
+        if not authenticated:
+            recent.append(now)
+            _login_failures[client_ip] = recent
             return _JSONResponse(
-                {"detail": "Invalid secret"},
+                {"detail": "Invalid credentials"},
                 status_code=401,
             )
-        resp = _JSONResponse({"status": "ok", "authenticated": True})
+
+        # Success — clear failures for this IP
+        _login_failures.pop(client_ip, None)
+
+        resp = _JSONResponse({
+            "status": "ok",
+            "authenticated": True,
+            "username": session_user,
+            "role": session_role,
+        })
+        # Opaque session cookie preferred (audit H1)
+        try:
+            from kazma_core.security.web_sessions import (
+                SESSION_COOKIE,
+                create_session,
+                use_opaque_sessions,
+            )
+
+            if use_opaque_sessions():
+                sid = create_session(
+                    actor="login",
+                    username=session_user,
+                    role=session_role,
+                    user_id=session_uid,
+                )
+                resp.set_cookie(
+                    key=SESSION_COOKIE,
+                    value=sid,
+                    httponly=True,
+                    samesite="lax",
+                    path="/",
+                    secure=_is_https(request),
+                    max_age=60 * 60 * 24 * 14,
+                )
+                resp.delete_cookie(SECRET_COOKIE, path="/")
+                return resp
+        except Exception:
+            logger.debug("[auth] opaque session create failed; legacy cookie", exc_info=True)
         resp.set_cookie(
             key=SECRET_COOKIE,
             value=expected,
@@ -397,13 +505,93 @@ def register_direct_routes(self: Any) -> None:
         )
         return resp
 
-    @self.app.post("/api/auth/logout")
-    async def _auth_logout() -> Response:
-        """Clear the auth session cookie."""
-        from kazma_ui.auth import SECRET_COOKIE
+    @self.app.get("/api/auth/oidc/start")
+    async def _oidc_start(request: Request) -> Response:
+        """Redirect browser to configured OIDC IdP (Phase 4.4)."""
+        from fastapi.responses import RedirectResponse
 
+        try:
+            from kazma_core.security.oidc import build_authorize_url, oidc_configured
+
+            if not oidc_configured():
+                return _JSONResponse(
+                    {"error": "OIDC not configured (KAZMA_OIDC_ISSUER + CLIENT_ID)"},
+                    status_code=503,
+                )
+            info = await build_authorize_url()
+            return RedirectResponse(url=info["url"], status_code=302)
+        except Exception as exc:
+            logger.exception("[oidc] start failed")
+            return _JSONResponse({"error": str(exc)}, status_code=500)
+
+    @self.app.get("/api/auth/oidc/callback")
+    async def _oidc_callback(request: Request) -> Response:
+        """OIDC callback — mint opaque session from IdP claims."""
+        from fastapi.responses import RedirectResponse
+        from kazma_ui.auth import SESSION_COOKIE, _is_https
+
+        code = request.query_params.get("code") or ""
+        state = request.query_params.get("state") or ""
+        if not code or not state:
+            return _JSONResponse({"error": "Missing code/state"}, status_code=400)
+        try:
+            from kazma_core.security.oidc import exchange_code
+            from kazma_core.security.web_sessions import create_session, use_opaque_sessions
+
+            result = await exchange_code(code, state)
+            if not use_opaque_sessions():
+                return _JSONResponse(
+                    {"error": "Opaque sessions required for OIDC"},
+                    status_code=500,
+                )
+            sid = create_session(
+                actor="oidc",
+                username=result.get("username"),
+                role=result.get("role") or "operator",
+                user_id=result.get("user_id"),
+            )
+            resp = RedirectResponse(url="/", status_code=302)
+            resp.set_cookie(
+                key=SESSION_COOKIE,
+                value=sid,
+                httponly=True,
+                samesite="lax",
+                path="/",
+                secure=_is_https(request),
+                max_age=60 * 60 * 24 * 14,
+            )
+            return resp
+        except Exception as exc:
+            logger.exception("[oidc] callback failed")
+            return _JSONResponse({"error": str(exc)}, status_code=400)
+
+    @self.app.get("/api/auth/me")
+    async def _auth_me(request: Request) -> Response:
+        """Return current principal (role/username) for UI chrome."""
+        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+
+        secret = get_kazma_secret()
+        if secret and not is_authenticated(request, secret):
+            return _JSONResponse({"authenticated": False}, status_code=401)
+        principal = get_request_principal(request) or {}
+        return _JSONResponse({"authenticated": True, **principal})
+
+    @self.app.post("/api/auth/logout")
+    async def _auth_logout(request: Request) -> Response:
+        """Clear auth cookies and revoke opaque session."""
+        from kazma_ui.auth import SECRET_COOKIE, SESSION_COOKIE
+
+        try:
+            from kazma_core.security.web_sessions import revoke_session
+
+            sid = request.cookies.get(SESSION_COOKIE) or ""
+            if sid:
+                revoke_session(sid)
+        except Exception:
+            pass
         resp = _JSONResponse({"status": "ok", "authenticated": False})
         resp.delete_cookie(SECRET_COOKIE, path="/")
+        resp.delete_cookie(SESSION_COOKIE, path="/")
         return resp
 
     @self.app.get("/api/system/packages")
@@ -897,7 +1085,12 @@ def register_direct_routes(self: Any) -> None:
                                 status_code=403,
                             )
         except Exception as _e:
-            logger.debug("[HITL] Ownership check failed: %s", _e)
+            # Fail-closed (audit M7): never skip ownership on store errors
+            logger.warning("[HITL] Ownership check failed — denying: %s", _e)
+            return _JSONResponse(
+                {"error": "Ownership check failed — approval denied"},
+                status_code=403,
+            )
 
         try:
             from langgraph.types import Command
@@ -962,9 +1155,18 @@ def register_direct_routes(self: Any) -> None:
             grant_info: dict[str, Any] | None = None
             if approved and scope == "yolo":
                 try:
-                    from kazma_core.safety.yolo import enable_yolo
+                    from kazma_core.safety.yolo import YoloDisabledError, enable_yolo
 
                     grant_info = enable_yolo(thread_id, actor=actor)
+                except YoloDisabledError as yde:
+                    logger.warning("[HITL] YOLO scope blocked: %s", yde)
+                    return _JSONResponse(
+                        {
+                            "error": str(yde),
+                            "status": "yolo_disabled",
+                        },
+                        status_code=403,
+                    )
                 except Exception:
                     logger.exception("[HITL] failed to enable YOLO scope")
             elif approved and scope == "tool":

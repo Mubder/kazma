@@ -233,13 +233,27 @@ class SubAgentManager:
             return {"enabled": False}
 
         if safety_mode == "auto_deny":
-            # Child agents auto-deny danger tools after 1s
+            # Child agents: full canonical danger list + auto-deny (audit M19)
+            try:
+                from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+
+                danger = list(CANONICAL_DANGER_TOOLS)
+            except Exception:
+                danger = [
+                    "file_write", "file_delete", "shell_exec",
+                    "python_exec", "code_exec",
+                ]
             return {
                 "enabled": True,
-                "require_approval_for": ["file_write", "file_delete", "shell_exec"],
+                "require_approval_for": danger,
                 "approval_timeout_seconds": 1,
                 "auto_deny_on_timeout": True,
             }
 
-        # "inherit" — caller passes their own config
-        return None
+        # "inherit" — use process-wide HITL config
+        try:
+            from kazma_core.safety.hitl import get_hitl_config
+
+            return get_hitl_config()
+        except Exception:
+            return None

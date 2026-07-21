@@ -107,6 +107,12 @@ function settingsApp() {
         passwordForm: { old_password: '', new_password: '', confirm_password: '' },
         tokenName: '',
         lastCreatedToken: '',
+        // SaaS multi-user
+        saasStatus: null,
+        platformUsers: [],
+        tenants: [],
+        newUser: { username: '', password: '', role: 'operator' },
+        newTenant: { id: '', name: '' },
 
         // ── Tools Tab ──
         tools: [],
@@ -1412,6 +1418,114 @@ function settingsApp() {
             // Always replace arrays so Alpine x-for sees a new reference.
             this.apiTokens = Array.isArray(tokens) ? tokens.slice() : [];
             this.sessions = Array.isArray(sessions) ? sessions.slice() : [];
+            await this.loadSaasAdmin();
+        },
+
+        async loadSaasAdmin() {
+            try {
+                const st = await this._fetch('/api/saas/status');
+                this.saasStatus = st || null;
+                if (!st) return;
+                const isAdmin = st.principal && (st.principal.role === 'admin' || st.principal.source === 'secret');
+                if (!isAdmin) return;
+                const [usersResp, tenantsResp] = await Promise.all([
+                    this._fetch('/api/saas/users'),
+                    this._fetch('/api/saas/tenants'),
+                ]);
+                this.platformUsers = (usersResp && usersResp.users) ? usersResp.users.slice() : [];
+                this.tenants = (tenantsResp && tenantsResp.tenants) ? tenantsResp.tenants.slice() : [];
+            } catch (e) {
+                console.debug('[settings] saas admin load skipped', e);
+            }
+        },
+
+        async createPlatformUser() {
+            if (!this.newUser.username || !this.newUser.password) {
+                showToast('Username and password required', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/saas/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(this.newUser),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showToast(data.error || 'Failed to create user', 'error');
+                    return;
+                }
+                showToast('User created', 'success');
+                this.newUser = { username: '', password: '', role: 'operator' };
+                await this.loadSaasAdmin();
+            } catch (e) {
+                showToast('Failed: ' + e.message, 'error');
+            }
+        },
+
+        async patchPlatformUser(username, patch) {
+            try {
+                const resp = await fetch('/api/saas/users/' + encodeURIComponent(username), {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(patch),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showToast(data.error || 'Update failed', 'error');
+                    return;
+                }
+                showToast('User updated', 'success');
+                await this.loadSaasAdmin();
+            } catch (e) {
+                showToast('Failed: ' + e.message, 'error');
+            }
+        },
+
+        async deletePlatformUser(username) {
+            if (!confirm('Delete user ' + username + '?')) return;
+            try {
+                const resp = await fetch('/api/saas/users/' + encodeURIComponent(username), {
+                    method: 'DELETE',
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showToast(data.error || 'Delete failed', 'error');
+                    return;
+                }
+                showToast('User deleted', 'success');
+                await this.loadSaasAdmin();
+            } catch (e) {
+                showToast('Failed: ' + e.message, 'error');
+            }
+        },
+
+        async createTenant() {
+            if (!this.newTenant.id) {
+                showToast('Tenant id required', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/saas/tenants', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(this.newTenant),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showToast(data.error || 'Failed', 'error');
+                    return;
+                }
+                showToast('Tenant added', 'success');
+                this.newTenant = { id: '', name: '' };
+                await this.loadSaasAdmin();
+            } catch (e) {
+                showToast('Failed: ' + e.message, 'error');
+            }
         },
 
         async changePassword() {

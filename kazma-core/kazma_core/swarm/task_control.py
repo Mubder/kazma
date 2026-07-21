@@ -26,6 +26,10 @@ def cancel_active_task(
     ``finalize`` is a callable matching ``SwarmEngine._finalize_task`` kwargs
     (task=, status=, worker_results=, error=, duration_seconds=).
 
+    When a live asyncio handle exists, only ``handle.cancel()`` is called and
+    ``dispatch``'s ``CancelledError`` path finalizes once (audit H7). When no
+    live handle exists, finalize immediately.
+
     Returns True if cancelled, False if not active.
     """
     if task_id not in active_tasks:
@@ -36,7 +40,12 @@ def cancel_active_task(
     handle = task_handles.get(task_id)
     if handle is not None and not handle.done():
         handle.cancel()
-        logger.info("[task_control] cancelled asyncio handle for task '%s'", task_id)
+        logger.info(
+            "[task_control] cancelled asyncio handle for task '%s' "
+            "(finalize deferred to CancelledError path)",
+            task_id,
+        )
+        return True
 
     finalize(
         task=task,
@@ -45,7 +54,7 @@ def cancel_active_task(
         error="Cancelled by user",
         duration_seconds=0.0,
     )
-    logger.info("[task_control] task '%s' cancelled", task_id)
+    logger.info("[task_control] task '%s' cancelled (no live handle)", task_id)
     return True
 
 

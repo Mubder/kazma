@@ -841,17 +841,20 @@ class LocalToolRegistry:
                 "git", "uv", "pytest", "ruff", "mypy",
                 # Archive
                 "tar", "gzip", "gunzip", "zip", "unzip",
-                # Process info (read-only)
-                "ps", "pgrep",
-                # Text processing (read-only)
+                # Text processing (read-only) — no `ps` (env leak on some OS)
                 "jq", "tr", "cut",
                 # File ops (write — HITL-gated via safety layer)
                 "mkdir", "cp", "mv", "touch",
                 # Process control (safe)
                 "sleep",
-                # Kazma internal CLI (still HITL-gated as shell_exec)
-                "kazma",
+                # Note: `kazma` / `ps` removed from prod allowlist (audit H4)
             }
+            # Dev-only extras when not in production
+            import os as _os_bin
+            if (_os_bin.environ.get("KAZMA_PRODUCTION") or "").lower() not in (
+                "1", "true", "on", "yes",
+            ):
+                _SAFE_BINARIES = set(_SAFE_BINARIES) | {"ps", "pgrep", "kazma"}
             import os
 
             p = Path(args[0])
@@ -886,6 +889,69 @@ class LocalToolRegistry:
                 # Restrict context strictly to active workspace
                 from kazma_core.tools.file_write import _get_workspace
                 cwd = _get_workspace()
+                cwd_s = str(cwd)
+
+                # Reject absolute paths outside workspace (audit H4)
+                for a in args[1:]:
+                    if not a or a.startswith("-"):
+                        continue
+                    # Rough path detection
+                    looks_path = (
+                        a.startswith("/")
+                        or a.startswith("\\")
+                        or (len(a) > 2 and a[1] == ":" and a[0].isalpha())
+                        or ".." in a.replace("\\", "/")
+                    )
+                    if not looks_path:
+                        continue
+                    try:
+                        import os as _os
+
+                        cand = _os.path.normpath(
+                            a if _os.path.isabs(a) else _os.path.join(cwd_s, a)
+                        )
+                        root_n = _os.path.normpath(cwd_s)
+                        if cand != root_n and not cand.startswith(root_n + _os.sep):
+                            return (
+                                f"Error: path '{a}' is outside the workspace "
+                                f"({cwd_s}). Absolute paths must stay inside the workspace."
+                            )
+                    except Exception:
+                        pass
+
+                # git subcommand denylist (destructive / credential)
+                if binary == "git" and len(args) > 1:
+                    sub = args[1].lstrip("-")
+                    blocked_git = {
+                        "push", "credential", "credential-manager",
+                        "credential-store", "credential-cache",
+                    }
+                    joined = " ".join(args[1:]).lower()
+                    if sub in blocked_git or "config --global" in joined or "clean -fd" in joined:
+                        return (
+                            f"Error: git subcommand/args not allowed: {' '.join(args[1:])}. "
+                            "push/credential/global config/clean -fd are blocked."
+                        )
+
+                # Scrub parent env so API keys are not inherited (audit H4)
+                import os as _os_env
+
+                child_env = {
+                    "PATH": _os_env.environ.get("PATH", ""),
+                    "LANG": _os_env.environ.get("LANG", "C.UTF-8"),
+                    "LC_ALL": _os_env.environ.get("LC_ALL", "C.UTF-8"),
+                    "HOME": cwd_s,
+                    "USERPROFILE": cwd_s,
+                    "TMPDIR": cwd_s,
+                    "TEMP": cwd_s,
+                    "TMP": cwd_s,
+                    "SYSTEMROOT": _os_env.environ.get("SYSTEMROOT", ""),
+                    "COMSPEC": _os_env.environ.get("COMSPEC", ""),
+                    "PATHEXT": _os_env.environ.get("PATHEXT", ""),
+                    "WINDIR": _os_env.environ.get("WINDIR", ""),
+                }
+                # Drop empty Windows-only keys on POSIX
+                child_env = {k: v for k, v in child_env.items() if v}
 
                 # Run process asynchronously with timeout and restricted context
                 proc = await asyncio.create_subprocess_exec(
@@ -894,6 +960,7 @@ class LocalToolRegistry:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=cwd,
+                    env=child_env,
                 )
                 
                 try:

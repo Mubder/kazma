@@ -293,22 +293,57 @@ class CronScheduler:
         graph_builder: Any = None,
         checkpointer: Any = None,
         poll_interval: float = 30.0,
+        max_concurrent: int = 4,
     ) -> None:
         self._store = store
         self._graph_builder = graph_builder
         self._checkpointer = checkpointer
         self._poll_interval = poll_interval
+        self._max_concurrent = max(1, int(max_concurrent))
         self._running = False
         self._task: asyncio.Task[None] | None = None
         self._in_flight: set[str] = set()
+        self._sem: asyncio.Semaphore | None = None
 
     async def start(self) -> None:
         """Start the scheduler polling loop."""
         if self._running:
             return
         self._running = True
+        self._sem = asyncio.Semaphore(self._max_concurrent)
+        # Audit H10: recover jobs left RUNNING after crash
+        try:
+            await self._recover_stale_running()
+        except Exception:
+            logger.exception("[CronScheduler] stale RUNNING recovery failed")
         self._task = asyncio.create_task(self._loop(), name="cron-scheduler")
-        logger.info("[CronScheduler] Started (poll_interval=%.0fs)", self._poll_interval)
+        logger.info(
+            "[CronScheduler] Started (poll_interval=%.0fs max_concurrent=%d)",
+            self._poll_interval,
+            self._max_concurrent,
+        )
+
+    async def _recover_stale_running(self) -> None:
+        """Mark leftover RUNNING jobs as FAILED so they do not storm on restart."""
+        try:
+            jobs = await self._store.list_all()
+        except Exception:
+            jobs = await self._store.list_active()
+        for job in jobs:
+            status = getattr(job, "status", None)
+            if status == JobStatus.RUNNING or getattr(status, "value", None) == "running":
+                await self._store.update_status(job.job_id, JobStatus.FAILED)
+                try:
+                    await self._store.update_result(
+                        job.job_id,
+                        "Marked failed on scheduler restart (stale RUNNING)",
+                    )
+                except Exception:
+                    pass
+                logger.warning(
+                    "[CronScheduler] recovered stale RUNNING job %s → FAILED",
+                    job.job_id,
+                )
 
     async def stop(self) -> None:
         """Stop the scheduler."""
@@ -373,22 +408,42 @@ class CronScheduler:
         """Check every N seconds for due jobs."""
         while self._running:
             try:
+                from kazma_core.shutdown import is_shutting_down
+
+                if is_shutting_down():
+                    logger.info("[CronScheduler] shutdown signal — exiting poll loop")
+                    self._running = False
+                    break
+            except Exception:
+                pass
+
+            try:
                 jobs = await self._store.list_active()
                 now = datetime.now(UTC)
+                sem = self._sem or asyncio.Semaphore(self._max_concurrent)
 
                 for job in jobs:
+                    if not self._running:
+                        break
                     if job.job_id in self._in_flight:
                         continue
+                    if len(self._in_flight) >= self._max_concurrent:
+                        break
                     if job.next_run and self._is_due(job.next_run, now):
                         self._in_flight.add(job.job_id)
                         asyncio.create_task(
-                            self._execute(job),
+                            self._execute_bounded(job, sem),
                             name=f"cron-exec-{job.job_id}",
                         )
             except Exception:
                 logger.exception("[CronScheduler] Poll error")
 
             await asyncio.sleep(self._poll_interval)
+
+    async def _execute_bounded(self, job: ScheduledJob, sem: asyncio.Semaphore) -> None:
+        """Run job under the global concurrency semaphore."""
+        async with sem:
+            await self._execute(job)
 
     @staticmethod
     def _is_due(next_run_str: str, now: datetime) -> bool:

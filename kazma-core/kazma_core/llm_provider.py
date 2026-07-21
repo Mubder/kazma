@@ -576,8 +576,26 @@ class LLMProvider:
             changed = True
 
         if changed:
-            # Force client recreation on next request (old client will be GC'd)
+            # Force client recreation on next request — always aclose the old
+            # client (audit H9); relying on GC leaks sockets/FDs under frequent
+            # Settings provider switches.
+            old = self._http
             self._http = None
+            if old is not None:
+                try:
+                    import asyncio
+
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(old.aclose())
+                    except RuntimeError:
+                        # No running loop (sync context / tests) — best-effort.
+                        try:
+                            asyncio.run(old.aclose())
+                        except Exception:
+                            pass
+                except Exception as exc:
+                    logger.debug("LLMProvider reconfigure aclose failed: %s", exc)
             logger.info(
                 "LLMProvider reconfigured: base_url=%s model=%s api_key=%s",
                 self.config.base_url,

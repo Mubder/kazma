@@ -165,21 +165,22 @@ class TestIsSensitivePath:
     def test_root_is_not_sensitive(self):
         assert is_sensitive_path("/") is False
 
-    def test_status_is_not_sensitive(self):
-        assert is_sensitive_path("/api/status") is False
-
-    def test_unrelated_api_is_not_sensitive(self):
-        assert is_sensitive_path("/api/telemetry") is False
-        assert is_sensitive_path("/api/something-random") is False
+    def test_all_api_default_deny_sensitive(self):
+        """Audit M1: every /api/* is classified sensitive; open paths use is_always_open."""
+        assert is_sensitive_path("/api/status") is True
+        assert is_sensitive_path("/api/telemetry") is True
+        assert is_sensitive_path("/api/something-random") is True
+        assert is_sensitive_path("/api/mod") is True
+        assert is_sensitive_path("/api/setting") is True
 
     def test_chat_stream_is_sensitive(self):
-        """/api/chat/* is a sensitive prefix (chat can invoke tools/models)."""
+        """/api/chat/* is gated (chat can invoke tools/models)."""
         assert is_sensitive_path("/api/chat/stream") is True
 
-    def test_partial_match_not_sensitive(self):
-        """A path like /api/mod should NOT match /api/models prefix."""
-        assert is_sensitive_path("/api/mod") is False
-        assert is_sensitive_path("/api/setting") is False
+    def test_admin_html_shells_sensitive(self):
+        assert is_sensitive_path("/settings") is True
+        assert is_sensitive_path("/ide") is True
+        assert is_sensitive_path("/chat") is False  # main chat page shell stays open
 
 
 class TestIsAlwaysOpen:
@@ -291,7 +292,11 @@ OPEN_TEST_PATHS = [
     ("/", "GET"),
     ("/api/status", "GET"),
     ("/api/telemetry", "GET"),
-    ("/api/public/info", "GET"),
+    # /api/public/* is default-deny (audit M1) — must not appear here
+]
+
+SENSITIVE_EXTRA_PATHS = [
+    "/api/public/info",  # default-deny: unknown API routes require auth
 ]
 
 
@@ -345,6 +350,15 @@ class TestAuthMiddlewareWithSecret:
         else:
             resp = self.client.get(path)
         assert resp.status_code == 200, f"Expected 200 for open {path}, got {resp.status_code}"
+
+    @pytest.mark.parametrize("path", SENSITIVE_EXTRA_PATHS)
+    def test_unknown_api_default_deny(self, path: str):
+        """New /api/* routes ship closed when secret is set (audit M1)."""
+        resp = self.client.get(path)
+        assert resp.status_code == 401
+        headers = {SECRET_HEADER: TEST_SECRET}
+        resp_ok = self.client.get(path, headers=headers)
+        assert resp_ok.status_code == 200
 
     def test_websocket_unauthorized_without_secret(self):
         """Websocket connection fails when secret is required but not provided."""
