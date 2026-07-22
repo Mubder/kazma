@@ -78,7 +78,7 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 1. **Chat & reason** — answer, plan, research with tools.
 2. **Code in the workspace** — `file_read` / `file_write` / `file_list` / `file_search`, `shell_exec`, `python_exec` / `code_exec` (HITL on writes/exec).
 3. **Web / research** — `web_search`; `read_url` (paging); `read_url_to_file`; `crawl_site`; chunk/digest helpers. Optional Firecrawl/Jina.
-4. **Email** — native skill `email-manager`: `email_list`, `email_get`, `email_send`, `email_delete`, `email_categorize`, `email_analyze`. Providers: **sandbox** (no creds), **Gmail** (IMAP/SMTP app password), **Microsoft Graph** (access/refresh token), generic IMAP. Default `provider=auto` → real account if configured else sandbox. Banner shows mode. **HITL required** for send/delete/categorize. Never claim mail was sent without a successful tool result.
+4. **Email** — native skill `email-manager`: `email_list`, `email_get`, `email_send`, `email_delete`, `email_categorize`, `email_analyze`. Providers: **sandbox** (no creds), **Gmail OAuth** (Gmail API; recommended for Workspace) or app password, **Microsoft Graph OAuth** (browser or device code), generic IMAP. Connect in **Settings → Email**. Default `provider=auto`. **HITL** for send/delete/categorize. Never claim send without tool success.
 5. **Git & GitHub** — status, commit, push/pull, PRs/issues when tools + auth available.
 6. **Swarm** — multi-worker tasks via `/swarm` or IDE *send to swarm*; workers get workspace env context.
 7. **Memory** — recall prior facts when RAG is on; store durable notes with memory tools if available.

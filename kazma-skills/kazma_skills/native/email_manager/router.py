@@ -1,4 +1,4 @@
-"""Resolve email provider → backend (auto / sandbox / gmail / microsoft / imap / accounts)."""
+"""Resolve email provider → backend (auto / sandbox / gmail OAuth|app-password / microsoft / imap)."""
 
 from __future__ import annotations
 
@@ -21,11 +21,24 @@ def _env(name: str, default: str = "") -> str:
     return (os.environ.get(name) or default).strip()
 
 
+def _gmail_oauth_ready() -> bool:
+    return bool(
+        cred("EMAIL_GMAIL_ACCESS_TOKEN", "email.gmail.access_token")
+        or cred("EMAIL_GMAIL_REFRESH_TOKEN", "email.gmail.refresh_token")
+    )
+
+
+def _gmail_app_password_ready() -> bool:
+    return bool(
+        cred("EMAIL_GMAIL_ADDRESS", "email.gmail.address")
+        and cred("EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password")
+    )
+
+
 def detect_available_provider() -> str:
     """Return first real provider with credentials, else sandbox."""
-    if cred("EMAIL_GMAIL_ADDRESS") and cred(
-        "EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password"
-    ):
+    # Prefer OAuth Gmail over app password
+    if _gmail_oauth_ready() or _gmail_app_password_ready():
         return "gmail"
     if cred("EMAIL_MS_ACCESS_TOKEN", "email.microsoft.access_token") or cred(
         "EMAIL_MS_REFRESH_TOKEN", "email.microsoft.refresh_token"
@@ -34,11 +47,12 @@ def detect_available_provider() -> str:
     if cred("EMAIL_ADDRESS") and cred("EMAIL_PASSWORD", "email.imap.password"):
         if _env("EMAIL_IMAP_HOST"):
             return "imap"
-    # Multi-account: first configured alias
     for alias in list_account_aliases():
         cfg = account_config(alias)
         t = (cfg.get("type") or "").lower()
-        if t == "gmail" and cfg.get("address") and cfg.get("password"):
+        if t == "gmail" and (
+            cfg.get("password") or cfg.get("access_token") or cfg.get("refresh_token")
+        ):
             return f"account:{alias}"
         if t in ("microsoft", "microsoft_graph", "outlook") and (
             cfg.get("access_token") or cfg.get("refresh_token")
@@ -50,7 +64,6 @@ def detect_available_provider() -> str:
 
 
 def resolve_provider(provider: str | None = None, account: str | None = None) -> str:
-    """Normalize provider string. Account alias → account:{alias}."""
     if account and str(account).strip():
         return f"account:{str(account).strip()}"
     p = (provider or _env("EMAIL_DEFAULT_PROVIDER", "auto") or "auto").strip().lower()
@@ -58,7 +71,6 @@ def resolve_provider(provider: str | None = None, account: str | None = None) ->
         return detect_available_provider()
     if p.startswith("account:"):
         return p
-    # Treat bare alias as account if listed
     aliases = list_account_aliases()
     if p in {a.lower() for a in aliases}:
         return f"account:{p}"
@@ -69,7 +81,7 @@ def resolve_provider(provider: str | None = None, account: str | None = None) ->
     return "sandbox"
 
 
-def _gmail_backend(
+def _gmail_imap_backend(
     *,
     address: str,
     password: str,
@@ -93,8 +105,25 @@ def _gmail_backend(
     )
 
 
+def _gmail_oauth_backend(name: str = "gmail_oauth") -> Any:
+    from kazma_skills.native.email_manager.backends.gmail_api import GmailApiBackend
+
+    access = cred("EMAIL_GMAIL_ACCESS_TOKEN", "email.gmail.access_token")
+    refresh = cred("EMAIL_GMAIL_REFRESH_TOKEN", "email.gmail.refresh_token")
+    if not access and not refresh:
+        return None
+    return GmailApiBackend(
+        access_token=access or "pending_refresh",
+        refresh_token=refresh,
+        client_id=cred("EMAIL_GMAIL_CLIENT_ID", "email.gmail.client_id")
+        or cred("GOOGLE_OAUTH_CLIENT_ID", "email.gmail.client_id"),
+        client_secret=cred("EMAIL_GMAIL_CLIENT_SECRET", "email.gmail.client_secret")
+        or cred("GOOGLE_OAUTH_CLIENT_SECRET", "email.gmail.client_secret"),
+        email_address=cred("EMAIL_GMAIL_ADDRESS", "email.gmail.address"),
+    )
+
+
 def get_backend(provider: str | None = None, account: str | None = None) -> Any:
-    """Instantiate backend for *provider* / *account*."""
     name = resolve_provider(provider, account)
 
     if name == "sandbox":
@@ -105,10 +134,25 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
         cfg = account_config(alias)
         t = (cfg.get("type") or "sandbox").lower()
         if t == "gmail":
+            # OAuth tokens on alias
+            if cfg.get("access_token") or cfg.get("refresh_token"):
+                from kazma_skills.native.email_manager.backends.gmail_api import (
+                    GmailApiBackend,
+                )
+
+                return GmailApiBackend(
+                    access_token=cfg.get("access_token") or "pending_refresh",
+                    refresh_token=cfg.get("refresh_token") or "",
+                    client_id=cfg.get("client_id")
+                    or cred("EMAIL_GMAIL_CLIENT_ID", "email.gmail.client_id"),
+                    client_secret=cfg.get("client_secret")
+                    or cred("EMAIL_GMAIL_CLIENT_SECRET", "email.gmail.client_secret"),
+                    email_address=cfg.get("address") or "",
+                )
             if not cfg.get("address") or not cfg.get("password"):
                 logger.info("[email] account %s gmail incomplete → sandbox", alias)
                 return SandboxBackend()
-            return _gmail_backend(
+            return _gmail_imap_backend(
                 address=cfg["address"],
                 password=cfg["password"],
                 imap_host=cfg.get("imap_host") or "imap.gmail.com",
@@ -154,12 +198,16 @@ def get_backend(provider: str | None = None, account: str | None = None) -> Any:
         return SandboxBackend()
 
     if name == "gmail":
+        # Prefer OAuth Gmail API (Workspace-friendly)
+        oauth_b = _gmail_oauth_backend()
+        if oauth_b is not None:
+            return oauth_b
         address = cred("EMAIL_GMAIL_ADDRESS", "email.gmail.address")
         password = cred("EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password")
         if not address or not password:
-            logger.info("[email] gmail requested but missing creds → sandbox")
+            logger.info("[email] gmail requested but missing OAuth/app-password → sandbox")
             return SandboxBackend()
-        return _gmail_backend(
+        return _gmail_imap_backend(
             address=address,
             password=password,
             imap_host=_env("EMAIL_IMAP_HOST", "imap.gmail.com") or "imap.gmail.com",

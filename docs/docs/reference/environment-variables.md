@@ -120,13 +120,18 @@ Native skill `email-manager`. Default provider **`auto`**: real account if confi
 | Variable | Purpose |
 |----------|---------|
 | `EMAIL_DEFAULT_PROVIDER` | `auto` \| `sandbox` \| `gmail` \| `microsoft` \| `imap` |
-| `EMAIL_GMAIL_ADDRESS` | Gmail address |
-| `EMAIL_GMAIL_APP_PASSWORD` | Gmail app password |
+| `EMAIL_GMAIL_ADDRESS` | Gmail address (filled by OAuth or manual) |
+| `EMAIL_GMAIL_APP_PASSWORD` | Optional app password (often blocked on Workspace) |
+| `EMAIL_GMAIL_CLIENT_ID` / `EMAIL_GMAIL_CLIENT_SECRET` | Google OAuth web client (recommended) |
+| `EMAIL_GMAIL_ACCESS_TOKEN` / `EMAIL_GMAIL_REFRESH_TOKEN` | Set by OAuth callback / refresh |
+| `EMAIL_GMAIL_REDIRECT_URI` | Override callback (default `{public}/api/email/oauth/gmail/callback`) |
 | `EMAIL_MS_ACCESS_TOKEN` | Graph bearer token (short-lived) |
 | `EMAIL_MS_REFRESH_TOKEN` | Graph refresh token |
 | `EMAIL_MS_CLIENT_ID` | Azure app client id |
 | `EMAIL_MS_CLIENT_SECRET` | Azure app secret (confidential clients) |
 | `EMAIL_MS_TENANT_ID` | Tenant (`common` default) |
+| `EMAIL_MS_REDIRECT_URI` | Override callback (default `{public}/api/email/oauth/microsoft/callback`) |
+| `KAZMA_PUBLIC_URL` | Public origin for OAuth redirects behind proxy |
 | `EMAIL_ADDRESS` / `EMAIL_PASSWORD` | Generic IMAP user |
 | `EMAIL_IMAP_HOST` / `EMAIL_IMAP_PORT` | IMAP (default 993) |
 | `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | SMTP (default 587 STARTTLS) |

@@ -46,33 +46,57 @@ Open **Settings → Email** (`/settings?tab=email`).
 | Card | Action |
 |------|--------|
 | **Sandbox** | Always on — no setup |
-| **Gmail** | Enter address + [App Password](https://myaccount.google.com/apppasswords) → **Save Gmail** (vault + process env) |
-| **Microsoft** | Save Azure **Client ID** (+ tenant) → **Connect Microsoft** → enter device code at Microsoft → wait until “Connected” |
+| **Gmail / Workspace** | **OAuth (recommended):** save Google OAuth Client ID + secret → **Connect with Google** → Google consent → redirect back Connected. Uses **Gmail API** (works when App Passwords are disabled). Optional fallback: app password. |
+| **Microsoft 365** | **OAuth (recommended):** save Azure Client ID (+ secret if confidential) → **Connect with Microsoft** → browser consent → redirect back. Optional: device code. |
 
 Status shows **Active provider (auto)**. Disconnect clears vault/env for that provider.
 
-### Gmail (env alternative)
+### Gmail OAuth setup (Workspace-friendly)
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → enable **Gmail API**.  
+2. OAuth consent screen → add scopes `gmail.modify`, `gmail.send`, `userinfo.email`.  
+3. Credentials → **OAuth client ID** → type **Web application**.  
+4. Authorized redirect URI (must match your host):
+
+```text
+http://127.0.0.1:9090/api/email/oauth/gmail/callback
+https://your.domain/api/email/oauth/gmail/callback
+```
+
+5. Settings → Email → paste Client ID + secret → **Save OAuth client** → **Connect with Google**.
+
+Env alternative:
 
 ```bash
-EMAIL_GMAIL_ADDRESS=you@gmail.com
-EMAIL_GMAIL_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+EMAIL_GMAIL_CLIENT_ID=...
+EMAIL_GMAIL_CLIENT_SECRET=...
+# After OAuth, tokens are stored automatically:
+# EMAIL_GMAIL_ACCESS_TOKEN / EMAIL_GMAIL_REFRESH_TOKEN (also vault)
 ```
 
-IMAP `993` / SMTP STARTTLS `587` by default.
+App passwords still work for personal Gmail if your admin allows them; OAuth is preferred for Workspace.
 
-### Microsoft Graph (API alternative)
+### Microsoft Graph OAuth setup
 
-1. Azure app: public client + `Mail.Read` / `Mail.ReadWrite` / `Mail.Send` / `offline_access`  
-2. Settings UI or:
+1. Azure app registration → Web redirect URI:
 
-```http
-POST /api/email/oauth/microsoft/client   {"client_id":"…","tenant_id":"common"}
-POST /api/email/oauth/microsoft/device/start
-POST /api/email/oauth/microsoft/device/poll   {"device_code":"…"}
-POST /api/email/oauth/microsoft/disconnect
+```text
+http://127.0.0.1:9090/api/email/oauth/microsoft/callback
 ```
 
-Tokens: process env + vault; refresh re-persists to vault.
+2. Delegated permissions: `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `offline_access`.  
+3. Settings → Email → Client ID (+ secret if confidential client) → **Connect with Microsoft**.  
+
+Device code remains available under “Alternative: device code”.
+
+```bash
+EMAIL_MS_CLIENT_ID=...
+EMAIL_MS_CLIENT_SECRET=...   # if required
+EMAIL_MS_TENANT_ID=common
+EMAIL_MS_REDIRECT_URI=http://127.0.0.1:9090/api/email/oauth/microsoft/callback  # optional override
+```
+
+Set `KAZMA_PUBLIC_URL=https://your.domain` behind a reverse proxy so redirect URIs resolve correctly.
 
 ## Multi-account aliases
 

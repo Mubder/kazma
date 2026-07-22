@@ -182,7 +182,8 @@ function settingsApp() {
         },
         emailAccounts: [],
         emailGmail: { address: '', app_password: '' },
-        emailMs: { client_id: '', tenant_id: 'common' },
+        emailGmailOAuth: { client_id: '', client_secret: '' },
+        emailMs: { client_id: '', client_secret: '', tenant_id: 'common' },
         emailMsDevice: { user_code: '', verification_uri: '', device_code: '', message: '' },
         emailMsConnecting: false,
         emailMsPollTimer: null,
@@ -2164,6 +2165,31 @@ function settingsApp() {
         async loadEmailStatus() {
             this.emailLoading = true;
             try {
+                // OAuth callback toast (?email_oauth=ok|error)
+                try {
+                    const url = new URL(window.location.href);
+                    const oauth = url.searchParams.get('email_oauth');
+                    if (oauth === 'ok') {
+                        const prov = url.searchParams.get('provider') || 'email';
+                        const em = url.searchParams.get('email') || '';
+                        showToast(
+                            (prov === 'gmail' ? 'Gmail' : 'Microsoft') +
+                            ' connected' + (em ? ' as ' + em : ''),
+                            'success'
+                        );
+                        url.searchParams.delete('email_oauth');
+                        url.searchParams.delete('provider');
+                        url.searchParams.delete('email');
+                        url.searchParams.delete('msg');
+                        history.replaceState(null, '', url.pathname + url.search + url.hash);
+                    } else if (oauth === 'error') {
+                        showToast('OAuth failed: ' + (url.searchParams.get('msg') || 'unknown'), 'error');
+                        url.searchParams.delete('email_oauth');
+                        url.searchParams.delete('msg');
+                        history.replaceState(null, '', url.pathname + url.search + url.hash);
+                    }
+                } catch (e) { /* ignore */ }
+
                 const data = await this._fetch('/api/email/status');
                 if (data && !data.error) {
                     Object.assign(this.emailStatus, data);
@@ -2174,6 +2200,69 @@ function settingsApp() {
                 if (acc && Array.isArray(acc.accounts)) this.emailAccounts = acc.accounts;
             } finally {
                 this.emailLoading = false;
+            }
+        },
+
+        async saveGmailOAuthClient() {
+            const client_id = (this.emailGmailOAuth.client_id || '').trim();
+            const client_secret = (this.emailGmailOAuth.client_secret || '').trim();
+            if (!client_id || !client_secret) {
+                showToast(window.t ? t('settings.email_gmail_oauth_client_required') : 'Google Client ID and secret required', 'error');
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/oauth/gmail/client', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ client_id, client_secret }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+                this.emailGmailOAuth.client_secret = '';
+                showToast(data.message || 'Google OAuth client saved', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async connectGmailOAuth() {
+            if ((this.emailGmailOAuth.client_id || '').trim() && (this.emailGmailOAuth.client_secret || '').trim()) {
+                await this.saveGmailOAuthClient();
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/oauth/gmail/start.json', { credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok || !data.authorize_url) {
+                    throw new Error(data.error || 'Could not start Google OAuth');
+                }
+                window.location.href = data.authorize_url;
+            } catch (e) {
+                showToast('Gmail OAuth failed: ' + e.message, 'error');
+                this.emailSaving = false;
+            }
+        },
+
+        async connectMicrosoftOAuth() {
+            if ((this.emailMs.client_id || '').trim()) {
+                await this.saveMsClient();
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/oauth/microsoft/start.json', { credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok || !data.authorize_url) {
+                    throw new Error(data.error || 'Could not start Microsoft OAuth');
+                }
+                window.location.href = data.authorize_url;
+            } catch (e) {
+                showToast('Microsoft OAuth failed: ' + e.message, 'error');
+                this.emailSaving = false;
             }
         },
 
@@ -2233,6 +2322,7 @@ function settingsApp() {
 
         async saveMsClient() {
             const client_id = (this.emailMs.client_id || '').trim();
+            const client_secret = (this.emailMs.client_secret || '').trim();
             const tenant_id = (this.emailMs.tenant_id || 'common').trim() || 'common';
             if (!client_id) {
                 showToast(window.t ? t('settings.email_ms_client_required') : 'Azure client ID required', 'error');
@@ -2244,7 +2334,7 @@ function settingsApp() {
                     method: 'POST',
                     credentials: 'same-origin',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ client_id, tenant_id }),
+                    body: JSON.stringify({ client_id, client_secret, tenant_id }),
                 });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));

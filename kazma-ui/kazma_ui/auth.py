@@ -202,6 +202,9 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
 ALWAYS_OPEN_PREFIXES: tuple[str, ...] = (
     "/api/github/oauth/callback",
     "/api/github/oauth/start",
+    # Email OAuth: Google/Microsoft redirect with ?code= only (no secret header)
+    "/api/email/oauth/gmail/callback",
+    "/api/email/oauth/microsoft/callback",
     "/api/auth/",
 )
 

@@ -215,8 +215,43 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.email_connected": {"en": "Connected", "ar": "متصل"},
     "settings.email_not_connected": {"en": "Not connected", "ar": "غير متصل"},
     "settings.email_gmail_desc": {
-        "en": "Use a Google App Password (2FA required). Stored in vault when KAZMA_VAULT_KEY is set.",
-        "ar": "استخدم كلمة مرور تطبيق Google (مطلوب 2FA). تُخزَّن في الخزنة عند تفعيل KAZMA_VAULT_KEY.",
+        "en": "Fallback only: Google App Password (often blocked on Workspace). Prefer Connect with Google OAuth.",
+        "ar": "بديل فقط: كلمة مرور تطبيق Google (غالباً محظورة في Workspace). فضّل الربط عبر Google OAuth.",
+    },
+    "settings.email_gmail_oauth_desc": {
+        "en": "Recommended for Google Workspace: sign in with Google OAuth (no app password). Uses Gmail API.",
+        "ar": "موصى به لـ Google Workspace: تسجيل الدخول عبر Google OAuth (بدون كلمة مرور تطبيق). يستخدم Gmail API.",
+    },
+    "settings.email_gmail_oauth_client_id": {"en": "Google OAuth Client ID", "ar": "معرّف عميل Google OAuth"},
+    "settings.email_gmail_oauth_client_secret": {"en": "Google OAuth Client secret", "ar": "سر عميل Google OAuth"},
+    "settings.email_gmail_oauth_help": {
+        "en": "Google Cloud Console → OAuth Web client. Authorized redirect URI must include /api/email/oauth/gmail/callback",
+        "ar": "Google Cloud Console ← عميل OAuth ويب. يجب أن يتضمن Redirect URI المسار /api/email/oauth/gmail/callback",
+    },
+    "settings.email_save_oauth_client": {"en": "Save OAuth client", "ar": "حفظ عميل OAuth"},
+    "settings.email_connect_google": {"en": "Connect with Google", "ar": "الربط مع Google"},
+    "settings.email_gmail_oauth_client_required": {
+        "en": "Google Client ID and Client secret are required",
+        "ar": "معرّف سر عميل Google مطلوبان",
+    },
+    "settings.email_gmail_app_password_fallback": {
+        "en": "Fallback: app password (personal Gmail / if admin allows)",
+        "ar": "بديل: كلمة مرور التطبيق (Gmail شخصي / إن سمح المسؤول)",
+    },
+    "settings.email_ms_oauth_desc": {
+        "en": "Sign in with Microsoft in the browser (authorization code). Best for M365/Outlook. Device code is optional fallback.",
+        "ar": "تسجيل الدخول مع Microsoft في المتصفح. الأفضل لـ M365/Outlook. رمز الجهاز بديل اختياري.",
+    },
+    "settings.email_ms_client_secret": {"en": "Client secret (if confidential app)", "ar": "سر العميل (إن وُجد)"},
+    "settings.email_ms_redirect_help": {
+        "en": "Azure app redirect URI must include /api/email/oauth/microsoft/callback (and your public host).",
+        "ar": "يجب أن يتضمن Redirect URI في Azure المسار /api/email/oauth/microsoft/callback.",
+    },
+    "settings.email_connect_microsoft_browser": {"en": "Connect with Microsoft", "ar": "الربط مع Microsoft"},
+    "settings.email_connect_microsoft_device": {"en": "Connect via device code", "ar": "الربط برمز الجهاز"},
+    "settings.email_ms_device_fallback": {
+        "en": "Alternative: device code (no browser redirect)",
+        "ar": "بديل: رمز الجهاز (بدون إعادة توجيه)",
     },
     "settings.email_address": {"en": "Address", "ar": "العنوان"},
     "settings.email_gmail_address": {"en": "Gmail address", "ar": "عنوان Gmail"},
