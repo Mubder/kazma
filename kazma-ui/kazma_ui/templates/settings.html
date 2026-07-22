@@ -1353,13 +1353,19 @@
                     <!-- OAuth -->
                     <div x-show="emailGmailMode === 'oauth'">
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_gmail_oauth_desc') }}</p>
+                        <p style="font-size:0.8rem;margin:0 0 12px 0;">
+                            <span style="color:var(--text-tertiary);">{{ t('settings.email_gmail_oauth_client_status') }}:</span>
+                            <span class="badge" style="font-size:0.65rem;margin-left:6px;"
+                                  :class="emailStatus.gmail_oauth_client_set ? 'badge-stdio' : 'badge-basic'"
+                                  x-text="emailStatus.gmail_oauth_client_set ? t('settings.email_gmail_oauth_client_ready') : t('settings.email_gmail_oauth_client_missing')"></span>
+                        </p>
                         <div class="form-group" style="margin-bottom:8px;">
                             <label>{{ t('settings.email_gmail_oauth_client_id') }}</label>
-                            <input type="text" class="form-control" x-model="emailGmailOAuth.client_id" placeholder="Google OAuth Client ID" autocomplete="off">
+                            <input type="text" class="form-control" x-model="emailGmailOAuth.client_id" placeholder="….apps.googleusercontent.com" autocomplete="off">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
                             <label>{{ t('settings.email_gmail_oauth_client_secret') }}</label>
-                            <input type="password" class="form-control" x-model="emailGmailOAuth.client_secret" placeholder="Client secret" autocomplete="new-password">
+                            <input type="password" class="form-control" x-model="emailGmailOAuth.client_secret" placeholder="Client secret (GOCSPX-…)" autocomplete="new-password">
                             <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_oauth_help') }}</p>
                         </div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">

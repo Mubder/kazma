@@ -140,14 +140,30 @@ async def gmail_set_oauth_client(body: GmailOAuthClientBody) -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.credentials import vault_store
 
-        os.environ["EMAIL_GMAIL_CLIENT_ID"] = body.client_id.strip()
-        os.environ["EMAIL_GMAIL_CLIENT_SECRET"] = body.client_secret.strip()
-        vault_store("email.gmail.client_id", body.client_id.strip(), category="email")
-        vault_store("email.gmail.client_secret", body.client_secret.strip(), category="email")
+        cid = body.client_id.strip()
+        secret = body.client_secret.strip()
+        if not cid or not secret:
+            return JSONResponse(
+                {"ok": False, "error": "client_id and client_secret are required"},
+                status_code=400,
+            )
+        os.environ["EMAIL_GMAIL_CLIENT_ID"] = cid
+        os.environ["EMAIL_GMAIL_CLIENT_SECRET"] = secret
+        ok_id = vault_store("email.gmail.client_id", cid, category="email")
+        ok_sec = vault_store("email.gmail.client_secret", secret, category="email")
+        # Process env is enough for this run; vault needed after restart
+        msg = "Google OAuth client saved. Click Connect with Google."
+        if not (ok_id and ok_sec):
+            msg += (
+                " Warning: vault store failed — credentials live only in this "
+                "process until restart. Check KAZMA_VAULT_KEY."
+            )
         return JSONResponse(
             {
                 "ok": True,
-                "message": "Google OAuth client saved. Click Connect with Google.",
+                "client_id_set": True,
+                "vault_ok": bool(ok_id and ok_sec),
+                "message": msg,
             }
         )
     except Exception as exc:

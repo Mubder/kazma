@@ -174,6 +174,7 @@ function settingsApp() {
             gmail_configured: false,
             gmail_address: '',
             gmail_auth_mode: 'none',
+            gmail_oauth_client_set: false,
             microsoft_configured: false,
             microsoft_address: '',
             microsoft_auth_mode: 'none',
@@ -2311,15 +2312,35 @@ function settingsApp() {
         },
 
         async connectGmailOAuth() {
-            if ((this.emailGmailOAuth.client_id || '').trim() && (this.emailGmailOAuth.client_secret || '').trim()) {
+            const formId = (this.emailGmailOAuth.client_id || '').trim();
+            const formSecret = (this.emailGmailOAuth.client_secret || '').trim();
+            // Always save when both fields present (refresh after restart)
+            if (formId && formSecret) {
                 await this.saveGmailOAuthClient();
+            } else if (!this.emailStatus.gmail_oauth_client_set) {
+                showToast(
+                    window.t
+                        ? t('settings.email_gmail_oauth_client_required')
+                        : 'Paste Google OAuth Client ID + secret, click Save OAuth client, then Connect.',
+                    'error'
+                );
+                return;
+            } else if (formId && !formSecret) {
+                // Client ID typed again but secret blank — need both to re-save
+                showToast(
+                    window.t
+                        ? t('settings.email_gmail_oauth_secret_again')
+                        : 'Re-enter Client secret (or leave both fields empty if already saved).',
+                    'error'
+                );
+                return;
             }
             this.emailSaving = true;
             try {
                 const resp = await fetch('/api/email/oauth/gmail/start.json', { credentials: 'same-origin' });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || !data.ok || !data.authorize_url) {
-                    throw new Error(data.error || 'Could not start Google OAuth');
+                    throw new Error(data.error || 'Could not start Google OAuth (is Client ID/secret saved?)');
                 }
                 window.location.href = data.authorize_url;
             } catch (e) {

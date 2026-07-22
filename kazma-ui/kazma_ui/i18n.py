@@ -258,8 +258,24 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.email_save_oauth_client": {"en": "Save OAuth client", "ar": "حفظ عميل OAuth"},
     "settings.email_connect_google": {"en": "Connect with Google", "ar": "الربط مع Google"},
     "settings.email_gmail_oauth_client_required": {
-        "en": "Google Client ID and Client secret are required",
-        "ar": "معرّف سر عميل Google مطلوبان",
+        "en": "Paste Google OAuth Client ID + secret, click Save OAuth client, then Connect with Google.",
+        "ar": "الصق معرّف وسر عميل Google OAuth، احفظ، ثم اربط مع Google.",
+    },
+    "settings.email_gmail_oauth_secret_again": {
+        "en": "Re-enter Client secret (or clear Client ID and use the already-saved client).",
+        "ar": "أعد إدخال سر العميل (أو امسح المعرّف لاستخدام المحفوظ).",
+    },
+    "settings.email_gmail_oauth_client_status": {
+        "en": "OAuth client",
+        "ar": "عميل OAuth",
+    },
+    "settings.email_gmail_oauth_client_ready": {
+        "en": "Saved on server — you can Connect",
+        "ar": "محفوظ على الخادم — يمكنك الربط",
+    },
+    "settings.email_gmail_oauth_client_missing": {
+        "en": "Not saved yet — paste Client ID + secret first",
+        "ar": "غير محفوظ — الصق المعرّف والسر أولاً",
     },
     "settings.email_gmail_app_password_fallback": {
         "en": "Fallback: app password (personal Gmail / if admin allows)",

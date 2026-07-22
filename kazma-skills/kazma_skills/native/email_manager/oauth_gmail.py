@@ -66,16 +66,23 @@ def start_gmail_oauth(request_base: str | None = None) -> dict[str, Any]:
     if not cid:
         return {
             "ok": False,
+            "code": "missing_client_id",
             "error": (
-                "EMAIL_GMAIL_CLIENT_ID is not set. Create a Google Cloud OAuth "
-                "Web client and set EMAIL_GMAIL_CLIENT_ID + EMAIL_GMAIL_CLIENT_SECRET."
+                "Google OAuth Client ID is not set. In Settings → Email → OAuth, "
+                "paste your Google Cloud OAuth Web client ID and secret, click "
+                "Save OAuth client, then Connect with Google. "
+                "Or set EMAIL_GMAIL_CLIENT_ID + EMAIL_GMAIL_CLIENT_SECRET."
             ),
         }
     secret = _client_secret()
     if not secret:
         return {
             "ok": False,
-            "error": "EMAIL_GMAIL_CLIENT_SECRET is not set (required for web OAuth).",
+            "code": "missing_client_secret",
+            "error": (
+                "Google OAuth Client secret is not set. Re-enter Client ID + secret "
+                "in Settings → Email, click Save OAuth client, then Connect again."
+            ),
         }
     redirect = gmail_redirect_uri(request_base)
     state = new_state("gmail", redirect_uri=redirect)
