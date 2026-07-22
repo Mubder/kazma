@@ -26,14 +26,46 @@ from typing import Any, Protocol, runtime_checkable
 import httpx
 
 __all__ = [
+    "TTSError",
     "TTSProvider",
     "get_tts_provider",
+    "get_last_error",
     "list_tts_providers",
     "register_tts_provider",
     "synthesize",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+class TTSError(Exception):
+    """Raised by a TTS provider when synthesis cannot proceed.
+
+    Carries a ``hint`` (install/fix guidance shown to the operator) and an
+    ``is_config`` flag distinguishing a misconfiguration / missing dependency
+    (HTTP callers should map this to **503 Service Unavailable**) from a
+    transient runtime failure (map to **502 Bad Gateway**).
+    """
+
+    def __init__(self, message: str, *, hint: str = "", is_config: bool = False) -> None:
+        super().__init__(message)
+        self.hint = hint
+        self.is_config = is_config
+
+
+# Last error recorded by ``synthesize`` for the current thread/task. HTTP/WS
+# handlers inspect this (when synthesize returns None) to surface an accurate
+# status code + install hint instead of a generic 502. ContextVar propagates
+# across ``await`` points within one asyncio task and is copied into child
+# tasks created in the same context.
+from contextvars import ContextVar  # noqa: E402
+
+_last_error: ContextVar[TTSError | None] = ContextVar("kazma_tts_last_error", default=None)
+
+
+def get_last_error() -> TTSError | None:
+    """Return the most recent TTS error recorded for this task, if any."""
+    return _last_error.get()
 
 
 def _get_provider_api_key_from_db(provider_name: str) -> str | None:
@@ -103,15 +135,41 @@ async def synthesize(
     """Synthesize text to audio using the named provider.
 
     Falls back to ``edgetts`` if the named provider is not registered.
+
+    Returns ``None`` on failure (back-compat). When a provider raises
+    :class:`TTSError`, the reason is recorded and retrievable via
+    :func:`get_last_error` so HTTP/WS handlers can emit an accurate status
+    code + install hint (503 config vs 502 runtime) instead of a bare 502.
     """
+    # Reset per-call so a stale error from a previous call doesn't leak.
+    _last_error.set(None)
     p = get_tts_provider(provider)
     if p is None:
         logger.warning("[TTS] Unknown provider '%s' — falling back to edgetts", provider)
         p = get_tts_provider("edgetts")
     if p is None:
-        logger.error("[TTS] No providers registered")
+        err = TTSError(
+            f"No TTS providers registered (provider '{provider}' unknown)",
+            hint="Register a TTS provider, e.g. pip install edge-tts",
+            is_config=True,
+        )
+        _last_error.set(err)
+        logger.error("[TTS] %s", err)
         return None
-    return await p(text, voice=voice, api_key=api_key, output_format=output_format)
+    try:
+        return await p(text, voice=voice, api_key=api_key, output_format=output_format)
+    except TTSError as err:
+        _last_error.set(err)
+        if err.is_config:
+            logger.error("[TTS/%s] %s", provider, err)
+        else:
+            logger.exception("[TTS/%s] %s", provider, err)
+        return None
+    except Exception as err:  # provider didn't raise TTSError
+        wrapped = TTSError(str(err) or "TTS synthesis failed")
+        _last_error.set(wrapped)
+        logger.exception("[TTS/%s] Failed", provider)
+        return None
 
 
 # ── Built-in providers ─────────────────────────────────────────────────
@@ -134,8 +192,11 @@ def _edgetts_provider() -> TTSProvider:
         try:
             import edge_tts  # type: ignore[import-untyped]
         except ImportError:
-            logger.error("[TTS/edgetts] pip install edge-tts required")
-            return None
+            raise TTSError(
+                "edge-tts is not installed",
+                hint="pip install edge-tts",
+                is_config=True,
+            )
         if voice == "default":
             voice = "en-US-AriaNeural"
         try:
@@ -151,9 +212,8 @@ def _edgetts_provider() -> TTSProvider:
                     voice,
                 )
             return audio_data or None
-        except Exception:
-            logger.exception("[TTS/edgetts] Failed")
-            return None
+        except Exception as err:
+            raise TTSError(str(err) or "edge-tts synthesis failed") from err
 
     return _synthesize
 
@@ -173,8 +233,11 @@ def _openai_tts_provider() -> TTSProvider:
     ) -> bytes | None:
         key = api_key or os.environ.get("OPENAI_API_KEY") or _get_provider_api_key_from_db("openai")
         if not key:
-            logger.error("[TTS/openai] No API key")
-            return None
+            raise TTSError(
+                "OpenAI API key not configured",
+                hint="Set OPENAI_API_KEY or configure the openai provider in Settings",
+                is_config=True,
+            )
         if voice == "default":
             voice = "alloy"
         # OpenAI TTS output formats: mp3, opus, aac, flac, wav, pcm
@@ -196,9 +259,8 @@ def _openai_tts_provider() -> TTSProvider:
                 if audio:
                     logger.info("[TTS/openai] Synthesized %d bytes (voice=%s)", len(audio), voice)
                 return audio or None
-        except Exception:
-            logger.exception("[TTS/openai] Failed")
-            return None
+        except Exception as err:
+            raise TTSError(str(err) or "OpenAI TTS request failed") from err
 
     return _synthesize
 
@@ -224,8 +286,11 @@ def _nvidia_tts_provider() -> TTSProvider:
             or _get_provider_api_key_from_db("nvidia")
         )
         if not key:
-            logger.error("[TTS/nvidia] No API key (set NVIDIA_API_KEY)")
-            return None
+            raise TTSError(
+                "NVIDIA/NGC API key not configured",
+                hint="Set NVIDIA_API_KEY (or NGC_API_KEY)",
+                is_config=True,
+            )
         if voice == "default":
             voice = "Magpie-Multilingual.EN-US.Aria"
         base_url = os.environ.get(
@@ -252,9 +317,8 @@ def _nvidia_tts_provider() -> TTSProvider:
                 if audio:
                     logger.info("[TTS/nvidia] Synthesized %d bytes (voice=%s)", len(audio), voice)
                 return audio or None
-        except Exception:
-            logger.exception("[TTS/nvidia] Failed")
-            return None
+        except Exception as err:
+            raise TTSError(str(err) or "NVIDIA TTS request failed") from err
 
     return _synthesize
 
@@ -279,8 +343,11 @@ def _kokoro_provider() -> TTSProvider:
             import kokoro  # type: ignore[import-untyped]
             import soundfile as sf  # type: ignore[import-untyped]
         except ImportError:
-            logger.error("[TTS/kokoro] pip install 'kokoro>=0.8' soundfile required")
-            return None
+            raise TTSError(
+                "kokoro / soundfile not installed",
+                hint="pip install 'kokoro>=0.8' soundfile",
+                is_config=True,
+            )
         if voice == "default":
             voice = "af_sarah"
         try:
@@ -294,9 +361,8 @@ def _kokoro_provider() -> TTSProvider:
             if audio_bytes:
                 logger.info("[TTS/kokoro] Synthesized %d bytes (voice=%s)", len(audio_bytes), voice)
             return audio_bytes or None
-        except Exception:
-            logger.exception("[TTS/kokoro] Failed")
-            return None
+        except Exception as err:
+            raise TTSError(str(err) or "kokoro synthesis failed") from err
 
     return _synthesize
 
@@ -320,8 +386,11 @@ def _coqui_provider() -> TTSProvider:
             import TTS.api.TTS as coqui_tts  # type: ignore[import-untyped]
             import soundfile as sf  # type: ignore[import-untyped]
         except ImportError:
-            logger.error("[TTS/coqui] pip install TTS soundfile required")
-            return None
+            raise TTSError(
+                "Coqui TTS / soundfile not installed",
+                hint="pip install TTS soundfile",
+                is_config=True,
+            )
         try:
             tts_model = coqui_tts.TTS()
             wav = tts_model.tts(text)
@@ -332,9 +401,8 @@ def _coqui_provider() -> TTSProvider:
             if audio_bytes:
                 logger.info("[TTS/coqui] Synthesized %d bytes", len(audio_bytes))
             return audio_bytes or None
-        except Exception:
-            logger.exception("[TTS/coqui] Failed")
-            return None
+        except Exception as err:
+            raise TTSError(str(err) or "Coqui TTS failed") from err
 
     return _synthesize
 

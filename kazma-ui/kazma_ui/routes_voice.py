@@ -107,7 +107,7 @@ async def text_to_speech(
     Returns raw audio bytes with the appropriate content type.
     """
     from kazma_core.config_store import get_config_store
-    from kazma_core.voice.tts import synthesize
+    from kazma_core.voice.tts import get_last_error, synthesize
 
     cs = get_config_store()
     db_provider = cs.get("voice.tts_provider")
@@ -132,6 +132,18 @@ async def text_to_speech(
         output_format=output_format,
     )
     if audio is None:
+        # Distinguish a misconfiguration (missing dep / API key) from a
+        # transient runtime failure. Config issues are 503 (fixable by the
+        # operator) with an install/config hint; runtime failures stay 502.
+        err = get_last_error()
+        if err is not None and getattr(err, "is_config", False):
+            hint = getattr(err, "hint", "") or ""
+            detail = f"TTS provider '{provider}' unavailable: {err}"
+            if hint:
+                detail += f" — fix: {hint}"
+            raise HTTPException(status_code=503, detail=detail)
+        if err is not None:
+            raise HTTPException(status_code=502, detail=f"TTS provider '{provider}' failed: {err}")
         raise HTTPException(status_code=502, detail=f"TTS provider '{provider}' failed")
 
     content_type = {
