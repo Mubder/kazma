@@ -113,6 +113,28 @@ See [OIDC IdP Setup](../ops/oidc-setup) and [Multi-user SaaS](../products/multi-
 
 ---
 
+## Email (Gmail / Microsoft Graph / sandbox)
+
+Native skill `email-manager`. Default provider **`auto`**: real account if configured, else sandbox.
+
+| Variable | Purpose |
+|----------|---------|
+| `EMAIL_DEFAULT_PROVIDER` | `auto` \| `sandbox` \| `gmail` \| `microsoft` \| `imap` |
+| `EMAIL_GMAIL_ADDRESS` | Gmail address |
+| `EMAIL_GMAIL_APP_PASSWORD` | Gmail app password |
+| `EMAIL_MS_ACCESS_TOKEN` | Graph bearer token (short-lived) |
+| `EMAIL_MS_REFRESH_TOKEN` | Graph refresh token |
+| `EMAIL_MS_CLIENT_ID` | Azure app client id |
+| `EMAIL_MS_CLIENT_SECRET` | Azure app secret (confidential clients) |
+| `EMAIL_MS_TENANT_ID` | Tenant (`common` default) |
+| `EMAIL_ADDRESS` / `EMAIL_PASSWORD` | Generic IMAP user |
+| `EMAIL_IMAP_HOST` / `EMAIL_IMAP_PORT` | IMAP (default 993) |
+| `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | SMTP (default 587 STARTTLS) |
+
+HITL danger tools: `email_send`, `email_delete`, `email_categorize`. Plan: `docs/plans/EMAIL_INTEGRATION_FULL_PLAN.md`.
+
+---
+
 ## Cost, chaos, tests
 
 | Variable | Default | Purpose |

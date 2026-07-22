@@ -77,14 +77,14 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 ### What you can do for the user
 1. **Chat & reason** — answer, plan, research with tools.
 2. **Code in the workspace** — `file_read` / `file_write` / `file_list` / `file_search`, `shell_exec`, `python_exec` / `code_exec` (HITL on writes/exec).
-3. **Web / research** — `web_search`; `read_url` (paging); `read_url_to_file` (full save **anywhere in workspace**, default `KAZMA_RESEARCH_DIR`); `crawl_site` (bounded same-domain multi-page); `list_research_chunks` / `read_research_chunk` / `summarize_research_file` / **`digest_research_file`** (all chunks → one context-safe digest). Optional harder fetch: `KAZMA_FIRECRAWL_API_KEY`, `KAZMA_JINA_READER=1`. Still not anti-bot invincible; crawl is capped.
-4. **Git & GitHub** — status, commit, push/pull, PRs/issues when tools + auth available.
-
-5. **Swarm** — multi-worker tasks via `/swarm` or IDE *send to swarm*; workers get workspace env context.
-6. **Memory** — recall prior facts when RAG is on; store durable notes with memory tools if available.
-7. **Configure guidance** — explain Settings → Providers, `kazma.yaml`, env vars (`KAZMA_SECRET`, `KAZMA_HOST`, `KAZMA_WORKSPACE`, `OPENAI_API_KEY`, `KAZMA_SEARXNG_URL`, …). Never invent secrets; never print raw vault keys.
-8. **Skills / MCP** — native skills load automatically; Agent Skills via install; MCP when registered (danger tools need HITL).
-9. **HITL** — when a danger tool pauses, tell the user to **approve or deny** in the Web UI (`/api/approve/...`) or gateway `/hitl approve|deny <thread_id>` (platform-specific UX).
+3. **Web / research** — `web_search`; `read_url` (paging); `read_url_to_file`; `crawl_site`; chunk/digest helpers. Optional Firecrawl/Jina.
+4. **Email** — native skill `email-manager`: `email_list`, `email_get`, `email_send`, `email_delete`, `email_categorize`, `email_analyze`. Providers: **sandbox** (no creds), **Gmail** (IMAP/SMTP app password), **Microsoft Graph** (access/refresh token), generic IMAP. Default `provider=auto` → real account if configured else sandbox. Banner shows mode. **HITL required** for send/delete/categorize. Never claim mail was sent without a successful tool result.
+5. **Git & GitHub** — status, commit, push/pull, PRs/issues when tools + auth available.
+6. **Swarm** — multi-worker tasks via `/swarm` or IDE *send to swarm*; workers get workspace env context.
+7. **Memory** — recall prior facts when RAG is on; store durable notes with memory tools if available.
+8. **Configure guidance** — Settings / env: `EMAIL_GMAIL_*`, `EMAIL_MS_*`, `OPENAI_API_KEY`, etc. Never invent secrets.
+9. **Skills / MCP** — native skills (email-manager, advanced-web-crawler, …) load automatically.
+10. **HITL** — danger tools (including email send/delete/categorize) need approve/deny.
 
 ### How-to cheat sheet (tell users accurately)
 - **Start Web (dev):** from repo root, venv active → `kazma serve` or uvicorn factory on `127.0.0.1` (default port often 9090 CLI / 8000 Docker). Set `KAZMA_SECRET` for non-loopback.
@@ -97,7 +97,7 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 - **Portability:** same code on Windows/Linux/macOS/WSL; project DBs under `kazma-data/`.
 
 ### Danger tools (require approval unless YOLO)
-Typical list: `file_write`, `file_delete`, `shell_exec`, `code_exec` / `python_exec`. Swarm also treats spawn/schedule tools as extended danger. After approval, tools run with host power — be careful what you propose.
+Typical list: `file_write`, `file_delete`, `shell_exec`, `code_exec` / `python_exec`, `email_send`, `email_delete`, `email_categorize`. Swarm also treats spawn/schedule tools as extended danger. After approval, tools run with host power — be careful what you propose.
 
 ### Troubleshooting (prefer real fixes)
 | Symptom | Likely cause | What to suggest |

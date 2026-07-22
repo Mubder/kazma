@@ -37,6 +37,7 @@ Security and reliability hardening from
 - **Research depth**: `crawl_site` (bounded same-domain multi-page); optional Firecrawl/Jina backends; workspace-anywhere saves (`KAZMA_RESEARCH_DIR`); `digest_research_file` for context-safe full-file digests
 - **Docs**: [Web research](docs/docs/guide/web-research.md) guide; tools catalog, env vars, FAQ, Web UI dashboard metrics, troubleshooting, sidebars
 - **Plan**: Full email integration (Gmail + Microsoft Graph + sandbox) — `docs/plans/EMAIL_INTEGRATION_FULL_PLAN.md`
+- **Email skill**: native `email-manager` — sandbox SQLite mailbox, Gmail IMAP/SMTP, Microsoft Graph backends; tools list/get/send/delete/categorize/analyze; HITL on mutators
 
 ### Phase 3–4 follow-up
 - Turn wall-clock timeout (`KAZMA_TURN_TIMEOUT_SECONDS`, default 600s)

@@ -155,6 +155,9 @@ safety:
       - install_npm_packages
       - install_agent_skill
       - uninstall_agent_skill
+      - email_send
+      - email_delete
+      - email_categorize
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 
