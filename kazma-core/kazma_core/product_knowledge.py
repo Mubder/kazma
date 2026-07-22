@@ -85,6 +85,7 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 8. **Configure guidance** — Settings / env: `EMAIL_GMAIL_*`, `EMAIL_MS_*`, `OPENAI_API_KEY`, etc. Never invent secrets.
 9. **Skills / MCP** — native skills (email-manager, advanced-web-crawler, …) load automatically.
 10. **HITL** — danger tools (including email send/delete/categorize) need approve/deny.
+11. **Self-improvement** — after chat turns and swarm tasks, Kazma can append short `[SelfImprovement]` learnings to the main agent Soul (`agent_evolution.json`) or worker prompts. Disable with `KAZMA_SELF_IMPROVEMENT=0`.
 
 ### How-to cheat sheet (tell users accurately)
 - **Start Web (dev):** from repo root, venv active → `kazma serve` or uvicorn factory on `127.0.0.1` (default port often 9090 CLI / 8000 Docker). Set `KAZMA_SECRET` for non-loopback.

@@ -256,6 +256,21 @@ class KazmaAgent:
         except Exception:
             logger.debug("[agent_runner] agent skills catalog injection skipped", exc_info=True)
 
+        # Self-improvement Soul (Kazma-wide) — accumulated from past chat/swarm
+        # outcomes. Also re-injected per turn in SSE (may grow after init).
+        try:
+            from kazma_core.skills.self_improvement import get_agent_evolution_block
+
+            evo = get_agent_evolution_block("supervisor")
+            if evo and evo not in self.system_prompt:
+                self.system_prompt = (
+                    self.system_prompt.rstrip()
+                    + "\n\n## Self-improvement learnings\n"
+                    + evo
+                )
+        except Exception:
+            logger.debug("[agent_runner] agent evolution injection skipped", exc_info=True)
+
         # Universal language directive — injected LAST so it's the final
         # instruction the model sees, after all cultural context. This
         # prevents Arabic cultural context from biasing the model to

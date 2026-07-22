@@ -41,6 +41,7 @@ Security and reliability hardening from
 - **Email IMAP/POP modes**: Settings → Email mode switcher **OAuth | IMAP | POP** for both Gmail and Microsoft; POP3+SMTP backend; host presets; `POST /api/email/protocol/connect|disconnect`; `EMAIL_GMAIL_AUTH` / `EMAIL_MS_AUTH`
 - **Gmail OAuth scopes**: probe Gmail API after OAuth; reject email-only tokens; consent-screen + test-user troubleshooting in email guide; clearer 403 insufficient-scopes errors
 - **Docs**: FAQ/API routes/Web UI/product knowledge updated for email OAuth·IMAP·POP; website (KazmaAI) email guide + landing/FAQ
+- **Self-improvement Kazma-wide**: chat (Web SSE + gateway) + swarm; `agent_evolution.json` Soul for supervisor; inject every turn; `KAZMA_SELF_IMPROVEMENT=0` kill-switch; failure analysis for WorkerResult `status=error`
 - **Email polish**: Microsoft device-code OAuth API (`/api/email/oauth/microsoft/*`), vault token persist on refresh, multi-account aliases (`EMAIL_ACCOUNTS`), Graph well-known folders + Gmail FLAGS/labels, [Email integration](docs/docs/guide/email-integration.md) guide
 - **Settings → Email**: Connect Gmail (app password → vault), Connect Microsoft (device code + poll UI), status/disconnect, accounts list
 - **Email OAuth (browser)**: Gmail authorization-code + Gmail API backend (Workspace-friendly); Microsoft authorization-code redirect + device-code fallback; open callbacks under `/api/email/oauth/*/callback`

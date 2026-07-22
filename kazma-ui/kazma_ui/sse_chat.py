@@ -380,6 +380,36 @@ async def _stream_langgraph_events(
                 len(content_acc),
                 interrupted,
             )
+            # Kazma-wide SI: learn from completed turns (skip HITL pauses).
+            # Background — never delay the done frame.
+            if not interrupted:
+                try:
+                    from kazma_core.skills.self_improvement import (
+                        schedule_chat_self_improvement,
+                    )
+
+                    empty = not content_acc
+                    looks_error = content_acc.strip().startswith("⚠️") or content_acc.strip().startswith(
+                        "Error"
+                    )
+                    # Recover user text from input_state when available
+                    umsg = ""
+                    try:
+                        for m in reversed(list((input_state or {}).get("messages") or [])):
+                            if isinstance(m, dict) and m.get("role") == "user":
+                                umsg = str(m.get("content") or "")
+                                break
+                    except Exception:
+                        pass
+                    schedule_chat_self_improvement(
+                        user_message=umsg or "(chat turn)",
+                        success=(not empty and not looks_error),
+                        error="" if not looks_error else content_acc[:400],
+                        output_snippet=content_acc[:600],
+                    )
+                except Exception:
+                    logger.debug("[SSE] chat self-improvement schedule skipped", exc_info=True)
+
             yield _sse_frame(
                 "done",
                 {
@@ -818,6 +848,25 @@ def create_sse_chat_router(
         system_msgs: list[dict[str, Any]] = []
         if system_prompt:
             system_msgs.append({"role": "system", "content": system_prompt})
+
+        # Kazma-wide self-improvement Soul (fresh every turn so new deltas apply
+        # without rebuilding the cached streaming graph).
+        try:
+            from kazma_core.skills.self_improvement import get_agent_evolution_block
+
+            evo = get_agent_evolution_block("supervisor")
+            if evo:
+                system_msgs.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            "## Self-improvement learnings (from past outcomes)\n"
+                            "Apply these refinements to your behaviour:\n" + evo
+                        ),
+                    }
+                )
+        except Exception:
+            logger.debug("[sse_chat] agent evolution inject skipped", exc_info=True)
 
         try:
             from kazma_core.ide.env_context import build_env_context

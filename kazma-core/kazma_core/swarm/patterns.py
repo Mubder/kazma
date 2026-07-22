@@ -152,7 +152,13 @@ async def _run_self_improvement(
     avoiding redundant LLM calls and misattribution.
     """
     try:
-        from kazma_core.skills.self_improvement import get_self_improvement
+        from kazma_core.skills.self_improvement import (
+            get_self_improvement,
+            self_improvement_enabled,
+        )
+
+        if not self_improvement_enabled():
+            return
         si = get_self_improvement()
         for res in worker_results:
             if not res.worker:

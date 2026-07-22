@@ -283,34 +283,45 @@ Flushes to `TaskStore.record_worker_metric` on every record. Exposed via REST at
 
 ## 11. Self-improvement engine (feedback loop)
 
-The self-improvement skill (`skills/self_improvement.py`) automatically learns from task outcomes and mutates worker system prompts to improve future performance.
+The self-improvement skill (`skills/self_improvement.py`) learns from outcomes **Kazma-wide**:
+
+| Surface | Hook | Where Soul is stored |
+|---------|------|----------------------|
+| **Chat** (Web SSE, Telegram/Discord/Slack gateway) | After each completed turn (skips HITL pauses) | `data_dir()/agent_evolution.json` → injected every turn as a system message |
+| **Swarm** (pipeline / fan-out / conditional) | `_run_self_improvement` after pattern completion | `WorkerRegistry` `system_prompt` (+ optional memory `log_evolution`) |
+
+Kill-switch: `KAZMA_SELF_IMPROVEMENT=0` (or `false` / `off`).
 
 ### 11.1 The feedback loop
 
 ```mermaid
 flowchart LR
-    T[Task completes] --> SI[_run_self_improvement]
+    T[Task or chat turn completes] --> SI[analyze / schedule_chat_self_improvement]
     SI --> A{analyze}
     A -->|success| S[Meta-Refiner: reinforce]
-    A -->|failure/timeout| F[Meta-Refiner: correct]
-    S --> AA[_auto_apply]
+    A -->|failure/timeout/error| F[Meta-Refiner: correct]
+    S --> AA[apply mutation]
     F --> AA
     AA --> CP[_cap_evolution_prompt]
-    CP --> WR[WorkerRegistry.update system_prompt]
-    AA --> LE[adapter.log_evolution]
-    LE --> ML[4-layer memory]
-    ML --> PD[Phonebook dispatch_by_name]
-    PD -->|PAST_LEARNINGS| WR
+    CP --> WR[WorkerRegistry OR agent_evolution.json]
+    AA --> LE[optional adapter.log_evolution for swarm]
 ```
 
-### 11.2 How it works
+### 11.2 How it works (swarm)
 
 1. **Hook fires** after every pipeline, fan-out, and conditional pattern completion (`patterns.py:_run_self_improvement`).
-2. **Each worker is analyzed** against only its own result (not all stages — fixed from the old behavior).
-3. The **Meta-Refiner LLM** generates a 2-3 sentence delta (reinforcement for success, correction for failure).
+2. **Each worker is analyzed** against only its own result (not all stages).
+3. The **Meta-Refiner LLM** generates a 2-3 sentence delta (reinforcement for success, correction for failure). WorkerResult `status=error` counts as failure.
 4. The delta is **auto-applied** to the worker's system prompt via `_cap_evolution_prompt` (max 12 blocks, 8000 chars).
-5. The applied delta is **persisted** to the 4-layer memory adapter via `adapter.log_evolution()`.
-6. On future dispatches, the phonebook retrieves relevant past learnings and injects them as `PAST_LEARNINGS_FOR_THIS_WORKER` context.
+5. The applied delta is **persisted** to the 4-layer memory adapter via `adapter.log_evolution()` when available.
+6. On future dispatches, the updated worker Soul is used automatically.
+
+### 11.2b How it works (chat)
+
+1. After Web SSE `done` (not interrupted) or gateway graph completion, `schedule_chat_self_improvement` runs in the background.
+2. Outcome: success unless empty/⚠️/error-looking reply.
+3. Delta is capped and stored under agent id `supervisor` in `agent_evolution.json`.
+4. Next turn: SSE and gateway inject the Soul block as a system message (no graph rebuild required).
 
 ### 11.3 Status tracking
 

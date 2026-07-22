@@ -771,6 +771,33 @@ def create_graph_handler(
                     _skill_exc,
                 )
 
+            # ── Self-improvement Soul (Kazma-wide) ─────────────────
+            try:
+                from kazma_core.skills.self_improvement import get_agent_evolution_block
+
+                evo = get_agent_evolution_block("supervisor")
+                if evo:
+                    msgs = list(state.get("messages") or [])
+                    evo_sys = {
+                        "role": "system",
+                        "content": (
+                            "## Self-improvement learnings (from past outcomes)\n"
+                            "Apply these refinements to your behaviour:\n" + evo
+                        ),
+                    }
+                    insert_at = 0
+                    for i, m in enumerate(msgs):
+                        if isinstance(m, dict) and m.get("role") == "user":
+                            insert_at = i
+                            break
+                    msgs.insert(insert_at, evo_sys)
+                    state = {**state, "messages": msgs}
+            except Exception:
+                logger.debug(
+                    "[agent-handler] agent evolution inject skipped",
+                    exc_info=True,
+                )
+
             # ── Invoke graph ───────────────────────────────────────
             start = time.monotonic()
             try:
@@ -862,6 +889,27 @@ def create_graph_handler(
                     thread_id,
                     msg.platform,
                 )
+
+                # Kazma-wide self-improvement (background)
+                try:
+                    from kazma_core.skills.self_improvement import (
+                        schedule_chat_self_improvement,
+                    )
+
+                    empty = not (assistant_text or "").strip() or assistant_text.startswith(
+                        "(No response"
+                    )
+                    schedule_chat_self_improvement(
+                        user_message=(msg.text or "").strip() or "(gateway turn)",
+                        success=not empty,
+                        error="" if not empty else assistant_text[:400],
+                        output_snippet=(assistant_text or "")[:600],
+                    )
+                except Exception:
+                    logger.debug(
+                        "[agent-handler] chat SI schedule skipped",
+                        exc_info=True,
+                    )
 
                 _sync_platform_session_to_web(
                     thread_id,

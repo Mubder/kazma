@@ -449,10 +449,186 @@ Output ONLY the delta text, no preamble."""
 # Module-level singleton
 _self_improvement: SelfImprovementSkill | None = None
 
+# ── Kazma-wide (supervisor / chat) Soul evolution ───────────────────────
+# Swarm workers keep deltas on WorkerRegistry. The main chat agent has no
+# worker entry — store [SelfImprovement] blocks here and inject every turn.
+
+_DEFAULT_AGENT_ID = "supervisor"
+_agent_evo_lock = __import__("threading").Lock()
+
+
+def _agent_evolution_path() -> Path:
+    from kazma_core.paths import data_dir
+
+    return data_dir() / "agent_evolution.json"
+
+
+def _load_agent_evolution() -> dict[str, Any]:
+    import json
+
+    path = _agent_evolution_path()
+    if not path.exists():
+        return {"agents": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {"agents": {}}
+        data.setdefault("agents", {})
+        return data
+    except Exception:
+        return {"agents": {}}
+
+
+def _save_agent_evolution(data: dict[str, Any]) -> None:
+    import json
+
+    path = _agent_evolution_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def self_improvement_enabled() -> bool:
+    """Global kill-switch: KAZMA_SELF_IMPROVEMENT=0|false|off disables all SI."""
+    import os
+
+    raw = (os.environ.get("KAZMA_SELF_IMPROVEMENT") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "disabled")
+
+
+def get_agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID) -> str:
+    """Return the cumulative [SelfImprovement] Soul block for the main agent.
+
+    Empty when none applied or SI disabled. Safe to append as a system message
+    every chat turn (Web SSE / gateway).
+    """
+    if not self_improvement_enabled():
+        return ""
+    with _agent_evo_lock:
+        data = _load_agent_evolution()
+        entry = (data.get("agents") or {}).get(agent_id) or {}
+        block = str(entry.get("soul") or "").strip()
+        return block
+
+
+def apply_agent_mutation(agent_id: str, delta: str) -> bool:
+    """Cap and persist a Soul delta for the main (or named) agent."""
+    if not delta or not self_improvement_enabled():
+        return False
+    import time as _time
+
+    with _agent_evo_lock:
+        data = _load_agent_evolution()
+        agents = data.setdefault("agents", {})
+        entry = agents.get(agent_id) or {"soul": "", "history": []}
+        old = str(entry.get("soul") or "")
+        # Cap treats prior soul as base + existing blocks
+        new_soul = _cap_evolution_prompt(old or "You are Kazma, the main supervisor agent.", delta)
+        entry["soul"] = new_soul
+        hist = list(entry.get("history") or [])
+        hist.append(
+            {
+                "ts": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "delta": delta[:_MAX_DELTA_CHARS],
+            }
+        )
+        entry["history"] = hist[-40:]
+        agents[agent_id] = entry
+        _save_agent_evolution(data)
+    logger.info(
+        "[SelfImprovement] Agent '%s' Soul updated (%d → %d chars)",
+        agent_id,
+        len(old),
+        len(new_soul),
+    )
+    return True
+
+
+async def analyze_and_apply_chat_turn(
+    *,
+    user_message: str,
+    success: bool,
+    error: str = "",
+    output_snippet: str = "",
+    agent_id: str = _DEFAULT_AGENT_ID,
+) -> dict[str, Any]:
+    """Run Meta-Refiner for a main-agent chat turn and persist Soul delta.
+
+    Call after Web SSE / gateway turns (not HITL pauses). Skips empty turns.
+    """
+    if not self_improvement_enabled():
+        return {"action": "skip", "reason": "disabled"}
+    msg = (user_message or "").strip()
+    if len(msg) < 2:
+        return {"action": "skip", "reason": "empty user message"}
+    # Skip pure acknowledgements
+    if msg.lower() in ("ok", "thanks", "thank you", "yes", "no", "y", "n", "👍"):
+        return {"action": "skip", "reason": "ack-only"}
+
+    si = get_self_improvement()
+    if not si._enabled:
+        return {"action": "skip", "reason": "skill disabled"}
+
+    class _Stage:
+        def __init__(self) -> None:
+            self.role = agent_id
+            self.worker_name = agent_id
+            self.status = "completed" if success else "failed"
+            self.output = (output_snippet or "")[:800]
+            self.error = (error or "")[:400]
+            self.duration_ms = 0
+
+    status = "completed" if success else "failed"
+    analysis = await si.analyze(
+        worker_name=agent_id,
+        task=msg[:500],
+        stages=[_Stage()],
+        status=status,
+    )
+    if analysis.get("action") != "mutate":
+        return analysis
+    delta = analysis.get("delta") or ""
+    ok = apply_agent_mutation(agent_id, delta)
+    analysis["applied"] = ok
+    analysis["agent_id"] = agent_id
+    return analysis
+
+
+def schedule_chat_self_improvement(
+    *,
+    user_message: str,
+    success: bool,
+    error: str = "",
+    output_snippet: str = "",
+    agent_id: str = _DEFAULT_AGENT_ID,
+) -> None:
+    """Fire-and-forget SI after a chat turn (does not block the response)."""
+    if not self_improvement_enabled():
+        return
+    import asyncio
+
+    async def _run() -> None:
+        try:
+            await analyze_and_apply_chat_turn(
+                user_message=user_message,
+                success=success,
+                error=error,
+                output_snippet=output_snippet,
+                agent_id=agent_id,
+            )
+        except Exception as exc:
+            logger.debug("[SelfImprovement] chat SI failed: %s", exc)
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_run())
+    except RuntimeError:
+        # No running loop (sync context) — best-effort skip
+        logger.debug("[SelfImprovement] no event loop for chat SI")
+
 
 def get_self_improvement() -> SelfImprovementSkill:
     """Return the shared SelfImprovementSkill instance."""
     global _self_improvement
     if _self_improvement is None:
-        _self_improvement = SelfImprovementSkill()
+        _self_improvement = SelfImprovementSkill(enabled=self_improvement_enabled())
     return _self_improvement
