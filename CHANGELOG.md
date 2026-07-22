@@ -1,5 +1,58 @@
 # CHANGELOG
 
+## Unreleased — Deep-audit security fixes (2026-07-22)
+
+Fixes from the full-codebase audit (`1 CRITICAL + 7 HIGH + 4 MEDIUM`):
+
+### Security — Self-improvement (audit C1, H1, H2, H3, M2)
+- **C1 prompt-injection hardening**: new `kazma_core/safety/prompt_fence.py`
+  rejects Soul deltas containing override markers ("ignore prior
+  instructions", "you are now", `</system>`, etc.) at creation time
+  (`_analyze_success`/`_analyze_failure`) and again at apply time
+  (`_auto_apply`/`apply_agent_mutation`). All 3 supervisor injection sites
+  (`agent_runner`, `sse_chat`, gateway `graph`) now wrap deltas in an
+  untrusted `<kazma:data>` fence instead of the old obey-style "Apply these
+  refinements" framing.
+- **H1/H2 atomic store**: `agent_evolution.json` migrated to ConfigStore
+  (SQLite WAL + atomic transactions) under key `self_improvement.agent_evolution`.
+  A `_agent_evo_lock` serializes the compound read-modify-write; one-time
+  migration of any legacy JSON file. Eliminates the non-atomic/torn-write and
+  multi-worker lost-update hazards.
+- **H3 task retention**: `schedule_chat_self_improvement` now retains a strong
+  reference to its fire-and-forget task (`_si_tasks` set + done-callback) so
+  CPython can't GC it mid-execution.
+- **M2 runtime kill-switch**: the swarm worker-mutation path now re-checks
+  `self_improvement_enabled()` live, so `KAZMA_SELF_IMPROVEMENT=0` toggled at
+  runtime also stops worker deltas (not just chat/supervisor).
+
+### Security — email_api (audit H4, H5, H6)
+- **H4 CSRF**: the 9 state-mutating POST endpoints now live on a protected
+  sub-router guarded by an Origin/Referer same-host check + required
+  `X-Requested-With` header (added to `KazmaAPI.fetch` defaults and settings.js).
+  OAuth callbacks stay open (Google/Microsoft can't send a custom header).
+- **H5 error leakage**: all email_api error responses sanitized via
+  `_safe_error()` (full detail logged server-side only; gated on
+  `KAZMA_PRODUCTION`, the canonical flag).
+- **H6 open redirect**: `_request_base` delegates to
+  `oauth_common.public_base_url` so `KAZMA_PUBLIC_URL` is authoritative; raw
+  `Host`/`X-Forwarded-Host` headers can no longer redirect OAuth callbacks.
+
+### Reliability — OAuth (audit M3)
+- **M3 token-refresh race**: `GmailApiBackend` and `MicrosoftGraphBackend` now
+  guard `_refresh()` with an `asyncio.Lock` so concurrent 401s never POST more
+  than one refresh at a time (prevents Microsoft refresh-token invalidation and
+  the `self.access_token` race).
+
+### Tests
+- New `tests/test_agent_self_improvement.py` (12 tests): injection rejection,
+  fence, concurrency atomicity, legacy migration, corrupt-file recovery, task
+  retention, kill-switch.
+- New `tests/test_email_api_security.py` (8 tests): CSRF dependency,
+  error sanitization, base-URL resolution.
+- New `tests/test_email_oauth_refresh_lock.py` (3 tests): concurrent-refresh
+  serialization.
+- 95 email/audit/HITL regression tests pass.
+
 ## Unreleased — Production readiness remediation (2026-07-21)
 
 Security and reliability hardening from

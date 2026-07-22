@@ -402,7 +402,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(updates),
                 });
                 // Reconfigure the live LLM provider so subsequent chat
@@ -410,7 +410,7 @@ function settingsApp() {
                 try {
                     await fetch('/api/provider/switch', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                         body: JSON.stringify({
                             provider: this.modelProvider || 'custom',
                             base_url: this.currentModel.base_url,
@@ -445,7 +445,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/settings/test-model', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.currentModel),
                 });
                 this.testResult = await resp.json();
@@ -470,7 +470,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/models/saved', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({
                         name: name,
                         base_url: this.currentModel.base_url || '',
@@ -552,7 +552,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/agent', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.agent),
                 });
                 showToast('Agent settings saved', 'success');
@@ -573,7 +573,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/agent/safety', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.safety),
                 });
                 showToast('Safety settings saved', 'success');
@@ -588,7 +588,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/agent/context', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.context),
                 });
                 showToast('Context settings saved', 'success');
@@ -607,7 +607,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/connectors', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ platform, settings: this.connectors[platform] || {} }),
                 });
                 // Auto-refresh gateway adapters so the new connector config
@@ -654,7 +654,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/settings/connectors/test', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ platform }),
                 });
                 const result = await resp.json();
@@ -779,7 +779,7 @@ function settingsApp() {
                 delete data._existing;
                 const resp = await fetch('/api/providers', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(data),
                 });
                 const result = await resp.json();
@@ -816,7 +816,7 @@ function settingsApp() {
             try {
                 await fetch(`/api/providers/${encodeURIComponent(name)}/toggle`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ enabled }),
                 });
                 await this.loadHubProviders();
@@ -860,7 +860,7 @@ function settingsApp() {
                 delete temp._existing;
                 const upsertResp = await fetch('/api/providers', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(temp),
                 });
                 if (!upsertResp.ok) {
@@ -933,7 +933,7 @@ function settingsApp() {
             try {
                 await fetch(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ models: p.selected_models }),
                 });
             } catch (e) {
@@ -959,7 +959,7 @@ function settingsApp() {
             try {
                 await fetch(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ models: p.selected_models }),
                 });
             } catch (e) {
@@ -1013,7 +1013,7 @@ function settingsApp() {
                 delete data._existing;
                 const resp = await fetch('/api/connectors', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(data),
                 });
                 const result = await resp.json();
@@ -1055,7 +1055,7 @@ function settingsApp() {
             try {
                 await fetch(`/api/connectors/${encodeURIComponent(name)}/toggle`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ enabled }),
                 });
                 await this.loadHubConnectors();
@@ -1093,7 +1093,7 @@ function settingsApp() {
                 delete data._existing;
                 await fetch('/api/connectors', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(data),
                 });
                 const resp = await fetch(`/api/connectors/${encodeURIComponent(name)}/test`, { method: 'POST' });
@@ -1151,7 +1151,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/models/profiles', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.hubEditingProfile),
                 });
                 const result = await resp.json();
@@ -1212,7 +1212,7 @@ function settingsApp() {
                 }
                 await fetch('/api/settings/mcp', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(data),
                 });
                 this.showMcpModal = false;
@@ -1309,7 +1309,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/appearance', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.appearance),
                 });
                 // Apply theme immediately
@@ -1479,7 +1479,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/saas/users', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
                     body: JSON.stringify(this.newUser),
                 });
@@ -1500,7 +1500,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/saas/users/' + encodeURIComponent(username), {
                     method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
                     body: JSON.stringify(patch),
                 });
@@ -1543,7 +1543,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/saas/tenants', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
                     body: JSON.stringify(this.newTenant),
                 });
@@ -1572,7 +1572,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/settings/account/password', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ old_password: this.passwordForm.old_password, new_password: this.passwordForm.new_password }),
                 });
                 const data = await resp.json();
@@ -1592,7 +1592,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/settings/account/tokens', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ name: this.tokenName }),
                 });
                 const data = await resp.json();
@@ -1704,7 +1704,7 @@ function settingsApp() {
             try {
                 const resp = await fetch(`/api/settings/tools/${encodeURIComponent(toolName)}/test`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ arguments: args }),
                 });
                 this.toolTestResult = await resp.json();
@@ -1803,7 +1803,7 @@ function settingsApp() {
             try {
                 const res = await fetch('/api/system/install', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
                     body: JSON.stringify({ extra: extraName }),
                 });
@@ -1918,7 +1918,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/import', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({
                         data: this.importData,
                         format: this.importFormat,
@@ -1988,7 +1988,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/settings/voice', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.voiceForm)
                 });
                 if (!resp.ok) {
@@ -2230,7 +2230,7 @@ function settingsApp() {
                 const resp = await fetch('/api/email/protocol/connect', {
                     method: 'POST',
                     credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({
                         provider: 'gmail',
                         protocol: protocol === 'pop' ? 'pop' : 'imap',
@@ -2263,7 +2263,7 @@ function settingsApp() {
                 const resp = await fetch('/api/email/protocol/connect', {
                     method: 'POST',
                     credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({
                         provider: 'microsoft',
                         protocol: protocol === 'pop' ? 'pop' : 'imap',
@@ -2296,7 +2296,7 @@ function settingsApp() {
                 const resp = await fetch('/api/email/oauth/gmail/client', {
                     method: 'POST',
                     credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ client_id, client_secret }),
                 });
                 const data = await resp.json().catch(() => ({}));
@@ -2379,7 +2379,7 @@ function settingsApp() {
                 const resp = await fetch('/api/email/gmail/connect', {
                     method: 'POST',
                     credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ address, app_password }),
                 });
                 const data = await resp.json().catch(() => ({}));
@@ -2434,7 +2434,7 @@ function settingsApp() {
                 const resp = await fetch('/api/email/oauth/microsoft/client', {
                     method: 'POST',
                     credentials: 'same-origin',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ client_id, client_secret, tenant_id }),
                 });
                 const data = await resp.json().catch(() => ({}));
@@ -2494,7 +2494,7 @@ function settingsApp() {
                     const resp = await fetch('/api/email/oauth/microsoft/device/poll', {
                         method: 'POST',
                         credentials: 'same-origin',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                         body: JSON.stringify({ device_code }),
                     });
                     const data = await resp.json().catch(() => ({}));

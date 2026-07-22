@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from email.message import EmailMessage as StdEmailMessage
@@ -42,6 +43,10 @@ class GmailApiBackend:
         self.client_id = client_id
         self.client_secret = client_secret
         self.email_address = email_address
+        # Serializes token refresh so N concurrent 401s don't each POST a
+        # refresh request (which can invalidate rotated refresh tokens and
+        # race on self.access_token). Audit M3.
+        self._token_lock = asyncio.Lock()
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -63,7 +68,16 @@ class GmailApiBackend:
                 method, url, headers=self._headers(), json=json_body, params=params
             )
             if r.status_code == 401 and self.refresh_token:
-                await self._refresh()
+                # Serialize refresh across concurrent requests so only one
+                # coroutine POSTs to the token endpoint; others wait, then
+                # reuse the freshly rotated access_token.
+                token_before = self.access_token
+                async with self._token_lock:
+                    # Re-check: another request may have refreshed while we
+                    # waited to acquire the lock. Only refresh ourselves if the
+                    # token hasn't already changed.
+                    if self.access_token == token_before:
+                        await self._refresh()
                 r = await client.request(
                     method, url, headers=self._headers(), json=json_body, params=params
                 )

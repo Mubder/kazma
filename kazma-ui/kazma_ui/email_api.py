@@ -1,4 +1,15 @@
-"""Email integration API — Gmail/Microsoft OAuth + app-password + status."""
+"""Email integration API — Gmail/Microsoft OAuth + app-password + status.
+
+Security notes (audit H4/H5/H6):
+- Mutating POST endpoints are mounted on a sub-router protected by an Origin
+  + custom-header check (CSRF defense; browsers won't send ``X-Requested-With``
+  cross-site without a preflight, and the frontend sets it explicitly).
+- Error responses are sanitized via :func:`_safe_error` — internal exception
+  text is only returned when ``KAZMA_PRODUCTION`` is unset.
+- ``_request_base`` delegates to ``oauth_common.public_base_url`` so the
+  ``KAZMA_PUBLIC_URL`` env var is authoritative and raw ``Host`` /
+  ``X-Forwarded-Host`` headers can't redirect OAuth callbacks off-site.
+"""
 
 from __future__ import annotations
 
@@ -7,13 +18,21 @@ import os
 from typing import Any
 from urllib.parse import quote
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
+# Open router: GET / status / OAuth callbacks (callbacks are browser-redirect
+# targets from Google/Microsoft and cannot carry a custom header).
 router = APIRouter(prefix="/api/email", tags=["email"])
+
+# Protected router: every state-mutating POST. Inherits the prefix.
+protected_router = APIRouter(prefix="/api/email", tags=["email"])
+
+
+# ── Pydantic bodies ────────────────────────────────────────────────────
 
 
 class DevicePollBody(BaseModel):
@@ -55,13 +74,72 @@ class ProtocolDisconnectBody(BaseModel):
     provider: str = Field(..., min_length=3)
 
 
+# ── Helpers ────────────────────────────────────────────────────────────
+
+
+def _is_production() -> bool:
+    return (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+
+
+def _safe_error(exc: Exception, status: int = 500) -> JSONResponse:
+    """Sanitized error response — full detail is logged server-side only.
+
+    Internal exception text is only echoed to the client in non-production
+    mode (audit H5). Mirrors the global handler's intent but uses the
+    canonical ``KAZMA_PRODUCTION`` flag (the global catch-all in app.py uses
+    ``KAZMA_ENV``, a narrower one-off).
+    """
+    logger.exception("[email_api] %s", exc)
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": "internal_error",
+            "detail": "" if _is_production() else str(exc)[:300],
+        },
+        status_code=status,
+    )
+
+
 def _request_base(request: Request) -> str:
-    # Honor reverse proxy headers when present
-    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host")
-    if host:
-        return f"{proto}://{host}".rstrip("/")
-    return str(request.base_url).rstrip("/")
+    """Resolve our own public base URL for OAuth redirect URIs / post-callback
+    redirects.
+
+    Delegates to ``oauth_common.public_base_url`` so ``KAZMA_PUBLIC_URL`` is
+    authoritative (matching the GitHub-OAuth + OIDC precedent). The raw
+    ``Host`` / ``X-Forwarded-Host`` headers are NOT trusted here — otherwise
+    an attacker could spoof them to redirect the OAuth callback to an
+    attacker-controlled host (audit H6).
+    """
+    from kazma_skills.native.email_manager.oauth_common import public_base_url
+
+    return public_base_url(str(request.base_url).rstrip("/"))
+
+
+async def _verify_same_origin(request: Request) -> None:
+    """CSRF guard for mutating email POST endpoints (audit H4).
+
+    Two layers, both required:
+    1. A custom ``X-Requested-With`` header that the browser cannot be
+       tricked into sending cross-site without a CORS preflight (and the
+       Kazma app never grants such preflight). The frontend sets this header
+       explicitly via ``KazmaAPI.fetch``.
+    2. When the request carries an ``Origin`` (or ``Referer``), it must
+       resolve to our own public base. A bare form POST from another site
+       lacks the custom header and fails layer 1 regardless.
+    """
+    xrw = request.headers.get("x-requested-with", "").lower()
+    if xrw != "xmlhttprequest":
+        raise HTTPException(status_code=403, detail="missing custom request header")
+    origin = request.headers.get("origin") or request.headers.get("referer") or ""
+    if origin:
+        own = _request_base(request)
+        if not origin.startswith(own):
+            raise HTTPException(status_code=403, detail="cross-origin request denied")
+
+
+# ── Status (open) ──────────────────────────────────────────────────────
 
 
 @router.get("/status")
@@ -85,14 +163,13 @@ async def email_status() -> JSONResponse:
             data["gmail_app_password"] = bool(data.get("gmail_imap") or data.get("gmail_pop"))
         return JSONResponse(data)
     except Exception as exc:
-        logger.exception("email status failed")
-        return JSONResponse({"error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
 # ── Gmail app password (optional; Workspace may block) ─────────────────
 
 
-@router.post("/gmail/connect")
+@protected_router.post("/gmail/connect", dependencies=[Depends(_verify_same_origin)])
 async def gmail_connect(body: GmailConnectBody) -> JSONResponse:
     address = body.address.strip()
     password = body.app_password.strip().replace(" ", "")
@@ -118,24 +195,23 @@ async def gmail_connect(body: GmailConnectBody) -> JSONResponse:
             }
         )
     except Exception as exc:
-        logger.exception("gmail connect failed")
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
-@router.post("/gmail/disconnect")
+@protected_router.post("/gmail/disconnect", dependencies=[Depends(_verify_same_origin)])
 async def gmail_disconnect() -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.protocol_connect import disconnect_protocol
 
         return JSONResponse(disconnect_protocol("gmail"))
     except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
 # ── Gmail OAuth (browser) ──────────────────────────────────────────────
 
 
-@router.post("/oauth/gmail/client")
+@protected_router.post("/oauth/gmail/client", dependencies=[Depends(_verify_same_origin)])
 async def gmail_set_oauth_client(body: GmailOAuthClientBody) -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.credentials import vault_store
@@ -167,7 +243,7 @@ async def gmail_set_oauth_client(body: GmailOAuthClientBody) -> JSONResponse:
             }
         )
     except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
 @router.get("/oauth/gmail/start")
@@ -229,7 +305,7 @@ async def gmail_oauth_callback(
 # ── Microsoft OAuth browser + device ───────────────────────────────────
 
 
-@router.post("/oauth/microsoft/client")
+@protected_router.post("/oauth/microsoft/client", dependencies=[Depends(_verify_same_origin)])
 async def ms_set_client(body: MsClientBody) -> JSONResponse:
     cid = body.client_id.strip()
     tenant = (body.tenant_id or "common").strip() or "common"
@@ -257,7 +333,7 @@ async def ms_set_client(body: MsClientBody) -> JSONResponse:
             }
         )
     except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
 @router.get("/oauth/microsoft/start")
@@ -314,7 +390,7 @@ async def ms_oauth_callback(
     )
 
 
-@router.post("/oauth/microsoft/device/start")
+@protected_router.post("/oauth/microsoft/device/start", dependencies=[Depends(_verify_same_origin)])
 async def ms_device_start() -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.oauth_ms import start_device_code_flow
@@ -323,11 +399,10 @@ async def ms_device_start() -> JSONResponse:
         code = 200 if result.get("ok") else 400
         return JSONResponse(result, status_code=code)
     except Exception as exc:
-        logger.exception("ms device start failed")
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
-@router.post("/oauth/microsoft/device/poll")
+@protected_router.post("/oauth/microsoft/device/poll", dependencies=[Depends(_verify_same_origin)])
 async def ms_device_poll(body: DevicePollBody) -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.oauth_ms import poll_device_code_flow
@@ -335,18 +410,17 @@ async def ms_device_poll(body: DevicePollBody) -> JSONResponse:
         result = await poll_device_code_flow(body.device_code)
         return JSONResponse(result)
     except Exception as exc:
-        logger.exception("ms device poll failed")
-        return JSONResponse({"ok": False, "status": "failed", "error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
-@router.post("/oauth/microsoft/disconnect")
+@protected_router.post("/oauth/microsoft/disconnect", dependencies=[Depends(_verify_same_origin)])
 async def ms_disconnect() -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.oauth_ms import clear_microsoft_tokens
 
         return JSONResponse(clear_microsoft_tokens())
     except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
 @router.get("/accounts")
@@ -372,7 +446,7 @@ async def email_accounts() -> JSONResponse:
             )
         return JSONResponse({"accounts": rows, "count": len(rows)})
     except Exception as exc:
-        return JSONResponse({"accounts": [], "error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
 # ── IMAP / POP protocol connect (Gmail, Microsoft, generic) ────────────
@@ -385,10 +459,10 @@ async def email_presets() -> JSONResponse:
 
         return JSONResponse({"ok": True, "presets": list_presets()})
     except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
-@router.post("/protocol/connect")
+@protected_router.post("/protocol/connect", dependencies=[Depends(_verify_same_origin)])
 async def protocol_connect(body: ProtocolConnectBody) -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.protocol_connect import connect_protocol
@@ -408,11 +482,10 @@ async def protocol_connect(body: ProtocolConnectBody) -> JSONResponse:
         code = 200 if result.get("ok") else 400
         return JSONResponse(result, status_code=code)
     except Exception as exc:
-        logger.exception("protocol connect failed")
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return _safe_error(exc)
 
 
-@router.post("/protocol/disconnect")
+@protected_router.post("/protocol/disconnect", dependencies=[Depends(_verify_same_origin)])
 async def protocol_disconnect(body: ProtocolDisconnectBody) -> JSONResponse:
     try:
         from kazma_skills.native.email_manager.protocol_connect import disconnect_protocol
@@ -421,4 +494,4 @@ async def protocol_disconnect(body: ProtocolDisconnectBody) -> JSONResponse:
         code = 200 if result.get("ok") else 400
         return JSONResponse(result, status_code=code)
     except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        return _safe_error(exc)

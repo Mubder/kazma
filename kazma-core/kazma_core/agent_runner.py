@@ -258,15 +258,17 @@ class KazmaAgent:
 
         # Self-improvement Soul (Kazma-wide) — accumulated from past chat/swarm
         # outcomes. Also re-injected per turn in SSE (may grow after init).
+        # Wrapped in an untrusted data fence so the model treats deltas as
+        # observation context, never instructions (prompt-injection defense).
         try:
+            from kazma_core.safety.prompt_fence import format_untrusted_block
             from kazma_core.skills.self_improvement import get_agent_evolution_block
 
             evo = get_agent_evolution_block("supervisor")
-            if evo and evo not in self.system_prompt:
+            fenced = format_untrusted_block(evo, source="self_improvement")
+            if fenced and fenced not in self.system_prompt:
                 self.system_prompt = (
-                    self.system_prompt.rstrip()
-                    + "\n\n## Self-improvement learnings\n"
-                    + evo
+                    self.system_prompt.rstrip() + "\n\n" + fenced
                 )
         except Exception:
             logger.debug("[agent_runner] agent evolution injection skipped", exc_info=True)

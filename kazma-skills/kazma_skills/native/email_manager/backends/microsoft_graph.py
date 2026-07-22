@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -57,6 +58,10 @@ class MicrosoftGraphBackend:
         self.client_secret = client_secret
         self.tenant_id = tenant_id or "common"
         self.account_alias = account_alias or ""
+        # Serializes token refresh so N concurrent 401s don't each POST a
+        # refresh request — Microsoft rotates refresh tokens, so a concurrent
+        # refresh can invalidate the token and log the account out. Audit M3.
+        self._token_lock = asyncio.Lock()
         if account_alias:
             self.name = f"microsoft_graph:{account_alias}"
 
@@ -84,7 +89,16 @@ class MicrosoftGraphBackend:
                 params=params,
             )
             if r.status_code == 401 and self.refresh_token and self.client_id:
-                await self._refresh()
+                # Serialize refresh across concurrent requests (see gmail_api
+                # _request). Microsoft rotates refresh tokens, so a racing
+                # refresh can invalidate the stored token.
+                token_before = self.access_token
+                async with self._token_lock:
+                    # Re-check: another request may have refreshed while we
+                    # waited to acquire the lock. Only refresh ourselves if the
+                    # token hasn't already changed.
+                    if self.access_token == token_before:
+                        await self._refresh()
                 r = await client.request(
                     method,
                     url,

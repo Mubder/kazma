@@ -980,10 +980,14 @@ class KazmaAppBuilder:
         logger.info("IDE API router mounted at /api/ide/*")
 
         # ── Email integration (status + Microsoft device OAuth) ──
+        # Open router (GET / status / OAuth callbacks) + protected router
+        # (state-mutating POSTs guarded by Origin + X-Requested-With check).
         try:
+            from kazma_ui.email_api import protected_router as email_protected
             from kazma_ui.email_api import router as email_router
 
             self.app.include_router(email_router)
+            self.app.include_router(email_protected)
             logger.info("Email API router mounted at /api/email/*")
         except Exception as e:
             logger.warning("Email API router failed to mount: %s", e)

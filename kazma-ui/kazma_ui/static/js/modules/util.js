@@ -12,7 +12,11 @@ export const KazmaAPI = {
      */
     async fetch(url, opts = {}) {
         const defaults = {
-            headers: { 'Content-Type': 'application/json' },
+            // X-Requested-With marks requests as AJAX. The email_api CSRF guard
+            // (and future same-origin checks) require it on mutating POSTs — a
+            // browser cannot be tricked into sending a custom header cross-site
+            // without a CORS preflight, which Kazma never grants.
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin',
         };
         const config = { ...defaults, ...opts };

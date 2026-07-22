@@ -850,8 +850,11 @@ def create_sse_chat_router(
             system_msgs.append({"role": "system", "content": system_prompt})
 
         # Kazma-wide self-improvement Soul (fresh every turn so new deltas apply
-        # without rebuilding the cached streaming graph).
+        # without rebuilding the cached streaming graph). The deltas are wrapped
+        # in an untrusted data fence — the model must treat them as observation
+        # context, never as instructions to obey (prompt-injection defense).
         try:
+            from kazma_core.safety.prompt_fence import format_untrusted_block
             from kazma_core.skills.self_improvement import get_agent_evolution_block
 
             evo = get_agent_evolution_block("supervisor")
@@ -859,10 +862,7 @@ def create_sse_chat_router(
                 system_msgs.append(
                     {
                         "role": "system",
-                        "content": (
-                            "## Self-improvement learnings (from past outcomes)\n"
-                            "Apply these refinements to your behaviour:\n" + evo
-                        ),
+                        "content": format_untrusted_block(evo, source="self_improvement"),
                     }
                 )
         except Exception:

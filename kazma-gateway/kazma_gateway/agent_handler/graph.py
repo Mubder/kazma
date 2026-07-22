@@ -772,7 +772,11 @@ def create_graph_handler(
                 )
 
             # ── Self-improvement Soul (Kazma-wide) ─────────────────
+            # Deltas are wrapped in an untrusted data fence — treat as
+            # observation context only, never instructions (prompt-injection
+            # defense, audit C1).
             try:
+                from kazma_core.safety.prompt_fence import format_untrusted_block
                 from kazma_core.skills.self_improvement import get_agent_evolution_block
 
                 evo = get_agent_evolution_block("supervisor")
@@ -780,10 +784,7 @@ def create_graph_handler(
                     msgs = list(state.get("messages") or [])
                     evo_sys = {
                         "role": "system",
-                        "content": (
-                            "## Self-improvement learnings (from past outcomes)\n"
-                            "Apply these refinements to your behaviour:\n" + evo
-                        ),
+                        "content": format_untrusted_block(evo, source="self_improvement"),
                     }
                     insert_at = 0
                     for i, m in enumerate(msgs):

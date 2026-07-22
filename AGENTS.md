@@ -184,6 +184,41 @@ workspace. Three new modules; understanding their interaction is essential.
 - JavaScript: syntax-check with `node --check` before committing
 - Never use `&&` or `||` in PowerShell commands; use `;` and `$LASTEXITCODE`
 
+### 11. Self-Improvement Soul Store + Prompt Fence (`kazma-core/kazma_core/skills/self_improvement.py`)
+
+The self-improvement engine persists "Soul deltas" (LLM-generated system-prompt
+refinements derived from untrusted conversation/tool output) and re-injects
+them into every future system prompt. Two invariants must hold:
+
+**A. Storage is ConfigStore-backed, NOT a free-standing JSON file.**
+- The supervisor/main-agent Soul lives in `get_config_store()` under key
+  `self_improvement.agent_evolution` (a dict `{"agents": {<id>: {soul, history}}}`).
+- `_load_agent_evolution` / `_save_agent_evolution` go through ConfigStore —
+  do NOT reintroduce a direct `path.write_text` write (the old
+  `agent_evolution.json` was non-atomic and corruptible on crash/concurrency).
+- A compound read-modify-write lock (`_agent_evo_lock`) serializes
+  `apply_agent_mutation` within a process; ConfigStore's own lock only guards
+  individual get/set, not the multi-step sequence. Both are required.
+- A one-time migration (`_migrate_legacy_evolution_if_present`) moves any
+  pre-existing `agent_evolution.json` into ConfigStore and renames it
+  `.migrated`. Leave this in place.
+- Swarm *worker* deltas live on `WorkerRegistry` (`WorkerEntry.system_prompt`),
+  not here.
+
+**B. Every injected Soul delta MUST go through the prompt fence.**
+- `kazma_core/safety/prompt_fence.py` provides `is_override_delta()` (rejects
+  injection markers like "ignore prior instructions") and
+  `format_untrusted_block()` (wraps content in a `<kazma:data untrusted>`
+  fence telling the model the text is observation data, NOT instructions).
+- Deltas are checked at creation time (`_analyze_success`/`_analyze_failure`)
+  AND at apply time (`_auto_apply`/`apply_agent_mutation`) — defense-in-depth.
+  Never inject a delta via the old `"Apply these refinements to your behaviour:"`
+  framing; always use `format_untrusted_block(evo, source="self_improvement")`.
+- The 3 supervisor injection sites (`agent_runner.py`, `sse_chat.py`, gateway
+  `graph.py`) all use the fence. Keep them in sync if you add a 4th.
+- Kill-switch `KAZMA_SELF_IMPROVEMENT=0` is checked live (not just at init) on
+  both the chat/supervisor path and the swarm worker path.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
