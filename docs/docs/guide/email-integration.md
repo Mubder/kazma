@@ -97,6 +97,22 @@ EMAIL_GMAIL_CLIENT_SECRET=...
 
 App passwords still work for personal Gmail if your admin allows them; OAuth is preferred for Workspace.
 
+#### Error: “Kazma has not completed the Google verification process” / `403: access_denied`
+
+Your OAuth app is in **Testing**. Google only allows **test users** until the app is verified (Gmail scopes are “sensitive/restricted”).
+
+**Fix for personal / single-user use (recommended):**
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services** → **OAuth consent screen**.  
+2. Publishing status should be **Testing** (fine for self-host).  
+3. Open **Test users** → **Add users** → add the Gmail you sign in with (e.g. `you@gmail.com`).  
+4. Save, wait ~1 minute, try **Connect with Google** again.  
+5. On the consent screen you may still see “Google hasn’t verified this app” → **Continue** / **Advanced** → go to Kazma (unsafe) — expected for unverified personal projects.
+
+**Do not** need full Google verification unless you ship Kazma as a multi-tenant product to arbitrary Gmail users. Self-host + test users is enough.
+
+**Workspace:** if the account is a company Google Workspace user, an admin may still block third-party OAuth; use a personal test user or admin-approved app.
+
 ### Microsoft Graph OAuth setup
 
 1. Azure app registration → Web redirect URI:
