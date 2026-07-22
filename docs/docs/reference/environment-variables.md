@@ -130,8 +130,13 @@ Native skill `email-manager`. Default provider **`auto`**: real account if confi
 | `EMAIL_ADDRESS` / `EMAIL_PASSWORD` | Generic IMAP user |
 | `EMAIL_IMAP_HOST` / `EMAIL_IMAP_PORT` | IMAP (default 993) |
 | `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | SMTP (default 587 STARTTLS) |
+| `EMAIL_ACCOUNTS` | Comma-separated multi-account aliases |
+| `EMAIL_ACCOUNT_{ALIAS}_TYPE` | `gmail` \| `microsoft` \| `imap` |
+| `EMAIL_ACCOUNT_{ALIAS}_ADDRESS` / `_PASSWORD` | Per-account credentials |
+| `EMAIL_ACCOUNT_{ALIAS}_*` | `IMAP_HOST`, `REFRESH_TOKEN`, `CLIENT_ID`, … |
 
-HITL danger tools: `email_send`, `email_delete`, `email_categorize`. Plan: `docs/plans/EMAIL_INTEGRATION_FULL_PLAN.md`.
+API: `GET /api/email/status`, `POST /api/email/oauth/microsoft/device/start|poll`, `POST /api/email/oauth/microsoft/disconnect`.  
+HITL: `email_send`, `email_delete`, `email_categorize`. Guide: [Email integration](../guide/email-integration).
 
 ---
 

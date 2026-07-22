@@ -43,8 +43,15 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `summarize_research_file` | search | safe/read | Light extractive outline (per-chunk previews). |
 | `digest_research_file` | search | safe/read | Process all chunks in-tool; return one bounded extractive digest (context-safe). |
 | `crawl_site` | search | safe/read | Bounded same-domain multi-page crawl; saves pages + markdown index. |
+| `email_list` | email | safe/read | List/search mailbox folder (sandbox / Gmail / Graph / IMAP). |
+| `email_get` | email | safe/read | Fetch full message by id. |
+| `email_send` | email | **danger** | Send / reply / forward / draft (HITL). |
+| `email_delete` | email | **danger** | Trash or permanent delete (HITL). |
+| `email_categorize` | email | **danger** | Read/star/labels/move (HITL). |
+| `email_analyze` | email | safe/read | Summary, actions, phishing risk. |
 
-**Research workflow (chat, not `/research`):** see [Web research](../guide/web-research). Caps: `KAZMA_READ_URL_MAX_CHARS`, `KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS`, `KAZMA_RESEARCH_DIGEST_MAX`.
+**Research workflow (chat, not `/research`):** [Web research](../guide/web-research).  
+**Email workflow (chat):** [Email integration](../guide/email-integration). Caps: `KAZMA_READ_URL_MAX_CHARS`, research truncate envs.
 
 ### Related tool modules (`kazma_core/tools/`)
 

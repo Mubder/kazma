@@ -136,17 +136,35 @@ class ImapSmtpBackend:
             page = uids[offset : offset + limit]
             out: list[EmailMessage] = []
             for uid in page:
-                typ, msg_data = M.uid("fetch", uid, "(RFC822.HEADER)")
+                uid_s = uid.decode() if isinstance(uid, bytes) else str(uid)
+                typ, msg_data = M.uid("fetch", uid, "(FLAGS RFC822.HEADER)")
                 if typ != "OK" or not msg_data or not msg_data[0]:
                     continue
-                raw = msg_data[0][1] if isinstance(msg_data[0], tuple) else msg_data[0]
-                if not isinstance(raw, (bytes, bytearray)):
+                # Response shape: [(b'1 (FLAGS (\\Seen) RFC822.HEADER {n}', bytes), b')']
+                flags_blob = ""
+                raw = None
+                for part in msg_data:
+                    if isinstance(part, tuple) and len(part) >= 2:
+                        flags_blob = part[0].decode(errors="replace") if isinstance(part[0], bytes) else str(part[0])
+                        if isinstance(part[1], (bytes, bytearray)):
+                            raw = bytes(part[1])
+                if raw is None:
                     continue
-                m = self._parse_msg(bytes(raw), uid.decode() if isinstance(uid, bytes) else str(uid), folder)
-                # header-only body empty — snippet from subject
+                m = self._parse_msg(raw, uid_s, folder)
                 if not m.snippet:
                     m.snippet = m.subject[:80]
-                m.unread = query.unread_only or True
+                seen = "\\Seen" in flags_blob or "\\seen" in flags_blob.lower()
+                flagged = "\\Flagged" in flags_blob or "\\flagged" in flags_blob.lower()
+                m.unread = not seen
+                m.starred = flagged
+                # Gmail labels in FLAGS response (X-GM-LABELS) best-effort
+                if "X-GM-LABELS" in flags_blob or "x-gm-labels" in flags_blob.lower():
+                    import re as _re
+
+                    gm = _re.search(r"X-GM-LABELS\s*\(([^)]*)\)", flags_blob, flags=_re.I)
+                    if gm:
+                        labels = [x.strip().strip('"') for x in gm.group(1).split() if x.strip()]
+                        m.labels = list(dict.fromkeys([*m.labels, *labels]))
                 out.append(m)
             return out
         finally:

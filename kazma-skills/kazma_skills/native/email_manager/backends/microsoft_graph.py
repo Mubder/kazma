@@ -22,6 +22,22 @@ logger = logging.getLogger(__name__)
 GRAPH = "https://graph.microsoft.com/v1.0"
 
 
+# Well-known folder display names → Graph well-known names
+_WELL_KNOWN_FOLDERS = {
+    "inbox": "inbox",
+    "sent": "sentitems",
+    "sent items": "sentitems",
+    "sentitems": "sentitems",
+    "drafts": "drafts",
+    "trash": "deleteditems",
+    "deleted": "deleteditems",
+    "deleteditems": "deleteditems",
+    "junk": "junkemail",
+    "spam": "junkemail",
+    "archive": "archive",
+}
+
+
 class MicrosoftGraphBackend:
     name = "microsoft_graph"
 
@@ -33,12 +49,16 @@ class MicrosoftGraphBackend:
         client_id: str = "",
         client_secret: str = "",
         tenant_id: str = "common",
+        account_alias: str = "",
     ) -> None:
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.client_id = client_id
         self.client_secret = client_secret
         self.tenant_id = tenant_id or "common"
+        self.account_alias = account_alias or ""
+        if account_alias:
+            self.name = f"microsoft_graph:{account_alias}"
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -96,6 +116,43 @@ class MicrosoftGraphBackend:
             self.access_token = payload.get("access_token") or self.access_token
             if payload.get("refresh_token"):
                 self.refresh_token = payload["refresh_token"]
+            self._persist_tokens()
+
+    def _persist_tokens(self) -> None:
+        """Write refreshed tokens to env + vault (and per-account keys if aliased)."""
+        import os
+
+        try:
+            from kazma_skills.native.email_manager.credentials import vault_store
+
+            if self.access_token and self.access_token != "pending_refresh":
+                os.environ["EMAIL_MS_ACCESS_TOKEN"] = self.access_token
+                vault_store("email.microsoft.access_token", self.access_token)
+                if self.account_alias:
+                    vault_store(
+                        f"email.account.{self.account_alias}.access_token",
+                        self.access_token,
+                    )
+            if self.refresh_token:
+                os.environ["EMAIL_MS_REFRESH_TOKEN"] = self.refresh_token
+                vault_store("email.microsoft.refresh_token", self.refresh_token)
+                if self.account_alias:
+                    vault_store(
+                        f"email.account.{self.account_alias}.refresh_token",
+                        self.refresh_token,
+                    )
+        except Exception as exc:
+            logger.debug("[graph] token persist skipped: %s", exc)
+
+    def _folder_path(self, folder: str) -> str:
+        key = (folder or "INBOX").strip().lower()
+        known = _WELL_KNOWN_FOLDERS.get(key)
+        if known:
+            return f"/me/mailFolders/{known}/messages"
+        if key in ("inbox", "mail", ""):
+            return "/me/messages"
+        # Custom folder name — Graph expects folder id; try displayName filter via well-known path
+        return f"/me/mailFolders/{quote(folder, safe='')}/messages"
 
     def _map_message(self, item: dict[str, Any], folder: str = "INBOX") -> EmailMessage:
         from_obj = (item.get("from") or {}).get("emailAddress") or {}
@@ -133,24 +190,27 @@ class MicrosoftGraphBackend:
             "$top": limit,
             "$skip": offset,
             "$orderby": "receivedDateTime desc",
-            "$select": "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,isRead,flag,conversationId",
+            "$select": "id,subject,from,toRecipients,ccRecipients,receivedDateTime,bodyPreview,isRead,flag,conversationId,categories",
         }
-        path = "/me/messages"
         folder = (query.folder or "INBOX").strip()
-        if folder and folder.upper() not in ("INBOX", "MAIL"):
-            # Try well-known folder name
-            path = f"/me/mailFolders/{quote(folder)}/messages"
+        path = self._folder_path(folder)
         if query.unread_only:
             params["$filter"] = "isRead eq false"
         if query.query:
-            # $search requires ConsistencyLevel header — use filter contains as fallback
             q = query.query.replace("'", "''")
             filt = params.get("$filter", "")
             search_f = f"contains(subject,'{q}')"
             params["$filter"] = f"{filt} and {search_f}" if filt else search_f
         data = await self._request("GET", path, params=params)
         items = data.get("value") or []
-        return [self._map_message(it, folder=folder) for it in items]
+        out = []
+        for it in items:
+            m = self._map_message(it, folder=folder)
+            cats = it.get("categories") or []
+            if cats:
+                m.labels = list(dict.fromkeys([*m.labels, *[str(c) for c in cats]]))
+            out.append(m)
+        return out
 
     async def get_message(self, message_id: str) -> EmailMessage:
         data = await self._request(

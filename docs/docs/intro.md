@@ -21,6 +21,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) |
 | Use tools safely | [Tools catalog](reference/tools-catalog) · [Security & HITL](guide/security-and-safety) |
 | Web search / scrape / research | [Web research](guide/web-research) |
+| Email (Gmail / Microsoft / sandbox) | [Email integration](guide/email-integration) |
 
 ## Documentation map
 
@@ -29,7 +30,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 - [Quickstart](guide/quickstart) · [Architecture](guide/architecture) · [Configuration](guide/configuration)
 - [Gateways & platforms](guide/gateways-and-platforms) · [CLI](guide/cli-reference) · [Skills, MCP & tools](guide/skills-mcp-and-tools)
 - [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Security](guide/security-and-safety)
-- [Web research](guide/web-research) · [Arabic & cultural](guide/arabic-cultural-features) · [Deployment](guide/deployment) · [Development](guide/development)
+- [Web research](guide/web-research) · [Email](guide/email-integration) · [Arabic & cultural](guide/arabic-cultural-features) · [Deployment](guide/deployment) · [Development](guide/development)
 - [Troubleshooting](guide/troubleshooting-and-workarounds) · [FAQ](guide/faq) · [Glossary](guide/glossary) · [Roadmap](guide/roadmap-and-future)
 
 ### Products (UI surfaces)

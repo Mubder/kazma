@@ -1,4 +1,4 @@
-"""Resolve email provider → backend (auto / sandbox / gmail / microsoft / imap)."""
+"""Resolve email provider → backend (auto / sandbox / gmail / microsoft / imap / accounts)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,12 @@ import os
 from typing import Any
 
 from kazma_skills.native.email_manager.backends.sandbox import SandboxBackend
+from kazma_skills.native.email_manager.credentials import (
+    account_config,
+    cred,
+    list_account_aliases,
+    vault_retrieve,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,55 +21,47 @@ def _env(name: str, default: str = "") -> str:
     return (os.environ.get(name) or default).strip()
 
 
-def _vault_get(key: str) -> str:
-    """Best-effort sync vault read (may fail closed)."""
-    try:
-        from kazma_core.security.vault import SecretVault
-
-        # Prefer config store path if available
-        try:
-            from kazma_core.paths import vault_db_path
-
-            v = SecretVault(db_path=vault_db_path())
-        except Exception:
-            v = SecretVault()
-        # SecretVault API may be async or sync — try common patterns
-        if hasattr(v, "get_sync"):
-            return str(v.get_sync(key) or "")
-        # Fall through: many vaults need async; skip
-    except Exception as exc:
-        logger.debug("[email] vault get %s failed: %s", key, exc)
-    return ""
-
-
-def _cred(env_key: str, vault_key: str = "") -> str:
-    val = _env(env_key)
-    if val:
-        return val
-    if vault_key:
-        return _vault_get(vault_key)
-    return ""
-
-
 def detect_available_provider() -> str:
     """Return first real provider with credentials, else sandbox."""
-    if _cred("EMAIL_GMAIL_ADDRESS") and _cred(
+    if cred("EMAIL_GMAIL_ADDRESS") and cred(
         "EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password"
     ):
         return "gmail"
-    if _cred("EMAIL_MS_ACCESS_TOKEN") or _cred(
+    if cred("EMAIL_MS_ACCESS_TOKEN", "email.microsoft.access_token") or cred(
         "EMAIL_MS_REFRESH_TOKEN", "email.microsoft.refresh_token"
     ):
         return "microsoft"
-    if _cred("EMAIL_ADDRESS") and _cred("EMAIL_PASSWORD", "email.imap.password"):
-        return "imap"
+    if cred("EMAIL_ADDRESS") and cred("EMAIL_PASSWORD", "email.imap.password"):
+        if _env("EMAIL_IMAP_HOST"):
+            return "imap"
+    # Multi-account: first configured alias
+    for alias in list_account_aliases():
+        cfg = account_config(alias)
+        t = (cfg.get("type") or "").lower()
+        if t == "gmail" and cfg.get("address") and cfg.get("password"):
+            return f"account:{alias}"
+        if t in ("microsoft", "microsoft_graph", "outlook") and (
+            cfg.get("access_token") or cfg.get("refresh_token")
+        ):
+            return f"account:{alias}"
+        if t == "imap" and cfg.get("address") and cfg.get("password") and cfg.get("imap_host"):
+            return f"account:{alias}"
     return "sandbox"
 
 
-def resolve_provider(provider: str | None = None) -> str:
+def resolve_provider(provider: str | None = None, account: str | None = None) -> str:
+    """Normalize provider string. Account alias → account:{alias}."""
+    if account and str(account).strip():
+        return f"account:{str(account).strip()}"
     p = (provider or _env("EMAIL_DEFAULT_PROVIDER", "auto") or "auto").strip().lower()
     if p in ("", "auto"):
         return detect_available_provider()
+    if p.startswith("account:"):
+        return p
+    # Treat bare alias as account if listed
+    aliases = list_account_aliases()
+    if p in {a.lower() for a in aliases}:
+        return f"account:{p}"
     if p in ("sandbox", "gmail", "microsoft", "microsoft_graph", "outlook", "imap"):
         if p in ("microsoft_graph", "outlook"):
             return "microsoft"
@@ -71,37 +69,110 @@ def resolve_provider(provider: str | None = None) -> str:
     return "sandbox"
 
 
-def get_backend(provider: str | None = None) -> Any:
-    """Instantiate backend for *provider* (after resolve)."""
-    name = resolve_provider(provider)
+def _gmail_backend(
+    *,
+    address: str,
+    password: str,
+    imap_host: str = "",
+    imap_port: int = 993,
+    smtp_host: str = "",
+    smtp_port: int = 587,
+    name: str = "gmail",
+) -> Any:
+    from kazma_skills.native.email_manager.backends.imap_smtp import ImapSmtpBackend
+
+    return ImapSmtpBackend(
+        name=name,
+        address=address,
+        password=password,
+        imap_host=imap_host or "imap.gmail.com",
+        imap_port=imap_port,
+        smtp_host=smtp_host or "smtp.gmail.com",
+        smtp_port=smtp_port,
+        smtp_starttls=True,
+    )
+
+
+def get_backend(provider: str | None = None, account: str | None = None) -> Any:
+    """Instantiate backend for *provider* / *account*."""
+    name = resolve_provider(provider, account)
 
     if name == "sandbox":
         return SandboxBackend()
 
-    if name == "gmail":
-        from kazma_skills.native.email_manager.backends.imap_smtp import ImapSmtpBackend
+    if name.startswith("account:"):
+        alias = name.split(":", 1)[1]
+        cfg = account_config(alias)
+        t = (cfg.get("type") or "sandbox").lower()
+        if t == "gmail":
+            if not cfg.get("address") or not cfg.get("password"):
+                logger.info("[email] account %s gmail incomplete → sandbox", alias)
+                return SandboxBackend()
+            return _gmail_backend(
+                address=cfg["address"],
+                password=cfg["password"],
+                imap_host=cfg.get("imap_host") or "imap.gmail.com",
+                imap_port=int(cfg.get("imap_port") or "993"),
+                smtp_host=cfg.get("smtp_host") or "smtp.gmail.com",
+                smtp_port=int(cfg.get("smtp_port") or "587"),
+                name=f"gmail:{alias}",
+            )
+        if t in ("microsoft", "microsoft_graph", "outlook"):
+            token = cfg.get("access_token") or ""
+            refresh = cfg.get("refresh_token") or ""
+            if not token and not refresh:
+                return SandboxBackend()
+            from kazma_skills.native.email_manager.backends.microsoft_graph import (
+                MicrosoftGraphBackend,
+            )
 
-        address = _cred("EMAIL_GMAIL_ADDRESS", "email.gmail.address")
-        password = _cred("EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password")
+            return MicrosoftGraphBackend(
+                access_token=token or "pending_refresh",
+                refresh_token=refresh,
+                client_id=cfg.get("client_id")
+                or cred("EMAIL_MS_CLIENT_ID", "email.microsoft.client_id"),
+                client_secret=cfg.get("client_secret")
+                or cred("EMAIL_MS_CLIENT_SECRET", "email.microsoft.client_secret"),
+                tenant_id=cfg.get("tenant_id") or _env("EMAIL_MS_TENANT_ID", "common") or "common",
+                account_alias=alias,
+            )
+        if t == "imap":
+            from kazma_skills.native.email_manager.backends.imap_smtp import ImapSmtpBackend
+
+            if not cfg.get("address") or not cfg.get("password") or not cfg.get("imap_host"):
+                return SandboxBackend()
+            return ImapSmtpBackend(
+                name=f"imap:{alias}",
+                address=cfg["address"],
+                password=cfg["password"],
+                imap_host=cfg["imap_host"],
+                imap_port=int(cfg.get("imap_port") or "993"),
+                smtp_host=cfg.get("smtp_host") or cfg["imap_host"].replace("imap", "smtp"),
+                smtp_port=int(cfg.get("smtp_port") or "587"),
+                smtp_starttls=True,
+            )
+        return SandboxBackend()
+
+    if name == "gmail":
+        address = cred("EMAIL_GMAIL_ADDRESS", "email.gmail.address")
+        password = cred("EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password")
         if not address or not password:
             logger.info("[email] gmail requested but missing creds → sandbox")
             return SandboxBackend()
-        return ImapSmtpBackend(
-            name="gmail",
+        return _gmail_backend(
             address=address,
             password=password,
             imap_host=_env("EMAIL_IMAP_HOST", "imap.gmail.com") or "imap.gmail.com",
             imap_port=int(_env("EMAIL_IMAP_PORT", "993") or "993"),
             smtp_host=_env("EMAIL_SMTP_HOST", "smtp.gmail.com") or "smtp.gmail.com",
             smtp_port=int(_env("EMAIL_SMTP_PORT", "587") or "587"),
-            smtp_starttls=True,
         )
 
     if name == "imap":
         from kazma_skills.native.email_manager.backends.imap_smtp import ImapSmtpBackend
 
-        address = _cred("EMAIL_ADDRESS")
-        password = _cred("EMAIL_PASSWORD", "email.imap.password")
+        address = cred("EMAIL_ADDRESS")
+        password = cred("EMAIL_PASSWORD", "email.imap.password")
         host = _env("EMAIL_IMAP_HOST")
         if not address or not password or not host:
             logger.info("[email] imap requested but missing creds → sandbox")
@@ -123,17 +194,18 @@ def get_backend(provider: str | None = None) -> Any:
             graph_token_from_env,
         )
 
-        token = graph_token_from_env() or _vault_get("email.microsoft.access_token")
-        refresh = _cred("EMAIL_MS_REFRESH_TOKEN", "email.microsoft.refresh_token")
+        token = graph_token_from_env() or vault_retrieve("email.microsoft.access_token")
+        refresh = cred("EMAIL_MS_REFRESH_TOKEN", "email.microsoft.refresh_token")
         if not token and not refresh:
             logger.info("[email] microsoft requested but missing tokens → sandbox")
             return SandboxBackend()
         return MicrosoftGraphBackend(
             access_token=token or "pending_refresh",
             refresh_token=refresh,
-            client_id=_cred("EMAIL_MS_CLIENT_ID", "email.microsoft.client_id"),
-            client_secret=_cred("EMAIL_MS_CLIENT_SECRET", "email.microsoft.client_secret"),
+            client_id=cred("EMAIL_MS_CLIENT_ID", "email.microsoft.client_id"),
+            client_secret=cred("EMAIL_MS_CLIENT_SECRET", "email.microsoft.client_secret"),
             tenant_id=_env("EMAIL_MS_TENANT_ID", "common") or "common",
+            account_alias="",
         )
 
     return SandboxBackend()

@@ -1,6 +1,6 @@
 # Full Email Integration Plan — Gmail · Microsoft Graph · IMAP/SMTP · Sandbox
 
-**Status:** Approved direction (implementation plan)  
+**Status:** Implemented (core + polish) — see `email-manager` native skill, `/api/email/*`, [Email integration guide](../docs/guide/email-integration.md)  
 **Owner call:** Defaults below are **decided** — no open product questions  
 **Product ask:** Fully integrate email (Gmail + Microsoft) with read / write / delete / categorize / analyze  
 **Package shape:** Native skill `email-manager` + thin core helpers  

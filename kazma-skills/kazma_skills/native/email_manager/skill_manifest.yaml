@@ -11,7 +11,7 @@ tools:
     arabic_name: "قائمة البريد"
     description: >
       List, search, and page emails in a folder (INBOX default).
-      Args: folder, query, limit, offset, unread_only, provider (auto|sandbox|gmail|microsoft|imap).
+      Args: folder, query, limit, offset, unread_only, provider (auto|sandbox|gmail|microsoft|imap), account (optional multi-account alias).
     category: email
     prompt_chain:
       - "اعرض رسائل البريد في الصندوق"

@@ -38,6 +38,7 @@ Security and reliability hardening from
 - **Docs**: [Web research](docs/docs/guide/web-research.md) guide; tools catalog, env vars, FAQ, Web UI dashboard metrics, troubleshooting, sidebars
 - **Plan**: Full email integration (Gmail + Microsoft Graph + sandbox) — `docs/plans/EMAIL_INTEGRATION_FULL_PLAN.md`
 - **Email skill**: native `email-manager` — sandbox SQLite mailbox, Gmail IMAP/SMTP, Microsoft Graph backends; tools list/get/send/delete/categorize/analyze; HITL on mutators
+- **Email polish**: Microsoft device-code OAuth API (`/api/email/oauth/microsoft/*`), vault token persist on refresh, multi-account aliases (`EMAIL_ACCOUNTS`), Graph well-known folders + Gmail FLAGS/labels, [Email integration](docs/docs/guide/email-integration.md) guide
 
 ### Phase 3–4 follow-up
 - Turn wall-clock timeout (`KAZMA_TURN_TIMEOUT_SECONDS`, default 600s)

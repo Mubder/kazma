@@ -979,6 +979,16 @@ class KazmaAppBuilder:
         self.app.include_router(ide_router)
         logger.info("IDE API router mounted at /api/ide/*")
 
+        # ── Email integration (status + Microsoft device OAuth) ──
+        try:
+            from kazma_ui.email_api import router as email_router
+
+            self.app.include_router(email_router)
+            logger.info("Email API router mounted at /api/email/*")
+        except Exception as e:
+            logger.warning("Email API router failed to mount: %s", e)
+            self._init_errors.append({"subsystem": "email_api", "error": str(e)})
+
         # ── Swarm Panel ──
         from kazma_ui.swarm_panel import create_swarm_router
 

@@ -22,6 +22,10 @@ Arabic, RTL (`agent.language: ar`, `agent.rtl: true`). Set to `en` for English. 
 
 **Kazma** in Latin script; Arabic brand **كاظمه** (preferred) or **كاظمة**. The spelling **كازما** is wrong. The Majlis protocol (`majlis.py`) implements Gulf Arabic conversational rhythms.
 
+### How do I connect Gmail or Microsoft email?
+
+See [Email integration](email-integration). Sandbox works with no setup. Gmail uses an app password; Microsoft uses Graph (device-code OAuth via `POST /api/email/oauth/microsoft/device/start` or env tokens). Mutating tools need HITL approval.
+
 ### How do I make the agent research the web?
 
 There is **no** `/research` slash command. Ask in **chat** (e.g. “Research X and cite sources”) or use **`/swarm research …`** for multi-worker dispatch. The agent uses `web_search`, `read_url` / `read_url_to_file`, optional `crawl_site`, and `digest_research_file`. See [Web research](web-research).

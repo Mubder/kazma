@@ -14,6 +14,8 @@ from kazma_skills.native.email_manager.models import (
 )
 from kazma_skills.native.email_manager.router import get_backend, mode_banner, resolve_provider
 
+# account= multi-account alias (EMAIL_ACCOUNTS + EMAIL_ACCOUNT_{ALIAS}_*)
+
 logger = logging.getLogger(__name__)
 
 
@@ -35,10 +37,11 @@ async def email_list(
     offset: int = 0,
     unread_only: bool = False,
     provider: str = "auto",
+    account: str = "",
 ) -> str:
     """List/search emails in a folder (sandbox, Gmail, Microsoft Graph, or IMAP)."""
     try:
-        backend = get_backend(provider)
+        backend = get_backend(provider, account=account or None)
         banner = mode_banner(backend)
         msgs = await backend.list_messages(
             ListQuery(
@@ -73,12 +76,13 @@ async def email_get(
     include_body: bool = True,
     max_body_chars: int = 32000,
     provider: str = "auto",
+    account: str = "",
 ) -> str:
     """Fetch one email by id."""
     if not message_id or not str(message_id).strip():
         return "Error: message_id is required."
     try:
-        backend = get_backend(provider)
+        backend = get_backend(provider, account=account or None)
         banner = mode_banner(backend)
         msg = await backend.get_message(str(message_id).strip())
         body = msg.body if include_body else ""
@@ -114,6 +118,7 @@ async def email_send(
     message_id: str = "",
     body_format: str = "text",
     provider: str = "auto",
+    account: str = "",
 ) -> str:
     """Send, reply, forward, or save a draft. Requires HITL approval in production."""
     try:
@@ -124,7 +129,7 @@ async def email_send(
         if action_n in ("send", "forward") and not to_list and action_n != "draft":
             if action_n == "send" and not to_list:
                 return "Error: `to` is required for send."
-        backend = get_backend(provider)
+        backend = get_backend(provider, account=account or None)
         banner = mode_banner(backend)
         result = await backend.send(
             SendRequest(
@@ -154,12 +159,13 @@ async def email_delete(
     message_id: str,
     permanent: bool = False,
     provider: str = "auto",
+    account: str = "",
 ) -> str:
     """Move email to trash or permanently delete. Requires HITL approval."""
     if not message_id or not str(message_id).strip():
         return "Error: message_id is required."
     try:
-        backend = get_backend(provider)
+        backend = get_backend(provider, account=account or None)
         banner = mode_banner(backend)
         await backend.delete(str(message_id).strip(), permanent=bool(permanent))
         action = "Permanently deleted" if permanent else "Moved to Trash"
@@ -179,12 +185,13 @@ async def email_categorize(
     remove_labels: str | list[str] | None = None,
     move_to_folder: str = "",
     provider: str = "auto",
+    account: str = "",
 ) -> str:
     """Mark read/unread, star, labels/folders. Requires HITL approval."""
     if not message_id or not str(message_id).strip():
         return "Error: message_id is required."
     try:
-        backend = get_backend(provider)
+        backend = get_backend(provider, account=account or None)
         banner = mode_banner(backend)
         await backend.categorize(
             CategorizeRequest(
@@ -210,15 +217,16 @@ async def email_analyze(
     focus: str = "full",
     provider: str = "auto",
     max_body_chars: int = 32000,
+    account: str = "",
 ) -> str:
     """Summarize, extract actions, sentiment, and phishing risk for an email."""
     try:
         subject = ""
         from_addr = ""
         body = raw_text or ""
-        mode = resolve_provider(provider)
+        mode = resolve_provider(provider, account=account or None)
         if message_id and str(message_id).strip():
-            backend = get_backend(provider)
+            backend = get_backend(provider, account=account or None)
             mode = getattr(backend, "name", mode)
             msg = await backend.get_message(str(message_id).strip())
             subject = msg.subject
