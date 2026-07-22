@@ -106,18 +106,23 @@ def account_config(alias: str) -> dict[str, str]:
 def status_summary() -> dict[str, Any]:
     """Non-secret status for Settings / API."""
     aliases = list_account_aliases()
-    gmail = bool(cred("EMAIL_GMAIL_ADDRESS") and cred("EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password"))
+    gmail_addr = cred("EMAIL_GMAIL_ADDRESS", "email.gmail.address")
+    gmail_pw = bool(cred("EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password"))
+    gmail = bool(gmail_addr and gmail_pw)
     ms = bool(
         cred("EMAIL_MS_ACCESS_TOKEN", "email.microsoft.access_token")
         or cred("EMAIL_MS_REFRESH_TOKEN", "email.microsoft.refresh_token")
     )
     imap = bool(cred("EMAIL_ADDRESS") and cred("EMAIL_PASSWORD", "email.imap.password") and _env("EMAIL_IMAP_HOST"))
+    ms_cid = _env("EMAIL_MS_CLIENT_ID") or vault_retrieve("email.microsoft.client_id")
     return {
         "default_provider": _env("EMAIL_DEFAULT_PROVIDER", "auto") or "auto",
         "gmail_configured": gmail,
+        "gmail_address": gmail_addr if gmail else "",
         "microsoft_configured": ms,
         "imap_configured": imap,
         "sandbox_always": True,
         "accounts": aliases,
-        "ms_client_id_set": bool(_env("EMAIL_MS_CLIENT_ID") or vault_retrieve("email.microsoft.client_id")),
+        "ms_client_id_set": bool(ms_cid),
+        "ms_tenant_id": _env("EMAIL_MS_TENANT_ID", "common") or "common",
     }

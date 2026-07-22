@@ -21,6 +21,7 @@
         <button class="settings-tab" :class="{ active: tab === 'packages' }" @click="onTabChange('packages')">{{ t('settings.tab_packages') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'voice' }" @click="onTabChange('voice')">{{ t('settings.tab_voice') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
     </nav>
 
     <!-- Loading indicator -->
@@ -1295,6 +1296,125 @@
             <h3>{{ t('settings.reset_to_defaults_section') }}</h3>
             <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.reset_description') }}</p>
             <button class="btn btn-danger" @click="resetToDefaults()">{{ t('settings.reset_all_settings') }}</button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB: EMAIL (Connect Gmail / Microsoft / status)
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'email'" x-transition x-cloak>
+        <div class="settings-group">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
+                <div>
+                    <h3 style="margin:0;">{{ t('settings.email_title') }}</h3>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:6px 0 0 0;">{{ t('settings.email_subtitle') }}</p>
+                </div>
+                <button class="btn btn-sm btn-secondary" @click="loadEmailStatus()" :disabled="emailLoading" x-text="emailLoading ? '…' : t('settings.email_refresh')"></button>
+            </div>
+
+            <!-- Active mode banner -->
+            <div style="padding:12px 14px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--bg-elevated);margin-bottom:20px;">
+                <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);margin-bottom:4px;">{{ t('settings.email_active_provider') }}</div>
+                <div style="font-family:var(--font-mono);font-size:1rem;font-weight:600;" x-text="emailStatus.active_provider || 'sandbox'"></div>
+                <p style="margin:8px 0 0 0;font-size:0.8rem;color:var(--text-tertiary);">{{ t('settings.email_auto_hint') }}</p>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
+                <!-- Sandbox card -->
+                <div class="card" style="padding:16px;border:1px solid var(--border-subtle);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <h4 style="margin:0;">{{ t('settings.email_sandbox') }}</h4>
+                        <span class="badge badge-stdio" style="font-size:0.7rem;">{{ t('settings.email_always_on') }}</span>
+                    </div>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_sandbox_desc') }}</p>
+                    <p style="font-size:0.8rem;margin:0;color:var(--text-secondary);">{{ t('settings.email_sandbox_try') }}</p>
+                </div>
+
+                <!-- Gmail card -->
+                <div class="card" style="padding:16px;border:1px solid var(--border-subtle);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <h4 style="margin:0;">Gmail</h4>
+                        <span class="badge" :class="emailStatus.gmail_configured ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                              x-text="emailStatus.gmail_configured ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
+                    </div>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_gmail_desc') }}</p>
+                    <div x-show="emailStatus.gmail_configured" style="margin-bottom:12px;font-size:0.85rem;">
+                        <span style="color:var(--text-tertiary);">{{ t('settings.email_address') }}:</span>
+                        <code x-text="emailStatus.gmail_address || '—'"></code>
+                    </div>
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label>{{ t('settings.email_gmail_address') }}</label>
+                        <input type="email" class="form-control" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label>{{ t('settings.email_gmail_app_password') }}</label>
+                        <input type="password" class="form-control" x-model="emailGmail.app_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+                        <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_app_password_help') }}</p>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn btn-primary btn-sm" @click="saveGmail()" :disabled="emailSaving" x-text="emailSaving ? '…' : t('settings.email_save_gmail')"></button>
+                        <button class="btn btn-secondary btn-sm" x-show="emailStatus.gmail_configured" @click="disconnectGmail()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
+                    </div>
+                </div>
+
+                <!-- Microsoft card -->
+                <div class="card" style="padding:16px;border:1px solid var(--border-subtle);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <h4 style="margin:0;">Microsoft 365 / Outlook</h4>
+                        <span class="badge" :class="emailStatus.microsoft_configured ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                              x-text="emailStatus.microsoft_configured ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
+                    </div>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_ms_desc') }}</p>
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label>{{ t('settings.email_ms_client_id') }}</label>
+                        <input type="text" class="form-control" x-model="emailMs.client_id" placeholder="Azure app (client) ID" autocomplete="off">
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label>{{ t('settings.email_ms_tenant') }}</label>
+                        <input type="text" class="form-control" x-model="emailMs.tenant_id" placeholder="common">
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                        <button class="btn btn-secondary btn-sm" @click="saveMsClient()" :disabled="emailSaving">{{ t('settings.email_save_ms_client') }}</button>
+                        <button class="btn btn-primary btn-sm" @click="connectMicrosoft()" :disabled="emailMsConnecting || emailSaving"
+                                x-text="emailMsConnecting ? t('settings.email_waiting_auth') : t('settings.email_connect_microsoft')"></button>
+                        <button class="btn btn-secondary btn-sm" x-show="emailStatus.microsoft_configured" @click="disconnectMicrosoft()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
+                    </div>
+                    <!-- Device code panel -->
+                    <div x-show="emailMsDevice.user_code" x-cloak
+                         style="padding:12px;border-radius:8px;background:var(--bg-primary);border:1px dashed var(--accent, #5e6ad2);">
+                        <p style="margin:0 0 8px 0;font-size:0.85rem;">{{ t('settings.email_ms_device_hint') }}</p>
+                        <div style="font-size:1.4rem;font-weight:700;letter-spacing:0.12em;font-family:var(--font-mono);" x-text="emailMsDevice.user_code"></div>
+                        <p style="margin:8px 0 0 0;font-size:0.85rem;">
+                            <a :href="emailMsDevice.verification_uri" target="_blank" rel="noopener" style="color:var(--accent);">
+                                <span x-text="emailMsDevice.verification_uri || 'https://microsoft.com/devicelogin'"></span>
+                            </a>
+                        </p>
+                        <p style="margin:8px 0 0 0;font-size:0.8rem;color:var(--text-muted);" x-text="emailMsDevice.message || ''"></p>
+                        <p x-show="emailMsConnecting" style="margin:8px 0 0 0;font-size:0.8rem;color:var(--warning);">{{ t('settings.email_ms_polling') }}</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Multi-account list -->
+            <div style="margin-top:24px;" x-show="emailAccounts.length > 0">
+                <h4 style="margin:0 0 8px 0;">{{ t('settings.email_multi_accounts') }}</h4>
+                <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_multi_accounts_hint') }}</p>
+                <div class="account-list-table">
+                    <template x-for="a in emailAccounts" :key="a.alias">
+                        <div style="display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:0.85rem;">
+                            <strong x-text="a.alias"></strong>
+                            <span x-text="a.type"></span>
+                            <code x-text="a.address || '—'"></code>
+                            <span x-text="(a.has_password || a.has_token) ? '●' : '○'" :title="(a.has_password || a.has_token) ? 'creds' : 'incomplete'"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <p style="margin-top:20px;font-size:0.8rem;color:var(--text-tertiary);">
+                {{ t('settings.email_docs_hint') }}
+                <a href="/docs/guide/email-integration" style="color:var(--accent);">{{ t('settings.email_docs_link') }}</a>
+            </p>
         </div>
     </div>
 

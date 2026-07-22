@@ -168,6 +168,27 @@ function settingsApp() {
         sttModelType: 'default',
         ttsVoiceType: 'default',
 
+        // ── Email tab (Connect Gmail / Microsoft) ──
+        emailStatus: {
+            active_provider: 'sandbox',
+            gmail_configured: false,
+            gmail_address: '',
+            microsoft_configured: false,
+            ms_client_id_set: false,
+            ms_tenant_id: 'common',
+            imap_configured: false,
+            sandbox_always: true,
+            accounts: [],
+        },
+        emailAccounts: [],
+        emailGmail: { address: '', app_password: '' },
+        emailMs: { client_id: '', tenant_id: 'common' },
+        emailMsDevice: { user_code: '', verification_uri: '', device_code: '', message: '' },
+        emailMsConnecting: false,
+        emailMsPollTimer: null,
+        emailLoading: false,
+        emailSaving: false,
+
         /* ══════════════════════════════════════════════════════════════════
            INITIALIZATION
            ══════════════════════════════════════════════════════════════════ */
@@ -2130,6 +2151,211 @@ function settingsApp() {
                 case 'voice':
                     await Promise.all([this.loadVoiceModels(), this.loadSttModels()]);
                     break;
+                case 'email':
+                    await this.loadEmailStatus();
+                    break;
+            }
+        },
+
+        /* ══════════════════════════════════════════════════════════════════
+           EMAIL TAB — Connect Gmail / Microsoft Graph
+           ══════════════════════════════════════════════════════════════════ */
+
+        async loadEmailStatus() {
+            this.emailLoading = true;
+            try {
+                const data = await this._fetch('/api/email/status');
+                if (data && !data.error) {
+                    Object.assign(this.emailStatus, data);
+                    if (data.gmail_address) this.emailGmail.address = data.gmail_address;
+                    if (data.ms_tenant_id) this.emailMs.tenant_id = data.ms_tenant_id;
+                }
+                const acc = await this._fetch('/api/email/accounts');
+                if (acc && Array.isArray(acc.accounts)) this.emailAccounts = acc.accounts;
+            } finally {
+                this.emailLoading = false;
+            }
+        },
+
+        async saveGmail() {
+            const address = (this.emailGmail.address || '').trim();
+            const app_password = (this.emailGmail.app_password || '').trim();
+            if (!address || !app_password) {
+                showToast(window.t ? t('settings.email_gmail_required') : 'Email and app password required', 'error');
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/gmail/connect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address, app_password }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) {
+                    throw new Error(data.error || ('HTTP ' + resp.status));
+                }
+                this.emailGmail.app_password = '';
+                showToast(data.message || 'Gmail connected', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Gmail connect failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async disconnectGmail() {
+            if (!(await window.kazmaConfirm({
+                title: window.t ? t('settings.email_disconnect') : 'Disconnect',
+                message: window.t ? t('settings.email_disconnect_gmail_confirm') : 'Clear Gmail credentials?',
+                confirmText: window.t ? t('settings.email_disconnect') : 'Disconnect',
+                danger: true,
+            }))) return;
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/gmail/disconnect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data.ok === false) throw new Error(data.error || 'Failed');
+                this.emailGmail = { address: '', app_password: '' };
+                showToast(data.message || 'Gmail disconnected', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Disconnect failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async saveMsClient() {
+            const client_id = (this.emailMs.client_id || '').trim();
+            const tenant_id = (this.emailMs.tenant_id || 'common').trim() || 'common';
+            if (!client_id) {
+                showToast(window.t ? t('settings.email_ms_client_required') : 'Azure client ID required', 'error');
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/oauth/microsoft/client', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ client_id, tenant_id }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+                showToast(data.message || 'Microsoft app saved', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async connectMicrosoft() {
+            // Ensure client id is set first if user typed it
+            if ((this.emailMs.client_id || '').trim()) {
+                await this.saveMsClient();
+            }
+            this.emailMsConnecting = true;
+            this.emailMsDevice = { user_code: '', verification_uri: '', device_code: '', message: '' };
+            try {
+                const resp = await fetch('/api/email/oauth/microsoft/device/start', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) {
+                    throw new Error(data.error || ('HTTP ' + resp.status));
+                }
+                this.emailMsDevice = {
+                    user_code: data.user_code || '',
+                    verification_uri: data.verification_uri_complete || data.verification_uri || 'https://microsoft.com/devicelogin',
+                    device_code: data.device_code || '',
+                    message: data.message || '',
+                };
+                showToast(window.t ? t('settings.email_ms_enter_code') : 'Enter the code at Microsoft', 'info');
+                this._startMsPoll();
+            } catch (e) {
+                this.emailMsConnecting = false;
+                showToast('Microsoft connect failed: ' + e.message, 'error');
+            }
+        },
+
+        _startMsPoll() {
+            if (this.emailMsPollTimer) {
+                clearInterval(this.emailMsPollTimer);
+                this.emailMsPollTimer = null;
+            }
+            const device_code = this.emailMsDevice.device_code;
+            if (!device_code) {
+                this.emailMsConnecting = false;
+                return;
+            }
+            const intervalMs = 5000;
+            this.emailMsPollTimer = setInterval(async () => {
+                try {
+                    const resp = await fetch('/api/email/oauth/microsoft/device/poll', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ device_code }),
+                    });
+                    const data = await resp.json().catch(() => ({}));
+                    if (data.ok && data.status === 'authorized') {
+                        clearInterval(this.emailMsPollTimer);
+                        this.emailMsPollTimer = null;
+                        this.emailMsConnecting = false;
+                        this.emailMsDevice = { user_code: '', verification_uri: '', device_code: '', message: '' };
+                        showToast(data.message || 'Microsoft connected', 'success');
+                        await this.loadEmailStatus();
+                        return;
+                    }
+                    if (data.status === 'failed' || data.status === 'expired') {
+                        clearInterval(this.emailMsPollTimer);
+                        this.emailMsPollTimer = null;
+                        this.emailMsConnecting = false;
+                        showToast(data.error || 'Authorization failed', 'error');
+                    }
+                    // authorization_pending / slow_down → keep polling
+                } catch (e) {
+                    /* keep polling */
+                }
+            }, intervalMs);
+        },
+
+        async disconnectMicrosoft() {
+            if (!(await window.kazmaConfirm({
+                title: window.t ? t('settings.email_disconnect') : 'Disconnect',
+                message: window.t ? t('settings.email_disconnect_ms_confirm') : 'Clear Microsoft Graph tokens?',
+                confirmText: window.t ? t('settings.email_disconnect') : 'Disconnect',
+                danger: true,
+            }))) return;
+            if (this.emailMsPollTimer) {
+                clearInterval(this.emailMsPollTimer);
+                this.emailMsPollTimer = null;
+            }
+            this.emailMsConnecting = false;
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/oauth/microsoft/disconnect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data.ok === false) throw new Error(data.error || 'Failed');
+                this.emailMsDevice = { user_code: '', verification_uri: '', device_code: '', message: '' };
+                showToast(data.message || 'Microsoft disconnected', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Disconnect failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
             }
         },
     };

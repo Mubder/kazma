@@ -1,8 +1,9 @@
-"""Email integration API — status + Microsoft device-code OAuth."""
+"""Email integration API — status, Gmail vault save, Microsoft device-code OAuth."""
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from fastapi import APIRouter
@@ -16,6 +17,18 @@ router = APIRouter(prefix="/api/email", tags=["email"])
 
 class DevicePollBody(BaseModel):
     device_code: str = Field(..., min_length=1)
+
+
+class GmailConnectBody(BaseModel):
+    address: str = Field(..., min_length=3)
+    app_password: str = Field(..., min_length=4)
+
+
+class MsClientBody(BaseModel):
+    """Optional client id / tenant for device flow (stored in env for process)."""
+
+    client_id: str = Field(..., min_length=8)
+    tenant_id: str = Field(default="common")
 
 
 @router.get("/status")
@@ -97,3 +110,78 @@ async def email_accounts() -> JSONResponse:
         return JSONResponse({"accounts": rows, "count": len(rows)})
     except Exception as exc:
         return JSONResponse({"accounts": [], "error": str(exc)}, status_code=500)
+
+
+@router.post("/gmail/connect")
+async def gmail_connect(body: GmailConnectBody) -> JSONResponse:
+    """Save Gmail address + app password to env (process) and vault."""
+    address = body.address.strip()
+    password = body.app_password.strip().replace(" ", "")
+    if "@" not in address:
+        return JSONResponse({"ok": False, "error": "Invalid email address"}, status_code=400)
+    try:
+        from kazma_skills.native.email_manager.credentials import vault_store
+
+        os.environ["EMAIL_GMAIL_ADDRESS"] = address
+        os.environ["EMAIL_GMAIL_APP_PASSWORD"] = password
+        vault_ok = vault_store("email.gmail.address", address, category="email")
+        vault_ok = vault_store("email.gmail.app_password", password, category="email") and vault_ok
+        return JSONResponse(
+            {
+                "ok": True,
+                "address": address,
+                "vault": vault_ok,
+                "message": "Gmail credentials saved. Agent will use [gmail mode] when provider=auto.",
+            }
+        )
+    except Exception as exc:
+        logger.exception("gmail connect failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@router.post("/gmail/disconnect")
+async def gmail_disconnect() -> JSONResponse:
+    """Clear Gmail credentials from env + vault."""
+    try:
+        os.environ.pop("EMAIL_GMAIL_ADDRESS", None)
+        os.environ.pop("EMAIL_GMAIL_APP_PASSWORD", None)
+        try:
+            from kazma_core.security.vault import SecretVault, get_vault
+            from kazma_core.paths import vault_db_path
+
+            v = get_vault() or SecretVault(db_path=vault_db_path())
+            for name in ("email.gmail.address", "email.gmail.app_password"):
+                try:
+                    v.delete(name)
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.debug("gmail vault clear: %s", exc)
+        return JSONResponse({"ok": True, "message": "Gmail credentials cleared."})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@router.post("/oauth/microsoft/client")
+async def ms_set_client(body: MsClientBody) -> JSONResponse:
+    """Set Azure app client id / tenant for device-code flow (process env + vault)."""
+    cid = body.client_id.strip()
+    tenant = (body.tenant_id or "common").strip() or "common"
+    if not cid:
+        return JSONResponse({"ok": False, "error": "client_id required"}, status_code=400)
+    try:
+        from kazma_skills.native.email_manager.credentials import vault_store
+
+        os.environ["EMAIL_MS_CLIENT_ID"] = cid
+        os.environ["EMAIL_MS_TENANT_ID"] = tenant
+        vault_store("email.microsoft.client_id", cid, category="email")
+        return JSONResponse(
+            {
+                "ok": True,
+                "client_id_set": True,
+                "tenant_id": tenant,
+                "message": "Microsoft app registered for this process. Click Connect Microsoft next.",
+            }
+        )
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)

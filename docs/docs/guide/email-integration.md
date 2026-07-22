@@ -39,65 +39,40 @@ Common args: `provider` (`auto`\|`sandbox`\|`gmail`\|`microsoft`\|`imap`), optio
 3. First configured real account (Gmail → Microsoft → IMAP → multi-account aliases)  
 4. **Sandbox**
 
-## Connect Gmail
+## Connect email (Settings UI)
 
-1. Enable 2FA and create a [Google App Password](https://myaccount.google.com/apppasswords).  
-2. Set env (or vault keys `email.gmail.address` / `email.gmail.app_password`):
+Open **Settings → Email** (`/settings?tab=email`).
+
+| Card | Action |
+|------|--------|
+| **Sandbox** | Always on — no setup |
+| **Gmail** | Enter address + [App Password](https://myaccount.google.com/apppasswords) → **Save Gmail** (vault + process env) |
+| **Microsoft** | Save Azure **Client ID** (+ tenant) → **Connect Microsoft** → enter device code at Microsoft → wait until “Connected” |
+
+Status shows **Active provider (auto)**. Disconnect clears vault/env for that provider.
+
+### Gmail (env alternative)
 
 ```bash
 EMAIL_GMAIL_ADDRESS=you@gmail.com
 EMAIL_GMAIL_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx
 ```
 
-3. Restart Kazma. Chat: *List my Gmail inbox* or `provider=gmail`.
+IMAP `993` / SMTP STARTTLS `587` by default.
 
-IMAP `993` / SMTP STARTTLS `587` by default (`EMAIL_IMAP_*` / `EMAIL_SMTP_*` overrides).
+### Microsoft Graph (API alternative)
 
-## Connect Microsoft (Graph) — device code
-
-1. Azure app registration (public client recommended for device code):  
-   - Allow public client flows  
-   - API permissions: `Mail.Read`, `Mail.ReadWrite`, `Mail.Send`, `offline_access` (delegated)  
-2. Set:
-
-```bash
-EMAIL_MS_CLIENT_ID=<app-client-id>
-EMAIL_MS_TENANT_ID=common   # or your tenant id
-```
-
-3. Call the API (authenticated with `KAZMA_SECRET` like other APIs):
+1. Azure app: public client + `Mail.Read` / `Mail.ReadWrite` / `Mail.Send` / `offline_access`  
+2. Settings UI or:
 
 ```http
+POST /api/email/oauth/microsoft/client   {"client_id":"…","tenant_id":"common"}
 POST /api/email/oauth/microsoft/device/start
-```
-
-Response includes `user_code` and `verification_uri`. Open the URI, enter the code, approve.
-
-4. Poll until authorized:
-
-```http
-POST /api/email/oauth/microsoft/device/poll
-Content-Type: application/json
-
-{"device_code":"<from start>"}
-```
-
-On success, tokens are stored in **env for this process** and in the **encrypted vault** (`email.microsoft.access_token` / `refresh_token`). Token **refresh** also re-persists to vault.
-
-5. Disconnect:
-
-```http
+POST /api/email/oauth/microsoft/device/poll   {"device_code":"…"}
 POST /api/email/oauth/microsoft/disconnect
 ```
 
-Manual tokens (alternative):
-
-```bash
-EMAIL_MS_ACCESS_TOKEN=...
-EMAIL_MS_REFRESH_TOKEN=...
-EMAIL_MS_CLIENT_ID=...
-EMAIL_MS_CLIENT_SECRET=...   # if confidential client
-```
+Tokens: process env + vault; refresh re-persists to vault.
 
 ## Multi-account aliases
 

@@ -39,6 +39,7 @@ Security and reliability hardening from
 - **Plan**: Full email integration (Gmail + Microsoft Graph + sandbox) — `docs/plans/EMAIL_INTEGRATION_FULL_PLAN.md`
 - **Email skill**: native `email-manager` — sandbox SQLite mailbox, Gmail IMAP/SMTP, Microsoft Graph backends; tools list/get/send/delete/categorize/analyze; HITL on mutators
 - **Email polish**: Microsoft device-code OAuth API (`/api/email/oauth/microsoft/*`), vault token persist on refresh, multi-account aliases (`EMAIL_ACCOUNTS`), Graph well-known folders + Gmail FLAGS/labels, [Email integration](docs/docs/guide/email-integration.md) guide
+- **Settings → Email**: Connect Gmail (app password → vault), Connect Microsoft (device code + poll UI), status/disconnect, accounts list
 
 ### Phase 3–4 follow-up
 - Turn wall-clock timeout (`KAZMA_TURN_TIMEOUT_SECONDS`, default 600s)

@@ -190,6 +190,84 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.tab_packages": {"en": "Packages", "ar": "الحزم"},
     "settings.tab_import": {"en": "Import/Export", "ar": "استيراد/تصدير"},
     "settings.tab_voice": {"en": "Voice", "ar": "الصوت"},
+    "settings.tab_email": {"en": "Email", "ar": "البريد"},
+    "settings.email_title": {"en": "Connect email", "ar": "ربط البريد"},
+    "settings.email_subtitle": {
+        "en": "Gmail, Microsoft 365/Outlook, or sandbox demo mailbox for the agent.",
+        "ar": "Gmail أو Microsoft 365/Outlook أو صندوق تجريبي (sandbox) للوكيل.",
+    },
+    "settings.email_refresh": {"en": "Refresh status", "ar": "تحديث الحالة"},
+    "settings.email_active_provider": {"en": "Active provider (auto)", "ar": "المزود النشط (تلقائي)"},
+    "settings.email_auto_hint": {
+        "en": "Chat uses auto: real account if connected, otherwise sandbox. Banner shows [sandbox|gmail|microsoft_graph] mode.",
+        "ar": "الدردشة تستخدم الوضع التلقائي: حساب حقيقي إن وُجد، وإلا sandbox. تظهر البادئة [sandbox|gmail|microsoft_graph].",
+    },
+    "settings.email_sandbox": {"en": "Sandbox", "ar": "تجريبي"},
+    "settings.email_always_on": {"en": "Always available", "ar": "متاح دائماً"},
+    "settings.email_sandbox_desc": {
+        "en": "Local SQLite demo mailbox — no credentials. Safe for testing list/analyze/send drafts.",
+        "ar": "صندوق بريد تجريبي محلي — بلا بيانات اعتماد. آمن لاختبار القائمة والتحليل والمسودات.",
+    },
+    "settings.email_sandbox_try": {
+        "en": "Try in chat: “List my inbox” or “Analyze the lottery email”.",
+        "ar": "جرّب في الدردشة: «اعرض بريدي» أو «حلّل رسالة اليانصيب».",
+    },
+    "settings.email_connected": {"en": "Connected", "ar": "متصل"},
+    "settings.email_not_connected": {"en": "Not connected", "ar": "غير متصل"},
+    "settings.email_gmail_desc": {
+        "en": "Use a Google App Password (2FA required). Stored in vault when KAZMA_VAULT_KEY is set.",
+        "ar": "استخدم كلمة مرور تطبيق Google (مطلوب 2FA). تُخزَّن في الخزنة عند تفعيل KAZMA_VAULT_KEY.",
+    },
+    "settings.email_address": {"en": "Address", "ar": "العنوان"},
+    "settings.email_gmail_address": {"en": "Gmail address", "ar": "عنوان Gmail"},
+    "settings.email_gmail_app_password": {"en": "App password", "ar": "كلمة مرور التطبيق"},
+    "settings.email_gmail_app_password_help": {
+        "en": "Google Account → Security → App passwords. Not your normal Gmail password.",
+        "ar": "حساب Google ← الأمان ← كلمات مرور التطبيقات. ليست كلمة مرور Gmail العادية.",
+    },
+    "settings.email_save_gmail": {"en": "Save Gmail", "ar": "حفظ Gmail"},
+    "settings.email_disconnect": {"en": "Disconnect", "ar": "قطع الاتصال"},
+    "settings.email_gmail_required": {"en": "Email and app password are required", "ar": "البريد وكلمة مرور التطبيق مطلوبان"},
+    "settings.email_disconnect_gmail_confirm": {
+        "en": "Clear saved Gmail address and app password?",
+        "ar": "مسح عنوان Gmail وكلمة مرور التطبيق المحفوظة؟",
+    },
+    "settings.email_ms_desc": {
+        "en": "Microsoft Graph via device code. Register an Azure app (public client) with Mail.Read/ReadWrite/Send + offline_access.",
+        "ar": "Microsoft Graph عبر رمز الجهاز. سجّل تطبيقاً في Azure (عميل عام) بصلاحيات البريد + offline_access.",
+    },
+    "settings.email_ms_client_id": {"en": "Azure application (client) ID", "ar": "معرّف تطبيق Azure (Client ID)"},
+    "settings.email_ms_tenant": {"en": "Tenant ID", "ar": "معرّف المستأجر"},
+    "settings.email_save_ms_client": {"en": "Save app ID", "ar": "حفظ معرّف التطبيق"},
+    "settings.email_connect_microsoft": {"en": "Connect Microsoft", "ar": "ربط Microsoft"},
+    "settings.email_waiting_auth": {"en": "Waiting for sign-in…", "ar": "بانتظار تسجيل الدخول…"},
+    "settings.email_ms_client_required": {"en": "Azure client ID is required", "ar": "معرّف عميل Azure مطلوب"},
+    "settings.email_ms_device_hint": {
+        "en": "Open the link and enter this code, then approve mail access:",
+        "ar": "افتح الرابط وأدخل هذا الرمز ثم وافق على صلاحيات البريد:",
+    },
+    "settings.email_ms_polling": {
+        "en": "Polling for authorization… keep this page open.",
+        "ar": "جارٍ انتظار التفويض… أبقِ هذه الصفحة مفتوحة.",
+    },
+    "settings.email_ms_enter_code": {
+        "en": "Enter the code at Microsoft to finish connecting",
+        "ar": "أدخل الرمز في Microsoft لإكمال الربط",
+    },
+    "settings.email_disconnect_ms_confirm": {
+        "en": "Clear Microsoft Graph tokens from this server?",
+        "ar": "مسح رموز Microsoft Graph من هذا الخادم؟",
+    },
+    "settings.email_multi_accounts": {"en": "Multi-account aliases (env)", "ar": "حسابات متعددة (env)"},
+    "settings.email_multi_accounts_hint": {
+        "en": "Configured via EMAIL_ACCOUNTS / EMAIL_ACCOUNT_* environment variables.",
+        "ar": "تُضبط عبر متغيرات EMAIL_ACCOUNTS / EMAIL_ACCOUNT_*.",
+    },
+    "settings.email_docs_hint": {
+        "en": "Full setup notes:",
+        "ar": "تفاصيل الإعداد:",
+    },
+    "settings.email_docs_link": {"en": "Email integration guide", "ar": "دليل تكامل البريد"},
 
     # Settings — Providers tab
     "settings.llm_providers": {"en": "LLM Providers", "ar": "مزودو النماذج"},
