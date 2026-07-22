@@ -28,14 +28,15 @@ def _make_request(*, headers: dict | None = None, base_url: str = "http://127.0.
 
 
 def test_verify_same_origin_passes_with_header_and_matching_origin(monkeypatch):
-    """A same-origin POST with the custom header is allowed."""
-    monkeypatch.setenv("KAZMA_PUBLIC_URL", "https://kazma.example.com")
+    """A same-origin POST (Origin host == request Host) with the custom header
+    is allowed."""
     from kazma_ui.email_api import _verify_same_origin
 
     req = _make_request(
         headers={
             "x-requested-with": "XMLHttpRequest",
-            "origin": "https://kazma.example.com/settings",
+            "host": "127.0.0.1:9090",
+            "origin": "http://127.0.0.1:9090/settings",
         }
     )
     import asyncio
@@ -57,13 +58,13 @@ def test_verify_same_origin_rejects_missing_header(monkeypatch):
 
 
 def test_verify_same_origin_rejects_cross_origin(monkeypatch):
-    """A POST with the header but a foreign Origin is denied."""
-    monkeypatch.setenv("KAZMA_PUBLIC_URL", "https://kazma.example.com")
+    """A POST with the header but a foreign Origin host is denied."""
     from kazma_ui.email_api import _verify_same_origin
 
     req = _make_request(
         headers={
             "x-requested-with": "XMLHttpRequest",
+            "host": "127.0.0.1:9090",
             "origin": "https://evil.example.com",
         }
     )
@@ -122,25 +123,46 @@ def test_safe_error_leaks_in_dev(monkeypatch):
     assert "connection refused" in body  # helpful in dev
 
 
-# ── H6: _request_base honors KAZMA_PUBLIC_URL ─────────────────────────
+# ── H6: _request_base never trusts the Host header ────────────────────
 
 
 def test_request_base_uses_kazma_public_url(monkeypatch):
     """KAZMA_PUBLIC_URL is authoritative; a spoofed Host header is ignored."""
     monkeypatch.setenv("KAZMA_PUBLIC_URL", "https://kazma.example.com")
+    monkeypatch.delenv("KAZMA_HOST", raising=False)
     from kazma_ui.email_api import _request_base
 
     req = _make_request(
         headers={"host": "evil.example.com", "x-forwarded-host": "evil.example.com"},
-        base_url="http://127.0.0.1:9090/",
+        base_url="http://evil.example.com/",
     )
     assert _request_base(req) == "https://kazma.example.com"
 
 
-def test_request_base_falls_back_to_request_url(monkeypatch):
-    """Without KAZMA_PUBLIC_URL, falls back to the request's own base URL."""
+def test_request_base_ignores_spoofed_host_without_public_url(monkeypatch):
+    """The core H6 regression: with KAZMA_PUBLIC_URL UNSET, a spoofed Host
+    header must NOT control the base (this is what the first fix missed)."""
     monkeypatch.delenv("KAZMA_PUBLIC_URL", raising=False)
+    monkeypatch.delenv("KAZMA_HOST", raising=False)
+    monkeypatch.setenv("KAZMA_PORT", "9090")
     from kazma_ui.email_api import _request_base
 
-    req = _make_request(base_url="http://localhost:9090/")
-    assert _request_base(req) == "http://localhost:9090"
+    req = _make_request(
+        headers={"host": "evil.example.com", "x-forwarded-host": "evil.example.com"},
+        base_url="http://evil.example.com/",
+    )
+    # Must resolve to the local default, NOT evil.example.com
+    result = _request_base(req)
+    assert "evil" not in result, f"Host header leaked into base: {result}"
+    assert result == "http://127.0.0.1:9090"
+
+
+def test_request_base_uses_kazma_host_when_set(monkeypatch):
+    """KAZMA_HOST overrides the loopback default (e.g. for LAN access)."""
+    monkeypatch.delenv("KAZMA_PUBLIC_URL", raising=False)
+    monkeypatch.setenv("KAZMA_HOST", "192.168.1.50")
+    monkeypatch.setenv("KAZMA_PORT", "9090")
+    from kazma_ui.email_api import _request_base
+
+    req = _make_request(headers={"host": "evil.example.com"})
+    assert _request_base(req) == "http://192.168.1.50:9090"

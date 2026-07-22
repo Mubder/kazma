@@ -106,15 +106,29 @@ def _request_base(request: Request) -> str:
     """Resolve our own public base URL for OAuth redirect URIs / post-callback
     redirects.
 
-    Delegates to ``oauth_common.public_base_url`` so ``KAZMA_PUBLIC_URL`` is
-    authoritative (matching the GitHub-OAuth + OIDC precedent). The raw
-    ``Host`` / ``X-Forwarded-Host`` headers are NOT trusted here — otherwise
-    an attacker could spoof them to redirect the OAuth callback to an
-    attacker-controlled host (audit H6).
-    """
-    from kazma_skills.native.email_manager.oauth_common import public_base_url
+    Security (audit H6): the base MUST be operator-controlled, never derived
+    from client-supplied ``Host`` / ``X-Forwarded-Host`` headers — otherwise an
+    attacker can spoof the Host header and redirect the OAuth callback (or the
+    post-callback browser 302) to an attacker-controlled host. The fallbacks
+    therefore read only environment configuration:
 
-    return public_base_url(str(request.base_url).rstrip("/"))
+    precedence: ``KAZMA_PUBLIC_URL`` → ``KAZMA_HOST``:``KAZMA_PORT`` →
+    ``127.0.0.1:`` ``KAZMA_PORT``.
+
+    Note: ``oauth_common.public_base_url`` is NOT used here because its
+    fallback echoes ``request.base_url`` (which is built from the spoofable
+    Host header), re-introducing the very vector this fix closes. The
+    ``KAZMA_PUBLIC_URL``-first behavior matches that helper and the GitHub-OAuth
+    / OIDC precedent, but the fallback is hard-locked to local config.
+    """
+    import os
+
+    public = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
+    if public:
+        return public
+    host = (os.environ.get("KAZMA_HOST") or "").strip() or "127.0.0.1"
+    port = (os.environ.get("KAZMA_PORT") or "9090").strip()
+    return f"http://{host}:{port}"
 
 
 async def _verify_same_origin(request: Request) -> None:
@@ -124,18 +138,28 @@ async def _verify_same_origin(request: Request) -> None:
     1. A custom ``X-Requested-With`` header that the browser cannot be
        tricked into sending cross-site without a CORS preflight (and the
        Kazma app never grants such preflight). The frontend sets this header
-       explicitly via ``KazmaAPI.fetch``.
-    2. When the request carries an ``Origin`` (or ``Referer``), it must
-       resolve to our own public base. A bare form POST from another site
-       lacks the custom header and fails layer 1 regardless.
+       explicitly via ``KazmaAPI.fetch``. This is the primary defense.
+    2. When the request carries an ``Origin`` (or ``Referer``), it must target
+       the same host the browser is on. This is defense-in-depth; the custom
+       header already blocks cross-site forgery. We compare against the
+       request's actual host (not the operator ``KAZMA_PUBLIC_URL``) so LAN /
+       loopback / proxied access isn't falsely rejected.
     """
     xrw = request.headers.get("x-requested-with", "").lower()
     if xrw != "xmlhttprequest":
         raise HTTPException(status_code=403, detail="missing custom request header")
     origin = request.headers.get("origin") or request.headers.get("referer") or ""
     if origin:
-        own = _request_base(request)
-        if not origin.startswith(own):
+        # Compare only the host:port, tolerating scheme differences (http/https
+        # behind a TLS-terminating proxy). Extract the netloc from the Origin.
+        own_host = request.headers.get("host") or ""
+        try:
+            from urllib.parse import urlparse
+
+            origin_host = urlparse(origin).netloc
+        except Exception:
+            origin_host = ""
+        if own_host and origin_host and origin_host != own_host:
             raise HTTPException(status_code=403, detail="cross-origin request denied")
 
 
