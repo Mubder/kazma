@@ -166,8 +166,9 @@ def persist_gmail_tokens(access: str, refresh: str = "", email: str = "") -> Non
     if email:
         os.environ["EMAIL_GMAIL_ADDRESS"] = email
         vault_store("email.gmail.address", email, category="email")
-    # Mark auth mode
+    # Mark auth mode (wins over IMAP/POP until user reconnects protocol)
     os.environ["EMAIL_GMAIL_AUTH"] = "oauth"
+    vault_store("email.gmail.auth", "oauth", category="email")
 
 
 def clear_gmail_oauth() -> dict[str, Any]:

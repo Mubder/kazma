@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from typing import Any
@@ -71,9 +70,9 @@ def list_account_aliases() -> list[str]:
 def account_config(alias: str) -> dict[str, str]:
     """Load per-account env map: EMAIL_ACCOUNT_{ALIAS}_{FIELD}.
 
-    Fields: TYPE (gmail|microsoft|imap|sandbox), ADDRESS, PASSWORD,
-    IMAP_HOST, IMAP_PORT, SMTP_HOST, SMTP_PORT, CLIENT_ID, CLIENT_SECRET,
-    TENANT_ID, ACCESS_TOKEN, REFRESH_TOKEN.
+    Fields: TYPE (gmail|microsoft|imap|pop|sandbox), ADDRESS, PASSWORD,
+    IMAP_HOST, IMAP_PORT, POP_HOST, POP_PORT, SMTP_HOST, SMTP_PORT, CLIENT_ID,
+    CLIENT_SECRET, TENANT_ID, ACCESS_TOKEN, REFRESH_TOKEN.
     """
     prefix = f"EMAIL_ACCOUNT_{alias.upper().replace('-', '_')}_"
     fields = (
@@ -82,6 +81,8 @@ def account_config(alias: str) -> dict[str, str]:
         "PASSWORD",
         "IMAP_HOST",
         "IMAP_PORT",
+        "POP_HOST",
+        "POP_PORT",
         "SMTP_HOST",
         "SMTP_PORT",
         "CLIENT_ID",
@@ -103,26 +104,103 @@ def account_config(alias: str) -> dict[str, str]:
     return out
 
 
+def gmail_auth_mode() -> str:
+    """oauth | imap | pop | app_password | none."""
+    auth = (cred("EMAIL_GMAIL_AUTH", "email.gmail.auth") or "").lower()
+    if auth in ("oauth", "imap", "pop", "app_password"):
+        if auth == "app_password":
+            return "imap"
+        return auth
+    if cred("EMAIL_GMAIL_ACCESS_TOKEN", "email.gmail.access_token") or cred(
+        "EMAIL_GMAIL_REFRESH_TOKEN", "email.gmail.refresh_token"
+    ):
+        return "oauth"
+    if cred("EMAIL_GMAIL_ADDRESS", "email.gmail.address") and cred(
+        "EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password"
+    ):
+        return "imap"
+    return "none"
+
+
+def microsoft_auth_mode() -> str:
+    """oauth | imap | pop | none."""
+    auth = (cred("EMAIL_MS_AUTH", "email.microsoft.auth") or "").lower()
+    if auth in ("oauth", "imap", "pop"):
+        return auth
+    if cred("EMAIL_MS_ACCESS_TOKEN", "email.microsoft.access_token") or cred(
+        "EMAIL_MS_REFRESH_TOKEN", "email.microsoft.refresh_token"
+    ):
+        return "oauth"
+    if cred("EMAIL_MS_ADDRESS", "email.microsoft.address") and cred(
+        "EMAIL_MS_PASSWORD", "email.microsoft.password"
+    ):
+        # default protocol when only password set
+        return "imap"
+    return "none"
+
+
 def status_summary() -> dict[str, Any]:
     """Non-secret status for Settings / API."""
     aliases = list_account_aliases()
     gmail_addr = cred("EMAIL_GMAIL_ADDRESS", "email.gmail.address")
     gmail_pw = bool(cred("EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password"))
-    gmail = bool(gmail_addr and gmail_pw)
-    ms = bool(
-        cred("EMAIL_MS_ACCESS_TOKEN", "email.microsoft.access_token")
-        or cred("EMAIL_MS_REFRESH_TOKEN", "email.microsoft.refresh_token")
+    gmail_oauth = bool(
+        cred("EMAIL_GMAIL_ACCESS_TOKEN", "email.gmail.access_token")
+        or cred("EMAIL_GMAIL_REFRESH_TOKEN", "email.gmail.refresh_token")
     )
-    imap = bool(cred("EMAIL_ADDRESS") and cred("EMAIL_PASSWORD", "email.imap.password") and _env("EMAIL_IMAP_HOST"))
+    gmail_mode = gmail_auth_mode()
+    gmail_configured = gmail_mode != "none"
+
+    ms_mode = microsoft_auth_mode()
+    ms_addr = cred("EMAIL_MS_ADDRESS", "email.microsoft.address")
+    ms_configured = ms_mode != "none"
+
+    generic_proto = (_env("EMAIL_PROTOCOL") or vault_retrieve("email.generic.auth") or "").lower()
+    generic_addr = _env("EMAIL_ADDRESS") or vault_retrieve("email.generic.address")
+    generic_pw = bool(cred("EMAIL_PASSWORD", "email.imap.password"))
+    imap_host = _env("EMAIL_IMAP_HOST")
+    pop_host = _env("EMAIL_POP_HOST")
+    if not generic_proto:
+        if generic_addr and generic_pw and imap_host:
+            generic_proto = "imap"
+        elif generic_addr and generic_pw and pop_host:
+            generic_proto = "pop"
+    imap_configured = bool(
+        generic_addr and generic_pw and (generic_proto == "imap" or imap_host)
+    )
+    pop_configured = bool(
+        generic_addr and generic_pw and (generic_proto == "pop" or pop_host)
+    )
+
     ms_cid = _env("EMAIL_MS_CLIENT_ID") or vault_retrieve("email.microsoft.client_id")
     return {
         "default_provider": _env("EMAIL_DEFAULT_PROVIDER", "auto") or "auto",
-        "gmail_configured": gmail,
-        "gmail_address": gmail_addr if gmail else "",
-        "microsoft_configured": ms,
-        "imap_configured": imap,
+        "gmail_configured": gmail_configured,
+        "gmail_address": gmail_addr if gmail_configured else "",
+        "gmail_auth_mode": gmail_mode,
+        "gmail_oauth": gmail_oauth and gmail_mode == "oauth",
+        "gmail_app_password": gmail_pw and gmail_mode in ("imap", "pop", "app_password"),
+        "gmail_imap": gmail_mode == "imap",
+        "gmail_pop": gmail_mode == "pop",
+        "microsoft_configured": ms_configured,
+        "microsoft_address": ms_addr if ms_configured and ms_mode in ("imap", "pop") else "",
+        "microsoft_auth_mode": ms_mode,
+        "microsoft_oauth": ms_mode == "oauth",
+        "microsoft_imap": ms_mode == "imap",
+        "microsoft_pop": ms_mode == "pop",
+        "imap_configured": imap_configured,
+        "pop_configured": pop_configured,
+        "generic_protocol": generic_proto or "",
         "sandbox_always": True,
         "accounts": aliases,
         "ms_client_id_set": bool(ms_cid),
         "ms_tenant_id": _env("EMAIL_MS_TENANT_ID", "common") or "common",
+        "presets": {
+            "gmail": {"imap": "imap.gmail.com", "pop": "pop.gmail.com", "smtp": "smtp.gmail.com"},
+            "microsoft": {
+                "imap": "outlook.office365.com",
+                "pop": "outlook.office365.com",
+                "smtp": "smtp.office365.com",
+            },
+        },
     }

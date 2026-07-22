@@ -119,9 +119,10 @@ Native skill `email-manager`. Default provider **`auto`**: real account if confi
 
 | Variable | Purpose |
 |----------|---------|
-| `EMAIL_DEFAULT_PROVIDER` | `auto` \| `sandbox` \| `gmail` \| `microsoft` \| `imap` |
-| `EMAIL_GMAIL_ADDRESS` | Gmail address (filled by OAuth or manual) |
-| `EMAIL_GMAIL_APP_PASSWORD` | Optional app password (often blocked on Workspace) |
+| `EMAIL_DEFAULT_PROVIDER` | `auto` \| `sandbox` \| `gmail` \| `microsoft` \| `imap` \| `pop` |
+| `EMAIL_GMAIL_ADDRESS` | Gmail address (filled by OAuth or IMAP/POP) |
+| `EMAIL_GMAIL_APP_PASSWORD` | App password for IMAP/POP (often blocked on Workspace) |
+| `EMAIL_GMAIL_AUTH` | `oauth` \| `imap` \| `pop` (set by Settings / OAuth) |
 | `EMAIL_GMAIL_CLIENT_ID` / `EMAIL_GMAIL_CLIENT_SECRET` | Google OAuth web client (recommended) |
 | `EMAIL_GMAIL_ACCESS_TOKEN` / `EMAIL_GMAIL_REFRESH_TOKEN` | Set by OAuth callback / refresh |
 | `EMAIL_GMAIL_REDIRECT_URI` | Override callback (default `{public}/api/email/oauth/gmail/callback`) |
@@ -131,16 +132,21 @@ Native skill `email-manager`. Default provider **`auto`**: real account if confi
 | `EMAIL_MS_CLIENT_SECRET` | Azure app secret (confidential clients) |
 | `EMAIL_MS_TENANT_ID` | Tenant (`common` default) |
 | `EMAIL_MS_REDIRECT_URI` | Override callback (default `{public}/api/email/oauth/microsoft/callback`) |
+| `EMAIL_MS_AUTH` | `oauth` \| `imap` \| `pop` |
+| `EMAIL_MS_ADDRESS` / `EMAIL_MS_PASSWORD` | Microsoft IMAP/POP login |
+| `EMAIL_MS_IMAP_HOST` / `EMAIL_MS_POP_HOST` / `EMAIL_MS_SMTP_HOST` | Override M365 protocol hosts |
 | `KAZMA_PUBLIC_URL` | Public origin for OAuth redirects behind proxy |
-| `EMAIL_ADDRESS` / `EMAIL_PASSWORD` | Generic IMAP user |
+| `EMAIL_ADDRESS` / `EMAIL_PASSWORD` | Generic IMAP/POP user |
+| `EMAIL_PROTOCOL` | `imap` \| `pop` for generic account |
 | `EMAIL_IMAP_HOST` / `EMAIL_IMAP_PORT` | IMAP (default 993) |
+| `EMAIL_POP_HOST` / `EMAIL_POP_PORT` | POP3 SSL (default 995) |
 | `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | SMTP (default 587 STARTTLS) |
 | `EMAIL_ACCOUNTS` | Comma-separated multi-account aliases |
-| `EMAIL_ACCOUNT_{ALIAS}_TYPE` | `gmail` \| `microsoft` \| `imap` |
+| `EMAIL_ACCOUNT_{ALIAS}_TYPE` | `gmail` \| `microsoft` \| `imap` \| `pop` |
 | `EMAIL_ACCOUNT_{ALIAS}_ADDRESS` / `_PASSWORD` | Per-account credentials |
-| `EMAIL_ACCOUNT_{ALIAS}_*` | `IMAP_HOST`, `REFRESH_TOKEN`, `CLIENT_ID`, … |
+| `EMAIL_ACCOUNT_{ALIAS}_*` | `IMAP_HOST`, `POP_HOST`, `REFRESH_TOKEN`, `CLIENT_ID`, … |
 
-API: `GET /api/email/status`, `POST /api/email/oauth/microsoft/device/start|poll`, `POST /api/email/oauth/microsoft/disconnect`.  
+API: `GET /api/email/status`, `GET /api/email/presets`, `POST /api/email/protocol/connect\|disconnect`, OAuth start/callback routes.  
 HITL: `email_send`, `email_delete`, `email_categorize`. Guide: [Email integration](../guide/email-integration).
 
 ---

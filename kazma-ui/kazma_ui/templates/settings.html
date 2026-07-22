@@ -1337,42 +1337,73 @@
                         <span class="badge" :class="emailStatus.gmail_configured ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
                               x-text="emailStatus.gmail_configured ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
                     </div>
-                    <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_gmail_oauth_desc') }}</p>
                     <div x-show="emailStatus.gmail_configured" style="margin-bottom:12px;font-size:0.85rem;">
                         <span style="color:var(--text-tertiary);">{{ t('settings.email_address') }}:</span>
                         <code x-text="emailStatus.gmail_address || '—'"></code>
-                        <span x-show="emailStatus.gmail_oauth" class="badge badge-stdio" style="font-size:0.65rem;margin-left:6px;">OAuth</span>
-                        <span x-show="emailStatus.gmail_app_password && !emailStatus.gmail_oauth" class="badge badge-basic" style="font-size:0.65rem;margin-left:6px;">App password</span>
+                        <span class="badge badge-basic" style="font-size:0.65rem;margin-left:6px;"
+                              x-text="(emailStatus.gmail_auth_mode || '').toUpperCase() || '—'"></span>
                     </div>
-                    <div class="form-group" style="margin-bottom:8px;">
-                        <label>{{ t('settings.email_gmail_oauth_client_id') }}</label>
-                        <input type="text" class="form-control" x-model="emailGmailOAuth.client_id" placeholder="Google OAuth Client ID" autocomplete="off">
+                    <!-- Mode switcher -->
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+                        <button type="button" class="btn btn-sm" :class="emailGmailMode === 'oauth' ? 'btn-primary' : 'btn-secondary'" @click="emailGmailMode = 'oauth'">{{ t('settings.email_mode_oauth') }}</button>
+                        <button type="button" class="btn btn-sm" :class="emailGmailMode === 'imap' ? 'btn-primary' : 'btn-secondary'" @click="emailGmailMode = 'imap'">{{ t('settings.email_mode_imap') }}</button>
+                        <button type="button" class="btn btn-sm" :class="emailGmailMode === 'pop' ? 'btn-primary' : 'btn-secondary'" @click="emailGmailMode = 'pop'">{{ t('settings.email_mode_pop') }}</button>
                     </div>
-                    <div class="form-group" style="margin-bottom:12px;">
-                        <label>{{ t('settings.email_gmail_oauth_client_secret') }}</label>
-                        <input type="password" class="form-control" x-model="emailGmailOAuth.client_secret" placeholder="Client secret" autocomplete="new-password">
-                        <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_oauth_help') }}</p>
-                    </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-                        <button class="btn btn-secondary btn-sm" @click="saveGmailOAuthClient()" :disabled="emailSaving">{{ t('settings.email_save_oauth_client') }}</button>
-                        <button class="btn btn-primary btn-sm" @click="connectGmailOAuth()" :disabled="emailSaving">{{ t('settings.email_connect_google') }}</button>
-                        <button class="btn btn-secondary btn-sm" x-show="emailStatus.gmail_configured" @click="disconnectGmail()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
-                    </div>
-                    <details style="margin-top:8px;">
-                        <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-tertiary);">{{ t('settings.email_gmail_app_password_fallback') }}</summary>
-                        <div style="margin-top:12px;">
-                            <p style="font-size:0.8rem;color:var(--text-muted);">{{ t('settings.email_gmail_desc') }}</p>
-                            <div class="form-group" style="margin-bottom:8px;">
-                                <label>{{ t('settings.email_gmail_address') }}</label>
-                                <input type="email" class="form-control" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
-                            </div>
-                            <div class="form-group" style="margin-bottom:12px;">
-                                <label>{{ t('settings.email_gmail_app_password') }}</label>
-                                <input type="password" class="form-control" x-model="emailGmail.app_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
-                            </div>
-                            <button class="btn btn-secondary btn-sm" @click="saveGmail()" :disabled="emailSaving" x-text="emailSaving ? '…' : t('settings.email_save_gmail')"></button>
+
+                    <!-- OAuth -->
+                    <div x-show="emailGmailMode === 'oauth'">
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_gmail_oauth_desc') }}</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_gmail_oauth_client_id') }}</label>
+                            <input type="text" class="form-control" x-model="emailGmailOAuth.client_id" placeholder="Google OAuth Client ID" autocomplete="off">
                         </div>
-                    </details>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_gmail_oauth_client_secret') }}</label>
+                            <input type="password" class="form-control" x-model="emailGmailOAuth.client_secret" placeholder="Client secret" autocomplete="new-password">
+                            <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_oauth_help') }}</p>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn btn-secondary btn-sm" @click="saveGmailOAuthClient()" :disabled="emailSaving">{{ t('settings.email_save_oauth_client') }}</button>
+                            <button class="btn btn-primary btn-sm" @click="connectGmailOAuth()" :disabled="emailSaving">{{ t('settings.email_connect_google') }}</button>
+                        </div>
+                    </div>
+
+                    <!-- IMAP -->
+                    <div x-show="emailGmailMode === 'imap'" x-cloak>
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_gmail_imap_desc') }}</p>
+                        <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">imap.gmail.com:993 · smtp.gmail.com:587</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_gmail_address') }}</label>
+                            <input type="email" class="form-control" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_gmail_app_password') }}</label>
+                            <input type="password" class="form-control" x-model="emailGmail.app_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+                            <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_app_password_help') }}</p>
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="saveGmailProtocol('imap')" :disabled="emailSaving"
+                                x-text="emailSaving ? '…' : t('settings.email_save_imap')"></button>
+                    </div>
+
+                    <!-- POP -->
+                    <div x-show="emailGmailMode === 'pop'" x-cloak>
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_gmail_pop_desc') }}</p>
+                        <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">pop.gmail.com:995 · smtp.gmail.com:587</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_gmail_address') }}</label>
+                            <input type="email" class="form-control" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_gmail_app_password') }}</label>
+                            <input type="password" class="form-control" x-model="emailGmail.app_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="saveGmailProtocol('pop')" :disabled="emailSaving"
+                                x-text="emailSaving ? '…' : t('settings.email_save_pop')"></button>
+                    </div>
+
+                    <div style="margin-top:12px;" x-show="emailStatus.gmail_configured">
+                        <button class="btn btn-secondary btn-sm" @click="disconnectGmail()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
+                    </div>
                 </div>
 
                 <!-- Microsoft card -->
@@ -1382,42 +1413,92 @@
                         <span class="badge" :class="emailStatus.microsoft_configured ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
                               x-text="emailStatus.microsoft_configured ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
                     </div>
-                    <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_ms_oauth_desc') }}</p>
-                    <div class="form-group" style="margin-bottom:8px;">
-                        <label>{{ t('settings.email_ms_client_id') }}</label>
-                        <input type="text" class="form-control" x-model="emailMs.client_id" placeholder="Azure app (client) ID" autocomplete="off">
+                    <div x-show="emailStatus.microsoft_configured" style="margin-bottom:12px;font-size:0.85rem;">
+                        <span style="color:var(--text-tertiary);">{{ t('settings.email_address') }}:</span>
+                        <code x-text="emailStatus.microsoft_address || (emailStatus.microsoft_auth_mode === 'oauth' ? 'OAuth' : '—')"></code>
+                        <span class="badge badge-basic" style="font-size:0.65rem;margin-left:6px;"
+                              x-text="(emailStatus.microsoft_auth_mode || '').toUpperCase() || '—'"></span>
                     </div>
-                    <div class="form-group" style="margin-bottom:8px;">
-                        <label>{{ t('settings.email_ms_client_secret') }}</label>
-                        <input type="password" class="form-control" x-model="emailMs.client_secret" placeholder="Optional for public clients" autocomplete="new-password">
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+                        <button type="button" class="btn btn-sm" :class="emailMsMode === 'oauth' ? 'btn-primary' : 'btn-secondary'" @click="emailMsMode = 'oauth'">{{ t('settings.email_mode_oauth') }}</button>
+                        <button type="button" class="btn btn-sm" :class="emailMsMode === 'imap' ? 'btn-primary' : 'btn-secondary'" @click="emailMsMode = 'imap'">{{ t('settings.email_mode_imap') }}</button>
+                        <button type="button" class="btn btn-sm" :class="emailMsMode === 'pop' ? 'btn-primary' : 'btn-secondary'" @click="emailMsMode = 'pop'">{{ t('settings.email_mode_pop') }}</button>
                     </div>
-                    <div class="form-group" style="margin-bottom:12px;">
-                        <label>{{ t('settings.email_ms_tenant') }}</label>
-                        <input type="text" class="form-control" x-model="emailMs.tenant_id" placeholder="common">
-                        <p class="form-help" style="margin-top:4px;">{{ t('settings.email_ms_redirect_help') }}</p>
-                    </div>
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-                        <button class="btn btn-secondary btn-sm" @click="saveMsClient()" :disabled="emailSaving">{{ t('settings.email_save_ms_client') }}</button>
-                        <button class="btn btn-primary btn-sm" @click="connectMicrosoftOAuth()" :disabled="emailSaving">{{ t('settings.email_connect_microsoft_browser') }}</button>
-                        <button class="btn btn-secondary btn-sm" x-show="emailStatus.microsoft_configured" @click="disconnectMicrosoft()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
-                    </div>
-                    <details>
-                        <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-tertiary);">{{ t('settings.email_ms_device_fallback') }}</summary>
-                        <div style="margin-top:12px;">
-                            <button class="btn btn-secondary btn-sm" @click="connectMicrosoft()" :disabled="emailMsConnecting || emailSaving"
-                                    x-text="emailMsConnecting ? t('settings.email_waiting_auth') : t('settings.email_connect_microsoft_device')"></button>
-                            <div x-show="emailMsDevice.user_code" x-cloak style="margin-top:12px;padding:12px;border-radius:8px;background:var(--bg-primary);border:1px dashed var(--accent, #5e6ad2);">
-                                <p style="margin:0 0 8px 0;font-size:0.85rem;">{{ t('settings.email_ms_device_hint') }}</p>
-                                <div style="font-size:1.4rem;font-weight:700;letter-spacing:0.12em;font-family:var(--font-mono);" x-text="emailMsDevice.user_code"></div>
-                                <p style="margin:8px 0 0 0;font-size:0.85rem;">
-                                    <a :href="emailMsDevice.verification_uri" target="_blank" rel="noopener" style="color:var(--accent);">
-                                        <span x-text="emailMsDevice.verification_uri || 'https://microsoft.com/devicelogin'"></span>
-                                    </a>
-                                </p>
-                                <p x-show="emailMsConnecting" style="margin:8px 0 0 0;font-size:0.8rem;color:var(--warning);">{{ t('settings.email_ms_polling') }}</p>
-                            </div>
+
+                    <!-- OAuth -->
+                    <div x-show="emailMsMode === 'oauth'">
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_ms_oauth_desc') }}</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_ms_client_id') }}</label>
+                            <input type="text" class="form-control" x-model="emailMs.client_id" placeholder="Azure app (client) ID" autocomplete="off">
                         </div>
-                    </details>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_ms_client_secret') }}</label>
+                            <input type="password" class="form-control" x-model="emailMs.client_secret" placeholder="Optional for public clients" autocomplete="new-password">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_ms_tenant') }}</label>
+                            <input type="text" class="form-control" x-model="emailMs.tenant_id" placeholder="common">
+                            <p class="form-help" style="margin-top:4px;">{{ t('settings.email_ms_redirect_help') }}</p>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                            <button class="btn btn-secondary btn-sm" @click="saveMsClient()" :disabled="emailSaving">{{ t('settings.email_save_ms_client') }}</button>
+                            <button class="btn btn-primary btn-sm" @click="connectMicrosoftOAuth()" :disabled="emailSaving">{{ t('settings.email_connect_microsoft_browser') }}</button>
+                        </div>
+                        <details>
+                            <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-tertiary);">{{ t('settings.email_ms_device_fallback') }}</summary>
+                            <div style="margin-top:12px;">
+                                <button class="btn btn-secondary btn-sm" @click="connectMicrosoft()" :disabled="emailMsConnecting || emailSaving"
+                                        x-text="emailMsConnecting ? t('settings.email_waiting_auth') : t('settings.email_connect_microsoft_device')"></button>
+                                <div x-show="emailMsDevice.user_code" x-cloak style="margin-top:12px;padding:12px;border-radius:8px;background:var(--bg-primary);border:1px dashed var(--accent, #5e6ad2);">
+                                    <p style="margin:0 0 8px 0;font-size:0.85rem;">{{ t('settings.email_ms_device_hint') }}</p>
+                                    <div style="font-size:1.4rem;font-weight:700;letter-spacing:0.12em;font-family:var(--font-mono);" x-text="emailMsDevice.user_code"></div>
+                                    <p style="margin:8px 0 0 0;font-size:0.85rem;">
+                                        <a :href="emailMsDevice.verification_uri" target="_blank" rel="noopener" style="color:var(--accent);">
+                                            <span x-text="emailMsDevice.verification_uri || 'https://microsoft.com/devicelogin'"></span>
+                                        </a>
+                                    </p>
+                                    <p x-show="emailMsConnecting" style="margin:8px 0 0 0;font-size:0.8rem;color:var(--warning);">{{ t('settings.email_ms_polling') }}</p>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+
+                    <!-- IMAP -->
+                    <div x-show="emailMsMode === 'imap'" x-cloak>
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_ms_imap_desc') }}</p>
+                        <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">outlook.office365.com:993 · smtp.office365.com:587</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_ms_address') }}</label>
+                            <input type="email" class="form-control" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_ms_password') }}</label>
+                            <input type="password" class="form-control" x-model="emailMsProtocol.password" placeholder="Password or app password" autocomplete="new-password">
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="saveMsProtocol('imap')" :disabled="emailSaving"
+                                x-text="emailSaving ? '…' : t('settings.email_save_imap')"></button>
+                    </div>
+
+                    <!-- POP -->
+                    <div x-show="emailMsMode === 'pop'" x-cloak>
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_ms_pop_desc') }}</p>
+                        <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">outlook.office365.com:995 · smtp.office365.com:587</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_ms_address') }}</label>
+                            <input type="email" class="form-control" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_ms_password') }}</label>
+                            <input type="password" class="form-control" x-model="emailMsProtocol.password" placeholder="Password or app password" autocomplete="new-password">
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="saveMsProtocol('pop')" :disabled="emailSaving"
+                                x-text="emailSaving ? '…' : t('settings.email_save_pop')"></button>
+                    </div>
+
+                    <div style="margin-top:12px;" x-show="emailStatus.microsoft_configured">
+                        <button class="btn btn-secondary btn-sm" @click="disconnectMicrosoft()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
+                    </div>
                 </div>
             </div>
 

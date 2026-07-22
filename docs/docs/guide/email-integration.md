@@ -30,26 +30,47 @@ Without credentials, every response is prefixed with **`[sandbox mode]`**. Data 
 | `email_categorize` | read/star/labels/move | **Yes** |
 | `email_analyze` | summary, actions, phishing | No |
 
-Common args: `provider` (`auto`\|`sandbox`\|`gmail`\|`microsoft`\|`imap`), optional `account` (multi-account alias).
+Common args: `provider` (`auto`\|`sandbox`\|`gmail`\|`microsoft`\|`imap`\|`pop`), optional `account` (multi-account alias).
 
 ## Provider resolution (`auto`)
 
 1. Explicit `provider` / `account` on the tool call  
 2. `EMAIL_DEFAULT_PROVIDER`  
-3. First configured real account (Gmail → Microsoft → IMAP → multi-account aliases)  
+3. First configured real account (Gmail → Microsoft → generic IMAP/POP → multi-account aliases)  
 4. **Sandbox**
 
 ## Connect email (Settings UI)
 
 Open **Settings → Email** (`/settings?tab=email`).
 
-| Card | Action |
+Each of **Gmail** and **Microsoft** has a mode switcher: **OAuth | IMAP | POP**.
+
+| Card | Modes |
 |------|--------|
 | **Sandbox** | Always on — no setup |
-| **Gmail / Workspace** | **OAuth (recommended):** save Google OAuth Client ID + secret → **Connect with Google** → Google consent → redirect back Connected. Uses **Gmail API** (works when App Passwords are disabled). Optional fallback: app password. |
-| **Microsoft 365** | **OAuth (recommended):** save Azure Client ID (+ secret if confidential) → **Connect with Microsoft** → browser consent → redirect back. Optional: device code. |
+| **Gmail / Workspace** | **OAuth** (recommended, Gmail API) · **IMAP** (`imap.gmail.com` + app password) · **POP** (`pop.gmail.com` + app password) |
+| **Microsoft 365** | **OAuth** (recommended, Graph) · **IMAP** (`outlook.office365.com`) · **POP** (`outlook.office365.com:995`) |
 
-Status shows **Active provider (auto)**. Disconnect clears vault/env for that provider.
+Status shows **Active provider (auto)** and the auth mode badge (OAUTH / IMAP / POP). Disconnect clears vault/env for that provider.
+
+| Protocol | Hosts (preset) | Notes |
+|----------|----------------|-------|
+| Gmail IMAP | `imap.gmail.com:993`, `smtp.gmail.com:587` | App password; enable IMAP in Gmail |
+| Gmail POP | `pop.gmail.com:995`, `smtp.gmail.com:587` | Inbox-only; no drafts/labels |
+| MS IMAP | `outlook.office365.com:993`, `smtp.office365.com:587` | Basic auth often disabled → use OAuth |
+| MS POP | `outlook.office365.com:995`, `smtp.office365.com:587` | Same auth caveat; limited features |
+
+API:
+
+```http
+POST /api/email/protocol/connect
+{"provider":"gmail"|"microsoft"|"generic","protocol":"imap"|"pop","address":"...","password":"..."}
+
+POST /api/email/protocol/disconnect
+{"provider":"gmail"|"microsoft"|"generic"}
+
+GET /api/email/presets
+```
 
 ### Gmail OAuth setup (Workspace-friendly)
 
@@ -130,7 +151,8 @@ GET /api/email/accounts
 - Mutating tools require **HITL** approval (same gates as file/shell).  
 - Never paste app passwords into chat; use env or vault.  
 - Sandbox never sends real mail.  
-- Graph is the supported M365 path; basic IMAP to Outlook is only for tenants that still allow it.
+- Graph OAuth is the recommended M365 path; IMAP/POP basic auth only works when the tenant still allows it.  
+- POP is inbox-oriented (no folders/labels/drafts); prefer IMAP or OAuth when possible.
 
 ## Related
 

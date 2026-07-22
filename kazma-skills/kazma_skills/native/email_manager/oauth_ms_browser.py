@@ -121,6 +121,8 @@ async def finish_ms_browser_oauth(code: str, state: str) -> dict[str, Any]:
         os.environ["EMAIL_MS_REFRESH_TOKEN"] = refresh
         vault_store("email.microsoft.refresh_token", refresh, category="email")
     vault_store("email.microsoft.client_id", cid, category="email")
+    os.environ["EMAIL_MS_AUTH"] = "oauth"
+    vault_store("email.microsoft.auth", "oauth", category="email")
     logger.info("[email.oauth] Microsoft Graph browser OAuth tokens stored")
     return {
         "ok": True,

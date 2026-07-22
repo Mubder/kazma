@@ -168,22 +168,29 @@ function settingsApp() {
         sttModelType: 'default',
         ttsVoiceType: 'default',
 
-        // ── Email tab (Connect Gmail / Microsoft) ──
+        // ── Email tab (Connect Gmail / Microsoft — OAuth | IMAP | POP) ──
         emailStatus: {
             active_provider: 'sandbox',
             gmail_configured: false,
             gmail_address: '',
+            gmail_auth_mode: 'none',
             microsoft_configured: false,
+            microsoft_address: '',
+            microsoft_auth_mode: 'none',
             ms_client_id_set: false,
             ms_tenant_id: 'common',
             imap_configured: false,
+            pop_configured: false,
             sandbox_always: true,
             accounts: [],
         },
         emailAccounts: [],
+        emailGmailMode: 'oauth',
+        emailMsMode: 'oauth',
         emailGmail: { address: '', app_password: '' },
         emailGmailOAuth: { client_id: '', client_secret: '' },
         emailMs: { client_id: '', client_secret: '', tenant_id: 'common' },
+        emailMsProtocol: { address: '', password: '' },
         emailMsDevice: { user_code: '', verification_uri: '', device_code: '', message: '' },
         emailMsConnecting: false,
         emailMsPollTimer: null,
@@ -2194,12 +2201,85 @@ function settingsApp() {
                 if (data && !data.error) {
                     Object.assign(this.emailStatus, data);
                     if (data.gmail_address) this.emailGmail.address = data.gmail_address;
+                    if (data.microsoft_address) this.emailMsProtocol.address = data.microsoft_address;
                     if (data.ms_tenant_id) this.emailMs.tenant_id = data.ms_tenant_id;
+                    // Sync mode tabs to active auth
+                    const gm = data.gmail_auth_mode || 'none';
+                    if (gm === 'imap' || gm === 'pop' || gm === 'oauth') this.emailGmailMode = gm;
+                    else if (gm === 'app_password') this.emailGmailMode = 'imap';
+                    const mm = data.microsoft_auth_mode || 'none';
+                    if (mm === 'imap' || mm === 'pop' || mm === 'oauth') this.emailMsMode = mm;
                 }
                 const acc = await this._fetch('/api/email/accounts');
                 if (acc && Array.isArray(acc.accounts)) this.emailAccounts = acc.accounts;
             } finally {
                 this.emailLoading = false;
+            }
+        },
+
+        async saveGmailProtocol(protocol) {
+            const address = (this.emailGmail.address || '').trim();
+            const password = (this.emailGmail.app_password || '').trim();
+            if (!address || !password) {
+                showToast(window.t ? t('settings.email_gmail_required') : 'Email and app password required', 'error');
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/protocol/connect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        provider: 'gmail',
+                        protocol: protocol === 'pop' ? 'pop' : 'imap',
+                        address,
+                        password,
+                    }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+                this.emailGmail.app_password = '';
+                this.emailGmailMode = protocol === 'pop' ? 'pop' : 'imap';
+                showToast(data.message || ('Gmail ' + protocol.toUpperCase() + ' connected'), 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Gmail ' + protocol + ' failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async saveMsProtocol(protocol) {
+            const address = (this.emailMsProtocol.address || '').trim();
+            const password = (this.emailMsProtocol.password || '').trim();
+            if (!address || !password) {
+                showToast(window.t ? t('settings.email_ms_protocol_required') : 'Email and password required', 'error');
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/protocol/connect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        provider: 'microsoft',
+                        protocol: protocol === 'pop' ? 'pop' : 'imap',
+                        address,
+                        password,
+                    }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+                this.emailMsProtocol.password = '';
+                this.emailMsMode = protocol === 'pop' ? 'pop' : 'imap';
+                showToast(data.message || ('Microsoft ' + protocol.toUpperCase() + ' connected'), 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Microsoft ' + protocol + ' failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
             }
         },
 

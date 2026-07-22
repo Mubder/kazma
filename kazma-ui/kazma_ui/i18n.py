@@ -199,8 +199,35 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.email_refresh": {"en": "Refresh status", "ar": "تحديث الحالة"},
     "settings.email_active_provider": {"en": "Active provider (auto)", "ar": "المزود النشط (تلقائي)"},
     "settings.email_auto_hint": {
-        "en": "Chat uses auto: real account if connected, otherwise sandbox. Banner shows [sandbox|gmail|microsoft_graph] mode.",
-        "ar": "الدردشة تستخدم الوضع التلقائي: حساب حقيقي إن وُجد، وإلا sandbox. تظهر البادئة [sandbox|gmail|microsoft_graph].",
+        "en": "Chat uses auto: real account if connected, otherwise sandbox. Banner shows [sandbox|gmail|gmail_pop|microsoft_graph|microsoft_imap|imap|pop] mode.",
+        "ar": "الدردشة تستخدم الوضع التلقائي: حساب حقيقي إن وُجد، وإلا sandbox. تظهر بادئة الوضع في الرد.",
+    },
+    "settings.email_mode_oauth": {"en": "OAuth", "ar": "OAuth"},
+    "settings.email_mode_imap": {"en": "IMAP", "ar": "IMAP"},
+    "settings.email_mode_pop": {"en": "POP", "ar": "POP"},
+    "settings.email_save_imap": {"en": "Save IMAP", "ar": "حفظ IMAP"},
+    "settings.email_save_pop": {"en": "Save POP", "ar": "حفظ POP"},
+    "settings.email_gmail_imap_desc": {
+        "en": "IMAP + SMTP with a Google App Password (enable IMAP in Gmail settings). Workspace often blocks this — prefer OAuth.",
+        "ar": "IMAP + SMTP مع كلمة مرور تطبيق Google. Workspace غالباً يحظرها — فضّل OAuth.",
+    },
+    "settings.email_gmail_pop_desc": {
+        "en": "POP3 + SMTP with a Google App Password (enable POP in Gmail). Inbox-only; prefer IMAP or OAuth when possible.",
+        "ar": "POP3 + SMTP مع كلمة مرور تطبيق Google. صندوق الوارد فقط؛ فضّل IMAP أو OAuth.",
+    },
+    "settings.email_ms_imap_desc": {
+        "en": "IMAP + SMTP to Outlook/M365 (outlook.office365.com). Many tenants disable basic auth — use OAuth if login fails.",
+        "ar": "IMAP + SMTP إلى Outlook/M365. كثير من المستأجرين يعطّلون المصادقة الأساسية — استخدم OAuth إن فشل الدخول.",
+    },
+    "settings.email_ms_pop_desc": {
+        "en": "POP3 + SMTP to Outlook/M365. Limited features vs Graph/IMAP; basic auth may be blocked.",
+        "ar": "POP3 + SMTP إلى Outlook/M365. ميزات محدودة مقارنة بـ Graph/IMAP؛ قد تُحظر المصادقة الأساسية.",
+    },
+    "settings.email_ms_address": {"en": "Microsoft / Outlook address", "ar": "عنوان Microsoft / Outlook"},
+    "settings.email_ms_password": {"en": "Password or app password", "ar": "كلمة المرور أو كلمة مرور التطبيق"},
+    "settings.email_ms_protocol_required": {
+        "en": "Email address and password are required for IMAP/POP",
+        "ar": "عنوان البريد وكلمة المرور مطلوبان لـ IMAP/POP",
     },
     "settings.email_sandbox": {"en": "Sandbox", "ar": "تجريبي"},
     "settings.email_always_on": {"en": "Always available", "ar": "متاح دائماً"},

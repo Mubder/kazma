@@ -38,6 +38,7 @@ Security and reliability hardening from
 - **Docs**: [Web research](docs/docs/guide/web-research.md) guide; tools catalog, env vars, FAQ, Web UI dashboard metrics, troubleshooting, sidebars
 - **Plan**: Full email integration (Gmail + Microsoft Graph + sandbox) — `docs/plans/EMAIL_INTEGRATION_FULL_PLAN.md`
 - **Email skill**: native `email-manager` — sandbox SQLite mailbox, Gmail IMAP/SMTP, Microsoft Graph backends; tools list/get/send/delete/categorize/analyze; HITL on mutators
+- **Email IMAP/POP modes**: Settings → Email mode switcher **OAuth | IMAP | POP** for both Gmail and Microsoft; POP3+SMTP backend; host presets; `POST /api/email/protocol/connect|disconnect`; `EMAIL_GMAIL_AUTH` / `EMAIL_MS_AUTH`
 - **Email polish**: Microsoft device-code OAuth API (`/api/email/oauth/microsoft/*`), vault token persist on refresh, multi-account aliases (`EMAIL_ACCOUNTS`), Graph well-known folders + Gmail FLAGS/labels, [Email integration](docs/docs/guide/email-integration.md) guide
 - **Settings → Email**: Connect Gmail (app password → vault), Connect Microsoft (device code + poll UI), status/disconnect, accounts list
 - **Email OAuth (browser)**: Gmail authorization-code + Gmail API backend (Workspace-friendly); Microsoft authorization-code redirect + device-code fallback; open callbacks under `/api/email/oauth/*/callback`

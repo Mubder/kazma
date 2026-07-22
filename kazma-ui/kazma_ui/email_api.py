@@ -36,6 +36,25 @@ class MsClientBody(BaseModel):
     tenant_id: str = Field(default="common")
 
 
+class ProtocolConnectBody(BaseModel):
+    """IMAP or POP for gmail | microsoft | generic."""
+
+    provider: str = Field(..., min_length=3, description="gmail | microsoft | generic")
+    protocol: str = Field(..., min_length=3, description="imap | pop")
+    address: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=4)
+    imap_host: str = Field(default="")
+    imap_port: int | None = Field(default=None)
+    pop_host: str = Field(default="")
+    pop_port: int | None = Field(default=None)
+    smtp_host: str = Field(default="")
+    smtp_port: int | None = Field(default=None)
+
+
+class ProtocolDisconnectBody(BaseModel):
+    provider: str = Field(..., min_length=3)
+
+
 def _request_base(request: Request) -> str:
     # Honor reverse proxy headers when present
     proto = request.headers.get("x-forwarded-proto") or request.url.scheme
@@ -56,17 +75,14 @@ async def email_status() -> JSONResponse:
         # Auth modes
         from kazma_skills.native.email_manager.credentials import cred
 
-        data["gmail_oauth"] = bool(
-            cred("EMAIL_GMAIL_ACCESS_TOKEN", "email.gmail.access_token")
-            or cred("EMAIL_GMAIL_REFRESH_TOKEN", "email.gmail.refresh_token")
-        )
-        data["gmail_app_password"] = bool(
-            cred("EMAIL_GMAIL_APP_PASSWORD", "email.gmail.app_password")
-        )
+        # Prefer modes from status_summary; fill oauth client flag
         data["gmail_oauth_client_set"] = bool(
             cred("EMAIL_GMAIL_CLIENT_ID", "email.gmail.client_id")
             or cred("GOOGLE_OAUTH_CLIENT_ID", "email.gmail.client_id")
         )
+        # Back-compat aliases for older Settings JS
+        if "gmail_app_password" not in data:
+            data["gmail_app_password"] = bool(data.get("gmail_imap") or data.get("gmail_pop"))
         return JSONResponse(data)
     except Exception as exc:
         logger.exception("email status failed")
@@ -87,14 +103,18 @@ async def gmail_connect(body: GmailConnectBody) -> JSONResponse:
 
         os.environ["EMAIL_GMAIL_ADDRESS"] = address
         os.environ["EMAIL_GMAIL_APP_PASSWORD"] = password
-        os.environ["EMAIL_GMAIL_AUTH"] = "app_password"
+        os.environ["EMAIL_GMAIL_AUTH"] = "imap"
+        os.environ.setdefault("EMAIL_IMAP_HOST", "imap.gmail.com")
+        os.environ.setdefault("EMAIL_SMTP_HOST", "smtp.gmail.com")
         vault_store("email.gmail.address", address, category="email")
         vault_store("email.gmail.app_password", password, category="email")
+        vault_store("email.gmail.auth", "imap", category="email")
         return JSONResponse(
             {
                 "ok": True,
                 "address": address,
-                "message": "Gmail app password saved. Prefer OAuth if Workspace blocks app passwords.",
+                "protocol": "imap",
+                "message": "Gmail IMAP (app password) saved. Prefer OAuth if Workspace blocks app passwords.",
             }
         )
     except Exception as exc:
@@ -105,22 +125,9 @@ async def gmail_connect(body: GmailConnectBody) -> JSONResponse:
 @router.post("/gmail/disconnect")
 async def gmail_disconnect() -> JSONResponse:
     try:
-        from kazma_skills.native.email_manager.oauth_gmail import clear_gmail_oauth
+        from kazma_skills.native.email_manager.protocol_connect import disconnect_protocol
 
-        clear_gmail_oauth()
-        os.environ.pop("EMAIL_GMAIL_ADDRESS", None)
-        try:
-            from kazma_core.security.vault import SecretVault, get_vault
-            from kazma_core.paths import vault_db_path
-
-            v = get_vault() or SecretVault(db_path=vault_db_path())
-            try:
-                v.delete("email.gmail.address")
-            except Exception:
-                pass
-        except Exception:
-            pass
-        return JSONResponse({"ok": True, "message": "Gmail credentials cleared."})
+        return JSONResponse(disconnect_protocol("gmail"))
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
@@ -350,3 +357,52 @@ async def email_accounts() -> JSONResponse:
         return JSONResponse({"accounts": rows, "count": len(rows)})
     except Exception as exc:
         return JSONResponse({"accounts": [], "error": str(exc)}, status_code=500)
+
+
+# ── IMAP / POP protocol connect (Gmail, Microsoft, generic) ────────────
+
+
+@router.get("/presets")
+async def email_presets() -> JSONResponse:
+    try:
+        from kazma_skills.native.email_manager.presets import list_presets
+
+        return JSONResponse({"ok": True, "presets": list_presets()})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@router.post("/protocol/connect")
+async def protocol_connect(body: ProtocolConnectBody) -> JSONResponse:
+    try:
+        from kazma_skills.native.email_manager.protocol_connect import connect_protocol
+
+        result = connect_protocol(
+            provider=body.provider,
+            protocol=body.protocol,
+            address=body.address,
+            password=body.password,
+            imap_host=body.imap_host,
+            imap_port=body.imap_port,
+            pop_host=body.pop_host,
+            pop_port=body.pop_port,
+            smtp_host=body.smtp_host,
+            smtp_port=body.smtp_port,
+        )
+        code = 200 if result.get("ok") else 400
+        return JSONResponse(result, status_code=code)
+    except Exception as exc:
+        logger.exception("protocol connect failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@router.post("/protocol/disconnect")
+async def protocol_disconnect(body: ProtocolDisconnectBody) -> JSONResponse:
+    try:
+        from kazma_skills.native.email_manager.protocol_connect import disconnect_protocol
+
+        result = disconnect_protocol(body.provider)
+        code = 200 if result.get("ok") else 400
+        return JSONResponse(result, status_code=code)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)

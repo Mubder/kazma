@@ -126,6 +126,8 @@ async def poll_device_code_flow(device_code: str) -> dict[str, Any]:
     if refresh:
         vault_store("email.microsoft.refresh_token", refresh, category="email")
     vault_store("email.microsoft.client_id", client_id, category="email")
+    os.environ["EMAIL_MS_AUTH"] = "oauth"
+    vault_store("email.microsoft.auth", "oauth", category="email")
 
     _pending.pop(device_code, None)
     logger.info("[email.oauth] Microsoft Graph tokens stored (vault + env)")
@@ -139,22 +141,8 @@ async def poll_device_code_flow(device_code: str) -> dict[str, Any]:
 
 
 def clear_microsoft_tokens() -> dict[str, Any]:
-    """Remove Microsoft tokens from env + vault."""
-    for k in ("EMAIL_MS_ACCESS_TOKEN", "EMAIL_MS_REFRESH_TOKEN"):
-        os.environ.pop(k, None)
-    try:
-        from kazma_core.security.vault import SecretVault, get_vault
-        from kazma_core.paths import vault_db_path
+    """Remove Microsoft OAuth tokens (and protocol password if disconnect-all)."""
+    from kazma_skills.native.email_manager.protocol_connect import disconnect_protocol
 
-        v = get_vault() or SecretVault(db_path=vault_db_path())
-        for name in (
-            "email.microsoft.access_token",
-            "email.microsoft.refresh_token",
-        ):
-            try:
-                v.delete(name)
-            except Exception:
-                pass
-    except Exception as exc:
-        logger.debug("[email.oauth] vault clear: %s", exc)
-    return {"ok": True, "message": "Microsoft Graph tokens cleared."}
+    # Full disconnect: OAuth + IMAP/POP password for Microsoft
+    return disconnect_protocol("microsoft")
