@@ -113,6 +113,25 @@ Your OAuth app is in **Testing**. Google only allows **test users** until the ap
 
 **Workspace:** if the account is a company Google Workspace user, an admin may still block third-party OAuth; use a personal test user or admin-approved app.
 
+#### Error: `Request had insufficient authentication scopes` / `insufficientPermissions`
+
+OAuth “succeeded” but the token only has profile/email (or no Gmail scopes). Gmail API then returns **403**.
+
+**Fix (required — current token will never work until reconnected):**
+
+1. Google Cloud → **APIs & Services** → enable **Gmail API**.  
+2. **OAuth consent screen** → **Data access** / **Scopes** → **Add or remove scopes** → add:
+   - `https://www.googleapis.com/auth/gmail.modify`
+   - `https://www.googleapis.com/auth/gmail.send`  
+   (optional: `…/auth/userinfo.email`)  
+3. Save. Confirm you are a **Test user**.  
+4. Kazma **Settings → Email → Disconnect** Gmail.  
+5. **Connect with Google** again.  
+6. On Google’s consent UI you must see **Gmail** / **Read, compose, send, and permanently delete all your email** (wording varies) — not only “See your email address”. Approve those.  
+7. Retry in chat: *List my inbox*.
+
+If consent only asked for email address, scopes were never added on the Cloud project — fix step 2, then disconnect/reconnect.
+
 ### Microsoft Graph OAuth setup
 
 1. Azure app registration → Web redirect URI:

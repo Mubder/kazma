@@ -68,7 +68,18 @@ class GmailApiBackend:
                     method, url, headers=self._headers(), json=json_body, params=params
                 )
             if r.status_code >= 400:
-                raise RuntimeError(f"Gmail API {method} {path} → {r.status_code}: {r.text[:300]}")
+                body = (r.text or "")[:400]
+                if r.status_code == 403 and (
+                    "insufficient" in body.lower()
+                    or "PERMISSION_DENIED" in body
+                    or "insufficientPermissions" in body
+                ):
+                    from kazma_skills.native.email_manager.oauth_gmail import SCOPE_FIX_HINT
+
+                    raise RuntimeError(
+                        f"Gmail API 403 insufficient scopes on {method} {path}. {SCOPE_FIX_HINT}"
+                    )
+                raise RuntimeError(f"Gmail API {method} {path} → {r.status_code}: {body}")
             if r.status_code == 204 or not r.content:
                 return {}
             return r.json()

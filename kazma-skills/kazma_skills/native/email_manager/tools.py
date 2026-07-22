@@ -68,6 +68,15 @@ async def email_list(
         return "\n".join(lines)
     except Exception as exc:
         logger.exception("email_list failed")
+        msg = str(exc)
+        if "403" in msg or "insufficient" in msg.lower() or "scope" in msg.lower():
+            return (
+                f"Error listing email: {exc}\n\n"
+                "**Fix:** Settings → Email → Disconnect Gmail, then in Google Cloud "
+                "add Gmail scopes (gmail.modify) on the OAuth consent screen, enable "
+                "Gmail API, reconnect with **Connect with Google**, and approve **Gmail** "
+                "access (not only email address)."
+            )
         return f"Error listing email: {exc}"
 
 
