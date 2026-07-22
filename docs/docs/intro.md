@@ -59,6 +59,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Path | Purpose |
 |------|---------|
 | `docs/audits/` | Security & architecture audits |
+| `docs/plans/` | Implementation plans (e.g. full email integration) |
 | `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` | Full monorepo map (linked from [System map](reference/system-map)) |
 | `docs/DOCS_CONSOLIDATION_PLAN.md` | This docs consolidation plan |
 | `AGENTS.md` | Rules for coding agents working in the repo |
