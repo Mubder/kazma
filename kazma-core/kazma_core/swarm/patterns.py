@@ -163,17 +163,29 @@ async def _run_self_improvement(
                 def __init__(self, r: WorkerResult) -> None:
                     self.role = r.worker
                     self.worker_name = r.worker
-                    self.status = "completed" if r.status == "success" else r.status
+                    # Normalize: engine uses success/error; SI expects completed/failed
+                    rs = (r.status or "").lower()
+                    if rs in ("success", "ok", "completed"):
+                        self.status = "completed"
+                    elif rs in ("error", "failed", "failure", "timeout", "cancelled"):
+                        self.status = "failed" if rs != "timeout" else "timeout"
+                    else:
+                        self.status = rs or "failed"
                     self.output = r.output
                     self.error = r.error
                     self.duration_ms = (getattr(r, "duration_seconds", 0) or 0) * 1000
 
             # Analyze this worker against ONLY its own result
+            task_status = (status or "").lower()
+            if task_status in ("success", "ok"):
+                task_status = "completed"
+            elif task_status in ("error", "failure"):
+                task_status = "failed"
             analysis = await si.analyze(
                 worker_name=res.worker,
                 task=task.prompt,
                 stages=[_WorkerStage(res)],
-                status="completed" if status == "success" else status,
+                status=task_status,
             )
             if analysis.get("action") == "mutate":
                 await si.apply_mutation(res.worker, analysis["delta"])

@@ -101,16 +101,34 @@ class SelfImprovementSkill:
         if not self._enabled:
             return {"action": "skip", "delta": "", "reason": "Self-improvement disabled"}
 
-        # Compute success metrics — count both "failed" and "timeout" as failures
+        # Compute success metrics. Swarm WorkerResult uses status="error" on
+        # failure (not always "failed"); patterns may also pass "timeout".
+        _FAIL = frozenset({"failed", "error", "timeout", "failure", "cancelled"})
+        _OK = frozenset({"completed", "success", "ok"})
         total = len(stages)
-        succeeded = sum(1 for s in stages if getattr(s, "status", "") == "completed")
-        failed = sum(1 for s in stages if getattr(s, "status", "") in ("failed", "timeout"))
+        succeeded = sum(
+            1 for s in stages if str(getattr(s, "status", "") or "").lower() in _OK
+        )
+        failed = sum(
+            1 for s in stages if str(getattr(s, "status", "") or "").lower() in _FAIL
+        )
         success_rate = succeeded / total if total > 0 else 0.0
+        st = str(status or "").lower()
+        # Normalize pipeline-level status: fan-out uses "success", finalize uses "completed"
+        if st in ("success", "ok"):
+            st = "completed"
+        if st in ("error", "failure"):
+            st = "failed"
 
-        if status == "completed" and success_rate >= 1.0:
+        if st == "completed" and success_rate >= 1.0:
             return await self._analyze_success(worker_name, task, stages, success_rate)
-        elif status in ("failed", "partial", "timeout") or success_rate < 0.5:
-            return await self._analyze_failure(worker_name, task, stages, success_rate, failed)
+        elif st in ("failed", "partial", "timeout") or success_rate < 0.5:
+            # If stages used non-standard labels, still treat all non-OK as failures
+            if failed == 0 and total > 0 and succeeded < total:
+                failed = total - succeeded
+            return await self._analyze_failure(
+                worker_name, task, stages, success_rate, failed
+            )
         return {"action": "skip", "delta": "", "reason": f"Mixed results — rate={success_rate:.0%}"}
 
     # ── Success analysis ────────────────────────────────────────────────
@@ -182,13 +200,18 @@ Output ONLY the delta text, no preamble."""
         if failed_count == 0:
             return {"action": "skip", "delta": "", "reason": "No failed stages"}
 
-        # Collect failure details
+        # Collect failure details (WorkerResult.status is often "error")
+        _FAIL = frozenset({"failed", "error", "timeout", "failure", "cancelled"})
         failed_details = []
         for s in stages:
-            if getattr(s, "status", "") == "failed":
+            st = str(getattr(s, "status", "") or "").lower()
+            if st in _FAIL or (failed_count and st not in ("completed", "success", "ok")):
                 role = getattr(s, "role", str(s))
-                error = getattr(s, "error", "")
-                failed_details.append(f"- {role}: {error[:200] if error else 'unknown error'}")
+                error = getattr(s, "error", "") or getattr(s, "output", "") or ""
+                detail = (error[:200] if error else f"status={st or 'unknown'}")
+                failed_details.append(f"- {role}: {detail}")
+        if not failed_details and failed_count:
+            failed_details.append(f"- (aggregate) {failed_count} failed stage(s)")
 
         # Query memory for past failure patterns
         past_context = ""
