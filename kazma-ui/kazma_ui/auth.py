@@ -160,6 +160,13 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/api/",  # default-deny: any /api/* not in ALWAYS_OPEN_* is gated
     "/metrics",
     "/v1/models",
+    # Auto-generated API docs/schema — gate them so the OpenAPI surface
+    # isn't reachable unauthenticated (and the PEP-563 /openapi.json 500
+    # doesn't surface to anonymous visitors). Disabled entirely in prod
+    # via FastAPI(docs_url=None, openapi_url=None) — see app.py.
+    "/docs",
+    "/redoc",
+    "/openapi.json",
     # Admin HTML shells (audit M2)
     "/dashboard",
     "/settings",

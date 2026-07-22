@@ -29,18 +29,17 @@ router = APIRouter(tags=["health"])
 
 def get_health_dependencies():
     """Get all dependencies for health checks.
-    
+
     Returns a dict of component checkers that can be called.
     """
     from kazma_core.config_store import get_config_store
     from kazma_core.swarm import get_swarm_engine
-    from kazma_core.agent_runner import get_agent_runner
     from kazma_core.model_registry import get_registry
-    
+
     return {
         "config_store": get_config_store,
         "swarm_engine": get_swarm_engine,
-        "agent_runner": get_agent_runner,
+        "agent_runner": check_agent_runner,
         "model_registry": get_registry,
     }
 
@@ -88,12 +87,23 @@ def check_model_registry() -> dict[str, Any]:
 
 
 def check_agent_runner() -> dict[str, Any]:
-    """Check AgentRunner availability."""
+    """Check AgentRunner availability (structural — module + class importable).
+
+    ``KazmaAgent`` is constructed on-demand per chat turn (not held as a
+    process singleton), so this verifies the ``agent_runner`` module and
+    ``KazmaAgent`` class import cleanly and that ``get_streaming_graph`` is
+    present. A failure here means the chat subsystem cannot build its graph.
+    """
     try:
-        from kazma_core.agent_runner import get_agent_runner
-        runner = get_agent_runner()
-        if runner is None:
-            return {"status": "not_initialized", "component": "agent_runner"}
+        from kazma_core.agent_runner import KazmaAgent
+
+        # get_streaming_graph is the per-request entry the SSE chat path uses.
+        if not hasattr(KazmaAgent, "get_streaming_graph"):
+            return {
+                "status": "degraded",
+                "component": "agent_runner",
+                "error": "KazmaAgent.get_streaming_graph missing",
+            }
         return {"status": "ok", "component": "agent_runner"}
     except Exception as e:
         logger.error("AgentRunner health check failed: %s", e)

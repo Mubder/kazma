@@ -312,11 +312,22 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Workspace] Failed to configure: %s", e)
 
-        # Create FastAPI app
+        # Create FastAPI app. In production, disable the auto-generated docs
+        # and OpenAPI schema: (1) the schema currently throws 500 under
+        # `from __future__ import annotations` (PEP 563 ForwardRef on bare
+        # `Response` return types — a known FastAPI/Pydantic-v2 interaction),
+        # and (2) the API surface should not be internet-exposed. Dev/loopback
+        # builds keep them. Docs/redoc are never mounted in prod.
+        _prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+            "1", "true", "on", "yes",
+        )
         self.app = FastAPI(
             title="Kazma",
             version=self.config.version,
             description="Autonomous AI Agent Framework — Arabic RTL Dashboard",
+            docs_url=None if _prod else "/docs",
+            redoc_url=None if _prod else "/redoc",
+            openapi_url=None if _prod else "/openapi.json",
         )
 
         # Register services in Dependency Injection Container
