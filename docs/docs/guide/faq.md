@@ -24,7 +24,16 @@ Arabic, RTL (`agent.language: ar`, `agent.rtl: true`). Set to `en` for English. 
 
 ### How do I connect Gmail or Microsoft email?
 
-See [Email integration](email-integration). Sandbox works with no setup. Gmail uses an app password; Microsoft uses Graph (device-code OAuth via `POST /api/email/oauth/microsoft/device/start` or env tokens). Mutating tools need HITL approval.
+See [Email integration](email-integration). Sandbox works with no setup.
+
+**Settings → Email** (`/settings?tab=email`) has a mode switcher per provider: **OAuth | IMAP | POP**.
+
+| Provider | Recommended | Alternatives |
+|----------|-------------|--------------|
+| **Gmail** | Browser **OAuth** (Gmail API) — Google Cloud OAuth Web client + Test user + `gmail.modify` scopes | IMAP/POP with a **Google App Password** (not your normal password) |
+| **Microsoft 365** | Browser **OAuth** (Graph) or device-code fallback | IMAP/POP to `outlook.office365.com` if the tenant still allows basic auth |
+
+Mutating tools (`email_send`, `email_delete`, `email_categorize`) need HITL approval. If Gmail returns **403 insufficient scopes**, add Gmail scopes on the OAuth consent screen, Disconnect, and Connect again.
 
 ### How do I make the agent research the web?
 

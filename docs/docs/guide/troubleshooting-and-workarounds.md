@@ -769,6 +769,36 @@ With `KAZMA_PRODUCTION=1`, YOLO is hard-blocked unless `KAZMA_ALLOW_YOLO=1` (avo
 
 ---
 
+## 16. Email (Gmail / Microsoft)
+
+Full guide: [Email integration](email-integration).
+
+### 16.1 Google: “has not completed the Google verification process” / `access_denied`
+
+**Cause:** OAuth consent app is in **Testing**; only listed test users can sign in.
+
+**Fix:** Cloud Console → OAuth consent screen → **Test users** → add your Gmail. Continue past the unverified-app warning (expected for self-hosted).
+
+### 16.2 Gmail API `403 insufficient authentication scopes` / `insufficientPermissions`
+
+**Cause:** Token has profile/email only — Gmail mail scopes were not granted (or not listed on the consent screen).
+
+**Fix:** Enable **Gmail API**. Consent screen → scopes → add `https://www.googleapis.com/auth/gmail.modify` and `…/gmail.send`. Settings → Email → **Disconnect** → **Connect with Google** → approve **Gmail** access (not only “See your email address”).
+
+### 16.3 IMAP/POP rejects Gmail password
+
+**Cause:** Google does not accept normal account passwords for IMAP/POP.
+
+**Fix:** Use a Google **App Password** (2FA required) or prefer **OAuth**.
+
+### 16.4 Microsoft IMAP/POP fails on M365
+
+**Cause:** Many tenants disable basic auth.
+
+**Fix:** Use **Microsoft Graph OAuth** (Settings → Email → OAuth).
+
+---
+
 ## Documentation Audit Notes
 
 This file consolidates audits plus the former operator guide (`archive/docs-loose/TROUBLESHOOTING.md` — folded into §1.6–1.9 and §9–14). Gotchas:

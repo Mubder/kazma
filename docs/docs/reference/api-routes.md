@@ -53,6 +53,28 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | * | `/api/settings*`, config export | Admin/operator | ConfigStore-backed settings UI |
 | * | Workspace routes `/api/workspaces*` | Session | WorkspaceStore CRUD |
 
+## Email (`email_api.py`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/email/status` | Session | Active provider, auth modes, presets summary |
+| GET | `/api/email/accounts` | Session | Multi-account aliases (env) |
+| GET | `/api/email/presets` | Session | Gmail/Microsoft IMAP/POP host presets |
+| POST | `/api/email/protocol/connect` | Session | Save IMAP/POP for gmail\|microsoft\|generic |
+| POST | `/api/email/protocol/disconnect` | Session | Clear protocol + OAuth tokens for provider |
+| POST | `/api/email/gmail/connect` | Session | Gmail app-password → IMAP |
+| POST | `/api/email/gmail/disconnect` | Session | Clear Gmail creds |
+| POST | `/api/email/oauth/gmail/client` | Session | Save Google OAuth client id/secret |
+| GET | `/api/email/oauth/gmail/start` · `start.json` | Session | Browser OAuth redirect / JSON |
+| GET | `/api/email/oauth/gmail/callback` | Open (OAuth) | Token exchange; redirects to Settings |
+| POST | `/api/email/oauth/microsoft/client` | Session | Save Azure app id/secret |
+| GET | `/api/email/oauth/microsoft/start` · `start.json` | Session | Browser OAuth |
+| GET | `/api/email/oauth/microsoft/callback` | Open (OAuth) | Token exchange |
+| POST | `/api/email/oauth/microsoft/device/start` · `…/poll` | Session | Device-code fallback |
+| POST | `/api/email/oauth/microsoft/disconnect` | Session | Clear Microsoft tokens |
+
+Agent mail ops use tools (`email_list`, …), not these HTTP routes. Guide: [Email integration](../guide/email-integration).
+
 ## Gateways & platforms
 
 | Method | Path | Auth | Description |

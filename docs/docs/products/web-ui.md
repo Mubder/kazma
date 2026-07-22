@@ -25,7 +25,7 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 |------|------|---------|
 | Chat | `/` or chat route | SSE streaming agent chat (`sse_chat.py`, `streaming.js`) |
 | Dashboard | `/dashboard` | Observability: cost, tokens, tool calls, cost breaker, uptime, traces |
-| Settings | `/settings` | Models, providers, safety, account |
+| Settings | `/settings` | Models, providers, safety, account, **Email** (`?tab=email`) |
 | Swarm / Command Center | `/swarm` | Workers, live tasks, dispatch UI |
 | IDE | `/ide` | Workspace files, run, git, AI-assisted edit |
 | Login | `/login` | Secret / local user / OIDC |
@@ -45,6 +45,18 @@ Cards are fed by the in-memory **`TraceStore`** (LLM/tool traces) plus the **cos
 `GET /api/dashboard/status` and WebSocket `/ws/dashboard` push numeric metrics (legacy string forms like `"$0.00"` / `"1,234"` are parsed safely in `dashboard.js`). Chat footer token/cost on a turn still comes from the SSE `done` event for that session.
 
 Research / scrape runs through **chat tools** (see [Web research](../guide/web-research)), not a separate dashboard action.
+
+## Email (Settings → Email)
+
+Connect real mailboxes for the agent without env-only setup:
+
+| Card | Modes |
+|------|--------|
+| Sandbox | Always on (demo SQLite mailbox) |
+| Gmail / Workspace | **OAuth** (Gmail API) · **IMAP** · **POP** |
+| Microsoft 365 | **OAuth** (Graph browser or device code) · **IMAP** · **POP** |
+
+API: `/api/email/status`, OAuth start/callback, `POST /api/email/protocol/connect`. Full guide: [Email integration](../guide/email-integration).
 
 ## Auth
 

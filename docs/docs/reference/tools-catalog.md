@@ -43,7 +43,7 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `summarize_research_file` | search | safe/read | Light extractive outline (per-chunk previews). |
 | `digest_research_file` | search | safe/read | Process all chunks in-tool; return one bounded extractive digest (context-safe). |
 | `crawl_site` | search | safe/read | Bounded same-domain multi-page crawl; saves pages + markdown index. |
-| `email_list` | email | safe/read | List/search mailbox folder (sandbox / Gmail / Graph / IMAP). |
+| `email_list` | email | safe/read | List/search mailbox folder (sandbox / Gmail OAuth / Graph / IMAP / POP). |
 | `email_get` | email | safe/read | Fetch full message by id. |
 | `email_send` | email | **danger** | Send / reply / forward / draft (HITL). |
 | `email_delete` | email | **danger** | Trash or permanent delete (HITL). |
