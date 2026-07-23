@@ -1096,6 +1096,45 @@ class LocalToolRegistry:
                     "Configure swarm workers in kazma.yaml."
                 )
 
+            # Auto-register a default "researcher" worker if none exist, so
+            # dispatch_swarm works out of the box without manual setup.
+            if not engine.worker_names:
+                try:
+                    from kazma_core.swarm.config import WorkerConfig, WorkerCapabilities
+                    from kazma_core.model_registry import get_model_registry
+
+                    reg = get_model_registry()
+                    profile = reg.get_active_profile()
+                    engine.add_worker(WorkerConfig(
+                        name="researcher",
+                        type="in_process",
+                        model=profile.get("model", ""),
+                        provider=profile.get("provider", ""),
+                        role="researcher",
+                        system_prompt=(
+                            "You are a Researcher worker. Analyze the task "
+                            "thoroughly using available tools (web_search, "
+                            "read_url, crawl_site). Provide comprehensive, "
+                            "well-structured findings."
+                        ),
+                        capabilities=WorkerCapabilities(
+                            role="researcher",
+                            expertise=["research", "analysis", "writing"],
+                            tools=["web_search", "read_url", "crawl_site", "file_write"],
+                        ),
+                    ))
+                    logger.info("[dispatch_swarm] Auto-registered 'researcher' worker")
+                except Exception as exc:
+                    return (
+                        f"Error: No swarm workers registered and could not "
+                        f"auto-create one: {exc}. Add workers in the Swarm "
+                        f"panel or kazma.yaml."
+                    )
+
+            # Resolve "auto" to the first available worker.
+            if worker == "auto":
+                worker = engine.worker_names[0] if engine.worker_names else "researcher"
+
             task = SwarmTask(
                 prompt=prompt,
                 workers=[worker],
