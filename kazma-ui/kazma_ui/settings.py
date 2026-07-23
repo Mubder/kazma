@@ -147,6 +147,7 @@ class SettingsRouterBuilder:
                 "name": config_store.get("agent.name", agent.config.name),
                 "language": config_store.get("agent.language", agent.config.language),
                 "system_prompt": config_store.get("agent.system_prompt", agent.system_prompt),
+                "max_iterations": config_store.get("agent.max_iterations", 15),
             }
             connector_settings = {
                 "telegram_token": "***" if config_store.get("connectors.telegram.token", "") else "",

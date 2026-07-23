@@ -137,14 +137,23 @@ class SupervisorState(TypedDict, total=False):
 def initial_supervisor_state(
     *,
     thread_id: str | None = None,
-    max_iterations: int = 15,
+    max_iterations: int | None = None,
 ) -> SupervisorState:
     """Create a fresh SupervisorState with sensible defaults.
 
     Args:
         thread_id: Stable conversation thread ID.  Auto-generated if omitted.
-        max_iterations: ReAct loop ceiling (default 10).
+        max_iterations: ReAct loop ceiling. If None, reads from ConfigStore
+            key ``agent.max_iterations`` (default 15). Settable via the
+            Web UI Settings page.
     """
+    # Read max_iterations from ConfigStore so it's tunable at runtime.
+    if max_iterations is None:
+        try:
+            from kazma_core.config_store import get_config_store
+            max_iterations = int(get_config_store().get("agent.max_iterations", 15))
+        except Exception:
+            max_iterations = 15
     now = datetime.now(UTC).isoformat()
     return SupervisorState(
         messages=[],

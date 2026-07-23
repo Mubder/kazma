@@ -124,6 +124,25 @@
         .catch(function () { toast('Export request failed', 'error'); });
     },
 
+    del: function (id) {
+      if (!confirm('Delete this research result?')) return;
+      fetch('/api/research/tasks/' + encodeURIComponent(id), {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.error) { toast('Delete failed: ' + data.error, 'error'); return; }
+          toast('Deleted', 'success');
+          if (currentId === id) {
+            $('research-detail').style.display = 'none';
+            currentId = null;
+          }
+          window.KazmaResearch.load();
+        })
+        .catch(function () { toast('Delete failed', 'error'); });
+    },
+
     compare: function () {
       var a = $('research-cmp-a').value;
       var b = $('research-cmp-b').value;
@@ -187,6 +206,7 @@
             '</div>' +
           '</div>' +
           '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(t.status) + '</span>' +
+          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.del(\'' + t.id + '\')" title="Delete">×</button>' +
         '</div>' +
       '</div>';
     }).join('');

@@ -229,4 +229,26 @@ def create_research_router() -> APIRouter:
             media_type="application/octet-stream",
         )
 
+    @router.delete("/api/research/tasks/{task_id}")
+    async def delete_research(task_id: str) -> JSONResponse:
+        """Delete a research task from the TaskStore."""
+        store = _get_store()
+        if store is None:
+            return JSONResponse({"error": "store unavailable"}, status_code=503)
+        try:
+            # TaskStore doesn't have a delete method — use direct SQL.
+            conn = store._get_conn() if hasattr(store, "_get_conn") else None
+            if conn is not None:
+                conn.execute("DELETE FROM swarm_tasks WHERE id = ?", (task_id,))
+                conn.commit()
+            elif hasattr(store, "_pg") and store._pg:
+                from kazma_core.db.pg_helpers import get_pool
+                get_pool().execute("DELETE FROM kazma_swarm_tasks WHERE id = %s", (task_id,))
+            else:
+                return JSONResponse({"error": "cannot access store"}, status_code=500)
+            return JSONResponse({"ok": True, "deleted": task_id})
+        except Exception as exc:
+            logger.exception("[research] delete failed")
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
     return router

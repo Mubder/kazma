@@ -252,6 +252,7 @@ class AgentConfigUpdate(BaseModel):
     language: str | None = None
     system_prompt: str | None = None
     personality: str | None = None
+    max_iterations: int | None = None
 
 
 class SafetySettingsUpdate(BaseModel):
