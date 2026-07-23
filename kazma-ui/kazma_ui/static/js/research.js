@@ -16,6 +16,7 @@
   var pollTimer = null;
 
   function $(id) { return document.getElementById(id); }
+  function i18n(key) { return (window.KAZMA_I18N && window.KAZMA_I18N[key]) || key; }
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -115,7 +116,7 @@
       var a = $('research-cmp-a').value;
       var b = $('research-cmp-b').value;
       if (!a || !b) { toast('Pick two runs', 'error'); return; }
-      $('research-cmp-result').innerHTML = '<div style="padding:1rem;color:var(--text-muted);">Comparing…</div>';
+      $('research-cmp-result').innerHTML = '<div style="padding:1rem;color:var(--text-muted);">' + esc(i18n('research.comparing')) + '</div>';
       fetch('/api/research/compare', {
         method: 'POST',
         credentials: 'same-origin',
@@ -134,10 +135,10 @@
               '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);font-weight:600;">' + esc(delta) + '</td></tr>';
           }
           var html = '<table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.9rem;">' +
-            '<thead><tr><th style="text-align:left;padding:8px;">Metric</th>' +
-            '<th style="text-align:right;padding:8px;">Run A</th>' +
-            '<th style="text-align:right;padding:8px;">Run B</th>' +
-            '<th style="text-align:right;padding:8px;">Delta</th></tr></thead><tbody>' +
+            '<thead><tr><th style="text-align:left;padding:8px;">' + esc(i18n('research.metric')) + '</th>' +
+            '<th style="text-align:right;padding:8px;">' + esc(i18n('research.run_a')) + '</th>' +
+            '<th style="text-align:right;padding:8px;">' + esc(i18n('research.run_b')) + '</th>' +
+            '<th style="text-align:right;padding:8px;">' + esc(i18n('research.delta')) + '</th></tr></thead><tbody>' +
             row('Cost (USD)', d.a_cost.toFixed(4), d.b_cost.toFixed(4), arrow(d.cost_delta.toFixed(4))) +
             row('Tokens', d.a_tokens, d.b_tokens, arrow(d.token_delta)) +
             row('Duration (s)', d.a_duration.toFixed(1), d.b_duration.toFixed(1), arrow(d.duration_delta.toFixed(1))) +
@@ -146,9 +147,9 @@
             row('Output changed', '', '', d.output_changed ? 'yes' : 'no') +
             '</tbody></table>';
           if (d.output_diff) {
-            html += '<h4 style="margin-top:1.5rem;">Text Diff</h4><pre style="background:rgba(0,0,0,0.1);padding:12px;border-radius:6px;font-size:0.8rem;overflow-x:auto;max-height:300px;">' + esc(d.output_diff) + '</pre>';
+            html += '<h4 style="margin-top:1.5rem;">' + esc(i18n('research.text_diff')) + '</h4><pre style="background:rgba(0,0,0,0.1);padding:12px;border-radius:6px;font-size:0.8rem;overflow-x:auto;max-height:300px;">' + esc(d.output_diff) + '</pre>';
           }
-          if (d.identical) html += '<p style="color:var(--success);">✅ Results are identical.</p>';
+          if (d.identical) html += '<p style="color:var(--success);">✅ ' + esc(i18n('research.identical')) + '</p>';
           $('research-cmp-result').innerHTML = html;
         })
         .catch(function () { toast('Compare failed', 'error'); });
@@ -158,7 +159,7 @@
   function renderList(tasks) {
     var el = $('research-list');
     if (!tasks.length) {
-      el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">No research results yet. Ask the agent to research something using the Swarm.</div>';
+      el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research.no_results')) + '</div>';
       return;
     }
     el.innerHTML = tasks.map(function (t) {

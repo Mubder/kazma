@@ -39,15 +39,15 @@
   <!-- ══ TAB: Compare ══ -->
   <div class="tab-panel" id="panel-compare" style="display:none;">
     <div class="card" style="padding:1.5rem;">
-      <p style="color:var(--text-muted);margin-bottom:1rem;">Compare two research runs to see how outputs, cost, and duration differ.</p>
+      <p style="color:var(--text-muted);margin-bottom:1rem;">{{ t('research.compare_desc') }}</p>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
-        <label>Run A:
+        <label>{{ t('research.run_a') }}:
           <select id="research-cmp-a" class="form-select" style="min-width:200px;"></select>
         </label>
-        <label>Run B:
+        <label>{{ t('research.run_b') }}:
           <select id="research-cmp-b" class="form-select" style="min-width:200px;"></select>
         </label>
-        <button class="btn btn-primary" onclick="KazmaResearch.compare()">Compare</button>
+        <button class="btn btn-primary" onclick="KazmaResearch.compare()">{{ t('research.tab_compare') }}</button>
       </div>
       <div id="research-cmp-result"></div>
     </div>
@@ -72,5 +72,18 @@
 
 {% block scripts %}
 <script src="/static/js/streaming.js"></script>
+<script>
+window.KAZMA_I18N = {
+  research_compare_desc: "{{ t('research.compare_desc') }}",
+  research_no_results: "{{ t('research.no_results') }}",
+  research_comparing: "{{ t('research.comparing') }}",
+  research_metric: "{{ t('research.metric') }}",
+  research_run_a: "{{ t('research.run_a') }}",
+  research_run_b: "{{ t('research.run_b') }}",
+  research_delta: "{{ t('research.delta') }}",
+  research_text_diff: "{{ t('research.text_diff') }}",
+  research_identical: "{{ t('research.identical') }}",
+};
+</script>
 <script src="/static/js/research.js"></script>
 {% endblock %}
