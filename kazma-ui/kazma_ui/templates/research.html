@@ -1,22 +1,22 @@
 {% extends "base.html" %}
 {% set active_page = "research" %}
-{% block title %}Kazma — Research{% endblock %}
-{% block page_title %}🔍 Research Results{% endblock %}
+{% block title %}Kazma — {{ t('research.title') }}{% endblock %}
+{% block page_title %}🔍 {{ t('research.title') }}{% endblock %}
 
 {% block content %}
 <div class="research-container" style="max-width:1200px;margin:0 auto;">
 
   <div class="tabs" style="margin-bottom:0;">
-    <button class="tab active" data-tab="list" onclick="KazmaResearch.switchTab('list')">Results</button>
-    <button class="tab" data-tab="compare" onclick="KazmaResearch.switchTab('compare')">Compare</button>
-    <button class="tab" data-tab="about" onclick="KazmaResearch.switchTab('about')">About</button>
+    <button class="tab active" data-tab="list" onclick="KazmaResearch.switchTab('list')">{{ t('research.tab_results') }}</button>
+    <button class="tab" data-tab="compare" onclick="KazmaResearch.switchTab('compare')">{{ t('research.tab_compare') }}</button>
+    <button class="tab" data-tab="about" onclick="KazmaResearch.switchTab('about')">{{ t('research.tab_about') }}</button>
   </div>
 
   <!-- ══ TAB: Results List ══ -->
   <div class="tab-panel" id="panel-list" style="display:block;">
     <div style="display:flex;align-items:center;gap:12px;margin:1rem 0;">
-      <input type="text" id="research-search" placeholder="Search research..." class="form-input" style="flex:1;" onkeyup="KazmaResearch.search(event)">
-      <button class="btn btn-secondary" onclick="KazmaResearch.load()">Refresh</button>
+      <input type="text" id="research-search" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;" onkeyup="KazmaResearch.search(event)">
+      <button class="btn btn-secondary" onclick="KazmaResearch.load()">{{ t('research.refresh') }}</button>
     </div>
     <div id="research-list" style="display:grid;gap:8px;"></div>
 

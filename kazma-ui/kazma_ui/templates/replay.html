@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% set active_page = "replay" %}
-{% block title %}Kazma — Time Travel{% endblock %}
-{% block page_title %}🕰️ Time Travel{% endblock %}
+{% block title %}Kazma — {{ t('replay.title') }}{% endblock %}
+{% block page_title %}🕰️ {{ t('replay.title') }}{% endblock %}
 
 {% block content %}
 <div class="replay-container" style="max-width:1200px;margin:0 auto;">
 
   <!-- ── Thread Picker ── -->
   <div class="card" style="margin-bottom:1rem;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-    <label style="font-size:0.85rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Thread</label>
+    <label style="font-size:0.85rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">{{ t('replay.thread') }}</label>
     <select id="replay-thread-select" class="form-select" style="min-width:280px;" onchange="KazmaReplay.loadTimeline(this.value)">
-      <option value="">— Select a thread —</option>
+      <option value="">{{ t('replay.select_thread') }}</option>
     </select>
     <button class="btn btn-secondary" onclick="KazmaReplay.loadThreads()" title="Refresh">
       <span class="ki" data-icon="refresh" aria-hidden="true"></span>
@@ -20,9 +20,9 @@
 
   <!-- ── Tabs ── -->
   <div class="tabs" style="margin-bottom:0;">
-    <button class="tab active" data-tab="timeline" onclick="KazmaReplay.switchTab('timeline')">Timeline</button>
-    <button class="tab" data-tab="diff" onclick="KazmaReplay.switchTab('diff')">Compare</button>
-    <button class="tab" data-tab="about" onclick="KazmaReplay.switchTab('about')">About</button>
+    <button class="tab active" data-tab="timeline" onclick="KazmaReplay.switchTab('timeline')">{{ t('replay.tab_timeline') }}</button>
+    <button class="tab" data-tab="diff" onclick="KazmaReplay.switchTab('diff')">{{ t('replay.tab_diff') }}</button>
+    <button class="tab" data-tab="about" onclick="KazmaReplay.switchTab('about')">{{ t('replay.tab_about') }}</button>
   </div>
 
   <!-- ══ TAB: Timeline ══ -->
@@ -39,8 +39,8 @@
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
           <h3 style="margin:0;" id="replay-detail-title">Snapshot detail</h3>
           <div style="display:flex;gap:8px;">
-            <button class="btn btn-primary" onclick="KazmaReplay.restoreCurrent()" title="Rewind the live thread to this snapshot">Restore here</button>
-            <button class="btn btn-secondary" onclick="KazmaReplay.forkCurrent()" title="Branch into a new thread (original stays intact)">Fork</button>
+            <button class="btn btn-primary" onclick="KazmaReplay.restoreCurrent()" title="{{ t('replay.restore') }}">{{ t('replay.restore') }}</button>
+            <button class="btn btn-secondary" onclick="KazmaReplay.forkCurrent()" title="{{ t('replay.fork') }}">{{ t('replay.fork') }}</button>
           </div>
         </div>
         <div id="replay-detail-meta" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;"></div>
