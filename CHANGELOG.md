@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Unreleased — Research system + chat→swarm bridge + fixes (2026-07-24)
+
+### Chat→Swarm bridge
+- **`dispatch_swarm`** tool: dispatches through `SwarmEngine.dispatch()` in the
+  background. Chat-triggered research is now a real Swarm task — visible in
+  the `/swarm` panel with workers, progress, cost, and persisted results.
+  Returns a task ID immediately; agent polls with `check_swarm_task`.
+- **`check_swarm_task`** tool: polls task status and returns the full result
+  (aggregated output + cost + duration) when complete.
+
+### Research Results system
+- **Research panel** (`/research`): browse all research outputs (prompt,
+  worker, cost, duration, full text), compare two runs side-by-side (metric
+  deltas + text diff), and export any result to DOCX/PDF/Markdown.
+- **`compare_task_results()`**: diff function modeled on
+  `ReplayEngine.compare_replays` — cost/token/duration deltas + difflib text diff.
+- **`metadata_filter`** on `TaskStore.list_tasks`: SQLite `json_extract` +
+  Postgres `@>` JSONB — enables `?kind=research` filtering.
+- Tasks tagged with `metadata={"kind": "research"}` at dispatch time.
+
+### Fixes
+- **Circuit breaker dead-loop**: tripped breaker routed to SUPERVISOR instead
+  of RESPOND → 10 wasted iterations, empty response. Now routes to RESPOND.
+  Also: empty search results no longer count as failures (only `is_error`);
+  threshold raised 2→3.
+- **Tool kwargs filter**: LLM-injected extra args (e.g. `raw`) that the
+  function doesn't accept caused `TypeError`. Now filtered via
+  `inspect.signature()` before calling.
+
 ## Unreleased — Time Travel Replay (2026-07-23)
 
 Full time-travel replay system — snapshot every supervisor iteration, rewind,

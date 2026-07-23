@@ -28,6 +28,7 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 | Settings | `/settings` | Models, providers, safety, account, **Email** (`?tab=email`) |
 | Swarm / Command Center | `/swarm` | Workers, live tasks, dispatch UI |
 | Time Travel | `/replay` | Snapshot timeline browser, restore (rewind), fork (branch), compare diff, live SSE snapshot events |
+| Research | `/research` | Research results browser, side-by-side comparison, export to DOCX/PDF/Markdown |
 | IDE | `/ide` | Workspace files, run, git, AI-assisted edit |
 | Login | `/login` | Secret / local user / OIDC |
 

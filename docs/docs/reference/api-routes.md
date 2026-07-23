@@ -47,6 +47,8 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | GET | `/swarm` | Session | Swarm panel page |
 | * | `/api/replay/*` | Session | Time travel: threads, snapshots, restore, fork, compare, clear (`replay_routes.py`) |
 | GET | `/replay` | Session | Time Travel panel page |
+| * | `/api/research/*` | Session | Research: list, detail, compare, export (`research_panel/routes.py`) |
+| GET | `/research` | Session | Research panel page |
 
 ## Settings & config
 
