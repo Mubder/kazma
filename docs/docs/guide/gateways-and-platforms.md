@@ -51,7 +51,7 @@ flowchart LR
 | Receive | Manual `getUpdates` **long-polling** (HTTP), 1-3 s jitter; optional webhook router `create_webhook_router()` mounted at `/api/webhooks/telegram`. |
 | Send | `POST /sendMessage` with HTML `parse_mode`, 429 retry, message chunking. |
 | Context keys | `chat_id` (int), `user_id` (int), `username` (str), `message_id` (int), `chat_type` (str). |
-| Extras | Voice/STT (`telegram_stt.py`), inline keyboards (`telegram_keyboards.py`), reactions (✅/🎯/❌), typing indicator, registered command menu via `setMyCommands`. |
+| Extras | Voice/STT (`telegram_stt.py`), inline keyboards (`telegram_keyboards.py`), reactions (✅/🎯/❌), typing indicator, registered command menu via `setMyCommands`, inbound photo/document/video/animation capture, outbound `sendPhoto`/`sendDocument`/`sendVideo`/`sendAudio`. |
 | Helper modules | `telegram_callbacks.py`, `telegram_keyboards.py`, `telegram_parse.py`, `telegram_send.py`, `telegram_stt.py`. |
 
 Telegram is the **most feature-complete** adapter.
@@ -179,7 +179,9 @@ The full SSE event contract (`token`, `tool_call`, `tool_result`, `approval_requ
 | HITL approval buttons | ✅ | ✅ | ✅ | ✅ | modal |
 | Markdown rendering | → Telegram HTML | plain text | plain text | client-side | plain |
 | Slash commands | full set (registered) | plain-text parse | `hitl` w/o `/` | UI buttons | — |
-| Voice / STT | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Voice / STT (inbound transcribe) | ✅ | ✅ | ✅ | ✅ `/api/voice/stt` | — |
+| Voice / TTS (outbound reply) | ✅ | ✅ | ✅ | ✅ `/api/voice/tts` | — |
+| Media in/out (photo/doc/video) | ✅ | ✅ | ✅ | ✅ `/api/chat/upload` | — |
 | Typing indicator | ✅ | ✅ | ✅ | n/a | n/a |
 | Reactions | ✅ ✅/🎯/❌ | ❌ | ❌ | n/a | n/a |
 | Model selector UI | ✅ inline keyboard | ❌ | ❌ | ✅ settings | read-only |

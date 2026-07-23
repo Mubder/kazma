@@ -80,7 +80,7 @@ The full default file (`kazma.yaml`) with every key, type, and default. Line num
 |---|---|---|---|
 | `mcp.servers` | list | see below | MCP server definitions. |
 | `mcp.servers[].name` | string | — | Server identifier. |
-| `mcp.servers[].transport` | string | `stdio` | `stdio` or `sse`. SSE supports an `auth` field (bearer/custom header). |
+| `mcp.servers[].transport` | string | `stdio` | `stdio`, `sse`, or `streamable_http` (alias `http`). SSE and streamable_http support an `auth` field (bearer/custom header); streamable_http also tracks `Mcp-Session-Id` for resumable sessions (MCP 2025-03-26 spec). |
 | `mcp.servers[].trust` | string | `trusted` | **Plain config string — not consumed by any trust-tier code.** |
 | `mcp.servers[].command` | list | — | argv for stdio spawn. |
 | `mcp.ide_server.enabled` | bool | `true` | Enable the in-process IDE/file MCP server. |
@@ -146,8 +146,9 @@ Multi-line string. The default is Arabic-aware: "You are Kazma (كاظمه), an 
 | `gateway.rate_limits.discord` | int | `5` | Requests per window. |
 | `gateway.rate_limits.slack` | int | `1` | Requests per window. |
 | `gateway.suggestions.enabled` | bool | `true` | Suggested-followup UI. |
-| `gateway.voice.enabled` | bool | `false` | Voice/STT (Telegram only). |
-| `gateway.voice.provider` | string | `openai` | One of `openai`, `local`, `groq`. |
+| `gateway.voice.enabled` | bool | `false` | Voice (STT inbound + TTS outbound) across **all platforms** (Telegram, Discord, Slack) + Web. Also settable at runtime via the Settings UI. |
+| `gateway.voice.stt_provider` | string | `openai` | Speech-to-text provider: `openai`, `groq`, `cohere`, `nvidia`, or `faster-whisper` (local). |
+| `gateway.voice.tts_provider` | string | `edgetts` | Text-to-speech provider: `edgetts` (free, default), `openai`, `nvidia`, `kokoro` (local), `coqui` (local). |
 
 ### `safety.hitl` (lines 81-96)
 
@@ -309,26 +310,33 @@ Keys are stored per-provider in ConfigStore `providers.list` (each entry has `ap
 
 ### 5.2 Built-in provider presets
 
-From `kazma-core/kazma_core/providers.py:13-84`:
+From `kazma-core/kazma_core/providers.py`. Most presets speak the OpenAI Chat Completions wire format and work through the generic `LLMProvider` (Bearer auth). **Four providers have dedicated native classes** (see [LLM Providers](../reference/llm-providers)) because their auth/schema differs: `google` → `GeminiProvider`, `anthropic` → `AnthropicProvider` (native `/messages` API), `azure` → `AzureProvider` (`api-key` header + `api-version`), `bedrock` → `BedrockProvider` (AWS SigV4 + Converse API).
 
-| Key | Display name | `base_url` | `auth_header` |
-|---|---|---|---|
-| `openai` | OpenAI | `https://api.openai.com/v1` | `Bearer` |
-| `anthropic` | Anthropic | `https://api.anthropic.com/v1` | `x-api-key` |
-| `deepseek` | DeepSeek | `https://api.deepseek.com/v1` | `Bearer` |
-| `google` | Google Gemini | *(computed per project/location)* | `Bearer` |
-| `xai` | xAI / Grok | `https://api.x.ai/v1` | `Bearer` |
-| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | `Bearer` |
-| `ollama` | Ollama (Local) | `http://127.0.0.1:11434/v1` | *(none)* |
-| `lm-studio` | LM Studio (Local) | `http://localhost:1234/v1` | *(none)* |
-| `nvidia` | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | `Bearer` |
-| `custom` | Custom Endpoint | *(blank)* | `Bearer` |
+| Key | Display name | `base_url` | `auth_header` | Native class? |
+|---|---|---|---|---|
+| `openai` | OpenAI | `https://api.openai.com/v1` | `Bearer` | no |
+| `anthropic` | Anthropic | `https://api.anthropic.com/v1` | `x-api-key` | **yes** — `AnthropicProvider` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com/v1` | `Bearer` | no |
+| `google` | Google Gemini | *(computed per project/location)* | `Bearer` | **yes** — `GeminiProvider` |
+| `xai` | xAI / Grok | `https://api.x.ai/v1` | `Bearer` | no |
+| `openrouter` | OpenRouter | `https://openrouter.ai/api/v1` | `Bearer` | no |
+| `groq` | Groq | `https://api.groq.com/openai/v1` | `Bearer` | no |
+| `mistral` | Mistral AI | `https://api.mistral.ai/v1` | `Bearer` | no |
+| `together` | Together AI | `https://api.together.xyz/v1` | `Bearer` | no |
+| `cohere` | Cohere | `https://api.cohere.ai/v1` | `Bearer` | no |
+| `fireworks` | Fireworks AI | `https://api.fireworks.ai/inference/v1` | `Bearer` | no |
+| `perplexity` | Perplexity | `https://api.perplexity.ai` | `Bearer` | no |
+| `ai21` | AI21 Labs | `https://api.ai21.com/studio/v1` | `Bearer` | no |
+| `nvidia` | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | `Bearer` | no |
+| `azure` | Azure OpenAI | *(computed from resource + deployment)* | `api-key` | **yes** — `AzureProvider` |
+| `bedrock` | AWS Bedrock | *(computed from region)* | `Bearer` (SigV4) | **yes** — `BedrockProvider` |
+| `ollama` | Ollama (Local) | `http://127.0.0.1:11434/v1` | *(none)* | no |
+| `lm-studio` | LM Studio (Local) | `http://localhost:1234/v1` | *(none)* | no |
+| `custom` | Custom Endpoint | *(blank)* | `Bearer` | no |
 
 Hardcoded `GEMINI_MODELS` (Vertex AI has no static `/models` endpoint): `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.0-flash`, `gemini-2.0-flash-lite`.
 
 > **Default-enabled provider:** Only `google` is `enabled=True` out of the box (`model_registry_store.py:117`). All others must be configured before use. `custom` is excluded from preset seeding.
-
-> **Anthropic auth caveat:** The preset declares `auth_header: x-api-key`, but `LLMProvider.chat()` always sends `Authorization: Bearer`. The preset header only takes effect during `discover_models()`. For chat, Anthropic may require routing through an OpenAI-compatible proxy.
 
 ### 5.3 Model discovery
 

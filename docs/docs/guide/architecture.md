@@ -154,7 +154,18 @@ Key invariants enforced along this path:
 
 ## 5. The LLM provider layer
 
-`kazma-core/kazma_core/llm_provider.py` is a thin, **SDK-free** `httpx` client. It speaks the OpenAI Chat Completions wire format to anything compatible.
+`kazma-core/kazma_core/llm_provider.py` is a thin, **SDK-free** `httpx` client. It speaks the OpenAI Chat Completions wire format to anything compatible. Most providers (OpenAI, DeepSeek, Groq, Mistral, Together, Cohere, Fireworks, Perplexity, AI21, xAI, OpenRouter, NVIDIA NIM, Ollama, LM Studio) work through this generic `LLMProvider` with `Authorization: Bearer`.
+
+Four providers have **dedicated native classes** (their auth or request schema differs from the OpenAI wire format) and are dispatched in `model_registry.get_client()` / `get_model()` / `get_client_by_provider()`:
+
+| Provider | Class | Why native |
+|---|---|---|
+| Google Gemini | `GeminiProvider` (`google_llm.py`) | Vertex AI, ADC, computed base URL |
+| Anthropic | `AnthropicProvider` (`anthropic_llm.py`) | `/messages` schema, `x-api-key` + `anthropic-version` |
+| Azure OpenAI | `AzureProvider` (`azure_llm.py`) | `api-key` header + `api-version` query param, deployment routing |
+| AWS Bedrock | `BedrockProvider` (`bedrock_llm.py`) | SigV4 signing + Converse API |
+
+See [LLM Providers](../reference/llm-providers) for the full list and setup.
 
 ### 5.1 Provider resolution
 

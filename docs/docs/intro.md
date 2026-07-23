@@ -17,9 +17,12 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 |------------|--------|
 | Install and send a first message | [Quickstart](guide/quickstart) |
 | Understand the engine | [Architecture](guide/architecture) |
-| Configure providers / YAML / env | [Configuration](guide/configuration) · [Environment variables](reference/environment-variables) |
+| Configure providers / YAML / env | [Configuration](guide/configuration) · [LLM providers](reference/llm-providers) · [Environment variables](reference/environment-variables) |
 | Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) |
 | Use tools safely | [Tools catalog](reference/tools-catalog) · [Security & HITL](guide/security-and-safety) |
+| Use built-in skills (browser, calendar, docs, …) | [Native skills](guide/native-skills) |
+| Send voice / images / documents | [Voice & media](guide/voice-and-media) |
+| Connect MCP servers (stdio/sse/streamable_http) | [Skills, MCP & tools](guide/skills-mcp-and-tools) |
 | Web search / scrape / research | [Web research](guide/web-research) |
 | Email (Gmail / Microsoft / sandbox) | [Email integration](guide/email-integration) |
 
@@ -29,6 +32,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 
 - [Quickstart](guide/quickstart) · [Architecture](guide/architecture) · [Configuration](guide/configuration)
 - [Gateways & platforms](guide/gateways-and-platforms) · [CLI](guide/cli-reference) · [Skills, MCP & tools](guide/skills-mcp-and-tools)
+- [Native skills](guide/native-skills) · [Voice & media](guide/voice-and-media)
 - [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Security](guide/security-and-safety)
 - [Web research](guide/web-research) · [Email](guide/email-integration) · [Arabic & cultural](guide/arabic-cultural-features) · [Deployment](guide/deployment) · [Development](guide/development)
 - [Troubleshooting](guide/troubleshooting-and-workarounds) · [FAQ](guide/faq) · [Glossary](guide/glossary) · [Roadmap](guide/roadmap-and-future)
@@ -40,7 +44,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 
 ### Reference (exhaustive catalogs)
 
-- [Tools catalog](reference/tools-catalog) · [Slash commands](reference/slash-commands)
+- [Tools catalog](reference/tools-catalog) · [LLM providers](reference/llm-providers) · [Slash commands](reference/slash-commands)
 - [Environment variables](reference/environment-variables) · [API routes](reference/api-routes)
 - [Skill manifest](reference/skill-manifest) · [System map](reference/system-map)
 
@@ -69,4 +73,4 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 
 ## Honesty policy
 
-Docs distinguish **what the code does today** from **planned / library-only** features. Unwired packages (e.g. `delegation/*`) are labeled — see [Roadmap](guide/roadmap-and-future) and audits `UNWIRED_INVENTORY.md`.
+Docs distinguish **what the code does today** from **planned / library-only** features. Retired/unwired code is moved to `archive/` (e.g. the former `delegation/*` package) — see [Roadmap](guide/roadmap-and-future) and audits `UNWIRED_INVENTORY.md`.

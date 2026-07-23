@@ -15,6 +15,8 @@ const sidebars = {
         'guide/gateways-and-platforms',
         'guide/cli-reference',
         'guide/skills-mcp-and-tools',
+        'guide/native-skills',
+        'guide/voice-and-media',
         'guide/web-research',
         'guide/email-integration',
         'guide/api-and-extension-points',
@@ -45,6 +47,7 @@ const sidebars = {
       label: 'Reference',
       items: [
         'reference/tools-catalog',
+        'reference/llm-providers',
         'reference/slash-commands',
         'reference/environment-variables',
         'reference/api-routes',

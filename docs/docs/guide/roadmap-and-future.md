@@ -95,12 +95,13 @@ Items are marked:
 | Discord adapter | ✅ | Gateway WebSocket. |
 | Slack adapter | ✅ | Socket Mode / polling. |
 | Web UI (SSE) | ✅ | `/api/chat/stream`. |
-| WebSocket chat | 🔴 | `/ws/chat` returns 410 Gone. |
+| WebSocket chat | ✅ | Legacy `/ws/chat` removed; SSE `/api/chat/stream` is the sole transport. |
 | TUI | ✅ | Textual, read-mostly. |
 | EN/AR i18n + RTL | ✅ | Inline dict, Calibri + 16px base. |
 | Majlis protocol | ✅ | `majlis.py` (core), not a UI toggle. |
-| Voice on Discord/Slack/Web | 🔴 | Telegram only. |
-| `/undo`, `/edit` slash commands | 🔴 | Stubs. |
+| Voice on Discord/Slack/Web | ✅ | STT + TTS wired into all platforms via `voice_helpers.py` (was Telegram-only). |
+| Media / attachments (photo/doc/video) | ✅ | `Attachment` contract on `IncomingMessage`/`OutboundMessage`; inbound+outbound on all platforms + Web `/api/chat/upload`. |
+| `/undo`, `/edit` slash commands | ✅ | Handled by the graph (`_handle_undo`/`_handle_edit` mutate checkpoint state). |
 
 ---
 
@@ -108,15 +109,16 @@ Items are marked:
 
 | Capability | Status | Notes |
 |---|---|---|
-| OpenAI-compatible providers (10 presets) | ✅ | `providers.py`. |
+| OpenAI-compatible providers (18 presets) | ✅ | `providers.py` — incl. Mistral/Together/Cohere/Fireworks/Perplexity/AI21/Groq/xAI/OpenRouter/NVIDIA. |
+| Native non-OpenAI providers | ✅ | `AnthropicProvider` (`/messages`), `AzureProvider` (`api-key`+`api-version`), `BedrockProvider` (SigV4 + Converse), `GeminiProvider` (ADC). See [LLM Providers](../reference/llm-providers). |
 | Google Vertex AI (ADC) | ✅ | `google_llm.py`. |
 | Local servers (Ollama/LM Studio) | ✅ | Dummy-key handling. |
-| MCP (stdio + SSE) | ✅ | `mcp/manager.py`. |
+| MCP (stdio + SSE + Streamable HTTP) | ✅ | `mcp/manager.py` — Streamable HTTP (MCP 2025-03-26 spec) with `Mcp-Session-Id` resumption. |
 | Skill Hub (registry, signing, certification) | ✅ | `hub/`. |
 | Langfuse tracing | 🟡 | Dependency present; `logging.langfuse.enabled` flag; integration not active. |
 | OpenTelemetry | 🟡 | `[tracing]` extra has exporters; Kazma's own tracing is in-house spans, not OTel. |
 | Cloudflare Pages / edge | 🔴 | Not applicable — stateful Python service. |
-| PostgreSQL / Redis | 🔴 | Only referenced in `kubernetes/hub-*.yaml` (Hub API), not the main agent. |
+| PostgreSQL (main agent) | ✅ | First-class backend for ConfigStore/sessions/swarm/checkpoints; HITL pending-approvals enumerate Postgres threads (`hitl_approval.py`). |
 
 ---
 
@@ -134,25 +136,21 @@ Items are marked:
 
 ---
 
-## 9. Suggested next steps (updated post-overhaul)
+## 9. Suggested next steps
 
-The memory overhaul closed items #1–4 below. Remaining items:
+The memory overhaul closed items #1–4; the capability-expansion sprint closed #6–10. Remaining open items:
 
-1. ~~**Wire `memory_store` into `create_authority()`**~~ ✅ **Done** (Phase 1) — compaction now retrieves + injects memories.
-2. ~~**Fix `search_backend.py`**~~ ✅ **Done** (Phase 2) — vec detection + cosine distance in Python.
-3. ~~**Fix the 4-layer adapter**~~ ✅ **Done** (Phase 2) — L1 import typo + caller bug fixed.
-4. ~~**Add a document chunker**~~ ✅ **Done** (Phase 3) — 2000-char chunks with 200-char overlap.
+1. ~~**Wire `memory_store` into `create_authority()`**~~ ✅ Done — compaction retrieves + injects memories.
+2. ~~**Fix `search_backend.py`**~~ ✅ Done — vec detection + cosine distance in Python.
+3. ~~**Fix the 4-layer adapter**~~ ✅ Done — L1 import typo + caller bug fixed.
+4. ~~**Add a document chunker**~~ ✅ Done — 2000-char chunks with 200-char overlap.
 5. **Add 429 backoff** to the retry layer (or document the proxy requirement more loudly).
-6. **Auto-wire `CostCircuitBreaker`** into the agent loop so runaway spend is actually halted.
-7. **Sync the version strings** (`pyproject.toml`, `kazma.yaml`, CLI `--help`).
-8. **Resolve the OpenTelemetry question** — either remove the dead OTel code + `[tracing]` extra (6 unused packages), or wire it properly with a `logging.opentelemetry.enabled` config flag.
-9. **Add Prometheus `/metrics`** or commit to the Langfuse/OTel path.
-10. ~~**Remove the dead WebSocket endpoint**~~ / **Remove stub `/undo`/`/edit`** commands to reduce user confusion.
-6. **Auto-wire `CostCircuitBreaker`** into the agent loop so runaway spend is actually halted.
-7. **Sync the version strings** (`pyproject.toml`, `kazma.yaml`, CLI `--help`).
-8. **Add Prometheus `/metrics`** or commit to the OTel path and wire it.
-9. **Reconcile the K8s manifests** with the main agent (or move them under a `hub/` subdir clearly labelled as the Hub API).
-10. **Remove the dead `/ws/chat` endpoint** or the stub `/undo`/`/edit` commands to reduce user confusion.
+6. ~~**Auto-wire `CostCircuitBreaker`**~~ ✅ Done — instantiated per-agent and driven on the live loop (`agent_runner.py`, `graph_builder.py`).
+7. ~~**Sync the version strings**~~ ✅ Done — `pyproject.toml`, `kazma.yaml`, gateway, TUI all track 0.6.1; parity test added.
+8. **Resolve the OpenTelemetry question** — the dead OTel code + `[tracing]` extra were removed; Langfuse + Console remain as backends. Re-add only if OTLP export becomes a real requirement.
+9. ~~**Prometheus `/metrics`**~~ ✅ Done — `/metrics` + `/api/metrics` emit Prometheus 0.0.4 text (`kazma_ui/metrics.py`).
+10. ~~**Remove dead `/ws/chat` + stub `/undo`/`/edit`**~~ ✅ Done — `/ws/chat` removed; `/undo`/`/edit` now handled by the graph.
+11. **Hosted vector DB** (Pinecone/pgvector/Weaviate) — the local 4-layer RAG stack is fine for single-replica; add a managed backend for multi-replica SaaS.
 
 ---
 
@@ -160,4 +158,4 @@ The memory overhaul closed items #1–4 below. Remaining items:
 
 - This file intentionally resists over-promising. Where README/marketing copy describes a feature that is only partially wired, the status column says 🟡 with the specific reason.
 - The "Suggested next steps" are the audit's opinionated recommendations, prioritized by impact-to-effort ratio. They are not commitments.
-- For the canonical project roadmap, cross-reference `ROADMAP.md` (root) — this file reflects code reality as of v0.6.1+, not marketing futures.
+- This file reflects code reality as of v0.6.1+, not marketing futures.

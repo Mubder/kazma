@@ -14,7 +14,7 @@ description: Kazma Skills, MCP & Tools — code-audited reference (unified docs,
 |---|---|
 | **Tool** | A function the supervisor can call (file ops, shell, memory, web, …). Registered in `ToolRegistry`. |
 | **Skill** | A packaged, optionally-signed Python entry point + manifest that registers one or more tools. Lives under `kazma-skills/manifests/` or the Hub registry. |
-| **MCP server** | An external Model Context Protocol server (stdio or SSE) whose tools are discovered at runtime and proxied into the agent. |
+| **MCP server** | An external Model Context Protocol server (stdio, SSE, or Streamable HTTP) whose tools are discovered at runtime and proxied into the agent. |
 | **Hub** | The skill registry/marketplace (`kazma hub …`) with certification and signing. |
 
 ---
@@ -171,7 +171,8 @@ kazma wizard
 | Transport | Config | Auth |
 |---|---|---|
 | `stdio` | `command: [argv]` — subprocess spawn. | **None.** The subprocess inherits the process environment. |
-| `sse` | `url` + optional `auth` field. | **Yes** — `AsyncMCPManager._connect_sse` (`manager.py:452-505`) supports a first-class `auth` config injecting `Authorization: Bearer &lt;token>` or a custom header (lines 461-466). |
+| `sse` | `url` + optional `auth` field. | **Yes** — `AsyncMCPManager._connect_sse` supports a first-class `auth` config injecting `Authorization: Bearer &lt;token>` or a custom header. |
+| `streamable_http` (alias `http`) | `url` + optional `auth` field. MCP **2025-03-26 spec** — single POST endpoint with SSE response streaming + `Mcp-Session-Id` resumption. | **Yes** — same `auth` field as SSE. |
 
 > **There is no authentication inside `mcp/manager.py` for the stdio transport.** Run stdio MCP servers you trust, in a sandboxed environment.
 
@@ -206,6 +207,10 @@ mcp:
       auth:
         type: bearer
         token: ${MCP_API_TOKEN}   # supply via env
+    - name: remote-mcp
+      transport: streamable_http   # MCP 2025-03-26 spec
+      url: https://mcp.example.com/mcp
+      trust: approval_required
   ide_server:
     enabled: true
     root: .
@@ -310,5 +315,5 @@ Register it during startup (or via a skill's entry point). The supervisor will e
 
 - **HMAC skill signing is real and fail-closed** — contrary to what one might assume from the mix of subsystems, the loader genuinely refuses tampered/unsigned-by-required skills.
 - **"Trust tiers" are NOT a code feature.** Documented explicitly to counter any implication of a tiered trust model. Only a boolean `certified` flag and an unused `trust: trusted` string exist.
-- **MCP stdio transport has no auth.** Only SSE supports bearer/custom-header auth. This is a meaningful security boundary for production planning.
+- **MCP stdio transport has no auth.** SSE and Streamable HTTP support bearer/custom-header auth; stdio inherits the process environment. This is a meaningful security boundary for production planning.
 - **`classify_mcp_tool` unknown → danger** is the safe default and should be preserved.

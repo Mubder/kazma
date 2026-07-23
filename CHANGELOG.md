@@ -1,5 +1,82 @@
 # CHANGELOG
 
+## Unreleased — Capability expansion (2026-07-23)
+
+A cross-cutting expansion sprint closing the major horizontal and vertical
+gaps surfaced by the production-readiness audit. All additions follow
+existing patterns (lazy imports + graceful degradation); nothing ships
+without a fallback path.
+
+### Media & attachments (the unblocker)
+- **Message contract**: new `Attachment` dataclass on `IncomingMessage` /
+  `OutboundMessage` (`gateway.py`). Previously the contract was text-only —
+  no platform could carry photos, documents, or video.
+- **Multimodal content builder** (`agent_handler/attachments.py`): images
+  inline as base64 vision blocks (mirrors `vision_analyze.py`); documents
+  persisted to `kazma-data/attachments/` and referenced via `file_read` to
+  keep prompt size bounded. Used by both the gateway and Web SSE paths.
+- **Telegram**: captures inbound photo/document/video/animation (was silently
+  dropped); outbound `sendPhoto`/`sendDocument`/`sendVideo`/`sendAudio`.
+- **Discord + Slack**: full inbound/outbound media via multipart upload
+  (Slack uses the modern `getUploadURLExternal` → `completeUploadExternal` flow).
+- **Web**: new `POST /api/chat/upload` route; `chat.js` supports image/PDF
+  upload in addition to the existing text-inline path.
+
+### Voice on all platforms
+- Voice (STT inbound + TTS outbound) extended from Telegram-only to
+  **Discord + Slack** via shared `voice_helpers.py`. One `voice.*`
+  ConfigStore block controls all platforms. STT providers: openai/groq/
+  cohere/nvidia/faster-whisper. TTS providers: edgetts/openai/nvidia/
+  kokoro/coqui.
+
+### Native tools & skills
+- **Multi-backend image generation**: `image_gen.py` refactored from
+  Pollinations-only to `backends/{pollinations,dall_e,stability,flux}` +
+  router. `provider="auto"` picks the first credentialed backend.
+- **Document generator** (new skill): `generate_pdf`/`generate_docx`/
+  `generate_xlsx`/`generate_markdown_doc` → `kazma-data/documents/`.
+- **Browser automation** (new skill, Playwright): `browser_navigate`,
+  `browser_click`, `browser_extract_text`, `browser_screenshot`,
+  `browser_fill_form`, `browser_eval_js` (HITL-gated as danger).
+- **Calendar** (new skill): Google + Outlook (MS Graph) + in-memory sandbox
+  backends; `list_events`/`create_event`/`update_event`/`delete_event`/
+  `find_free_slots`.
+- **Database drivers**: `database_client` extended with Postgres (psycopg3),
+  MySQL (pymysql), and MongoDB (pymongo) via URI-scheme dialect detection;
+  read-only enforcement shared across SQL dialects.
+
+### LLM providers (11 → 19 + 3 native classes)
+- **OpenAI-compatible presets added**: Mistral, Together, Cohere, Fireworks,
+  Perplexity, AI21.
+- **Native provider classes** (for auth/schemas the generic Bearer
+  `LLMProvider` can't serve): `AnthropicProvider` (native `/messages` API,
+  `x-api-key` + `anthropic-version`), `AzureProvider` (`api-key` header +
+  `api-version` query param), `BedrockProvider` (AWS SigV4 + Converse API).
+  Dispatch wired into all three `model_registry` client-building sites.
+
+### MCP — Streamable HTTP transport
+- Third MCP transport (`streamable_http`, MCP 2025-03-26 spec): single POST
+  endpoint with SSE response streaming + `Mcp-Session-Id` resumption.
+  Accepts aliases `streamable-http` / `http`.
+
+### Cleanup & debt
+- Removed dead `/ws/chat` endpoint + handler; removed orphaned
+  `SettingsManager.install_skill` stub.
+- `/undo` and `/edit` now handled by the graph (were short-circuit stubs).
+- Archived dormant `delegation/` package (~1,600 LOC) — SwarmEngine is the
+  sole dispatch model.
+- Synced version strings (gateway, TUI → 0.6.1); added version-sync test.
+- Fixed stale roadmap status markers (CostCircuitBreaker + Prometheus
+  `/metrics` were already wired).
+
+### Fixes
+- **HITL on Postgres**: `GET /api/pending-approvals` / `/api/sessions` no
+  longer logs `'AsyncConnectionPool' object has no attribute 'execute'` on
+  Postgres checkpointer deployments — thread enumeration now acquires a
+  connection from the pool. Pending-approval cards populate correctly.
+
+---
+
 ## Unreleased — Deep-audit security fixes (2026-07-22)
 
 Fixes from the full-codebase audit (`1 CRITICAL + 7 HIGH + 4 MEDIUM`):
