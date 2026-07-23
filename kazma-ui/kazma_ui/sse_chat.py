@@ -781,10 +781,34 @@ def create_sse_chat_router(
         # ── Intercept /swarm <task> and /research <topic> ──────────
         # These dispatch directly through SwarmEngine — bypassing the LLM's
         # tool-call decision — so swarm research always works from chat.
+        # Match at start of line OR when embedded in Arabic text (e.g.
+        # "استخدم /research لعمل بحث عن...").
         _lower = raw_msg.lower().strip()
-        if _lower.startswith("/swarm ") or _lower.startswith("/research ") or _lower == "/swarm" or _lower == "/research":
-            _is_research = _lower.startswith("/research")
-            _task_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
+        _swarm_cmd = None
+        _swarm_text = ""
+        if _lower.startswith("/swarm ") or _lower == "/swarm":
+            _swarm_cmd = "swarm"
+            _swarm_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
+        elif _lower.startswith("/research ") or _lower == "/research":
+            _swarm_cmd = "research"
+            _swarm_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
+        elif "/research " in _lower:
+            # Embedded in Arabic text — extract the topic after /research.
+            _idx = _lower.find("/research ")
+            _swarm_cmd = "research"
+            _swarm_text = raw_msg[_idx + 10:].strip()
+            # Strip trailing /swarm or other trailing commands.
+            for _trailer in [" /swarm", "/swarm", " /research"]:
+                if _swarm_text.lower().endswith(_trailer):
+                    _swarm_text = _swarm_text[:-len(_trailer)].strip()
+        elif "/swarm " in _lower:
+            _idx = _lower.find("/swarm ")
+            _swarm_cmd = "swarm"
+            _swarm_text = raw_msg[_idx + 7:].strip()
+
+        if _swarm_cmd:
+            _is_research = _swarm_cmd == "research"
+            _task_text = _swarm_text
             if not _task_text:
                 _usage = (
                     "🔍 *Usage:* `/research <topic>` — dispatches the swarm to research a topic.\n\n"
