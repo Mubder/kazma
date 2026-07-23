@@ -416,22 +416,22 @@ class InProcessWorker(SwarmWorker):
                                         "is_error": True,
                                     }
 
-                        # 3. Universal Empty-Result Circuit Breaker
+                        # 3. Error-Only Circuit Breaker (matches graph_builder fix)
+                        # Only actual errors and denials count as failures —
+                        # empty search results ("no results" / "[]") are normal
+                        # for research tasks, not tool malfunctions.
                         content_str = str(result.get("content", "")).strip()
-                        is_empty_or_denied = (
-                            not content_str or 
-                            content_str == "[]" or 
-                            "no results" in content_str.lower() or 
-                            "denied by user" in content_str.lower() or
+                        is_failure = (
                             result.get("is_error", False)
+                            or "denied by user" in content_str.lower()
                         )
-                        
-                        if is_empty_or_denied:
+
+                        if is_failure:
                             _consecutive_tool_failures += 1
                         else:
                             _consecutive_tool_failures = 0
 
-                        if _consecutive_tool_failures >= 2:
+                        if _consecutive_tool_failures >= 3:
                             logger.warning(
                                 "[InProcessWorker:%s] Circuit breaker tripped! %d consecutive tool failures for %s.",
                                 self.name, _consecutive_tool_failures, tc.name
