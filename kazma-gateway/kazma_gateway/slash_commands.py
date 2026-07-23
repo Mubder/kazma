@@ -145,28 +145,32 @@ def _save_config(config: dict[str, Any]) -> None:
     _flatten(config)
     store.batch_set(items)
 
-# Lazy-loaded ReplayEngine — may not be available yet
-_ReplayEngine = None
+# Lazy-loaded time-travel components — may not be available if time_travel
+# module is absent. Cached so the import is attempted only once per process.
+_replay_recorder = None
+_replay_engine = None
 _replay_import_attempted = False
 
 
-def _get_replay_engine():
-    """Try to import ReplayEngine from kazma_core.time_travel.
+def _get_replay_components():
+    """Try to import SnapshotRecorder + ReplayEngine from kazma_core.time_travel.
 
-    Returns the class if available, None otherwise.  Caches the result
-    so the import is attempted only once per process.
+    Returns ``(recorder, engine)`` instances if available, ``(None, None)``
+    otherwise. Caches the result so the import is attempted only once.
     """
-    global _ReplayEngine, _replay_import_attempted
+    global _replay_recorder, _replay_engine, _replay_import_attempted
     if _replay_import_attempted:
-        return _ReplayEngine
+        return _replay_recorder, _replay_engine
     _replay_import_attempted = True
     try:
-        from kazma_core.time_travel import ReplayEngine  # type: ignore[import-untyped]
-        _ReplayEngine = ReplayEngine
+        from kazma_core.time_travel import ReplayEngine, create_recorder
+        _replay_recorder = create_recorder()
+        _replay_engine = ReplayEngine(_replay_recorder)
     except ImportError:
         logger.info("[slash] kazma_core.time_travel not available — /replay will show fallback")
-        _ReplayEngine = None
-    return _ReplayEngine
+        _replay_recorder = None
+        _replay_engine = None
+    return _replay_recorder, _replay_engine
 
 
 def is_slash_command(text: str) -> bool:
@@ -212,11 +216,12 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
     if cmd == "/context":
         return _cmd_context(ctx)
 
-    # NOTE: /undo and /edit are intentionally NOT handled here. They mutate
-    # LangGraph checkpoint state and are resolved by the graph handler in
-    # agent_handler/graph.py (_handle_undo / _handle_edit) before this
-    # resolver runs. Returning None lets them fall through to the graph on
-    # live platforms, and to the LLM otherwise.
+    # NOTE: /undo, /edit, /fork, and /replay <n> are intentionally NOT
+    # handled here. They mutate LangGraph checkpoint state and are resolved
+    # by the graph handler in agent_handler/graph.py (_handle_undo /
+    # _handle_edit / _handle_replay / _handle_fork) before this resolver
+    # runs. Returning None lets them fall through to the graph on live
+    # platforms, and to the LLM otherwise.
 
     return None  # not a recognised command → passed to LLM
 
@@ -229,9 +234,10 @@ def _cmd_help() -> str:
         "• `/reset` — Clear conversation history and starting fresh\n"
         "• `/compact` — Manually trigger context window compaction\n"
         "• `/replay list` — Show available snapshots\n"
-        "• `/replay <iteration>` — Replay from iteration\n"
-        "• `/replay compare <a> <b>` — Compare two runs\n"
-        "• `/replay clear` — Clear snapshots for this thread\n\n"
+        "• `/replay <iteration>` — Restore from iteration (rewinds in-place)\n"
+        "• `/replay compare <a> <b>` — Compare two snapshots\n"
+        "• `/replay clear` — Clear snapshots for this thread\n"
+        "• `/fork <iteration>` — Fork from iteration into a new thread\n\n"
         "🔧 *Tools*\n"
         "• `/personality` — Show current personality\n"
         "• `/personality list` — List all available personalities\n"
@@ -309,19 +315,20 @@ def _cmd_cost(ctx: dict[str, Any]) -> str:
 # ── Replay / Time Travel ────────────────────────────────────────────
 
 
-def _cmd_replay(text: str, ctx: dict[str, Any]) -> str:
+def _cmd_replay(text: str, ctx: dict[str, Any]) -> str | None:
     """Handle /replay commands for time-travel debugging.
 
     Sub-commands:
         /replay list               — show available snapshots
-        /replay <iteration>        — replay from that iteration
-        /replay compare <a> <b>    — compare two replay runs
+        /replay <iteration>        — restore from that iteration (graph handler)
+        /replay compare <a> <b>    — compare two snapshots
         /replay clear              — clear snapshots for current thread
 
-    Gracefully falls back if kazma_core.time_travel is not yet available.
+    Returns None for ``/replay <iteration>`` so it falls through to the graph
+    handler (``_handle_replay``) which can call ``graph.aupdate_state``.
     """
-    engine_cls = _get_replay_engine()
-    if engine_cls is None:
+    recorder, engine = _get_replay_components()
+    if recorder is None or engine is None:
         return "⏳ Time travel not yet available."
 
     parts = text.strip().split()
@@ -331,20 +338,24 @@ def _cmd_replay(text: str, ctx: dict[str, Any]) -> str:
     thread_id = ctx.get("thread_id", "default")
 
     if sub == "list" or sub == "":
-        return _replay_list(engine_cls, thread_id)
+        return _replay_list(recorder, thread_id)
     if sub == "compare":
-        return _replay_compare(engine_cls, parts, thread_id)
+        return _replay_compare(engine, parts, thread_id)
     if sub == "clear":
-        return _replay_clear(engine_cls, thread_id)
-    # Otherwise treat as an iteration number
-    return _replay_iteration(engine_cls, sub, thread_id)
+        return _replay_clear(recorder, thread_id)
+    # Numeric iteration → fall through to the graph handler for restore.
+    # Validate it's a number so we can give immediate feedback if not.
+    try:
+        int(sub)
+    except (ValueError, TypeError):
+        return f"⚠️ Unknown /replay sub-command: `{sub}`. Use `list`, `compare`, `clear`, or a number."
+    return None  # graph handler (_handle_replay) does the restore
 
 
-def _replay_list(engine_cls, thread_id: str) -> str:
+def _replay_list(recorder, thread_id: str) -> str:
     """List available snapshots for a thread."""
     try:
-        engine = engine_cls(thread_id=thread_id)
-        snapshots = engine.list_snapshots()
+        snapshots = recorder.list_snapshots(thread_id)
     except Exception as exc:
         logger.warning("[slash] /replay list failed: %s", exc)
         return f"⚠️ Could not list snapshots: {exc}"
@@ -354,38 +365,15 @@ def _replay_list(engine_cls, thread_id: str) -> str:
 
     lines = ["🕰️ *Available snapshots:*\n"]
     for snap in snapshots:
-        it = snap.get("iteration", "?")
-        ts = snap.get("timestamp", "?")
-        desc = snap.get("description", "")
-        entry = f"• Iteration `{it}` — {ts}"
-        if desc:
-            entry += f" — {desc}"
-        lines.append(entry)
+        it = snap.iteration
+        ts = snap.timestamp
+        model = snap.model_used or "—"
+        lines.append(f"• Iteration `{it}` — {ts} — {model}")
     return "\n".join(lines)
 
 
-def _replay_iteration(engine_cls, iteration_str: str, thread_id: str) -> str:
-    """Replay from a specific iteration."""
-    try:
-        iteration = int(iteration_str)
-    except (ValueError, TypeError):
-        return f"⚠️ Invalid iteration: `{iteration_str}`. Use a number (e.g. `/replay 3`)."
-
-    try:
-        engine = engine_cls(thread_id=thread_id)
-        result = engine.replay(iteration)
-    except Exception as exc:
-        logger.warning("[slash] /replay iteration %s failed: %s", iteration, exc)
-        return f"⚠️ Could not replay iteration `{iteration}`: {exc}"
-
-    if result is None:
-        return f"📭 No snapshot found for iteration `{iteration}`."
-
-    return f"🕰️ *Replay from iteration {iteration}:*\n\n{result}"
-
-
-def _replay_compare(engine_cls, parts: list, thread_id: str) -> str:
-    """Compare two replay runs."""
+def _replay_compare(engine, parts: list, thread_id: str) -> str:
+    """Compare two snapshots via ReplayEngine.compare_replays()."""
     if len(parts) < 4:
         return "⚠️ Usage: `/replay compare <a> <b>` — provide two iteration numbers."
 
@@ -396,23 +384,55 @@ def _replay_compare(engine_cls, parts: list, thread_id: str) -> str:
         return "⚠️ Both iterations must be numbers (e.g. `/replay compare 1 3`)."
 
     try:
-        engine = engine_cls(thread_id=thread_id)
-        result = engine.compare(iter_a, iter_b)
+        state_a = engine.replay_from(thread_id, iter_a)
+        state_b = engine.replay_from(thread_id, iter_b)
+        if state_a is None or state_b is None:
+            return f"📭 Could not load snapshots for iterations `{iter_a}`/`{iter_b}`."
+        diff = engine.compare_replays(state_a, state_b)
     except Exception as exc:
         logger.warning("[slash] /replay compare %s vs %s failed: %s", iter_a, iter_b, exc)
         return f"⚠️ Could not compare iterations `{iter_a}` and `{iter_b}`: {exc}"
 
-    if result is None:
-        return f"📭 Could not compare iterations `{iter_a}` and `{iter_b}` — snapshots may be missing."
-
-    return f"🕰️ *Comparison: iteration {iter_a} vs {iter_b}:*\n\n{result}"
+    return _format_compare_diff(iter_a, iter_b, diff)
 
 
-def _replay_clear(engine_cls, thread_id: str) -> str:
+def _format_compare_diff(iter_a: int, iter_b: int, diff: dict[str, Any]) -> str:
+    """Render a compare_replays() diff dict as a Markdown table."""
+    def _arrow(delta: int | float) -> str:
+        if delta > 0:
+            return f"+{delta}"
+        return str(delta)
+
+    lines = [f"🕰️ *Comparison: iteration {iter_a} vs {iter_b}:*\n"]
+    lines.append("| Metric | Iter {} | Iter {} | Delta |".format(iter_a, iter_b))
+    lines.append("|---|---|---|---|")
+    lines.append("| Messages | {} | {} | {} |".format(
+        diff["original_message_count"], diff["replayed_message_count"],
+        _arrow(diff["message_count_delta"])))
+    lines.append("| Iteration | {} | {} | {} |".format(
+        diff["original_iteration"], diff["replayed_iteration"],
+        _arrow(diff["iteration_delta"])))
+    lines.append("| Model | {} | {} | {} |".format(
+        diff["original_model"], diff["replayed_model"],
+        "changed" if diff["model_changed"] else "same"))
+    lines.append("| Cost (USD) | {:.4f} | {:.4f} | {} |".format(
+        diff["original_cost_usd"], diff["replayed_cost_usd"],
+        _arrow(diff["cost_delta_usd"])))
+    lines.append("| Tool calls | {} | {} | {} |".format(
+        diff["original_tool_calls"], diff["replayed_tool_calls"],
+        _arrow(diff["tool_calls_delta"])))
+    lines.append("| Next node | {} | {} | {} |".format(
+        diff["original_next_node"], diff["replayed_next_node"],
+        "changed" if diff["routing_changed"] else "same"))
+    if diff["identical"]:
+        lines.append("\n✅ States are **identical**.")
+    return "\n".join(lines)
+
+
+def _replay_clear(recorder, thread_id: str) -> str:
     """Clear all snapshots for a thread."""
     try:
-        engine = engine_cls(thread_id=thread_id)
-        count = engine.clear_snapshots()
+        count = recorder.clear_snapshots(thread_id)
     except Exception as exc:
         logger.warning("[slash] /replay clear failed: %s", exc)
         return f"⚠️ Could not clear snapshots: {exc}"

@@ -184,6 +184,7 @@ async def _stream_langgraph_events(
     total_cost = 0.0
     turn_start = time.monotonic()
     content_acc = ""  # accumulated assistant text for the done event
+    _snapshot_info: dict[str, Any] | None = None  # last snapshot_id/iteration from graph state
 
     try:
         try:
@@ -268,6 +269,16 @@ async def _stream_langgraph_events(
                             total_cost = final_cost
                         if final_tokens:
                             total_tokens = final_tokens
+
+                        # Time Travel: capture snapshot id/iteration if the
+                        # graph stamped one (snapshot_recorder is wired).
+                        _sid = output.get("snapshot_id")
+                        if _sid:
+                            _snapshot_info = {
+                                "snapshot_id": _sid,
+                                "iteration": output.get("snapshot_iteration", 0),
+                                "model": output.get("last_model", ""),
+                            }
 
                         # CRITICAL: LLMProvider uses custom httpx (not
                         # BaseChatModel), so on_chat_model_stream never fires.
@@ -420,6 +431,11 @@ async def _stream_langgraph_events(
                     "empty": (not content_acc and not interrupted),
                 },
             )
+
+            # Time Travel: notify the UI a snapshot was captured (live
+            # timeline growth). No-op if the replay panel isn't open.
+            if _snapshot_info:
+                yield _sse_frame("snapshot", _snapshot_info)
 
         except asyncio.CancelledError:
             logger.warning("SSE stream cancelled by client disconnect")

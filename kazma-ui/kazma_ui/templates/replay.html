@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% set active_page = "replay" %}
+{% block title %}Kazma — Time Travel{% endblock %}
+{% block page_title %}🕰️ Time Travel{% endblock %}
+
+{% block content %}
+<div class="replay-container" style="max-width:1200px;margin:0 auto;">
+
+  <!-- ── Thread Picker ── -->
+  <div class="card" style="margin-bottom:1rem;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <label style="font-size:0.85rem;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em;">Thread</label>
+    <select id="replay-thread-select" class="form-select" style="min-width:280px;" onchange="KazmaReplay.loadTimeline(this.value)">
+      <option value="">— Select a thread —</option>
+    </select>
+    <button class="btn btn-secondary" onclick="KazmaReplay.loadThreads()" title="Refresh">
+      <span class="ki" data-icon="refresh" aria-hidden="true"></span>
+    </button>
+    <span id="replay-snapshot-count" style="font-size:0.85rem;color:var(--text-muted);margin-left:auto;"></span>
+  </div>
+
+  <!-- ── Tabs ── -->
+  <div class="tabs" style="margin-bottom:0;">
+    <button class="tab active" data-tab="timeline" onclick="KazmaReplay.switchTab('timeline')">Timeline</button>
+    <button class="tab" data-tab="diff" onclick="KazmaReplay.switchTab('diff')">Compare</button>
+    <button class="tab" data-tab="about" onclick="KazmaReplay.switchTab('about')">About</button>
+  </div>
+
+  <!-- ══ TAB: Timeline ══ -->
+  <div class="tab-panel" id="panel-timeline" style="display:block;">
+    <div id="replay-timeline-list" style="display:grid;gap:8px;">
+      <div style="padding:2rem;text-align:center;color:var(--text-muted);">
+        Select a thread above to see its snapshot timeline.
+      </div>
+    </div>
+
+    <!-- Snapshot detail (messages) — hidden until a snapshot is clicked -->
+    <div id="replay-snapshot-detail" style="display:none;margin-top:1.5rem;">
+      <div class="card" style="padding:1rem;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+          <h3 style="margin:0;" id="replay-detail-title">Snapshot detail</h3>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary" onclick="KazmaReplay.restoreCurrent()" title="Rewind the live thread to this snapshot">Restore here</button>
+            <button class="btn btn-secondary" onclick="KazmaReplay.forkCurrent()" title="Branch into a new thread (original stays intact)">Fork</button>
+          </div>
+        </div>
+        <div id="replay-detail-meta" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;"></div>
+        <div id="replay-detail-messages" style="max-height:400px;overflow-y:auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: Diff ══ -->
+  <div class="tab-panel" id="panel-diff" style="display:none;">
+    <div class="card" style="padding:1.5rem;">
+      <p style="color:var(--text-muted);margin-bottom:1rem;">Compare two snapshots from the same thread to see how the conversation diverged.</p>
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:1rem;">
+        <label>Iteration A:
+          <select id="replay-diff-a" class="form-select" style="min-width:100px;"></select>
+        </label>
+        <label>Iteration B:
+          <select id="replay-diff-b" class="form-select" style="min-width:100px;"></select>
+        </label>
+        <button class="btn btn-primary" onclick="KazmaReplay.compare()">Compare</button>
+      </div>
+      <div id="replay-diff-result"></div>
+    </div>
+  </div>
+
+  <!-- ══ TAB: About ══ -->
+  <div class="tab-panel" id="panel-about" style="display:none;">
+    <div class="card" style="padding:1.5rem;line-height:1.7;">
+      <h3 style="margin-top:0;">🕰️ Time Travel Replay</h3>
+      <p>Kazma captures a snapshot of the agent's state after every supervisor iteration. This lets you:</p>
+      <ul>
+        <li><strong>Browse</strong> the timeline of every decision point in a conversation.</li>
+        <li><strong>Restore</strong> (rewind) the live thread to any snapshot — the conversation continues from that point as if the later turns never happened.</li>
+        <li><strong>Fork</strong> from any snapshot into a brand-new thread, keeping the original intact. Explore "what if" branches without losing history.</li>
+        <li><strong>Compare</strong> two snapshots to see how messages, cost, model, and routing diverged.</li>
+      </ul>
+      <p style="color:var(--text-muted);font-size:0.85rem;">Snapshots are stored in <code>kazma-data/snapshots.db</code> (configurable via <code>time_travel</code> in kazma.yaml). The in-memory store is the source of truth for the current session; SQLite provides durability across restarts.</p>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/streaming.js"></script>
+<script src="/static/js/replay.js"></script>
+{% endblock %}

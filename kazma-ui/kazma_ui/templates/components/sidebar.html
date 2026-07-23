@@ -117,6 +117,17 @@
             <span class="nav-kbd">⌘6</span>
         </a>
 
+        <a href="/replay" class="nav-link {{ 'active' if active_page == 'replay' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="9"/>
+                    <polyline points="12,7 12,12 15,14"/>
+                </svg>
+            </span>
+            <span class="nav-label">Time Travel</span>
+            <span class="nav-kbd">⌘7</span>
+        </a>
+
         <a href="/agents" class="nav-link {{ 'active' if active_page == 'agents' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">

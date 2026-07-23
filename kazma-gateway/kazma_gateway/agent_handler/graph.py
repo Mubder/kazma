@@ -569,6 +569,32 @@ def create_graph_handler(
             ))
             return
 
+        # ── /replay <n>: Restore from a snapshot (rewind in-place) ──
+        replay_match = _extract_replay_command(msg.text)
+        if replay_match is not None:
+            replay_result = await _handle_replay(thread_id, config, replay_match)
+            ctx = await _store.get(thread_id) or msg.context_metadata
+            replay_text, replay_ctx = _prepare_tg_outbound(msg, replay_result, ctx)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=replay_text,
+                context_metadata=replay_ctx,
+            ))
+            return
+
+        # ── /fork <n>: Branch from a snapshot into a new thread ────
+        fork_match = _extract_fork_command(msg.text)
+        if fork_match is not None:
+            fork_result = await _handle_fork(thread_id, config, fork_match, msg, _store, sender)
+            ctx = await _store.get(thread_id) or msg.context_metadata
+            fork_text, fork_ctx = _prepare_tg_outbound(msg, fork_result, ctx)
+            await manager.send(OutboundMessage(
+                target_id=_build_target_id(msg.platform, ctx),
+                text=fork_text,
+                context_metadata=fork_ctx,
+            ))
+            return
+
         # ── Slash-command intercept (/model, /help, /reset, etc.) ──
         # Resolve common commands without an LLM call. This keeps
         # responses instant and saves tokens.
@@ -1071,6 +1097,137 @@ def create_graph_handler(
         except Exception as exc:
             logger.warning("[agent-handler] /edit failed: %s", exc, exc_info=True)
             return corrected_text, f"⚠️ Could not edit: {exc}"
+
+    # ── /replay <n> + /fork <n>: Time-travel restore + branch ────────
+
+    def _extract_replay_command(text: str | None) -> int | None:
+        """Extract the iteration from ``/replay <n>``.
+
+        Returns the int iteration, or None if the text isn't a numeric
+        /replay command. Bare ``/replay`` (no arg) and ``/replay list``
+        etc. return None (handled by the slash resolver).
+        """
+        if not text:
+            return None
+        parts = text.strip().split()
+        if len(parts) != 2 or parts[0].lower() != "/replay":
+            return None
+        try:
+            return int(parts[1])
+        except (ValueError, TypeError):
+            return None
+
+    def _extract_fork_command(text: str | None) -> int | None:
+        """Extract the iteration from ``/fork <n>``."""
+        if not text:
+            return None
+        parts = text.strip().split()
+        if parts[0].lower() != "/fork":
+            return None
+        if len(parts) < 2:
+            return 0  # bare /fork → show usage
+        try:
+            return int(parts[1])
+        except (ValueError, TypeError):
+            return None
+
+    async def _handle_replay(thread_id: str, config: dict[str, Any], iteration: int) -> str:
+        """Restore a snapshot in-place: rewind the live thread to *iteration*."""
+        try:
+            from kazma_core.time_travel import create_recorder, ReplayEngine
+
+            recorder = create_recorder()
+            engine = ReplayEngine(recorder)
+            state = engine.replay_from(thread_id, iteration)
+            if state is None:
+                return f"📭 No snapshot found for iteration `{iteration}`. Use `/replay list` to see available snapshots."
+
+            # Write the snapshot state back to the live thread checkpoint.
+            msg_count = len(state.get("messages", []))
+            model = state.get("last_model", "unknown")
+            await graph.aupdate_state(config, {"messages": state.get("messages", [])})
+            logger.info(
+                "[agent-handler] /replay restored thread=%s iter=%d msgs=%d",
+                thread_id, iteration, msg_count,
+            )
+            return (
+                f"🕰️ *Restored from iteration {iteration}.*\n\n"
+                f"The conversation has been rewound to that point.\n"
+                f"  Messages: {msg_count}\n"
+                f"  Model: {model}\n\n"
+                f"Your next message continues from here."
+            )
+        except Exception as exc:
+            logger.warning("[agent-handler] /replay failed: %s", exc, exc_info=True)
+            return f"⚠️ Could not replay iteration `{iteration}`: {exc}"
+
+    async def _handle_fork(
+        thread_id: str, config: dict[str, Any], iteration: int,
+        msg: Any, _store: Any, sender: str,
+    ) -> str:
+        """Fork from a snapshot into a NEW thread (original stays intact)."""
+        if iteration == 0:
+            return "✏️ *Usage:* `/fork <iteration>` — branches from that snapshot into a new thread.\n\nUse `/replay list` to see available iterations."
+
+        try:
+            import uuid
+
+            from kazma_core.time_travel import create_recorder, ReplayEngine
+
+            recorder = create_recorder()
+            engine = ReplayEngine(recorder)
+            state = engine.replay_from(thread_id, iteration)
+            if state is None:
+                return f"📭 No snapshot found for iteration `{iteration}`. Use `/replay list` to see available snapshots."
+
+            # Mint a new thread id (copy /new pattern).
+            new_thread_id = f"gw-{msg.platform}-{sender.replace(':', '_')}-{uuid.uuid4().hex[:8]}"
+
+            # Override thread identity in the state for the new branch.
+            state["thread_id"] = new_thread_id
+            gw = state.get("_gateway") or {}
+            gw["thread_id"] = new_thread_id
+            state["_gateway"] = gw
+
+            # Seed the new thread with the snapshot state.
+            new_config = {"configurable": {"thread_id": new_thread_id, "checkpoint_ns": ""}}
+            await graph.aupdate_state(new_config, {"messages": state.get("messages", [])})
+            logger.info("[agent-handler] /fork seeded new thread=%s from %s iter=%d", new_thread_id, thread_id, iteration)
+
+            # Copy platform context so the fork can route replies.
+            try:
+                src_ctx = await _store.get(thread_id)
+                if src_ctx:
+                    await _store.put(new_thread_id, src_ctx)
+            except Exception:
+                logger.debug("[agent-handler] /fork: could not copy session context", exc_info=True)
+
+            # Create a Web UI session for the fork (visible in the sidebar).
+            try:
+                from kazma_ui.session_manager import get_session_manager, ChatSession
+
+                web_store = get_session_manager()
+                username = msg.context_metadata.get("username") or "fork"
+                web_session = ChatSession(
+                    session_id=new_thread_id,
+                    thread_id=new_thread_id,
+                    title=f"Fork of {username} (iter {iteration})",
+                    messages=state.get("messages", []),
+                )
+                web_store.put(web_session)
+            except Exception:
+                logger.debug("[agent-handler] /fork: could not create Web UI session", exc_info=True)
+
+            msg_count = len(state.get("messages", []))
+            return (
+                f"🌿 *Forked from iteration {iteration} into a new thread.*\n\n"
+                f"  New thread: `{new_thread_id}`\n"
+                f"  Messages carried over: {msg_count}\n\n"
+                f"The original thread is unchanged. The fork is available in the Web UI sidebar."
+            )
+        except Exception as exc:
+            logger.warning("[agent-handler] /fork failed: %s", exc, exc_info=True)
+            return f"⚠️ Could not fork from iteration `{iteration}`: {exc}"
 
     # ── Register telegram backend with core's send_message dispatcher ──
     try:

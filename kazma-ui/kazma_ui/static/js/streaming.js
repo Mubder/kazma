@@ -84,6 +84,12 @@ var KazmaStream = (function() {
           case 'done':
             finishStream(data);
             break;
+          case 'snapshot':
+            // Time Travel: live snapshot captured — notify the replay panel.
+            if (window.KazmaReplay && window.KazmaReplay.onLiveSnapshot) {
+              window.KazmaReplay.onLiveSnapshot(data);
+            }
+            break;
           case 'approval_required':
             if (callbacks.onApprovalRequired) callbacks.onApprovalRequired(data);
             break;

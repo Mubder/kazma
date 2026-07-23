@@ -129,6 +129,9 @@ class KazmaAgent:
         self._checkpoint_conn: aiosqlite.Connection | None = None
         self._thread_id: str = ""
 
+        # Time Travel — snapshot recorder (lazy-init in _ensure_graph).
+        self._snapshot_recorder: Any = None
+
         # Streaming graph for SSE path (built lazily, cached).
         # Separate from _graph which includes a checkpointer for run().
         self._streaming_graph: Any = None
@@ -659,6 +662,7 @@ class KazmaAgent:
             authority=self.authority,
             tracer=self.tracer,
             hitl_config=streaming_hitl,
+            snapshot_recorder=self._snapshot_recorder,
         )
         return self._streaming_graph
 
@@ -699,6 +703,7 @@ class KazmaAgent:
             tracer=self.tracer,
             hitl_config=hitl,
             checkpointer=None,
+            snapshot_recorder=self._snapshot_recorder,
         )
 
     async def _ensure_graph(self) -> Any:
@@ -749,6 +754,15 @@ class KazmaAgent:
         from kazma_core.safety.hitl import get_hitl_config
         hitl_config = get_hitl_config(self.config.raw)
 
+        # Time Travel — create the snapshot recorder once (honors kazma.yaml
+        # time_travel.enabled / max_snapshots / db_path).
+        if self._snapshot_recorder is None:
+            try:
+                from kazma_core.time_travel import create_recorder
+                self._snapshot_recorder = create_recorder(config=self.config.raw)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Snapshot recorder unavailable: %s", exc)
+
         self._graph = build_supervisor_graph(
             llm=self.llm,
             system_prompt=self.system_prompt,
@@ -759,6 +773,7 @@ class KazmaAgent:
             tracer=self.tracer,
             checkpointer=self._checkpointer,
             hitl_config=hitl_config,
+            snapshot_recorder=self._snapshot_recorder,
         )
         logger.info("KazmaAgent run path bound to supervisor graph")
         return self._graph
@@ -853,6 +868,13 @@ class KazmaAgent:
         await self.tools.disconnect_all()
         await self.llm.close()
         self.tracer.shutdown()
+        # Time Travel — close the snapshot recorder's SQLite handle.
+        if self._snapshot_recorder is not None:
+            try:
+                self._snapshot_recorder.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Error closing snapshot recorder: %s", e)
+            self._snapshot_recorder = None
         if self._checkpoint_conn is not None:
             try:
                 await self._checkpoint_conn.close()

@@ -888,6 +888,17 @@ def register_direct_routes(self: Any) -> None:
             },
         )
 
+    @self.app.get("/replay", response_class=HTMLResponse)
+    async def replay_page(request: Request) -> HTMLResponse:
+        return self.templates.TemplateResponse(
+            request,
+            "replay.html",
+            {
+                "config": self.agent.config,
+                "active_page": "replay",
+            },
+        )
+
     @self.app.post("/api/gateway/refresh-adapters")
     async def refresh_gateway_adapters() -> dict[str, Any]:
         if self.gateway is None:

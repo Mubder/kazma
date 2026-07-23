@@ -1073,6 +1073,19 @@ class KazmaAppBuilder:
             if not recompile_hitl.get("enabled", True):
                 recompile_hitl = None
 
+            # Time Travel — reuse the agent's snapshot recorder so the SSE
+            # path captures snapshots too. Create lazily if the agent hasn't
+            # built its graph yet.
+            _recorder = getattr(self.agent, "_snapshot_recorder", None)
+            if _recorder is None:
+                try:
+                    from kazma_core.time_travel import create_recorder
+                    _recorder = create_recorder(config=self.config.raw)
+                    self.agent._snapshot_recorder = _recorder
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("[App] snapshot recorder unavailable: %s", exc)
+            self._snapshot_recorder = _recorder
+
             recompiled = build_supervisor_graph(
                 llm=self.agent.llm,
                 system_prompt=self.agent.system_prompt,
@@ -1083,6 +1096,7 @@ class KazmaAppBuilder:
                 tracer=self.agent.tracer,
                 checkpointer=self._checkpointer,
                 hitl_config=recompile_hitl,
+                snapshot_recorder=_recorder,
             )
             self._graph_holder["graph"] = recompiled
             logger.info("[Checkpoint] Graph recompiled with checkpointer")
@@ -1090,6 +1104,22 @@ class KazmaAppBuilder:
             self._hitl_state["graph"] = recompiled
             self._hitl_state["checkpointer"] = self._checkpointer
             logger.info("[HITL] Pending approvals endpoint linked to checkpointed graph")
+
+            # ── Time Travel: mount replay API + page route ──────────
+            if self._snapshot_recorder is not None:
+                try:
+                    from kazma_core.time_travel import ReplayEngine
+                    from kazma_ui.replay_routes import create_replay_router
+
+                    _replay_engine = ReplayEngine(self._snapshot_recorder)
+                    self.app.include_router(create_replay_router(
+                        recorder=self._snapshot_recorder,
+                        engine=_replay_engine,
+                        graph=recompiled,
+                    ))
+                    logger.info("[Replay] Time-travel API mounted at /api/replay/*")
+                except Exception as exc:
+                    logger.warning("[Replay] Failed to mount replay API: %s", exc)
 
             if self.gateway is not None:
                 from kazma_gateway.agent_handler import create_graph_handler
