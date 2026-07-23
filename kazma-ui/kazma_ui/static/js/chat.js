@@ -252,34 +252,55 @@
   }
 
   // ── File handling ─────────────────────────────────────
-  function onFileSelected(e) {
-    var file = e.target.files[0];
-    if (!file) return;
-    // Validate file size (max 1MB for text attachment)
-    if (file.size > 1048576) {
-      KS.toast('File too large (max 1MB for text attachments)', 'error', 3000);
-      e.target.value = '';
-      return;
-    }
-    // Validate file type — text only
+  // Pending attachments accumulated for the next send. Text files stay
+  // client-side (inlined); binary files (images, PDFs, etc.) are uploaded
+  // to /api/chat/upload and referenced by the returned descriptor.
+  var pendingText = '';
+  var pendingTextName = '';
+  var pendingUploads = []; // [{id, kind, mime, filename, path}]
+
+  function _isTextFile(file) {
     var allowedTypes = ['text/plain', 'text/markdown', 'text/html', 'application/json', 'text/csv', 'text/x-python', 'text/javascript'];
     var allowedExts = ['.txt', '.md', '.markdown', '.json', '.csv', '.py', '.js', '.ts', '.yaml', '.yml', '.xml', '.html', '.css', '.sh', '.sql'];
     var ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
-    if (allowedTypes.indexOf(file.type) === -1 && allowedExts.indexOf(ext) === -1) {
-      KS.toast('Only text files are supported', 'error', 3000);
+    return allowedTypes.indexOf(file.type) !== -1 || allowedExts.indexOf(ext) !== -1;
+  }
+
+  function onFileSelected(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    // Text files ≤ 1MB are still inlined client-side (cheap, no upload).
+    if (_isTextFile(file) && file.size <= 1048576) {
+      var reader = new FileReader();
+      reader.onload = function(evt) {
+        pendingText = evt.target.result;
+        pendingTextName = file.name;
+        KS.toast('Attached: ' + file.name + ' (' + KS.formatTokens(file.size) + ' bytes)', 'info', 2500);
+        inputEl.placeholder = '\uD83D\uDCCE ' + file.name + ' attached. Type a message\u2026';
+      };
+      reader.readAsText(file);
       e.target.value = '';
       return;
     }
-    var reader = new FileReader();
-    reader.onload = function(evt) {
-      var content = evt.target.result;
-      var name = file.name;
-      KS.toast('Attached: ' + name + ' (' + KS.formatTokens(file.size) + ' bytes)', 'info', 2500);
-      inputEl.dataset.attachment = content;
-      inputEl.dataset.attachmentName = name;
-      inputEl.placeholder = '\uD83D\uDCCE ' + name + ' attached. Type a message\u2026';
-    };
-    reader.readAsText(file);
+    // Everything else (images, PDFs, docs, large text) is uploaded.
+    if (file.size > 20 * 1024 * 1024) {
+      KS.toast('File too large (max 20MB)', 'error', 3000);
+      e.target.value = '';
+      return;
+    }
+    KS.toast('Uploading ' + file.name + '\u2026', 'info', 2000);
+    var fd = new FormData();
+    fd.append('file', file);
+    fetch('/api/chat/upload', { method: 'POST', body: fd })
+      .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error('Upload failed (' + r.status + ')')); })
+      .then(function(desc) {
+        pendingUploads.push(desc);
+        KS.toast('Attached: ' + (desc.filename || file.name), 'info', 2500);
+        inputEl.placeholder = '\uD83D\uDCCE ' + (desc.filename || file.name) + ' attached. Type a message\u2026';
+      })
+      .catch(function(err) {
+        KS.toast('Upload failed: ' + err.message, 'error', 3500);
+      });
     e.target.value = '';
   }
 
@@ -431,9 +452,9 @@
   // ── Send message via SSE ──────────────────────────────
   function sendMessage() {
     var text = (inputEl.value || '').trim();
-    var attachment = inputEl.dataset.attachment || '';
-    var attachmentName = inputEl.dataset.attachmentName || '';
-    if (!text && !attachment) return;
+    var hasTextAtt = !!pendingText;
+    var hasUploads = pendingUploads.length > 0;
+    if (!text && !hasTextAtt && !hasUploads) return;
 
     hideSlashMenu();
 
@@ -480,22 +501,31 @@
       renderSessionList();
     }
 
-    // Build message content
+    // Build message content. Text attachments are inlined; binary uploads
+    // are referenced as attachments and rendered in the transcript by name.
     var content = text;
-    if (attachment) {
+    var displayAttachName = pendingTextName || (pendingUploads[0] && pendingUploads[0].filename) || '';
+    if (pendingText) {
       content = text
-        ? text + '\n\n[Attached file: ' + attachmentName + ']\n```\n' + attachment.slice(0, 8000) + '\n```'
-        : '[Attached file: ' + attachmentName + ']\n```\n' + attachment.slice(0, 8000) + '\n```';
+        ? text + '\n\n[Attached file: ' + pendingTextName + ']\n```\n' + pendingText.slice(0, 8000) + '\n```'
+        : '[Attached file: ' + pendingTextName + ']\n```\n' + pendingText.slice(0, 8000) + '\n```';
+    } else if (hasUploads && !text) {
+      content = '[' + (pendingUploads[0].kind || 'file') + ']';
     }
+    // Build the attachments payload for the server (binary uploads only).
+    var attachmentsPayload = pendingUploads.map(function(u) {
+      return { id: u.id, kind: u.kind, mime: u.mime, filename: u.filename, path: u.path };
+    });
 
     // Show user message
-    appendMessage('user', content, attachmentName);
+    appendMessage('user', content, displayAttachName);
     scrollToBottom();
     disableInput();
 
     // Reset attachment state
-    inputEl.dataset.attachment = '';
-    inputEl.dataset.attachmentName = '';
+    pendingText = '';
+    pendingTextName = '';
+    pendingUploads = [];
     inputEl.value = '';
     inputEl.style.height = 'auto';
     inputEl.placeholder = 'Type your message\u2026 (Enter to send)';
@@ -519,6 +549,7 @@
       message: content,
       session_id: chatSessionId,
       model: selectedModel || '',
+      attachments: attachmentsPayload,
     }, {
       onToken: function(data) {
         KS.hideTyping(typingEl);

@@ -29,7 +29,7 @@ Items are marked:
 | Context compaction (LLM summarise) | ✅ | `compaction.py`. |
 | Compaction with memory retrieval + checkpoint | 🟡 | Memory adapter wired on main paths; checkpoint_manager still optional. |
 | Rate-limit (429) handling | ✅ | Exponential backoff + Retry-After in `llm_provider.py` (2026-07). |
-| Cost breaker auto-wired | 🟡 | Standalone dataclass; agent must drive it. |
+| Cost breaker auto-wired | ✅ | `CostCircuitBreaker` instantiated per-agent (`agent_runner.py`) and driven on the live loop — `record_user_interaction()` on each inbound message, `should_halt()` gate, and `record_cost()` after each LLM call (`graph_builder.py`). Exposed on the dashboard via `.status()`. |
 
 ---
 
@@ -129,7 +129,7 @@ Items are marked:
 | In-house tracing spans | ✅ | `TraceStore` (dashboard) + `TracingEmitter` (swarm). |
 | SSE telemetry events | ✅ | `/api/chat/stream` + telemetry router. |
 | Langfuse tracing | ✅ | Wired via `KazmaTracer`; dormant by default (`logging.langfuse.enabled: false`). |
-| Prometheus scrape endpoint | 🔴 | Absent. |
+| Prometheus scrape endpoint | ✅ | `/metrics` + `/api/metrics` in `kazma_ui/metrics.py`, mounted in `app.py` (gateway-active block). Emits `text/plain; version=0.0.4` with inbound/outbound/error counters, active threads, adapter, queue-depth, and swarm gauges. |
 | OpenTelemetry export | 🔴 | **Removed** — dead code + 8 packages purged. Langfuse + Console remain as the two backends. Re-add only if OTLP export to Jaeger/Tempo becomes a real requirement. |
 
 ---

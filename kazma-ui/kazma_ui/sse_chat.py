@@ -574,7 +574,10 @@ def create_sse_chat_router(
             )
 
         user_message = (body.get("message") or "").strip()
-        if not user_message:
+        # Optional attachments uploaded via /api/chat/upload. Each entry is an
+        # Attachment-shaped dict {id, kind, mime, filename, path}.
+        raw_attachments = body.get("attachments") or []
+        if not user_message and not raw_attachments:
             return StreamingResponse(
                 iter([_sse_frame("error", {"content": "Empty message"})]),
                 media_type="text/event-stream",
@@ -913,6 +916,45 @@ def create_sse_chat_router(
             system_messages=system_msgs,
             fallback_history=session.messages[:-1],  # exclude the user line we just added
         )
+
+        # If attachments were uploaded, replace the last user message's text
+        # content with the multimodal version (inline images / persisted docs).
+        # This mirrors the gateway path (agent_handler/attachments.py) so both
+        # transports produce identical OpenAI-compatible content.
+        if raw_attachments and messages:
+            try:
+                from kazma_gateway.gateway import Attachment
+                from kazma_gateway.agent_handler.attachments import build_user_content
+                from pathlib import Path as _Path
+
+                atts: list[Attachment] = []
+                for a in raw_attachments:
+                    kind = a.get("kind", "file")
+                    mime = a.get("mime", "application/octet-stream")
+                    data = None
+                    p = a.get("path")
+                    if p:
+                        try:
+                            data = _Path(p).read_bytes()
+                        except Exception:  # noqa: BLE001
+                            data = None
+                    atts.append(
+                        Attachment(
+                            kind=kind,
+                            mime=mime,
+                            filename=a.get("filename", ""),
+                            data=data,
+                            url=a.get("url"),
+                        )
+                    )
+                multimodal_content = build_user_content(user_message or "", atts)
+                # Replace the trailing user message content.
+                for i in range(len(messages) - 1, -1, -1):
+                    if isinstance(messages[i], dict) and messages[i].get("role") == "user":
+                        messages[i]["content"] = multimodal_content
+                        break
+            except Exception:  # noqa: BLE001 — never block a turn on media
+                logger.debug("[SSE] attachment content build failed", exc_info=True)
 
         # ── Build SupervisorState for the graph ────────────────────
         from kazma_core.agent.state import initial_supervisor_state

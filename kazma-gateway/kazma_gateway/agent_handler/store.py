@@ -155,8 +155,16 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
         "platform": msg.platform,
     }
 
-    # Attach the user message
-    state["messages"] = [{"role": "user", "content": msg.text}]
+    # Attach the user message — multimodal when media is present.
+    # Plain text (no attachments) stays a string; images become an OpenAI
+    # vision content list; documents are persisted and referenced as text.
+    try:
+        from kazma_gateway.agent_handler.attachments import build_user_content
+
+        user_content = build_user_content(msg.text, msg.attachments)
+    except Exception:  # noqa: BLE001 — never block a turn on attachment building
+        user_content = msg.text
+    state["messages"] = [{"role": "user", "content": user_content}]
 
     # Defense-in-depth: strip any platform-specific identifiers that might
     # have leaked into the top-level state. ``_PLATFORM_KEYS`` is the

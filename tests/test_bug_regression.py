@@ -243,17 +243,7 @@ class TestBug11_RequestIDConcurrency:
 # ── Bug 12: swarm.py type annotation ──────────────────────────────────────
 
 
-class TestBug12_SwarmTypeAnnotation:
-    """parallel_execute results list must accept None values."""
-
-    def test_results_list_accepts_none(self):
-        """The type annotation list[DelegationResult | None] must be valid."""
-        import inspect
-
-        from kazma_core.delegation.swarm import SwarmIntelligence
-
-        source = inspect.getsource(SwarmIntelligence.parallel_execute)
-        assert "DelegationResult | None" in source or "Optional[DelegationResult]" in source
+# ── Bug 12: (removed) — delegation/ was archived; SwarmEngine is the sole dispatch model.
 
 
 # ── Bug 13: hub/registry.py lazy _agents init ─────────────────────────────
@@ -367,20 +357,8 @@ class TestBug17_NotifyUsesExecutor:
         assert "proc.stdin.write" in source
 
 
-# ── Bug 18: test uses production DB ────────────────────────────────────────
-
-
-class TestBug18_TestUsesTmpPath:
-    """Test fixtures must use tmp_path, not production paths."""
-
-    def test_discovery_fixture_uses_tmp_path(self):
-        """The hub fixture in test_agent_discovery.py must use tmp_path."""
-        with open("tests/test_agent_discovery.py") as f:
-            source = f.read()
-        assert "tmp_path" in source, "Test fixture still uses production DB path"
-        assert "KazmaHub()" not in source.replace("KazmaHub(registry_path=", ""), (
-            "KazmaHub() with no args uses production path"
-        )
+# ── Bug 18: (removed) — guarded test_agent_discovery.py, which was deleted
+# when delegation/ was archived. SwarmEngine is the sole dispatch model.
 
 
 # ── Bug 19: tracing.py ignores YAML config ─────────────────────────────────

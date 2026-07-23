@@ -923,6 +923,16 @@ class KazmaAppBuilder:
             logger.warning("SSE chat router failed to initialize: %s", e)
             self._init_errors.append({"subsystem": "sse_chat", "error": str(e)})
 
+        # ── Chat attachment upload ──
+        try:
+            from kazma_ui.routes_chat_upload import router as chat_upload_router
+
+            self.app.include_router(chat_upload_router)
+            logger.info("Chat upload router mounted at /api/chat/upload")
+        except Exception as e:
+            logger.warning("Chat upload router failed to initialize: %s", e)
+            self._init_errors.append({"subsystem": "chat_upload", "error": str(e)})
+
         # ── Voice API Route ──
         try:
             from kazma_ui.routes_voice import router as voice_router

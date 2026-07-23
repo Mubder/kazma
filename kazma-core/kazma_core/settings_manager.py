@@ -535,10 +535,6 @@ class SettingsManager:
             logger.debug("Failed to parse skill frontmatter for %s: %s", path, _e)
             return {"name": path.parent.name, "description": ""}
 
-    def install_skill(self, skill_id: str) -> dict[str, Any]:
-        """Install a skill (stub — marketplace integration pending)."""
-        return {"status": "pending", "message": f"Skill marketplace for '{skill_id}' not yet implemented"}
-
     def uninstall_skill(self, skill_id: str) -> None:
         """Uninstall a skill."""
         self._cs.set(f"skills.{skill_id}.enabled", False, category="skills")

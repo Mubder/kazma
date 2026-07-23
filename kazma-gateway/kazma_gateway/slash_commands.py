@@ -211,10 +211,12 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
         return _cmd_config(f"/config {text}", ctx)
     if cmd == "/context":
         return _cmd_context(ctx)
-    if cmd == "/undo":
-        return _cmd_undo()
-    if cmd == "/edit":
-        return _cmd_edit(text)
+
+    # NOTE: /undo and /edit are intentionally NOT handled here. They mutate
+    # LangGraph checkpoint state and are resolved by the graph handler in
+    # agent_handler/graph.py (_handle_undo / _handle_edit) before this
+    # resolver runs. Returning None lets them fall through to the graph on
+    # live platforms, and to the LLM otherwise.
 
     return None  # not a recognised command → passed to LLM
 
@@ -273,34 +275,6 @@ def _cmd_context(ctx: dict[str, Any]) -> str:
         f"Tokens: `{token_count:,}` / `{max_tokens:,}` ({pct:.1f}%)\n"
         f"[{bar}]\n\n"
         f"Compaction triggers at 80% usage."
-    )
-
-
-def _cmd_undo() -> str:
-    """Fallback when /undo is not handled by agent_handler (no graph)."""
-    return (
-        "↩️ *Undo* is handled by the live agent session.\n\n"
-        "Send `/undo` on Telegram/Discord/Slack while chatting with the "
-        "agent — it removes the last assistant turn from checkpoint state.\n\n"
-        "If you see this message, the graph handler is not wired for this "
-        "channel. Use `/reset` or start a new session instead."
-    )
-
-
-def _cmd_edit(text: str) -> str:
-    """Fallback when /edit is not handled by agent_handler (no graph)."""
-    parts = text.strip().split(maxsplit=1)
-    if len(parts) < 2:
-        return (
-            "✏️ *Usage:* `/edit <corrected text>`\n\n"
-            "On live chat platforms this replaces the last assistant "
-            "message in the conversation checkpoint."
-        )
-    return (
-        "✏️ *Edit* is handled by the live agent session.\n\n"
-        f"Correction received (not applied here): {parts[1][:200]}\n\n"
-        "Send `/edit <text>` in Telegram/Discord/Slack while chatting "
-        "with the agent so the graph handler can update the checkpoint."
     )
 
 

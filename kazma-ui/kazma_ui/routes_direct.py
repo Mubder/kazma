@@ -826,17 +826,6 @@ def register_direct_routes(self: Any) -> None:
         finally:
             store.unregister_ws(websocket)
 
-    @self.app.websocket("/ws/chat")
-    async def ws_chat(websocket: WebSocket) -> None:
-        from kazma_ui.auth import websocket_is_authenticated
-
-        if not websocket_is_authenticated(websocket):
-            await websocket.close(code=4003, reason="Unauthorized")
-            return
-        from kazma_ui.chat import chat_websocket_handler
-
-        await chat_websocket_handler(websocket, self.agent)
-
     @self.app.get("/", response_class=HTMLResponse)
     async def root(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(

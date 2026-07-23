@@ -1,16 +1,15 @@
-"""Chat routes and deprecated WebSocket handler for the Kazma WebUI.
+"""Chat routes for the Kazma WebUI.
 
 Primary chat transport is SSE at ``/api/chat/stream`` (full graph HITL).
-WebSocket ``/ws/chat`` returns 410 Gone and must not execute tools.
+The legacy WebSocket ``/ws/chat`` endpoint (formerly 410 Gone) was removed.
 """
 
 from __future__ import annotations
 
 import logging
-import warnings
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Request, WebSocket
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -22,7 +21,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "chat_websocket_handler",
     "create_chat_router",
     "get_or_create_session",
     "list_sessions",
@@ -86,23 +84,5 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
     return r
 
 
-# ── WebSocket handler (deprecated) ────────────────────────────────────
+    return r
 
-
-async def chat_websocket_handler(websocket: WebSocket, agent: KazmaAgent) -> None:
-    """Deprecated WebSocket chat — always closes with 410 Gone.
-
-    This path historically bypassed LangGraph ``interrupt()`` HITL.
-    Clients must use SSE ``/api/chat/stream`` for full Mechanism A approval.
-    """
-    del agent  # unused; signature kept for call-site compatibility
-    warnings.warn(
-        "WebSocket /chat is deprecated. Use SSE /api/chat/stream for full HITL safety.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    # Code 4100 is application-specific "gone / use SSE"
-    await websocket.close(
-        code=4100,
-        reason="Deprecated: Use /api/chat/stream for full HITL support",
-    )

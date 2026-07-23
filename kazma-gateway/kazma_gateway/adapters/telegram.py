@@ -39,6 +39,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from kazma_gateway.gateway import (
+    Attachment,
     BaseAdapter,
     IncomingMessage,
     OutboundMessage,
@@ -55,6 +56,10 @@ _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
 # Voice download size cap
 MAX_VOICE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+# Generic media (photo/document/video) download cap. Telegram Bot API limits
+# downloads to 20 MB, so we cap just below that.
+MAX_MEDIA_BYTES = 19 * 1024 * 1024  # 19 MB
 
 # Rate-limit constants
 _SEND_MAX_RETRIES = 3
@@ -285,6 +290,7 @@ class TelegramAdapter(BaseAdapter):
                             continue
 
                         # Handle voice messages (async download + transcribe)
+                        # and generic media (photo/document/video/animation).
                         msg = self._parse_update(update)
                         if msg is None:
                             message = (
@@ -319,6 +325,12 @@ class TelegramAdapter(BaseAdapter):
                                         "voice_transcribed": True,
                                     },
                                 )
+                            elif message and self._detect_media_message(message):
+                                # Photo / document / video / animation:
+                                # download and attach instead of dropping.
+                                msg = await self._handle_media_message(message)
+                                if msg is None:
+                                    continue
                             else:
                                 continue
 
@@ -571,6 +583,141 @@ class TelegramAdapter(BaseAdapter):
         except Exception as exc:
             logger.error("[telegram] Failed to download voice file: %s", type(exc).__name__)
             return None
+
+    # --- Generic media (photo/document/video) -------------------------
+
+    # Telegram media key → coarse kind + the size-ordered array to pick from.
+    # `photo` is a size-ordered array (smallest→largest); pick the largest.
+    # `document`/`video`/`animation`/`audio` are single objects with file_id.
+    _MEDIA_KEYS: dict[str, str] = {
+        "photo": "image",
+        "document": "file",
+        "video": "video",
+        "animation": "video",
+        "audio": "audio",
+    }
+
+    def _detect_media_message(self, message: dict[str, Any]) -> bool:
+        """Return True if *message* carries a downloadable media payload."""
+        return any(key in message for key in self._MEDIA_KEYS)
+
+    async def _download_media_file(self, file_id: str) -> bytes | None:
+        """Download any Telegram file by ``file_id`` (reuses the getFile flow).
+
+        Capped at :data:`MAX_MEDIA_BYTES`. Returns raw bytes or None on error.
+        """
+        if self._http is None:
+            raise RuntimeError("HTTP client not initialized -- adapter not started")
+        try:
+            resp = await self._http.get("/getFile", params={"file_id": file_id})
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("ok"):
+                logger.error("[telegram] getFile ok=false for media: %s", data)
+                return None
+            file_path = data["result"].get("file_path")
+            if not file_path:
+                return None
+            file_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
+            dl_resp = await self._http.get(file_url)
+            dl_resp.raise_for_status()
+            if len(dl_resp.content) > MAX_MEDIA_BYTES:
+                logger.warning(
+                    "[telegram] media file too large: %d bytes", len(dl_resp.content)
+                )
+                return None
+            logger.info(
+                "[telegram] Downloaded media file: %s (%d bytes)",
+                file_path, len(dl_resp.content),
+            )
+            return dl_resp.content
+        except Exception as exc:
+            logger.error("[telegram] media download failed: %s", type(exc).__name__)
+            return None
+
+    async def _handle_media_message(
+        self, message: dict[str, Any]
+    ) -> IncomingMessage | None:
+        """Download a media payload and build an :class:`IncomingMessage`.
+
+        Captures photo / document / video / animation / audio. Caption (if
+        any) becomes the message text; otherwise a minimal ``[image]`` /
+        ``[file]`` placeholder keeps downstream ``if msg.text`` guards from
+        skipping the turn. Images become vision attachments; everything
+        else is attached as a file (the builder persists + references it).
+        """
+        # Pick the first present media key by priority order.
+        media_kind: str | None = None
+        for key in ("photo", "document", "video", "animation", "audio"):
+            if key in message:
+                media_kind = self._MEDIA_KEYS[key]
+                payload = message[key]
+                break
+        else:
+            return None
+
+        # Resolve a file_id + filename + mime.
+        file_id = ""
+        filename = ""
+        mime = ""
+        if media_kind == "image":
+            # photo is an array of PhotoSize; largest is last.
+            sizes = payload  # type: ignore[assignment]
+            if not isinstance(sizes, list) or not sizes:
+                return None
+            largest = sizes[-1]
+            file_id = largest.get("file_id", "")
+            mime = "image/jpeg"  # Telegram photos are JPEG
+            filename = f"photo_{largest.get('file_unique_id', 'tg')}.jpg"
+        else:
+            file_id = payload.get("file_id", "")
+            mime = payload.get("mime_type", "") or "application/octet-stream"
+            filename = payload.get("file_name", "") or f"{media_kind}_{file_id[:8]}"
+
+        if not file_id:
+            return None
+
+        data = await self._download_media_file(file_id)
+        if data is None:
+            return None
+
+        caption = message.get("caption") or ""
+        from_user = message.get("from", {})
+        user_id = from_user.get("id", 0)
+        chat_id = message.get("chat", {}).get("id", 0)
+        username = (
+            from_user.get("username", "")
+            or from_user.get("first_name", "")
+            or f"tg_{user_id}"
+        )
+        sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
+        text = caption or f"[{media_kind}]"
+        attachment = Attachment(
+            kind=media_kind,
+            mime=mime,
+            filename=filename,
+            data=data,
+            meta={"file_id": file_id, "source": "telegram"},
+        )
+        logger.info(
+            "[telegram] media attached: %s (%s, %d bytes) thread=%s",
+            filename, mime, len(data), chat_id,
+        )
+        return IncomingMessage(
+            platform="telegram",
+            sender_id=sender_id,
+            text=text,
+            attachments=[attachment],
+            context_metadata={
+                "chat_id": chat_id,
+                "user_id": user_id,
+                "username": username,
+                "message_id": message.get("message_id", 0),
+                "chat_type": message.get("chat", {}).get("type", "private"),
+                "update_id": message.get("update_id", 0) or 0,
+                "media": True,
+            },
+        )
 
     def _live_voice_settings(self) -> dict[str, str | bool]:
         """Read voice settings from ConfigStore (Settings UI) with ctor fallbacks.
@@ -1082,6 +1229,9 @@ class TelegramAdapter(BaseAdapter):
                 asyncio.create_task(
                     self._set_reaction(chat_id, original_msg_id, emoji)
                 )
+            # Send any media attachments (photos/documents/video) after text.
+            for att in outbound.attachments:
+                await self._send_attachment(chat_id, att)
             # Send TTS voice reply if original message was voice
             if self._live_voice_settings().get("enabled") and outbound.context_metadata.get("voice_transcribed"):
                 asyncio.create_task(self._send_tts_reply(chat_id, outbound.text, original_msg_id))
@@ -1093,6 +1243,60 @@ class TelegramAdapter(BaseAdapter):
                 asyncio.create_task(
                     self._set_reaction(chat_id, original_msg_id, "❌")
                 )
+            return False
+
+    async def _send_attachment(self, chat_id: int, att: Attachment) -> bool:
+        """Deliver one media attachment via the matching Telegram API.
+
+        Routes by ``att.kind``: image→``/sendPhoto``, video→``/sendVideo``,
+        audio→``/sendAudio``, otherwise ``/sendDocument``. Bytes must be in
+        ``att.data``; if absent and ``att.url`` is set, the file is fetched
+        first. Failures are logged but never abort the whole send.
+        """
+        if self._http is None:
+            return False
+
+        data = att.data
+        if data is None and att.url:
+            try:
+                resp = await self._http.get(att.url, timeout=30.0)
+                resp.raise_for_status()
+                data = resp.content
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[telegram] attachment fetch failed: %s", exc)
+                return False
+        if not data:
+            return False
+
+        if att.kind == "image":
+            endpoint = "/sendPhoto"
+            field = "photo"
+        elif att.kind == "video":
+            endpoint = "/sendVideo"
+            field = "video"
+        elif att.kind == "audio":
+            endpoint = "/sendAudio"
+            field = "audio"
+        else:
+            endpoint = "/sendDocument"
+            field = "document"
+
+        safe_name = att.filename or f"kazma_{att.kind}"
+        try:
+            await self._rate_limiter.acquire()
+            resp = await self._http.post(
+                endpoint,
+                params={"chat_id": chat_id},
+                files={field: (safe_name, data, att.mime or "application/octet-stream")},
+            )
+            resp.raise_for_status()
+            if not resp.json().get("ok"):
+                logger.error("[telegram] %s returned ok=false", endpoint)
+                return False
+            logger.info("[telegram] sent %s (%d bytes) to %d", endpoint, len(data), chat_id)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[telegram] %s failed: %s", endpoint, type(exc).__name__)
             return False
 
     async def _register_bot_commands(self) -> None:
