@@ -83,6 +83,62 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
         "auth_header": "Bearer",
         "docs": "https://build.nvidia.com",
     },
+    "mistral": {
+        "name": "Mistral AI",
+        "base_url": "https://api.mistral.ai/v1",
+        "models_endpoint": "/models",
+        "auth_header": "Bearer",
+        "docs": "https://console.mistral.ai/api-keys",
+    },
+    "together": {
+        "name": "Together AI",
+        "base_url": "https://api.together.xyz/v1",
+        "models_endpoint": "/models",
+        "auth_header": "Bearer",
+        "docs": "https://api.together.ai/settings/api-keys",
+    },
+    "cohere": {
+        "name": "Cohere",
+        "base_url": "https://api.cohere.ai/v1",
+        "models_endpoint": "/models",
+        "auth_header": "Bearer",
+        "docs": "https://dashboard.cohere.com/api-keys",
+    },
+    "fireworks": {
+        "name": "Fireworks AI",
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "models_endpoint": "/models",
+        "auth_header": "Bearer",
+        "docs": "https://fireworks.ai/account/api-keys",
+    },
+    "perplexity": {
+        "name": "Perplexity",
+        "base_url": "https://api.perplexity.ai",
+        "models_endpoint": "/models",
+        "auth_header": "Bearer",
+        "docs": "https://www.perplexity.ai/settings/api",
+    },
+    "ai21": {
+        "name": "AI21 Labs",
+        "base_url": "https://api.ai21.com/studio/v1",
+        "models_endpoint": "/models",
+        "auth_header": "Bearer",
+        "docs": "https://studio.ai21.com/account/api-key",
+    },
+    "azure": {
+        "name": "Azure OpenAI",
+        "base_url": "",  # computed by AzureProvider from resource name + deployment
+        "models_endpoint": "",
+        "auth_header": "api-key",
+        "docs": "https://learn.microsoft.com/azure/ai-services/openai",
+    },
+    "bedrock": {
+        "name": "AWS Bedrock",
+        "base_url": "",  # computed by BedrockProvider from region
+        "models_endpoint": "",
+        "auth_header": "Bearer",  # SigV4 signing applied by BedrockProvider
+        "docs": "https://console.aws.amazon.com/bedrock",
+    },
     "custom": {
         "name": "Custom Endpoint",
         "base_url": "",

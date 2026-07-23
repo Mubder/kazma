@@ -355,6 +355,19 @@ class ModelRegistry:
                     location=location,
                     google_mode=google_mode,
                 )
+            elif provider_name.lower() == "anthropic":
+                # Native Anthropic Messages API (x-api-key + /messages schema).
+                from kazma_core.anthropic_llm import AnthropicProvider
+
+                client = AnthropicProvider(config)
+            elif provider_name.lower() == "azure":
+                from kazma_core.azure_llm import AzureProvider
+
+                client = AzureProvider(config)
+            elif provider_name.lower() == "bedrock":
+                from kazma_core.bedrock_llm import BedrockProvider
+
+                client = BedrockProvider(config)
             else:
                 client = LLMProvider(config)
 
@@ -390,6 +403,15 @@ class ModelRegistry:
                     location=str(owner.get("location", "")) or "us-central1",
                     google_mode=str(owner.get("google_mode", "")),
                 )
+            if owner_name == "anthropic":
+                from kazma_core.anthropic_llm import AnthropicProvider
+                return AnthropicProvider(config)
+            if owner_name == "azure":
+                from kazma_core.azure_llm import AzureProvider
+                return AzureProvider(config)
+            if owner_name == "bedrock":
+                from kazma_core.bedrock_llm import BedrockProvider
+                return BedrockProvider(config)
             return LLMProvider(config)
 
         # Fallback: use active profile with overridden model
@@ -425,6 +447,15 @@ class ModelRegistry:
                 location=str(entry.get("location", "")) or "us-central1",
                 google_mode=str(entry.get("google_mode", "")),
             )
+        if provider_name.lower() == "anthropic":
+            from kazma_core.anthropic_llm import AnthropicProvider
+            return AnthropicProvider(config)
+        if provider_name.lower() == "azure":
+            from kazma_core.azure_llm import AzureProvider
+            return AzureProvider(config)
+        if provider_name.lower() == "bedrock":
+            from kazma_core.bedrock_llm import BedrockProvider
+            return BedrockProvider(config)
         return LLMProvider(config)
 
     def find_provider_for_model(self, model_id: str) -> dict[str, Any] | None:
