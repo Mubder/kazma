@@ -102,6 +102,7 @@ Items are marked:
 | Voice on Discord/Slack/Web | ✅ | STT + TTS wired into all platforms via `voice_helpers.py` (was Telegram-only). |
 | Media / attachments (photo/doc/video) | ✅ | `Attachment` contract on `IncomingMessage`/`OutboundMessage`; inbound+outbound on all platforms + Web `/api/chat/upload`. |
 | `/undo`, `/edit` slash commands | ✅ | Handled by the graph (`_handle_undo`/`_handle_edit` mutate checkpoint state). |
+| Time-travel replay & fork | ✅ | `SnapshotRecorder` wired into all graph-build sites; `/replay` restore + `/fork` branch + Web UI `/replay` timeline panel + live SSE snapshot events + `/api/replay/*`. |
 
 ---
 

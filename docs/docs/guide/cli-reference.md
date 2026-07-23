@@ -268,7 +268,8 @@ These are typed inside a connected chat (Telegram/Discord/Slack/Web). Defined in
 | `/model` or `/models` | Interactive model selector (Telegram inline keyboard). |
 | `/memory` | Memory subsystem stats. |
 | `/cost` | Token spend for the session. |
-| `/replay list \| &lt;iter> \| compare &lt;a> &lt;b> \| clear` | Time-travel. |
+| `/replay list \| &lt;iter> \| compare &lt;a> &lt;b> \| clear` | Time-travel: list snapshots, restore (rewind), compare diff, clear. |
+| `/fork &lt;iter>` | Branch from a snapshot into a new thread (original stays intact). |
 | `/config show \| model &lt;n> \| personality &lt;n> \| memory on\|off \| tools list \| tools toggle &lt;n> \| export` | Config wizard. |
 | `/personality` | Delegate to `/config personality`. |
 | `/context` | Context-window token usage. |

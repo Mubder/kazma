@@ -227,6 +227,44 @@ them into every future system prompt. Two invariants must hold:
 - Kill-switch `KAZMA_SELF_IMPROVEMENT=0` is checked live (not just at init) on
   both the chat/supervisor path and the swarm worker path.
 
+### 12. Time Travel Replay (`kazma-core/kazma_core/time_travel.py`)
+
+The time-travel subsystem captures a snapshot of the full `SupervisorState`
+after every supervisor iteration and persists it to
+`kazma-data/snapshots.db` (SQLite WAL, LRU-capped per-thread at 50).
+
+**A. The recorder must be wired into ALL graph-build sites.**
+- `SnapshotRecorder` is created once per agent (`agent_runner.py` via
+  `create_recorder(config=...)`) and passed to `build_supervisor_graph(...,
+  snapshot_recorder=...)` at all 3 call sites: the run graph
+  (`_ensure_graph`), the streaming graph (`_ensure_streaming_graph`), and
+  child graphs (`build_child_graph`). The app.py post-startup recompile also
+  passes it. If any site omits the recorder, that path stops capturing
+  snapshots silently.
+
+**B. Capture hook lives in the supervisor node.**
+- `graph_builder.py:_supervisor` calls `snapshot_recorder.capture(merged)`
+  after each iteration and stamps `snapshot_id`/`snapshot_iteration` into
+  the result state. This is conditional on `snapshot_recorder is not None`.
+  The SSE path reads `snapshot_id` from the terminal graph state to emit a
+  `snapshot` SSE event (Part 6).
+
+**C. Restore vs Fork — in-place vs branch.**
+- `/replay <n>` (`_handle_replay` in `graph.py`): loads a snapshot via
+  `ReplayEngine.replay_from(thread_id, iteration)` and writes it back to the
+  SAME thread via `graph.aupdate_state(config, state)` — rewinding the live
+  conversation. Same pattern as `/undo`.
+- `/fork <n>` (`_handle_fork` in `graph.py`): loads the same snapshot but
+  writes it under a NEW `thread_id` (mints `gw-{platform}-{sender}-{uuid}`).
+  Also copies session context + creates a Web UI session. The original
+  thread is NOT modified. Do NOT overwrite `active_thread.{sender}` — the
+  user stays on the original; the fork appears in the Web UI sidebar.
+
+**D. The slash-command resolver returns `None` for `/replay <n>` and `/fork`.**
+- These fall through to the graph handler (like `/undo`/`/edit`) because they
+  need `graph.aupdate_state`. The resolver only handles read-only subcommands
+  (`list`, `compare`, `clear`) which don't need graph access.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

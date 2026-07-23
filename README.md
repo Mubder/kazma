@@ -18,6 +18,7 @@ Kazma is a multi-platform AI agent framework that lets you build, deploy, and or
 - 🐝 **Swarm orchestration** — six patterns (dispatch, broadcast, pipeline, fan-out, consult, conditional) with circuit breakers, retries, and self-improvement
 - 💻 **IDE subsystem** — transport-agnostic coding backend (Web, TUI, all chat platforms): multi-tab editor, file-aware AI chat, `/ide` commands, per-task workspace targeting, GitHub clone-from-chat
 - 🔒 **Human-in-the-loop safety** — three independent HITL gates ensure dangerous tools never execute without approval
+- 🕰️ **Time-travel replay** — snapshot every supervisor iteration; restore (rewind) any conversation point, fork into a new thread without losing the original, compare runs, and browse a timeline in the Web UI
 - 🔑 **Encrypted secret vault** — AES-256-GCM encrypted storage for API keys and credentials
 - 🌐 **Any LLM provider** — OpenAI, Anthropic (native Messages API), Google Gemini, DeepSeek, xAI, OpenRouter, NVIDIA NIM, Mistral, Together, Cohere, Fireworks, Perplexity, AI21, Azure OpenAI, AWS Bedrock, Ollama, LM Studio — via plain HTTP, no SDK lock-in
 - 🇸🇦 **Arabic-native** — custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultural protocol
