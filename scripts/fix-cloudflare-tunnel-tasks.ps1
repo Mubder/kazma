@@ -80,15 +80,33 @@ $actProxy = New-ScheduledTaskAction `
 Register-ScheduledTask -TaskName "KazmaWSL" -Action $actProxy -Trigger $trigStart -Principal $principal -Settings $settings -Force | Out-Null
 Write-Host "        OK -> waits up to 60s for a valid WSL IP before pinning portproxy" -ForegroundColor Green
 
+# ── 3b. Create a KazmaCloudflared task so the tunnel daemon auto-starts ─
+# cloudflared is NOT installed as a Windows service here, so without this it
+# dies on every reboot and the tunnel 1033s until manually restarted.
+Write-Host "  [3b/4] Recreating KazmaCloudflared (tunnel daemon auto-start)..." -ForegroundColor Cyan
+Unregister-ScheduledTask -TaskName "KazmaCloudflared" -Confirm:$false -ErrorAction SilentlyContinue
+$cfBin = "C:\Program Files (x86)\cloudflared\cloudflared.exe"
+if (Test-Path $cfBin) {
+    $actCf = New-ScheduledTaskAction `
+        -Execute $cfBin `
+        -Argument "tunnel run" `
+        -WorkingDirectory "C:\Users\balfa\.cloudflared"
+    Register-ScheduledTask -TaskName "KazmaCloudflared" -Action $actCf -Trigger $trigStart -Principal $principal -Settings $settings -Force | Out-Null
+    Write-Host "        OK -> '$cfBin tunnel run' at startup" -ForegroundColor Green
+} else {
+    Write-Host "        SKIP -> cloudflared.exe not found at $cfBin" -ForegroundColor Yellow
+}
+
 # ── 4. Also fire the portproxy NOW so you don't have to reboot ──────────
 Write-Host "  [4/4] Running the portproxy fix once now (so no reboot needed)..." -ForegroundColor Cyan
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pinScript -Distro $Distro -Port $Port -WaitForNetwork 30
 
 Write-Host ""
-Write-Host "  DONE. On every reboot/login the bridge now sets itself up." -ForegroundColor Green
-Write-Host "  You should no longer need to run wsl_fixed_access.ps1 manually." -ForegroundColor Green
+Write-Host "  DONE. On every reboot the bridge + tunnel daemon now start themselves." -ForegroundColor Green
+Write-Host "  You should no longer need to run wsl_fixed_access.ps1 or cloudflared manually." -ForegroundColor Green
 Write-Host ""
 Write-Host "  Verify (no admin needed):" -ForegroundColor Cyan
 Write-Host "    netsh interface portproxy show v4tov4"
 Write-Host "    curl http://127.0.0.1:$Port/health"
+Write-Host "    curl https://my.kazma.ai/health     # via the tunnel"
 Write-Host ""
