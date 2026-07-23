@@ -477,12 +477,31 @@ class LocalToolRegistry:
 
         for attempt in range(1, max_attempts + 1):
             try:
+                # Filter arguments to only those the function accepts. The LLM
+                # sometimes injects extra keys (e.g. "raw") that aren't in the
+                # function signature, causing TypeError on **kwargs splat.
+                import inspect as _inspect
+                try:
+                    sig = _inspect.signature(tool.func)
+                    valid_params = {
+                        k: v for k, v in arguments.items()
+                        if k in sig.parameters
+                    }
+                    if len(valid_params) < len(arguments):
+                        dropped = set(arguments) - set(valid_params)
+                        logger.debug(
+                            "Tool '%s': dropped unexpected args: %s",
+                            tool_name, dropped,
+                        )
+                except (ValueError, TypeError):
+                    valid_params = arguments
+
                 if tool.is_async:
-                    result = await tool.func(**arguments)
+                    result = await tool.func(**valid_params)
                 else:
                     # Run sync functions in a thread pool
                     loop = asyncio.get_running_loop()
-                    result = await loop.run_in_executor(None, lambda: tool.func(**arguments))
+                    result = await loop.run_in_executor(None, lambda: tool.func(**valid_params))
 
                 duration_ms = (time.monotonic() - start) * 1000
                 logger.info("Tool '%s' executed in %.0fms", tool_name, duration_ms)
