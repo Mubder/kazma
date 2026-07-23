@@ -60,6 +60,10 @@ __all__ = ["LocalTool", "LocalToolRegistry", "get_tool_registry", "get_vector_me
 
 logger = logging.getLogger(__name__)
 
+# Strong references for background dispatch tasks so the GC doesn't
+# kill them before they complete (and persist to TaskStore).
+_pending_dispatch_tasks: set = set()
+
 #: ContextVar set by the graph's interrupt() gate after HITL approval.
 #: This is the ONLY trusted source for the "already approved" flag —
 #: the ``_hitl_approved`` key in LLM-supplied tool arguments is always
@@ -1144,7 +1148,11 @@ class LocalToolRegistry:
                 metadata={"source": "chat", "kind": "research"},
             )
             # Dispatch in the background so the tool returns immediately.
-            _asyncio.create_task(engine.dispatch(task))
+            # Hold a strong reference so the GC doesn't kill the task
+            # before it completes (and persists to TaskStore).
+            _bg_task = _asyncio.create_task(engine.dispatch(task))
+            _pending_dispatch_tasks.add(_bg_task)
+            _bg_task.add_done_callback(_pending_dispatch_tasks.discard)
             return (
                 f"Swarm task dispatched to worker '{worker}' "
                 f"(id: {task.id}). It's visible in the Swarm panel. "
