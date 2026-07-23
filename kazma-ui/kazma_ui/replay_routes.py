@@ -48,18 +48,7 @@ def create_replay_router(
     async def list_threads() -> JSONResponse:
         """List distinct thread_ids that have at least one snapshot."""
         try:
-            from kazma_core.config_store import get_config_store
-
-            store = recorder._get_store(recorder._db_path) if hasattr(recorder, "_db_path") else None
-            # The SnapshotStore tracks threads in the snapshots table; list
-            # distinct thread_ids via a direct SQL query.
-            if store is not None:
-                rows = store._conn.execute(
-                    "SELECT DISTINCT thread_id FROM snapshots ORDER BY thread_id"
-                ).fetchall()
-                threads = [r[0] for r in rows]
-            else:
-                threads = list({k[0] for k in recorder._memory})
+            threads = recorder.list_distinct_threads()
             return JSONResponse({"threads": threads, "count": len(threads)})
         except Exception as exc:
             logger.exception("[replay] list threads failed")
