@@ -9,11 +9,13 @@ Routes:
   GET  /api/research/tasks/{id}      — single research result detail
   POST /api/research/compare         — compare two research runs
   POST /api/research/{id}/export     — export to DOCX/PDF/Markdown
+  GET  /api/research/download        — download an exported file
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -190,5 +192,19 @@ def create_research_router() -> APIRouter:
             "path": path,
             "filename": Path(path).name if path else "",
         })
+
+    @router.get("/api/research/download")
+    async def download_export(path: str) -> Any:
+        """Download an exported research file."""
+        # Security: only allow downloads from kazma-data/documents/.
+        safe_root = os.path.abspath("kazma-data/documents")
+        real_path = os.path.abspath(path)
+        if not real_path.startswith(safe_root) or not os.path.isfile(real_path):
+            return JSONResponse({"error": "invalid file path"}, status_code=403)
+        return FileResponse(
+            real_path,
+            filename=os.path.basename(real_path),
+            media_type="application/octet-stream",
+        )
 
     return router

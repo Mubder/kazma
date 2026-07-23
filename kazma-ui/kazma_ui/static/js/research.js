@@ -91,7 +91,14 @@
           var output = t.aggregated_output || t.synthesized_output ||
             (t.worker_results && t.worker_results[0] ? t.worker_results[0].output : '') ||
             '(no output)';
-          $('research-detail-output').textContent = output;
+          // Render as markdown (rich text) instead of plain text.
+          if (window.KazmaStream && KazmaStream.markdown) {
+            $('research-detail-output').innerHTML = KazmaStream.markdown(output);
+          } else if (window.marked) {
+            $('research-detail-output').innerHTML = window.marked(output);
+          } else {
+            $('research-detail-output').textContent = output;
+          }
         });
     },
 
@@ -108,6 +115,15 @@
         .then(function (data) {
           if (data.error) { toast('Export failed: ' + data.error, 'error'); return; }
           toast('Exported: ' + (data.filename || fmt), 'success');
+          // Trigger a file download so the user actually gets the file.
+          if (data.path) {
+            var a = document.createElement('a');
+            a.href = '/api/research/download?path=' + encodeURIComponent(data.path);
+            a.download = data.filename || 'research.' + fmt;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
         })
         .catch(function () { toast('Export request failed', 'error'); });
     },
