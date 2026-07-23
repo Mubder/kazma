@@ -98,9 +98,16 @@ def create_research_router() -> APIRouter:
     async def research_detail(task_id: str) -> JSONResponse:
         """Get a single research result with full output."""
         store = _get_store()
-        if store is None:
-            return JSONResponse({"error": "store unavailable"}, status_code=503)
-        task = store.get_task(task_id)
+        task = store.get_task(task_id) if store else None
+        if task is None:
+            # Fall back to the engine's in-memory tasks.
+            try:
+                from kazma_core.swarm import get_swarm_engine
+                engine = get_swarm_engine()
+                if engine:
+                    task = engine.get_task(task_id) or engine.get_active_task(task_id)
+            except Exception:
+                pass
         if task is None:
             return JSONResponse({"error": "not found"}, status_code=404)
         return JSONResponse({"task": _flatten(task)})
@@ -139,10 +146,18 @@ def create_research_router() -> APIRouter:
 
         Body: ``{"format": "docx" | "pdf" | "markdown"}``
         """
+        # Try TaskStore first, then engine's in-memory active/completed tasks.
         store = _get_store()
-        if store is None:
-            return JSONResponse({"error": "store unavailable"}, status_code=503)
-        task = store.get_task(task_id)
+        task = store.get_task(task_id) if store else None
+        if task is None:
+            # Fall back to the engine's in-memory tasks (not yet persisted).
+            try:
+                from kazma_core.swarm import get_swarm_engine
+                engine = get_swarm_engine()
+                if engine:
+                    task = engine.get_task(task_id) or engine.get_active_task(task_id)
+            except Exception:
+                pass
         if task is None or task.result is None:
             return JSONResponse({"error": "task or result not found"}, status_code=404)
 

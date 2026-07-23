@@ -91,10 +91,14 @@
           var output = t.aggregated_output || t.synthesized_output ||
             (t.worker_results && t.worker_results[0] ? t.worker_results[0].output : '') ||
             '(no output)';
-          // Render as plain text with proper wrapping — cleaner for long
-          // research outputs with markdown tables (which render poorly
-          // through the markdown renderer inside a narrow panel).
-          $('research-detail-output').textContent = output;
+          // Render as markdown (formatted) — same renderer as chat messages.
+          var el = $('research-detail-output');
+          el.className = 'markdown-body';
+          if (window.KazmaStream && KazmaStream.markdown) {
+            el.innerHTML = KazmaStream.markdown(output);
+          } else {
+            el.textContent = output;
+          }
         });
     },
 
