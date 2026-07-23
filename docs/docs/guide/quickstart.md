@@ -14,7 +14,7 @@ description: Kazma Quickstart — code-audited reference (unified docs, v0.6.1+)
 |---|---|
 | **Python** | `>=3.11, &lt;3.14` (declared in `pyproject.toml`). |
 | **Git** | For cloning / `kazma update` (git install path). |
-| **An LLM provider key** | At least one of: OpenAI, DeepSeek, Anthropic, Google (ADC), xAI, OpenRouter, NVIDIA NIM — or a local server (Ollama / LM Studio). |
+| **An LLM provider key** | At least one of: OpenAI, Anthropic, Google (ADC), DeepSeek, xAI, OpenRouter, NVIDIA NIM, Mistral, Together, Cohere, Fireworks, Perplexity, AI21 — or a local server (Ollama / LM Studio). Azure OpenAI and AWS Bedrock are also supported natively. |
 | **Node.js** (optional) | Only if you want to build/serve the Docusaurus docs site (`docs/`). Not required to run Kazma itself. |
 
 > **Note on extras:** Core `pip install -e .` installs everything needed to run the agent, Web UI, TUI, gateways, and swarm. The `rag` extra (`chromadb`, `sentence-transformers`) is required **only** for vector memory / RAG — see [Memory & RAG](memory-and-rag).
@@ -54,11 +54,26 @@ source .venv/bin/activate
 
 ```bash
 pip install -e ".[rag,dev]"
+# or install everything at once:
+pip install -e ".[all]"
 # or: uv sync --all-extras
 ```
 
-- `[rag]` adds `chromadb>=0.5.0` + `sentence-transformers>=3.0.0`.
-- `[dev]` adds `pytest`, `pytest-asyncio`, `ruff`, `mypy`, `locust`, etc.
+Optional extras (only install the ones you need):
+
+| Extra | Packages | Enables |
+|---|---|---|
+| `[rag]` | `chromadb>=0.5.0`, `sentence-transformers>=3.0.0`, `sqlite-vec>=0.1.6` | Vector memory / RAG (4-layer UnifiedMemoryAdapter) |
+| `[dev]` | `pytest`, `pytest-asyncio`, `ruff`, `mypy`, `locust`, … | Tests + linting |
+| `[tui]` | `textual>=8.0.0`, `python-bidi>=0.4.0` | Terminal dashboard (`kazma-tui`) |
+| `[observability]` | `prometheus-client>=0.20.0` | `/metrics` scrape endpoint |
+| `[web]` | `playwright>=1.40` | Browser-automation skill (run `playwright install chromium` after) |
+| `[document]` | `reportlab>=4.0.0`, `python-docx>=1.1.0`, `openpyxl>=3.1.0` | Document-generator skill (PDF/DOCX/XLSX) |
+| `[database]` | `psycopg[binary]>=3.1.0`, `pymysql>=1.1.0`, `pymongo>=4.7.0` | Postgres/MySQL/Mongo in the database-client skill |
+| `[postgres]` | `psycopg[binary,pool]>=3.1.0`, `langgraph-checkpoint-postgres>=2.0.0` | Multi-replica SaaS shared state |
+| `[all]` | meta — installs every extra above | Convenience |
+
+> The native skills (browser, calendar, document-generator, database) **always load** — their tools are registered even when the optional package is absent; calling a tool whose backend isn't installed returns a friendly install-hint string instead of failing. Install the extra to activate that backend.
 
 ### Path B — Production Docker Compose
 

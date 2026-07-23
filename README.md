@@ -19,7 +19,7 @@ Kazma is a multi-platform AI agent framework that lets you build, deploy, and or
 - 💻 **IDE subsystem** — transport-agnostic coding backend (Web, TUI, all chat platforms): multi-tab editor, file-aware AI chat, `/ide` commands, per-task workspace targeting, GitHub clone-from-chat
 - 🔒 **Human-in-the-loop safety** — three independent HITL gates ensure dangerous tools never execute without approval
 - 🔑 **Encrypted secret vault** — AES-256-GCM encrypted storage for API keys and credentials
-- 🌐 **Any LLM provider** — OpenAI, Anthropic, DeepSeek, Google Gemini, xAI, OpenRouter, Ollama, LM Studio, NVIDIA NIM — via plain HTTP, no SDK lock-in
+- 🌐 **Any LLM provider** — OpenAI, Anthropic (native Messages API), Google Gemini, DeepSeek, xAI, OpenRouter, NVIDIA NIM, Mistral, Together, Cohere, Fireworks, Perplexity, AI21, Azure OpenAI, AWS Bedrock, Ollama, LM Studio — via plain HTTP, no SDK lock-in
 - 🇸🇦 **Arabic-native** — custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultural protocol
 - 💾 **Memory & RAG** — ChromaDB vector memory with per-turn retrieval injection. **Pluggable embeddings** — local sentence-transformers or NVIDIA NIM / any OpenAI-compatible endpoint (config flip, no code change)
 - 📱 **Responsive web UI** — multi-tab code editor, AI chat, find/replace, unified dialog system — works on mobile with a slide-in nav drawer
@@ -70,7 +70,7 @@ pip install -e ".[rag,dev]"
 ```
 
 > **WSL:** If you see `externally-managed-environment`, always use a venv — never system-wide `pip install`.  
-> **Extras:** `rag` = vector memory; `dev` = tests/lint. For a fuller install: `pip install -e ".[all]"` if that extra is defined in your checkout, or `uv sync --all-extras`.
+> **Extras:** `rag` = vector memory; `dev` = tests/lint; `web` = browser automation (Playwright); `document` = PDF/DOCX/XLSX generation; `database` = Postgres/MySQL/Mongo drivers. Install everything with `pip install -e ".[all]"` or `uv sync --all-extras`.
 
 ### 3. Configure
 

@@ -38,6 +38,10 @@ DANGER = {
     "install_npm_packages",
     "install_agent_skill",
     "uninstall_agent_skill",
+    "email_send",
+    "email_delete",
+    "email_categorize",
+    "browser_eval_js",
 }
 
 

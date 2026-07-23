@@ -27,6 +27,14 @@ All packages are in scope. The four main packages:
 - `get_client(model)` auto-corrects provider/model mismatches at runtime
 - `set_active_model()` switches BOTH model AND provider via `find_provider_for_model()`
 - Never change one without the other or the LLM call goes to the wrong API endpoint
+- **Provider dispatch has FOUR branches** in `get_client()` / `get_model()` /
+  `get_client_by_provider()`: `google`→`GeminiProvider`, `anthropic`→
+  `AnthropicProvider`, `azure`→`AzureProvider`, `bedrock`→`BedrockProvider`,
+  else the generic `LLMProvider`. The generic `LLMProvider` always sends
+  `Authorization: Bearer` to `/chat/completions` — it CANNOT reach
+  Anthropic-native (`/messages`), Azure (`api-key` header + `api-version`),
+  or Bedrock (SigV4). Adding a non-Bearer provider means a new class +
+  a branch in all three sites (mirror the Google case), not just a preset.
 
 ### 2. Platform Isolation (`kazma-gateway/kazma_gateway/agent_handler.py`)
 - The LangGraph state NEVER contains `chat_id`, `user_id`, or `message_id`

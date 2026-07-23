@@ -35,23 +35,6 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `spawn_agents` | delegation | **danger** |  |
 | `python_exec` | code | **danger** |  |
 | `context_info` | diagnostics | safe/read |  |
-| `web_search` | search | safe/read | Public web search: SearXNG → DuckDuckGo → Bing HTML. Prefer `KAZMA_SEARXNG_URL`. |
-| `read_url` | search | safe/read | Fetch one public URL; paged window (`offset`, `max_chars`; default ~16k). SSRF-safe; optional Firecrawl/Jina. |
-| `read_url_to_file` | search | safe/read | Full extract saved under workspace (default `KAZMA_RESEARCH_DIR`). |
-| `list_research_chunks` | search | safe/read | Chunk index + previews for a saved research file. |
-| `read_research_chunk` | search | safe/read | One chunk by index from a saved research file. |
-| `summarize_research_file` | search | safe/read | Light extractive outline (per-chunk previews). |
-| `digest_research_file` | search | safe/read | Process all chunks in-tool; return one bounded extractive digest (context-safe). |
-| `crawl_site` | search | safe/read | Bounded same-domain multi-page crawl; saves pages + markdown index. |
-| `email_list` | email | safe/read | List/search mailbox folder (sandbox / Gmail OAuth / Graph / IMAP / POP). |
-| `email_get` | email | safe/read | Fetch full message by id. |
-| `email_send` | email | **danger** | Send / reply / forward / draft (HITL). |
-| `email_delete` | email | **danger** | Trash or permanent delete (HITL). |
-| `email_categorize` | email | **danger** | Read/star/labels/move (HITL). |
-| `email_analyze` | email | safe/read | Summary, actions, phishing risk. |
-
-**Research workflow (chat, not `/research`):** [Web research](../guide/web-research).  
-**Email workflow (chat):** [Email integration](../guide/email-integration). Caps: `KAZMA_READ_URL_MAX_CHARS`, research truncate envs.
 
 ### Related tool modules (`kazma_core/tools/`)
 
@@ -64,23 +47,47 @@ These modules implement or support tools (some registered at startup, some via s
 - `file_write.py`
 - `image_gen.py`
 - `personality_cmd.py`
-- `read_url.py` — paging, research save/chunk/digest, optional backends
-- `web_research.py` — `crawl_site`
+- `read_url.py`
 - `registry.py`
 - `send_message.py`
 - `vision_analyze.py`
+- `web_research.py`
 - `web_search.py`
 
 ## Native skill tools
 
 | Tool | Skill | Category | Danger (typical) | Description |
 |------|-------|----------|------------------|-------------|
-| `web_search_duckduckgo` | advanced-web-crawler | web | safe/read | Wrapper around core `web_search` (SearXNG / DDG / Bing). |
-| `crawl_page` | advanced-web-crawler | web | safe/read | Alias of `read_url` (supports `offset` / `max_chars`). Single page only. |
+| `web_search_duckduckgo` | advanced-web-crawler | web | safe/read | Search the public web via core web_search (SearXNG / DuckDuckGo / Bing). Markdown titles, URLs, snippets. May rate-limit without SearXNG.
+ |
+| `crawl_page` | advanced-web-crawler | web | safe/read | Fetch ONE public URL and extract readable text (alias of read_url). Not multi-page crawl. Playwright fallback for bot walls / thin JS shells when installed.
+ |
 | `parse_document` | advanced-web-crawler | filesystem | safe/read | Parse structured text from local files including CSV, JSON, XLS, or PDF. |
 | `arabic_translate` | arabic-bilingual-nlp | nlp | safe/read | Translate context-preserving between Arabic and English. |
 | `hijri_convert` | arabic-bilingual-nlp | nlp | safe/read | Convert dates between Gregorian calendar (YYYY-MM-DD) and Hijri calendar. |
 | `insert_diacritics` | arabic-bilingual-nlp | nlp | safe/read | Apply correct vowel diacritics (tashkeel/harakat) to Arabic text based on semantic grammar. |
+| `browser_navigate` | browser-automation | browser | safe/read | Open a URL in a headless browser and return the page title plus the visible body text (truncated). Use for JS-rendered pages a plain HTTP fetch cannot read.
+ |
+| `browser_click` | browser-automation | browser | safe/read | Click an element matched by a CSS selector on the current page and return the updated text.
+ |
+| `browser_extract_text` | browser-automation | browser | safe/read | Extract text content from elements matching a CSS selector on the current page (or the full body if no selector).
+ |
+| `browser_screenshot` | browser-automation | browser | safe/read | Capture a screenshot of the current page (full page) and save it to kazma-data/images/. Returns the file path.
+ |
+| `browser_fill_form` | browser-automation | browser | safe/read | Fill input fields on the current page from a mapping of CSS selectors to values, optionally submitting the form.
+ |
+| `browser_eval_js` | browser-automation | browser | **danger** | Evaluate a JavaScript expression on the current page and return the result. Use with care — this executes arbitrary page-side code.
+ |
+| `list_events` | calendar | calendar | safe/read | List upcoming calendar events within a time range (ISO 8601). Defaults to the next 7 days.
+ |
+| `create_event` | calendar | calendar | safe/read | Create a calendar event with a title, start/end (ISO 8601), optional location and description.
+ |
+| `update_event` | calendar | calendar | safe/read | Update an existing event by id. Only provided fields are changed.
+ |
+| `delete_event` | calendar | calendar | safe/read | Delete a calendar event by id.
+ |
+| `find_free_slots` | calendar | calendar | safe/read | Find free time slots of a given duration within a date range, excluding existing busy events.
+ |
 | `dispatch_notification` | chat-platform-dispatcher | communication | safe/read | Send a notification message to a specific recipient or channel on Telegram, Discord, or Slack. |
 | `send_approval_request` | chat-platform-dispatcher | communication | safe/read | Dispatch an interactive approval card with actions/buttons for human verification (HITL). |
 | `send_message` | chat-platform-dispatcher | communication | safe/read | Send a text message to the current conversation thread. Use this to reply to the user. The platform and delivery channel are handled automatically. |
@@ -90,6 +97,26 @@ These modules implement or support tools (some registered at startup, some via s
 | `inspect_db_schema` | database-client | database | safe/read | Extract list of tables, column names, data types, primary/foreign keys, and indexes from SQLite databases. |
 | `execute_db_query` | database-client | database | safe/read | Execute a read-only SQL SELECT query against a local SQLite database file. |
 | `sqlite_query` | database-client | database | safe/read | Execute a read-only SQL query against the local SQLite database. SELECT queries only. Returns rows as JSON. |
+| `generate_pdf` | document-generator | document | safe/read | Generate a PDF document from a title and a list of sections (heading + body text). Returns the saved file path.
+ |
+| `generate_docx` | document-generator | document | safe/read | Generate a Word .docx document from a title and a list of sections (heading + body text). Returns the saved file path.
+ |
+| `generate_xlsx` | document-generator | document | safe/read | Generate an Excel .xlsx workbook from a list of sheets, each with a list of row-lists (the first row is the header). Returns the file path.
+ |
+| `generate_markdown_doc` | document-generator | document | safe/read | Generate a Markdown (.md) document from a title and a list of sections (heading + body). Returns the saved file path.
+ |
+| `email_list` | email-manager | email | safe/read | List, search, and page emails in a folder (INBOX default). Args: folder, query, limit, offset, unread_only, provider (auto\|sandbox\|gmail\|microsoft\|imap), account (optional multi-account alias).
+ |
+| `email_get` | email-manager | email | safe/read | Fetch full email by message_id. Args: message_id, include_body, max_body_chars, provider.
+ |
+| `email_send` | email-manager | email | **danger** | Send, reply, forward, or save draft. HITL required. Args: to, subject, body, action (send\|reply\|forward\|draft), cc, message_id, body_format, provider.
+ |
+| `email_delete` | email-manager | email | **danger** | Move message to trash or permanently delete. HITL required. Args: message_id, permanent, provider.
+ |
+| `email_categorize` | email-manager | email | **danger** | Mark read/unread, star/flag, add/remove labels, move folder. HITL required. Args: message_id, mark_read, star, add_labels, remove_labels, move_to_folder, provider.
+ |
+| `email_analyze` | email-manager | email | safe/read | Summarize email, extract action items/deadlines, sentiment, phishing risk. Args: message_id or raw_text, focus (full\|security\|actions), provider.
+ |
 | `install_python_packages` | environment-bootstrapper | system | **danger** | Install Python packages safely inside the runtime virtual environment using uv or pip. |
 | `install_npm_packages` | environment-bootstrapper | system | **danger** | Install Node/npm packages inside the active workspace. |
 | `check_environment` | environment-bootstrapper | system | safe/read | Diagnose system binaries, active Python interpreter, PATH variables, and compile resources. |
@@ -130,9 +157,13 @@ See [Skills, MCP & Tools](../guide/skills-mcp-and-tools).
 
 From `kazma_core/safety/hitl.py` → `CANONICAL_DANGER_TOOLS` (also mirrored in this script):
 
+- `browser_eval_js`
 - `cancel_scheduled`
 - `code_exec`
 - `config_save`
+- `email_categorize`
+- `email_delete`
+- `email_send`
 - `file_delete`
 - `file_write`
 - `git_commit`

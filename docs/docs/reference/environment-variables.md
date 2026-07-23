@@ -59,11 +59,18 @@ Generic `ConfigStore.get()` does **not** automatically overlay every env var —
 
 | Variable | Default | Prod required? | Purpose |
 |----------|---------|----------------|---------|
-| `OPENAI_API_KEY` | unset | One provider key | OpenAI-compatible key. |
+| `OPENAI_API_KEY` | unset | One provider key | OpenAI-compatible key; also used for the `dall-e` image-gen backend. |
 | `KAZMA_API_KEY` | unset | Fallback | Generic API key fallback. |
 | `KAZMA_PROVIDER` | unset | Optional boot | Provider id at startup. |
 | `KAZMA_MODEL` | unset | Optional boot | Model id at startup. |
-| Provider-specific | — | As used | e.g. Anthropic, DeepSeek, xAI, OpenRouter, Google ADC — see Configuration. |
+| `ANTHROPIC_API_KEY` | unset | For Claude | Native Anthropic Messages API (`anthropic_llm.py`). |
+| `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_DEPLOYMENT` / `AZURE_OPENAI_API_VERSION` | unset | For Azure | Azure OpenAI (`azure_llm.py`). |
+| `AWS_REGION` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | unset | For Bedrock | AWS Bedrock via standard boto3 credential chain (`bedrock_llm.py`). |
+| `STABILITY_API_KEY` | unset | Optional | Stability SDXL image-gen backend. |
+| `FAL_KEY` | unset | Optional | Flux image-gen backend (FAL.ai). |
+| `KAZMA_IMAGE_PROVIDER` | unset | Optional | Force an image backend (`pollinations`/`dall-e`/`stability`/`flux`); default `auto`. |
+| `GOOGLE_CALENDAR_TOKEN` / `MS_CALENDAR_TOKEN` | unset | Optional | OAuth token for the calendar skill's Google / Outlook backend. |
+| Provider-specific | — | As used | e.g. DeepSeek, Groq, xAI, OpenRouter, Mistral, Together, Cohere, Fireworks, Perplexity, AI21, Google ADC — see Configuration. |
 
 ---
 
