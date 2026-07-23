@@ -500,6 +500,7 @@ def register_tasks_routes(
         status: str | None = Query(default=None),
         worker: str | None = Query(default=None),
         q: str | None = Query(default=None),
+        kind: str | None = Query(default=None),
         page: int = Query(default=1, ge=1),
         page_size: int = Query(default=20, alias="pageSize", ge=1, le=100),
     ) -> JSONResponse:
@@ -508,6 +509,8 @@ def register_tasks_routes(
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:
             return JSONResponse({"tasks": [], "count": 0})
+
+        metadata_filter = {"kind": kind} if kind else None
 
         # Use TaskStore for paginated queries when available.
         store = getattr(engine, "task_store", None) or getattr(engine, "_task_store", None)
@@ -519,6 +522,7 @@ def register_tasks_routes(
                     status=status,
                     task_type=task_type,
                     worker=worker,
+                    metadata_filter=metadata_filter,
                     include_count=False,
                 )
                 q_lower = q.lower()
@@ -533,6 +537,7 @@ def register_tasks_routes(
                     status=status,
                     task_type=task_type,
                     worker=worker,
+                    metadata_filter=metadata_filter,
                     include_count=True,
                 )
             return JSONResponse({

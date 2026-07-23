@@ -1121,6 +1121,14 @@ class KazmaAppBuilder:
                 except Exception as exc:
                     logger.warning("[Replay] Failed to mount replay API: %s", exc)
 
+            # ── Research panel API ────────────────────────────────
+            try:
+                from kazma_ui.research_panel import create_research_router
+                self.app.include_router(create_research_router())
+                logger.info("[Research] API mounted at /api/research/*")
+            except Exception as exc:
+                logger.warning("[Research] Failed to mount research API: %s", exc)
+
             if self.gateway is not None:
                 from kazma_gateway.agent_handler import create_graph_handler
 

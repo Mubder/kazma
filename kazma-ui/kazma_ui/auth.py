@@ -182,6 +182,7 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/cron",
     "/observability",
     "/replay",
+    "/research",
 )
 
 #: Exact read-only paths that are always open regardless of secret config.

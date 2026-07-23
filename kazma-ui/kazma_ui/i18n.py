@@ -45,6 +45,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "nav.mcp": {"en": "MCP Servers", "ar": "خوادم MCP"},
     "nav.swarm": {"en": "Swarm", "ar": "السرب"},
     "nav.replay": {"en": "Time Travel", "ar": "السفر عبر الزمن"},
+    "nav.research": {"en": "Research", "ar": "الأبحاث"},
     "nav.agents": {"en": "Agents", "ar": "الوكلاء"},
     "nav.settings": {"en": "Settings", "ar": "الإعدادات"},
 

@@ -26,6 +26,7 @@ export function initSoftNav() {
         '/skills',
         '/mcp',
         '/replay',
+        '/research',
     ]);
 
     const GLOBAL_LIBS = [
@@ -37,7 +38,7 @@ export function initSoftNav() {
 
     // Only these classic page bundles are re-injected on soft-nav.
     // (Keeps importmap / module / alpine out of the reinject loop.)
-    const PAGE_SCRIPT_RE = /\/static\/js\/(?:providers|models|settings|agents|skills|mcp|dashboard|workspace|streaming|hitl_approval|replay)\.js(?:\?|$)/i;
+    const PAGE_SCRIPT_RE = /\/static\/js\/(?:providers|models|settings|agents|skills|mcp|dashboard|workspace|streaming|hitl_approval|replay|research)\.js(?:\?|$)/i;
 
     let navInFlight = null;
     let softNavGeneration = 0;
@@ -436,6 +437,7 @@ export function initSoftNav() {
         '5': '/mcp',
         '6': '/swarm',
         '7': '/replay',
+        '8': '/research',
     };
 
     document.addEventListener('keydown', (e) => {

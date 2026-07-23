@@ -1083,7 +1083,7 @@ class LocalToolRegistry:
                 type=TaskType.DISPATCH,
                 context=context,
                 timeout=300.0,
-                metadata={"source": "chat"},
+                metadata={"source": "chat", "kind": "research"},
             )
             # Dispatch in the background so the tool returns immediately.
             _asyncio.create_task(engine.dispatch(task))
