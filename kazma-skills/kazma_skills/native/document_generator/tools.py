@@ -63,6 +63,23 @@ async def generate_pdf(
     except ImportError:
         return "Error: reportlab not installed. Run: pip install reportlab"
 
+    # Arabic text needs reshaping + bidi for proper rendering in reportlab.
+    try:
+        import arabic_reshaper
+        from bidi.algorithm import get_display
+        _has_arabic = True
+    except ImportError:
+        _has_arabic = False
+
+    def _shape(text: str) -> str:
+        """Reshape Arabic text for reportlab (RTL + ligatures)."""
+        if not _has_arabic:
+            return text
+        try:
+            return get_display(arabic_reshaper.reshape(text))
+        except Exception:
+            return text
+
     secs = _normalize_sections(sections)
     dest = _filename(title, "pdf")
     try:
@@ -73,12 +90,12 @@ async def generate_pdf(
             "SectionHead", parent=styles["Heading2"], spaceBefore=14, spaceAfter=6
         )
         body_style = styles["BodyText"]
-        flow: list[Any] = [Paragraph(title, title_style), Spacer(1, 12)]
+        flow: list[Any] = [Paragraph(_shape(title), title_style), Spacer(1, 12)]
         for s in secs:
             if s["heading"]:
-                flow.append(Paragraph(s["heading"], head_style))
+                flow.append(Paragraph(_shape(s["heading"]), head_style))
             if s["body"]:
-                flow.append(Paragraph(s["body"].replace("\n", "<br/>"), body_style))
+                flow.append(Paragraph(_shape(s["body"]).replace("\n", "<br/>"), body_style))
             flow.append(Spacer(1, 8))
         doc.build(flow)
     except Exception as exc:  # noqa: BLE001
@@ -106,9 +123,17 @@ async def generate_docx(
         doc.add_heading(title, level=0)
         for s in secs:
             if s["heading"]:
-                doc.add_heading(s["heading"], level=1)
+                # Detect heading level from markdown ## prefixes.
+                heading = s["heading"].lstrip("#").strip()
+                level = s["heading"].count("#") if s["heading"].startswith("#") else 1
+                level = min(level, 3)  # docx supports 0-3 practically
+                doc.add_heading(heading, level=level)
             if s["body"]:
-                doc.add_paragraph(s["body"])
+                # Split body into paragraphs and add each separately.
+                for para in s["body"].split("\n\n"):
+                    para = para.strip()
+                    if para:
+                        doc.add_paragraph(para)
         doc.save(str(dest))
     except Exception as exc:  # noqa: BLE001
         return f"Error: DOCX generation failed — {exc}"

@@ -76,6 +76,8 @@ document = [
     "reportlab>=4.0.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
+    "arabic-reshaper>=3.0.0",
+    "python-bidi>=0.4.2",
 ]
 # Database drivers beyond SQLite (database_client skill)
 database = [
