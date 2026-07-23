@@ -904,8 +904,12 @@ async def respond_node(state: SupervisorState) -> dict[str, Any]:
     Extracts the last assistant message as the response and increments
     the iteration counter. Also schedules automatic long-term memory
     writes (durable facts / turn snapshots) so recall is not tool-only.
+
+    If the last message is a tool result (max-iterations forced respond
+    mid-tool-loop), makes a final LLM call to synthesize a text answer
+    from the collected tool results so the user gets a response.
     """
-    messages = state.get("messages", [])
+    messages = list(state.get("messages", []))
     iteration = state.get("iteration", 0) + 1
 
     logger.info(
@@ -913,6 +917,31 @@ async def respond_node(state: SupervisorState) -> dict[str, Any]:
         iteration,
         len(messages),
     )
+
+    # If max iterations forced us here mid-tool-loop, the last message is
+    # a tool result, not an assistant text. Synthesize a final answer.
+    _last = messages[-1] if messages else {}
+    _last_role = _last.get("role") if isinstance(_last, dict) else None
+    _max_hit = iteration >= state.get("max_iterations", 15)
+    if _max_hit and _last_role in ("tool", "assistant") and not (
+        isinstance(_last, dict) and _last.get("role") == "assistant"
+        and (_last.get("content") or "").strip() and not _last.get("tool_calls")
+    ):
+        # Inject a "wrap up" instruction and call the LLM for a final answer.
+        _llm = state.get("_llm")
+        if _llm is None:
+            # Try to get the LLM from the global state
+            _llm = _resolve_llm_from_state(state)
+        if _llm is not None:
+            try:
+                _wrap_msg = {"role": "user", "content": "Based on the tool results above, provide your final answer to the user now. Do not call any more tools."}
+                _resp = await _llm.chat(messages + [_wrap_msg], tools=None)
+                _content = getattr(_resp, "content", "") or ""
+                if _content.strip():
+                    messages.append({"role": "assistant", "content": _content})
+                    logger.info("[Respond] Synthesized final answer (%d chars) after max iterations", len(_content))
+            except Exception as exc:
+                logger.warning("[Respond] Could not synthesize final answer: %s", exc)
 
     # Auto-store durable user facts (and optional turn snapshots) so
     # per-turn RAG has something to retrieve without requiring memory_store.
@@ -1095,6 +1124,19 @@ def build_supervisor_graph(
         # Force respond on max iterations
         if iteration >= max_iter:
             logger.warning("[Router] Max iterations (%d) hit — forcing respond", max_iter)
+            # Inject a final instruction so the LLM synthesizes what it has
+            # instead of producing an empty response.
+            _msgs = state.get("messages", [])
+            _has_final = any(
+                isinstance(m, dict) and m.get("role") == "assistant" and (m.get("content") or "").strip()
+                and not m.get("tool_calls")
+                for m in _msgs[-3:]
+            )
+            if not _has_final:
+                # No recent text answer — the model was stuck in tool loops.
+                # We can't mutate state here (routing function), but the
+                # respond_node will handle synthesizing from tool results.
+                pass
             return NodeName.RESPOND
 
         if next_node == NodeName.TOOL_WORKER:

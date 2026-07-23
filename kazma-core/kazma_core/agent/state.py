@@ -137,7 +137,7 @@ class SupervisorState(TypedDict, total=False):
 def initial_supervisor_state(
     *,
     thread_id: str | None = None,
-    max_iterations: int = 10,
+    max_iterations: int = 15,
 ) -> SupervisorState:
     """Create a fresh SupervisorState with sensible defaults.
 
