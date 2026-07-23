@@ -69,15 +69,15 @@
   <!-- ══ TAB: About ══ -->
   <div class="tab-panel" id="panel-about" style="display:none;">
     <div class="card" style="padding:1.5rem;line-height:1.7;">
-      <h3 style="margin-top:0;">🕰️ Time Travel Replay</h3>
-      <p>Kazma captures a snapshot of the agent's state after every supervisor iteration. This lets you:</p>
+      <h3 style="margin-top:0;">{{ t('replay.about_title') }}</h3>
+      <p>{{ t('replay.about_desc') }}</p>
       <ul>
-        <li><strong>Browse</strong> the timeline of every decision point in a conversation.</li>
-        <li><strong>Restore</strong> (rewind) the live thread to any snapshot — the conversation continues from that point as if the later turns never happened.</li>
-        <li><strong>Fork</strong> from any snapshot into a brand-new thread, keeping the original intact. Explore "what if" branches without losing history.</li>
-        <li><strong>Compare</strong> two snapshots to see how messages, cost, model, and routing diverged.</li>
+        <li>{{ t('replay.about_browse') }}</li>
+        <li>{{ t('replay.about_restore') }}</li>
+        <li>{{ t('replay.about_fork') }}</li>
+        <li>{{ t('replay.about_compare') }}</li>
       </ul>
-      <p style="color:var(--text-muted);font-size:0.85rem;">Snapshots are stored in <code>kazma-data/snapshots.db</code> (configurable via <code>time_travel</code> in kazma.yaml). The in-memory store is the source of truth for the current session; SQLite provides durability across restarts.</p>
+      <p style="color:var(--text-muted);font-size:0.85rem;">{{ t('replay.about_note') }}</p>
     </div>
   </div>
 

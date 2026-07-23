@@ -56,14 +56,14 @@
   <!-- ══ TAB: About ══ -->
   <div class="tab-panel" id="panel-about" style="display:none;">
     <div class="card" style="padding:1.5rem;line-height:1.7;">
-      <h3 style="margin-top:0;">🔍 Research Results</h3>
-      <p>When you ask the agent to research a topic via the Swarm (using <code>dispatch_swarm</code>), the results are persisted here with full traceability:</p>
+      <h3 style="margin-top:0;">{{ t('research.about_title') }}</h3>
+      <p>{{ t('research.about_desc') }}</p>
       <ul>
-        <li><strong>Browse</strong> all research outputs — prompt, worker, cost, duration, full text.</li>
-        <li><strong>Compare</strong> two runs side-by-side — see how cost, tokens, duration, and output text diverged.</li>
-        <li><strong>Export</strong> any result to DOCX, PDF, or Markdown for academic or reporting use.</li>
+        <li>{{ t('research.about_browse') }}</li>
+        <li>{{ t('research.about_compare') }}</li>
+        <li>{{ t('research.about_export') }}</li>
       </ul>
-      <p style="color:var(--text-muted);font-size:0.85rem;">Research tasks are tagged with <code>metadata.kind=research</code> at dispatch time and stored in the Swarm TaskStore (<code>kazma-data/swarm_tasks.db</code>).</p>
+      <p style="color:var(--text-muted);font-size:0.85rem;">{{ t('research.about_note') }}</p>
     </div>
   </div>
 
