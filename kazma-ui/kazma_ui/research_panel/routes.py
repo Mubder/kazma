@@ -195,10 +195,17 @@ def create_research_router() -> APIRouter:
 
     @router.get("/api/research/download")
     async def download_export(path: str) -> Any:
-        """Download an exported research file."""
-        # Security: only allow downloads from kazma-data/documents/.
+        """Download an exported research file.
+
+        Accepts both absolute paths and bare filenames (looked up in
+        kazma-data/documents/). Security: only serves files from that dir.
+        """
         safe_root = os.path.abspath("kazma-data/documents")
-        real_path = os.path.abspath(path)
+        # Accept bare filename, relative path, or absolute path.
+        if os.path.isabs(path):
+            real_path = os.path.abspath(path)
+        else:
+            real_path = os.path.abspath(os.path.join("kazma-data/documents", path))
         if not real_path.startswith(safe_root) or not os.path.isfile(real_path):
             return JSONResponse({"error": "invalid file path"}, status_code=403)
         return FileResponse(

@@ -111,14 +111,10 @@
         .then(function (data) {
           if (data.error) { toast('Export failed: ' + data.error, 'error'); return; }
           toast('Exported: ' + (data.filename || fmt), 'success');
-          // Trigger a file download so the user actually gets the file.
-          if (data.path) {
-            var a = document.createElement('a');
-            a.href = '/api/research/download?path=' + encodeURIComponent(data.path);
-            a.download = data.filename || 'research.' + fmt;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
+          // Trigger a file download. Use the bare filename so the server
+          // resolves it from kazma-data/documents/.
+          if (data.filename) {
+            window.open('/api/research/download?path=' + encodeURIComponent(data.filename), '_blank');
           }
         })
         .catch(function () { toast('Export request failed', 'error'); });
