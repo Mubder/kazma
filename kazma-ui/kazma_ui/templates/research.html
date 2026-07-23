@@ -57,13 +57,13 @@
   <div class="tab-panel" id="panel-about" style="display:none;">
     <div class="card" style="padding:1.5rem;line-height:1.7;">
       <h3 style="margin-top:0;">{{ t('research.about_title') }}</h3>
-      <p>{{ t('research.about_desc') }}</p>
+      <p>{{ t('research.about_desc') | safe }}</p>
       <ul>
-        <li>{{ t('research.about_browse') }}</li>
-        <li>{{ t('research.about_compare') }}</li>
-        <li>{{ t('research.about_export') }}</li>
+        <li>{{ t('research.about_browse') | safe }}</li>
+        <li>{{ t('research.about_compare') | safe }}</li>
+        <li>{{ t('research.about_export') | safe }}</li>
       </ul>
-      <p style="color:var(--text-muted);font-size:0.85rem;">{{ t('research.about_note') }}</p>
+      <p style="color:var(--text-muted);font-size:0.85rem;">{{ t('research.about_note') | safe }}</p>
     </div>
   </div>
 

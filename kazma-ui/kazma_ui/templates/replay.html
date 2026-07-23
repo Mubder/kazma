@@ -72,12 +72,12 @@
       <h3 style="margin-top:0;">{{ t('replay.about_title') }}</h3>
       <p>{{ t('replay.about_desc') }}</p>
       <ul>
-        <li>{{ t('replay.about_browse') }}</li>
-        <li>{{ t('replay.about_restore') }}</li>
-        <li>{{ t('replay.about_fork') }}</li>
-        <li>{{ t('replay.about_compare') }}</li>
+        <li>{{ t('replay.about_browse') | safe }}</li>
+        <li>{{ t('replay.about_restore') | safe }}</li>
+        <li>{{ t('replay.about_fork') | safe }}</li>
+        <li>{{ t('replay.about_compare') | safe }}</li>
       </ul>
-      <p style="color:var(--text-muted);font-size:0.85rem;">{{ t('replay.about_note') }}</p>
+      <p style="color:var(--text-muted);font-size:0.85rem;">{{ t('replay.about_note') | safe }}</p>
     </div>
   </div>
 
