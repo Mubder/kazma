@@ -42,7 +42,6 @@ DANGER = {
     "email_delete",
     "email_categorize",
     "browser_eval_js",
-    "dispatch_swarm",
 }
 
 

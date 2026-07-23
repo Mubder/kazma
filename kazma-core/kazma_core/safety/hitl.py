@@ -91,7 +91,6 @@ TOOL_TIERS: dict[str, str] = {
     "email_send": "danger",
     "email_delete": "danger",
     "email_categorize": "danger",
-    "dispatch_swarm": "danger",
     # Unsafe — always blocked (reserved)
 }
 
@@ -122,7 +121,6 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "email_delete",
     "email_categorize",
     "browser_eval_js",
-    "dispatch_swarm",
 )
 
 # Backward-compatible alias used throughout the codebase / tests.
