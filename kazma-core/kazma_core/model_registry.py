@@ -115,6 +115,17 @@ class ModelRegistry:
 
     # ── Active profile management ──────────────────────────────────
 
+    @staticmethod
+    def _env_locked() -> bool:
+        """Whether the active profile is pinned by env vars (KAZMA_MODEL /
+        KAZMA_PROVIDER).
+
+        When locked, ``set_active_model`` / ``set_active_provider`` are
+        no-ops — the env always wins. Use this to pin a single model on a
+        shared public demo so visitors can't change it for everyone.
+        """
+        return bool(os.getenv("KAZMA_MODEL", "").strip() or os.getenv("KAZMA_PROVIDER", "").strip())
+
     def _resolve_provider_config(
         self, provider_name: str, model: str = "",
     ) -> tuple[str, str, str, str]:
@@ -189,6 +200,9 @@ class ModelRegistry:
         "change-one-without-the-other" desync where the persisted profile
         recorded a provider/model mismatch.
         """
+        if self._env_locked():
+            logger.info("[registry] provider change to %r ignored — profile locked by KAZMA_MODEL/KAZMA_PROVIDER env", provider)
+            return {"error": "Profile is locked by KAZMA_MODEL/KAZMA_PROVIDER environment variables"}
         clean_provider = (provider or "").strip()
         if not clean_provider:
             return {"error": "Provider name is required"}
@@ -246,6 +260,9 @@ class ModelRegistry:
         active one, the active provider is updated so the LLM client
         points to the correct API endpoint.
         """
+        if self._env_locked():
+            logger.info("[registry] model change to %r ignored — profile locked by KAZMA_MODEL/KAZMA_PROVIDER env", model)
+            return
         clean_model = (model or "").strip()
         with self._lock:
             self._active_model = clean_model
