@@ -365,6 +365,17 @@ def register_direct_routes(self: Any) -> None:
                 "oidc": oidc,
                 "multi_user": multi_user,
             }
+        # Public demo mode: report as open/authenticated so the client skips
+        # the login redirect. Matches the middleware bypass in auth.py.
+        import os as _os
+        if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+            return {
+                "auth_enabled": False,
+                "authenticated": True,
+                "mode": "demo",
+                "oidc": oidc,
+                "multi_user": multi_user,
+            }
         ok = is_authenticated(request, expected)
         principal = get_request_principal(request) if ok else None
         return {
@@ -571,7 +582,11 @@ def register_direct_routes(self: Any) -> None:
     async def _auth_me(request: Request) -> Response:
         """Return current principal (role/username) for UI chrome."""
         from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+        import os as _os
 
+        # Public demo mode: report as an authenticated demo visitor.
+        if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+            return _JSONResponse({"authenticated": True, "source": "demo", "role": "admin"})
         secret = get_kazma_secret()
         if secret and not is_authenticated(request, secret):
             return _JSONResponse({"authenticated": False}, status_code=401)

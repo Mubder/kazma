@@ -568,6 +568,13 @@ def create_auth_middleware(
         path = request.url.path
         expected = static_secret if static_secret is not None else get_kazma_secret()
 
+        # 0. Public demo mode: KAZMA_DEMO_MODE bypasses the secret gate so a
+        #    public demo (e.g. kazma-demo.fly.dev) is open to all visitors
+        #    without login. Only enable this on a throwaway demo instance —
+        #    never on a production deployment with real secrets/data.
+        if os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
+            return await call_next(request)
+
         # 1. Read-only & page routes always pass through.
         # Cookie auto-issue only for loopback or when secret header is present
         # (never mint auth cookie for anonymous remote visitors — C2 fix).
