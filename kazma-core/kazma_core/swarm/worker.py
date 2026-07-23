@@ -187,7 +187,7 @@ class InProcessWorker(SwarmWorker):
         """
         import json as _json
 
-        MAX_ITERATIONS = 15
+        MAX_ITERATIONS = 20
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
         logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")
         
@@ -449,12 +449,17 @@ class InProcessWorker(SwarmWorker):
                     })
 
             else:
-                # Iteration limit exhausted — return the last response we got.
-                final_output = (
-                    response.content
-                    if hasattr(response, "content") and response.content
-                    else "Max tool-use iterations reached without a final answer."
-                )
+                # Iteration limit exhausted — make one final LLM call WITHOUT
+                # tools to force a text answer from whatever was collected.
+                logger.info("[InProcessWorker:%s] Max iterations hit — forcing final synthesis", self.name)
+                try:
+                    _final_msgs = list(messages) + [{"role": "user", "content": "Provide your complete final answer now based on all the research above. Do not call any tools. Write the full report."}]
+                    _final_resp = await provider.chat(_final_msgs, tools=None, model=self.model or None)
+                    final_output = _final_resp.content or last_content or "Max tool-use iterations reached without a final answer."
+                    total_tokens += int(getattr(_final_resp, "usage", {}).get("prompt_tokens", 0)) + int(getattr(_final_resp, "usage", {}).get("completion_tokens", 0))
+                    total_cost += getattr(_final_resp, "cost_usd", 0.0) or 0.0
+                except Exception:
+                    final_output = last_content or "Max tool-use iterations reached without a final answer."
 
             return {
                 "worker": self.name,
