@@ -4,7 +4,7 @@
 {% block page_title %}🔍 {{ t('research.title') }}{% endblock %}
 
 {% block content %}
-<div class="research-container" style="max-width:1200px;margin:0 auto;">
+<div class="research-container" style="max-width:900px;margin:0 auto;padding:0 1rem;box-sizing:border-box;">
 
   <div class="tabs" style="margin-bottom:0;">
     <button class="tab active" data-tab="list" onclick="KazmaResearch.switchTab('list')">{{ t('research.tab_results') }}</button>
@@ -15,23 +15,23 @@
   <!-- ══ TAB: Results List ══ -->
   <div class="tab-panel" id="panel-list" style="display:block;">
     <div style="display:flex;align-items:center;gap:12px;margin:1rem 0;">
-      <input type="text" id="research-search" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;" onkeyup="KazmaResearch.search(event)">
+      <input type="text" id="research-search" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;min-width:0;" onkeyup="KazmaResearch.search(event)">
       <button class="btn btn-secondary" onclick="KazmaResearch.load()">{{ t('research.refresh') }}</button>
     </div>
-    <div id="research-list" style="display:grid;gap:8px;"></div>
+    <div id="research-list" style="display:flex;flex-direction:column;gap:8px;max-width:100%;overflow:hidden;"></div>
 
     <div id="research-detail" style="display:none;margin-top:1.5rem;">
-      <div class="card" style="padding:1rem;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
-          <h3 style="margin:0;" id="research-detail-title">Detail</h3>
-          <div style="display:flex;gap:6px;">
+      <div class="card" style="padding:1rem;max-width:100%;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;flex-wrap:wrap;gap:8px;">
+          <h3 style="margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="research-detail-title">Detail</h3>
+          <div style="display:flex;gap:6px;flex-shrink:0;">
             <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.exportCurrent('markdown')">MD</button>
             <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.exportCurrent('docx')">DOCX</button>
             <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.exportCurrent('pdf')">PDF</button>
           </div>
         </div>
         <div id="research-detail-meta" style="font-size:0.85rem;color:var(--text-muted);margin-bottom:1rem;"></div>
-        <div id="research-detail-output" style="max-height:500px;overflow-y:auto;line-height:1.7;word-wrap:break-word;overflow-wrap:break-word;"></div>
+        <div id="research-detail-output" style="max-height:500px;overflow-y:auto;line-height:1.7;word-break:break-word;overflow-wrap:anywhere;"></div>
       </div>
     </div>
   </div>

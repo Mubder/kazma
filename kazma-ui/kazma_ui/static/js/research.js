@@ -91,14 +91,10 @@
           var output = t.aggregated_output || t.synthesized_output ||
             (t.worker_results && t.worker_results[0] ? t.worker_results[0].output : '') ||
             '(no output)';
-          // Render as markdown (rich text) instead of plain text.
-          if (window.KazmaStream && KazmaStream.markdown) {
-            $('research-detail-output').innerHTML = KazmaStream.markdown(output);
-          } else if (window.marked) {
-            $('research-detail-output').innerHTML = window.marked(output);
-          } else {
-            $('research-detail-output').textContent = output;
-          }
+          // Render as plain text with proper wrapping — cleaner for long
+          // research outputs with markdown tables (which render poorly
+          // through the markdown renderer inside a narrow panel).
+          $('research-detail-output').textContent = output;
         });
     },
 
@@ -179,18 +175,18 @@
       return;
     }
     el.innerHTML = tasks.map(function (t) {
-      return '<div class="card" style="padding:12px 16px;cursor:pointer;" onclick="KazmaResearch.viewDetail(\'' + t.id + '\')">' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;">' +
-          '<div style="flex:1;min-width:0;">' +
-            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(t.prompt || '(no prompt)') + '</div>' +
-            '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;">' +
+      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" onclick="KazmaResearch.viewDetail(\'' + t.id + '\')">' +
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
+          '<div style="flex:1;min-width:0;overflow:hidden;">' +
+            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || '(no prompt)') + '</div>' +
+            '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
               '<span>' + esc((t.workers || []).join(', ')) + '</span> · ' +
               '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
               '<span>' + (t.duration || 0).toFixed(1) + 's</span> · ' +
               '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>' +
             '</div>' +
           '</div>' +
-          '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;">' + esc(t.status) + '</span>' +
+          '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(t.status) + '</span>' +
         '</div>' +
       '</div>';
     }).join('');
