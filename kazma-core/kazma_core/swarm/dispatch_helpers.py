@@ -7,6 +7,8 @@ from typing import Any
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.task import SwarmTask, WorkerResult
 
+__all__ = ["WORKER_TYPE_ALIASES", "aggregate_outputs", "build_dispatch_context", "build_handoff_context", "build_result_metadata", "normalize_worker_type", "overall_status", "resolve_max_concurrent"]
+
 # Map free-form worker type aliases to canonical WorkerConfig.type values
 WORKER_TYPE_ALIASES: dict[str, str] = {
     "in-process": "in_process",

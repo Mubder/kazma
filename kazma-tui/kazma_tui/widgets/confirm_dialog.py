@@ -10,6 +10,8 @@ from textual.widgets import Button, Label, Static
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["ConfirmDialog"]
+
 
 class ConfirmDialog(ModalScreen[bool]):
     """Reusable confirmation dialog for destructive actions.

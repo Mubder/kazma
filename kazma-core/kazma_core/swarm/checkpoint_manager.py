@@ -22,6 +22,8 @@ from kazma_core.swarm.checkpoint import HITLCheckpoint, HITLCheckpointHandler
 from kazma_core.swarm.patterns import PatternExecution
 from kazma_core.swarm.task import SwarmTask, TaskResult, TaskStatus
 
+__all__ = ["CheckpointManager"]
+
 logger = logging.getLogger(__name__)
 
 

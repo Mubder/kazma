@@ -18,6 +18,8 @@ from .swarm_dispatch import (
 
 logger = logging.getLogger(__name__)
 
+__all__: list[str] = []
+
 
 async def _try_swarm_command(
     msg: IncomingMessage,
@@ -921,6 +923,231 @@ def _is_active_model(model_id: str) -> bool:
     except Exception as exc:
         logger.debug("Failed to check if model %s is active: %s", model_id, exc, exc_info=True)
         return False
+
+
+def _normalize_slash_text(text: str) -> str:
+    """Strip Telegram ``/cmd@BotName`` suffix so intercepts match cleanly."""
+    raw = (text or "").strip()
+    if not raw.startswith("/"):
+        return raw
+    parts = raw.split(None, 1)
+    cmd = parts[0]
+    if "@" in cmd:
+        cmd = cmd.split("@", 1)[0]
+    if len(parts) == 1:
+        return cmd
+    return f"{cmd} {parts[1]}"
+
+
+async def _try_skill_command(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+) -> bool:
+    """Handle ``/skill`` Agent Skills commands (agentskills.io / SKILL.md).
+
+    Subcommands::
+
+        /skill                     — help
+        /skill list                — list installed Agent Skills
+        /skill install <source>    — install from GitHub owner/repo or URL
+        /skill activate <name>     — load full skill instructions into this chat
+        /skill uninstall <name>    — remove a user-level skill
+        /skill info <name>         — show skill metadata + location
+
+    Returns ``True`` if handled (skip graph), else ``False``.
+    """
+    text = _normalize_slash_text(msg.text or "")
+    low = text.lower()
+    if not (low == "/skill" or low.startswith("/skill ")):
+        return False
+
+    parts = text.split(None, 2)
+    # parts: ["/skill"] | ["/skill", sub] | ["/skill", sub, rest]
+    sub = parts[1].lower() if len(parts) > 1 else ""
+    rest = parts[2].strip() if len(parts) > 2 else ""
+
+    try:
+        if sub in ("", "help"):
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                "📦 **Agent Skills** (https://agentskills.io/)\n\n"
+                "• `/skill list` — installed skills\n"
+                "• `/skill install <owner/repo>` — install from GitHub\n"
+                "    e.g. `/skill install shadcn/improve`\n"
+                "• `/skill activate <name>` — arm skill for this chat\n"
+                "    e.g. `/skill activate improve`\n"
+                "• `/skill deactivate` — clear active skill\n"
+                "• `/skill info <name>` — skill details\n"
+                "• `/skill uninstall <name>` — remove a skill\n\n"
+                "No Node/npm required — Kazma downloads SKILL.md bundles directly.\n"
+                "Or ask in chat: *install skill shadcn/improve*.",
+            )
+            return True
+
+        if sub == "list":
+            from kazma_core.agent_skills.tools import list_agent_skills
+
+            result = await list_agent_skills()
+            await _send_model_reply(msg, store, manager, thread_id, result)
+            return True
+
+        if sub in ("install", "add"):
+            if not rest:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "⚠️ Usage: `/skill install <owner/repo>`\n"
+                    "Example: `/skill install shadcn/improve`",
+                )
+                return True
+            from kazma_core.agent_skills.tools import install_agent_skill
+
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⏳ Installing skill from `{rest}`…",
+            )
+            result = await install_agent_skill(source=rest, scope="user")
+            await _send_model_reply(msg, store, manager, thread_id, result)
+            return True
+
+        if sub in ("activate", "use", "load"):
+            if not rest:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "⚠️ Usage: `/skill activate <name>`\n"
+                    "Example: `/skill activate improve`\n"
+                    "See installed names with `/skill list`.",
+                )
+                return True
+            name = rest.split()[0]
+            from kazma_core.agent_skills.tools import activate_skill
+
+            content = await activate_skill(name=name)
+            if content.startswith("Error:"):
+                await _send_model_reply(msg, store, manager, thread_id, content)
+                return True
+
+            # Remember for this thread so the next agent turn can prefer it.
+            try:
+                ctx = await store.get(thread_id) or {}
+                ctx = dict(ctx)
+                ctx["active_agent_skill"] = name
+                await store.put(thread_id, ctx)
+            except Exception:
+                logger.debug(
+                    "[agent-handler] failed to persist active_agent_skill",
+                    exc_info=True,
+                )
+
+            # Keep the chat reply short — full body is injected on next turn.
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"✅ Skill **{name}** is now active for this chat.\n\n"
+                f"Full instructions will load automatically on your next "
+                f"message. Send your task (e.g. *audit the swarm engine* "
+                f"or *run improve quick*).\n\n"
+                f"• `/skill list` — see installed skills\n"
+                f"• `/skill deactivate` — stop using this skill\n"
+                f"• `/skill info {name}` — metadata",
+            )
+            return True
+
+        if sub in ("deactivate", "off", "clear"):
+            try:
+                ctx = await store.get(thread_id) or {}
+                ctx = dict(ctx)
+                had = ctx.pop("active_agent_skill", None)
+                await store.put(thread_id, ctx)
+            except Exception:
+                had = None
+            if had:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"✅ Deactivated skill **{had}** for this chat.",
+                )
+            else:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "No skill was active in this chat.",
+                )
+            return True
+
+        if sub in ("uninstall", "remove", "rm"):
+            if not rest:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "⚠️ Usage: `/skill uninstall <name>`",
+                )
+                return True
+            from kazma_core.agent_skills.tools import uninstall_agent_skill
+
+            result = await uninstall_agent_skill(name=rest.split()[0])
+            await _send_model_reply(msg, store, manager, thread_id, result)
+            return True
+
+        if sub in ("info", "show"):
+            if not rest:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "⚠️ Usage: `/skill info <name>`",
+                )
+                return True
+            from kazma_core.agent_skills.discovery import get_skill
+
+            skill = get_skill(rest.split()[0])
+            if skill is None:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    f"Skill `{rest}` not found. Try `/skill list`.",
+                )
+                return True
+            lines = [
+                f"**{skill.name}**",
+                skill.description,
+                f"Location: `{skill.location}`",
+                f"Scope: {skill.scope}",
+            ]
+            if skill.author:
+                lines.append(f"Author: {skill.author}")
+            if skill.version:
+                lines.append(f"Version: {skill.version}")
+            if skill.source:
+                lines.append(f"Source: {skill.source}")
+            lines.append(
+                f"\nActivate: `/skill activate {skill.name}`"
+            )
+            await _send_model_reply(
+                msg, store, manager, thread_id, "\n".join(lines),
+            )
+            return True
+
+        # Unknown subcommand — treat remainder as install source for convenience
+        # e.g. /skill shadcn/improve
+        source = text.split(None, 1)[1].strip() if len(parts) >= 2 else ""
+        if source and ("/" in source or source.startswith("http")):
+            from kazma_core.agent_skills.tools import install_agent_skill
+
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                f"⏳ Installing skill from `{source}`…",
+            )
+            result = await install_agent_skill(source=source, scope="user")
+            await _send_model_reply(msg, store, manager, thread_id, result)
+            return True
+
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            "Unknown `/skill` subcommand. Try `/skill help`.",
+        )
+        return True
+    except Exception as exc:
+        logger.exception("[agent-handler] /skill command failed")
+        await _send_model_reply(
+            msg, store, manager, thread_id,
+            f"⚠️ Skill command failed: {exc}",
+        )
+        return True
 
 
 async def _send_model_reply(

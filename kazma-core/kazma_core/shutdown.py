@@ -16,6 +16,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+__all__ = ["is_shutting_down", "reset_shutdown", "signal_shutdown", "wait_for_shutdown"]
+
 logger = logging.getLogger(__name__)
 
 _shutdown_event: asyncio.Event | None = None

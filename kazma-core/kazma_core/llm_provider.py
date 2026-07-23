@@ -25,6 +25,8 @@ import httpx
 
 from kazma_core.url_utils import get_dummy_api_key, normalize_model_name, normalize_provider_url
 
+__all__ = ["LLMConfig", "LLMError", "LLMProvider", "LLMResponse", "ToolCall"]
+
 logger = logging.getLogger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────
@@ -165,16 +167,24 @@ class LLMProvider:
     # (e.g. "ollama/llama3.2", "openai/local-model"). These identify the
     # provider inside kazma's registry/router but must NOT be sent to the
     # provider's API — Ollama/LM Studio expect the bare model name.
-    _ROUTING_PREFIXES = ("ollama/", "openai/", "anthropic/", "groq/", "bedrock/", "azure/")
+    # NOTE: only LOCAL providers (ollama, lm-studio) get a kazma-internal
+    # routing prefix that must be stripped. Hosted providers (groq, openai,
+    # anthropic, bedrock, azure) use model ids where the prefix is part of
+    # the real upstream name (e.g. Groq's "groq/compound-mini") — stripping
+    # it causes a 404 "model not found".
+    _ROUTING_PREFIXES = ("ollama/", "lm-studio/")
 
     @staticmethod
     def _strip_routing_prefix(model: str) -> str:
         """Strip kazma's internal provider routing prefix from a model name.
 
         ``normalize_model_name()`` tags local models with a provider prefix
-        ("ollama/", "openai/") for routing, but the upstream API (Ollama,
-        LM Studio, …) expects the bare name ("qwen2.5:7b"). Sending
+        ("ollama/", "lm-studio/") for routing, but the upstream local API
+        (Ollama, LM Studio, …) expects the bare name ("qwen2.5:7b"). Sending
         "ollama/qwen2.5:7b" makes Ollama reply 404 "model not found".
+
+        Hosted providers are NOT stripped: Groq's ``groq/compound-mini`` and
+        similar ids include the prefix as part of the real upstream name.
         """
         if not model:
             return model
@@ -574,8 +584,26 @@ class LLMProvider:
             changed = True
 
         if changed:
-            # Force client recreation on next request (old client will be GC'd)
+            # Force client recreation on next request — always aclose the old
+            # client (audit H9); relying on GC leaks sockets/FDs under frequent
+            # Settings provider switches.
+            old = self._http
             self._http = None
+            if old is not None:
+                try:
+                    import asyncio
+
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(old.aclose())
+                    except RuntimeError:
+                        # No running loop (sync context / tests) — best-effort.
+                        try:
+                            asyncio.run(old.aclose())
+                        except Exception:
+                            pass
+                except Exception as exc:
+                    logger.debug("LLMProvider reconfigure aclose failed: %s", exc)
             logger.info(
                 "LLMProvider reconfigured: base_url=%s model=%s api_key=%s",
                 self.config.base_url,

@@ -36,6 +36,8 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import AsyncIterator
 
+__all__ = ["current_workspace_id", "resolve_workspace_root", "workspace_scope"]
+
 logger = logging.getLogger(__name__)
 
 # The ContextVar carries the active workspace_id (or None for "use global").

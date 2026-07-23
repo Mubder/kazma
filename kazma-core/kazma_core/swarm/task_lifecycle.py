@@ -10,6 +10,8 @@ import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+__all__ = ["DEFAULT_MAX_HISTORY", "get_task", "list_tasks", "record_task", "update_task"]
+
 if TYPE_CHECKING:
     from kazma_core.swarm.task import SwarmTask
 

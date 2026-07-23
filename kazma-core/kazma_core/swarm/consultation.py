@@ -14,6 +14,8 @@ from kazma_core.swarm.reliability import BoundedConcurrency
 from kazma_core.swarm.task import SwarmTask, WorkerCapabilities, WorkerResult
 from kazma_core.swarm.worker import SwarmWorker
 
+__all__ = ["ConsultationConfigurationError", "ConsultationExecution", "execute_consult"]
+
 logger = logging.getLogger(__name__)
 
 DispatchWorkerByName = Callable[

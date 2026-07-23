@@ -28,6 +28,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "is_slash_command",
+    "resolve_slash_command",
+]
+
 # ── Config path / store ──────────────────────────────────────────────
 #
 # kazma.yaml is treated as a READ-ONLY bootstrap.  All runtime config
@@ -69,10 +74,16 @@ def _get_config_store() -> Any:
 
 
 def _read_bootstrap_yaml() -> dict[str, Any]:
-    """Read the read-only ``kazma.yaml`` bootstrap directly (no caching)."""
-    path = _get_config_path()
-    with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+    """Read shipped ``kazma.yaml`` + optional ``kazma.local.yaml`` (no caching)."""
+    try:
+        from kazma_core.config_loader import load_merged_yaml
+
+        path = _get_config_path()
+        return load_merged_yaml(path)
+    except Exception:
+        path = _get_config_path()
+        with open(path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
 
 
 def _apply_overrides(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
@@ -180,6 +191,10 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
         return _cmd_help()
     if cmd == "/reset":
         return None  # Handled by agent_handler directly (clears state)
+    if cmd == "/new":
+        return None  # Handled by agent_handler directly (creates new session)
+    if cmd == "/compact":
+        return None  # Handled by agent_handler directly (manual context compaction)
     if cmd == "/status":
         return _cmd_status(ctx)
     if cmd in ("/model", "/models"):
@@ -196,10 +211,12 @@ def resolve_slash_command(text: str, context: dict[str, Any] | None = None) -> s
         return _cmd_config(f"/config {text}", ctx)
     if cmd == "/context":
         return _cmd_context(ctx)
-    if cmd == "/undo":
-        return _cmd_undo()
-    if cmd == "/edit":
-        return _cmd_edit(text)
+
+    # NOTE: /undo and /edit are intentionally NOT handled here. They mutate
+    # LangGraph checkpoint state and are resolved by the graph handler in
+    # agent_handler/graph.py (_handle_undo / _handle_edit) before this
+    # resolver runs. Returning None lets them fall through to the graph on
+    # live platforms, and to the LLM otherwise.
 
     return None  # not a recognised command → passed to LLM
 
@@ -208,7 +225,9 @@ def _cmd_help() -> str:
     return (
         "*Available commands:*\n\n"
         "🔄 *Session*\n"
-        "• `/reset` — Clear conversation history\n"
+        "• `/new` — Create a brand new session/season\n"
+        "• `/reset` — Clear conversation history and starting fresh\n"
+        "• `/compact` — Manually trigger context window compaction\n"
         "• `/replay list` — Show available snapshots\n"
         "• `/replay <iteration>` — Replay from iteration\n"
         "• `/replay compare <a> <b>` — Compare two runs\n"
@@ -217,7 +236,12 @@ def _cmd_help() -> str:
         "• `/personality` — Show current personality\n"
         "• `/personality list` — List all available personalities\n"
         "• `/personality <name>` — Switch personality\n"
-        "• `/context` — Show context window usage\n\n"
+        "• `/context` — Show context window usage\n"
+        "• `/skill list` — List installed Agent Skills\n"
+        "• `/skill install <owner/repo>` — Install from GitHub (agentskills.io)\n"
+        "• `/skill activate <name>` — Arm a skill for this chat\n"
+        "• `/skill deactivate` — Clear the active skill\n"
+        "• `/skill uninstall <name>` — Remove an Agent Skill\n\n"
         "⚙️ *Config*\n"
         "• `/config show` — Display current configuration\n"
         "• `/config model <name>` — Switch model\n"
@@ -251,32 +275,6 @@ def _cmd_context(ctx: dict[str, Any]) -> str:
         f"Tokens: `{token_count:,}` / `{max_tokens:,}` ({pct:.1f}%)\n"
         f"[{bar}]\n\n"
         f"Compaction triggers at 80% usage."
-    )
-
-
-def _cmd_undo() -> str:
-    """Undo the last agent response."""
-    return (
-        "↩️ *Undo* — The `/undo` command removes the last agent response "
-        "from the conversation history.\n\n"
-        "This is handled by the platform adapter (Telegram/Discord/Slack). "
-        "If you're using the Web UI, use the chat interface to delete messages."
-    )
-
-
-def _cmd_edit(text: str) -> str:
-    """Edit the last agent response."""
-    parts = text.strip().split(maxsplit=1)
-    if len(parts) < 2:
-        return (
-            "✏️ *Edit* — Correct the last agent response.\n\n"
-            "Usage: `/edit <corrected text>`\n\n"
-            "This replaces the last agent response with your correction."
-        )
-    return (
-        f"✏️ *Edit received:* {parts[1]}\n\n"
-        "Note: /edit is not yet implemented. The conversation history "
-        "has not been modified."
     )
 
 

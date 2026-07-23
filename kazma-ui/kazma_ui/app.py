@@ -22,12 +22,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.responses import RedirectResponse
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["KazmaAppBuilder", "create_app", "main"]
 
 # Package paths
 _PACKAGE_DIR = Path(__file__).resolve().parent
@@ -129,6 +131,19 @@ class KazmaAppBuilder:
 
             # Ensure KAZMA_VAULT_KEY is configured (for the encrypted secret vault)
             _vault_key = os.environ.get("KAZMA_VAULT_KEY", "").strip()
+            _prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+                "1", "true", "on", "yes",
+            )
+            if not _vault_key and _prod:
+                # Production must not invent vault keys silently (audit M5 / 3.4)
+                logger.error(
+                    "[Vault] KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY — "
+                    "set a Fernet key before starting (see .env.example)"
+                )
+                raise RuntimeError(
+                    "KAZMA_PRODUCTION=1 requires KAZMA_VAULT_KEY to be set. "
+                    "Generate one: python -c \"import secrets; print(secrets.token_hex(32))\""
+                )
             if not _vault_key:
                 import secrets as _sec2
                 _vault_generated = _sec2.token_hex(32)
@@ -163,7 +178,9 @@ class KazmaAppBuilder:
                         logger.warning("[Vault] Failed to create .env for KAZMA_VAULT_KEY: %s", e)
 
         self.config = load_config(self.config_path)
-        self.config_store = ConfigStore()
+        # Process-wide singleton — never construct ConfigStore() elsewhere.
+        from kazma_core.config_store import get_config_store
+        self.config_store = get_config_store()
         
         # Register as process-wide singleton
         set_config_store(self.config_store)
@@ -281,6 +298,28 @@ class KazmaAppBuilder:
                     vector_memory_collection,
                     vector_memory_model,
                 )
+                # Pre-warm embedder + 4-layer adapter at boot so the first
+                # chat turn is not blocked on HuggingFace download / Chroma
+                # open / sqlite-vec load. Failures are non-fatal.
+                try:
+                    from kazma_core.swarm.memory.embedder import get_embedder
+                    from kazma_core.swarm.memory.adapter import get_adapter
+
+                    emb = get_embedder()
+                    if emb is not None:
+                        vec = emb.encode("kazma memory warmup")
+                        logger.info(
+                            "[VectorMemory] Embedder ready (%s, dim=%s, sample=%d)",
+                            type(emb).__name__,
+                            getattr(emb, "dim", "?"),
+                            len(vec or []),
+                        )
+                    adapter = get_adapter()
+                    if adapter is not None:
+                        health = adapter.health()
+                        logger.info("[VectorMemory] Adapter layers: %s", health)
+                except Exception as warm_exc:
+                    logger.warning("[VectorMemory] Pre-warm skipped: %s", warm_exc)
             except Exception as e:
                 logger.warning("[VectorMemory] Not available: %s", e)
                 logger.info(
@@ -317,11 +356,22 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Workspace] Failed to configure: %s", e)
 
-        # Create FastAPI app
+        # Create FastAPI app. In production, disable the auto-generated docs
+        # and OpenAPI schema: (1) the schema currently throws 500 under
+        # `from __future__ import annotations` (PEP 563 ForwardRef on bare
+        # `Response` return types — a known FastAPI/Pydantic-v2 interaction),
+        # and (2) the API surface should not be internet-exposed. Dev/loopback
+        # builds keep them. Docs/redoc are never mounted in prod.
+        _prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+            "1", "true", "on", "yes",
+        )
         self.app = FastAPI(
             title="Kazma",
             version=self.config.version,
             description="Autonomous AI Agent Framework — Arabic RTL Dashboard",
+            docs_url=None if _prod else "/docs",
+            redoc_url=None if _prod else "/redoc",
+            openapi_url=None if _prod else "/openapi.json",
         )
 
         # Register services in Dependency Injection Container
@@ -341,6 +391,10 @@ class KazmaAppBuilder:
         from fastapi.middleware.cors import CORSMiddleware
 
         _default_cors_origins = [
+            "http://localhost:9090",
+            "http://127.0.0.1:9090",
+            "http://localhost:9091",
+            "http://127.0.0.1:9091",
             "http://localhost:8000",
             "http://127.0.0.1:8000",
             "http://localhost:4321",
@@ -367,9 +421,33 @@ class KazmaAppBuilder:
         _STATIC_DIR.mkdir(parents=True, exist_ok=True)
         self.app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
-        # Setup Jinja2 templates
+        # Browsers always request /favicon.ico (ignores <link rel="icon"> alone)
+        _favicon = _STATIC_DIR / "img" / "favicon.png"
+        if not _favicon.is_file():
+            _favicon = _STATIC_DIR / "img" / "kazma-icon.png"
+
+        @self.app.get("/favicon.ico", include_in_schema=False)
+        async def _favicon_ico() -> FileResponse:
+            if not _favicon.is_file():
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=404, detail="favicon not found")
+            return FileResponse(
+                path=str(_favicon),
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+
+        # Setup Jinja2 templates (auto_reload=True so template edits
+        # are picked up without restarting — essential for development).
         _TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-        self.templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+        import jinja2 as _jinja2
+        _tpl_env = _jinja2.Environment(
+            loader=_jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
+            autoescape=_jinja2.select_autoescape(),
+            auto_reload=True,
+        )
+        self.templates = Jinja2Templates(env=_tpl_env)
 
         # Global template context for language/direction
         _lang = self.agent.config.language if hasattr(self.agent.config, "language") else "en"
@@ -405,12 +483,19 @@ class KazmaAppBuilder:
         self.templates.env.globals["dir"] = _dynamic_dir
         self.templates.env.globals["translations_json"] = _translations_json
 
-        # Cache-busting version for the main stylesheet. Derived from the
-        # CSS file's modification time so every edit forces browsers to
-        # reload (otherwise a stale cached kazma.css shows old/dark UI).
-        # Computed PER REQUEST (not at startup) so CSS edits take effect
-        # immediately without restarting the server.
+        # Cache-busting versions for static assets. Derived from file mtimes
+        # so every edit forces browsers to reload (otherwise a stale cached
+        # kazma.css / app.js keeps old soft-nav bugs alive). Computed PER
+        # REQUEST so edits take effect without restarting the server.
         _css_file = _STATIC_DIR / "css" / "kazma.css"
+        _js_version_files = (
+            _STATIC_DIR / "js" / "app.js",
+            _STATIC_DIR / "js" / "modules" / "nav.js",
+            _STATIC_DIR / "js" / "modules" / "stores.js",
+            _STATIC_DIR / "js" / "modules" / "components.js",
+            _STATIC_DIR / "js" / "modules" / "util.js",
+            _STATIC_DIR / "js" / "icons.js",
+        )
 
         def _css_version() -> int:
             try:
@@ -418,7 +503,17 @@ class KazmaAppBuilder:
             except Exception:
                 return 1
 
+        def _js_version() -> int:
+            latest = 1
+            for path in _js_version_files:
+                try:
+                    latest = max(latest, int(os.path.getmtime(path)))
+                except Exception:
+                    pass
+            return latest
+
         self.templates.env.globals["css_version"] = _css_version
+        self.templates.env.globals["js_version"] = _js_version
 
         @self.app.middleware("http")
         async def language_middleware(request: Request, call_next):
@@ -530,7 +625,23 @@ class KazmaAppBuilder:
 
             tg_adapter: TelegramAdapter | None = None
             if telegram_token:
-                tg_adapter = TelegramAdapter(token=telegram_token)
+                voice_cfg = self.config.raw.get("gateway", {}).get("voice", {})
+                webhook_secret = (
+                    self.config_store.get("connectors.telegram.webhook_secret", "")
+                    or os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+                    or ""
+                )
+                tg_adapter = TelegramAdapter(
+                    token=telegram_token,
+                    voice_enabled=voice_cfg.get("enabled", False),
+                    voice_provider=voice_cfg.get("stt_provider", "openai"),
+                    stt_api_key=None,  # reads from env vars
+                    tts_provider=voice_cfg.get("tts_provider", "edgetts"),
+                    tts_voice=voice_cfg.get("tts_voice", "default"),
+                    tts_output_format=voice_cfg.get("tts_output_format", "mp3"),
+                    stt_language=voice_cfg.get("stt_language", "auto"),
+                    webhook_secret=webhook_secret or None,
+                )
                 # Set allowed users
                 allowed = self.config_store.get("connectors.telegram.allowed_users", "")
                 if allowed:
@@ -628,25 +739,24 @@ class KazmaAppBuilder:
                 try:
                     from kazma_gateway.rate_feedback import RateFeedbackManager
 
-                    # Use the most conservative limit among active adapters
-                    _active_limits = []
+                    # Build per-platform active limits dictionary
+                    _active_limits_dict = {}
                     if tg_adapter is not None and "telegram" in rate_limits_cfg:
-                        _active_limits.append(int(rate_limits_cfg["telegram"]))
+                        _active_limits_dict["telegram"] = int(rate_limits_cfg["telegram"])
                     if discord_token and "discord" in rate_limits_cfg:
-                        _active_limits.append(int(rate_limits_cfg["discord"]))
+                        _active_limits_dict["discord"] = int(rate_limits_cfg["discord"])
                     if slack_bot_token and "slack" in rate_limits_cfg:
-                        _active_limits.append(int(rate_limits_cfg["slack"]))
-                    if _active_limits:
-                        _limit = min(_active_limits)
+                        _active_limits_dict["slack"] = int(rate_limits_cfg["slack"])
+                    if _active_limits_dict:
                         rfm = RateFeedbackManager(
-                            limit=_limit,
+                            limit=_active_limits_dict,
                             window_seconds=60,
                             cooldown_seconds=30,
                         )
                         self.gateway.set_rate_feedback(rfm)
                         logger.info(
-                            "[Gateway] Rate feedback wired (limit=%d/60s, cooldown=30s)",
-                            _limit,
+                            "[Gateway] Rate feedback wired (limits=%s, cooldown=30s)",
+                            _active_limits_dict,
                         )
                 except Exception as e:
                     logger.warning("[Gateway] Rate feedback wiring failed: %s", e)
@@ -761,8 +871,18 @@ class KazmaAppBuilder:
             try:
                 from kazma_core.agent.sub_agent import SubAgentManager, set_sub_agent_manager
 
+                def _sub_graph_builder(**kwargs: Any) -> Any:
+                    """Honor hitl_config + tools (audit M19)."""
+                    agent = self.agent
+                    if agent is not None and hasattr(agent, "build_child_graph"):
+                        return agent.build_child_graph(
+                            tools=kwargs.get("tools"),
+                            hitl_config=kwargs.get("hitl_config"),
+                        )
+                    return agent.get_streaming_graph()
+
                 sub_agent_mgr = SubAgentManager(
-                    graph_builder=lambda **kwargs: self.agent.get_streaming_graph(),
+                    graph_builder=_sub_graph_builder,
                     max_concurrent=3,
                 )
                 set_sub_agent_manager(sub_agent_mgr)
@@ -812,6 +932,13 @@ class KazmaAppBuilder:
         # Mount routers
         self.app.include_router(chat_router)
         self.app.include_router(settings_router)
+        try:
+            from kazma_ui.saas_api import create_saas_router
+
+            self.app.include_router(create_saas_router())
+            logger.info("[SaaS] multi-user / tenant API mounted at /api/saas")
+        except Exception as e:
+            logger.warning("[SaaS] router not available: %s", e)
         self.app.include_router(skills_router)
         self.app.include_router(mcp_router)
         self.app.include_router(agents_router)
@@ -839,6 +966,42 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("SSE chat router failed to initialize: %s", e)
             self._init_errors.append({"subsystem": "sse_chat", "error": str(e)})
+
+        # ── Chat attachment upload ──
+        try:
+            from kazma_ui.routes_chat_upload import router as chat_upload_router
+
+            self.app.include_router(chat_upload_router)
+            logger.info("Chat upload router mounted at /api/chat/upload")
+        except Exception as e:
+            logger.warning("Chat upload router failed to initialize: %s", e)
+            self._init_errors.append({"subsystem": "chat_upload", "error": str(e)})
+
+        # ── Voice API Route ──
+        try:
+            from kazma_ui.routes_voice import router as voice_router
+
+            self.app.include_router(voice_router)
+            logger.info("Voice API router mounted at /api/voice")
+        except Exception as e:
+            logger.warning("Voice API router failed to initialize: %s", e)
+
+        # ── Voice Streaming WebSocket ──
+        try:
+            from kazma_ui.routes_voice_ws import handle_voice_websocket
+
+            async def _ws_voice(websocket: WebSocket) -> None:
+                from kazma_ui.auth import websocket_is_authenticated
+
+                if not websocket_is_authenticated(websocket):
+                    await websocket.close(code=4003, reason="Unauthorized")
+                    return
+                await handle_voice_websocket(websocket)
+
+            self.app.websocket("/ws/voice")(_ws_voice)
+            logger.info("Voice streaming WebSocket mounted at /ws/voice")
+        except Exception as e:
+            logger.warning("Voice WebSocket failed to initialize: %s", e)
 
         # ── Telemetry SSE Route ──
         try:
@@ -880,6 +1043,20 @@ class KazmaAppBuilder:
         ide_router = create_ide_router()
         self.app.include_router(ide_router)
         logger.info("IDE API router mounted at /api/ide/*")
+
+        # ── Email integration (status + Microsoft device OAuth) ──
+        # Open router (GET / status / OAuth callbacks) + protected router
+        # (state-mutating POSTs guarded by Origin + X-Requested-With check).
+        try:
+            from kazma_ui.email_api import protected_router as email_protected
+            from kazma_ui.email_api import router as email_router
+
+            self.app.include_router(email_router)
+            self.app.include_router(email_protected)
+            logger.info("Email API router mounted at /api/email/*")
+        except Exception as e:
+            logger.warning("Email API router failed to mount: %s", e)
+            self._init_errors.append({"subsystem": "email_api", "error": str(e)})
 
         # ── Swarm Panel ──
         from kazma_ui.swarm_panel import create_swarm_router
@@ -1005,8 +1182,53 @@ class KazmaAppBuilder:
             logger.debug("[Startup] flush_pending_alerts: %s", e)
 
     async def _on_shutdown(self) -> None:
-        """Application shutdown: agent, HTTP pool, gateway."""
-        # Shut down the agent (closes MCP processes, LLM clients, checkpointer)
+        """Application shutdown: flag, cron, swarm, agent, stores, gateway."""
+        # Global drain flag so long-lived SSE / telemetry loops exit cleanly
+        try:
+            from kazma_core.shutdown import signal_shutdown
+
+            signal_shutdown()
+            logger.info("[app] signal_shutdown() fired")
+        except Exception as e:
+            logger.warning("[app] signal_shutdown failed: %s", e)
+
+        # 1) Stop cron first so no new jobs fire (audit C3)
+        try:
+            from kazma_core.cron.scheduler import get_cron_scheduler
+
+            cron_sched = get_cron_scheduler()
+            if cron_sched is not None and hasattr(cron_sched, "stop"):
+                maybe = cron_sched.stop()
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+                logger.info("[app] Cron scheduler stopped")
+        except Exception as e:
+            logger.warning("[app] cron stop failed: %s", e)
+
+        # 2) Drain swarm in-flight tasks
+        try:
+            engine = getattr(self, "swarm_engine", None) or getattr(self, "_swarm_engine", None)
+            if engine is None:
+                try:
+                    from kazma_core.swarm.engine import get_swarm_engine
+
+                    engine = get_swarm_engine()
+                except Exception:
+                    engine = None
+            if engine is not None:
+                handles = getattr(engine, "_task_handles", None) or {}
+                for _tid, handle in list(handles.items()):
+                    if handle is not None and hasattr(handle, "done") and not handle.done():
+                        handle.cancel()
+                if hasattr(engine, "stop_all"):
+                    maybe = engine.stop_all()
+                    if asyncio.iscoroutine(maybe):
+                        await maybe
+                logger.info("[app] Swarm engine drained")
+        except Exception as e:
+            logger.warning("[app] swarm drain failed: %s", e)
+
+        # 3) Shut down the agent (closes MCP processes, LLM clients)
         if self.agent is not None:
             try:
                 await self.agent.shutdown()
@@ -1014,7 +1236,21 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[app] Error during agent shutdown: %s", e)
 
-        # Close all cached ModelRegistry clients
+        # 4) Close app-level checkpointer / CheckpointManager if present
+        try:
+            cp = self._checkpointer
+            if cp is not None:
+                if hasattr(cp, "aclose"):
+                    await cp.aclose()
+                elif hasattr(cp, "close"):
+                    maybe = cp.close()
+                    if asyncio.iscoroutine(maybe):
+                        await maybe
+                logger.info("[app] Checkpointer closed")
+        except Exception as e:
+            logger.warning("[app] Error closing checkpointer: %s", e)
+
+        # 5) Close all cached ModelRegistry clients
         try:
             from kazma_core.model_registry import get_model_registry
 
@@ -1030,6 +1266,26 @@ class KazmaAppBuilder:
             await close_http_client()
         except Exception as e:
             logger.warning("[app] Error closing http client during shutdown: %s", e)
+
+        # 6) Best-effort vector memory close
+        try:
+            from kazma_core.memory import vector_store as _vs
+
+            vm = getattr(_vs, "_instance", None) or getattr(_vs, "VectorMemory", None)
+            for attr in ("get_vector_memory", "get_default", "default_memory"):
+                fn = getattr(_vs, attr, None)
+                if callable(fn):
+                    try:
+                        vm = fn()
+                        break
+                    except Exception:
+                        pass
+            if vm is not None and hasattr(vm, "close"):
+                maybe = vm.close()
+                if asyncio.iscoroutine(maybe):
+                    await maybe
+        except Exception as e:
+            logger.debug("[app] vector memory close: %s", e)
 
         if self.gateway is None:
             return
@@ -1110,18 +1366,22 @@ def main() -> None:
     """Entry point for `kazma-web` command.
 
     Usage:
-        kazma-web              # port 8000
+        kazma-web              # port 9090 (host default; matches CLI)
         kazma-web --port 8080  # custom port
+        KAZMA_PORT=9091 kazma-web
     """
     import argparse
-
-    parser = argparse.ArgumentParser(description="Kazma Web UI")
-    parser.add_argument("--port", "-p", type=int, default=8000, help="Port to bind (default: 8000)")
-    args, _ = parser.parse_known_args()
-
     import os as _os3
 
     import uvicorn
+
+    _default_port = int(_os3.environ.get("KAZMA_PORT", "9090") or "9090")
+    parser = argparse.ArgumentParser(description="Kazma Web UI")
+    parser.add_argument(
+        "--port", "-p", type=int, default=_default_port,
+        help=f"Port to bind (default: {_default_port} / KAZMA_PORT)",
+    )
+    args, _ = parser.parse_known_args()
 
     # Security: default to localhost.  Use KAZMA_HOST env var to
     # explicitly bind to all interfaces (decoupled from KAZMA_SECRET).
@@ -1130,7 +1390,8 @@ def main() -> None:
         logger.warning(
             "[app] Binding to 0.0.0.0 without KAZMA_SECRET — "
             "anyone on the network can access the UI. "
-            "Set KAZMA_SECRET to enable authentication."
+            "Set KAZMA_SECRET to enable authentication. "
+            "Use /login for remote session cookies."
         )
 
     app = create_app()

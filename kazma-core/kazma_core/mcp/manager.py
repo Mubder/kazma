@@ -46,6 +46,8 @@ from typing import Any
 
 import httpx
 
+__all__ = ["AsyncMCPManager", "MCPBridgeError", "MCPServerHandle", "UnifiedToolExecutor", "classify_mcp_tool"]
+
 logger = logging.getLogger(__name__)
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -62,12 +64,21 @@ _DANGER_KEYWORDS = (
     "replace", "rename", "create", "update", "modify", "alter",
     "truncate", "drop", "grant", "revoke", "clear", "purge",
     "wipe", "overwrite", "reset",
+    # Secret-exfil patterns (must not be treated as safe "get_*")
+    "secret", "password", "passwd", "credential", "token", "apikey",
+    "api_key", "private_key", "privatekey", "auth", "vault",
 )
 
 # Keywords that indicate a safe read-only tool (never requires approval).
 _SAFE_KEYWORDS = (
     "read", "list", "search", "get", "info", "status", "check",
     "describe", "query", "count", "exists", "help",
+)
+
+# Even with a "safe" verb, these substrings force danger (audit H6)
+_SENSITIVE_READ_KEYWORDS = (
+    "secret", "password", "passwd", "credential", "token", "apikey",
+    "api_key", "private", "vault", "auth", "cookie", "session_key",
 )
 
 
@@ -80,12 +91,11 @@ def classify_mcp_tool(tool_name: str) -> str:
         "unknown" — neither pattern matches (treat as danger by default for safety)
     """
     name_lower = tool_name.lower()
-    # Check safe first — "read_file" contains "read" (safe) even though
-    # "file" could theoretically match. But "write_file" has "write" (danger).
-    has_safe = any(kw in name_lower for kw in _SAFE_KEYWORDS)
     has_danger = any(kw in name_lower for kw in _DANGER_KEYWORDS)
-    if has_danger:
+    has_sensitive_read = any(kw in name_lower for kw in _SENSITIVE_READ_KEYWORDS)
+    if has_danger or has_sensitive_read:
         return "danger"
+    has_safe = any(kw in name_lower for kw in _SAFE_KEYWORDS)
     if has_safe:
         return "safe"
     return "unknown"
@@ -131,13 +141,16 @@ class MCPServerHandle:
     """Internal handle for a connected MCP server."""
 
     name: str
-    transport: str  # "stdio" | "sse"
+    transport: str  # "stdio" | "sse" | "streamable_http"
     # stdio
     process: asyncio.subprocess.Process | None = None
     command: list[str] = field(default_factory=list)
-    # sse
+    # sse / streamable_http
     http: httpx.AsyncClient | None = None
     url: str = ""
+    # streamable_http only — session id returned by the server, sent back on
+    # subsequent requests via the ``Mcp-Session-Id`` header.
+    session_id: str = ""
     # shared
     tools: list[dict[str, Any]] = field(default_factory=list)
     connected: bool = False
@@ -189,6 +202,8 @@ class AsyncMCPManager:
                     count = await self._connect_stdio(name, cfg)
                 elif transport == "sse":
                     count = await self._connect_sse(name, cfg)
+                elif transport in ("streamable_http", "streamable-http", "http"):
+                    count = await self._connect_streamable_http(name, cfg)
                 else:
                     logger.warning("[MCP] Unknown transport '%s' for server '%s'", transport, name)
                     continue
@@ -540,6 +555,8 @@ class AsyncMCPManager:
 
         if handle.transport == "stdio":
             return await self._send_stdio(handle, raw)
+        if handle.transport == "streamable_http":
+            return await self._send_streamable_http(handle, raw)
         return await self._send_sse(handle, raw)
 
     async def _notify(self, handle: MCPServerHandle, method: str, params: dict[str, Any]) -> None:
@@ -555,6 +572,16 @@ class AsyncMCPManager:
             await proc.stdin.drain()
         elif handle.transport == "sse" and handle.http is not None:
             await handle.http.post("/notifications", content=raw, headers={"Content-Type": "application/json"})
+        elif handle.transport == "streamable_http" and handle.http is not None:
+            # Streamable HTTP accepts notifications as POSTs that expect no
+            # JSON-RPC result (HTTP 202). Best-effort.
+            headers = {"Content-Type": "application/json"}
+            if handle.session_id:
+                headers["Mcp-Session-Id"] = handle.session_id
+            try:
+                await handle.http.post("", content=raw, headers=headers)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[MCP] streamable_http notify failed for '%s': %s", handle.name, exc)
 
     async def _send_stdio(self, handle: MCPServerHandle, raw: str) -> Any:
         """Send a JSON-RPC message over stdio and read the response."""
@@ -598,6 +625,131 @@ class AsyncMCPManager:
         )
         resp.raise_for_status()
         return _jsonrpc_parse(resp.text)
+
+    # ── Streamable HTTP transport (MCP 2025-03-26 spec) ──────────────
+    #
+    # The Streamable HTTP transport uses a SINGLE POST endpoint. The server
+    # responds with an SSE stream (text/event-stream) carrying JSON-RPC
+    # messages as ``data:`` frames, or a plain JSON body for simple
+    # responses. A server-assigned ``Mcp-Session-Id`` header (returned on
+    # initialize) must be echoed on subsequent requests.
+
+    async def _connect_streamable_http(self, name: str, cfg: dict[str, Any]) -> int:
+        """Connect to an MCP server over the Streamable HTTP transport."""
+        url = cfg.get("url", "")
+        if not url:
+            raise MCPBridgeError(f"Streamable HTTP server '{name}' requires a 'url'")
+
+        headers = dict(cfg.get("headers", {}))
+        headers.setdefault("Accept", "application/json, text/event-stream")
+        timeout = cfg.get("timeout", 30.0)
+
+        auth = cfg.get("auth", {})
+        if auth.get("type") == "bearer" and auth.get("token"):
+            headers["Authorization"] = f"Bearer {auth['token']}"
+        elif auth.get("type") == "header" and auth.get("name") and auth.get("value"):
+            headers[auth["name"]] = auth["value"]
+
+        http = httpx.AsyncClient(
+            base_url=url,
+            headers=headers,
+            timeout=timeout,
+        )
+
+        handle = MCPServerHandle(
+            name=name,
+            transport="streamable_http",
+            http=http,
+            url=url,
+        )
+
+        # MCP handshake — initialize captures the session id from the response.
+        try:
+            await self._send(
+                handle,
+                "initialize",
+                {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {"tools": {"listChanged": False}},
+                    "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
+                },
+            )
+            await self._notify(handle, "notifications/initialized", {})
+        except Exception as exc:
+            await http.aclose()
+            raise MCPBridgeError(f"Handshake failed for '{name}': {exc}") from exc
+
+        result = await self._send(handle, "tools/list", {})
+        tools = result.get("tools", []) if isinstance(result, dict) else []
+        handle.tools = tools
+        handle.connected = True
+        handle.trust = cfg.get("trust", "approval_required")
+
+        self._servers[name] = handle
+        logger.info(
+            "[MCP] Connected to '%s' (streamable_http, url=%s, session=%s, tools=%d)",
+            name, url, handle.session_id or "?", len(tools),
+        )
+        return len(tools)
+
+    async def _send_streamable_http(self, handle: MCPServerHandle, raw: str) -> Any:
+        """POST a JSON-RPC request to the streamable HTTP endpoint.
+
+        Reads the response as either an SSE stream (collecting ``data:``
+        frames until the JSON-RPC result) or a plain JSON body. Captures and
+        stores the ``Mcp-Session-Id`` header for subsequent requests.
+        """
+        if handle.http is None:
+            raise MCPBridgeError(f"Streamable HTTP client '{handle.name}' not initialized")
+
+        headers = {"Content-Type": "application/json"}
+        if handle.session_id:
+            headers["Mcp-Session-Id"] = handle.session_id
+
+        async with handle.read_lock:
+            resp = await handle.http.post("", content=raw, headers=headers)
+            # Persist the session id once we see it.
+            sid = resp.headers.get("mcp-session-id")
+            if sid and not handle.session_id:
+                handle.session_id = sid
+            resp.raise_for_status()
+
+            ctype = (resp.headers.get("content-type") or "").lower()
+            if "text/event-stream" in ctype:
+                return self._parse_sse_stream(resp.text, handle)
+            # Plain JSON response.
+            return _jsonrpc_parse(resp.text)
+
+    @staticmethod
+    def _parse_sse_stream(body: str, handle: MCPServerHandle) -> Any:
+        """Extract the JSON-RPC result from an SSE response body.
+
+        Streamable HTTP may interleave notifications, pings, and the final
+        result. We scan ``data:`` frames and return the first JSON-RPC object
+        that carries a ``result`` or ``error`` for our request id.
+        """
+        import json as _json
+
+        for chunk in body.split("\n\n"):
+            data_lines = []
+            for line in chunk.splitlines():
+                if line.startswith("data:"):
+                    data_lines.append(line[5:].strip())
+            if not data_lines:
+                continue
+            try:
+                payload = _json.loads("\n".join(data_lines))
+            except _json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and ("result" in payload or "error" in payload):
+                if "error" in payload:
+                    err = payload["error"]
+                    raise MCPBridgeError(
+                        f"MCP error {err.get('code')}: {err.get('message', '')}"
+                    )
+                return payload.get("result")
+        # No result frame found — return an empty result so callers degrade.
+        return {}
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -757,8 +909,30 @@ class UnifiedToolExecutor:
                     self._mcp.get_server_trust(server_name) == "trusted"
                 )
                 if not _hitl_already_approved and not _server_trusted:
+                    # Audit M10 / WP-3.6: untrusted MCP — force HITL for all
+                    # tools except explicit allowlist. "safe" name patterns are
+                    # not enough (list_keys, get_env, export_data, …).
+                    import os as _os_mcp
+
+                    allow_raw = (
+                        _os_mcp.environ.get("KAZMA_MCP_SAFE_ALLOWLIST") or ""
+                    ).strip()
+                    allowlist = {
+                        a.strip().lower()
+                        for a in allow_raw.split(",")
+                        if a.strip()
+                    }
                     tier = classify_mcp_tool(tool_name)
-                    if tier in ("danger", "unknown"):
+                    prod = (_os_mcp.environ.get("KAZMA_PRODUCTION") or "").lower() in (
+                        "1", "true", "on", "yes",
+                    )
+                    # Production: HITL for every tool not on the allowlist.
+                    # Dev/default: danger + unknown only (safe name patterns skip).
+                    if prod:
+                        force_hitl = tool_name.lower() not in allowlist
+                    else:
+                        force_hitl = tier in ("danger", "unknown")
+                    if force_hitl:
                         try:
                             import json as _json
 
@@ -766,11 +940,15 @@ class UnifiedToolExecutor:
 
                             safety = get_safety()
                             if safety.enabled:
+                                # force_danger=True: MCP tool names (write_file,
+                                # run_command, …) are not in the static
+                                # _EXTENDED_DANGER set (file_write, shell_exec).
                                 approved = await safety.check(
                                     tool_name=tool_name,
                                     tool_args=_json.dumps(arguments, default=str)[:200],
                                     task_id=str(arguments.get("task_id", "")),
                                     worker_name=f"mcp:{server_name}",
+                                    force_danger=True,
                                 )
                                 if not approved:
                                     return {

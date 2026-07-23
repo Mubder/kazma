@@ -71,10 +71,20 @@
             </template>
         </button>
 
-        {# User Menu #}
-        <div class="user-menu" x-data="{ open: false }" @click.outside="open = false">
-            <button class="user-menu-btn" @click="open = !open">
-                <div class="user-avatar" style="width:24px;height:24px;font-size:0.65rem">K</div>
+        {# User Menu — shows principal from /api/auth/me #}
+        <div class="user-menu" x-data="{ open: false, me: null }" x-init="
+            fetch('/api/auth/me', { credentials: 'same-origin' })
+              .then(r => r.ok ? r.json() : null)
+              .then(d => { me = d; })
+              .catch(() => {})
+          " @click.outside="open = false">
+            <button class="user-menu-btn" @click="open = !open" :title="(me && me.username) ? (me.username + ' · ' + (me.role || '')) : 'Account'">
+                <div class="user-avatar" style="width:24px;height:24px;font-size:0.65rem"
+                     x-text="(me && me.username) ? me.username.slice(0,1).toUpperCase() : 'K'"></div>
+                <span class="sidebar-collapsed-hide" style="font-size:0.75rem;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                      x-text="me && me.username ? me.username : ''"></span>
+                <span class="badge badge-stdio sidebar-collapsed-hide" style="font-size:0.65rem;margin-left:4px"
+                      x-show="me && me.role" x-text="me && me.role"></span>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M3 5l3 3 3-3"/>
                 </svg>
@@ -94,7 +104,10 @@
                     {{ t('header.health_status') }}
                 </button>
                 <div class="dropdown-divider"></div>
-                <button class="dropdown-item danger">
+                <button class="dropdown-item danger" type="button" @click="
+                  fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' })
+                    .finally(() => { window.location.href = '/login'; })
+                ">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
                     {{ t('header.logout') }}
                 </button>

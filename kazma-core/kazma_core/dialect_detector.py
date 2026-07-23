@@ -10,6 +10,8 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+__all__ = ["DialectDetector", "DialectResult"]
+
 logger = logging.getLogger(__name__)
 
 # ── Data models ───────────────────────────────────────────────────────

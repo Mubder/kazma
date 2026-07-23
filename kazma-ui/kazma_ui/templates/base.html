@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Kazma{% endblock %}</title>
     <link rel="icon" type="image/png" href="/static/img/favicon.png">
+    <link rel="shortcut icon" href="/favicon.ico">
     {# Arabic web font (Cairo) — loaded preconnect for performance. #}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -113,11 +114,26 @@
         };
     </script>
 
-    {# Core JS (ES module entry — imports focused modules under /static/js/modules) #}
-    <script type="module" src="/static/js/app.js"></script>
+    {# ES module cache-bust: relative imports from app.js resolve to absolute
+       /static/js/modules/* URLs; map them to versioned paths so nav.js edits
+       are picked up without a hard empty-cache reload. #}
+    <script type="importmap">
+    {
+      "imports": {
+        "/static/js/modules/nav.js": "/static/js/modules/nav.js?v={{ js_version() }}",
+        "/static/js/modules/stores.js": "/static/js/modules/stores.js?v={{ js_version() }}",
+        "/static/js/modules/components.js": "/static/js/modules/components.js?v={{ js_version() }}",
+        "/static/js/modules/util.js": "/static/js/modules/util.js?v={{ js_version() }}"
+      }
+    }
+    </script>
+
+    {# Core JS (ES module entry — imports focused modules under /static/js/modules).
+       ?v= busts browser cache when nav.js / app.js change (critical for soft-nav fixes). #}
+    <script type="module" src="/static/js/app.js?v={{ js_version() }}"></script>
 
     {# SVG icon registry (global — loaded before page scripts) #}
-    <script src="/static/js/icons.js"></script>
+    <script src="/static/js/icons.js?v={{ js_version() }}"></script>
 
     {# HTMX #}
     <script src="/static/js/htmx.min.js"></script>

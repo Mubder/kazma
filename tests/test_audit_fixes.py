@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 from kazma_core.skills.self_improvement import (
     _MAX_DELTA_CHARS,
     _MAX_EVOLUTION_BLOCKS,
@@ -60,6 +64,75 @@ class TestCapEvolutionPrompt:
         assert _cap_evolution_prompt(base, "") == base
 
 
+class TestSelfImprovementErrorStatus:
+    """WorkerResult uses status='error'; SI must not skip failure analysis."""
+
+    @pytest.mark.asyncio
+    async def test_error_status_not_skipped(self) -> None:
+        from kazma_core.skills.self_improvement import SelfImprovementSkill
+
+        class Stage:
+            def __init__(self) -> None:
+                self.status = "error"
+                self.role = "core"
+                self.output = ""
+                self.error = "boom"
+                self.duration_ms = 10
+
+        si = SelfImprovementSkill(enabled=True)
+
+        # Stub memory + LLM so the test never touches network or HF
+        with (
+            patch(
+                "kazma_core.swarm.memory.adapter.get_adapter",
+                return_value=None,
+            ),
+            patch(
+                "kazma_core.model_registry.get_model_registry",
+                side_effect=RuntimeError("no registry in unit test"),
+            ),
+        ):
+            result = await si.analyze(
+                "core", "fix the bug", [Stage()], "failed"
+            )
+
+        # Must NOT be the old bug: skip / No failed stages
+        assert result.get("action") == "mutate", result
+        assert result.get("delta")
+        assert "No failed stages" not in (result.get("reason") or "")
+        assert "boom" in (result.get("delta") or "") or "failed" in (
+            result.get("reason") or ""
+        ).lower() or "Template" in (result.get("reason") or "")
+
+    @pytest.mark.asyncio
+    async def test_success_path_still_mutates(self) -> None:
+        from kazma_core.skills.self_improvement import SelfImprovementSkill
+
+        class Stage:
+            def __init__(self) -> None:
+                self.status = "completed"
+                self.role = "core"
+                self.output = "done"
+                self.error = ""
+                self.duration_ms = 5
+
+        si = SelfImprovementSkill(enabled=True)
+        with (
+            patch(
+                "kazma_core.swarm.memory.adapter.get_adapter",
+                return_value=None,
+            ),
+            patch(
+                "kazma_core.model_registry.get_model_registry",
+                side_effect=RuntimeError("no registry"),
+            ),
+        ):
+            result = await si.analyze(
+                "core", "ship it", [Stage()], "completed"
+            )
+        assert result.get("action") == "mutate", result
+
+
 class TestSqliteVecSchema:
     """Verify the L4 vec0 table uses an auxiliary doc_id column (not an integer PK)."""
 
@@ -80,5 +153,6 @@ class TestSqliteVecSchema:
             "                    +doc_id TEXT\n"
             "                )"
         )
-        assert "INTEGER PRIMARY KEY" not in ddl
+        assert "vec0" in ddl
         assert "+doc_id TEXT" in ddl
+        assert "INTEGER PRIMARY KEY" not in ddl

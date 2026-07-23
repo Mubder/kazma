@@ -14,6 +14,8 @@ from kazma_core.compaction import CompactionEngine
 from kazma_core.state import AgentState
 from kazma_core.token_counter import TokenCounter
 
+__all__ = ["ContextAuthority", "create_authority"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,7 +45,7 @@ class ContextAuthority:
         """
         messages = state.get("messages", [])
 
-        if self.counter.should_compact(messages):
+        if self.counter.should_compact(messages) or state.get("needs_compaction"):
             logger.info(
                 "Context compaction triggered: %d/%d tokens (threshold=%d)",
                 self.counter.count(messages),

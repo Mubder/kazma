@@ -19,6 +19,8 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, Input, RichLog, Static, TextArea
 
+__all__ = ["EditorScreen", "PromptScreen"]
+
 logger = logging.getLogger(__name__)
 
 # Languages Textual can highlight. Unknown ones are set defensively and

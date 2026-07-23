@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+__all__ = ["ApprovalRequest", "BusAdapter", "BusMessage", "NullBusAdapter", "SwarmMessageBus", "SwarmReport", "get_message_bus", "set_message_bus"]
+
 logger = logging.getLogger(__name__)
 
 # Approval timeout: how long to wait before auto-rejecting.
@@ -112,7 +114,9 @@ class NullBusAdapter(BusAdapter):
         pass
 
     async def request_approval(self, approval: ApprovalRequest) -> bool:
-        return True  # auto-approve when no adapter is present
+        # Fail-closed (audit M9): headless danger must go through
+        # SafetyMiddleware.allow_headless_danger, not silent auto-approve.
+        return False
 
     async def send_alert(
         self,

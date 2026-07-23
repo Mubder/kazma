@@ -18,6 +18,8 @@ from kazma_cli.banner import check_config, show_banner, show_help_brief, show_st
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["main"]
+
 
 def main() -> None:
     """CLI entry point — supports wizard, hub, and docs commands."""
@@ -44,7 +46,7 @@ def main() -> None:
         _run_status()
 
     elif cmd == "serve":
-        port = int(sys.argv[2]) if len(sys.argv) > 2 else 8000
+        port = int(sys.argv[2]) if len(sys.argv) > 2 else 9090
         _run_serve(port)
 
     elif cmd == "wizard":
@@ -72,10 +74,12 @@ def main() -> None:
         _run_update(sys.argv[2:])
 
     elif cmd in ("--help", "-h", "help"):
-        print("Kazma CLI v0.2.0")
+        from kazma_cli.banner import _get_version
+
+        print(f"Kazma CLI v{_get_version()}")
         print("Commands:")
         print("  status     Show Kazma status")
-        print("  serve      Start the WebUI server (default port 8000)")
+        print("  serve      Start the WebUI server (default port 9090)")
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")
         print("  docs       Documentation commands (build, serve)")
@@ -86,7 +90,7 @@ def main() -> None:
         print("  update     Check for and install Kazma CLI updates")
         print("")
         print("Options:")
-        print("  serve [port]  Start server on specified port (default: 8000)")
+        print("  serve [port]  Start server on specified port (default: 9090)")
 
     else:
         print(f"Unknown command: {cmd}")
@@ -107,12 +111,44 @@ def _run_serve(port: int) -> None:
     app = create_app()
     import os as _os_cli
     import socket as _socket
-    host = "127.0.0.1"
-    if _os_cli.environ.get("KAZMA_SECRET"):
-        host = "0.0.0.0"
+
+    # Default loopback for production safety (audit C2). Opt into LAN/webhooks:
+    #   KAZMA_HOST=0.0.0.0  + strong KAZMA_SECRET
+    host = (_os_cli.environ.get("KAZMA_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    _KNOWN_BAD = "kazma-local-dev-secret"
+    _LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
+    existing = (_os_cli.environ.get("KAZMA_SECRET") or "").strip()
+    if existing == _KNOWN_BAD:
+        print(
+            "\n  [SECURITY] KAZMA_SECRET is the old hardcoded default — "
+            "refusing to start. Unset it or set a strong random secret.\n"
+        )
+        sys.exit(1)
+    is_loopback = host.lower() in _LOOPBACK
+    if not existing:
+        if not is_loopback:
+            print(
+                "\n  [SECURITY] Non-loopback bind requires KAZMA_SECRET.\n"
+                "  Set a strong secret, or use: KAZMA_HOST=127.0.0.1\n"
+                "  For webhooks/LAN: KAZMA_HOST=0.0.0.0 and pin KAZMA_SECRET.\n"
+            )
+            sys.exit(1)
+        import secrets as _secrets
+
+        generated = _secrets.token_urlsafe(32)
+        _os_cli.environ["KAZMA_SECRET"] = generated
+        print("\n  [SECURITY] Generated KAZMA_SECRET for this process (not persisted):")
+        print(f"    {generated}")
+        print("  Pin it with:  export KAZMA_SECRET='…'  (or put it in .env)\n")
+    elif not is_loopback:
+        print(
+            f"\n  [SECURITY] Binding {host} — ensure KAZMA_SECRET is strong "
+            "and reverse-proxy / firewall are configured.\n"
+            "  YOLO is disabled when KAZMA_PRODUCTION=1 "
+            "(override: KAZMA_ALLOW_YOLO=1).\n"
+        )
 
     # Print the browseable URL — 0.0.0.0 is a bind address, not browsable.
-    # Always show 127.0.0.1 (works everywhere), plus the LAN IP if binding to 0.0.0.0.
     browse_url = f"http://127.0.0.1:{port}"
     if host == "0.0.0.0":
         try:
@@ -126,10 +162,26 @@ def _run_serve(port: int) -> None:
         except Exception:
             print(f"\n  Kazma WebUI running: {browse_url}\n")
     else:
-        print(f"\n  Kazma WebUI running: {browse_url}\n")
+        print(f"\n  Kazma WebUI running: http://{host}:{port}\n")
 
     import uvicorn
-    uvicorn.run(app, host=host, port=port, log_level="info", timeout_graceful_shutdown=15)
+
+    try:
+        uvicorn.run(app, host=host, port=port, log_level="info", timeout_graceful_shutdown=15)
+    except OSError as exc:
+        # Windows: port often "busy" via WSL/Docker portproxy (svchost), not another Kazma.
+        err = str(exc).lower()
+        if "address already in use" in err or "10048" in err or "errno 98" in err or "errno 48" in err:
+            print(
+                f"\n  [ERROR] Cannot bind {host}:{port} — port is already in use.\n"
+                f"  Try:  kazma serve {port + 1}\n"
+                "  On Windows, check WSL/Docker portproxy:\n"
+                "    netsh interface portproxy show all\n"
+                "  If 127.0.0.1:9090 forwards elsewhere, browsers get ERR_CONNECTION_RESET\n"
+                "  even when Kazma is not running — pick a free port (e.g. 9091).\n"
+            )
+            sys.exit(1)
+        raise
 
 
 def _run_wizard() -> None:
@@ -379,7 +431,7 @@ def _run_status() -> None:
     print()
 
     # --- Server / gateway / swarm health (best-effort) ---------------------
-    port = 8000
+    port = 9090
     env_port = os.environ.get("KAZMA_PORT")
     if env_port:
         try:

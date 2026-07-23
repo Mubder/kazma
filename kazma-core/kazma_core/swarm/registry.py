@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+__all__ = ["WorkerEntry", "WorkerRegistry", "get_worker_registry"]
+
 logger = logging.getLogger(__name__)
 
 # Default registry file lives alongside kazma.yaml (project root or CWD).

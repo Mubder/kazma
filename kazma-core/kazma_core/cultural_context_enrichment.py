@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 
+__all__ = ["get_cultural_prompt_suffix"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,6 +79,15 @@ def get_cultural_prompt_suffix() -> str:
                 "\nToday is Kuwait Liberation Day (February 26)."
             )
 
+        if not parts:
+            return ""
+
+        # Never force Arabic output — language is chosen per user turn.
+        parts.append(
+            "\nLANGUAGE: Use cultural greetings only when the user writes in "
+            "Arabic (or explicitly invites them). If the user writes in English, "
+            "reply in English and do not switch to Arabic."
+        )
         suffix = "".join(parts)
         if suffix:
             logger.info("[Cultural] System prompt enriched: Ramadan=%s Eid=%s NationalDay=%s",

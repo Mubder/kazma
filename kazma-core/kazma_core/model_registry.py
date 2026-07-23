@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from typing import Any, TYPE_CHECKING
 
@@ -31,6 +32,8 @@ import httpx
 
 from kazma_core.llm_provider import LLMConfig, LLMProvider
 from kazma_core.providers import PROVIDER_PRESETS
+
+__all__ = ["ModelRegistry", "get_model_registry", "initialize_model_registry", "reset_model_registry"]
 
 if TYPE_CHECKING:
     from kazma_core.config_store import ConfigStore
@@ -112,6 +115,17 @@ class ModelRegistry:
 
     # ── Active profile management ──────────────────────────────────
 
+    @staticmethod
+    def _env_locked() -> bool:
+        """Whether the active profile is pinned by env vars (KAZMA_MODEL /
+        KAZMA_PROVIDER).
+
+        When locked, ``set_active_model`` / ``set_active_provider`` are
+        no-ops — the env always wins. Use this to pin a single model on a
+        shared public demo so visitors can't change it for everyone.
+        """
+        return bool(os.getenv("KAZMA_MODEL", "").strip() or os.getenv("KAZMA_PROVIDER", "").strip())
+
     def _resolve_provider_config(
         self, provider_name: str, model: str = "",
     ) -> tuple[str, str, str, str]:
@@ -137,6 +151,14 @@ class ModelRegistry:
                 effective_model = str(self._config_store.get("llm.model", "") or "")
             if not provider_name:
                 provider_name = "custom"
+
+        # Env-var fallback: when no key was resolved from ConfigStore, try the
+        # conventional <PROVIDER>_API_KEY env var (e.g. GROQ_API_KEY). This
+        # lets deployments (incl. the public demo) configure keys via env
+        # without saving them in the UI.
+        if not api_key and provider_name:
+            env_key = f"{provider_name.upper().replace('-', '_')}_API_KEY"
+            api_key = os.getenv(env_key, "") or os.getenv("KAZMA_API_KEY", "")
 
         return provider_name, base_url, api_key, effective_model
 
@@ -178,6 +200,9 @@ class ModelRegistry:
         "change-one-without-the-other" desync where the persisted profile
         recorded a provider/model mismatch.
         """
+        if self._env_locked():
+            logger.info("[registry] provider change to %r ignored — profile locked by KAZMA_MODEL/KAZMA_PROVIDER env", provider)
+            return {"error": "Profile is locked by KAZMA_MODEL/KAZMA_PROVIDER environment variables"}
         clean_provider = (provider or "").strip()
         if not clean_provider:
             return {"error": "Provider name is required"}
@@ -235,6 +260,9 @@ class ModelRegistry:
         active one, the active provider is updated so the LLM client
         points to the correct API endpoint.
         """
+        if self._env_locked():
+            logger.info("[registry] model change to %r ignored — profile locked by KAZMA_MODEL/KAZMA_PROVIDER env", model)
+            return
         clean_model = (model or "").strip()
         with self._lock:
             self._active_model = clean_model
@@ -353,6 +381,19 @@ class ModelRegistry:
                     location=location,
                     google_mode=google_mode,
                 )
+            elif provider_name.lower() == "anthropic":
+                # Native Anthropic Messages API (x-api-key + /messages schema).
+                from kazma_core.anthropic_llm import AnthropicProvider
+
+                client = AnthropicProvider(config)
+            elif provider_name.lower() == "azure":
+                from kazma_core.azure_llm import AzureProvider
+
+                client = AzureProvider(config)
+            elif provider_name.lower() == "bedrock":
+                from kazma_core.bedrock_llm import BedrockProvider
+
+                client = BedrockProvider(config)
             else:
                 client = LLMProvider(config)
 
@@ -388,6 +429,15 @@ class ModelRegistry:
                     location=str(owner.get("location", "")) or "us-central1",
                     google_mode=str(owner.get("google_mode", "")),
                 )
+            if owner_name == "anthropic":
+                from kazma_core.anthropic_llm import AnthropicProvider
+                return AnthropicProvider(config)
+            if owner_name == "azure":
+                from kazma_core.azure_llm import AzureProvider
+                return AzureProvider(config)
+            if owner_name == "bedrock":
+                from kazma_core.bedrock_llm import BedrockProvider
+                return BedrockProvider(config)
             return LLMProvider(config)
 
         # Fallback: use active profile with overridden model
@@ -423,6 +473,15 @@ class ModelRegistry:
                 location=str(entry.get("location", "")) or "us-central1",
                 google_mode=str(entry.get("google_mode", "")),
             )
+        if provider_name.lower() == "anthropic":
+            from kazma_core.anthropic_llm import AnthropicProvider
+            return AnthropicProvider(config)
+        if provider_name.lower() == "azure":
+            from kazma_core.azure_llm import AzureProvider
+            return AzureProvider(config)
+        if provider_name.lower() == "bedrock":
+            from kazma_core.bedrock_llm import BedrockProvider
+            return BedrockProvider(config)
         return LLMProvider(config)
 
     def find_provider_for_model(self, model_id: str) -> dict[str, Any] | None:
@@ -591,6 +650,17 @@ class ModelRegistry:
                 self._active_provider = "custom"
                 if not self._active_model:
                     self._active_model = str(self._config_store.get("llm.model", "") or "")
+
+        # Env-var override: KAZMA_PROVIDER / KAZMA_MODEL take precedence over
+        # stored config so deployments (incl. the public demo) can pin the
+        # active profile via environment without UI interaction. This is the
+        # documented fly.toml contract.
+        env_provider = os.getenv("KAZMA_PROVIDER", "").strip()
+        env_model = os.getenv("KAZMA_MODEL", "").strip()
+        if env_provider:
+            self._active_provider = env_provider
+        if env_model:
+            self._active_model = env_model
 
     def serialize(self) -> None:
         """Save current state to ConfigStore."""

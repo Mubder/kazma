@@ -1,0 +1,75 @@
+# Versioning is MANUAL until the product deliberately ships 1.0.0.
+#
+# Trigger: Actions → Release → Run workflow
+# Optional force_level: patch | minor | major
+#
+# Do NOT auto-run on every push — bad config previously produced
+# fake 0.1/0.2 and accidental 1.0.0 tags (see docs/VERSIONING.md).
+
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_level:
+        description: "Bump level (patch|minor|major). Required for a controlled release."
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Semantic release (manual)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install release tooling
+        run: |
+          pip install --upgrade pip
+          pip install python-semantic-release==9.21.1
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run semantic-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          LEVEL="${{ github.event.inputs.force_level }}"
+          echo "Manual release bump: $LEVEL"
+          semantic-release version --"$LEVEL"
+          # Sync kazma.yaml agent.version with pyproject
+          python - <<'PY'
+          import re, pathlib, tomllib
+          ver = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
+          p = pathlib.Path("kazma.yaml")
+          text = p.read_text(encoding="utf-8")
+          new, n = re.subn(r"(?m)^(  version:\s*).+$", rf"\g<1>{ver}", text, count=1)
+          if n:
+              p.write_text(new, encoding="utf-8")
+              print(f"synced kazma.yaml agent.version -> {ver}")
+          PY
+          git add kazma.yaml pyproject.toml CHANGELOG.md || true
+          git diff --cached --quiet || git commit -m "chore(release): sync yaml after $LEVEL [skip ci]" || true
+          semantic-release publish || true

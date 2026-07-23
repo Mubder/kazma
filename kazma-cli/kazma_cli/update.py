@@ -17,6 +17,7 @@ Flags:
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 import sys
@@ -31,16 +32,59 @@ logger = logging.getLogger(__name__)
 
 console = Console()
 
+__all__ = [
+    "PACKAGE_NAME",
+    "PYPI_URL",
+    "check_git_behind",
+    "detect_active_extras",
+    "detect_install_type",
+    "do_git_update",
+    "do_pip_update",
+    "get_current_version",
+    "get_git_commit",
+    "get_latest_pypi_version",
+    "is_newer",
+    "load_persisted_extras",
+    "parse_update_flags",
+    "parse_version",
+    "persist_extras",
+    "print_help",
+    "run",
+]
+
 PYPI_URL = "https://pypi.org/pypi/kazma/json"
 PACKAGE_NAME = "kazma"
 
 # Timeouts (seconds) for various subprocess operations.
 _CHECK_TIMEOUT = 15.0
 _INSTALL_TIMEOUT = 120.0
+# RAG pulls sentence-transformers + torch — allow a long first install.
+_INSTALL_TIMEOUT_HEAVY = 900.0
 _GIT_TIMEOUT = 60.0
 
+# pyproject optional-dependencies → importable marker modules.
+# Used so ``kazma update`` reinstalls the same extras the user already had
+# (bare ``uv sync`` would prune them and wipe VectorMemory deps).
+_EXTRA_MARKERS: dict[str, tuple[str, ...]] = {
+    "rag": ("chromadb", "sentence_transformers"),
+    "tui": ("textual", "bidi"),
+    "observability": ("prometheus_client",),
+    "web": ("playwright",),
+    "dev": ("pytest", "ruff", "mypy"),
+    "test": ("fakeredis",),
+}
+_KNOWN_EXTRAS: tuple[str, ...] = (
+    "rag", "tui", "observability", "web", "dev", "test",
+)
+
 # Flags that are boolean toggles (no value follows them).
-_UPDATE_BOOL_FLAGS = {"--check", "-c", "--force", "-f", "--yes", "-y", "--help", "-h"}
+_UPDATE_BOOL_FLAGS = {
+    "--check", "-c",
+    "--force", "-f",
+    "--yes", "-y",
+    "--help", "-h",
+    "--reinstall", "-r",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -99,10 +143,25 @@ def _run_cmd(
 def detect_install_type() -> str:
     """Detect whether kazma is pip-installed or git/editable-installed.
 
-    Returns ``"git"`` for editable installs, ``"pip"`` for regular pip
-    installs.  Uses ``pip show`` to check for the ``Editable project
-    location`` marker.
+    Returns ``"git"`` for editable installs or when a monorepo ``.git``
+    root is found (typical developer install), ``"pip"`` for wheel installs
+    without a local git tree.  Uses ``pip show`` for the editable marker.
     """
+    # Prefer git when the monorepo is present — Kazma is not always on PyPI.
+    if _find_git_root() is not None:
+        try:
+            result = _run_pip(["show", PACKAGE_NAME])
+            if result.returncode == 0 and "Editable project location:" in result.stdout:
+                return "git"
+            # Non-editable but repo present (uv/pip path into monorepo)
+            if result.returncode == 0 and "Location:" in result.stdout:
+                git_root = _find_git_root()
+                if git_root and str(git_root) in result.stdout.replace("\\", "/"):
+                    return "git"
+        except Exception as exc:
+            logger.debug("pip show failed during install-type detection: %s", exc)
+        # Developer checkout: always use git update path
+        return "git"
     try:
         result = _run_pip(["show", PACKAGE_NAME])
         if result.returncode == 0 and "Editable project location:" in result.stdout:
@@ -119,10 +178,14 @@ def detect_install_type() -> str:
 def get_current_version() -> str:
     """Return the currently installed kazma version.
 
-    Tries ``importlib.metadata`` first (fast, reliable), then falls back
-    to parsing ``pip show kazma`` output, and finally to reading
-    ``pyproject.toml``.
+    For git/monorepo installs prefer ``pyproject.toml`` (source of truth
+    after ``git pull``). Otherwise use importlib / pip metadata.
     """
+    # Git checkout: always trust repo pyproject so version matches HEAD
+    if _find_git_root() is not None:
+        ver = _get_version()
+        if ver and ver != "0.0.0":
+            return ver
     try:
         from importlib.metadata import version as pkg_version
 
@@ -142,22 +205,50 @@ def get_current_version() -> str:
 
 
 def get_latest_pypi_version() -> str | None:
-    """Fetch the latest kazma version from PyPI.
+    """Fetch the latest kazma version from PyPI, then GitHub releases.
 
     Returns the version string, or ``None`` on network/parse errors.
     """
     try:
         import httpx
 
-        with httpx.Client(timeout=_CHECK_TIMEOUT) as client:
-            response = client.get(PYPI_URL)
-            response.raise_for_status()
-            data = response.json()
-            version = data.get("info", {}).get("version")
-            if version:
-                return str(version)
+        with httpx.Client(timeout=_CHECK_TIMEOUT, follow_redirects=True) as client:
+            try:
+                response = client.get(PYPI_URL)
+                if response.status_code == 200:
+                    data = response.json()
+                    version = data.get("info", {}).get("version")
+                    if version:
+                        return str(version)
+            except Exception as exc:
+                logger.debug("PyPI version fetch failed: %s", exc)
+
+            # Fallback: GitHub Releases (primary distribution for monorepo)
+            for url in (
+                "https://api.github.com/repos/Mubder/kazma/releases/latest",
+                "https://api.github.com/repos/Mubder/kazma/tags?per_page=1",
+            ):
+                try:
+                    response = client.get(
+                        url,
+                        headers={"Accept": "application/vnd.github+json"},
+                    )
+                    if response.status_code != 200:
+                        continue
+                    data = response.json()
+                    if isinstance(data, dict):
+                        tag = data.get("tag_name") or data.get("name") or ""
+                    elif isinstance(data, list) and data:
+                        tag = data[0].get("name") or ""
+                    else:
+                        tag = ""
+                    tag = str(tag).lstrip("v").strip()
+                    if tag:
+                        return tag
+                except Exception as exc:
+                    logger.debug("GitHub version fetch failed: %s", exc)
     except Exception as exc:
-        logger.warning("Failed to fetch PyPI version: %s", exc)
+        logger.warning("Failed to fetch remote version: %s", exc)
     return None
 
 
@@ -281,10 +372,435 @@ def do_pip_update() -> bool:
         return False
 
 
-def do_git_update() -> bool:
-    """Update kazma from git source (pull + reinstall editable).
+def _extras_file() -> Path:
+    """User-level file that survives git pull / stash (not in the repo)."""
+    return Path.home() / ".kazma" / "installed_extras.json"
 
-    Returns ``True`` on success.
+
+def load_persisted_extras() -> list[str]:
+    """Load previously recorded optional extras (ConfigStore + ~/.kazma)."""
+    found: list[str] = []
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw = get_config_store().get("system.installed_extras")
+        if isinstance(raw, list):
+            found.extend(str(x) for x in raw)
+        elif isinstance(raw, str) and raw.strip():
+            found.extend(p.strip() for p in raw.split(",") if p.strip())
+    except Exception:
+        pass
+    try:
+        path = _extras_file()
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                data = data.get("extras") or data.get("installed") or []
+            if isinstance(data, list):
+                found.extend(str(x) for x in data)
+    except Exception:
+        pass
+    return _normalize_extras(found)
+
+
+def persist_extras(extras: list[str]) -> None:
+    """Remember which optional extras the user has installed."""
+    clean = _normalize_extras(extras)
+    try:
+        path = _extras_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"extras": clean}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.debug("Could not write installed_extras.json: %s", exc)
+    try:
+        from kazma_core.config_store import get_config_store
+
+        get_config_store().set(
+            "system.installed_extras", clean, category="system"
+        )
+    except Exception as exc:
+        logger.debug("Could not persist extras to ConfigStore: %s", exc)
+
+
+def _normalize_extras(extras: list[str] | set[str] | tuple[str, ...]) -> list[str]:
+    order = {name: i for i, name in enumerate(_KNOWN_EXTRAS)}
+    out: list[str] = []
+    for e in extras:
+        name = str(e).strip().lower()
+        if name == "all":
+            return list(_KNOWN_EXTRAS)
+        if name in order and name not in out:
+            out.append(name)
+    out.sort(key=lambda n: order.get(n, 99))
+    return out
+
+
+def _module_available(mod: str) -> bool:
+    try:
+        import importlib.util
+
+        return importlib.util.find_spec(mod) is not None
+    except Exception:
+        return False
+
+
+def _memory_was_expected() -> bool:
+    """ConfigStore / alerts imply the user previously had VectorMemory."""
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs = get_config_store()
+        st = str(cs.get("system.memory.status") or "").upper()
+        # DEGRADED is exactly the post-uv-sync wipe state
+        if st in ("ACTIVE", "INSTALLING", "READY", "DEGRADED"):
+            return True
+        extras = cs.get("system.installed_extras") or []
+        if isinstance(extras, list) and "rag" in extras:
+            return True
+        if isinstance(extras, str) and "rag" in extras:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _vector_memory_data_present(cwd: str) -> bool:
+    """True if on-disk vector memory exists (implies user had ``rag``)."""
+    candidates: list[Path] = []
+    try:
+        from kazma_core.paths import vector_memory_path
+
+        candidates.append(Path(vector_memory_path()))
+    except Exception:
+        pass
+    home = Path.home()
+    candidates.extend(
+        [
+            home / ".kazma" / "vector_memory",
+            home / ".kazma" / "chroma",
+            home / ".kazma" / "memory",
+            Path(cwd) / "kazma-data" / "vector_memory",
+            Path(cwd) / "kazma-data" / "chroma",
+            Path(cwd) / "kazma-data" / "memory",
+        ]
+    )
+    for p in candidates:
+        try:
+            if p.is_dir() and any(p.iterdir()):
+                return True
+            # chromadb often creates a sqlite file at the path root
+            if p.is_file() and p.suffix in (".sqlite3", ".db"):
+                return True
+        except Exception:
+            continue
+    if _memory_was_expected():
+        return True
+    return False
+
+
+def detect_active_extras(cwd: str | None = None) -> list[str]:
+    """Detect optional extras currently installed (or previously recorded).
+
+    Combines:
+    1. Persisted list (``~/.kazma/installed_extras.json`` + ConfigStore)
+    2. Live import markers in the active venv
+    3. Heuristic: vector memory data on disk → include ``rag``
+    """
+    extras: set[str] = set(load_persisted_extras())
+    for extra, markers in _EXTRA_MARKERS.items():
+        # Any marker present counts (partial install still means user wanted it)
+        if any(_module_available(m) for m in markers):
+            extras.add(extra)
+    root = cwd or str(_find_git_root() or Path.cwd())
+    if _vector_memory_data_present(root):
+        extras.add("rag")
+    return _normalize_extras(extras)
+
+
+def _editable_spec(extras: list[str]) -> str:
+    if extras:
+        return f".[{','.join(extras)}]"
+    return "."
+
+
+def _reinstall_local(cwd: str) -> bool:
+    """Reinstall editable package without wiping optional extras.
+
+    Bare ``uv sync`` is exact-by-default and **removes** packages not in the
+    default lock set (e.g. chromadb / sentence-transformers from ``[rag]``).
+    That made ``kazma update`` destroy VectorMemory. We now:
+
+    1. Detect + persist active extras
+    2. Prefer **additive** ``uv pip install -e ".[extras]"``
+    3. Fall back to ``uv sync --inexact --extra …`` (never bare ``uv sync``)
+    4. Fall back to ``python -m pip install -e ".[extras]"``
+    """
+    extras = detect_active_extras(cwd)
+    # Repair path: packages were wiped but memory status/data still exists
+    if "rag" not in extras and (
+        _vector_memory_data_present(cwd)
+        or not _module_available("chromadb")
+        and _memory_was_expected()
+    ):
+        extras = _normalize_extras([*extras, "rag"])
+    if extras:
+        persist_extras(extras)
+        console.print(
+            f"[cyan]Preserving optional extras:[/cyan] {', '.join(extras)}"
+        )
+    else:
+        console.print(
+            "[dim]No optional extras detected "
+            "(install later via Settings → Packages or "
+            "uv pip install -e \".[rag]\").[/dim]"
+        )
+
+    spec = _editable_spec(extras)
+    timeout = (
+        _INSTALL_TIMEOUT_HEAVY
+        if any(e in extras for e in ("rag", "all", "dev", "web"))
+        else _INSTALL_TIMEOUT
+    )
+
+    # 1) Additive uv pip install (does NOT prune other packages)
+    uv_pip_cmd = [
+        "uv", "pip", "install", "--python", sys.executable, "-e", spec,
+    ]
+    attempts: list[tuple[list[str], str]] = [
+        (uv_pip_cmd, f"uv pip install -e {spec}"),
+    ]
+
+    # 2) uv sync --inexact + extras (retains extraneous packages)
+    sync_cmd = ["uv", "sync", "--inexact"]
+    for e in extras:
+        sync_cmd.extend(["--extra", e])
+    sync_label = "uv sync --inexact" + (
+        " " + " ".join(f"--extra {e}" for e in extras) if extras else ""
+    )
+    attempts.append((sync_cmd, sync_label))
+
+    for cmd, label in attempts:
+        console.print(f"[cyan]Reinstalling via {label}...[/cyan]")
+        try:
+            result = _run_cmd(cmd, cwd=cwd, timeout=timeout)
+            if result.returncode == 0:
+                console.print(f"[green]{label} completed.[/green]")
+                if extras:
+                    persist_extras(extras)
+                return True
+            err = (result.stderr or result.stdout or "").strip()
+            console.print(f"[yellow]{label} failed:[/yellow] {err[:400]}")
+        except FileNotFoundError:
+            console.print(f"[dim]{cmd[0]} not on PATH — trying next method.[/dim]")
+        except subprocess.TimeoutExpired:
+            console.print(f"[yellow]{label} timed out.[/yellow]")
+        except Exception as exc:
+            console.print(f"[yellow]{label} error:[/yellow] {exc}")
+
+    # 3) python -m pip (may be missing in pure uv venvs)
+    console.print(f"[cyan]Reinstalling via python -m pip install -e {spec}...[/cyan]")
+    try:
+        result = _run_cmd(
+            [sys.executable, "-m", "pip", "install", "-e", spec],
+            cwd=cwd,
+            timeout=timeout,
+        )
+        if result.returncode == 0:
+            console.print("[green]pip install -e completed.[/green]")
+            if extras:
+                persist_extras(extras)
+            return True
+        err = (result.stderr or result.stdout or "").strip()
+        console.print(f"[yellow]pip install -e failed:[/yellow] {err[:400]}")
+    except Exception as exc:
+        console.print(f"[yellow]pip reinstall skipped:[/yellow] {exc}")
+
+    console.print(
+        "[yellow]Code was pulled successfully, but package reinstall did not run.[/yellow]\n"
+        "  Restart the server: [cyan]kazma serve[/cyan]\n"
+        "  To restore memory/RAG deps: [cyan]uv pip install -e \".[rag]\"[/cyan]\n"
+        "  To restore everything optional: [cyan]uv pip install -e \".[all]\"[/cyan]\n"
+        "  Avoid bare [red]uv sync[/red] — it removes extras."
+    )
+    # git pull already succeeded — do not fail the whole update
+    return True
+
+
+def _reinstall_via_subprocess(cwd: str) -> bool:
+    """Run ``_reinstall_local`` in a *fresh* interpreter after git pull.
+
+    ``kazma update`` loads ``update.py`` at process start. After
+    ``git reset/pull`` the on-disk module is new, but this process still
+    holds the *pre-pull* ``_reinstall_local`` (which used bare ``uv sync``
+    and wiped extras). A child process re-imports from disk and applies
+    the post-pull installer.
+    """
+    console.print(
+        "[cyan]Reinstalling with the post-update installer "
+        "(fresh process — picks up new update logic)…[/cyan]"
+    )
+    # Import path: editable checkout is on sys.path via site-packages .pth
+    # or running from repo. Prefer loading the file under *cwd* explicitly.
+    code = (
+        "import importlib.util, sys\n"
+        "from pathlib import Path\n"
+        f"cwd = {cwd!r}\n"
+        "root = Path(cwd)\n"
+        "sys.path.insert(0, str(root))\n"
+        "sys.path.insert(0, str(root / 'kazma-cli'))\n"
+        "path = root / 'kazma-cli' / 'kazma_cli' / 'update.py'\n"
+        "if not path.is_file():\n"
+        "    # Fallback: import installed package (editable)\n"
+        "    from kazma_cli.update import _reinstall_local\n"
+        "    sys.exit(0 if _reinstall_local(cwd) else 1)\n"
+        "spec = importlib.util.spec_from_file_location('kazma_cli_update_postpull', path)\n"
+        "mod = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(mod)\n"
+        "ok = bool(mod._reinstall_local(cwd))\n"
+        "sys.exit(0 if ok else 1)\n"
+    )
+    try:
+        result = _run_cmd(
+            [sys.executable, "-c", code],
+            cwd=cwd,
+            timeout=_INSTALL_TIMEOUT_HEAVY,
+        )
+        if result.returncode == 0:
+            return True
+        err = (result.stderr or result.stdout or "").strip()
+        console.print(
+            f"[yellow]Post-update reinstall process failed "
+            f"(exit {result.returncode}):[/yellow] {err[:500]}"
+        )
+    except subprocess.TimeoutExpired:
+        console.print("[yellow]Post-update reinstall timed out.[/yellow]")
+    except Exception as exc:
+        console.print(f"[yellow]Post-update reinstall error:[/yellow] {exc}")
+
+    # Last resort: in-process (may be stale logic if pre-pull)
+    console.print("[dim]Falling back to in-process reinstall…[/dim]")
+    return _reinstall_local(cwd)
+
+
+def needs_extras_repair(cwd: str | None = None) -> bool:
+    """True when recorded/needed extras are missing from the active venv."""
+    root = cwd or str(_find_git_root() or Path.cwd())
+    # Vector DB on disk but packages gone (the common post-uv-sync failure)
+    if _vector_memory_data_present(root):
+        if not (
+            _module_available("chromadb")
+            and _module_available("sentence_transformers")
+        ):
+            return True
+    for extra in detect_active_extras(root):
+        markers = _EXTRA_MARKERS.get(extra, ())
+        if not markers:
+            continue
+        if not any(_module_available(m) for m in markers):
+            return True
+    return False
+
+
+def _git_status_porcelain(cwd: str) -> str:
+    """Return ``git status --porcelain`` output (empty if clean)."""
+    try:
+        result = _run_cmd(["git", "status", "--porcelain"], cwd=cwd)
+        if result.returncode == 0:
+            return (result.stdout or "").strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _commits_ahead_of_origin(cwd: str) -> int:
+    """How many local commits are not on origin/main (0 = safe to reset)."""
+    try:
+        result = _run_cmd(
+            ["git", "rev-list", "--count", "origin/main..HEAD"],
+            cwd=cwd,
+        )
+        if result.returncode == 0 and result.stdout.strip().isdigit():
+            return int(result.stdout.strip())
+    except Exception:
+        pass
+    return 0
+
+
+def _stash_local_changes(cwd: str) -> bool:
+    """Stash tracked + untracked local edits. Returns True if a stash was created."""
+    status = _git_status_porcelain(cwd)
+    if not status:
+        return False
+
+    console.print("[yellow]Local changes detected (would block a normal pull):[/yellow]")
+    for line in status.splitlines()[:20]:
+        console.print(f"  [dim]{line}[/dim]")
+    if status.count("\n") >= 20:
+        console.print("  [dim]…[/dim]")
+
+    msg = "kazma-update-auto"
+    console.print(
+        "[cyan]Stashing local changes so update can run without merge conflicts…[/cyan]"
+    )
+    # Include untracked so new local files don't block either
+    result = _run_cmd(
+        ["git", "stash", "push", "-u", "-m", msg],
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        console.print(
+            f"[red]Could not stash local changes:[/red]\n"
+            f"{(result.stderr or result.stdout or '').strip()}"
+        )
+        console.print(
+            "Fix manually:\n"
+            "  [cyan]git stash push -u -m 'my-local'[/cyan]\n"
+            "  [cyan]git pull origin main[/cyan]\n"
+            "  [cyan]git stash pop[/cyan]"
+        )
+        return False
+
+    # Confirm stash was created (stash push is no-op if nothing to stash)
+    if "No local changes to save" in (result.stdout or ""):
+        return False
+    console.print("[green]Stashed local changes.[/green]")
+    return True
+
+
+def _restore_stash(cwd: str) -> None:
+    """Pop the latest stash; keep it if conflicts so nothing is lost."""
+    console.print("[cyan]Restoring your local changes (git stash pop)…[/cyan]")
+    result = _run_cmd(["git", "stash", "pop"], cwd=cwd)
+    out = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+    if result.returncode == 0:
+        console.print("[green]Local changes restored on top of the update.[/green]")
+        if out:
+            console.print(f"[dim]{out[:500]}[/dim]")
+        return
+
+    # Conflicts or other failure — stash entry remains if pop failed mid-way
+    console.print(
+        "[yellow]Could not auto-apply all local changes (likely a conflict).[/yellow]\n"
+        "Your edits are still safe in the git stash.\n"
+        "  List:   [cyan]git stash list[/cyan]\n"
+        "  Apply:  [cyan]git stash pop[/cyan]\n"
+        "  Drop:   [cyan]git stash drop[/cyan]  (only after you copied what you need)\n"
+        f"[dim]{out[:600]}[/dim]"
+    )
+
+
+def do_git_update() -> bool:
+    """Update kazma from git: stash → sync to origin/main → restore → reinstall.
+
+    Designed so operators never hit interactive merge/edit-file prompts:
+
+    1. Stash local dirty files (e.g. ``kazma.yaml`` runtime tweaks)
+    2. ``git fetch`` + fast-forward (or hard reset if no unique local commits)
+    3. ``git stash pop`` to put local config back
+    4. Best-effort package reinstall (uv/pip)
     """
     git_root = _find_git_root()
     if git_root is None:
@@ -292,46 +808,79 @@ def do_git_update() -> bool:
         return False
 
     cwd = str(git_root)
+    stashed = False
 
-    # git pull
-    console.print("[cyan]Running git pull origin main...[/cyan]")
     try:
-        result = _run_cmd(["git", "pull", "origin", "main"], cwd=cwd)
-        if result.returncode != 0:
-            console.print(f"[red]git pull failed:[/red]\n{result.stderr.strip()}")
+        # ── 1. Stash local edits so pull never aborts ─────────────
+        if _git_status_porcelain(cwd):
+            stashed = _stash_local_changes(cwd)
+            # If still dirty after failed stash, abort
+            if _git_status_porcelain(cwd) and not stashed:
+                console.print("[red]Working tree still dirty — cannot update safely.[/red]")
+                return False
+
+        # ── 2. Fetch + land on origin/main (no merge commits) ─────
+        console.print("[cyan]Fetching origin…[/cyan]")
+        fetch = _run_cmd(["git", "fetch", "origin"], cwd=cwd)
+        if fetch.returncode != 0:
+            console.print(
+                f"[red]git fetch failed:[/red]\n{(fetch.stderr or fetch.stdout or '').strip()}"
+            )
+            if stashed:
+                _restore_stash(cwd)
             return False
-    except subprocess.TimeoutExpired:
-        console.print("[red]git pull timed out.[/red]")
-        return False
+
+        ahead = _commits_ahead_of_origin(cwd)
+        if ahead > 0:
+            console.print(
+                f"[yellow]You have {ahead} local commit(s) not on origin/main.[/yellow]\n"
+                "Trying rebase onto origin/main (no merge commit)…"
+            )
+            result = _run_cmd(
+                ["git", "pull", "--rebase", "origin", "main"],
+                cwd=cwd,
+            )
+            if result.returncode != 0:
+                console.print(
+                    f"[red]git pull --rebase failed:[/red]\n"
+                    f"{(result.stderr or result.stdout or '').strip()}\n"
+                    "Resolve manually, then re-run [cyan]kazma update[/cyan]."
+                )
+                if stashed:
+                    _restore_stash(cwd)
+                return False
+            console.print("[green]Rebased onto origin/main.[/green]")
+        else:
+            # Clean tracking branch: hard reset is the no-merge path
+            console.print("[cyan]Updating to origin/main (fast-forward / reset)…[/cyan]")
+            result = _run_cmd(["git", "reset", "--hard", "origin/main"], cwd=cwd)
+            if result.returncode != 0:
+                console.print(
+                    f"[red]git reset --hard origin/main failed:[/red]\n"
+                    f"{(result.stderr or result.stdout or '').strip()}"
+                )
+                if stashed:
+                    _restore_stash(cwd)
+                return False
+            console.print("[green]Now at origin/main.[/green]")
+
+        # ── 3. Restore local config edits ─────────────────────────
+        if stashed:
+            _restore_stash(cwd)
+
     except FileNotFoundError:
         console.print("[red]git not found. Is Git installed and on PATH?[/red]")
         return False
+    except subprocess.TimeoutExpired:
+        console.print("[red]git update timed out.[/red]")
+        return False
     except Exception as exc:
-        console.print(f"[red]git pull error:[/red] {exc}")
+        console.print(f"[red]git update error:[/red] {exc}")
         return False
 
-    # pip install -e .
-    console.print("[cyan]Reinstalling package in editable mode (pip install -e .)...[/cyan]")
-    try:
-        result = _run_cmd(
-            [sys.executable, "-m", "pip", "install", "-e", "."],
-            cwd=cwd,
-            timeout=_INSTALL_TIMEOUT,
-        )
-        if result.returncode == 0:
-            console.print("[green]Reinstall completed.[/green]")
-            return True
-        console.print(f"[red]pip install -e . failed:[/red]\n{result.stderr.strip()}")
-        return False
-    except subprocess.TimeoutExpired:
-        console.print("[red]Reinstall timed out.[/red]")
-        return False
-    except PermissionError:
-        console.print("[red]Permission denied during reinstall.[/red]")
-        return False
-    except Exception as exc:
-        console.print(f"[red]Reinstall error:[/red] {exc}")
-        return False
+    # Always reinstall via a *new* Python process so we run the update.py
+    # that was just pulled — not the pre-pull function still in memory.
+    return _reinstall_via_subprocess(cwd)
 
 
 # ---------------------------------------------------------------------------
@@ -345,10 +894,22 @@ def print_help() -> None:
     console.print("Usage: kazma update [options]")
     console.print()
     console.print("Options:")
-    console.print("  --check, -c    Only check for updates, don't install (dry run)")
-    console.print("  --force, -f    Force update even if already latest")
-    console.print("  --yes, -y      Skip confirmation prompt")
-    console.print("  --help, -h     Show this help message")
+    console.print("  --check, -c       Only check for updates, don't install (dry run)")
+    console.print("  --force, -f       Force git sync even if already latest")
+    console.print("  --reinstall, -r   Only reinstall packages/extras (no git pull)")
+    console.print("  --yes, -y         Skip confirmation prompt")
+    console.print("  --help, -h        Show this help message")
+    console.print()
+    console.print("Notes:")
+    console.print("  Optional extras (rag/tui/…) are preserved across updates.")
+    console.print("  If VectorMemory packages were wiped, run:")
+    console.print('    [cyan]kazma update --reinstall -y[/cyan]')
+    console.print('    or  [cyan]uv pip install -e ".[rag]"[/cyan]')
+    console.print()
+    console.print("Git installs (monorepo):")
+    console.print("  • Local edits (e.g. kazma.yaml) are [bold]auto-stashed[/bold], then restored")
+    console.print("  • Uses reset/ff to origin/main — [bold]no merge commit prompts[/bold]")
+    console.print("  • Reinstall prefers [cyan]uv[/cyan] when pip is missing")
 
 
 def _confirm(prompt: str) -> bool:
@@ -391,13 +952,20 @@ def _print_version_table(
 def _run_pip_check_and_update(
     current_version: str, check_only: bool, force: bool, skip_confirm: bool
 ) -> None:
-    """Check PyPI for updates and optionally upgrade via pip."""
+    """Check PyPI/GitHub for updates and optionally upgrade via pip."""
+    # If a monorepo is present, prefer git update even when pip-installed
+    if _find_git_root() is not None:
+        console.print("[dim]Local git repo detected — using git update path.[/dim]")
+        _run_git_check_and_update(current_version, check_only, force, skip_confirm)
+        return
+
     latest = get_latest_pypi_version()
 
     if latest is None:
         console.print()
-        console.print("[red]Could not fetch version info from PyPI.[/red]")
-        console.print("Check your network connection and try again.")
+        console.print("[red]Could not fetch version info from PyPI or GitHub.[/red]")
+        console.print("If you cloned the repo, run from the monorepo: [cyan]git pull[/cyan]")
+        console.print("Or check network / GitHub releases: https://github.com/Mubder/kazma")
         sys.exit(1)
 
     console.print(f"  Latest:       [cyan]v{latest}[/cyan] (PyPI)")
@@ -454,6 +1022,8 @@ def _run_git_check_and_update(
     )
 
     update_available = commits_behind > 0
+    git_root = _find_git_root()
+    cwd = str(git_root) if git_root else str(Path.cwd())
 
     if update_available:
         console.print()
@@ -473,6 +1043,22 @@ def _run_git_check_and_update(
     else:
         console.print()
         console.print("[green]Already up to date.[/green]")
+        # Repair wiped extras even when git is current (post bare-uv-sync damage)
+        if needs_extras_repair(cwd):
+            console.print()
+            console.print(
+                "[yellow]Optional packages missing "
+                "(e.g. chromadb / sentence-transformers for VectorMemory).[/yellow]\n"
+                "Reinstalling preserved extras now…"
+            )
+            if _reinstall_via_subprocess(cwd):
+                console.print("[green]Package repair finished.[/green]")
+            else:
+                console.print(
+                    "[red]Repair incomplete.[/red] Try:\n"
+                    '  [cyan]uv pip install -e ".[rag]"[/cyan]'
+                )
+                sys.exit(1)
         return
 
     if check_only:
@@ -511,6 +1097,7 @@ def run(args: list[str]) -> None:
     check_only = "--check" in flags or "-c" in flags
     force = "--force" in flags or "-f" in flags
     skip_confirm = "--yes" in flags or "-y" in flags
+    reinstall_only = "--reinstall" in flags or "-r" in flags
 
     install_type = detect_install_type()
     current_version = get_current_version()
@@ -519,6 +1106,36 @@ def run(args: list[str]) -> None:
     console.print("[bold]Kazma Update[/bold]")
     console.print(f"  Install type: [cyan]{install_type}[/cyan]")
     console.print(f"  Current:      [cyan]v{current_version}[/cyan]")
+
+    # Package-only path (no git) — recover from bare uv sync / missing rag
+    if reinstall_only:
+        git_root = _find_git_root()
+        cwd = str(git_root) if git_root else str(Path.cwd())
+        extras = detect_active_extras(cwd)
+        # Always ensure rag when memory data exists or nothing detected but
+        # user asked for reinstall after a wipe — default to rag for recovery.
+        if not extras and _vector_memory_data_present(cwd):
+            extras = ["rag"]
+        if not extras:
+            extras = ["rag"]  # safe recovery default for memory installs
+            console.print(
+                "[dim]No extras recorded — defaulting to [rag] for memory restore.[/dim]"
+            )
+        persist_extras(extras)
+        console.print(f"[cyan]Reinstall extras:[/cyan] {', '.join(extras)}")
+        if not skip_confirm and not _confirm(
+            f"Reinstall packages for extras [{', '.join(extras)}]? [y/N] "
+        ):
+            console.print("Cancelled.")
+            return
+        # In-process is fine: no git pull happened, module matches disk
+        ok = _reinstall_local(cwd)
+        if ok:
+            console.print("[green]Reinstall complete.[/green]")
+        else:
+            console.print("[red]Reinstall failed.[/red]")
+            sys.exit(1)
+        return
 
     if install_type == "git":
         _run_git_check_and_update(current_version, check_only, force, skip_confirm)

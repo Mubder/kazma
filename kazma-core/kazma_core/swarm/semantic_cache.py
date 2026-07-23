@@ -15,6 +15,8 @@ from kazma_core.swarm.memory.vector import get_encoder
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
+__all__ = ["SemanticCache"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/semantic_cache.db"
@@ -196,5 +198,54 @@ class SemanticCache:
                 )
                 conn.commit()
                 logger.debug("[SemanticCache] Successfully cached response")
+                self._evict_if_needed(conn)
             except Exception as exc:
                 logger.warning("[SemanticCache] Failed to write cache entry: %s", exc)
+
+    def _evict_if_needed(self, conn: sqlite3.Connection) -> None:
+        """TTL + max-row eviction (audit M18).
+
+        Env:
+          KAZMA_SEMANTIC_CACHE_TTL_SECONDS (default 86400 = 1 day; 0 = no TTL)
+          KAZMA_SEMANTIC_CACHE_MAX_ROWS (default 10000)
+        """
+        try:
+            max_rows = int(os.environ.get("KAZMA_SEMANTIC_CACHE_MAX_ROWS") or "10000")
+        except ValueError:
+            max_rows = 10000
+        try:
+            ttl = int(os.environ.get("KAZMA_SEMANTIC_CACHE_TTL_SECONDS") or "86400")
+        except ValueError:
+            ttl = 86400
+
+        if ttl > 0:
+            try:
+                conn.execute(
+                    "DELETE FROM semantic_cache WHERE created_at < datetime('now', ?)",
+                    (f"-{ttl} seconds",),
+                )
+            except Exception as exc:
+                logger.debug("[SemanticCache] TTL eviction failed: %s", exc)
+
+        if max_rows > 0:
+            try:
+                row = conn.execute("SELECT COUNT(*) AS c FROM semantic_cache").fetchone()
+                count = int(row[0] if row else 0)
+                if count > max_rows:
+                    excess = count - max_rows
+                    conn.execute(
+                        """
+                        DELETE FROM semantic_cache WHERE id IN (
+                            SELECT id FROM semantic_cache
+                            ORDER BY created_at ASC
+                            LIMIT ?
+                        )
+                        """,
+                        (excess,),
+                    )
+            except Exception as exc:
+                logger.debug("[SemanticCache] max-row eviction failed: %s", exc)
+        try:
+            conn.commit()
+        except Exception:
+            pass

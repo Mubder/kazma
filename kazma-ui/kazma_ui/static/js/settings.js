@@ -1,6 +1,9 @@
 /**
- * Settings.js — Alpine.js state management for the 12-tab Kazma Settings panel.
+ * Settings.js — Alpine.js state management for the Kazma Settings panel.
+ * Tabs: providers_connectors, agent, connectors, mcp, skills, appearance,
+ * shortcuts, account, tools, system, packages, import.
  * Each tab section is a separate method/object for clean separation.
+ * Deep-link: /settings?tab=packages
  */
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -75,6 +78,8 @@ function settingsApp() {
         hubTestingProvider: null,
         hubTestingConnector: null,
         hubDiscoveringProvider: null,
+        /** Per-provider filter text for the discovered-models panel */
+        modelSearch: {},
         hubTestResult: null,
 
         // ── MCP Tab ──
@@ -101,6 +106,13 @@ function settingsApp() {
         sessions: [],
         passwordForm: { old_password: '', new_password: '', confirm_password: '' },
         tokenName: '',
+        lastCreatedToken: '',
+        // SaaS multi-user
+        saasStatus: null,
+        platformUsers: [],
+        tenants: [],
+        newUser: { username: '', password: '', role: 'operator' },
+        newTenant: { id: '', name: '' },
 
         // ── Tools Tab ──
         tools: [],
@@ -116,6 +128,19 @@ function settingsApp() {
         updateInfo: null,
         vaultStatus: { enabled: false, secret_count: 0 },
 
+        // ── Packages Tab ──
+        pkgCore: [],
+        pkgExtras: [],
+        pkgTotal: 0,
+        pkgPythonVer: '',
+        pkgDbBackend: 'sqlite',
+        pkgDbUrlSet: false,
+        pkgSearch: '',
+        pkgLoading: false,
+        pkgInstalling: '',
+        pkgInstallMsg: '',
+        pkgInstallOk: false,
+
         // ── Import/Export Tab ──
         exportFormat: 'yaml',
         importData: '',
@@ -123,6 +148,55 @@ function settingsApp() {
         importSelective: false,
         importSections: [],
         availableSections: ['model', 'agent', 'connectors', 'mcp', 'skills', 'appearance', 'shortcuts', 'tools', 'safety'],
+
+        // ── Voice Tab ──
+        voiceForm: {
+            enabled: false,
+            stt_provider: 'openai',
+            stt_model: 'default',
+            stt_base_url: '',
+            tts_provider: 'edgetts',
+            tts_voice: 'default',
+            stt_language: 'auto',
+            tts_output_format: 'mp3',
+        },
+        voiceProviders: { stt: ['openai', 'groq', 'cohere', 'nvidia', 'faster-whisper'], tts: ['edgetts', 'openai', 'nvidia', 'kokoro', 'coqui'] },
+        voiceModels: [],
+        /** Normalized STT options: always [{id, label}] for Alpine x-for */
+        sttModelOptions: [],
+        sttModelsLoading: false,
+        sttModelType: 'default',
+        ttsVoiceType: 'default',
+
+        // ── Email tab (Connect Gmail / Microsoft — OAuth | IMAP | POP) ──
+        emailStatus: {
+            active_provider: 'sandbox',
+            gmail_configured: false,
+            gmail_address: '',
+            gmail_auth_mode: 'none',
+            gmail_oauth_client_set: false,
+            microsoft_configured: false,
+            microsoft_address: '',
+            microsoft_auth_mode: 'none',
+            ms_client_id_set: false,
+            ms_tenant_id: 'common',
+            imap_configured: false,
+            pop_configured: false,
+            sandbox_always: true,
+            accounts: [],
+        },
+        emailAccounts: [],
+        emailGmailMode: 'oauth',
+        emailMsMode: 'oauth',
+        emailGmail: { address: '', app_password: '' },
+        emailGmailOAuth: { client_id: '', client_secret: '' },
+        emailMs: { client_id: '', client_secret: '', tenant_id: 'common' },
+        emailMsProtocol: { address: '', password: '' },
+        emailMsDevice: { user_code: '', verification_uri: '', device_code: '', message: '' },
+        emailMsConnecting: false,
+        emailMsPollTimer: null,
+        emailLoading: false,
+        emailSaving: false,
 
         /* ══════════════════════════════════════════════════════════════════
            INITIALIZATION
@@ -146,8 +220,13 @@ function settingsApp() {
                     if (settings.appearance) {
                         Object.assign(this.appearance, settings.appearance);
                         if (settings.appearance.font_size) {
-                            const root = Alpine.$data(document.querySelector('[x-data]'));
-                            if (root) root.fontSize = settings.appearance.font_size;
+                            try {
+                                const rootEl = document.documentElement;
+                                if (rootEl && rootEl._x_dataStack) {
+                                    const root = Alpine.$data(rootEl);
+                                    if (root) root.fontSize = settings.appearance.font_size;
+                                }
+                            } catch (e) { /* ignore font sync */ }
                         }
                     }
                     if (settings.safety) Object.assign(this.safety, settings.safety);
@@ -165,8 +244,12 @@ function settingsApp() {
                 const saved = await this._fetch('/api/models/saved');
                 if (Array.isArray(saved)) this.savedModels = saved;
 
-                // Load provider presets
-                this.providerPresets = ProvidersManager.getPresetKeys();
+                // Load provider presets (guard: soft-nav may load settings.js before providers.js)
+                if (window.ProvidersManager && typeof ProvidersManager.getPresetKeys === 'function') {
+                    this.providerPresets = ProvidersManager.getPresetKeys();
+                } else {
+                    this.providerPresets = [];
+                }
 
                 // Load unified hub data
                 await Promise.all([
@@ -174,10 +257,42 @@ function settingsApp() {
                     this.loadHubConnectors(),
                     this.loadHubProfiles(),
                 ]);
+
+                // Load Voice Subsystem Settings
+                try {
+                    const voiceSettings = await this._fetch('/api/settings/voice');
+                    if (voiceSettings) {
+                        Object.assign(this.voiceForm, voiceSettings);
+                    }
+                    const voiceProvs = await this._fetch('/api/voice/providers');
+                    if (voiceProvs) {
+                        if (Array.isArray(voiceProvs.stt)) this.voiceProviders.stt = voiceProvs.stt;
+                        if (Array.isArray(voiceProvs.tts)) this.voiceProviders.tts = voiceProvs.tts;
+                    }
+                    await Promise.all([
+                        this.loadVoiceModels(),
+                        this.loadSttModels()
+                    ]);
+                } catch (e) {
+                    console.error('[Settings] Failed to load voice config:', e);
+                }
             } catch (e) {
                 console.error('[Settings] Init failed:', e);
+            } finally {
+                // Always clear loading — never leave the Settings shell stuck
+                this.loading = false;
             }
-            this.loading = false;
+
+            // Deep-link: /settings?tab=packages (or any valid tab id)
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const requested = params.get('tab');
+                if (requested && requested !== this.tab) {
+                    await this.onTabChange(requested);
+                }
+            } catch (e) {
+                /* ignore bad query strings */
+            }
         },
 
         /* ══════════════════════════════════════════════════════════════════
@@ -287,7 +402,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(updates),
                 });
                 // Reconfigure the live LLM provider so subsequent chat
@@ -295,7 +410,7 @@ function settingsApp() {
                 try {
                     await fetch('/api/provider/switch', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                         body: JSON.stringify({
                             provider: this.modelProvider || 'custom',
                             base_url: this.currentModel.base_url,
@@ -330,7 +445,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/settings/test-model', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.currentModel),
                 });
                 this.testResult = await resp.json();
@@ -355,7 +470,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/models/saved', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({
                         name: name,
                         base_url: this.currentModel.base_url || '',
@@ -437,7 +552,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/agent', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.agent),
                 });
                 showToast('Agent settings saved', 'success');
@@ -458,7 +573,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/agent/safety', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.safety),
                 });
                 showToast('Safety settings saved', 'success');
@@ -473,7 +588,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/agent/context', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.context),
                 });
                 showToast('Context settings saved', 'success');
@@ -492,7 +607,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/connectors', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ platform, settings: this.connectors[platform] || {} }),
                 });
                 // Auto-refresh gateway adapters so the new connector config
@@ -539,7 +654,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/settings/connectors/test', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ platform }),
                 });
                 const result = await resp.json();
@@ -558,7 +673,19 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/providers');
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                this.hubProviders = await resp.json();
+                const raw = await resp.json();
+                // Normalize so Alpine x-for always gets string arrays
+                this.hubProviders = (Array.isArray(raw) ? raw : []).map(function (p) {
+                    var disc = p.discovered_models;
+                    if (!Array.isArray(disc)) disc = [];
+                    p.discovered_models = disc.map(function (m) {
+                        if (m && typeof m === 'object') return String(m.id || m.name || m);
+                        return String(m);
+                    }).filter(Boolean);
+                    if (!Array.isArray(p.selected_models)) p.selected_models = [];
+                    if (p._modelQuery === undefined) p._modelQuery = '';
+                    return p;
+                });
             } catch (e) {
                 console.error('[Hub] Failed to load providers:', e);
                 this.hubProviders = [];
@@ -652,7 +779,7 @@ function settingsApp() {
                 delete data._existing;
                 const resp = await fetch('/api/providers', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(data),
                 });
                 const result = await resp.json();
@@ -689,7 +816,7 @@ function settingsApp() {
             try {
                 await fetch(`/api/providers/${encodeURIComponent(name)}/toggle`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ enabled }),
                 });
                 await this.loadHubProviders();
@@ -733,7 +860,7 @@ function settingsApp() {
                 delete temp._existing;
                 const upsertResp = await fetch('/api/providers', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(temp),
                 });
                 if (!upsertResp.ok) {
@@ -778,6 +905,22 @@ function settingsApp() {
             this.hubDiscoveringProvider = null;
         },
 
+        filteredDiscoveredModels(provider) {
+            if (!provider) return [];
+            var list = provider.discovered_models;
+            if (!Array.isArray(list)) return [];
+            // Coerce entries to strings (API should return strings)
+            var models = list.map(function (m) {
+                if (m && typeof m === 'object') return String(m.id || m.name || m);
+                return String(m);
+            }).filter(Boolean);
+            var q = String(provider._modelQuery || '').trim().toLowerCase();
+            if (!q) return models;
+            return models.filter(function (m) {
+                return m.toLowerCase().indexOf(q) !== -1;
+            });
+        },
+
         async toggleModelSelection(providerName, model, checked) {
             const p = this.hubProviders.find(x => x.name === providerName);
             if (!p) return;
@@ -790,7 +933,7 @@ function settingsApp() {
             try {
                 await fetch(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ models: p.selected_models }),
                 });
             } catch (e) {
@@ -801,12 +944,22 @@ function settingsApp() {
         async toggleAllModels(providerName) {
             const p = this.hubProviders.find(x => x.name === providerName);
             if (!p || !p.discovered_models) return;
-            const allSelected = (p.selected_models || []).length === p.discovered_models.length;
-            p.selected_models = allSelected ? [] : [...p.discovered_models];
+            // Toggle only the currently filtered set when searching
+            const visible = this.filteredDiscoveredModels(p);
+            const allVisibleSelected = visible.length > 0 && visible.every(
+                m => (p.selected_models || []).includes(m)
+            );
+            if (allVisibleSelected) {
+                p.selected_models = (p.selected_models || []).filter(m => !visible.includes(m));
+            } else {
+                const set = new Set(p.selected_models || []);
+                visible.forEach(m => set.add(m));
+                p.selected_models = Array.from(set);
+            }
             try {
                 await fetch(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ models: p.selected_models }),
                 });
             } catch (e) {
@@ -860,7 +1013,7 @@ function settingsApp() {
                 delete data._existing;
                 const resp = await fetch('/api/connectors', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(data),
                 });
                 const result = await resp.json();
@@ -902,7 +1055,7 @@ function settingsApp() {
             try {
                 await fetch(`/api/connectors/${encodeURIComponent(name)}/toggle`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ enabled }),
                 });
                 await this.loadHubConnectors();
@@ -940,7 +1093,7 @@ function settingsApp() {
                 delete data._existing;
                 await fetch('/api/connectors', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(data),
                 });
                 const resp = await fetch(`/api/connectors/${encodeURIComponent(name)}/test`, { method: 'POST' });
@@ -998,7 +1151,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/models/profiles', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.hubEditingProfile),
                 });
                 const result = await resp.json();
@@ -1059,7 +1212,7 @@ function settingsApp() {
                 }
                 await fetch('/api/settings/mcp', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(data),
                 });
                 this.showMcpModal = false;
@@ -1156,7 +1309,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/appearance', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.appearance),
                 });
                 // Apply theme immediately
@@ -1291,11 +1444,120 @@ function settingsApp() {
 
         async loadAccount() {
             const [tokens, sessions] = await Promise.all([
-                this._fetch('/api/settings/account/tokens'),
-                this._fetch('/api/settings/account/sessions'),
+                this._fetch('/api/settings/account/tokens?_=' + Date.now()),
+                this._fetch('/api/settings/account/sessions?_=' + Date.now()),
             ]);
-            if (Array.isArray(tokens)) this.apiTokens = tokens;
-            if (Array.isArray(sessions)) this.sessions = sessions;
+            // Always replace arrays so Alpine x-for sees a new reference.
+            this.apiTokens = Array.isArray(tokens) ? tokens.slice() : [];
+            this.sessions = Array.isArray(sessions) ? sessions.slice() : [];
+            await this.loadSaasAdmin();
+        },
+
+        async loadSaasAdmin() {
+            try {
+                const st = await this._fetch('/api/saas/status');
+                this.saasStatus = st || null;
+                if (!st) return;
+                const isAdmin = st.principal && (st.principal.role === 'admin' || st.principal.source === 'secret');
+                if (!isAdmin) return;
+                const [usersResp, tenantsResp] = await Promise.all([
+                    this._fetch('/api/saas/users'),
+                    this._fetch('/api/saas/tenants'),
+                ]);
+                this.platformUsers = (usersResp && usersResp.users) ? usersResp.users.slice() : [];
+                this.tenants = (tenantsResp && tenantsResp.tenants) ? tenantsResp.tenants.slice() : [];
+            } catch (e) {
+                console.debug('[settings] saas admin load skipped', e);
+            }
+        },
+
+        async createPlatformUser() {
+            if (!this.newUser.username || !this.newUser.password) {
+                showToast('Username and password required', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/saas/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(this.newUser),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showToast(data.error || 'Failed to create user', 'error');
+                    return;
+                }
+                showToast('User created', 'success');
+                this.newUser = { username: '', password: '', role: 'operator' };
+                await this.loadSaasAdmin();
+            } catch (e) {
+                showToast('Failed: ' + e.message, 'error');
+            }
+        },
+
+        async patchPlatformUser(username, patch) {
+            try {
+                const resp = await fetch('/api/saas/users/' + encodeURIComponent(username), {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(patch),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showToast(data.error || 'Update failed', 'error');
+                    return;
+                }
+                showToast('User updated', 'success');
+                await this.loadSaasAdmin();
+            } catch (e) {
+                showToast('Failed: ' + e.message, 'error');
+            }
+        },
+
+        async deletePlatformUser(username) {
+            if (!confirm('Delete user ' + username + '?')) return;
+            try {
+                const resp = await fetch('/api/saas/users/' + encodeURIComponent(username), {
+                    method: 'DELETE',
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showToast(data.error || 'Delete failed', 'error');
+                    return;
+                }
+                showToast('User deleted', 'success');
+                await this.loadSaasAdmin();
+            } catch (e) {
+                showToast('Failed: ' + e.message, 'error');
+            }
+        },
+
+        async createTenant() {
+            if (!this.newTenant.id) {
+                showToast('Tenant id required', 'error');
+                return;
+            }
+            try {
+                const resp = await fetch('/api/saas/tenants', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(this.newTenant),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showToast(data.error || 'Failed', 'error');
+                    return;
+                }
+                showToast('Tenant added', 'success');
+                this.newTenant = { id: '', name: '' };
+                await this.loadSaasAdmin();
+            } catch (e) {
+                showToast('Failed: ' + e.message, 'error');
+            }
         },
 
         async changePassword() {
@@ -1310,7 +1572,7 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/settings/account/password', {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ old_password: this.passwordForm.old_password, new_password: this.passwordForm.new_password }),
                 });
                 const data = await resp.json();
@@ -1330,28 +1592,88 @@ function settingsApp() {
             try {
                 const resp = await fetch('/api/settings/account/tokens', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ name: this.tokenName }),
                 });
                 const data = await resp.json();
-                showToast('Token created: ' + (data.token || '').substring(0, 12) + '...', 'success');
+                const tok = data.token || '';
                 this.tokenName = '';
+                this.lastCreatedToken = tok;
                 await this.loadAccount();
+                showToast(tok ? 'Token created — copy it below (shown once)' : 'Token created', tok ? 'success' : 'error');
             } catch (e) {
                 showToast('Failed: ' + e.message, 'error');
             }
         },
 
+        async copyLastToken() {
+            if (!this.lastCreatedToken) return;
+            try {
+                await navigator.clipboard.writeText(this.lastCreatedToken);
+                showToast('Token copied to clipboard', 'success');
+            } catch (e) {
+                showToast('Copy failed — select the token and copy manually', 'error');
+            }
+        },
+
+        async copyTokenCurl() {
+            if (!this.lastCreatedToken) return;
+            const origin = window.location.origin || 'http://127.0.0.1:9090';
+            const cmd =
+                'curl -s -H "Authorization: Bearer ' + this.lastCreatedToken + '" \\\n  ' +
+                origin + '/api/memory/graph/stats';
+            try {
+                await navigator.clipboard.writeText(cmd);
+                showToast('curl example copied', 'success');
+            } catch (e) {
+                showToast('Copy failed', 'error');
+            }
+        },
+
         async revokeToken(tokenId) {
+            if (!tokenId) {
+                showToast('Missing token id', 'error');
+                return;
+            }
             if (!(await window.kazmaConfirm({
                 title: 'Revoke token',
-                message: 'Revoke this token? This cannot be undone.',
+                message: 'Revoke this token? This cannot be undone. Scripts using it will get 401.',
                 confirmText: 'Revoke',
                 danger: true,
             }))) return;
-            await fetch(`/api/settings/account/tokens/${tokenId}`, { method: 'DELETE' });
-            await this.loadAccount();
-            showToast('Token revoked', 'success');
+            try {
+                const id = String(tokenId);
+                // Clear the one-time green “copy me” panel if it was this token.
+                const doomed = (this.apiTokens || []).find(function(x) {
+                    return String(x.id) === id;
+                });
+                if (doomed && this.lastCreatedToken && doomed.token_prefix
+                    && this.lastCreatedToken.indexOf(doomed.token_prefix) === 0) {
+                    this.lastCreatedToken = '';
+                }
+
+                const resp = await fetch(
+                    `/api/settings/account/tokens/${encodeURIComponent(id)}?_=${Date.now()}`,
+                    { method: 'DELETE', credentials: 'same-origin', cache: 'no-store' }
+                );
+                if (!resp.ok) {
+                    const err = await resp.json().catch(function() { return {}; });
+                    const detail = err.detail || err.error || ('HTTP ' + resp.status);
+                    showToast('Revoke failed: ' + detail, 'error');
+                    await this.loadAccount();
+                    return;
+                }
+                // Force Alpine to drop the row immediately (new array ref).
+                this.apiTokens = (this.apiTokens || []).filter(function(x) {
+                    return String(x.id) !== id;
+                });
+                // Re-fetch with cache bust so a stale GET cannot resurrect the row.
+                const tokens = await this._fetch('/api/settings/account/tokens?_=' + Date.now());
+                this.apiTokens = Array.isArray(tokens) ? tokens.slice() : [];
+                showToast('Token revoked', 'success');
+            } catch (e) {
+                showToast('Revoke failed: ' + e.message, 'error');
+            }
         },
 
         /* ══════════════════════════════════════════════════════════════════
@@ -1382,7 +1704,7 @@ function settingsApp() {
             try {
                 const resp = await fetch(`/api/settings/tools/${encodeURIComponent(toolName)}/test`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ arguments: args }),
                 });
                 this.toolTestResult = await resp.json();
@@ -1430,6 +1752,101 @@ function settingsApp() {
             }
         },
 
+        async loadPackages() {
+            this.pkgLoading = true;
+            try {
+                const data = await this._fetch('/api/system/packages');
+                if (data) {
+                    this.pkgCore = data.core || [];
+                    this.pkgExtras = data.extras || [];
+                    this.pkgTotal = data.total_installed || 0;
+                    this.pkgPythonVer = data.python_version || '';
+                    this.pkgDbBackend = data.db_backend || 'sqlite';
+                    this.pkgDbUrlSet = !!data.db_url_set;
+                }
+            } catch (e) { /* silent */ }
+            this.pkgLoading = false;
+        },
+
+        get filteredPkgCore() {
+            if (!this.pkgSearch) return this.pkgCore;
+            var q = this.pkgSearch.toLowerCase();
+            return this.pkgCore.filter(function(p) {
+                return (p.name || '').toLowerCase().includes(q) ||
+                       (p.description || '').toLowerCase().includes(q);
+            });
+        },
+
+        copyPkgCmd(cmd) {
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(cmd);
+                if (window.KazmaStream && window.KazmaStream.toast) {
+                    window.KazmaStream.toast('Copied to clipboard', 'success', 2000);
+                }
+            }
+        },
+
+        async installExtra(extraName) {
+            if (!extraName || this.pkgInstalling) return;
+            const ok = window.kazmaConfirm
+                ? await window.kazmaConfirm({
+                    title: 'Install optional dependency',
+                    message: `Install the "${extraName}" extra into this Python environment? This runs uv/pip in the background.`,
+                    confirmText: 'Install',
+                })
+                : confirm(`Install optional extra "${extraName}"?`);
+            if (!ok) return;
+
+            this.pkgInstalling = extraName;
+            this.pkgInstallMsg = '';
+            this.pkgInstallOk = false;
+            try {
+                const res = await fetch('/api/system/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({ extra: extraName }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok || data.status === 'error' || data.status === 'unavailable') {
+                    this.pkgInstallOk = false;
+                    this.pkgInstallMsg = data.message || data.detail || 'Install failed to start';
+                    if (window.showToast) window.showToast(this.pkgInstallMsg, 'error', 4000);
+                } else {
+                    this.pkgInstallOk = true;
+                    this.pkgInstallMsg = `Installing "${extraName}" in the background… Refresh this tab in a minute.`;
+                    if (window.showToast) window.showToast(this.pkgInstallMsg, 'success', 4000);
+                    // Poll status a few times then reload package list
+                    this._pollInstallStatus(extraName);
+                }
+            } catch (e) {
+                this.pkgInstallOk = false;
+                this.pkgInstallMsg = e.message || 'Network error';
+            }
+            this.pkgInstalling = '';
+        },
+
+        async _pollInstallStatus(extraName) {
+            const self = this;
+            let tries = 0;
+            const tick = async () => {
+                tries += 1;
+                try {
+                    const st = await self._fetch('/api/system/install/status');
+                    if (st && (st.status === 'OK' || st.status === 'FAILED')) {
+                        self.pkgInstallOk = st.status === 'OK';
+                        self.pkgInstallMsg = st.status === 'OK'
+                            ? `Installed "${extraName}". Reloading package list…`
+                            : (`Install failed: ${st.error || 'see server logs'}`);
+                        await self.loadPackages();
+                        return;
+                    }
+                } catch (e) { /* ignore */ }
+                if (tries < 20) setTimeout(tick, 3000);
+            };
+            setTimeout(tick, 2500);
+        },
+
         async checkUpdates() {
             try {
                 this.updateInfo = await this._fetch('/api/settings/system/updates');
@@ -1457,7 +1874,7 @@ function settingsApp() {
         async systemReset() {
             if (!(await window.kazmaConfirm({
                 title: 'Reset all settings',
-                message: '⚠️ This will reset ALL settings to defaults. Are you sure?',
+                message: '[!]  This will reset ALL settings to defaults. Are you sure?',
                 confirmText: 'Reset',
                 danger: true,
             }))) return;
@@ -1501,7 +1918,7 @@ function settingsApp() {
             try {
                 await fetch('/api/settings/import', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({
                         data: this.importData,
                         format: this.importFormat,
@@ -1550,7 +1967,15 @@ function settingsApp() {
 
         async _fetch(url) {
             try {
-                const resp = await fetch(url);
+                const resp = await fetch(url, { credentials: 'same-origin' });
+                if (resp.status === 401 || resp.status === 403) {
+                    if (!window.__kazmaAuthRedirecting) {
+                        window.__kazmaAuthRedirecting = true;
+                        const next = encodeURIComponent(location.pathname + location.search);
+                        window.location.href = '/login?next=' + next;
+                    }
+                    return null;
+                }
                 if (!resp.ok) return null;
                 return await resp.json();
             } catch (e) {
@@ -1558,11 +1983,159 @@ function settingsApp() {
             }
         },
 
-        /**
+        async saveVoiceSettings() {
+            this.saving = true;
+            try {
+                const resp = await fetch('/api/settings/voice', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(this.voiceForm)
+                });
+                if (!resp.ok) {
+                    throw new Error('HTTP ' + resp.status);
+                }
+                showToast('Voice settings saved', 'success');
+            } catch (e) {
+                showToast('Failed to save voice settings: ' + e.message, 'error');
+            } finally {
+                this.saving = false;
+            }
+        },
+
+        async loadVoiceModels() {
+            try {
+                const provider = this.voiceForm.tts_provider || 'edgetts';
+                const models = await this._fetch(`/api/voice/voices?provider=${provider}`);
+                if (Array.isArray(models)) {
+                    this.voiceModels = models;
+                    if (this.voiceModels.includes(this.voiceForm.tts_voice)) {
+                        this.ttsVoiceType = this.voiceForm.tts_voice;
+                    } else {
+                        this.ttsVoiceType = 'custom';
+                    }
+                }
+            } catch (e) {
+                console.error('[Settings] Failed to load voice models:', e);
+            }
+        },
+
+        _normalizeSttModels(raw) {
+            var list = Array.isArray(raw) ? raw : [];
+            var out = [];
+            var seen = {};
+            list.forEach(function (m) {
+                var id = '';
+                var label = '';
+                if (m && typeof m === 'object') {
+                    id = String(m.id || m.model || m.name || '').trim();
+                    label = String(m.label || id).trim();
+                } else {
+                    id = String(m || '').trim();
+                    label = id;
+                }
+                if (!id || seen[id]) return;
+                seen[id] = true;
+                out.push({ id: id, label: label });
+            });
+            return out;
+        },
+
+        _sttFallbackModels(provider) {
+            var p = (provider || 'openai').toLowerCase();
+            var map = {
+                openai: [{ id: 'whisper-1', label: 'whisper-1' }],
+                groq: [
+                    { id: 'whisper-large-v3', label: 'whisper-large-v3' },
+                    { id: 'whisper-large-v3-turbo', label: 'whisper-large-v3-turbo' },
+                    { id: 'distil-whisper-large-v3-en', label: 'distil-whisper-large-v3-en' },
+                ],
+                nvidia: [
+                    { id: 'openai/whisper-large-v3', label: 'Whisper Large v3 (NIM)' },
+                    { id: 'whisper-large-v3', label: 'whisper-large-v3' },
+                    { id: 'nvidia/parakeet-ctc-1.1b-en-us', label: 'Parakeet CTC 1.1B (EN)' },
+                ],
+                'faster-whisper': [
+                    { id: 'tiny', label: 'tiny' },
+                    { id: 'base', label: 'base' },
+                    { id: 'small', label: 'small' },
+                    { id: 'medium', label: 'medium' },
+                    { id: 'large-v3', label: 'large-v3' },
+                ],
+                cohere: [
+                    { id: 'cohere-transcribe-03-2026', label: 'cohere-transcribe-03-2026' },
+                    { id: 'cohere-transcribe-arabic-07-2026', label: 'cohere-transcribe-arabic-07-2026' },
+                ],
+            };
+            return map[p] || [{ id: 'default', label: 'default' }];
+        },
+
+        async loadSttModels() {
+            var provider = this.voiceForm.stt_provider || 'openai';
+            this.sttModelsLoading = true;
+            // Show fallback immediately so the dropdown is never empty
+            this.sttModelOptions = this._sttFallbackModels(provider);
+            try {
+                var url = '/api/voice/stt-models?provider=' + encodeURIComponent(provider);
+                var resp = await fetch(url, { credentials: 'same-origin' });
+                if (resp.ok) {
+                    var models = await resp.json();
+                    var normalized = this._normalizeSttModels(models);
+                    if (normalized.length) {
+                        this.sttModelOptions = normalized;
+                    }
+                } else {
+                    console.warn('[Settings] STT models HTTP', resp.status, '— using fallback for', provider);
+                }
+                var ids = this.sttModelOptions.map(function (m) { return m.id; });
+                if (ids.indexOf(this.voiceForm.stt_model) !== -1) {
+                    this.sttModelType = this.voiceForm.stt_model;
+                } else if (this.voiceForm.stt_model && this.voiceForm.stt_model !== 'default') {
+                    this.sttModelType = 'custom';
+                } else if (ids.length) {
+                    this.sttModelType = ids[0];
+                    this.voiceForm.stt_model = ids[0];
+                } else {
+                    this.sttModelType = 'custom';
+                }
+            } catch (e) {
+                console.error('[Settings] Failed to load STT models:', e);
+                this.sttModelOptions = this._sttFallbackModels(provider);
+            } finally {
+                this.sttModelsLoading = false;
+            }
+        },
+
+        onSttModelTypeChange() {
+            if (this.sttModelType !== 'custom') {
+                this.voiceForm.stt_model = this.sttModelType;
+                this.saveVoiceSettings();
+            }
+        },
+
+        onTtsVoiceTypeChange() {
+            if (this.ttsVoiceType !== 'custom') {
+                this.voiceForm.tts_voice = this.ttsVoiceType;
+                this.saveVoiceSettings();
+            }
+        },
+
+                /**
          * Tab change handler — lazy-load data when switching tabs.
+         * Keeps ?tab= in the URL for deep-linking / refresh.
          */
         async onTabChange(newTab) {
             this.tab = newTab;
+            try {
+                const url = new URL(window.location.href);
+                if (newTab && newTab !== 'providers_connectors') {
+                    url.searchParams.set('tab', newTab);
+                } else {
+                    url.searchParams.delete('tab');
+                }
+                history.replaceState(null, '', url.pathname + url.search + url.hash);
+            } catch (e) {
+                /* ignore URL sync errors */
+            }
             switch (newTab) {
                 case 'providers': await this.loadProviders(); break;
                 case 'providers_connectors':
@@ -1582,7 +2155,398 @@ function settingsApp() {
                 case 'account': await this.loadAccount(); break;
                 case 'tools': await this.loadTools(); break;
                 case 'system': await this.loadDiagnostics(); await this.loadLogs(); await this.loadVaultStatus(); break;
+                case 'packages': await this.loadPackages(); break;
                 case 'import': break;
+                case 'voice':
+                    await Promise.all([this.loadVoiceModels(), this.loadSttModels()]);
+                    break;
+                case 'email':
+                    await this.loadEmailStatus();
+                    break;
+            }
+        },
+
+        /* ══════════════════════════════════════════════════════════════════
+           EMAIL TAB — Connect Gmail / Microsoft Graph
+           ══════════════════════════════════════════════════════════════════ */
+
+        async loadEmailStatus() {
+            this.emailLoading = true;
+            try {
+                // OAuth callback toast (?email_oauth=ok|error)
+                try {
+                    const url = new URL(window.location.href);
+                    const oauth = url.searchParams.get('email_oauth');
+                    if (oauth === 'ok') {
+                        const prov = url.searchParams.get('provider') || 'email';
+                        const em = url.searchParams.get('email') || '';
+                        showToast(
+                            (prov === 'gmail' ? 'Gmail' : 'Microsoft') +
+                            ' connected' + (em ? ' as ' + em : ''),
+                            'success'
+                        );
+                        url.searchParams.delete('email_oauth');
+                        url.searchParams.delete('provider');
+                        url.searchParams.delete('email');
+                        url.searchParams.delete('msg');
+                        history.replaceState(null, '', url.pathname + url.search + url.hash);
+                    } else if (oauth === 'error') {
+                        showToast('OAuth failed: ' + (url.searchParams.get('msg') || 'unknown'), 'error');
+                        url.searchParams.delete('email_oauth');
+                        url.searchParams.delete('msg');
+                        history.replaceState(null, '', url.pathname + url.search + url.hash);
+                    }
+                } catch (e) { /* ignore */ }
+
+                const data = await this._fetch('/api/email/status');
+                if (data && !data.error) {
+                    Object.assign(this.emailStatus, data);
+                    if (data.gmail_address) this.emailGmail.address = data.gmail_address;
+                    if (data.microsoft_address) this.emailMsProtocol.address = data.microsoft_address;
+                    if (data.ms_tenant_id) this.emailMs.tenant_id = data.ms_tenant_id;
+                    // Sync mode tabs to active auth
+                    const gm = data.gmail_auth_mode || 'none';
+                    if (gm === 'imap' || gm === 'pop' || gm === 'oauth') this.emailGmailMode = gm;
+                    else if (gm === 'app_password') this.emailGmailMode = 'imap';
+                    const mm = data.microsoft_auth_mode || 'none';
+                    if (mm === 'imap' || mm === 'pop' || mm === 'oauth') this.emailMsMode = mm;
+                }
+                const acc = await this._fetch('/api/email/accounts');
+                if (acc && Array.isArray(acc.accounts)) this.emailAccounts = acc.accounts;
+            } finally {
+                this.emailLoading = false;
+            }
+        },
+
+        async saveGmailProtocol(protocol) {
+            const address = (this.emailGmail.address || '').trim();
+            const password = (this.emailGmail.app_password || '').trim();
+            if (!address || !password) {
+                showToast(window.t ? t('settings.email_gmail_required') : 'Email and app password required', 'error');
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/protocol/connect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({
+                        provider: 'gmail',
+                        protocol: protocol === 'pop' ? 'pop' : 'imap',
+                        address,
+                        password,
+                    }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+                this.emailGmail.app_password = '';
+                this.emailGmailMode = protocol === 'pop' ? 'pop' : 'imap';
+                showToast(data.message || ('Gmail ' + protocol.toUpperCase() + ' connected'), 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Gmail ' + protocol + ' failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async saveMsProtocol(protocol) {
+            const address = (this.emailMsProtocol.address || '').trim();
+            const password = (this.emailMsProtocol.password || '').trim();
+            if (!address || !password) {
+                showToast(window.t ? t('settings.email_ms_protocol_required') : 'Email and password required', 'error');
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/protocol/connect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({
+                        provider: 'microsoft',
+                        protocol: protocol === 'pop' ? 'pop' : 'imap',
+                        address,
+                        password,
+                    }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+                this.emailMsProtocol.password = '';
+                this.emailMsMode = protocol === 'pop' ? 'pop' : 'imap';
+                showToast(data.message || ('Microsoft ' + protocol.toUpperCase() + ' connected'), 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Microsoft ' + protocol + ' failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async saveGmailOAuthClient() {
+            const client_id = (this.emailGmailOAuth.client_id || '').trim();
+            const client_secret = (this.emailGmailOAuth.client_secret || '').trim();
+            if (!client_id || !client_secret) {
+                showToast(window.t ? t('settings.email_gmail_oauth_client_required') : 'Google Client ID and secret required', 'error');
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/oauth/gmail/client', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ client_id, client_secret }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+                this.emailGmailOAuth.client_secret = '';
+                showToast(data.message || 'Google OAuth client saved', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async connectGmailOAuth() {
+            const formId = (this.emailGmailOAuth.client_id || '').trim();
+            const formSecret = (this.emailGmailOAuth.client_secret || '').trim();
+            // Always save when both fields present (refresh after restart)
+            if (formId && formSecret) {
+                await this.saveGmailOAuthClient();
+            } else if (!this.emailStatus.gmail_oauth_client_set) {
+                showToast(
+                    window.t
+                        ? t('settings.email_gmail_oauth_client_required')
+                        : 'Paste Google OAuth Client ID + secret, click Save OAuth client, then Connect.',
+                    'error'
+                );
+                return;
+            } else if (formId && !formSecret) {
+                // Client ID typed again but secret blank — need both to re-save
+                showToast(
+                    window.t
+                        ? t('settings.email_gmail_oauth_secret_again')
+                        : 'Re-enter Client secret (or leave both fields empty if already saved).',
+                    'error'
+                );
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/oauth/gmail/start.json', { credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok || !data.authorize_url) {
+                    throw new Error(data.error || 'Could not start Google OAuth (is Client ID/secret saved?)');
+                }
+                window.location.href = data.authorize_url;
+            } catch (e) {
+                showToast('Gmail OAuth failed: ' + e.message, 'error');
+                this.emailSaving = false;
+            }
+        },
+
+        async connectMicrosoftOAuth() {
+            if ((this.emailMs.client_id || '').trim()) {
+                await this.saveMsClient();
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/oauth/microsoft/start.json', { credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok || !data.authorize_url) {
+                    throw new Error(data.error || 'Could not start Microsoft OAuth');
+                }
+                window.location.href = data.authorize_url;
+            } catch (e) {
+                showToast('Microsoft OAuth failed: ' + e.message, 'error');
+                this.emailSaving = false;
+            }
+        },
+
+        async saveGmail() {
+            const address = (this.emailGmail.address || '').trim();
+            const app_password = (this.emailGmail.app_password || '').trim();
+            if (!address || !app_password) {
+                showToast(window.t ? t('settings.email_gmail_required') : 'Email and app password required', 'error');
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/gmail/connect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ address, app_password }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) {
+                    throw new Error(data.error || ('HTTP ' + resp.status));
+                }
+                this.emailGmail.app_password = '';
+                showToast(data.message || 'Gmail connected', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Gmail connect failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async disconnectGmail() {
+            if (!(await window.kazmaConfirm({
+                title: window.t ? t('settings.email_disconnect') : 'Disconnect',
+                message: window.t ? t('settings.email_disconnect_gmail_confirm') : 'Clear Gmail credentials?',
+                confirmText: window.t ? t('settings.email_disconnect') : 'Disconnect',
+                danger: true,
+            }))) return;
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/gmail/disconnect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data.ok === false) throw new Error(data.error || 'Failed');
+                this.emailGmail = { address: '', app_password: '' };
+                showToast(data.message || 'Gmail disconnected', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Disconnect failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async saveMsClient() {
+            const client_id = (this.emailMs.client_id || '').trim();
+            const client_secret = (this.emailMs.client_secret || '').trim();
+            const tenant_id = (this.emailMs.tenant_id || 'common').trim() || 'common';
+            if (!client_id) {
+                showToast(window.t ? t('settings.email_ms_client_required') : 'Azure client ID required', 'error');
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/oauth/microsoft/client', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ client_id, client_secret, tenant_id }),
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) throw new Error(data.error || ('HTTP ' + resp.status));
+                showToast(data.message || 'Microsoft app saved', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async connectMicrosoft() {
+            // Ensure client id is set first if user typed it
+            if ((this.emailMs.client_id || '').trim()) {
+                await this.saveMsClient();
+            }
+            this.emailMsConnecting = true;
+            this.emailMsDevice = { user_code: '', verification_uri: '', device_code: '', message: '' };
+            try {
+                const resp = await fetch('/api/email/oauth/microsoft/device/start', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok) {
+                    throw new Error(data.error || ('HTTP ' + resp.status));
+                }
+                this.emailMsDevice = {
+                    user_code: data.user_code || '',
+                    verification_uri: data.verification_uri_complete || data.verification_uri || 'https://microsoft.com/devicelogin',
+                    device_code: data.device_code || '',
+                    message: data.message || '',
+                };
+                showToast(window.t ? t('settings.email_ms_enter_code') : 'Enter the code at Microsoft', 'info');
+                this._startMsPoll();
+            } catch (e) {
+                this.emailMsConnecting = false;
+                showToast('Microsoft connect failed: ' + e.message, 'error');
+            }
+        },
+
+        _startMsPoll() {
+            if (this.emailMsPollTimer) {
+                clearInterval(this.emailMsPollTimer);
+                this.emailMsPollTimer = null;
+            }
+            const device_code = this.emailMsDevice.device_code;
+            if (!device_code) {
+                this.emailMsConnecting = false;
+                return;
+            }
+            const intervalMs = 5000;
+            this.emailMsPollTimer = setInterval(async () => {
+                try {
+                    const resp = await fetch('/api/email/oauth/microsoft/device/poll', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: JSON.stringify({ device_code }),
+                    });
+                    const data = await resp.json().catch(() => ({}));
+                    if (data.ok && data.status === 'authorized') {
+                        clearInterval(this.emailMsPollTimer);
+                        this.emailMsPollTimer = null;
+                        this.emailMsConnecting = false;
+                        this.emailMsDevice = { user_code: '', verification_uri: '', device_code: '', message: '' };
+                        showToast(data.message || 'Microsoft connected', 'success');
+                        await this.loadEmailStatus();
+                        return;
+                    }
+                    if (data.status === 'failed' || data.status === 'expired') {
+                        clearInterval(this.emailMsPollTimer);
+                        this.emailMsPollTimer = null;
+                        this.emailMsConnecting = false;
+                        showToast(data.error || 'Authorization failed', 'error');
+                    }
+                    // authorization_pending / slow_down → keep polling
+                } catch (e) {
+                    /* keep polling */
+                }
+            }, intervalMs);
+        },
+
+        async disconnectMicrosoft() {
+            if (!(await window.kazmaConfirm({
+                title: window.t ? t('settings.email_disconnect') : 'Disconnect',
+                message: window.t ? t('settings.email_disconnect_ms_confirm') : 'Clear Microsoft Graph tokens?',
+                confirmText: window.t ? t('settings.email_disconnect') : 'Disconnect',
+                danger: true,
+            }))) return;
+            if (this.emailMsPollTimer) {
+                clearInterval(this.emailMsPollTimer);
+                this.emailMsPollTimer = null;
+            }
+            this.emailMsConnecting = false;
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/email/oauth/microsoft/disconnect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data.ok === false) throw new Error(data.error || 'Failed');
+                this.emailMsDevice = { user_code: '', verification_uri: '', device_code: '', message: '' };
+                showToast(data.message || 'Microsoft disconnected', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Disconnect failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
             }
         },
     };

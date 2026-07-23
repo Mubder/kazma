@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+__all__ = ["BaseTool", "PermissionLevel", "ShellTool", "ToolRegistry", "ToolResult", "get_tool_registry"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,11 +86,11 @@ class ShellTool(BaseTool):
     # fetch tools, no container runtimes — see class docstring.
     _READ_ONLY_COMMANDS = {
         "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
-        "uniq", "echo", "date", "whoami", "pwd", "env", "df", "du",
+        "uniq", "echo", "date", "whoami", "pwd", "df", "du",
         "free", "uptime", "uname", "hostname", "ps", "pgrep",
         "git", "tar", "gzip", "gunzip", "zip", "unzip",
         "jq", "tr", "cut", "mkdir", "cp", "mv", "touch",
-        "hermes", "kazma", "uv", "pytest", "ruff", "mypy",
+        "kazma", "uv", "pytest", "ruff", "mypy",
     }
 
     @classmethod
@@ -192,14 +194,24 @@ class ToolRegistry:
     def _register_builtin_tools(self) -> None:
         """Register all pre-existing tools as registry entries."""
         # Register directly — simpler than tuple mapping
-        self._register_builtin("web_search", "kazma_core.tools.web_search", "web_search",
-                               PermissionLevel.READ_ONLY, "DuckDuckGo web search")
+        self._register_builtin(
+            "web_search",
+            "kazma_core.tools.web_search",
+            "web_search",
+            PermissionLevel.READ_ONLY,
+            "Web search (SearXNG / DuckDuckGo / Bing fallback)",
+        )
         self._register_builtin("file_read", "kazma_core.tools.file_read", "file_read",
                                PermissionLevel.READ_ONLY, "Read local files")
         self._register_builtin("file_write", "kazma_core.tools.file_write", "file_write",
                                PermissionLevel.SYSTEM_EXEC, "Write files to disk")
-        self._register_builtin("read_url", "kazma_core.tools.read_url", "read_url",
-                               PermissionLevel.READ_ONLY, "Read web pages")
+        self._register_builtin(
+            "read_url",
+            "kazma_core.tools.read_url",
+            "read_url",
+            PermissionLevel.READ_ONLY,
+            "Fetch one URL and extract text (Playwright fallback)",
+        )
         self._register_builtin("vision_analyze", "kazma_core.tools.vision_analyze", "analyze_image",
                                PermissionLevel.READ_ONLY, "AI vision analysis")
 

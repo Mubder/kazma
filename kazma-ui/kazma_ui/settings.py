@@ -30,6 +30,7 @@ from kazma_ui.models import (
     ProviderToggleRequest,
     SettingsUpdate,
     ShortcutUpdate,
+    VoiceSettingsUpdate,
 )
 
 if TYPE_CHECKING:
@@ -37,6 +38,51 @@ if TYPE_CHECKING:
     from kazma_core.config_store import ConfigStore
 
 logger = logging.getLogger(__name__)
+
+__all__ = ["SettingsRouterBuilder", "create_settings_router"]
+
+# Keys whose values are secrets and must be masked in API responses.
+_SENSITIVE_KEY_FRAGMENTS = (
+    "api_key", "apikey", "token", "secret", "password", "passphrase",
+    "passwd", "credential", "private_key", "authorization", "webhook",
+    "pat", "bearer",
+)
+
+
+def _mask_sensitive_values(data: dict[str, dict[str, Any]]) -> None:
+    """Recursively mask values whose key name looks like a secret."""
+    import json
+    try:
+        from kazma_core.config_store import is_sensitive_config_key
+    except Exception:
+        is_sensitive_config_key = lambda k: False  # noqa: E731
+
+    for category, settings_dict in data.items():
+        if not isinstance(settings_dict, dict):
+            continue
+        for key, val in list(settings_dict.items()):
+            key_lower = key.lower()
+            sensitive = any(frag in key_lower for frag in _SENSITIVE_KEY_FRAGMENTS)
+            try:
+                sensitive = sensitive or bool(is_sensitive_config_key(key))
+            except Exception:
+                pass
+            if not sensitive:
+                continue
+            # Only mask non-empty string values — constant *** (no last-4).
+            raw = val
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if isinstance(raw, str) and raw.strip():
+                settings_dict[key] = "***"
+            elif isinstance(raw, dict):
+                for sub_k, sub_v in list(raw.items()):
+                    if isinstance(sub_v, str) and sub_v.strip():
+                        raw[sub_k] = "***"
+                settings_dict[key] = json.dumps(raw)
 
 
 class SettingsRouterBuilder:
@@ -78,9 +124,11 @@ class SettingsRouterBuilder:
                 from kazma_core.model_registry import get_model_registry
                 reg = get_model_registry()
                 profile = reg.get_active_profile()
+                # Never embed raw API keys in HTML — mask like the API paths.
+                _raw_key = profile.get("api_key") or llm_cfg.get("api_key") or ""
                 model_settings = {
                     "base_url": profile.get("base_url") or llm_cfg["base_url"],
-                    "api_key": profile.get("api_key") or llm_cfg["api_key"],
+                    "api_key": ("***" if _raw_key else ""),
                     "model": profile.get("model") or llm_cfg["model"],
                     "max_tokens": config_store.get("llm.max_tokens", llm_cfg["max_tokens"]),
                     "temperature": config_store.get("llm.temperature", llm_cfg["temperature"]),
@@ -122,8 +170,10 @@ class SettingsRouterBuilder:
 
         @router.get("/api/settings")
         async def api_get_all_settings() -> dict[str, dict[str, Any]]:
-            """Get all settings grouped by category."""
-            return config_store.get_all()
+            """Get all settings grouped by category (secrets masked)."""
+            data = config_store.get_all()
+            _mask_sensitive_values(data)
+            return data
 
         @router.get("/api/settings/vault/status")
         async def api_vault_status() -> dict[str, Any]:
@@ -137,10 +187,10 @@ class SettingsRouterBuilder:
 
         @router.get("/api/settings/export")
         async def api_export_yaml(fmt: str = Query("yaml", alias="format")) -> Response:
-            """Export settings as YAML or JSON file download."""
+            """Export settings as YAML or JSON file download (secrets masked)."""
             sm = _get_sm()
             try:
-                content = sm.export_config(fmt)
+                content = sm.export_config(fmt, mask_secrets=True)
                 media = "application/json" if fmt == "json" else "text/yaml"
                 ext = "json" if fmt == "json" else "yaml"
                 return Response(
@@ -163,12 +213,6 @@ class SettingsRouterBuilder:
         async def api_update_single(setting: SettingsUpdate) -> dict[str, str]:
             """Update a single setting."""
             config_store.set(setting.key, setting.value, category=setting.category)
-            return {"status": "ok"}
-
-        @router.delete("/api/settings/{key:path}")
-        async def api_delete_setting(key: str) -> dict[str, str]:
-            """Delete a setting (reverts to YAML default)."""
-            config_store.delete(key)
             return {"status": "ok"}
 
         @router.put("/api/settings/agent")
@@ -195,6 +239,92 @@ class SettingsRouterBuilder:
             """Save context window settings."""
             _get_sm().save_context_settings(req)
             return {"status": "ok"}
+
+        @router.get("/api/settings/voice")
+        async def api_get_voice_settings() -> dict[str, Any]:
+            """Get voice subsystem settings."""
+            def _get_val(key: str, default: str) -> str:
+                v = config_store.get(key)
+                if v is None or str(v).strip() == "" or str(v).strip().lower() == "none":
+                    return default
+                return str(v)
+
+            return {
+                "enabled": bool(config_store.get("voice.enabled", False)),
+                "stt_provider": _get_val("voice.stt_provider", "openai"),
+                "stt_model": _get_val("voice.stt_model", "default"),
+                "stt_base_url": _get_val("voice.stt_base_url", ""),
+                "tts_provider": _get_val("voice.tts_provider", "edgetts"),
+                "tts_voice": _get_val("voice.tts_voice", "default"),
+                "stt_language": _get_val("voice.stt_language", "auto"),
+                "tts_output_format": _get_val("voice.tts_output_format", "mp3"),
+            }
+
+        @router.put("/api/settings/voice")
+        async def api_save_voice_settings(req: VoiceSettingsUpdate) -> dict[str, str]:
+            """Save voice subsystem settings."""
+            config_store.set("voice.enabled", req.enabled, category="voice")
+            config_store.set("voice.stt_provider", req.stt_provider, category="voice")
+            config_store.set("voice.stt_model", req.stt_model, category="voice")
+            config_store.set("voice.stt_base_url", req.stt_base_url or "", category="voice")
+            config_store.set("voice.tts_provider", req.tts_provider, category="voice")
+            config_store.set("voice.tts_voice", req.tts_voice, category="voice")
+            config_store.set("voice.stt_language", req.stt_language, category="voice")
+            config_store.set("voice.tts_output_format", req.tts_output_format, category="voice")
+            return {"status": "ok"}
+
+        @router.get("/api/voice/providers")
+        async def api_get_voice_providers() -> dict[str, list[str]]:
+            """Get available voice providers for STT and TTS."""
+            return {
+                "stt": ["openai", "groq", "cohere", "nvidia", "faster-whisper"],
+                "tts": ["edgetts", "openai", "nvidia", "kokoro", "coqui"],
+            }
+
+        @router.get("/api/voice/voices")
+        async def api_get_voice_voices(provider: str = "edgetts") -> list[str]:
+            """Get available voice models/ShortNames for a specific TTS provider."""
+            p_lower = provider.strip().lower()
+            if p_lower == "openai":
+                return ["default", "alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+            elif p_lower == "nvidia":
+                return [
+                    "default",
+                    "Magpie-Multilingual.EN-US.Aria",
+                    "Magpie-Multilingual.EN-US.Benjamin",
+                    "Magpie-Multilingual.ES-ES.Alba",
+                    "Magpie-Multilingual.FR-FR.Denise",
+                    "Magpie-Multilingual.ZH-CN.Xiaoxiao",
+                ]
+            elif p_lower == "edgetts":
+                try:
+                    import edge_tts  # type: ignore
+                    voices = await edge_tts.VoicesManager.create()
+                    return ["default"] + sorted([v["ShortName"] for v in voices.voices])
+                except Exception:
+                    return [
+                        "default",
+                        "en-US-AriaNeural",
+                        "en-US-GuyNeural",
+                        "en-GB-SoniaNeural",
+                        "en-GB-RyanNeural",
+                        "es-ES-ElviraNeural",
+                        "fr-FR-DeniseNeural",
+                        "ar-EG-SalmaNeural",
+                        "ar-EG-ShakirNeural",
+                        "ar-SA-HamedNeural",
+                        "ar-SA-ZariyahNeural",
+                    ]
+            return ["default"]
+
+        @router.get("/api/voice/stt-models")
+        async def api_get_voice_stt_models(provider: str = "openai") -> list[Any]:
+            """Get available STT models (delegates to voice router catalog)."""
+            from kazma_ui.routes_voice import list_stt_models
+
+            return await list_stt_models(provider=provider)
+
+
 
         @router.get("/api/settings/connectors")
         async def api_get_connectors() -> dict[str, Any]:
@@ -281,10 +411,14 @@ class SettingsRouterBuilder:
             return _get_sm().create_api_token(req.get("name", "unnamed"))
 
         @router.delete("/api/settings/account/tokens/{token_id}")
-        async def api_revoke_token(token_id: str) -> dict[str, str]:
+        async def api_revoke_token(token_id: str) -> dict[str, Any]:
             """Revoke an API token."""
-            _get_sm().revoke_api_token(token_id)
-            return {"status": "ok"}
+            removed = _get_sm().revoke_api_token(token_id)
+            if not removed:
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=404, detail=f"Token '{token_id}' not found")
+            return {"status": "ok", "removed": True, "id": token_id}
 
         @router.get("/api/settings/account/sessions")
         async def api_get_sessions() -> list[dict[str, Any]]:
@@ -546,6 +680,15 @@ class SettingsRouterBuilder:
         async def api_test_mcp(name: str) -> dict[str, Any]:
             """Test an MCP server connection."""
             return await _get_sm().test_mcp_server(name)
+
+        # Catch-all DELETE must come AFTER all specific routes above,
+        # otherwise it matches paths like /api/settings/account/tokens/{id}
+        # before the specific handler can fire.
+        @router.delete("/api/settings/{key:path}")
+        async def api_delete_setting(key: str) -> dict[str, str]:
+            """Delete a setting (reverts to YAML default)."""
+            config_store.delete(key)
+            return {"status": "ok"}
 
     def build(self) -> APIRouter:
         self._build_general_routes()

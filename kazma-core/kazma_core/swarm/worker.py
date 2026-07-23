@@ -19,6 +19,8 @@ from typing import Any
 from kazma_core.swarm.blackboard import SwarmDispatchContext
 from kazma_core.swarm.task import WorkerCapabilities
 
+__all__ = ["InProcessWorker", "SwarmWorker"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -258,6 +260,26 @@ class InProcessWorker(SwarmWorker):
 
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
+
+            # Branding + product family (short) so Arabic replies never use كازما.
+            try:
+                from kazma_core.product_knowledge import identity_line
+
+                messages.append(
+                    {
+                        "role": "system",
+                        "content": (
+                            f"{identity_line()} You are a swarm worker named "
+                            f"{self.name} inside the Kazma framework. Prefer "
+                            "workspace tools and accurate product terminology."
+                        ),
+                    }
+                )
+            except Exception:
+                logger.debug(
+                    "[InProcessWorker:%s] product identity injection skipped",
+                    self.name, exc_info=True,
+                )
 
             # ── Environment awareness (IDE/workspace/repo/tools) ──────
             # Inject a dedicated env-context system message so the worker

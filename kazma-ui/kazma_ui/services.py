@@ -14,6 +14,8 @@ from typing import Any, Optional
 
 logger = __import__("logging").getLogger(__name__)
 
+__all__ = ["SwarmService", "get_swarm_service", "reset_swarm_service"]
+
 
 class SwarmService:
     """Facade over SwarmEngine and related components."""

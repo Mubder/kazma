@@ -30,6 +30,8 @@ from kazma_core.exceptions import sanitize_error
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_sse_chat_router", "router"]
+
 router = APIRouter(tags=["chat-sse"])
 
 
@@ -38,6 +40,110 @@ router = APIRouter(tags=["chat-sse"])
 # ══════════════════════════════════════════════════════════════════════════
 
 from kazma_ui.sse_utils import sse_frame as _sse_frame
+
+
+def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
+    dicts = []
+    for m in langgraph_messages:
+        role = "user"
+        content = ""
+        if isinstance(m, dict):
+            role = m.get("role") or "user"
+            content = m.get("content") or ""
+        else:
+            cls_name = m.__class__.__name__
+            if cls_name == "AIMessage":
+                role = "assistant"
+            elif cls_name == "SystemMessage":
+                role = "system"
+            else:
+                role = "user"
+            content = getattr(m, "content", "")
+        
+        if role in ("system", "user", "assistant") and content:
+            if isinstance(content, list):
+                content = " ".join(
+                    b.get("text", "") if isinstance(b, dict) else str(b)
+                    for b in content
+                )
+            dicts.append({"role": role, "content": str(content).strip()})
+    return dicts
+
+
+def _message_text(m: Any) -> str:
+    """Extract plain assistant text from a dict or LangChain message object."""
+    if m is None:
+        return ""
+
+    if isinstance(m, dict):
+        role = (m.get("role") or m.get("type") or "").lower()
+        if role in ("user", "system", "tool", "human"):
+            return ""
+        # assistant / ai / empty role with tool_calls
+        if role and role not in ("assistant", "ai") and not m.get("tool_calls"):
+            return ""
+        text = m.get("content")
+    else:
+        cls = m.__class__.__name__
+        role_attr = (getattr(m, "type", None) or getattr(m, "role", None) or "").lower()
+        if cls not in ("AIMessage", "AIMessageChunk") and role_attr not in (
+            "ai",
+            "assistant",
+            "",
+        ):
+            return ""
+        text = getattr(m, "content", None)
+
+    if isinstance(text, list):
+        parts: list[str] = []
+        for block in text:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+            else:
+                t = getattr(block, "text", None)
+                if t:
+                    parts.append(str(t))
+        text = "".join(parts)
+    if text is None:
+        return ""
+    return str(text).strip()
+
+
+def _extract_hitl_payload(intr: Any) -> dict[str, Any] | None:
+    """Normalize LangGraph interrupt objects into a hitl payload dict."""
+    value = getattr(intr, "value", None)
+    if value is None and isinstance(intr, dict):
+        value = intr.get("value", intr)
+    # Some versions wrap the value in a 1-tuple / list
+    if isinstance(value, (list, tuple)) and value:
+        value = value[0]
+    if not isinstance(value, dict):
+        return None
+    if value.get("type") == "hitl_approval":
+        return value
+    # Fallback: tool/args shape without type tag (still show a card)
+    if "tool" in value or "args" in value or "tools" in value:
+        return {
+            "type": "hitl_approval",
+            "tool": value.get("tool", "unknown"),
+            "args": value.get("args", value.get("arguments", {})),
+            "tools": value.get("tools") or [],
+            "message": value.get("message", ""),
+        }
+    return None
+
+
+def _last_assistant_text(messages: list[Any] | None) -> str:
+    """Return the last non-empty assistant text from a message list."""
+    if not messages:
+        return ""
+    for m in reversed(list(messages)):
+        text = _message_text(m)
+        if text:
+            return text
+    return ""
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -69,180 +175,262 @@ async def _stream_langgraph_events(
     Yields:
         SSE-formatted strings.
     """
+    from kazma_core.safety.hitl import set_current_thread_id, reset_current_thread_id
+
+    tid = config.get("configurable", {}).get("thread_id") if config else None
+    token = set_current_thread_id(tid) if tid else None
+
     total_tokens = 0
     total_cost = 0.0
     turn_start = time.monotonic()
     content_acc = ""  # accumulated assistant text for the done event
 
     try:
-        async for event in graph.astream_events(input_state, config=config, version="v2"):
-            kind = event.get("event", "")
-            data = event.get("data", {})
-            name = event.get("name", "")
-
-            # ── on_chat_model_stream: LLM token delta ──────────────
-            if kind == "on_chat_model_stream":
-                chunk = data.get("chunk")
-                if chunk is not None:
-                    # chunk is an AIMessageChunk — extract content
-                    token_text = ""
-                    if hasattr(chunk, "content"):
-                        token_text = chunk.content or ""
-                    elif isinstance(chunk, dict):
-                        token_text = chunk.get("content", "")
-
-                    if token_text:
-                        content_acc += token_text
-                        yield _sse_frame("token", {"content": token_text})
-
-            # ── on_chat_model_end: LLM finished — extract usage ────
-            elif kind == "on_chat_model_end":
-                output = data.get("output", {})
-                if hasattr(output, "usage_metadata"):
-                    usage = output.usage_metadata or {}
-                    total_tokens = usage.get("total_tokens", total_tokens)
-                elif isinstance(output, dict):
-                    usage = output.get("usage", {})
-                    total_tokens = usage.get("total_tokens", total_tokens)
-                    # Some providers put cost in response_metadata
-                    meta = output.get("response_metadata", {})
-                    if "cost" in meta:
-                        total_cost += meta["cost"]
-
-            # ── on_tool_start: tool execution beginning ────────────
-            elif kind == "on_tool_start":
-                inputs = data.get("input", {})
-                # data.input can be the raw args dict or nested
-                if isinstance(inputs, dict) and "input" in inputs:
-                    inputs = inputs["input"]
-                yield _sse_frame(
-                    "tool_call",
-                    {
-                        "tool_name": name,
-                        "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
-                        if isinstance(inputs, dict)
-                        else str(inputs)[:2000],
-                    },
-                )
-
-            # ── on_tool_end: tool execution finished ───────────────
-            elif kind == "on_tool_end":
-                output = data.get("output", "")
-                if hasattr(output, "content"):
-                    output = output.content
-                elif isinstance(output, dict):
-                    output = output.get("content", json.dumps(output, ensure_ascii=False))
-                yield _sse_frame(
-                    "tool_result",
-                    {
-                        "tool_name": name,
-                        "result": str(output)[:5000],
-                    },
-                )
-
-            # ── on_chain_end at graph terminal: graph finished ─────
-            # LangGraph 1.x emits the terminal on_chain_end with name
-            # "LangGraph"; older versions (and some test mocks) use
-            # "__end__".  Match both so the handler fires in production
-            # and in unit tests.
-            elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
-                # Extract final state if available
-                output = data.get("output", {})
-                if isinstance(output, dict):
-                    # Pull cost/tokens from the final state
-                    final_cost = output.get("last_cost_usd", total_cost)
-                    final_tokens = output.get("last_tokens", total_tokens)
-                    if final_cost:
-                        total_cost = final_cost
-                    if final_tokens:
-                        total_tokens = final_tokens
-
-                    # ── Extract final assistant message from terminal state ──
-                    # CRITICAL FIX (Issue 3): LLMProvider uses custom httpx
-                    # calls (not LangChain BaseChatModel), so
-                    # on_chat_model_stream events never fire.  The response
-                    # exists in output["messages"][-1] but was never emitted.
-                    # Guard with 'if not content_acc' to prevent duplicates
-                    # if real streaming is ever added.
-                    if not content_acc:
-                        messages_list = output.get("messages", [])
-                        if isinstance(messages_list, list) and messages_list:
-                            last_msg = messages_list[-1]
-                            if isinstance(last_msg, dict):
-                                msg_content = last_msg.get("content", "")
-                                if (
-                                    last_msg.get("role") == "assistant"
-                                    and msg_content
-                                ):
-                                    content_acc = msg_content
-                                    yield _sse_frame(
-                                        "token",
-                                        {"content": msg_content},
-                                    )
-
-        # ── HITL: detect interrupt() pause ─────────────────────────
-        # When tool_worker_node calls interrupt() for a danger tool, the
-        # graph checkpoint pauses and astream_events ends WITHOUT the
-        # terminal on_chain_end. Check the graph state for pending
-        # interrupts and surface them so the frontend can prompt for
-        # approval (POST /api/approve/{thread_id}).
-        thread_id = (config.get("configurable") or {}).get("thread_id", "")
-        interrupted = False
         try:
-            snapshot = await graph.aget_state(config)
-            if snapshot and getattr(snapshot, "next", None):
-                # Graph still has work to do — check for interrupt tasks.
-                for task in getattr(snapshot, "tasks", []) or []:
-                    interrupts = getattr(task, "interrupts", []) or []
-                    for intr in interrupts:
-                        payload = getattr(intr, "value", None)
-                        if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
-                            interrupted = True
-                            yield _sse_frame(
-                                "approval_required",
-                                {
-                                    "thread_id": thread_id,
-                                    "tool": payload.get("tool", ""),
-                                    "args": payload.get("args", {}),
-                                    "message": payload.get("message", ""),
-                                },
+            async for event in graph.astream_events(input_state, config=config, version="v2"):
+                kind = event.get("event", "")
+                data = event.get("data", {})
+                name = event.get("name", "")
+
+                # ── on_chat_model_stream: LLM token delta ──────────────
+                if kind == "on_chat_model_stream":
+                    chunk = data.get("chunk")
+                    if chunk is not None:
+                        # chunk is an AIMessageChunk — extract content
+                        token_text = ""
+                        if hasattr(chunk, "content"):
+                            token_text = chunk.content or ""
+                        elif isinstance(chunk, dict):
+                            token_text = chunk.get("content", "")
+
+                        if token_text:
+                            content_acc += token_text
+                            yield _sse_frame("token", {"content": token_text})
+
+                # ── on_chat_model_end: LLM finished — extract usage ────
+                elif kind == "on_chat_model_end":
+                    output = data.get("output", {})
+                    if hasattr(output, "usage_metadata"):
+                        usage = output.usage_metadata or {}
+                        total_tokens = usage.get("total_tokens", total_tokens)
+                    elif isinstance(output, dict):
+                        usage = output.get("usage", {})
+                        total_tokens = usage.get("total_tokens", total_tokens)
+                        # Some providers put cost in response_metadata
+                        meta = output.get("response_metadata", {})
+                        if "cost" in meta:
+                            total_cost += meta["cost"]
+
+                # ── on_tool_start: tool execution beginning ────────────
+                elif kind == "on_tool_start":
+                    inputs = data.get("input", {})
+                    # data.input can be the raw args dict or nested
+                    if isinstance(inputs, dict) and "input" in inputs:
+                        inputs = inputs["input"]
+                    yield _sse_frame(
+                        "tool_call",
+                        {
+                            "tool_name": name,
+                            "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
+                            if isinstance(inputs, dict)
+                            else str(inputs)[:2000],
+                        },
+                    )
+
+                # ── on_tool_end: tool execution finished ───────────────
+                elif kind == "on_tool_end":
+                    output = data.get("output", "")
+                    if hasattr(output, "content"):
+                        output = output.content
+                    elif isinstance(output, dict):
+                        output = output.get("content", json.dumps(output, ensure_ascii=False))
+                    yield _sse_frame(
+                        "tool_result",
+                        {
+                            "tool_name": name,
+                            "result": str(output)[:5000],
+                        },
+                    )
+
+                # ── on_chain_end at graph terminal: graph finished ─────
+                # LangGraph 1.x emits the terminal on_chain_end with name
+                # "LangGraph"; older versions (and some test mocks) use
+                # "__end__".  Match both so the handler fires in production
+                # and in unit tests.
+                elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
+                    # Extract final state if available
+                    output = data.get("output", {})
+                    if isinstance(output, dict):
+                        # Pull cost/tokens from the final state
+                        final_cost = output.get("last_cost_usd", total_cost)
+                        final_tokens = output.get("last_tokens", total_tokens)
+                        if final_cost:
+                            total_cost = final_cost
+                        if final_tokens:
+                            total_tokens = final_tokens
+
+                        # CRITICAL: LLMProvider uses custom httpx (not
+                        # BaseChatModel), so on_chat_model_stream never fires.
+                        # Surface final assistant text from graph state.
+                        if not content_acc:
+                            msg_content = _last_assistant_text(
+                                output.get("messages") or []
                             )
-                            logger.info(
-                                "[SSE] HITL interrupt: thread=%s tool=%s — awaiting approval",
+                            if msg_content:
+                                content_acc = msg_content
+                                yield _sse_frame(
+                                    "token",
+                                    {"content": msg_content},
+                                )
+
+            # ── Post-stream: HITL + backfill assistant text ────────────
+            # Custom LLM path never streams tokens. On HITL interrupt,
+            # astream_events ends WITHOUT terminal on_chain_end — so we
+            # must (1) detect interrupt, (2) pull any assistant prose from
+            # checkpoint state, (3) never leave the UI with only "Thinking…".
+            thread_id = (config.get("configurable") or {}).get("thread_id", "")
+            interrupted = False
+            snapshot = None
+            try:
+                snapshot = await graph.aget_state(config)
+            except Exception as exc:
+                logger.warning("[SSE] aget_state failed after stream: %s", exc)
+
+            if snapshot is not None:
+                # Backfill assistant text from checkpoint (interrupt or complete)
+                if not content_acc:
+                    try:
+                        vals = getattr(snapshot, "values", None) or {}
+                        msgs = vals.get("messages") if isinstance(vals, dict) else None
+                        msg_content = _last_assistant_text(msgs or [])
+                        if msg_content:
+                            content_acc = msg_content
+                            yield _sse_frame("token", {"content": msg_content})
+                    except Exception:
+                        logger.debug("[SSE] post-stream text backfill failed", exc_info=True)
+
+                # HITL interrupt detection (strict type OR tool/args fallback)
+                try:
+                    next_nodes = getattr(snapshot, "next", None) or ()
+                    if next_nodes:
+                        for task in getattr(snapshot, "tasks", []) or []:
+                            for intr in getattr(task, "interrupts", []) or []:
+                                payload = _extract_hitl_payload(intr)
+                                if not payload:
+                                    continue
+                                interrupted = True
+                                yield _sse_frame(
+                                    "approval_required",
+                                    {
+                                        "thread_id": thread_id,
+                                        "tool": payload.get("tool", ""),
+                                        "args": payload.get("args", {}),
+                                        "tools": payload.get("tools") or [],
+                                        "message": payload.get("message", ""),
+                                    },
+                                )
+                                logger.info(
+                                    "[SSE] HITL interrupt: thread=%s tool=%s — awaiting approval",
+                                    thread_id,
+                                    payload.get("tool"),
+                                )
+                                break
+                            if interrupted:
+                                break
+                        # Paused mid-graph but no parseable HITL payload
+                        if not interrupted and not content_acc:
+                            logger.warning(
+                                "[SSE] Graph paused (next=%s) without HITL payload "
+                                "thread=%s — emitting recovery notice",
+                                list(next_nodes),
                                 thread_id,
-                                payload.get("tool"),
                             )
+                            notice = (
+                                "⚠️ The agent paused mid-turn (no approval card could be "
+                                "built). Try again, or open **Dashboard → Pending Approvals**. "
+                                f"Thread: `{thread_id}`"
+                            )
+                            content_acc = notice
+                            yield _sse_frame("token", {"content": notice})
+                except Exception as exc:
+                    logger.warning("[SSE] interrupt scan failed: %s", exc, exc_info=True)
+
+            # Never leave the chat blank after "Thinking…"
+            if not content_acc and not interrupted:
+                notice = (
+                    "⚠️ No assistant text was returned for this turn "
+                    "(model may have failed silently or only planned tools). "
+                    "Please try again or check server logs."
+                )
+                content_acc = notice
+                yield _sse_frame("token", {"content": notice})
+                logger.warning(
+                    "[SSE] Empty turn with no HITL — thread=%s tokens=%s",
+                    thread_id,
+                    total_tokens,
+                )
+
+            # ── Turn complete ──────────────────────────────────────────
+            duration_ms = (time.monotonic() - turn_start) * 1000
+            logger.info(
+                "SSE turn complete: tokens=%d cost=$%.4f duration=%.0fms content_len=%d interrupted=%s",
+                total_tokens,
+                total_cost,
+                duration_ms,
+                len(content_acc),
+                interrupted,
+            )
+            # Kazma-wide SI: learn from completed turns (skip HITL pauses).
+            # Background — never delay the done frame.
+            if not interrupted:
+                try:
+                    from kazma_core.skills.self_improvement import (
+                        schedule_chat_self_improvement,
+                    )
+
+                    empty = not content_acc
+                    looks_error = content_acc.strip().startswith("⚠️") or content_acc.strip().startswith(
+                        "Error"
+                    )
+                    # Recover user text from input_state when available
+                    umsg = ""
+                    try:
+                        for m in reversed(list((input_state or {}).get("messages") or [])):
+                            if isinstance(m, dict) and m.get("role") == "user":
+                                umsg = str(m.get("content") or "")
+                                break
+                    except Exception:
+                        pass
+                    schedule_chat_self_improvement(
+                        user_message=umsg or "(chat turn)",
+                        success=(not empty and not looks_error),
+                        error="" if not looks_error else content_acc[:400],
+                        output_snippet=content_acc[:600],
+                    )
+                except Exception:
+                    logger.debug("[SSE] chat self-improvement schedule skipped", exc_info=True)
+
+            yield _sse_frame(
+                "done",
+                {
+                    "tokens": total_tokens,
+                    "cost": round(total_cost, 6),
+                    "duration_ms": round(duration_ms, 0),
+                    "interrupted": interrupted,
+                    "empty": (not content_acc and not interrupted),
+                },
+            )
+
+        except asyncio.CancelledError:
+            logger.warning("SSE stream cancelled by client disconnect")
+            yield _sse_frame("error", {"content": "Connection cancelled"})
+
         except Exception as exc:
-            # aget_state may be unavailable (no checkpointer). Don't fail
-            # the whole turn over interrupt detection — just log.
-            logger.debug("[SSE] Could not check interrupt state: %s", exc)
-
-        # ── Turn complete ──────────────────────────────────────────
-        duration_ms = (time.monotonic() - turn_start) * 1000
-        logger.info(
-            "SSE turn complete: tokens=%d cost=$%.4f duration=%.0fms content_len=%d interrupted=%s",
-            total_tokens,
-            total_cost,
-            duration_ms,
-            len(content_acc),
-            interrupted,
-        )
-        yield _sse_frame(
-            "done",
-            {
-                "tokens": total_tokens,
-                "cost": round(total_cost, 6),
-                "duration_ms": round(duration_ms, 0),
-            },
-        )
-
-    except asyncio.CancelledError:
-        logger.warning("SSE stream cancelled by client disconnect")
-        yield _sse_frame("error", {"content": "Connection cancelled"})
-
-    except Exception as exc:
-        logger.error("SSE stream error: %s", exc, exc_info=True)
-        yield _sse_frame("error", {"content": sanitize_error(exc)})
+            logger.error("SSE stream error: %s", exc, exc_info=True)
+            yield _sse_frame("error", {"content": sanitize_error(exc)})
+    finally:
+        if token is not None:
+            reset_current_thread_id(token)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -340,9 +528,18 @@ def create_sse_chat_router(
 
         Creates the ChatSession in the shared store on first use so the
         WebSocket transport can see it immediately.
+
+        Cross-platform continuity: platform sessions use ids like
+        ``gw-telegram-…``. Those ids **are** the LangGraph thread_id, so
+        Web and Telegram share one checkpointer season.
         """
         session = _get_store().get_or_create(session_id)
-        if not session.thread_id:
+        # Platform-linked seasons: session_id == thread_id always.
+        if session_id.startswith("gw-"):
+            if session.thread_id != session_id:
+                session.thread_id = session_id
+                _get_store().put(session)
+        elif not session.thread_id:
             session.thread_id = str(uuid.uuid4())
             _get_store().put(session)
         return session, session.thread_id
@@ -377,7 +574,10 @@ def create_sse_chat_router(
             )
 
         user_message = (body.get("message") or "").strip()
-        if not user_message:
+        # Optional attachments uploaded via /api/chat/upload. Each entry is an
+        # Attachment-shaped dict {id, kind, mime, filename, path}.
+        raw_attachments = body.get("attachments") or []
+        if not user_message and not raw_attachments:
             return StreamingResponse(
                 iter([_sse_frame("error", {"content": "Empty message"})]),
                 media_type="text/event-stream",
@@ -398,6 +598,169 @@ def create_sse_chat_router(
 
         # ── Resolve session and thread_id (shared store) ───────────
         session, thread_id = _resolve_session(session_id)
+
+        # ── Intercept YOLO command ─────────────────────────────────
+        raw_msg = (body.get("message") or "").strip()
+        if raw_msg.lower() in ("/yolo", "/yolo on", "/yolo off", "/yolo status"):
+            from kazma_core.safety.yolo import (
+                YoloDisabledError,
+                disable_yolo,
+                enable_yolo,
+                yolo_allowed,
+                yolo_status,
+            )
+
+            cmd = raw_msg.lower().strip()
+            if cmd == "/yolo status":
+                st = yolo_status(thread_id)
+                grant_note = ""
+                try:
+                    from kazma_core.safety.hitl_grants import list_grants
+
+                    grants = list_grants(thread_id)
+                    if grants:
+                        names = ", ".join(g["tool"] for g in grants)
+                        grant_note = f"\nPer-tool grants active: `{names}`"
+                except Exception:
+                    pass
+                if st.get("active"):
+                    rem = st.get("remaining_seconds")
+                    ttl_note = (
+                        f"Expires in ~{rem // 60}m." if rem is not None
+                        else "No auto-expiry."
+                    )
+                    confirmation = (
+                        f"🚀 YOLO is **ON** for this session. {ttl_note}\n"
+                        f"Disable: `/yolo off`{grant_note}"
+                    )
+                else:
+                    prod_note = ""
+                    if not yolo_allowed():
+                        prod_note = (
+                            "\nProduction mode blocks YOLO "
+                            "(set `KAZMA_ALLOW_YOLO=1` to opt in)."
+                        )
+                    confirmation = (
+                        "🛡️ YOLO is **OFF**. HITL approvals are required for danger tools."
+                        f"{grant_note}{prod_note}\n"
+                        "Tip: on an approval card use **Allow tool (session)** to stop "
+                        "repeat prompts for one tool without full YOLO."
+                    )
+            elif cmd == "/yolo off":
+                disable_yolo(thread_id, actor=f"web:{session_id[:12]}")
+                confirmation = (
+                    "🛡️ YOLO deactivated. Safety gates and tool grants are cleared."
+                )
+            else:
+                try:
+                    st = enable_yolo(thread_id, actor=f"web:{session_id[:12]}")
+                    rem = st.get("remaining_seconds")
+                    ttl_note = (
+                        f"Auto-expires in ~{rem // 60} minutes "
+                        f"(set KAZMA_YOLO_TTL_SECONDS to change; 0 = no expiry)."
+                        if rem is not None
+                        else "No auto-expiry (KAZMA_YOLO_TTL_SECONDS=0)."
+                    )
+                    confirmation = (
+                        "🚀 **YOLO ON** for this session only.\n"
+                        "All danger tools run **without** approval until you `/yolo off` "
+                        f"or TTL ends.\n{ttl_note}\n"
+                        "⚠️ Use only when you fully trust this session."
+                    )
+                except YoloDisabledError as yde:
+                    confirmation = f"🛡️ {yde}"
+
+            session.messages.append({"role": "user", "content": raw_msg})
+            session.messages.append({"role": "assistant", "content": confirmation})
+            try:
+                _get_store().put(session)
+            except Exception:
+                logger.exception("[SSE] failed to persist YOLO message")
+
+            async def _yolo_generator() -> AsyncGenerator[str, None]:
+                yield _sse_frame("token", {"content": confirmation})
+                yield _sse_frame("done", {
+                    "tokens": 1,
+                    "cost": 0.0,
+                    "duration_ms": 100,
+                })
+
+            return StreamingResponse(
+                _yolo_generator(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+        # ── Intercept RESET command ────────────────────────────────
+        if raw_msg.lower() == "/reset":
+            live_graph = _get_graph()
+            if live_graph and hasattr(live_graph, "checkpointer") and live_graph.checkpointer:
+                try:
+                    await live_graph.checkpointer.adelete_thread(thread_id)
+                except Exception as exc:
+                    logger.debug("[SSE] failed to delete thread checkpoints on /reset: %s", exc)
+            
+            session.messages = []
+            session.title = ""
+            try:
+                _get_store().put(session)
+            except Exception:
+                logger.exception("[SSE] failed to persist /reset")
+
+            confirmation = "🔄 Conversation cleared. Starting fresh."
+
+            async def _reset_generator() -> AsyncGenerator[str, None]:
+                yield _sse_frame("token", {"content": confirmation})
+                yield _sse_frame("done", {
+                    "tokens": 1,
+                    "cost": 0.0,
+                    "duration_ms": 100,
+                })
+
+            return StreamingResponse(
+                _reset_generator(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+
+        # ── Intercept COMPACT command ──────────────────────────────
+        if raw_msg.lower() == "/compact":
+            live_graph = _get_graph()
+            if live_graph:
+                try:
+                    config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+                    state_obj = await live_graph.aget_state(config)
+                    if state_obj and state_obj.values:
+                        current_values = dict(state_obj.values)
+                        current_values["needs_compaction"] = True
+                        
+                        result_state = await live_graph.ainvoke(current_values, config)
+                        
+                        session.messages = _convert_messages_to_dicts(result_state.get("messages", []))
+                        _get_store().put(session)
+                        
+                        confirmation = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
+                    else:
+                        confirmation = "🗜️ No conversation history found to compact yet."
+                except Exception as exc:
+                    logger.error("[SSE] failed to compact context: %s", exc)
+                    confirmation = "⚠️ Failed to compact context. (Compaction error)"
+            else:
+                confirmation = "⚠️ Live graph not loaded."
+
+            async def _compact_generator() -> AsyncGenerator[str, None]:
+                yield _sse_frame("token", {"content": confirmation})
+                yield _sse_frame("done", {
+                    "tokens": 1,
+                    "cost": 0.0,
+                    "duration_ms": 100,
+                })
+
+            return StreamingResponse(
+                _compact_generator(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
         # ── Apply model from request body ──────────────────────────
         # The chat frontend sends the selected model so the server can
@@ -465,36 +828,13 @@ def create_sse_chat_router(
         if cost_breaker:
             cost_breaker.record_user_interaction()
 
-        # ── Build conversation messages ────────────────────────────
+        # ── Persist UI projection (display only) ───────────────────
         session.messages.append({"role": "user", "content": user_message})
-
-        messages: list[dict[str, Any]] = []
-        has_system = any(m.get("role") == "system" for m in session.messages)
-        if not has_system and system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-
-        # ── Per-turn environment refresh (Phase 2) ─────────────────
-        # Re-resolve workspace/repo/tool facts on every request so a
-        # mid-conversation workspace switch takes effect immediately. The
-        # base system prompt is built once at init; this keeps it current.
+        # CRITICAL: persist immediately so restarts keep the sidebar transcript.
         try:
-            from kazma_core.ide.env_context import build_env_context
-
-            env_block = build_env_context()
-            if env_block:
-                messages.append({"role": "system", "content": env_block})
+            _get_store().put(session)
         except Exception:
-            logger.debug("[sse_chat] per-turn env_context refresh skipped", exc_info=True)
-
-        messages.extend(
-            {k: v for k, v in m.items() if k in ("role", "content")} for m in session.messages
-        )
-
-        # ── Build SupervisorState for the graph ────────────────────
-        from kazma_core.agent.state import initial_supervisor_state
-
-        input_state = initial_supervisor_state(thread_id=thread_id)
-        input_state["messages"] = messages
+            logger.exception("[SSE] failed to persist user message for session=%s", session_id)
 
         # ── LangGraph config with thread_id for checkpointing ──────
         graph_config = {
@@ -503,6 +843,124 @@ def create_sse_chat_router(
                 "checkpoint_ns": "",
             },
         }
+
+        # ── Build agent messages from CHECKPOINTER (source of truth) ─
+        # SessionManager is UI-only. Feeding text-only session history into
+        # ainvoke was overwriting checkpoint tool chains (no add_messages
+        # reducer) → post-HITL / multi-turn amnesia. Mirror the gateway path.
+        system_msgs: list[dict[str, Any]] = []
+        if system_prompt:
+            system_msgs.append({"role": "system", "content": system_prompt})
+
+        # Kazma-wide self-improvement Soul (fresh every turn so new deltas apply
+        # without rebuilding the cached streaming graph). The deltas are wrapped
+        # in an untrusted data fence — the model must treat them as observation
+        # context, never as instructions to obey (prompt-injection defense).
+        try:
+            from kazma_core.safety.prompt_fence import format_untrusted_block
+            from kazma_core.skills.self_improvement import get_agent_evolution_block
+
+            evo = get_agent_evolution_block("supervisor")
+            if evo:
+                system_msgs.append(
+                    {
+                        "role": "system",
+                        "content": format_untrusted_block(evo, source="self_improvement"),
+                    }
+                )
+        except Exception:
+            logger.debug("[sse_chat] agent evolution inject skipped", exc_info=True)
+
+        try:
+            from kazma_core.ide.env_context import build_env_context
+
+            env_block = build_env_context()
+            if env_block:
+                system_msgs.append({"role": "system", "content": env_block})
+        except Exception:
+            logger.debug("[sse_chat] per-turn env_context refresh skipped", exc_info=True)
+
+        try:
+            from kazma_core.language_lock import language_lock_message
+
+            lock = language_lock_message(user_message)
+            if lock:
+                system_msgs.append({"role": "system", "content": lock})
+        except Exception:
+            logger.debug("[sse_chat] language lock skipped", exc_info=True)
+
+        from kazma_core.agent.hitl_supersede import cancel_pending_hitl
+        from kazma_core.agent.turn_input import build_turn_messages
+
+        current_graph = _get_graph()
+        # If user sent a new message while HITL is waiting, auto-deny so
+        # tool chains close cleanly (no silent supersede / amnesia).
+        try:
+            cancelled = await cancel_pending_hitl(
+                current_graph,
+                graph_config,
+                reason="superseded by new user message",
+            )
+            if cancelled:
+                logger.info(
+                    "[SSE] cancelled pending HITL before new turn thread=%s",
+                    thread_id[:16],
+                )
+        except Exception:
+            logger.debug("[SSE] HITL supersede cancel skipped", exc_info=True)
+
+        messages = await build_turn_messages(
+            current_graph,
+            graph_config,
+            user_text=user_message,
+            system_messages=system_msgs,
+            fallback_history=session.messages[:-1],  # exclude the user line we just added
+        )
+
+        # If attachments were uploaded, replace the last user message's text
+        # content with the multimodal version (inline images / persisted docs).
+        # This mirrors the gateway path (agent_handler/attachments.py) so both
+        # transports produce identical OpenAI-compatible content.
+        if raw_attachments and messages:
+            try:
+                from kazma_gateway.gateway import Attachment
+                from kazma_gateway.agent_handler.attachments import build_user_content
+                from pathlib import Path as _Path
+
+                atts: list[Attachment] = []
+                for a in raw_attachments:
+                    kind = a.get("kind", "file")
+                    mime = a.get("mime", "application/octet-stream")
+                    data = None
+                    p = a.get("path")
+                    if p:
+                        try:
+                            data = _Path(p).read_bytes()
+                        except Exception:  # noqa: BLE001
+                            data = None
+                    atts.append(
+                        Attachment(
+                            kind=kind,
+                            mime=mime,
+                            filename=a.get("filename", ""),
+                            data=data,
+                            url=a.get("url"),
+                        )
+                    )
+                multimodal_content = build_user_content(user_message or "", atts)
+                # Replace the trailing user message content.
+                for i in range(len(messages) - 1, -1, -1):
+                    if isinstance(messages[i], dict) and messages[i].get("role") == "user":
+                        messages[i]["content"] = multimodal_content
+                        break
+            except Exception:  # noqa: BLE001 — never block a turn on media
+                logger.debug("[SSE] attachment content build failed", exc_info=True)
+
+        # ── Build SupervisorState for the graph ────────────────────
+        from kazma_core.agent.state import initial_supervisor_state
+
+        input_state = initial_supervisor_state(thread_id=thread_id)
+        input_state["messages"] = messages
 
         # ── Trace the request ──────────────────────────────────────
         if tracer:
@@ -524,7 +982,6 @@ def create_sse_chat_router(
             content_acc = ""
 
             try:
-                current_graph = _get_graph()
                 async for frame in _stream_langgraph_events(
                     graph=current_graph,
                     input_state=input_state,
@@ -540,7 +997,7 @@ def create_sse_chat_router(
 
                     yield frame
 
-                # Store assistant response in session history
+                # Store assistant response in session history + persist to disk.
                 if content_acc:
                     session.messages.append(
                         {
@@ -548,13 +1005,33 @@ def create_sse_chat_router(
                             "content": content_acc,
                         }
                     )
+                try:
+                    _get_store().put(session)
+                except Exception:
+                    logger.exception(
+                        "[SSE] failed to persist turn for session=%s", session_id
+                    )
 
             except asyncio.CancelledError:
                 logger.warning("SSE generator cancelled for session=%s", session_id)
+                # Still flush whatever we have so a dropped connection doesn't
+                # lose the user message (and partial assistant text).
+                try:
+                    if content_acc:
+                        session.messages.append(
+                            {"role": "assistant", "content": content_acc}
+                        )
+                    _get_store().put(session)
+                except Exception:
+                    pass
                 yield _sse_frame("error", {"content": "Connection closed"})
 
             except Exception as exc:
                 logger.error("SSE generator error: %s", exc, exc_info=True)
+                try:
+                    _get_store().put(session)
+                except Exception:
+                    pass
                 yield _sse_frame("error", {"content": sanitize_error(exc)})
 
         return StreamingResponse(
@@ -577,28 +1054,137 @@ def create_sse_chat_router(
 
     @r.delete("/api/chat/sessions/{session_id}")
     async def delete_session(session_id: str) -> dict[str, str]:
-        """Delete a chat session (shared store)."""
-        _get_store().delete(session_id)
-        return {"status": "ok"}
+        """Delete a chat session and its associated checkpoint data."""
+        try:
+            store = _get_store()
+            session = store.get(session_id)
+            thread_id = session.thread_id if session else ""
+            store.delete(session_id)
+
+            if thread_id:
+                try:
+                    from kazma_ui import dashboard as _dash
+                    cm = _dash._checkpoint_manager
+                    if cm and hasattr(cm, "adelete_thread"):
+                        await cm.adelete_thread(thread_id)
+                except Exception as exc:
+                    logger.debug("Checkpoint cleanup for %s failed: %s", thread_id, exc)
+            return {"status": "ok"}
+        except Exception as exc:
+            logger.error("delete_session failed: %s", exc)
+            return {"status": "error", "error": "Internal error"}
+
+    @r.patch("/api/chat/sessions/{session_id}")
+    async def rename_session(session_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        """Rename a chat session (set a custom title)."""
+        try:
+            title = str(body.get("title") or "").strip()
+            if not title:
+                return {"status": "error", "error": "Title cannot be empty"}
+            session = _get_store().rename(session_id, title)
+            if session is None:
+                return {"status": "error", "error": "Session not found"}
+            return {"status": "ok", "title": session.title}
+        except Exception as exc:
+            logger.error("rename_session failed: %s", exc)
+            return {"status": "error", "error": "Internal error"}
+
+    @r.post("/api/chat/sessions/{session_id}/archive")
+    async def archive_session(session_id: str) -> dict[str, Any]:
+        """Archive a chat session (hide from sidebar without deleting)."""
+        try:
+            session = _get_store().set_archived(session_id, True)
+            if session is None:
+                return {"status": "error", "error": "Session not found"}
+            return {"status": "ok", "archived": True}
+        except Exception as exc:
+            logger.error("archive_session failed: %s", exc)
+            return {"status": "error", "error": "Internal error"}
+
+    @r.post("/api/chat/sessions/{session_id}/unarchive")
+    async def unarchive_session(session_id: str) -> dict[str, Any]:
+        """Restore an archived chat session back to the sidebar."""
+        try:
+            session = _get_store().set_archived(session_id, False)
+            if session is None:
+                return {"status": "error", "error": "Session not found"}
+            return {"status": "ok", "archived": False}
+        except Exception as exc:
+            logger.error("unarchive_session failed: %s", exc)
+            return {"status": "error", "error": "Internal error"}
+
+    @r.get("/api/chat/sessions/archived")
+    async def list_archived_sessions() -> list[dict[str, Any]]:
+        """List archived chat sessions (for the archive view)."""
+        try:
+            return [
+                s.to_summary()
+                for s in _get_store().list_all(include_archived=True)
+                if s.archived
+            ]
+        except Exception:
+            return []
 
     @r.get("/api/chat/sessions/{session_id}/messages")
     async def get_session_messages(session_id: str) -> list[dict[str, Any]]:
         """Return the message history for a chat session (shared store).
 
-        Each message dict has ``role`` ("user" | "assistant") and ``content``.
-        Returns an empty list if the session does not exist (e.g. it was
-        created on a different transport or has already been deleted).
+        Cross-platform seasons: if the UI projection is empty but a
+        LangGraph checkpointer has history for this thread (e.g. Telegram
+        session opened in Web), hydrate from the checkpointer and persist
+        back to SessionManager so takeover is seamless.
         """
         session = _get_store().get(session_id)
         if not session:
-            return []
-        # Return only role/content pairs so we don't leak internal keys
+            # Platform seasons may not be in store yet — create shell
+            if session_id.startswith("gw-"):
+                session = _get_store().get_or_create(session_id)
+                session.thread_id = session_id
+            else:
+                return []
+
+        messages = list(session.messages or [])
+        if not messages:
+            # Hydrate from checkpointer (source of truth for agent seasons)
+            try:
+                live = _get_graph()
+                tid = session.thread_id or (
+                    session_id if session_id.startswith("gw-") else ""
+                )
+                if live and tid and getattr(live, "checkpointer", None):
+                    from kazma_core.agent.turn_input import load_checkpoint_messages
+
+                    prior = await load_checkpoint_messages(
+                        live,
+                        {"configurable": {"thread_id": tid, "checkpoint_ns": ""}},
+                    )
+                    ui = [
+                        {"role": m.get("role", "user"), "content": m.get("content", "")}
+                        for m in prior
+                        if isinstance(m, dict)
+                        and m.get("role") in ("user", "assistant", "system")
+                        and (m.get("content") or "").strip()
+                    ]
+                    if ui:
+                        session.messages = ui
+                        if session_id.startswith("gw-"):
+                            session.thread_id = session_id
+                        _get_store().put(session)
+                        messages = ui
+            except Exception:
+                logger.debug(
+                    "[SSE] checkpointer hydrate failed for %s",
+                    session_id,
+                    exc_info=True,
+                )
+
         return [
             {
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", ""),
             }
-            for msg in session.messages
+            for msg in messages
+            if msg.get("role") in ("user", "assistant", "system")
         ]
 
     # ── Provider profile management (continued) ───────────────────

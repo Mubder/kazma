@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+__all__ = ["SecurityAuditTrail", "SecurityEvent", "SecurityReport"]
+
 
 @dataclass
 class SecurityEvent:

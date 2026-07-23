@@ -12,19 +12,25 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Any
+
+__all__ = ["KnowledgeGraph"]
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PATH = "kazma-data/knowledge_graph.json"
+_FLUSH_DELAY = 2.0  # seconds before auto-flush
 
 
 class KnowledgeGraph:
     """NetworkX-backed structural memory (Layer 2).
 
-    Persists to JSON on every mutation.  Falls back to an empty graph
-    if the file is corrupted or missing.
+    Persists to JSON with timer-based batching — mutations set a dirty flag
+    and a background timer flushes after ``_FLUSH_DELAY`` seconds of
+    inactivity.  Falls back to an empty graph if the file is corrupted or
+    missing.
 
     Args:
         path:  Path to the JSON persistence file.
@@ -34,6 +40,9 @@ class KnowledgeGraph:
         self._path = Path(path)
         self._graph: Any = None
         self._ready: bool = False
+        self._dirty: bool = False
+        self._flush_timer: threading.Timer | None = None
+        self._lock = threading.Lock()
         self._load()
 
     # ── Persistence ─────────────────────────────────────────────────────
@@ -72,6 +81,29 @@ class KnowledgeGraph:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
+    def _mark_dirty(self) -> None:
+        """Mark graph as changed and schedule a delayed flush."""
+        with self._lock:
+            self._dirty = True
+            # Cancel any pending timer
+            if self._flush_timer is not None:
+                self._flush_timer.cancel()
+            # Schedule a new flush
+            self._flush_timer = threading.Timer(_FLUSH_DELAY, self._flush)
+            self._flush_timer.daemon = True
+            self._flush_timer.start()
+
+    def _flush(self) -> None:
+        """Flush dirty graph to disk if still dirty."""
+        with self._lock:
+            if not self._dirty:
+                return
+            self._dirty = False
+            try:
+                self._save()
+            except Exception as exc:
+                logger.warning("[KnowledgeGraph] Flush failed: %s", exc)
+
     @property
     def available(self) -> bool:
         return self._ready
@@ -88,7 +120,7 @@ class KnowledgeGraph:
         if not self._ready:
             return
         self._graph.add_node(entity_id, type=entity_type, **(properties or {}))
-        self._save()
+        self._mark_dirty()
 
     def add_relation(
         self,
@@ -101,7 +133,7 @@ class KnowledgeGraph:
         if not self._ready:
             return
         self._graph.add_edge(source, target, type=relation_type, **(properties or {}))
-        self._save()
+        self._mark_dirty()
 
     def query_related(
         self,
@@ -194,6 +226,11 @@ class KnowledgeGraph:
 
     def clear(self) -> None:
         """Reset the graph to empty."""
+        with self._lock:
+            if self._flush_timer is not None:
+                self._flush_timer.cancel()
+                self._flush_timer = None
+            self._dirty = False
         self._graph = self._graph_class()()
         self._save()
         logger.info("[KnowledgeGraph] Cleared")

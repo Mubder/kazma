@@ -4,8 +4,11 @@
 
 Kazma is a multi-platform AI agent framework with a LangGraph supervisor brain,
 swarm orchestration, cross-platform dispatch (Telegram/Discord/Slack/Web/TUI),
-and an OpenAI-compatible LLM provider layer. See `architecture.md` for the full
-system architecture and `CHANGELOG.md` for recent work.
+and an OpenAI-compatible LLM provider layer. See `docs/docs/guide/architecture.md`
+(Docusaurus docs under `docs/docs/`) for the full system architecture and
+`CHANGELOG.md` for recent work. Latest production audit:
+`docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md`. System map:
+`docs/ARCHITECTURE_AND_SYSTEM_MAP.md`.
 
 ## Package Scope
 
@@ -24,6 +27,14 @@ All packages are in scope. The four main packages:
 - `get_client(model)` auto-corrects provider/model mismatches at runtime
 - `set_active_model()` switches BOTH model AND provider via `find_provider_for_model()`
 - Never change one without the other or the LLM call goes to the wrong API endpoint
+- **Provider dispatch has FOUR branches** in `get_client()` / `get_model()` /
+  `get_client_by_provider()`: `google`→`GeminiProvider`, `anthropic`→
+  `AnthropicProvider`, `azure`→`AzureProvider`, `bedrock`→`BedrockProvider`,
+  else the generic `LLMProvider`. The generic `LLMProvider` always sends
+  `Authorization: Bearer` to `/chat/completions` — it CANNOT reach
+  Anthropic-native (`/messages`), Azure (`api-key` header + `api-version`),
+  or Bedrock (SigV4). Adding a non-Bearer provider means a new class +
+  a branch in all three sites (mirror the Google case), not just a preset.
 
 ### 2. Platform Isolation (`kazma-gateway/kazma_gateway/agent_handler.py`)
 - The LangGraph state NEVER contains `chat_id`, `user_id`, or `message_id`
@@ -181,6 +192,41 @@ workspace. Three new modules; understanding their interaction is essential.
 - JavaScript: syntax-check with `node --check` before committing
 - Never use `&&` or `||` in PowerShell commands; use `;` and `$LASTEXITCODE`
 
+### 11. Self-Improvement Soul Store + Prompt Fence (`kazma-core/kazma_core/skills/self_improvement.py`)
+
+The self-improvement engine persists "Soul deltas" (LLM-generated system-prompt
+refinements derived from untrusted conversation/tool output) and re-injects
+them into every future system prompt. Two invariants must hold:
+
+**A. Storage is ConfigStore-backed, NOT a free-standing JSON file.**
+- The supervisor/main-agent Soul lives in `get_config_store()` under key
+  `self_improvement.agent_evolution` (a dict `{"agents": {<id>: {soul, history}}}`).
+- `_load_agent_evolution` / `_save_agent_evolution` go through ConfigStore —
+  do NOT reintroduce a direct `path.write_text` write (the old
+  `agent_evolution.json` was non-atomic and corruptible on crash/concurrency).
+- A compound read-modify-write lock (`_agent_evo_lock`) serializes
+  `apply_agent_mutation` within a process; ConfigStore's own lock only guards
+  individual get/set, not the multi-step sequence. Both are required.
+- A one-time migration (`_migrate_legacy_evolution_if_present`) moves any
+  pre-existing `agent_evolution.json` into ConfigStore and renames it
+  `.migrated`. Leave this in place.
+- Swarm *worker* deltas live on `WorkerRegistry` (`WorkerEntry.system_prompt`),
+  not here.
+
+**B. Every injected Soul delta MUST go through the prompt fence.**
+- `kazma_core/safety/prompt_fence.py` provides `is_override_delta()` (rejects
+  injection markers like "ignore prior instructions") and
+  `format_untrusted_block()` (wraps content in a `<kazma:data untrusted>`
+  fence telling the model the text is observation data, NOT instructions).
+- Deltas are checked at creation time (`_analyze_success`/`_analyze_failure`)
+  AND at apply time (`_auto_apply`/`apply_agent_mutation`) — defense-in-depth.
+  Never inject a delta via the old `"Apply these refinements to your behaviour:"`
+  framing; always use `format_untrusted_block(evo, source="self_improvement")`.
+- The 3 supervisor injection sites (`agent_runner.py`, `sse_chat.py`, gateway
+  `graph.py`) all use the fence. Keep them in sync if you add a 4th.
+- Kill-switch `KAZMA_SELF_IMPROVEMENT=0` is checked live (not just at init) on
+  both the chat/supervisor path and the swarm worker path.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
@@ -200,7 +246,7 @@ workspace. Three new modules; understanding their interaction is essential.
 Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object { (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.Id)).CommandLine -like '*uvicorn*kazma*' } | ForEach-Object { Stop-Process -Id $_.Id -Force }
 
 # Start server (background)
-cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8090
+cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090
 ```
 
 ## Testing & Validation
@@ -212,7 +258,12 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 
 ## Key References
 
-- `architecture.md` — Full system architecture with data flow diagram
-- `CHANGELOG.md` — Sprint history (Sprint 12 = current swarm pro-grade work)
-- `HANDOFF_PHASE5.md` — Detailed file-by-file handoff from the swarm overhaul
-- `HANDOFF_PROMPT.md` — Ready-to-paste onboarding prompt for new agents
+- `docs/docs/intro.md` — Documentation map (single SoT under `docs/docs/`)
+- `docs/docs/guide/architecture.md` — Full system architecture with data flow diagram
+- `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
+- `docs/docs/reference/tools-catalog.md` — Built-in + native tools
+- `docs/docs/ops/production-checklist.md` — Production go-live checklist
+- `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Latest production audit
+- `docs/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan
+- `CHANGELOG.md` — Sprint history
+- `archive/` — Retired docs trees (former `docs-v2`, legacy pages)

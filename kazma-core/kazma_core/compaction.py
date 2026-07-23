@@ -15,6 +15,8 @@ from typing import Any
 
 from kazma_core.state import AgentState
 
+__all__ = ["CompactionEngine"]
+
 logger = logging.getLogger(__name__)
 
 # Summary prompt that instructs the LLM to preserve critical information
@@ -115,6 +117,14 @@ class CompactionEngine:
         system_content = self._build_compacted_system(summary, memories)
 
         compacted_messages: list[dict[str, Any]] = [{"role": "system", "content": system_content}]
+
+        # Preserve the in-flight user question. Compaction fires mid-turn
+        # (80% threshold or /compact), so dropping the latest user message
+        # would leave the agent with nothing to answer and lose the request.
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                compacted_messages.append({"role": "user", "content": msg.get("content", "")})
+                break
 
         # Step 5: Build and return new state
         new_state: AgentState = {

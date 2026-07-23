@@ -11,6 +11,8 @@ from kazma_core.swarm.task import SwarmTask, TaskType
 from kazma_core.swarm.task_store import TaskStore
 from kazma_core.swarm.worker import SwarmWorker
 
+__all__ = ["SwarmManager"]
+
 logger = logging.getLogger(__name__)
 
 

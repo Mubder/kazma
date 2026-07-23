@@ -9,6 +9,8 @@ import yaml
 
 from kazma_core.hub.manifest_schema import SkillManifest, ValidationResult
 
+__all__ = ["SkillValidator"]
+
 # Allowed permission names
 _ALLOWED_PERMISSIONS = frozenset(
     {

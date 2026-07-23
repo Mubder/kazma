@@ -22,6 +22,8 @@ from kazma_ui.services import get_swarm_service
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["register_tasks_routes"]
+
 try:
     from kazma_core.swarm import (
         SwarmTask,

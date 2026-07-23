@@ -30,7 +30,88 @@ from typing import Any, Protocol
 
 import yaml
 
+__all__ = ["CONFIG_STORE_MIGRATIONS", "ConfigStore", "ConfigStoreProtocol", "Migration", "MigrationRunner", "apply_sqlite_pragmas", "apply_sqlite_pragmas_async", "get_config_store", "get_kazma_secret", "get_or_create_disclosure_key", "get_validated_config", "is_masked_secret_placeholder", "is_sensitive_config_key", "is_vault_ref", "reset_config_store", "run_config_store_migrations", "set_config_store"]
+
 logger = logging.getLogger(__name__)
+
+# ── Vault-backed secrets ──────────────────────────────────────────────
+# When KAZMA_VAULT_KEY is set, sensitive keys are stored encrypted in the
+# vault; ConfigStore keeps a ``vault://cfg:<key>`` pointer only.
+_VAULT_REF_PREFIX = "vault://"
+_VAULT_NAME_PREFIX = "cfg:"
+
+# Match last path segment of dotted keys (e.g. llm.api_key → api_key).
+_SENSITIVE_LAST_SEGMENTS = frozenset({
+    "api_key",
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "private_key",
+    "access_token",
+    "refresh_token",
+    "bot_token",
+    "app_token",
+    "auth_token",
+    "client_secret",
+    "webhook_secret",
+})
+
+
+def is_sensitive_config_key(key: str) -> bool:
+    """True when *key* should never sit in plaintext settings.db if vault is on."""
+    if not key:
+        return False
+    last = key.lower().replace("-", "_").rsplit(".", 1)[-1]
+    if last in _SENSITIVE_LAST_SEGMENTS:
+        return True
+    return (
+        last.endswith("_token")
+        or last.endswith("_secret")
+        or last.endswith("_password")
+        or last.endswith("_api_key")
+    )
+
+
+def is_vault_ref(value: Any) -> bool:
+    """True if *value* is a vault pointer stored in ConfigStore."""
+    return isinstance(value, str) and value.startswith(_VAULT_REF_PREFIX)
+
+
+def is_masked_secret_placeholder(value: Any) -> bool:
+    """True if UI sent a masked placeholder (must not overwrite real secrets)."""
+    if not isinstance(value, str) or not value:
+        return False
+    if value in ("***", "****", "********"):
+        return True
+    # e.g. ****abcd or sk-****1234
+    return "****" in value
+
+
+def _vault_secret_name(key: str) -> str:
+    return f"{_VAULT_NAME_PREFIX}{key}"
+
+
+def _vault_ref_for_key(key: str) -> str:
+    return f"{_VAULT_REF_PREFIX}{_vault_secret_name(key)}"
+
+
+def _try_get_vault():
+    """Best-effort vault handle; None if disabled or unavailable."""
+    try:
+        from kazma_core.security.vault import get_vault
+
+        return get_vault()
+    except Exception:
+        return None
+
+
+def _redact_for_log(key: str, value: Any) -> str:
+    if is_sensitive_config_key(key) or is_vault_ref(value):
+        return "****"
+    s = repr(value)
+    return s if len(s) < 80 else s[:77] + "..."
 
 
 def get_kazma_secret() -> str:
@@ -392,7 +473,12 @@ class _InMemoryStore:
 
 
 class ConfigStore:
-    """SQLite-backed runtime configuration with YAML fallback."""
+    """Runtime configuration with YAML fallback.
+
+    Backend:
+      * **SQLite** (default) — ``kazma-data/settings.db``
+      * **Postgres** when ``KAZMA_DATABASE_URL`` is set — multi-replica safe
+    """
 
     def __init__(self, db_path: str | None = None, yaml_path: str | None = None) -> None:
         self._db_path = Path(db_path or _DEFAULT_DB)
@@ -402,9 +488,27 @@ class ConfigStore:
         self._lock = threading.Lock()
         self._yaml_cache: dict[str, Any] | None = None
         self._cache: dict[str, Any] = {}
+        self._pg = None  # lazy PostgresPool
         self._init_db()
 
+    def _use_postgres(self) -> bool:
+        try:
+            from kazma_core.db.backend import is_postgres
+
+            return is_postgres()
+        except Exception:
+            return False
+
+    def _pg_pool(self) -> Any:
+        if self._pg is None:
+            from kazma_core.db.postgres_pool import get_postgres_pool
+
+            self._pg = get_postgres_pool()
+        return self._pg
+
     def _get_conn(self) -> sqlite3.Connection:
+        if self._use_postgres():
+            raise RuntimeError("SQLite connection requested while Postgres backend is active")
         if self._conn is None:
             self._conn = sqlite3.connect(
                 str(self._db_path),
@@ -417,24 +521,48 @@ class ConfigStore:
 
     def _init_db(self) -> None:
         """Initialize database schema and run migrations."""
+        if self._use_postgres():
+            # Ensures kazma_settings table via pool bootstrap
+            try:
+                self._pg_pool()
+                logger.info("[ConfigStore] using Postgres backend")
+            except Exception as exc:
+                logger.error(
+                    "[ConfigStore] Postgres init failed (%s) — falling back is unsafe; "
+                    "fix KAZMA_DATABASE_URL or install psycopg",
+                    exc,
+                )
+                raise
+            return
         with self._lock:
             conn = self._get_conn()
             # Run migrations instead of simple schema creation
             run_config_store_migrations(str(self._db_path))
 
     def _load_yaml(self) -> dict[str, Any]:
-        """Load and cache the base YAML config."""
+        """Load and cache shipped YAML + optional ``kazma.local.yaml`` overrides.
+
+        ``kazma.yaml`` is product defaults (git-tracked). Machine-specific
+        overrides belong in gitignored ``kazma.local.yaml`` so ``git pull``
+        never collides with user settings. Runtime UI still wins via SQLite.
+        """
         if self._yaml_cache is not None:
             return self._yaml_cache
-        if self._yaml_path.exists():
-            with open(self._yaml_path) as f:
-                self._yaml_cache = yaml.safe_load(f) or {}
-        else:
-            self._yaml_cache = {}
+        try:
+            from kazma_core.config_loader import load_merged_yaml
+
+            self._yaml_cache = load_merged_yaml(self._yaml_path)
+        except Exception as exc:
+            logger.warning("[ConfigStore] merged YAML load failed: %s", exc)
+            if self._yaml_path.exists():
+                with open(self._yaml_path, encoding="utf-8") as f:
+                    self._yaml_cache = yaml.safe_load(f) or {}
+            else:
+                self._yaml_cache = {}
         return self._yaml_cache
 
     def invalidate_yaml_cache(self) -> None:
-        """Force re-read of kazma.yaml on next access."""
+        """Force re-read of kazma.yaml (+ local) on next access."""
         self._yaml_cache = None
         with self._lock:
             self._cache.clear()
@@ -472,6 +600,97 @@ class ConfigStore:
             target[parts[-1]] = json.loads(row["value"])
         return result
 
+    def _resolve_vault_value(self, key: str, val: Any) -> Any:
+        """Resolve vault:// pointers; optionally migrate plaintext secrets into vault."""
+        if is_vault_ref(val):
+            vault = _try_get_vault()
+            if vault is None:
+                logger.warning(
+                    "[ConfigStore] Vault ref for %s but vault disabled — secret unavailable",
+                    key,
+                )
+                return None
+            name = str(val)[len(_VAULT_REF_PREFIX):]
+            secret = vault.retrieve(name)
+            return secret if secret is not None else None
+
+        # Lazy migrate: plaintext sensitive value + vault available → encrypt
+        if (
+            is_sensitive_config_key(key)
+            and isinstance(val, str)
+            and val
+            and not is_masked_secret_placeholder(val)
+        ):
+            vault = _try_get_vault()
+            if vault is not None:
+                try:
+                    vname = _vault_secret_name(key)
+                    vault.store(vname, val, category="config")
+                    ref = _vault_ref_for_key(key)
+                    self._write_db_value(key, ref, category="security")
+                    logger.info(
+                        "[ConfigStore] Migrated sensitive key %s into vault", key
+                    )
+                    return val
+                except Exception as exc:
+                    logger.debug("[ConfigStore] Vault migrate skip for %s: %s", key, exc)
+        return val
+
+    def _write_db_value(self, key: str, value: Any, category: str = "general") -> None:
+        """Low-level DB write under the store lock (pointer updates after vault store)."""
+        now = datetime.now(UTC).isoformat()
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute("BEGIN")
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
+                       VALUES (?, ?, ?, ?)""",
+                    (key, json.dumps(value), category, now),
+                )
+                conn.execute("COMMIT")
+                self._cache.clear()
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+
+    def _prepare_value_for_storage(self, key: str, value: Any) -> Any | None:
+        """Return value to persist, or None to skip write (masked placeholder).
+
+        Sensitive values go to the vault when available; DB stores vault:// ref.
+        """
+        if is_masked_secret_placeholder(value):
+            # UI re-saved a masked field — keep existing secret untouched.
+            return None
+
+        if not is_sensitive_config_key(key):
+            return value
+
+        if value is None or value == "":
+            return value
+
+        if is_vault_ref(value):
+            return value
+
+        if not isinstance(value, str):
+            # Non-string secrets still stored as JSON (rare)
+            return value
+
+        vault = _try_get_vault()
+        if vault is None:
+            return value  # plaintext fallback when vault disabled
+
+        try:
+            vname = _vault_secret_name(key)
+            vault.store(vname, value, category="config")
+            return _vault_ref_for_key(key)
+        except Exception as exc:
+            logger.warning(
+                "[ConfigStore] Vault store failed for %s — falling back to plaintext: %s",
+                key, exc,
+            )
+            return value
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get a setting. DB overrides YAML.
 
@@ -480,25 +699,56 @@ class ConfigStore:
             2. DB child keys (``key.*``) merged into a dict — so a value
                flattened by ``import_yaml`` is reassembled transparently.
             3. YAML dotted-key lookup.
+
+        Sensitive values may be stored as ``vault://…`` pointers; this method
+        decrypts them when the vault is enabled.
         """
         with self._lock:
             if key in self._cache:
                 cached = self._cache[key]
                 if cached is _MISSING:
                     return default
-                return cached
+                # Cache may hold vault refs or plaintext; resolve outside lock
+                raw = cached
+            else:
+                raw = _MISSING
+                if self._use_postgres():
+                    pool = self._pg_pool()
+                    if pool is None:
+                        raw = _MISSING
+                    else:
+                        row = pool.execute_one(
+                            "SELECT value FROM kazma_settings WHERE key = %s",
+                            (key,),
+                        )
+                        if row is not None:
+                            raw = json.loads(row["value"]) if isinstance(row["value"], str) else row["value"]
+                            self._cache[key] = raw
+                        else:
+                            merged = self._collect_prefixed_pg(pool, key)
+                            if merged:
+                                self._cache[key] = merged
+                                return merged
+                            raw = _MISSING
+                else:
+                    conn = self._get_conn()
+                    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+                    if row is not None:
+                        raw = json.loads(row["value"])
+                        self._cache[key] = raw
+                    else:
+                        # Re-merge flattened children (e.g. from import_yaml round-trip).
+                        merged = self._collect_prefixed(conn, key)
+                        if merged:
+                            self._cache[key] = merged
+                            return merged
+                        raw = _MISSING
 
-            conn = self._get_conn()
-            row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-            if row is not None:
-                val = json.loads(row["value"])
-                self._cache[key] = val
-                return val
-            # Re-merge flattened children (e.g. from import_yaml round-trip).
-            merged = self._collect_prefixed(conn, key)
-            if merged:
-                self._cache[key] = merged
-                return merged
+        if raw is not _MISSING:
+            resolved = self._resolve_vault_value(key, raw)
+            if resolved is None and is_vault_ref(raw):
+                return default
+            return resolved
 
         # Fall back to YAML (supports dotted keys like "llm.model")
         yaml_data = self._load_yaml()
@@ -514,30 +764,64 @@ class ConfigStore:
         with self._lock:
             if val is not None:
                 self._cache[key] = val
-                return val
             else:
                 self._cache[key] = _MISSING
                 return default
+        return self._resolve_vault_value(key, val)
 
     def set(self, key: str, value: Any, category: str = "general") -> None:
-        """Set a setting in the DB."""
+        """Set a setting in the DB.
+
+        Sensitive keys are written to the encrypted vault when
+        ``KAZMA_VAULT_KEY`` is set; the DB only stores a pointer.
+        Masked placeholders from the UI are ignored (no overwrite).
+        """
+        to_store = self._prepare_value_for_storage(key, value)
+        if to_store is None:
+            logger.debug(
+                "Setting skip (masked placeholder): %s (category=%s)", key, category
+            )
+            return
         now = datetime.now(UTC).isoformat()
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute("BEGIN")
-                conn.execute(
-                    """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
-                       VALUES (?, ?, ?, ?)""",
-                    (key, json.dumps(value), category, now),
-                )
-                conn.execute("COMMIT")
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    raise RuntimeError("Postgres pool unavailable")
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO kazma_settings (key, value, category, updated_at)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (key) DO UPDATE SET
+                              value = EXCLUDED.value,
+                              category = EXCLUDED.category,
+                              updated_at = EXCLUDED.updated_at
+                            """,
+                            (key, json.dumps(to_store), category, now),
+                        )
+                    conn.commit()
                 self._cache.clear()
-            except Exception:
-                logger.debug("set() write failed, rolling back for key=%s", key)
-                conn.execute("ROLLBACK")
-                raise
-        logger.info("Setting updated: %s = %s (category=%s)", key, value, category)
+            else:
+                conn = self._get_conn()
+                try:
+                    conn.execute("BEGIN")
+                    conn.execute(
+                        """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
+                           VALUES (?, ?, ?, ?)""",
+                        (key, json.dumps(to_store), category, now),
+                    )
+                    conn.execute("COMMIT")
+                    self._cache.clear()
+                except Exception:
+                    logger.debug("set() write failed, rolling back for key=%s", key)
+                    conn.execute("ROLLBACK")
+                    raise
+        logger.info(
+            "Setting updated: %s = %s (category=%s)",
+            key, _redact_for_log(key, to_store), category,
+        )
 
     def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
         """Atomically set multiple keys in a single transaction.
@@ -550,28 +834,57 @@ class ConfigStore:
             items: List of ``(key, value, category)`` tuples.
 
         Returns:
-            Number of keys written.
+            Number of keys written (after dropping masked placeholders).
         """
         if not items:
             return 0
+        prepared: list[tuple[str, Any, str]] = []
+        for key, value, category in items:
+            to_store = self._prepare_value_for_storage(key, value)
+            if to_store is None:
+                continue
+            prepared.append((key, to_store, category))
+        if not prepared:
+            return 0
         now = datetime.now(UTC).isoformat()
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute("BEGIN")
-                for key, value, category in items:
-                    conn.execute(
-                        """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
-                           VALUES (?, ?, ?, ?)""",
-                        (key, json.dumps(value), category, now),
-                    )
-                conn.execute("COMMIT")
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    raise RuntimeError("Postgres pool unavailable")
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        for key, value, category in prepared:
+                            cur.execute(
+                                """
+                                INSERT INTO kazma_settings (key, value, category, updated_at)
+                                VALUES (%s, %s, %s, %s)
+                                ON CONFLICT (key) DO UPDATE SET
+                                  value = EXCLUDED.value,
+                                  category = EXCLUDED.category,
+                                  updated_at = EXCLUDED.updated_at
+                                """,
+                                (key, json.dumps(value), category, now),
+                            )
+                    conn.commit()
                 self._cache.clear()
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
-        logger.info("Batch set: %d keys updated atomically", len(items))
-        return len(items)
+            else:
+                conn = self._get_conn()
+                try:
+                    conn.execute("BEGIN")
+                    for key, value, category in prepared:
+                        conn.execute(
+                            """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
+                               VALUES (?, ?, ?, ?)""",
+                            (key, json.dumps(value), category, now),
+                        )
+                    conn.execute("COMMIT")
+                    self._cache.clear()
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
+        logger.info("Batch set: %d keys updated atomically", len(prepared))
+        return len(prepared)
 
     @contextmanager
     def transaction(self) -> Generator[sqlite3.Connection, None, None]:
@@ -600,6 +913,19 @@ class ConfigStore:
     def get_category(self, category: str) -> dict[str, Any]:
         """Get all settings in a category from DB."""
         with self._lock:
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    return {}
+                rows = pool.execute(
+                    "SELECT key, value FROM kazma_settings WHERE category = %s",
+                    (category,),
+                )
+                out: dict[str, Any] = {}
+                for row in rows:
+                    val = row["value"]
+                    out[row["key"]] = json.loads(val) if isinstance(val, str) else val
+                return out
             conn = self._get_conn()
             rows = conn.execute("SELECT key, value FROM settings WHERE category = ?", (category,)).fetchall()
         return {row["key"]: json.loads(row["value"]) for row in rows}
@@ -607,6 +933,21 @@ class ConfigStore:
     def get_all(self) -> dict[str, dict[str, Any]]:
         """Get all settings grouped by category."""
         with self._lock:
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    return {}
+                rows = pool.execute(
+                    "SELECT key, value, category FROM kazma_settings ORDER BY category, key"
+                )
+                result_pg: dict[str, dict[str, Any]] = {}
+                for row in rows:
+                    cat = row["category"] or "general"
+                    if cat not in result_pg:
+                        result_pg[cat] = {}
+                    val = row["value"]
+                    result_pg[cat][row["key"]] = json.loads(val) if isinstance(val, str) else val
+                return result_pg
             conn = self._get_conn()
             rows = conn.execute("SELECT key, value, category FROM settings ORDER BY category, key").fetchall()
         result: dict[str, dict[str, Any]] = {}
@@ -617,21 +958,64 @@ class ConfigStore:
             result[cat][row["key"]] = json.loads(row["value"])
         return result
 
+    def _collect_prefixed_pg(self, pool: Any, key: str) -> dict[str, Any] | None:
+        """Reassemble flattened children for Postgres (mirror of _collect_prefixed)."""
+        prefix = key + "."
+        rows = pool.execute(
+            "SELECT key, value FROM kazma_settings WHERE key LIKE %s",
+            (prefix + "%",),
+        )
+        if not rows:
+            return None
+        merged: dict[str, Any] = {}
+        for row in rows:
+            rest = row["key"][len(prefix) :]
+            parts = rest.split(".")
+            cursor: Any = merged
+            for p in parts[:-1]:
+                cursor = cursor.setdefault(p, {})
+            val = row["value"]
+            cursor[parts[-1]] = json.loads(val) if isinstance(val, str) else val
+        return merged or None
+
     def delete(self, key: str) -> bool:
-        """Delete a setting. Returns True if a row was deleted."""
+        """Delete a setting. Returns True if a row was deleted.
+
+        Also removes the vault copy for sensitive keys when present.
+        """
+        deleted = False
         with self._lock:
-            conn = self._get_conn()
-            try:
-                conn.execute("BEGIN")
-                cursor = conn.execute("DELETE FROM settings WHERE key = ?", (key,))
-                conn.execute("COMMIT")
-                if cursor.rowcount > 0:
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    return False
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM kazma_settings WHERE key = %s", (key,))
+                        deleted = cur.rowcount > 0
+                    conn.commit()
+                if deleted:
                     self._cache.clear()
-                    return True
-                return False
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
+            else:
+                conn = self._get_conn()
+                try:
+                    conn.execute("BEGIN")
+                    cursor = conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+                    conn.execute("COMMIT")
+                    deleted = cursor.rowcount > 0
+                    if deleted:
+                        self._cache.clear()
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
+        if deleted and is_sensitive_config_key(key):
+            vault = _try_get_vault()
+            if vault is not None:
+                try:
+                    vault.delete(_vault_secret_name(key))
+                except Exception as exc:
+                    logger.debug("[ConfigStore] vault delete for %s: %s", key, exc)
+        return deleted
 
     def export_yaml(self) -> str:
         """Export current settings as YAML, merging DB overrides with base YAML."""
@@ -684,9 +1068,9 @@ class ConfigStore:
 
         This is the startup reconciliation step that makes ConfigStore the
         authoritative source: on first run (or when new YAML keys appear),
-        YAML values are copied into SQLite so all components read from one
-        place. Existing DB keys are **never overwritten** — user-made
-        settings changes always win.
+        YAML values are copied into the active store (SQLite or Postgres) so
+        all components read from one place. Existing DB keys are **never
+        overwritten** — user-made settings changes always win.
 
         Returns the number of new keys seeded.
         """
@@ -712,11 +1096,20 @@ class ConfigStore:
 
         _flatten(data)
 
-        # Find which keys are NOT already in the DB.
+        # Find which keys are NOT already in the active backend.
         with self._lock:
-            conn = self._get_conn()
-            existing_rows = conn.execute("SELECT key FROM settings").fetchall()
-            existing_keys = {row["key"] for row in existing_rows}
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    raise RuntimeError("Postgres pool unavailable")
+                rows = pool.execute("SELECT key FROM kazma_settings")
+                existing_keys = {row["key"] for row in rows}
+                backend_label = "Postgres"
+            else:
+                conn = self._get_conn()
+                existing_rows = conn.execute("SELECT key FROM settings").fetchall()
+                existing_keys = {row["key"] for row in existing_rows}
+                backend_label = "SQLite"
 
         new_items = [
             (key, value, cat)
@@ -728,14 +1121,26 @@ class ConfigStore:
             return 0
 
         logger.info(
-            "[ConfigStore] Reconciling %d new keys from kazma.yaml into SQLite",
+            "[ConfigStore] Reconciling %d new keys from kazma.yaml into %s",
             len(new_items),
+            backend_label,
         )
         return self.batch_set(new_items)
 
     def reset_all(self) -> int:
         """Delete all DB settings (reverts to YAML defaults). Returns count deleted."""
         with self._lock:
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    raise RuntimeError("Postgres pool unavailable")
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM kazma_settings")
+                        deleted = cur.rowcount
+                    conn.commit()
+                self._cache.clear()
+                return int(deleted or 0)
             conn = self._get_conn()
             try:
                 conn.execute("BEGIN")
@@ -752,6 +1157,7 @@ class ConfigStore:
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+        self._pg = None
 
 
 # ══════════════════════════════════════════════════════════════════════════

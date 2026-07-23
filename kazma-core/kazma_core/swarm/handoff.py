@@ -20,6 +20,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+__all__ = ["HandoffRequest", "get_handoff_callback", "request_handoff", "set_handoff_callback"]
+
 logger = logging.getLogger(__name__)
 
 

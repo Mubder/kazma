@@ -41,6 +41,8 @@ from vertexai.generative_models import GenerativeModel, GenerationConfig
 
 from kazma_core.llm_provider import LLMConfig, LLMProvider, LLMResponse
 
+__all__ = ["GeminiAPIError", "GeminiProvider", "GoogleGeminiClient"]
+
 logger = logging.getLogger(__name__)
 
 # ── Defaults ────────────────────────────────────────────────────────
@@ -378,7 +380,6 @@ class GeminiProvider(LLMProvider):
                 capture_output=True,
                 text=True,
                 check=False,
-                shell=True,
             )
             if res.returncode == 0:
                 gcloud_project = res.stdout.strip()

@@ -10,6 +10,8 @@ from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, DirectoryTree, Markdown, RichLog, Static
 
+__all__ = ["FilesPanel"]
+
 # Cap how much of a file we read for preview. Reading a huge (or unbounded,
 # e.g. a device/pipe) file fully into memory would both block the event loop
 # for a long time and risk exhausting memory before the size cap is ever

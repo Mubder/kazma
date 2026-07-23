@@ -15,9 +15,16 @@ from pathlib import Path
 
 import aiosqlite
 
+from kazma_core.paths import audit_db
+
+__all__ = ["AuditEntry", "AuditLogger"]
+
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = str(Path.cwd() / "kazma-data" / "audit.db")
+# Project-root ``kazma-data/audit.db`` (via paths.py), not bare CWD.
+# Re-resolved at construction time so subdir launches still hit the repo root.
+def _default_db() -> str:
+    return audit_db()
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS audit_entries (
@@ -69,7 +76,7 @@ class AuditLogger:
     """
 
     def __init__(self, db_path: str | None = None) -> None:
-        self.db_path = db_path or _DEFAULT_DB
+        self.db_path = db_path or _default_db()
         self._db: aiosqlite.Connection | None = None
 
     async def _get_db(self) -> aiosqlite.Connection:

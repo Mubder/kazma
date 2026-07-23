@@ -382,7 +382,7 @@
     badge.style.display = '';
     badge.className = 'badge ' + (cb.state === 'open' ? 'badge-danger' : 'badge-warning');
     badge.style.fontSize = '0.65rem';
-    badge.textContent = '⚡ ' + cb.state;
+    badge.textContent = ' ' + cb.state;
     badge.title = t('swarm.circuit_failures', {n: (cb.consecutive_failures || 0), threshold: (cb.failure_threshold || 5)});
   }
 
@@ -692,22 +692,22 @@
     activeTasks[taskId] = { sse: evtSource, events: [], timer: timerInterval };
 
     evtSource.addEventListener('task_started', function(e) {
-      addEventLine(taskId, '🚀', t('swarm.task_started'));
+      addEventLine(taskId, '', t('swarm.task_started'));
     });
 
     evtSource.addEventListener('worker_started', function(e) {
       var data = parseSseData(e); if (!data) return;
-      addEventLine(taskId, '⚙️', t('swarm.worker_started', {worker: esc(data.worker), step: (Number(data.step) || 0)}));
+      addEventLine(taskId, '', t('swarm.worker_started', {worker: esc(data.worker), step: (Number(data.step) || 0)}));
     });
 
     evtSource.addEventListener('worker_progress', function(e) {
       var data = parseSseData(e); if (!data) return;
-      addEventLine(taskId, '📝', esc(data.worker) + ': ' + t('swarm.tokens_inline', {count: (Number(data.tokens) || 0)}));
+      addEventLine(taskId, '', esc(data.worker) + ': ' + t('swarm.tokens_inline', {count: (Number(data.tokens) || 0)}));
     });
 
     evtSource.addEventListener('worker_completed', function(e) {
       var data = parseSseData(e); if (!data) return;
-      var icon = data.status === 'success' ? '✅' : '❌';
+      var icon = data.status === 'success' ? '' : '';
       addEventLine(taskId, icon, esc(data.worker) + ': ' + esc(data.status));
     });
 
@@ -733,7 +733,7 @@
       var hfEl = $('handoff-' + taskId);
       if (hfEl) {
         hfEl.style.display = 'block';
-        hfEl.innerHTML += '<span class="badge badge-info" style="margin-right:4px;">' + esc(data.from) + ' → ' + esc(data.to) + '</span>';
+        hfEl.innerHTML += '<span class="badge badge-info" style="margin-right:4px;">' + esc(data.from) + ' -> ' + esc(data.to) + '</span>';
       }
     });
 
@@ -745,7 +745,7 @@
         statusEl.textContent = data.result ? data.result.status : t('swarm.completed');
         statusEl.className = 'badge badge-' + ((data.result && data.result.status === 'success') ? 'success' : 'danger');
       }
-      addEventLine(taskId, '🏁', t('swarm.task_completed'));
+      addEventLine(taskId, '', t('swarm.task_completed'));
       evtSource.close();
       // Keep the completed card visible for a few seconds so the user can see
       // it finished, then refresh the dashboard. The activeTasks entry is
@@ -868,7 +868,7 @@
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
         '<span style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(workerNames.join(', ')) + '</span>' +
-        '<span class="badge badge-warning">● ' + esc(t('swarm.pending')) + '</span>' +
+        '<span class="badge badge-warning">• ' + esc(t('swarm.pending')) + '</span>' +
       '</div>' +
       '<div style="font-size:0.8rem;color:var(--text-muted);">' + esc(task.slice(0, 120)) + '</div>' +
       '<div class="task-result-output" style="font-size:0.75rem;color:var(--text-tertiary);margin-top:4px;">' + esc(t('swarm.waiting')) + '</div>';
@@ -894,10 +894,10 @@
       card.innerHTML =
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
           '<span style="font-weight:600;font-size:0.85rem;color:var(--accent);">' + esc(r.worker || '?') + '</span>' +
-          '<span class="badge" style="background:' + statusBg + ';color:' + statusColor + ';">● ' + esc(r.status || '?') + '</span>' +
+          '<span class="badge" style="background:' + statusBg + ';color:' + statusColor + ';">• ' + esc(r.status || '?') + '</span>' +
         '</div>' +
         (r.output ? '<div style="padding:8px;background:rgba(0,0,0,0.15);border-radius:4px;font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:150px;overflow-y:auto;">' + esc(r.output.slice(0, 500)) + '</div>' : '') +
-        (r.error ? '<div style="padding:8px;background:var(--danger-subtle);border-radius:4px;font-size:0.75rem;color:var(--danger);margin-top:4px;">⚠ ' + esc(r.error) + '</div>' : '');
+        (r.error ? '<div style="padding:8px;background:var(--danger-subtle);border-radius:4px;font-size:0.75rem;color:var(--danger);margin-top:4px;">[!]  ' + esc(r.error) + '</div>' : '');
       listEl.insertBefore(card, listEl.firstChild);
     });
 
@@ -989,7 +989,7 @@
           html += '<span style="padding:4px 8px;border-radius:var(--radius-xs);background:rgba(255,255,255,0.04);font-size:0.75rem;border:1px solid var(--border-subtle);">';
           html += '<span style="color:' + stepColor + ';">' + esc(wr.worker) + '</span>';
           html += '</span>';
-          if (idx < r.worker_results.length - 1) html += '<span style="color:var(--text-muted);">→</span>';
+          if (idx < r.worker_results.length - 1) html += '<span style="color:var(--text-muted);">-></span>';
         });
         html += '</div>';
       } else if (pattern === 'fan_out' && r.worker_results && r.worker_results.length) {
@@ -998,7 +998,7 @@
         r.worker_results.forEach(function(wr) {
           var wColor = wr.status === 'success' ? 'var(--success)' : 'var(--danger)';
           html += '<div style="padding:6px 8px;border-radius:var(--radius-xs);background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);font-size:0.75rem;">';
-          html += '<span style="color:' + wColor + ';">●</span> ' + esc(wr.worker);
+          html += '<span style="color:' + wColor + ';">•</span> ' + esc(wr.worker);
           html += '</div>';
         });
         html += '</div>';
@@ -1017,7 +1017,7 @@
         }
         if (r.synthesized_output) {
           html += '<div style="padding:6px 8px;background:var(--accent-subtle);border-radius:var(--radius-xs);font-size:0.75rem;color:var(--accent-light);">';
-          html += '🧠 ' + esc(r.synthesized_output.slice(0, 120));
+          html += ' ' + esc(r.synthesized_output.slice(0, 120));
           html += '</div>';
         }
       } else if (pattern === 'conditional' && r.metadata && r.metadata.route_taken) {
@@ -1288,9 +1288,9 @@
       return;
     }
 
-    var patternIcons = {dispatch:'🎯',broadcast:'📢',pipeline:'🔗',fan_out:'🌀',consult:'💬',conditional:'🔀'};
+    var patternIcons = {dispatch:'',broadcast:'',pipeline:'',fan_out:'',consult:'',conditional:''};
     tbody.innerHTML = tasks.map(function(t) {
-      var icon = patternIcons[t.type] || '📋';
+      var icon = patternIcons[t.type] || '';
       var statusColor = t.status === 'completed' ? 'var(--success)' : (t.status === 'failed' || t.status === 'cancelled') ? 'var(--danger)' : 'var(--warning)';
       var prompt = (t.prompt || '').slice(0, 80);
       var workers = (t.workers || []).join(', ');
@@ -1302,7 +1302,7 @@
         '<td style="padding:8px 12px;">' + icon + ' ' + esc(t.type || '?') + '</td>' +
         '<td style="padding:8px 12px;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(prompt) + '</td>' +
         '<td style="padding:8px 12px;font-size:0.8rem;">' + esc(workers) + '</td>' +
-        '<td style="padding:8px 12px;"><span style="color:' + statusColor + ';">● ' + esc(t.status || '?') + '</span></td>' +
+        '<td style="padding:8px 12px;"><span style="color:' + statusColor + ';">• ' + esc(t.status || '?') + '</span></td>' +
         '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + dur + '</td>' +
         '<td style="padding:8px 12px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' + cost + '</td>' +
       '</tr>';
@@ -1451,13 +1451,13 @@
         html += '<div style="padding:10px;border:1px solid var(--border-subtle);border-radius:var(--radius);">';
         html += '<div style="display:flex;justify-content:space-between;margin-bottom:4px;">';
         html += '<span style="font-weight:500;">' + esc(t('swarm.step_n', {n: (idx + 1)})) + ': ' + esc(wr.worker) + '</span>';
-        html += '<span style="color:' + statusColor + ';">● ' + esc(wr.status) + '</span>';
+        html += '<span style="color:' + statusColor + ';">• ' + esc(wr.status) + '</span>';
         html += '</div>';
         if (wr.output) html += '<div style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;max-height:200px;overflow-y:auto;background:rgba(0,0,0,0.15);padding:8px;border-radius:4px;">' + esc(wr.output) + '</div>';
-        if (wr.error) html += '<div style="color:var(--danger);font-size:0.8rem;margin-top:4px;">⚠ ' + esc(wr.error) + '</div>';
+        if (wr.error) html += '<div style="color:var(--danger);font-size:0.8rem;margin-top:4px;">[!]  ' + esc(wr.error) + '</div>';
         // Handoffs
         if (wr.handoffs && wr.handoffs.length) {
-          html += '<div style="margin-top:6px;font-size:0.8rem;color:var(--info);">' + esc(t('swarm.handoff')) + wr.handoffs.map(function(h) { return esc(h.from_worker) + ' → ' + esc(h.to_worker); }).join(', ') + '</div>';
+          html += '<div style="margin-top:6px;font-size:0.8rem;color:var(--info);">' + esc(t('swarm.handoff')) + wr.handoffs.map(function(h) { return esc(h.from_worker) + ' -> ' + esc(h.to_worker); }).join(', ') + '</div>';
         }
         html += '</div>';
       });
@@ -1917,7 +1917,7 @@
       card.addEventListener('dragend', handleDragEnd);
 
       var dragHandle = document.createElement('div');
-      dragHandle.innerHTML = '☰';
+      dragHandle.innerHTML = '';
       dragHandle.style.cssText = 'color:var(--text-muted);cursor:grab;font-size:0.9rem;padding-right:4px;';
       card.appendChild(dragHandle);
 
@@ -1965,7 +1965,7 @@
         updatePipelineDiagram();
       };
       hitlLabel.appendChild(hitlCheck);
-      hitlLabel.appendChild(document.createTextNode('⏸ HITL'));
+      hitlLabel.appendChild(document.createTextNode(' HITL'));
       card.appendChild(hitlLabel);
 
       var timeoutInput = document.createElement('input');
@@ -1983,7 +1983,7 @@
 
       var btnUp = document.createElement('button');
       btnUp.className = 'btn btn-sm btn-secondary';
-      btnUp.innerHTML = '▲';
+      btnUp.innerHTML = '';
       btnUp.style.cssText = 'padding:2px 6px;font-size:0.65rem;height:24px;line-height:1;';
       btnUp.disabled = (index === 0);
       btnUp.onclick = function(e) {
@@ -1994,7 +1994,7 @@
 
       var btnDown = document.createElement('button');
       btnDown.className = 'btn btn-sm btn-secondary';
-      btnDown.innerHTML = '▼';
+      btnDown.innerHTML = '';
       btnDown.style.cssText = 'padding:2px 6px;font-size:0.65rem;height:24px;line-height:1;';
       btnDown.disabled = (index === pipelineStages.length - 1);
       btnDown.onclick = function(e) {
@@ -2006,7 +2006,7 @@
 
       var btnDelete = document.createElement('button');
       btnDelete.className = 'btn btn-sm btn-danger';
-      btnDelete.innerHTML = '🗑️';
+      btnDelete.innerHTML = '';
       btnDelete.style.cssText = 'padding:2px 6px;font-size:0.7rem;height:24px;line-height:1;';
       btnDelete.onclick = function(e) {
         e.stopPropagation();
@@ -2113,7 +2113,7 @@
       var stepNum = index + 1;
       var label = t('swarm.step_n', {n: stepNum}) + ': ' + escapeMermaidLabel(stage.worker);
       if (stage.hitl) {
-        label = '⏸ ' + label;
+        label = ' ' + label;
       }
       var nodeName = 'Step' + stepNum;
       lines.push('  ' + nodeName + '["' + label + '"]');
@@ -2261,16 +2261,16 @@
             pipelineActiveTaskId = data.task_id;
             connectPipelineSSE(data.task_id);
           } else {
-            addPipelineTerminalLine('❌', esc(t('swarm.no_task_id')));
+            addPipelineTerminalLine('', esc(t('swarm.no_task_id')));
             resetPipelineRunBtn();
           }
         } else {
-          addPipelineTerminalLine('❌', esc(t('swarm.dispatch_failed_msg', {msg: (data.message || '')})));
+          addPipelineTerminalLine('', esc(t('swarm.dispatch_failed_msg', {msg: (data.message || '')})));
           resetPipelineRunBtn();
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('❌', esc(t('swarm.network_error') + err.message));
+        addPipelineTerminalLine('', esc(t('swarm.network_error') + err.message));
         resetPipelineRunBtn();
       });
   }
@@ -2304,30 +2304,30 @@
     pipelineSSE = source;
 
     source.addEventListener('task_started', function(e) {
-      addPipelineTerminalLine('🚀', esc(t('swarm.pipeline_started')));
+      addPipelineTerminalLine('', esc(t('swarm.pipeline_started')));
     });
 
     source.addEventListener('worker_started', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('⚙️', esc(t('swarm.worker_prefix')) + '<strong style="color:var(--accent);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.activated_step')) + (Number(d.step) || 0) + ')');
+      addPipelineTerminalLine('', esc(t('swarm.worker_prefix')) + '<strong style="color:var(--accent);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.activated_step')) + (Number(d.step) || 0) + ')');
     });
 
     source.addEventListener('worker_progress', function(e) {
       var d = parseSseData(e); if (!d) return;
       var tokens = Number(d.tokens) || 0;
-      addPipelineTerminalLine('📝', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.working_processed')) + tokens + ' ' + esc(t('swarm.tokens_word')) + ')');
+      addPipelineTerminalLine('', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.working_processed')) + tokens + ' ' + esc(t('swarm.tokens_word')) + ')');
     });
 
     source.addEventListener('worker_completed', function(e) {
       var d = parseSseData(e); if (!d) return;
-      var icon = d.status === 'success' ? '✅' : '❌';
+      var icon = d.status === 'success' ? '' : '';
       var color = d.status === 'success' ? 'var(--success)' : 'var(--danger)';
       addPipelineTerminalLine(icon, esc(t('swarm.worker_prefix')) + '<strong style="color:' + color + ';">' + esc(d.worker) + '</strong> ' + esc(t('swarm.completed_status')) + esc(d.status));
     });
 
     source.addEventListener('checkpoint', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('⏸', esc(t('swarm.hitl_checkpoint')) + (Number(d.step) || 0) + esc(t('swarm.awaiting_confirm')));
+      addPipelineTerminalLine('', esc(t('swarm.hitl_checkpoint')) + (Number(d.step) || 0) + esc(t('swarm.awaiting_confirm')));
       
       var hitlGate = $('pipeline-hitl-gate');
       var hitlPreview = $('pipeline-hitl-preview');
@@ -2340,16 +2340,16 @@
 
     source.addEventListener('handoff', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('🔀', esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
+      addPipelineTerminalLine((window.KazmaIcons ? '-> ' : ''), esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span>  <span class="badge badge-accent">' + esc(d.to) + '</span>');
     });
 
     source.addEventListener('task_completed', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addPipelineTerminalLine('🏁', esc(t('swarm.pipeline_finalized')));
+      addPipelineTerminalLine('', esc(t('swarm.pipeline_finalized')));
       
       var res = d.result || {};
       var summary = res.synthesis || res.response || t('swarm.no_synthesis');
-      addPipelineTerminalLine('📝', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
+      addPipelineTerminalLine('', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
       
       cleanupPipelineSession();
     });
@@ -2390,13 +2390,13 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          addPipelineTerminalLine('✅', esc(t('swarm.pipeline_checkpoint_approved')));
+          addPipelineTerminalLine('', esc(t('swarm.pipeline_checkpoint_approved')));
         } else {
-          addPipelineTerminalLine('❌', esc(t('swarm.approval_failed', {msg: (data.message || '')})));
+          addPipelineTerminalLine('', esc(t('swarm.approval_failed', {msg: (data.message || '')})));
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('❌', esc(t('swarm.network_error_action', {action: 'approving', msg: err.message})));
+        addPipelineTerminalLine('', esc(t('swarm.network_error_action', {action: 'approving', msg: err.message})));
       });
   }
 
@@ -2409,14 +2409,14 @@
       .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.status === 'ok') {
-          addPipelineTerminalLine('❌', esc(t('swarm.pipeline_checkpoint_rejected')));
+          addPipelineTerminalLine('', esc(t('swarm.pipeline_checkpoint_rejected')));
           cleanupPipelineSession();
         } else {
-          addPipelineTerminalLine('❌', esc(t('swarm.rejection_failed', {msg: (data.message || '')})));
+          addPipelineTerminalLine('', esc(t('swarm.rejection_failed', {msg: (data.message || '')})));
         }
       })
       .catch(function(err) {
-        addPipelineTerminalLine('❌', esc(t('swarm.network_error_action', {action: 'rejecting', msg: err.message})));
+        addPipelineTerminalLine('', esc(t('swarm.network_error_action', {action: 'rejecting', msg: err.message})));
       });
   }
 
@@ -2532,16 +2532,16 @@
             currentPlaygroundTaskId = data.task_id;
             connectPlaygroundSSE(data.task_id);
           } else {
-            addTerminalLine('❌', esc(t('swarm.no_task_id')));
+            addTerminalLine('', esc(t('swarm.no_task_id')));
             resetPlaygroundBtn();
           }
         } else {
-          addTerminalLine('❌', esc(t('swarm.dispatch_failed_msg', {msg: (data.message || '')})));
+          addTerminalLine('', esc(t('swarm.dispatch_failed_msg', {msg: (data.message || '')})));
           resetPlaygroundBtn();
         }
       })
       .catch(function(err) {
-        addTerminalLine('❌', esc(t('swarm.network_error_dispatching', {msg: err.message})));
+        addTerminalLine('', esc(t('swarm.network_error_dispatching', {msg: err.message})));
         resetPlaygroundBtn();
       });
   }
@@ -2576,12 +2576,12 @@
     playgroundSSE = source;
 
     source.addEventListener('task_started', function(e) {
-      addTerminalLine('🚀', esc(t('swarm.task_execution_started')));
+      addTerminalLine('', esc(t('swarm.task_execution_started')));
     });
 
     source.addEventListener('worker_started', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('⚙️', esc(t('swarm.worker_prefix')) + '<strong style="color:var(--accent);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.activated_step')) + (Number(d.step) || 0) + ')');
+      addTerminalLine('', esc(t('swarm.worker_prefix')) + '<strong style="color:var(--accent);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.activated_step')) + (Number(d.step) || 0) + ')');
       setText('play-state-node', esc(d.worker));
     });
 
@@ -2594,19 +2594,19 @@
       var estCost = playgroundTotalTokens * 0.0000015;
       setText('play-state-cost', '$' + estCost.toFixed(4));
 
-      addTerminalLine('📝', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.working_processed')) + tokens + ' ' + esc(t('swarm.tokens_word')) + ')');
+      addTerminalLine('', '<strong style="color:var(--text-secondary);">' + esc(d.worker) + '</strong> ' + esc(t('swarm.working_processed')) + tokens + ' ' + esc(t('swarm.tokens_word')) + ')');
     });
 
     source.addEventListener('worker_completed', function(e) {
       var d = parseSseData(e); if (!d) return;
-      var icon = d.status === 'success' ? '✅' : '❌';
+      var icon = d.status === 'success' ? '' : '';
       var color = d.status === 'success' ? 'var(--success)' : 'var(--danger)';
       addTerminalLine(icon, esc(t('swarm.worker_prefix')) + '<strong style="color:' + color + ';">' + esc(d.worker) + '</strong> ' + esc(t('swarm.completed_status')) + esc(d.status));
     });
 
     source.addEventListener('checkpoint', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('⏸', esc(t('swarm.hitl_checkpoint')) + (Number(d.step) || 0) + esc(t('swarm.awaiting_confirm')));
+      addTerminalLine('', esc(t('swarm.hitl_checkpoint')) + (Number(d.step) || 0) + esc(t('swarm.awaiting_confirm')));
       
       var hitlGate = $('play-hitl-gate');
       var hitlPreview = $('play-hitl-preview');
@@ -2622,12 +2622,12 @@
 
     source.addEventListener('handoff', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('🔀', esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span> ➜ <span class="badge badge-accent">' + esc(d.to) + '</span>');
+      addTerminalLine('', esc(t('swarm.handoff_label')) + '<span class="badge badge-info">' + esc(d.from) + '</span>  <span class="badge badge-accent">' + esc(d.to) + '</span>');
     });
 
     source.addEventListener('task_completed', function(e) {
       var d = parseSseData(e); if (!d) return;
-      addTerminalLine('🏁', esc(t('swarm.task_finalized')));
+      addTerminalLine('', esc(t('swarm.task_finalized')));
       
       var res = d.result || {};
       var finalStatus = res.status || 'success';
@@ -2645,7 +2645,7 @@
       }
       
       var summary = res.synthesis || res.response || t('swarm.no_synthesis');
-      addTerminalLine('📝', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
+      addTerminalLine('', '<strong>' + esc(t('swarm.synthesis_output')) + '</strong><div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);border-radius:4px;padding:8px;margin-top:6px;max-height:150px;overflow-y:auto;white-space:pre-wrap;color:var(--text-secondary);">' + esc(summary) + '</div>');
       
       cleanupPlaygroundSession();
     });

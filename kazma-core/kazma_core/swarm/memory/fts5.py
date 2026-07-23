@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+__all__ = ["FTS5LexicalStore"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,7 +35,10 @@ class FTS5LexicalStore:
         await store.index({"id": "m1", "content": "the auth module..."})
     """
 
-    def __init__(self, db_path: str = "kazma-data/memory.db") -> None:
+    def __init__(self, db_path: str | None = None) -> None:
+        if db_path is None:
+            from kazma_core.paths import fts5_memory_path
+            db_path = fts5_memory_path()
         self._db_path = db_path
         self._backend: Any = None
 

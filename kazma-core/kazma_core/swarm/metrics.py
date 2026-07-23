@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+__all__ = ["MetricsCollector", "WorkerMetricSnapshot"]
+
 if TYPE_CHECKING:
     from kazma_core.swarm.task_store import TaskStore
 

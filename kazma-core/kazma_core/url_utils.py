@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse, urlunparse
 
+__all__ = ["get_dummy_api_key", "normalize_model_name", "normalize_provider_url"]
+
 # Ports that already include /v1 in their path
 _OLLAMA_PORTS = {11434}
 _LITELLM_PORTS = {4000}

@@ -17,6 +17,8 @@ import re
 import threading
 from typing import Any
 
+__all__ = ["SemanticRouter", "SemanticRoutingUnavailableError", "get_semantic_router"]
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────

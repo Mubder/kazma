@@ -6,7 +6,7 @@
 {% block content %}
 <div x-data="settingsApp()" x-init="init()">
 
-    <!-- ═══ Settings Navigation (11 tabs) ═══ -->
+    <!-- ═══ Settings Navigation ═══ -->
     <nav class="settings-nav">
         <button class="settings-tab" :class="{ active: tab === 'providers_connectors' }" @click="onTabChange('providers_connectors')">{{ t('settings.tab_providers_connectors') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'agent' }" @click="onTabChange('agent')">{{ t('settings.tab_agent') }}</button>
@@ -18,7 +18,10 @@
         <button class="settings-tab" :class="{ active: tab === 'account' }" @click="onTabChange('account')">{{ t('settings.tab_account') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'tools' }" @click="onTabChange('tools')">{{ t('settings.tab_tools') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'system' }" @click="onTabChange('system')">{{ t('settings.tab_system') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'packages' }" @click="onTabChange('packages')">{{ t('settings.tab_packages') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'voice' }" @click="onTabChange('voice')">{{ t('settings.tab_voice') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
     </nav>
 
     <!-- Loading indicator -->
@@ -47,59 +50,77 @@
                 </div>
 
                 <template x-for="p in hubProviders" :key="p.name">
-                    <div class="provider-card" style="display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:8px">
-                        <div style="flex:1">
-                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                                <strong x-text="p.display_name || p.name" style="font-size:0.95rem"></strong>
-                                <span class="badge" :class="p.enabled ? 'badge-stdio' : 'badge-sse'" x-text="p.enabled ? t('common.enabled') : t('common.disabled')"></span>
-                                <span class="badge" :class="{
-                                    'badge-stdio': p.health === 'healthy',
-                                    'badge-standard': p.health === 'degraded',
-                                    'badge-premium': p.health === 'down'
-                                }" x-text="p.health || t('settings.unknown')" x-show="p.health"></span>
-                            </div>
-                            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" x-text="p.base_url"></div>
-                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">
-                                {{ t('settings.api_key') }}: <span x-text="p.api_key || '—'" style="font-family:var(--font-mono)"></span>
-                            </div>
-                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="p.models && p.models.length">
-                                {{ t('settings.models_label') }} <span x-text="(p.models || []).join(', ')"></span>
-                            </div>
-                            <div x-show="p.discovered_models && p.discovered_models.length" style="margin-top:6px">
-                                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-                                    <div style="font-size:0.7rem;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:0.06em">
-                                        <span x-text="t('settings.discovered_n', {n: p.discovered_models.length})"></span>
-                                        <span x-show="p.selected_models && p.selected_models.length" style="color:var(--text-muted);margin-left:6px">
-                                            <span x-text="t('settings.selected_n', {n: (p.selected_models || []).length})"></span>
-                                        </span>
-                                    </div>
-                                    <button class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(p.name)" x-text="t('settings.all_none')"></button>
+                    <div class="provider-card">
+                        <div class="provider-header">
+                            <div class="provider-info">
+                                <div class="provider-title-row">
+                                    <strong x-text="p.display_name || p.name" style="font-size:0.95rem"></strong>
+                                    <span class="badge" :class="p.enabled ? 'badge-stdio' : 'badge-sse'" x-text="p.enabled ? t('common.enabled') : t('common.disabled')"></span>
+                                    <span class="badge" :class="{
+                                        'badge-stdio': p.health === 'healthy',
+                                        'badge-standard': p.health === 'degraded',
+                                        'badge-premium': p.health === 'down'
+                                    }" x-text="p.health || t('settings.unknown')" x-show="p.health"></span>
                                 </div>
-                                <div style="display:flex;flex-direction:column;gap:2px;max-height:160px;overflow-y:auto;padding:4px;border:1px solid var(--border);border-radius:4px;background:rgba(0,0,0,0.15)">
-                                    <template x-for="m in p.discovered_models" :key="m">
-                                        <label style="display:flex;align-items:center;gap:6px;font-size:0.72rem;font-family:var(--font-mono);cursor:pointer;padding:1px 4px;border-radius:2px" class="model-check-label">
-                                            <input type="checkbox"
-                                                :checked="(p.selected_models || []).includes(m)"
-                                                @change="toggleModelSelection(p.name, m, $event.target.checked)"
-                                                style="width:auto;margin:0;cursor:pointer">
-                                            <span x-text="m"></span>
-                                        </label>
-                                    </template>
+                                <div style="font-size:0.8rem;color:var(--text-muted);word-break:break-all" x-text="p.base_url"></div>
+                                <div style="font-size:0.75rem;color:var(--text-muted)">
+                                    {{ t('settings.api_key') }}: <span x-text="p.api_key || '—'" style="font-family:var(--font-mono)"></span>
                                 </div>
-                                <div style="font-size:0.65rem;color:var(--text-tertiary);margin-top:3px">
-                                    {{ t('settings.checked_models_hint') }}
-                                </div>
+                            </div>
+                            <div class="provider-actions">
+                                <label class="toggle" :title="p.enabled ? t('common.disable') : t('common.enable')">
+                                    <input type="checkbox" :checked="p.enabled" @change="toggleHubProvider(p.name, $event.target.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <button class="btn btn-secondary btn-sm" @click="testHubProvider(p.name)" :disabled="hubTestingProvider === p.name" x-text="hubTestingProvider === p.name ? '...' : '{{ t('settings.test') }}'"></button>
+                                <button class="btn btn-secondary btn-sm" @click="discoverHubProvider(p.name)" :disabled="hubDiscoveringProvider === p.name" x-text="hubDiscoveringProvider === p.name ? '...' : '{{ t('settings.discover') }}'"></button>
+                                <button class="btn btn-secondary btn-sm" @click="editHubProvider(p.name)">{{ t('common.edit') }}</button>
+                                <button class="btn btn-danger btn-sm" @click="deleteHubProvider(p.name)">×</button>
                             </div>
                         </div>
-                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                            <label class="toggle" :title="p.enabled ? t('common.disable') : t('common.enable')">
-                                <input type="checkbox" :checked="p.enabled" @change="toggleHubProvider(p.name, $event.target.checked)">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <button class="btn btn-secondary btn-sm" @click="testHubProvider(p.name)" :disabled="hubTestingProvider === p.name" x-text="hubTestingProvider === p.name ? '...' : '{{ t('settings.test') }}'"></button>
-                            <button class="btn btn-secondary btn-sm" @click="discoverHubProvider(p.name)" :disabled="hubDiscoveringProvider === p.name" x-text="hubDiscoveringProvider === p.name ? '...' : '{{ t('settings.discover') }}'"></button>
-                            <button class="btn btn-secondary btn-sm" @click="editHubProvider(p.name)">{{ t('common.edit') }}</button>
-                            <button class="btn btn-danger btn-sm" @click="deleteHubProvider(p.name)">×</button>
+
+                        <div x-show="Array.isArray(p.discovered_models) && p.discovered_models.length > 0"
+                             x-cloak
+                             class="discovered-models-panel">
+                            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+                                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                    <span class="badge" style="background:var(--accent,#6366f1);color:#fff;font-size:0.65rem;padding:2px 8px;border-radius:999px;font-weight:600"
+                                          x-text="'Discovered (' + p.discovered_models.length + ')'"></span>
+                                    <span class="badge" style="background:rgba(255,255,255,0.08);color:var(--text-muted);font-size:0.65rem;padding:2px 8px;border-radius:999px"
+                                          x-show="(p.selected_models || []).length"
+                                          x-text="'(' + (p.selected_models || []).length + ' selected)'"></span>
+                                </div>
+                                <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(p.name)" x-text="t('settings.all_none')"></button>
+                            </div>
+                            <div class="input-with-icon" style="margin-bottom:6px">
+                                <input type="search"
+                                       class="form-input"
+                                       style="font-size:0.75rem;padding:6px 10px;width:100%;box-sizing:border-box"
+                                       :placeholder="'Search ' + p.discovered_models.length + ' models…'"
+                                       :value="p._modelQuery || ''"
+                                       @input="p._modelQuery = $event.target.value"
+                                       @click.stop>
+                            </div>
+                            <div class="discovered-models-list">
+                                <template x-for="m in filteredDiscoveredModels(p)" :key="String(m)">
+                                    <label class="model-check-label"
+                                           style="display:flex;align-items:center;gap:8px;font-size:0.72rem;font-family:var(--font-mono);cursor:pointer;padding:5px 8px;border-radius:6px"
+                                           :style="(p.selected_models || []).includes(m) ? 'background:rgba(99,102,241,0.15)' : ''">
+                                        <input type="checkbox"
+                                            :checked="(p.selected_models || []).includes(m)"
+                                            @change="toggleModelSelection(p.name, m, $event.target.checked)"
+                                            style="width:auto;margin:0;cursor:pointer;accent-color:var(--accent,#6366f1)">
+                                        <span x-text="m" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+                                    </label>
+                                </template>
+                                <div x-show="filteredDiscoveredModels(p).length === 0"
+                                     style="padding:12px;text-align:center;font-size:0.72rem;color:var(--text-muted)">
+                                    No models match your search
+                                </div>
+                            </div>
+                            <div style="font-size:0.65rem;color:var(--text-tertiary);margin-top:4px">
+                                {{ t('settings.checked_models_hint') }}
+                            </div>
                         </div>
                     </div>
                 </template>
@@ -113,7 +134,7 @@
                         <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>
                     </template>
                     <template x-if="!hubTestResult.success">
-                        <span class="text-error">✗ <span x-text="hubTestResult.error"></span></span>
+                        <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
             </div>
@@ -189,7 +210,7 @@
                         <span class="text-success">{{ t('settings.connected') }} <span x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
                     </template>
                     <template x-if="!hubTestResult.success">
-                        <span class="text-error">✗ <span x-text="hubTestResult.error"></span></span>
+                        <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
                     </template>
                 </div>
             </div>
@@ -239,7 +260,7 @@
                                 <label>{{ t('settings.api_key') }}</label>
                                 <div class="input-with-toggle">
                                     <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" placeholder="AI Studio Key (AIzaSy...)">
-                                    <button class="btn btn-icon" @click="hubShowProviderKey = !hubShowProviderKey" x-text="hubShowProviderKey ? '🙈' : '👁'"></button>
+                                    <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? 'Hide' : 'Show'" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -278,7 +299,7 @@
                             <label>{{ t('settings.api_key') }}</label>
                             <div class="input-with-toggle">
                                 <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" placeholder="sk-...">
-                                <button class="btn btn-icon" @click="hubShowProviderKey = !hubShowProviderKey" x-text="hubShowProviderKey ? '🙈' : '👁'"></button>
+                                <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? 'Hide' : 'Show'" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                             </div>
                             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>
                         </div>
@@ -327,7 +348,7 @@
                     <label>{{ t('settings.token') }}</label>
                     <div class="input-with-toggle">
                         <input :type="hubShowConnectorToken ? 'text' : 'password'" class="form-input" x-model="hubEditingConnector.token" placeholder="token / key">
-                        <button class="btn btn-icon" @click="hubShowConnectorToken = !hubShowConnectorToken" x-text="hubShowConnectorToken ? '🙈' : '👁'"></button>
+                        <button class="btn btn-icon" type="button" @click="hubShowConnectorToken = !hubShowConnectorToken" :title="hubShowConnectorToken ? 'Hide' : 'Show'" x-html="hubShowConnectorToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                     </div>
                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>
                 </div>
@@ -425,7 +446,7 @@
                     <label>{{ t('settings.api_key') }}</label>
                     <div class="input-with-toggle">
                         <input :type="hubShowProfileKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProfile.api_key" placeholder="sk-...">
-                        <button class="btn btn-icon" @click="hubShowProfileKey = !hubShowProfileKey" x-text="hubShowProfileKey ? '🙈' : '👁'"></button>
+                        <button class="btn btn-icon" type="button" @click="hubShowProfileKey = !hubShowProfileKey" :title="hubShowProfileKey ? 'Hide' : 'Show'" x-html="hubShowProfileKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                     </div>
                 </div>
                 <div class="form-group">
@@ -472,8 +493,8 @@
             <h3>{{ t('settings.personality_templates') }}</h3>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px">
                 <template x-for="p in personalities" :key="p.name">
-                    <div @click="setPersonality(p.name)" style="padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:all 0.15s" :style="agent.personality === p.name ? 'border-color:var(--accent);background:rgba(94,106,210,0.08)' : ''">
-                        <div style="font-size:1.5rem;margin-bottom:4px" x-text="p.emoji"></div>
+                    <div @click="setPersonality(p.name)" class="personality-card" :class="{ 'is-selected': agent.personality === p.name }" style="padding:14px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);cursor:pointer;transition:all 0.15s" :style="agent.personality === p.name ? 'border-color:var(--border-strong);background:var(--bg-hover)' : ''">
+                        <div class="personality-card-icon" style="margin-bottom:8px;color:var(--text-secondary)" x-html="(window.KazmaIcons && KazmaIcons.fromEmoji(p.emoji)) || ''"></div>
                         <div style="font-weight:600;font-size:0.9rem;margin-bottom:4px" x-text="p.display_name_ar && window.KAZMA_LANG === 'ar' ? p.display_name_ar : p.name"></div>
                         <div style="font-size:0.8rem;color:var(--text-tertiary)" x-text="p.description_ar && window.KAZMA_LANG === 'ar' ? p.description_ar : p.description"></div>
                     </div>
@@ -799,32 +820,131 @@
         <!-- API Tokens -->
         <div class="settings-group">
             <h3>{{ t('settings.api_tokens') }}</h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">
+              Use these tokens to call protected APIs from scripts without pasting <code>KAZMA_SECRET</code>.
+              Send as <code>Authorization: Bearer …</code> or <code>X-Api-Token</code>.
+            </p>
             <div style="display:flex;gap:8px;margin-bottom:12px">
                 <input type="text" class="form-input" x-model="tokenName" placeholder="{{ t('settings.token_name') }}" style="flex:1">
                 <button class="btn btn-primary" @click="createToken()">{{ t('settings.create_token') }}</button>
             </div>
-            <template x-for="t in apiTokens" :key="t.id">
-                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
-                    <span style="flex:1;font-size:0.9rem" x-text="t.name"></span>
-                    <span style="font-size:0.8rem;color:var(--text-muted);font-family:var(--font-mono)" x-text="(t.token_prefix || '***') + '...'"></span>
-                    <span style="font-size:0.8rem;color:var(--text-muted)" x-text="t.created_at || ''"></span>
-                    <button class="btn btn-danger btn-sm" @click="revokeToken(t.id)">{{ t('settings.revoke') }}</button>
+            <!-- One-time full token reveal -->
+            <div x-show="lastCreatedToken" x-cloak style="margin-bottom:14px;padding:12px 14px;border-radius:8px;border:1px solid rgba(16,185,129,0.35);background:rgba(16,185,129,0.08);">
+              <div style="font-size:0.75rem;font-weight:700;color:#34d399;margin-bottom:6px;">Token created — copy now (shown once)</div>
+              <code style="display:block;word-break:break-all;font-size:0.78rem;color:var(--text-primary);margin-bottom:8px;" x-text="lastCreatedToken"></code>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button type="button" class="btn btn-sm btn-primary" @click="copyLastToken()">Copy token</button>
+                <button type="button" class="btn btn-sm btn-secondary" @click="copyTokenCurl()">Copy curl example</button>
+                <button type="button" class="btn btn-sm btn-secondary" @click="lastCreatedToken=''">Dismiss</button>
+              </div>
+            </div>
+            <!-- Column-aligned token table (not free-form flex rows) -->
+            <div class="account-list-table account-tokens-table" x-show="apiTokens.length > 0">
+              <div class="account-list-head">
+                <span>{{ t('settings.token_name') }}</span>
+                <span>Prefix</span>
+                <span>Created</span>
+                <span></span>
+              </div>
+              <template x-for="tok in apiTokens" :key="tok.id">
+                <div class="account-list-row">
+                  <span class="account-list-name" x-text="tok.name" :title="tok.name"></span>
+                  <span class="account-list-mono" x-text="(tok.token_prefix || '***') + '…'"></span>
+                  <span class="account-list-meta" x-text="tok.created_at ? String(tok.created_at).slice(0, 19).replace('T',' ') : ''"></span>
+                  <span class="account-list-actions">
+                    <button type="button" class="btn btn-danger btn-sm" @click="revokeToken(tok.id)" :disabled="!tok.id">{{ t('settings.revoke') }}</button>
+                  </span>
                 </div>
-            </template>
-            <div x-show="apiTokens.length === 0" class="empty-state" style="padding:16px">{{ t('settings.no_api_tokens') }}</div>
+              </template>
+            </div>
+            <div x-show="apiTokens.length === 0 && !lastCreatedToken" class="empty-state" style="padding:16px">{{ t('settings.no_api_tokens') }}</div>
         </div>
 
         <!-- Sessions -->
         <div class="settings-group">
             <h3>{{ t('settings.active_sessions') }}</h3>
-            <template x-for="s in sessions" :key="s.id">
-                <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle)">
-                    <span style="flex:1;font-size:0.9rem" x-text="s.platform || t('settings.web')"></span>
-                    <span style="font-size:0.8rem;color:var(--text-muted)" x-text="s.last_active || ''"></span>
+            <div class="account-list-table account-sessions-table" x-show="sessions.length > 0">
+              <div class="account-list-head account-sessions-head">
+                <span>Platform</span>
+                <span>Last active</span>
+                <span></span>
+              </div>
+              <template x-for="s in sessions" :key="s.id || s.platform">
+                <div class="account-list-row account-sessions-row">
+                  <span class="account-list-name" x-text="s.platform || t('settings.web')"></span>
+                  <span class="account-list-meta" x-text="s.last_active || ''"></span>
+                  <span class="account-list-actions">
                     <span class="badge badge-stdio" x-show="s.current">{{ t('settings.current') }}</span>
+                  </span>
                 </div>
-            </template>
+              </template>
+            </div>
             <div x-show="sessions.length === 0" class="empty-state" style="padding:16px">{{ t('settings.no_active_sessions') }}</div>
+        </div>
+
+        <!-- Platform users (SaaS multi-user) — admin only -->
+        <div class="settings-group" x-show="saasStatus && (saasStatus.principal?.role === 'admin' || saasStatus.principal?.source === 'secret')">
+            <h3>{{ t('settings.platform_users') }}</h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">
+              {{ t('settings.platform_users_help') }} {{ t('settings.backend_label') }}
+              <code x-text="saasStatus?.backend || 'sqlite'"></code>
+              <span x-show="saasStatus?.postgres"> · {{ t('settings.postgres_ready') }}</span>
+              <span x-show="saasStatus?.oidc"> · {{ t('settings.oidc_enabled') }}</span>
+            </p>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                <input type="text" class="form-input" x-model="newUser.username" placeholder="{{ t('settings.username') }}" style="flex:1;min-width:120px">
+                <input type="password" class="form-input" x-model="newUser.password" placeholder="{{ t('settings.password_min8') }}" style="flex:1;min-width:120px">
+                <select class="form-input" x-model="newUser.role" style="width:auto">
+                  <option value="viewer">viewer</option>
+                  <option value="operator" selected>operator</option>
+                  <option value="admin">admin</option>
+                </select>
+                <button class="btn btn-primary" type="button" @click="createPlatformUser()">{{ t('settings.add_user') }}</button>
+            </div>
+            <div class="account-list-table" x-show="platformUsers.length > 0">
+              <div class="account-list-head">
+                <span>{{ t('settings.username') }}</span>
+                <span>{{ t('settings.role') }}</span>
+                <span>Status</span>
+                <span></span>
+              </div>
+              <template x-for="u in platformUsers" :key="u.user_id || u.username">
+                <div class="account-list-row">
+                  <span class="account-list-name" x-text="u.username"></span>
+                  <span>
+                    <select class="form-input" style="width:auto;padding:4px 8px;font-size:0.8rem"
+                            :value="u.role"
+                            @change="patchPlatformUser(u.username, { role: $event.target.value })">
+                      <option value="viewer">viewer</option>
+                      <option value="operator">operator</option>
+                      <option value="admin">admin</option>
+                    </select>
+                  </span>
+                  <span class="account-list-meta" x-text="u.enabled === false ? '{{ t('settings.status_disabled') }}' : '{{ t('settings.status_active') }}'"></span>
+                  <span class="account-list-actions">
+                    <button type="button" class="btn btn-sm btn-secondary"
+                            @click="patchPlatformUser(u.username, { enabled: u.enabled === false })"
+                            x-text="u.enabled === false ? '{{ t('settings.enable') }}' : '{{ t('settings.disable') }}'"></button>
+                    <button type="button" class="btn btn-danger btn-sm" @click="deletePlatformUser(u.username)">{{ t('settings.delete') }}</button>
+                  </span>
+                </div>
+              </template>
+            </div>
+            <div x-show="platformUsers.length === 0" class="empty-state" style="padding:16px">
+              {{ t('settings.no_platform_users') }}
+            </div>
+
+            <h3 style="margin-top:24px">{{ t('settings.tenants') }}</h3>
+            <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+                <input type="text" class="form-input" x-model="newTenant.id" placeholder="{{ t('settings.tenant_id') }}" style="flex:1;min-width:100px">
+                <input type="text" class="form-input" x-model="newTenant.name" placeholder="{{ t('settings.display_name_tenant') }}" style="flex:1;min-width:100px">
+                <button class="btn btn-primary" type="button" @click="createTenant()">{{ t('settings.add_tenant') }}</button>
+            </div>
+            <ul style="margin:0;padding-left:18px;color:var(--text-secondary);font-size:0.85rem;">
+              <template x-for="t in tenants" :key="t.id">
+                <li><strong x-text="t.id"></strong> — <span x-text="t.name"></span></li>
+              </template>
+            </ul>
         </div>
     </div>
 
@@ -913,12 +1033,12 @@
 
         <!-- Secret Vault -->
         <div class="settings-group">
-            <h3>🔐 Secret Vault</h3>
+            <h3><span class="ki" data-icon="lock" aria-hidden="true"></span> Secret Vault</h3>
             <div style="padding:12px 16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
                 <div>
                     <div style="font-weight:600;font-size:0.95rem">
-                        <span x-show="vaultStatus.enabled" style="color:var(--success)">● Vault Enabled</span>
-                        <span x-show="!vaultStatus.enabled" style="color:var(--danger)">● Vault Disabled</span>
+                        <span x-show="vaultStatus.enabled" style="color:var(--success);display:inline-flex;align-items:center;gap:6px"><span class="ki" data-icon="check-circle" aria-hidden="true"></span> Vault Enabled</span>
+                        <span x-show="!vaultStatus.enabled" style="color:var(--danger);display:inline-flex;align-items:center;gap:6px"><span class="ki" data-icon="alert-circle" aria-hidden="true"></span> Vault Disabled</span>
                     </div>
                     <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
                         <span x-show="vaultStatus.enabled" x-text="vaultStatus.secret_count + ' secrets stored'"></span>
@@ -981,7 +1101,137 @@
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════════
-         TAB 12: IMPORT/EXPORT
+         TAB 12: PACKAGES & DEPENDENCIES
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'packages'" x-transition>
+        <!-- Summary -->
+        <div class="settings-group" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+            <div>
+                <h3>{{ t('packages.title') }}</h3>
+                <p style="font-size:0.82rem;color:var(--text-muted);margin-top:4px;">
+                    <span x-text="pkgTotal"></span> {{ t('packages.installed') }} · Python <span x-text="pkgPythonVer"></span>
+                </p>
+                <p style="font-size:0.8rem;color:var(--text-secondary);margin-top:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <span style="color:var(--text-muted);">{{ t('packages.db_backend') }}:</span>
+                    <span class="badge" style="font-size:0.7rem;padding:3px 8px;border-radius:10px;"
+                          :class="pkgDbBackend === 'postgres' ? 'badge-success' : 'badge-secondary'"
+                          x-text="pkgDbBackend === 'postgres' ? t('packages.db_postgres') : t('packages.db_sqlite')"></span>
+                    <span x-show="pkgDbBackend === 'postgres'" style="font-size:0.72rem;color:var(--text-muted);">KAZMA_DATABASE_URL set</span>
+                    <span x-show="pkgDbBackend !== 'postgres'" style="font-size:0.72rem;color:var(--text-muted);">Set KAZMA_DATABASE_URL + install <code style="font-size:0.7rem;">.[postgres]</code> for multi-replica</span>
+                </p>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <div class="metric-card" style="padding:8px 16px;min-width:120px;text-align:center;">
+                    <div class="metric-value" style="font-size:1.5rem;" x-text="pkgExtras.filter(e => e.installed).length"></div>
+                    <div class="metric-label">{{ t('packages.extras_active') }}</div>
+                </div>
+                <div class="metric-card" style="padding:8px 16px;min-width:120px;text-align:center;">
+                    <div class="metric-value" style="font-size:1.5rem;" x-text="pkgExtras.filter(e => !e.installed).length"></div>
+                    <div class="metric-label">{{ t('packages.extras_missing') }}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Optional Dependencies -->
+        <div class="settings-group" style="padding:0;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border-subtle);">
+                <h4 style="margin:0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('packages.optional_deps') }}</h4>
+            </div>
+            <div x-show="pkgLoading" style="padding:40px;text-align:center;color:var(--text-muted);font-size:0.85rem;">{{ t('common.loading') }}</div>
+            <template x-for="extra in pkgExtras" :key="extra.name">
+                <div style="padding:14px 16px;border-bottom:1px solid var(--border-subtle);">
+                    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:6px;">
+                        <div style="flex:1;">
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                                <span style="font-size:0.88rem;font-weight:600;color:var(--text-primary);" x-text="extra.name"></span>
+                                <span class="badge"
+                                      :class="extra.installed ? 'badge-success' : (extra.partial ? 'badge-warning' : 'badge-warning')"
+                                      style="font-size:0.62rem;padding:2px 7px;border-radius:10px;display:inline-flex;align-items:center;gap:4px;"
+                                      x-html="extra.installed
+                                        ? (KazmaIcons.get('check') + ' ' + t('packages.installed_badge'))
+                                        : (extra.partial
+                                          ? ('~ Partial (' + (extra.installed_count || 0) + '/' + (extra.package_count || 0) + ')')
+                                          : (KazmaIcons.get('x') + ' ' + t('packages.missing_badge')))"></span>
+                            </div>
+                            <p style="margin:0;font-size:0.78rem;color:var(--text-secondary);line-height:1.5;" x-text="extra.description"></p>
+                        </div>
+                    </div>
+                    <!-- Package chips -->
+                    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;">
+                        <template x-for="pkg in extra.packages" :key="pkg.name">
+                            <span style="font-family:var(--font-mono);font-size:0.7rem;padding:2px 7px;border-radius:var(--radius-sm);border:1px solid var(--border-subtle);background:var(--bg-elevated);"
+                                  :style="!pkg.installed ? 'opacity:0.5;border-style:dashed;' : ''"
+                                  :title="pkg.installed ? (pkg.name + ' ' + pkg.version) : (pkg.name + ' — not installed')"
+                                  x-text="pkg.installed ? (pkg.name + ' ' + pkg.version) : (pkg.name + ' (missing)')"></span>
+                        </template>
+                    </div>
+                    <!-- Install command + one-click (only if not installed) -->
+                    <div x-show="!extra.installed" x-cloak
+                         style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--font-mono);font-size:0.75rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                        <span style="color:var(--text-muted);">$</span>
+                        <code style="flex:1;color:var(--text-primary);min-width:120px;" x-text="extra.install_cmd"></code>
+                        <button class="btn btn-xs btn-secondary" @click="copyPkgCmd(extra.install_cmd)" style="font-size:0.62rem;padding:2px 7px;">Copy</button>
+                        <button class="btn btn-xs btn-primary"
+                                @click="installExtra(extra.name)"
+                                :disabled="pkgInstalling === extra.name"
+                                style="font-size:0.62rem;padding:2px 8px;"
+                                x-text="pkgInstalling === extra.name ? t('packages.installing') : t('packages.install_btn')"></button>
+                    </div>
+                </div>
+            </template>
+            <div x-show="pkgInstallMsg" x-cloak
+                 style="padding:10px 16px;font-size:0.78rem;border-top:1px solid var(--border-subtle);"
+                 :style="pkgInstallOk ? 'color:var(--success)' : 'color:var(--warning)'"
+                 x-text="pkgInstallMsg"></div>
+        </div>
+
+        <!-- Core Dependencies -->
+        <div class="settings-group" style="padding:0;overflow:hidden;">
+            <div style="padding:12px 16px;border-bottom:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;">
+                <h4 style="margin:0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('packages.core_deps') }}</h4>
+                <span style="font-size:0.72rem;color:var(--text-muted);" x-text="'(' + pkgCore.length + ')'"></span>
+            </div>
+            <div style="padding:8px 16px;border-bottom:1px solid var(--border-subtle);">
+                <input type="text" class="form-input" :placeholder="t('packages.search_ph')" x-model="pkgSearch"
+                       style="font-size:0.8rem;padding:6px 10px;width:100%;box-sizing:border-box;">
+            </div>
+            <div style="max-height:400px;overflow-y:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:0.8rem;">
+                    <thead style="position:sticky;top:0;background:var(--bg-panel);z-index:1;">
+                        <tr style="border-bottom:1px solid var(--border-subtle);">
+                            <th style="text-align:left;padding:6px 16px;font-weight:600;color:var(--text-secondary);font-size:0.72rem;text-transform:uppercase;">{{ t('packages.col_package') }}</th>
+                            <th style="text-align:left;padding:6px 16px;font-weight:600;color:var(--text-secondary);font-size:0.72rem;text-transform:uppercase;">{{ t('packages.col_version') }}</th>
+                            <th style="text-align:left;padding:6px 16px;font-weight:600;color:var(--text-secondary);font-size:0.72rem;text-transform:uppercase;">{{ t('packages.col_description') }}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="pkg in filteredPkgCore" :key="pkg.name">
+                            <tr style="border-bottom:1px solid var(--tint);">
+                                <td style="padding:5px 16px;font-family:var(--font-mono);font-weight:500;color:var(--accent);font-size:0.78rem;" x-text="pkg.name"></td>
+                                <td style="padding:5px 16px;font-family:var(--font-mono);color:var(--text-muted);font-size:0.72rem;" x-text="pkg.version"></td>
+                                <td style="padding:5px 16px;color:var(--text-secondary);font-size:0.76rem;" x-text="pkg.description"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <div x-show="filteredPkgCore.length === 0 && !pkgLoading" x-cloak style="padding:20px;text-align:center;color:var(--text-muted);font-size:0.8rem;">{{ t('packages.no_match') }}</div>
+            </div>
+        </div>
+
+        <!-- Install all -->
+        <div class="settings-group">
+            <h4 style="margin:0 0 8px 0;font-size:0.88rem;font-weight:600;">{{ t('packages.install_all_title') }}</h4>
+            <p style="margin:0 0 10px 0;font-size:0.78rem;color:var(--text-muted);">{{ t('packages.install_all_desc') }}</p>
+            <div style="background:var(--bg-deep);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:8px 10px;font-family:var(--font-mono);font-size:0.75rem;display:flex;align-items:center;gap:8px;">
+                <span style="color:var(--text-muted);">$</span>
+                <code style="flex:1;color:var(--text-primary);">uv sync --all-extras</code>
+                <button class="btn btn-xs btn-secondary" @click="copyPkgCmd('uv sync --all-extras')" style="font-size:0.62rem;padding:2px 7px;">Copy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 13: IMPORT/EXPORT
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'import'" x-transition>
         <!-- Export -->
@@ -1046,6 +1296,365 @@
             <h3>{{ t('settings.reset_to_defaults_section') }}</h3>
             <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:12px">{{ t('settings.reset_description') }}</p>
             <button class="btn btn-danger" @click="resetToDefaults()">{{ t('settings.reset_all_settings') }}</button>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB: EMAIL (Connect Gmail / Microsoft / status)
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'email'" x-transition x-cloak>
+        <div class="settings-group">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
+                <div>
+                    <h3 style="margin:0;">{{ t('settings.email_title') }}</h3>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:6px 0 0 0;">{{ t('settings.email_subtitle') }}</p>
+                </div>
+                <button class="btn btn-sm btn-secondary" @click="loadEmailStatus()" :disabled="emailLoading" x-text="emailLoading ? '…' : t('settings.email_refresh')"></button>
+            </div>
+
+            <!-- Active mode banner -->
+            <div style="padding:12px 14px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--bg-elevated);margin-bottom:20px;">
+                <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);margin-bottom:4px;">{{ t('settings.email_active_provider') }}</div>
+                <div style="font-family:var(--font-mono);font-size:1rem;font-weight:600;" x-text="emailStatus.active_provider || 'sandbox'"></div>
+                <p style="margin:8px 0 0 0;font-size:0.8rem;color:var(--text-tertiary);">{{ t('settings.email_auto_hint') }}</p>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
+                <!-- Sandbox card -->
+                <div class="card" style="padding:16px;border:1px solid var(--border-subtle);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <h4 style="margin:0;">{{ t('settings.email_sandbox') }}</h4>
+                        <span class="badge badge-stdio" style="font-size:0.7rem;">{{ t('settings.email_always_on') }}</span>
+                    </div>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_sandbox_desc') }}</p>
+                    <p style="font-size:0.8rem;margin:0;color:var(--text-secondary);">{{ t('settings.email_sandbox_try') }}</p>
+                </div>
+
+                <!-- Gmail card -->
+                <div class="card" style="padding:16px;border:1px solid var(--border-subtle);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <h4 style="margin:0;">Gmail / Google Workspace</h4>
+                        <span class="badge" :class="emailStatus.gmail_configured ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                              x-text="emailStatus.gmail_configured ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
+                    </div>
+                    <div x-show="emailStatus.gmail_configured" style="margin-bottom:12px;font-size:0.85rem;">
+                        <span style="color:var(--text-tertiary);">{{ t('settings.email_address') }}:</span>
+                        <code x-text="emailStatus.gmail_address || '—'"></code>
+                        <span class="badge badge-basic" style="font-size:0.65rem;margin-left:6px;"
+                              x-text="(emailStatus.gmail_auth_mode || '').toUpperCase() || '—'"></span>
+                    </div>
+                    <!-- Mode switcher -->
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+                        <button type="button" class="btn btn-sm" :class="emailGmailMode === 'oauth' ? 'btn-primary' : 'btn-secondary'" @click="emailGmailMode = 'oauth'">{{ t('settings.email_mode_oauth') }}</button>
+                        <button type="button" class="btn btn-sm" :class="emailGmailMode === 'imap' ? 'btn-primary' : 'btn-secondary'" @click="emailGmailMode = 'imap'">{{ t('settings.email_mode_imap') }}</button>
+                        <button type="button" class="btn btn-sm" :class="emailGmailMode === 'pop' ? 'btn-primary' : 'btn-secondary'" @click="emailGmailMode = 'pop'">{{ t('settings.email_mode_pop') }}</button>
+                    </div>
+
+                    <!-- OAuth -->
+                    <div x-show="emailGmailMode === 'oauth'">
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_gmail_oauth_desc') }}</p>
+                        <p style="font-size:0.8rem;margin:0 0 12px 0;">
+                            <span style="color:var(--text-tertiary);">{{ t('settings.email_gmail_oauth_client_status') }}:</span>
+                            <span class="badge" style="font-size:0.65rem;margin-left:6px;"
+                                  :class="emailStatus.gmail_oauth_client_set ? 'badge-stdio' : 'badge-basic'"
+                                  x-text="emailStatus.gmail_oauth_client_set ? t('settings.email_gmail_oauth_client_ready') : t('settings.email_gmail_oauth_client_missing')"></span>
+                        </p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_gmail_oauth_client_id') }}</label>
+                            <input type="text" class="form-control" x-model="emailGmailOAuth.client_id" placeholder="….apps.googleusercontent.com" autocomplete="off">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_gmail_oauth_client_secret') }}</label>
+                            <input type="password" class="form-control" x-model="emailGmailOAuth.client_secret" placeholder="Client secret (GOCSPX-…)" autocomplete="new-password">
+                            <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_oauth_help') }}</p>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                            <button class="btn btn-secondary btn-sm" @click="saveGmailOAuthClient()" :disabled="emailSaving">{{ t('settings.email_save_oauth_client') }}</button>
+                            <button class="btn btn-primary btn-sm" @click="connectGmailOAuth()" :disabled="emailSaving">{{ t('settings.email_connect_google') }}</button>
+                        </div>
+                    </div>
+
+                    <!-- IMAP -->
+                    <div x-show="emailGmailMode === 'imap'" x-cloak>
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_gmail_imap_desc') }}</p>
+                        <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">imap.gmail.com:993 · smtp.gmail.com:587</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_gmail_address') }}</label>
+                            <input type="email" class="form-control" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_gmail_app_password') }}</label>
+                            <input type="password" class="form-control" x-model="emailGmail.app_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+                            <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_app_password_help') }}</p>
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="saveGmailProtocol('imap')" :disabled="emailSaving"
+                                x-text="emailSaving ? '…' : t('settings.email_save_imap')"></button>
+                    </div>
+
+                    <!-- POP -->
+                    <div x-show="emailGmailMode === 'pop'" x-cloak>
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_gmail_pop_desc') }}</p>
+                        <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">pop.gmail.com:995 · smtp.gmail.com:587</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_gmail_address') }}</label>
+                            <input type="email" class="form-control" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_gmail_app_password') }}</label>
+                            <input type="password" class="form-control" x-model="emailGmail.app_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="saveGmailProtocol('pop')" :disabled="emailSaving"
+                                x-text="emailSaving ? '…' : t('settings.email_save_pop')"></button>
+                    </div>
+
+                    <div style="margin-top:12px;" x-show="emailStatus.gmail_configured">
+                        <button class="btn btn-secondary btn-sm" @click="disconnectGmail()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
+                    </div>
+                </div>
+
+                <!-- Microsoft card -->
+                <div class="card" style="padding:16px;border:1px solid var(--border-subtle);">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                        <h4 style="margin:0;">Microsoft 365 / Outlook</h4>
+                        <span class="badge" :class="emailStatus.microsoft_configured ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                              x-text="emailStatus.microsoft_configured ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
+                    </div>
+                    <div x-show="emailStatus.microsoft_configured" style="margin-bottom:12px;font-size:0.85rem;">
+                        <span style="color:var(--text-tertiary);">{{ t('settings.email_address') }}:</span>
+                        <code x-text="emailStatus.microsoft_address || (emailStatus.microsoft_auth_mode === 'oauth' ? 'OAuth' : '—')"></code>
+                        <span class="badge badge-basic" style="font-size:0.65rem;margin-left:6px;"
+                              x-text="(emailStatus.microsoft_auth_mode || '').toUpperCase() || '—'"></span>
+                    </div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+                        <button type="button" class="btn btn-sm" :class="emailMsMode === 'oauth' ? 'btn-primary' : 'btn-secondary'" @click="emailMsMode = 'oauth'">{{ t('settings.email_mode_oauth') }}</button>
+                        <button type="button" class="btn btn-sm" :class="emailMsMode === 'imap' ? 'btn-primary' : 'btn-secondary'" @click="emailMsMode = 'imap'">{{ t('settings.email_mode_imap') }}</button>
+                        <button type="button" class="btn btn-sm" :class="emailMsMode === 'pop' ? 'btn-primary' : 'btn-secondary'" @click="emailMsMode = 'pop'">{{ t('settings.email_mode_pop') }}</button>
+                    </div>
+
+                    <!-- OAuth -->
+                    <div x-show="emailMsMode === 'oauth'">
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_ms_oauth_desc') }}</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_ms_client_id') }}</label>
+                            <input type="text" class="form-control" x-model="emailMs.client_id" placeholder="Azure app (client) ID" autocomplete="off">
+                        </div>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_ms_client_secret') }}</label>
+                            <input type="password" class="form-control" x-model="emailMs.client_secret" placeholder="Optional for public clients" autocomplete="new-password">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_ms_tenant') }}</label>
+                            <input type="text" class="form-control" x-model="emailMs.tenant_id" placeholder="common">
+                            <p class="form-help" style="margin-top:4px;">{{ t('settings.email_ms_redirect_help') }}</p>
+                        </div>
+                        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                            <button class="btn btn-secondary btn-sm" @click="saveMsClient()" :disabled="emailSaving">{{ t('settings.email_save_ms_client') }}</button>
+                            <button class="btn btn-primary btn-sm" @click="connectMicrosoftOAuth()" :disabled="emailSaving">{{ t('settings.email_connect_microsoft_browser') }}</button>
+                        </div>
+                        <details>
+                            <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-tertiary);">{{ t('settings.email_ms_device_fallback') }}</summary>
+                            <div style="margin-top:12px;">
+                                <button class="btn btn-secondary btn-sm" @click="connectMicrosoft()" :disabled="emailMsConnecting || emailSaving"
+                                        x-text="emailMsConnecting ? t('settings.email_waiting_auth') : t('settings.email_connect_microsoft_device')"></button>
+                                <div x-show="emailMsDevice.user_code" x-cloak style="margin-top:12px;padding:12px;border-radius:8px;background:var(--bg-primary);border:1px dashed var(--accent, #5e6ad2);">
+                                    <p style="margin:0 0 8px 0;font-size:0.85rem;">{{ t('settings.email_ms_device_hint') }}</p>
+                                    <div style="font-size:1.4rem;font-weight:700;letter-spacing:0.12em;font-family:var(--font-mono);" x-text="emailMsDevice.user_code"></div>
+                                    <p style="margin:8px 0 0 0;font-size:0.85rem;">
+                                        <a :href="emailMsDevice.verification_uri" target="_blank" rel="noopener" style="color:var(--accent);">
+                                            <span x-text="emailMsDevice.verification_uri || 'https://microsoft.com/devicelogin'"></span>
+                                        </a>
+                                    </p>
+                                    <p x-show="emailMsConnecting" style="margin:8px 0 0 0;font-size:0.8rem;color:var(--warning);">{{ t('settings.email_ms_polling') }}</p>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+
+                    <!-- IMAP -->
+                    <div x-show="emailMsMode === 'imap'" x-cloak>
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_ms_imap_desc') }}</p>
+                        <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">outlook.office365.com:993 · smtp.office365.com:587</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_ms_address') }}</label>
+                            <input type="email" class="form-control" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_ms_password') }}</label>
+                            <input type="password" class="form-control" x-model="emailMsProtocol.password" placeholder="Password or app password" autocomplete="new-password">
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="saveMsProtocol('imap')" :disabled="emailSaving"
+                                x-text="emailSaving ? '…' : t('settings.email_save_imap')"></button>
+                    </div>
+
+                    <!-- POP -->
+                    <div x-show="emailMsMode === 'pop'" x-cloak>
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 8px 0;">{{ t('settings.email_ms_pop_desc') }}</p>
+                        <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">outlook.office365.com:995 · smtp.office365.com:587</p>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label>{{ t('settings.email_ms_address') }}</label>
+                            <input type="email" class="form-control" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
+                        </div>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label>{{ t('settings.email_ms_password') }}</label>
+                            <input type="password" class="form-control" x-model="emailMsProtocol.password" placeholder="Password or app password" autocomplete="new-password">
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="saveMsProtocol('pop')" :disabled="emailSaving"
+                                x-text="emailSaving ? '…' : t('settings.email_save_pop')"></button>
+                    </div>
+
+                    <div style="margin-top:12px;" x-show="emailStatus.microsoft_configured">
+                        <button class="btn btn-secondary btn-sm" @click="disconnectMicrosoft()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Multi-account list -->
+            <div style="margin-top:24px;" x-show="emailAccounts.length > 0">
+                <h4 style="margin:0 0 8px 0;">{{ t('settings.email_multi_accounts') }}</h4>
+                <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_multi_accounts_hint') }}</p>
+                <div class="account-list-table">
+                    <template x-for="a in emailAccounts" :key="a.alias">
+                        <div style="display:flex;gap:12px;padding:8px 0;border-bottom:1px solid var(--border-subtle);font-size:0.85rem;">
+                            <strong x-text="a.alias"></strong>
+                            <span x-text="a.type"></span>
+                            <code x-text="a.address || '—'"></code>
+                            <span x-text="(a.has_password || a.has_token) ? '●' : '○'" :title="(a.has_password || a.has_token) ? 'creds' : 'incomplete'"></span>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <p style="margin-top:20px;font-size:0.8rem;color:var(--text-tertiary);">
+                {{ t('settings.email_docs_hint') }}
+                <a href="/docs/guide/email-integration" style="color:var(--accent);">{{ t('settings.email_docs_link') }}</a>
+            </p>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB 14: VOICE SETTINGS
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'voice'" x-transition x-cloak>
+        <div class="settings-group">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <div>
+                    <h3 style="margin:0;">Voice Subsystem</h3>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:4px 0 0 0;">Configure speech-to-text (STT) and text-to-speech (TTS) engines.</p>
+                </div>
+                <label class="toggle" style="scale: 1.2;">
+                    <input type="checkbox" x-model="voiceForm.enabled" @change="saveVoiceSettings()">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <!-- Voice Controls Section, shown only when enabled -->
+            <div x-show="voiceForm.enabled" x-transition x-cloak>
+
+                <div style="height:1px; background:var(--border-subtle); margin:16px 0;"></div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                    <!-- Speech to Text (STT) Configuration -->
+                    <div>
+                        <h4 style="margin:0 0 12px 0; display:flex; align-items:center; gap:8px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-mic"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
+                            Speech-to-Text (STT)
+                        </h4>
+                        
+                        <div class="form-group">
+                            <label>STT Provider</label>
+                            <select class="form-select" x-model="voiceForm.stt_provider" @change="saveVoiceSettings(); loadSttModels()">
+                                <template x-for="provider in voiceProviders.stt" :key="provider">
+                                    <option :value="provider" x-text="provider"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>STT Model <span x-show="sttModelsLoading" style="color:var(--text-muted);font-weight:400">(loading…)</span></label>
+                            <select class="form-select" x-model="sttModelType" @change="onSttModelTypeChange()">
+                                <template x-for="model in sttModelOptions" :key="model.id">
+                                    <option :value="model.id" x-text="model.label"></option>
+                                </template>
+                                <option value="custom">Custom model ID...</option>
+                            </select>
+                            <p class="form-help" style="margin-top:4px" x-show="!sttModelOptions.length">
+                                No models loaded — pick Custom or change provider.
+                            </p>
+                            <p class="form-help" style="margin-top:4px" x-show="voiceForm.stt_provider === 'nvidia'">
+                                NVIDIA Whisper is a <strong>Speech NIM</strong> (self-hosted), not a chat model on integrate.api.nvidia.com.
+                                Set the ASR base URL below, or use <code>groq</code>/<code>openai</code> for cloud STT.
+                            </p>
+                        </div>
+
+                        <div class="form-group" x-show="sttModelType === 'custom'" style="margin-top:8px;">
+                            <label>Custom STT Model ID</label>
+                            <input type="text" class="form-control" x-model="voiceForm.stt_model" placeholder="e.g. openai/whisper-large-v3" @change="saveVoiceSettings()">
+                            <p class="form-help" style="margin-top:4px;">Type any specific custom transcription model name.</p>
+                        </div>
+
+                        <div class="form-group" x-show="voiceForm.stt_provider === 'nvidia'" style="margin-top:8px;">
+                            <label>NVIDIA ASR base URL (Speech NIM)</label>
+                            <input type="text" class="form-control" x-model="voiceForm.stt_base_url"
+                                   placeholder="http://127.0.0.1:9000/v1"
+                                   @change="saveVoiceSettings()">
+                            <p class="form-help" style="margin-top:4px;">
+                                OpenAI-compatible root of your Speech NIM (must expose <code>/v1/audio/transcriptions</code>).
+                                Do <em>not</em> use the LLM integrate.api.nvidia.com URL.
+                            </p>
+                        </div>
+
+                        <div class="form-group">
+                            <label>STT Language</label>
+                            <input type="text" class="form-control" x-model="voiceForm.stt_language" placeholder="auto or en, ar, fr..." @change="saveVoiceSettings()">
+                            <p class="form-help" style="margin-top:4px;">Use "auto" or ISO-639-1 format.</p>
+                        </div>
+                    </div>
+
+                    <!-- Text to Speech (TTS) Configuration -->
+                    <div>
+                        <h4 style="margin:0 0 12px 0; display:flex; align-items:center; gap:8px;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-volume-2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path></svg>
+                            Text-to-Speech (TTS)
+                        </h4>
+
+                        <div class="form-group">
+                            <label>TTS Provider</label>
+                            <select class="form-select" x-model="voiceForm.tts_provider" @change="saveVoiceSettings(); loadVoiceModels()">
+                                <template x-for="provider in voiceProviders.tts" :key="provider">
+                                    <option :value="provider" x-text="provider"></option>
+                                </template>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Voice Model / Voice ID</label>
+                            <select class="form-select" x-model="ttsVoiceType" @change="onTtsVoiceTypeChange()">
+                                <template x-for="model in voiceModels" :key="model">
+                                    <option :value="model" x-text="model"></option>
+                                </template>
+                                <option value="custom">Custom voice ID...</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" x-show="ttsVoiceType === 'custom'" style="margin-top:8px;">
+                            <label>Custom Voice ID</label>
+                            <input type="text" class="form-control" x-model="voiceForm.tts_voice" placeholder="Enter custom voice ID" @change="saveVoiceSettings()">
+                            <p class="form-help" style="margin-top:4px;">e.g. provider voice ID, or a local file path.</p>
+                        </div>
+
+
+                        <div class="form-group">
+                            <label>Audio Format</label>
+                            <select class="form-select" x-model="voiceForm.tts_output_format" @change="saveVoiceSettings()">
+                                <option value="mp3">MP3 (standard)</option>
+                                <option value="wav">WAV (uncompressed)</option>
+                                <option value="opus">Opus (highly optimized)</option>
+                                <option value="flac">FLAC (lossless)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

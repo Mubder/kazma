@@ -2,56 +2,79 @@
 sidebar_position: 2
 ---
 
-# Publishing Skills
+# Publishing & registering skills
 
-Share your skills with the Kazma community.
+Share skills by registering them locally and, optionally, submitting them to a remote hub API.
+
+:::warning No `publish` command
+There is **no** `kazma hub publish` command. Use **`register`** for local install from a path, and **`submit`** only when a hub API is configured and reachable.
+:::
 
 ## Prerequisites
 
-- A Kazma Hub account
-- A skill with valid `skill_manifest.yaml`
-- Tests passing
+- A directory with valid `skill_manifest.yaml`  
+- Optional: `tools.py` (native tools shape) or entry-point module  
+- `KAZMA_SECRET` if you will **sign** the skill  
 
-## Publish flow
+## Recommended flow (local)
 
-### 1. Validate your skill
+### 1. Validate
 
 ```bash
 kazma hub validate ./my-skill
+# optional JSON:
+kazma hub validate ./my-skill --json
 ```
 
-Fix any errors before proceeding.
+### 2. Sign (integrity)
 
-### 2. Register locally
+```bash
+kazma hub sign ./my-skill
+# or: kazma hub sign ./my-skill --secret "$KAZMA_SECRET"
+```
+
+Writes checksum + HMAC into the manifest (see [Skills, MCP & Tools](../guide/skills-mcp-and-tools)).
+
+### 3. Register locally
 
 ```bash
 kazma hub register ./my-skill
 ```
 
-### 3. Publish to the hub
-
-```bash
-kazma hub publish ./my-skill
-```
-
-### 4. Verify publication
+### 4. Verify
 
 ```bash
 kazma hub search "my-skill"
+kazma hub list
+kazma hub info <skill-id>
+```
+
+## Optional: remote certification submit
+
+If you operate a hub API (`hub_url` / CLI default):
+
+```bash
+kazma hub submit ./my-skill --source-url https://github.com/you/my-skill
+kazma hub status <submission_id>
+```
+
+There is **no** `--level` flag on `submit`. Local readiness:
+
+```bash
+kazma hub check-certification ./my-skill
 ```
 
 ## Versioning
 
-Use semantic versioning:
+Use semantic versioning in the manifest:
 
-- **Patch** (1.0.1): Bug fixes
-- **Minor** (1.1.0): New features, backward compatible
-- **Major** (2.0.0): Breaking changes
+- **Patch** (1.0.1): bug fixes  
+- **Minor** (1.1.0): backward-compatible features  
+- **Major** (2.0.0): breaking changes  
 
 ## Best practices
 
-1. Include comprehensive tests
-2. Document all configuration options
-3. Keep dependencies minimal
-4. Follow the security guidelines
-5. Respond to issues promptly
+1. Keep tools small and HITL-aware (danger tools must match real capabilities).  
+2. Prefer the native `tools:` map used by built-in skills under `kazma-skills/`.  
+3. Document env vars and permissions in the skill README.  
+4. Run `validate` + `check-certification` before sharing.  

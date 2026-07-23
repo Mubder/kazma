@@ -10,6 +10,12 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "detect_voice_message",
+    "transcribe_groq",
+    "transcribe_openai",
+]
+
 
 def detect_voice_message(message: dict[str, Any]) -> bool:
     """Return True if the Telegram message contains voice or audio."""

@@ -13,6 +13,8 @@ from textual.widgets import Static
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["Toast"]
+
 
 class Toast(ModalScreen[None]):
     """Non-blocking notification popup with auto-dismiss.

@@ -25,6 +25,8 @@ import logging
 import os
 from typing import Any, Protocol, runtime_checkable
 
+__all__ = ["DEFAULT_DIM", "DEFAULT_MODEL", "DEFAULT_PROVIDER", "Embedder", "LocalSentenceTransformerEmbedder", "OpenAICompatibleEmbedder", "get_embedder", "get_embedding_dim", "make_chroma_embedding_function", "reset_embedder"]
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "all-MiniLM-L6-v2"
@@ -229,23 +231,11 @@ def make_chroma_embedding_function(embedder: Embedder) -> Any:
 
     ChromaDB's ``EmbeddingFunction.__call__`` must return a ``numpy.ndarray``
     (not a list). This adapter centralizes the numpy coercion so
-    ``vector_store.py`` stays provider-agnostic. Falls back to ChromaDB's
-    built-in ``SentenceTransformerEmbeddingFunction`` when the embedder is a
-    local SentenceTransformer (so ChromaDB can use its own optimized path).
+    ``vector_store.py`` stays provider-agnostic.
+
+    Always uses the generic wrapper — even for local SentenceTransformer
+    — to avoid loading the model twice (the embedder already holds it).
     """
-    # Fast path: for the local ST embedder, let ChromaDB use its native EF
-    # (avoids double-loading the model).
-    if isinstance(embedder, LocalSentenceTransformerEmbedder):
-        try:
-            from chromadb.utils import embedding_functions
-
-            return embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=embedder._model_name,
-            )
-        except Exception:
-            pass  # fall through to the generic wrapper
-
-    # Generic wrapper for remote providers.
     try:
         import numpy as np
         from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
@@ -319,10 +309,15 @@ def _read_embedding_config() -> dict[str, Any]:
     except (ValueError, TypeError):
         dim = DEFAULT_DIM
     base_url = os.environ.get("KAZMA_EMBED_BASE_URL", "") or cfg.get("base_url", "")
-    # api_key: read from the env var named in config (api_key_env), or a
-    # conventional default. Never inline the key in kazma.yaml.
+    # api_key: read from the env var named in config (api_key_env), then
+    # common aliases (NVIDIA NIM / OpenAI). Never inline the key in yaml.
     api_key_env = cfg.get("api_key_env", "KAZMA_EMBED_API_KEY")
-    api_key = os.environ.get(api_key_env, "")
+    api_key = os.environ.get(str(api_key_env), "") if api_key_env else ""
+    if not api_key:
+        for _alias in ("KAZMA_EMBED_API_KEY", "NVIDIA_API_KEY", "NGC_API_KEY", "OPENAI_API_KEY"):
+            api_key = os.environ.get(_alias, "")
+            if api_key:
+                break
 
     return {
         "provider": provider,
@@ -343,6 +338,12 @@ def get_embedder() -> Embedder | None:
     vector backends MUST use this function so the model/endpoint is never
     loaded twice. Returns None if the provider can't initialize (the
     callers already handle None gracefully).
+
+    When a remote provider is configured but missing ``base_url``/API key,
+    fall back to the **default local model** (``all-MiniLM-L6-v2`` / 384-d),
+    not the remote model name. Previously we kept ``nvidia/nv-embed-v1`` and
+    tried to load it via sentence-transformers, which fails (gated HF repo)
+    and silently kills store + per-turn recall.
     """
     global _embedder
     if _embedder is not None:
@@ -350,41 +351,74 @@ def get_embedder() -> Embedder | None:
 
     cfg = _read_embedding_config()
     provider = cfg["provider"]
+    remote_providers = ("openai-compatible", "openai", "nim", "remote")
+    fell_back_from_remote = False
 
-    if provider in ("openai-compatible", "openai", "nim", "remote"):
-        if not cfg["base_url"]:
+    if provider in remote_providers:
+        # Allow common NVIDIA/OpenAI env aliases when api_key_env is unset.
+        api_key = (cfg.get("api_key") or "").strip()
+        if not api_key:
+            for env_name in (
+                "KAZMA_EMBED_API_KEY",
+                "NVIDIA_API_KEY",
+                "NGC_API_KEY",
+                "OPENAI_API_KEY",
+            ):
+                api_key = os.environ.get(env_name, "").strip()
+                if api_key:
+                    break
+        base_url = (cfg.get("base_url") or "").strip()
+        if not base_url:
             logger.warning(
-                "[Embedder] provider=%s but base_url is empty — falling back to local",
+                "[Embedder] provider=%s but base_url is empty — falling back to local %s",
                 provider,
+                DEFAULT_MODEL,
             )
-        elif not cfg["api_key"]:
+            fell_back_from_remote = True
+        elif not api_key:
             logger.warning(
-                "[Embedder] provider=%s but api_key is empty — falling back to local",
+                "[Embedder] provider=%s but api_key is empty "
+                "(set %s or NVIDIA_API_KEY) — falling back to local %s",
                 provider,
+                cfg.get("api_key_env") or "KAZMA_EMBED_API_KEY",
+                DEFAULT_MODEL,
             )
+            fell_back_from_remote = True
         else:
             _embedder = OpenAICompatibleEmbedder(
-                base_url=cfg["base_url"],
-                api_key=cfg["api_key"],
+                base_url=base_url,
+                api_key=api_key,
                 model=cfg["model"],
                 dim=cfg["dim"],
             )
             logger.info(
                 "[Embedder] Using openai-compatible: %s (dim=%d, base=%s)",
-                cfg["model"], cfg["dim"], cfg["base_url"],
+                cfg["model"], cfg["dim"], base_url,
             )
             return _embedder
 
     # Default / fallback: local sentence-transformers.
-    if provider not in ("local", ""):
+    if provider not in ("local", "") and provider not in remote_providers:
         logger.warning(
             "[Embedder] Unknown provider '%s' — falling back to local. "
             "Valid: local, openai-compatible", provider,
         )
+        fell_back_from_remote = True
+
+    # Critical: when leaving a remote config, do NOT keep the remote model
+    # name (e.g. nvidia/nv-embed-v1) — ST will try to download a gated HF
+    # model and every encode returns [].
+    if fell_back_from_remote or provider in remote_providers:
+        local_model = DEFAULT_MODEL
+        local_dim = DEFAULT_DIM
+    else:
+        local_model = cfg.get("model") or DEFAULT_MODEL
+        local_dim = int(cfg.get("dim") or DEFAULT_DIM)
+
     _embedder = LocalSentenceTransformerEmbedder(
-        model_name=cfg["model"], dim=cfg["dim"],
+        model_name=local_model, dim=local_dim,
     )
-    logger.info("[Embedder] Using local: %s (dim=%d)", cfg["model"], cfg["dim"])
+    logger.info("[Embedder] Using local: %s (dim=%d)", local_model, local_dim)
     return _embedder
 
 

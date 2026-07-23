@@ -25,6 +25,8 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
 
+__all__ = ["HardwareMonitor", "TelemetrySnapshot", "parse_nvidia_smi_output"]
+
 logger = logging.getLogger(__name__)
 
 

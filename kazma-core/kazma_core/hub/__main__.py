@@ -2,4 +2,6 @@
 
 from kazma_core.hub.cli import main
 
+__all__: list[str] = []
+
 main()

@@ -26,6 +26,8 @@ from kazma_core.swarm.patterns import (
 )
 from kazma_core.swarm.task import SwarmTask, TaskResult, TaskType
 
+__all__ = ["dispatch_inner"]
+
 if TYPE_CHECKING:
     from kazma_core.swarm.engine import SwarmEngine
 

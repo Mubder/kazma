@@ -18,6 +18,8 @@ from fastapi.templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_agents_router"]
+
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
@@ -246,9 +248,9 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
             "list": tools_info["list"],
         },
         "metrics": {
-            "total_cost": f"${stats['total_cost']:.4f}",
-            "total_tokens": f"{stats['total_tokens']:,}",
-            "total_llm_calls": stats["total_llm_calls"],
-            "total_tool_calls": stats["total_tool_calls"],
+            "total_cost": float(stats.get("total_cost") or 0.0),
+            "total_tokens": int(stats.get("total_tokens") or 0),
+            "total_llm_calls": int(stats.get("total_llm_calls") or 0),
+            "total_tool_calls": int(stats.get("total_tool_calls") or 0),
         },
     }

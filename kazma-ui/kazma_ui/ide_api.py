@@ -34,6 +34,8 @@ from fastapi import APIRouter, Body, Query
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_ide_router"]
+
 
 def create_ide_router() -> APIRouter:
     """Create and return the IDE API router."""

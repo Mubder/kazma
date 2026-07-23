@@ -13,9 +13,11 @@ import os
 from unittest.mock import patch
 
 import pytest
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, Request, WebSocket
+from fastapi.responses import JSONResponse, Response
 from fastapi.testclient import TestClient
 from kazma_ui.auth import (
+    SECRET_COOKIE,
     SECRET_HEADER,
     SENSITIVE_PREFIXES,
     create_auth_middleware,
@@ -37,6 +39,41 @@ def _build_test_app() -> FastAPI:
 
     # Apply the auth middleware under test.
     app.middleware("http")(create_auth_middleware())
+
+    # --- Auth bootstrap (always open) — mirrors production cookie issue ---
+    @app.get("/login")
+    async def login_page() -> dict:
+        return {"ok": True}
+
+    @app.post("/api/auth/login")
+    async def auth_login(request: Request) -> Response:
+        from kazma_ui.auth import SECRET_COOKIE, get_kazma_secret, verify_secret
+
+        expected = get_kazma_secret()
+        if not expected:
+            return JSONResponse({"status": "ok", "authenticated": True})
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        secret = str((body or {}).get("secret") or "")
+        if not verify_secret(secret, expected):
+            return JSONResponse({"detail": "Invalid secret"}, status_code=401)
+        resp = JSONResponse({"status": "ok", "authenticated": True})
+        resp.set_cookie(SECRET_COOKIE, expected, httponly=True, samesite="strict", path="/")
+        return resp
+
+    @app.post("/api/auth/logout")
+    async def auth_logout() -> Response:
+        from kazma_ui.auth import SECRET_COOKIE
+
+        resp = JSONResponse({"status": "ok"})
+        resp.delete_cookie(SECRET_COOKIE, path="/")
+        return resp
+
+    @app.get("/api/auth/status")
+    async def auth_status() -> dict:
+        return {"ok": True}
 
     # --- Sensitive endpoints (one per prefix) ---
     @app.get("/api/settings")
@@ -128,27 +165,40 @@ class TestIsSensitivePath:
     def test_root_is_not_sensitive(self):
         assert is_sensitive_path("/") is False
 
-    def test_status_is_not_sensitive(self):
-        assert is_sensitive_path("/api/status") is False
-
-    def test_unrelated_api_is_not_sensitive(self):
-        assert is_sensitive_path("/api/telemetry") is False
-        assert is_sensitive_path("/api/something-random") is False
+    def test_all_api_default_deny_sensitive(self):
+        """Audit M1: every /api/* is classified sensitive; open paths use is_always_open."""
+        assert is_sensitive_path("/api/status") is True
+        assert is_sensitive_path("/api/telemetry") is True
+        assert is_sensitive_path("/api/something-random") is True
+        assert is_sensitive_path("/api/mod") is True
+        assert is_sensitive_path("/api/setting") is True
 
     def test_chat_stream_is_sensitive(self):
-        """/api/chat/* is a sensitive prefix (chat can invoke tools/models)."""
+        """/api/chat/* is gated (chat can invoke tools/models)."""
         assert is_sensitive_path("/api/chat/stream") is True
 
-    def test_partial_match_not_sensitive(self):
-        """A path like /api/mod should NOT match /api/models prefix."""
-        assert is_sensitive_path("/api/mod") is False
-        assert is_sensitive_path("/api/setting") is False
+    def test_admin_html_shells_sensitive(self):
+        assert is_sensitive_path("/settings") is True
+        assert is_sensitive_path("/ide") is True
+        assert is_sensitive_path("/chat") is False  # main chat page shell stays open
 
 
 class TestIsAlwaysOpen:
     """Test the always-open path set."""
 
-    @pytest.mark.parametrize("path", ["/", "/api/status", "/api/telemetry", "/health"])
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/",
+            "/api/status",
+            "/api/telemetry",
+            "/health",
+            "/login",
+            "/api/auth/login",
+            "/api/auth/logout",
+            "/api/auth/status",
+        ],
+    )
     def test_known_open_paths(self, path: str):
         assert is_always_open(path) is True
 
@@ -242,7 +292,11 @@ OPEN_TEST_PATHS = [
     ("/", "GET"),
     ("/api/status", "GET"),
     ("/api/telemetry", "GET"),
-    ("/api/public/info", "GET"),
+    # /api/public/* is default-deny (audit M1) — must not appear here
+]
+
+SENSITIVE_EXTRA_PATHS = [
+    "/api/public/info",  # default-deny: unknown API routes require auth
 ]
 
 
@@ -251,7 +305,8 @@ class TestAuthMiddlewareWithSecret:
 
     @pytest.fixture(autouse=True)
     def _set_secret(self):
-        with patch.dict(os.environ, {"KAZMA_SECRET": TEST_SECRET}):
+        # TRUST_LAN off so TestClient host is not auto-authed as private LAN
+        with patch.dict(os.environ, {"KAZMA_SECRET": TEST_SECRET, "KAZMA_TRUST_LAN": "0"}):
             # Rebuild app per-class so middleware captures the env.
             self.client = TestClient(_build_test_app())
             yield
@@ -296,11 +351,62 @@ class TestAuthMiddlewareWithSecret:
             resp = self.client.get(path)
         assert resp.status_code == 200, f"Expected 200 for open {path}, got {resp.status_code}"
 
+    @pytest.mark.parametrize("path", SENSITIVE_EXTRA_PATHS)
+    def test_unknown_api_default_deny(self, path: str):
+        """New /api/* routes ship closed when secret is set (audit M1)."""
+        resp = self.client.get(path)
+        assert resp.status_code == 401
+        headers = {SECRET_HEADER: TEST_SECRET}
+        resp_ok = self.client.get(path, headers=headers)
+        assert resp_ok.status_code == 200
+
     def test_websocket_unauthorized_without_secret(self):
         """Websocket connection fails when secret is required but not provided."""
         with pytest.raises(Exception):
             with self.client.websocket_connect("/ws/dashboard") as ws:
                 pass
+
+    def test_login_open_without_header(self):
+        """Login endpoints stay reachable without prior auth."""
+        assert self.client.get("/login").status_code == 200
+        assert self.client.get("/api/auth/status").status_code == 200
+
+    def test_login_sets_cookie_and_unlocks_api(self):
+        """POST /api/auth/login with correct secret sets cookie for API access."""
+        bad = self.client.post("/api/auth/login", json={"secret": "nope"})
+        assert bad.status_code == 401
+
+        # Fresh client so loopback auto-cookie from open routes doesn't leak in
+        with patch.dict(os.environ, {"KAZMA_SECRET": TEST_SECRET, "KAZMA_TRUST_LAN": "0"}):
+            c = TestClient(_build_test_app())
+            c.cookies.clear()
+            # Hit settings without cookie → 401
+            assert c.get("/api/settings").status_code == 401
+            ok = c.post("/api/auth/login", json={"secret": TEST_SECRET})
+            assert ok.status_code == 200
+            assert ok.json().get("authenticated") is True
+            # Cookie should unlock sensitive API
+            assert c.get("/api/settings").status_code == 200
+            c.post("/api/auth/logout")
+            # After logout cookie cleared — may still fail depending on TestClient
+            # cookie jar; force clear and re-check
+            c.cookies.clear()
+            assert c.get("/api/settings").status_code == 401
+
+    def test_html_navigation_redirects_to_login(self):
+        """Browser GET to sensitive page without cookie redirects to /login."""
+        with patch.dict(os.environ, {"KAZMA_SECRET": TEST_SECRET, "KAZMA_TRUST_LAN": "0"}):
+            app = FastAPI()
+            app.middleware("http")(create_auth_middleware())
+
+            @app.get("/dashboard")
+            async def dash():
+                return {"ok": True}
+
+            c = TestClient(app, follow_redirects=False)
+            resp = c.get("/dashboard", headers={"Accept": "text/html"})
+            assert resp.status_code in (302, 303, 307)
+            assert "/login" in resp.headers.get("location", "")
 
     def test_websocket_authorized_with_header(self):
         """Websocket connection succeeds when secret is provided in the headers."""

@@ -1,7 +1,7 @@
 """Swarm CLI commands — manage multi-worker AI agent orchestration.
 
 Talks to the running WebUI server's REST API (``/api/swarm/*``) using
-httpx.  The server is expected at ``http://localhost:8000`` by default;
+httpx.  The server is expected at ``http://localhost:9090`` by default;
 override with ``--port`` or the ``KAZMA_PORT`` env var.
 """
 
@@ -27,6 +27,30 @@ from kazma_cli.gateway import (
 logger = logging.getLogger(__name__)
 
 console = Console()
+
+__all__ = [
+    "cmd_approve",
+    "cmd_broadcast",
+    "cmd_circuit_breaker",
+    "cmd_consult",
+    "cmd_dispatch",
+    "cmd_fanout",
+    "cmd_history",
+    "cmd_metrics",
+    "cmd_pipeline",
+    "cmd_reject",
+    "cmd_start",
+    "cmd_stop",
+    "cmd_status",
+    "cmd_task",
+    "cmd_workers",
+    "cmd_worker_add",
+    "cmd_worker_remove",
+    "cmd_worker_spawn",
+    "parse_flags",
+    "print_help",
+    "run",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -713,7 +737,7 @@ def print_help() -> None:
     console.print("                    Show or reset circuit breakers")
     console.print()
     console.print("Options:")
-    console.print("  --port N          Server port (default: 8000, or KAZMA_PORT env var)")
+    console.print("  --port N          Server port (default: 9090, or KAZMA_PORT env var)")
 
 
 # ---------------------------------------------------------------------------

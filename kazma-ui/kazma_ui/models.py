@@ -6,6 +6,44 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+__all__ = [
+    "AgentConfigUpdate",
+    "AppearanceUpdate",
+    "APITokenCreate",
+    "ChatEvent",
+    "ChatMessage",
+    "ChatRequest",
+    "ConnectorConfigUpdate",
+    "ConnectorTestRequest",
+    "ConnectorTestResponse",
+    "ConnectorUpdateRequest",
+    "ContextSettingsUpdate",
+    "DashboardMetrics",
+    "ImportConfigRequest",
+    "MaskedSecretResponse",
+    "MCPServerAddRequest",
+    "MCPServerTestRequest",
+    "MCPServerToggleRequest",
+    "ModelCompareRequest",
+    "ModelDefaultUpdate",
+    "ModelProfileUpdateRequest",
+    "ModelTestRequest",
+    "PasswordChange",
+    "ProviderAddRequest",
+    "ProviderTestResponse",
+    "ProviderToggleRequest",
+    "ProviderUpdateRequest",
+    "SafetySettingsUpdate",
+    "SettingsUpdate",
+    "ShortcutUpdate",
+    "SkillConfigUpdate",
+    "SkillInstallRequest",
+    "SkillToggleRequest",
+    "ToolTestRequest",
+    "ToolToggleRequest",
+    "VoiceSettingsUpdate",
+]
+
 # ── Chat ──────────────────────────────────────────────────────────────
 
 
@@ -342,3 +380,16 @@ class ModelDefaultUpdate(BaseModel):
 
     task_type: str  # 'chat', 'code', 'summarize', 'translate'
     model_name: str
+
+
+class VoiceSettingsUpdate(BaseModel):
+    """Update Voice Subsystem settings."""
+
+    enabled: bool = False
+    stt_provider: str = "openai"
+    stt_model: str = "default"
+    stt_base_url: str = ""
+    tts_provider: str = "edgetts"
+    tts_voice: str = "default"
+    stt_language: str = "auto"
+    tts_output_format: str = "mp3"

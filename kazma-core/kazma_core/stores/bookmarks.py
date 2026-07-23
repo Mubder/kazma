@@ -33,6 +33,8 @@ from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
+__all__ = ["BookmarkStore", "get_bookmark_store", "reset_bookmark_store"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/settings.db"

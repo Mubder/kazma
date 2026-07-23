@@ -20,6 +20,8 @@ import httpx
 
 from kazma_core.url_utils import normalize_provider_url
 
+__all__ = ["ProviderInfo", "check_ollama_health", "discover_custom_models", "discover_lm_studio_models", "discover_models", "discover_ollama_models", "get_active_local_models", "get_model_base_url", "pull_ollama_model"]
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────
@@ -267,15 +269,30 @@ async def discover_models(
 
 async def _discover_openai_compatible(base_url: str, api_key: str | None, provider: str) -> ProviderInfo:
     """Discover models from any OpenAI-compatible /v1/models endpoint."""
+    import os
+
     import httpx
 
     url = f"{base_url.rstrip('/')}/models"
+    # Audit H2: SSRF guard — private URLs only with explicit opt-in
+    from kazma_core.security.ssrf import SSRFError, validate_url
+
+    allow_priv = (os.environ.get("KAZMA_ALLOW_PRIVATE_LLM") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+    try:
+        validate_url(url, block_unresolved=True, allow_private=allow_priv)
+    except (SSRFError, ValueError) as exc:
+        return ProviderInfo(
+            name=provider, label=provider.title(), base_url=base_url, error=str(exc),
+        )
+
     headers: dict[str, str] = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code in (200, 401):
                 # 401 with valid key often means the endpoint requires /v1 prefix already

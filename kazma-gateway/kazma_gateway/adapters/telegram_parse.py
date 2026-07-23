@@ -6,6 +6,12 @@ from typing import Any
 
 from kazma_gateway.gateway import IncomingMessage
 
+__all__ = [
+    "advance_offset",
+    "extract_message",
+    "parse_text_update",
+]
+
 
 def extract_message(update: dict[str, Any]) -> dict[str, Any] | None:
     """Return the message object from various Telegram update shapes."""

@@ -13,22 +13,88 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "KAZMA_ASCII",
+    "check_config",
+    "show_banner",
+    "show_help_brief",
+    "show_status",
+]
+
 # ---------------------------------------------------------------------------
 # Version detection
 # ---------------------------------------------------------------------------
 
-def _get_version() -> str:
-    """Read version from pyproject.toml, falling back to '0.2.0'."""
+def _version_from_pyproject(path: Path) -> str | None:
+    """Parse ``[project].version`` from a pyproject.toml file."""
     try:
-        pyproject = Path(__file__).parent.parent.parent / "pyproject.toml"
-        if pyproject.exists():
-            content = pyproject.read_text()
-            for line in content.splitlines():
-                if line.strip().startswith("version ="):
-                    return line.split("=")[1].strip().strip('"').strip("'")
+        if not path.is_file():
+            return None
+        content = path.read_text(encoding="utf-8")
+        in_project = False
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped == "[project]":
+                in_project = True
+                continue
+            if stripped.startswith("[") and stripped.endswith("]"):
+                in_project = False
+                continue
+            if in_project and stripped.startswith("version"):
+                _, _, rhs = stripped.partition("=")
+                ver = rhs.strip().strip('"').strip("'")
+                if ver:
+                    return ver
     except Exception as exc:
-        logger.debug("pyproject.toml version parse failed: %s", exc)
-    return "0.2.0"
+        logger.debug("pyproject.toml version parse failed (%s): %s", path, exc)
+    return None
+
+
+def _get_version() -> str:
+    """Resolve product version from monorepo pyproject (source of truth).
+
+    Prefer the checkout's ``pyproject.toml`` over ``importlib.metadata`` so
+    editable installs that still advertise a stale wheel version (e.g. 0.5.0)
+    don't mislead after a git pull to 0.6.x.
+    Never hardcode a release number in CLI help.
+    """
+    # 1) Monorepo / project pyproject.toml (walk up from this file + cwd)
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parent.parent.parent / "pyproject.toml",  # kazma-cli/kazma_cli → repo root
+        here.parent.parent / "pyproject.toml",
+        Path.cwd() / "pyproject.toml",
+    ]
+    # Also walk parents for nested layouts
+    for parent in list(here.parents)[:8]:
+        candidates.append(parent / "pyproject.toml")
+
+    seen: set[Path] = set()
+    for pyproject in candidates:
+        try:
+            key = pyproject.resolve()
+        except Exception:
+            key = pyproject
+        if key in seen:
+            continue
+        seen.add(key)
+        ver = _version_from_pyproject(pyproject)
+        if ver:
+            return ver
+
+    # 2) Installed distribution metadata (wheels / non-editable)
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+
+        for dist in ("kazma", "kazma-cli"):
+            try:
+                return version(dist)
+            except PackageNotFoundError:
+                continue
+    except Exception as exc:
+        logger.debug("importlib.metadata version lookup failed: %s", exc)
+
+    return "0.0.0"
 
 
 # ---------------------------------------------------------------------------

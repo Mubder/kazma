@@ -35,6 +35,12 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "SwarmNotifier",
+    "SwarmTaskTracker",
+    "TrackedTask",
+]
+
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
 # Telegram rate limit: 30 messages/sec per bot (global)

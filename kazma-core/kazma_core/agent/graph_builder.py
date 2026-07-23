@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 from typing import Any
 
@@ -63,6 +64,8 @@ from kazma_core.time_travel import SnapshotRecorder
 from kazma_core.tracing import KazmaTracer
 from kazma_core.config_schema import TracingConfig
 
+__all__ = ["TOOL_RESULT_MAX_CHARS", "build_supervisor_graph", "check_saturation_node", "respond_node", "sanitize_tool_chains", "summarize_node", "supervisor_node", "tool_worker_node", "truncate_tool_result"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,18 +75,120 @@ logger = logging.getLogger(__name__)
 
 _PERSONALITY_MARKER = "[KAZMA_PERSONALITY]"
 
-TOOL_RESULT_MAX_CHARS = 4000
+# Default cap for ordinary tools (env-overridable).
+TOOL_RESULT_MAX_CHARS = int(
+    os.environ.get("KAZMA_TOOL_RESULT_MAX_CHARS", "4000") or "4000"
+)
+# Higher cap for research / web-read tools so long pages can reach the model.
+TOOL_RESULT_RESEARCH_MAX_CHARS = int(
+    os.environ.get("KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS", "16000") or "16000"
+)
+_RESEARCH_TOOL_NAMES = frozenset(
+    {
+        "read_url",
+        "crawl_page",
+        "crawl_site",
+        "read_url_to_file",
+        "list_research_chunks",
+        "read_research_chunk",
+        "summarize_research_file",
+        "digest_research_file",
+        "web_search",
+        "web_search_duckduckgo",
+    }
+)
 
 
-def truncate_tool_result(content: str, max_chars: int = TOOL_RESULT_MAX_CHARS) -> str:
-    """Truncate tool result content to *max_chars* with a truncation marker.
+def truncate_tool_result(
+    content: str,
+    max_chars: int | None = None,
+    *,
+    tool_name: str | None = None,
+) -> str:
+    """Truncate tool result content with a truncation marker.
 
-    If *content* is shorter than *max_chars*, it is returned unchanged.
+    Research tools (``read_url``, chunk tools, …) use a higher default cap
+    (``KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS``, default 16000) so paging and
+    research workflows are not cut to 4k after a successful scrape.
     """
+    if max_chars is None:
+        if tool_name and tool_name in _RESEARCH_TOOL_NAMES:
+            max_chars = max(4000, min(100_000, TOOL_RESULT_RESEARCH_MAX_CHARS))
+        else:
+            max_chars = max(500, min(100_000, TOOL_RESULT_MAX_CHARS))
     if len(content) > max_chars:
         original_len = len(content)
         return content[:max_chars] + f"\n[truncated {original_len - max_chars} chars]"
     return content
+
+
+def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Repair broken tool-call chains ANYWHERE in the message history.
+
+    OpenAI-compatible providers reject a history in which an assistant
+    message with ``tool_calls`` is not followed by a ``tool`` response for
+    every ``tool_call_id`` (HTTP 400 "insufficient tool messages"). A chain
+    can break mid-history when a HITL interrupt pauses a turn and the error
+    turn is later committed on top of it, poisoning the thread permanently.
+
+    Repairs applied:
+      - assistant ``tool_calls`` entries with no later ``tool`` response are
+        removed; if none remain, the message is kept as plain text (when it
+        has content) or dropped entirely.
+      - orphaned ``tool`` messages (no surviving matching assistant
+        ``tool_calls``) are dropped.
+    """
+    msgs = list(messages)
+
+    # tool_call_id → indices of every tool response (ids can repeat across turns)
+    response_indices: dict[str, list[int]] = {}
+    for i, m in enumerate(msgs):
+        if isinstance(m, dict) and m.get("role") == "tool":
+            tcid = m.get("tool_call_id") or ""
+            if tcid:
+                response_indices.setdefault(tcid, []).append(i)
+
+    valid_ids: set[str] = set()
+    out: list[dict[str, Any]] = []
+    dropped = 0
+    for i, m in enumerate(msgs):
+        if not isinstance(m, dict):
+            out.append(m)
+            continue
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            kept = [
+                tc for tc in m["tool_calls"]
+                if any(j > i for j in response_indices.get(tc.get("id") or "", []))
+            ]
+            if kept:
+                if len(kept) != len(m["tool_calls"]):
+                    dropped += len(m["tool_calls"]) - len(kept)
+                    m = {**m, "tool_calls": kept}
+                valid_ids.update(tc.get("id") or "" for tc in kept)
+                out.append(m)
+            else:
+                dropped += len(m["tool_calls"])
+                content = m.get("content")
+                if isinstance(content, str) and content.strip():
+                    out.append({k: v for k, v in m.items() if k != "tool_calls"})
+                # else: tool-calls-only message with no responses — drop
+            continue
+        if role == "tool":
+            if (m.get("tool_call_id") or "") in valid_ids:
+                out.append(m)
+            else:
+                dropped += 1
+            continue
+        out.append(m)
+
+    if dropped:
+        logger.warning(
+            "[Sanitize] Repaired broken tool chains: removed %d dangling "
+            "tool_calls/tool entries (%d → %d messages)",
+            dropped, len(msgs), len(out),
+        )
+    return out
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -222,16 +327,17 @@ async def supervisor_node(
         }
 
     # ── 80% context compaction check ───────────────────────────────
+    # On compaction, CONTINUE this supervisor call with the compacted
+    # messages instead of returning early. The old early-return routed to
+    # RESPOND (there is no supervisor self-edge), which ended the turn with
+    # no answer and replaced the checkpoint with just the summary — the
+    # "agent forgot everything and said nothing" bug.
     state_for_check = {**state, "messages": messages}
     compacted_state = await authority.check_and_enforce(state_for_check)
     if compacted_state is not state_for_check:
-        logger.info("[Supervisor] Context compacted — restarting with fresh context")
-        return {
-            **breaker_reset,
-            "messages": compacted_state.get("messages", []),
-            "needs_compaction": False,
-            "next_node": NodeName.SUPERVISOR,  # re-enter supervisor
-        }
+        logger.info("[Supervisor] Context compacted — continuing turn with compacted context")
+        messages = list(compacted_state.get("messages", []))
+        breaker_reset = {**breaker_reset, "needs_compaction": False}
 
     # ── Ensure system prompt and personality are present ───────────
     # The personality prompt is injected at position 0, replacing any
@@ -274,7 +380,23 @@ async def supervisor_node(
     # so it fires once per user turn (not per ReAct iteration). This is
     # the key difference from compaction-only retrieval — the agent now
     # has recall on EVERY turn, not just when the context window is full.
-    if iteration == 0 and last_user_content:
+    # Honours memory.per_turn_retrieval in kazma.yaml (default true).
+    _per_turn_on = True
+    try:
+        import yaml
+        from pathlib import Path as _Path
+
+        _cfg_path = _Path("kazma.yaml")
+        if _cfg_path.exists():
+            with open(_cfg_path) as _f:
+                _mcfg = (yaml.safe_load(_f) or {}).get("memory", {}) or {}
+            _per_turn_on = bool(_mcfg.get("per_turn_retrieval", True))
+            if not bool(_mcfg.get("enabled", True)):
+                _per_turn_on = False
+    except Exception:
+        pass
+
+    if _per_turn_on and iteration == 0 and last_user_content:
         try:
             _top_k = _rag_top_k()
             memories = await authority.compactor.retrieve_memories(
@@ -292,6 +414,35 @@ async def supervisor_node(
                     )
         except Exception:
             logger.warning("[Supervisor] per-turn memory retrieval failed — recall degraded", exc_info=True)
+
+    # Per-turn language lock (again at graph level so Telegram/Discord paths
+    # get it even when SSE already injected one — duplicate is harmless).
+    if iteration == 0 and last_user_content:
+        try:
+            from kazma_core.language_lock import language_lock_message
+
+            lock = language_lock_message(last_user_content)
+            if lock and not any(
+                m.get("role") == "system" and "LANGUAGE LOCK" in str(m.get("content", ""))
+                for m in messages
+            ):
+                # Place just before the last user message so it is the nearest
+                # instruction to the model.
+                insert_at = len(messages)
+                for i in range(len(messages) - 1, -1, -1):
+                    if messages[i].get("role") == "user":
+                        insert_at = i
+                        break
+                messages.insert(insert_at, {"role": "system", "content": lock})
+        except Exception:
+            logger.debug("[Supervisor] language lock skipped", exc_info=True)
+
+    # ── Repair broken tool chains before the LLM call ──────────────
+    # A checkpoint poisoned by a paused HITL turn (assistant tool_calls
+    # with no tool responses, possibly mid-history) would 400 on every
+    # provider call forever. Sanitizing here also heals the thread: the
+    # repaired list is what gets persisted by the return paths below.
+    messages = sanitize_tool_chains(messages)
 
     start = time.monotonic()
     try:
@@ -377,8 +528,41 @@ async def supervisor_node(
 
     # ── Route decision ─────────────────────────────────────────────
     if not response.tool_calls:
+        content = response.content.strip() if response.content else ""
+
+        # ── Empty-response recovery ────────────────────────────────
+        # Some providers (Groq compound-mini, certain Ollama models)
+        # return content="" on the final turn after a tool call —
+        # especially when the tool result (e.g. memory_search JSON)
+        # was large. Without this guard the user sees
+        # "(No response generated)". Retry once with an explicit nudge.
+        if not content and iteration > 0:
+            logger.warning(
+                "[Supervisor] LLM returned empty content after tool calls "
+                "(iteration=%d) — retrying with nudge", iteration,
+            )
+            messages_with_nudge = messages + [
+                {"role": "system", "content": (
+                    "Your previous response was empty. Please provide a "
+                    "clear, helpful text answer to the user based on the "
+                    "conversation and tool results above."
+                )},
+            ]
+            try:
+                nudge_response = await llm.chat(
+                    messages=messages_with_nudge,
+                    tools=[],
+                    model=routed_model,
+                )
+                if nudge_response.content and nudge_response.content.strip():
+                    content = nudge_response.content.strip()
+                    response = nudge_response  # update for tracing/cost
+                    logger.info("[Supervisor] Nudge retry succeeded — content recovered")
+            except Exception as nudge_exc:
+                logger.warning("[Supervisor] Nudge retry failed: %s", nudge_exc)
+
         # Pure text response → RESPOND
-        assistant_msg = {"role": "assistant", "content": response.content}
+        assistant_msg = {"role": "assistant", "content": content or "I apologize, I couldn't generate a response. Please try rephrasing your question."}
         return {
             **breaker_reset,
             "messages": messages + [assistant_msg],
@@ -388,10 +572,15 @@ async def supervisor_node(
             "last_cost_usd": response.cost_usd,
         }
 
-    # Tool calls → build pending list and route to TOOL_WORKER
+    # Tool calls → build pending list and route to TOOL_WORKER.
+    # NOTE: Do NOT convert content to None when it's an empty string.
+    # Some providers (Groq compound-mini, certain Ollama models) return
+    # content="" alongside tool_calls. Converting to None breaks the
+    # message history on the next LLM call (API rejects null content).
+    # Keep the original value — empty string is valid per OpenAI spec.
     assistant_msg: dict[str, Any] = {
         "role": "assistant",
-        "content": response.content or None,
+        "content": response.content if response.content is not None else "",
         "tool_calls": [
             {
                 "id": tc.id,
@@ -506,7 +695,16 @@ async def tool_worker_node(
         safe_tools: list[PendingToolCall] = []
         danger_tools: list[PendingToolCall] = []
 
+        # Signal the tool registry that the graph is the HITL authority for
+        # this turn, so LocalToolRegistry.execute() skips the redundant
+        # SwarmMessageBus safety.check() (mechanism B) — the graph's
+        # interrupt() is the sole gate for single-agent chat. Restored in
+        # the finally below.
+        _graph_gate_token = None
         if hitl_config:
+            from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+
+            _graph_gate_token = _graph_hitl_gate_ctx.set(True)
             for tc in pending:
                 if requires_approval(tc["name"], hitl_config):
                     danger_tools.append(tc)
@@ -537,7 +735,7 @@ async def tool_worker_node(
 
             # ── Truncation middleware ──────────────────────────────────
             raw_content = result.get("content", "")
-            content = truncate_tool_result(raw_content)
+            content = truncate_tool_result(raw_content, tool_name=tc.get("name"))
             if len(content) != len(raw_content):
                 logger.info(
                     "[ToolWorker] Truncated result from %s (%d → %d chars)", tc["name"], len(raw_content), len(content)
@@ -566,35 +764,67 @@ async def tool_worker_node(
         if safe_tools:
             results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
 
-        # ── HITL: interrupt for each danger tool ──────────────────────
-        for tc in danger_tools:
+        # ── HITL: one combined interrupt for the whole danger batch ──
+        # (stops N-click floods when the model emits several danger tools
+        # in one turn). Scope grants (tool/yolo) are applied by /api/approve
+        # *before* resume so later turns skip the gate entirely.
+        if danger_tools:
+            tools_payload = [
+                {
+                    "id": tc.get("id"),
+                    "name": tc["name"],
+                    "args": tc.get("arguments") or {},
+                }
+                for tc in danger_tools
+            ]
+            if len(danger_tools) == 1:
+                tc0 = danger_tools[0]
+                message = f"Agent wants to run: {tc0['name']}({tc0.get('arguments') or {}})"
+                primary_tool = tc0["name"]
+                primary_args = tc0.get("arguments") or {}
+            else:
+                names = ", ".join(tc["name"] for tc in danger_tools)
+                message = (
+                    f"Agent wants to run {len(danger_tools)} danger tools: {names}"
+                )
+                primary_tool = f"{len(danger_tools)} tools"
+                primary_args = {"tools": [t["name"] for t in tools_payload]}
+
             approval_input = {
                 "type": "hitl_approval",
-                "tool": tc["name"],
-                "args": tc["arguments"],
-                "message": f"Agent wants to run: {tc['name']}({tc['arguments']})",
+                "tool": primary_tool,
+                "args": primary_args,
+                "tools": tools_payload,
+                "message": message,
             }
 
             # interrupt() pauses the graph — resumes when /api/approve calls
             # graph.ainvoke(Command(resume=...), config)
             approval = interrupt(approval_input)
 
-            if isinstance(approval, dict) and approval.get("approved", False):
-                logger.info("[ToolWorker] HITL approved: %s", tc["name"])
-                # Set the ContextVar so tool_registry.execute() and
-                # UnifiedToolExecutor.execute() skip the redundant swarm-bus
-                # check (double-gating prevention). Using a ContextVar instead
-                # of an argument flag prevents LLM prompt-injection bypass.
-                from kazma_core.agent.tool_registry import _hitl_approved_ctx
+            approved = isinstance(approval, dict) and approval.get("approved", False)
+            # Optional selective ids; None/missing → all tools in the batch.
+            approved_ids = None
+            if isinstance(approval, dict):
+                raw_ids = approval.get("approved_ids")
+                if isinstance(raw_ids, list):
+                    approved_ids = {str(x) for x in raw_ids}
 
-                _token = _hitl_approved_ctx.set(True)
-                try:
-                    results.append(await _exec_one(tc))
-                finally:
-                    _hitl_approved_ctx.reset(_token)
-            else:
-                logger.info("[ToolWorker] HITL denied: %s", tc["name"])
-                results.append(_denied_result(tc))
+            from kazma_core.agent.tool_registry import _hitl_approved_ctx
+
+            for tc in danger_tools:
+                tc_id = str(tc.get("id") or "")
+                allow = approved and (approved_ids is None or tc_id in approved_ids)
+                if allow:
+                    logger.info("[ToolWorker] HITL approved: %s", tc["name"])
+                    _token = _hitl_approved_ctx.set(True)
+                    try:
+                        results.append(await _exec_one(tc))
+                    finally:
+                        _hitl_approved_ctx.reset(_token)
+                else:
+                    logger.info("[ToolWorker] HITL denied: %s", tc["name"])
+                    results.append(_denied_result(tc))
 
         # ── Empty-Result Circuit Breaker ──────────────────────────────
         consecutive_failures = state.get("consecutive_tool_failures", 0)
@@ -659,13 +889,18 @@ async def tool_worker_node(
         # Always restore the prior ContextVar value, even if a tool
         # raised or the graph was interrupted by HITL.
         reset_current_session_messages(_messages_token)
+        if _graph_gate_token is not None:
+            from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+
+            _graph_hitl_gate_ctx.reset(_graph_gate_token)
 
 
 async def respond_node(state: SupervisorState) -> dict[str, Any]:
     """Respond node — finalizes the turn.
 
     Extracts the last assistant message as the response and increments
-    the iteration counter.
+    the iteration counter. Also schedules automatic long-term memory
+    writes (durable facts / turn snapshots) so recall is not tool-only.
     """
     messages = state.get("messages", [])
     iteration = state.get("iteration", 0) + 1
@@ -675,6 +910,15 @@ async def respond_node(state: SupervisorState) -> dict[str, Any]:
         iteration,
         len(messages),
     )
+
+    # Auto-store durable user facts (and optional turn snapshots) so
+    # per-turn RAG has something to retrieve without requiring memory_store.
+    try:
+        from kazma_core.memory.auto_store import schedule_auto_store
+
+        schedule_auto_store(messages)
+    except Exception:
+        logger.debug("[Respond] auto_store schedule failed", exc_info=True)
 
     return {
         "messages": messages,

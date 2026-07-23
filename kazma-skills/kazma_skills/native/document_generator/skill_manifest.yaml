@@ -1,0 +1,40 @@
+name: document-generator
+version: 0.1.0
+description: Generate PDF, DOCX, XLSX, and Markdown documents from structured content.
+author: Kazma Team
+license: MIT
+
+tools:
+  generate_pdf:
+    arabic_name: "إنشاء PDF"
+    description: >
+      Generate a PDF document from a title and a list of sections
+      (heading + body text). Returns the saved file path.
+    category: document
+    prompt_chain:
+      - "أنشئ مستند PDF من العنوان والأقسام المحددة"
+      - "احفظ الملف وأعد المسار"
+  generate_docx:
+    arabic_name: "إنشاء DOCX"
+    description: >
+      Generate a Word .docx document from a title and a list of sections
+      (heading + body text). Returns the saved file path.
+    category: document
+    prompt_chain:
+      - "أنشئ مستند Word من العنوان والأقسام المحددة"
+  generate_xlsx:
+    arabic_name: "إنشاء XLSX"
+    description: >
+      Generate an Excel .xlsx workbook from a list of sheets, each with a
+      list of row-lists (the first row is the header). Returns the file path.
+    category: document
+    prompt_chain:
+      - "أنشئ ملف Excel من الأوراق والصفوف المحددة"
+  generate_markdown_doc:
+    arabic_name: "إنشاء ملف Markdown"
+    description: >
+      Generate a Markdown (.md) document from a title and a list of
+      sections (heading + body). Returns the saved file path.
+    category: document
+    prompt_chain:
+      - "أنشئ ملف Markdown من العنوان والأقسام"

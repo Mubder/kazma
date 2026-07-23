@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+__all__ = [
+    "CallbackAction",
+    "parse_callback_data",
+]
+
 
 @dataclass(frozen=True)
 class CallbackAction:

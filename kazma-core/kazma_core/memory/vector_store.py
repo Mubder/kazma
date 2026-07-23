@@ -18,6 +18,8 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+__all__ = ["VectorMemory", "flush_pending_alerts"]
+
 logger = logging.getLogger(__name__)
 
 # Pending degradation alerts scheduled outside an event loop.
@@ -66,6 +68,8 @@ class VectorMemory:
 
         self.degraded = False
         self._fallback: FTS5Memory | None = None
+        self._client: Any = None
+        self._collection: Any = None
         self._path = path or vector_memory_path()
         self._path = str(Path(self._path).expanduser().resolve())
         self._collection_name = collection_name
@@ -403,3 +407,24 @@ class VectorMemory:
         except Exception as exc:
             logger.warning("[VectorMemory] Clear failed: %s", exc)
             return 0
+
+    def close(self) -> None:
+        """Release Chroma / fallback handles (audit M17 — call from app shutdown)."""
+        if self._fallback is not None:
+            try:
+                self._fallback.close()
+            except Exception:
+                pass
+            self._fallback = None
+        # PersistentClient has no public close in all versions; drop refs
+        self._collection = None
+        client = self._client
+        self._client = None
+        if client is not None:
+            try:
+                # chromadb ≥0.5 may expose reset/heartbeat only
+                if hasattr(client, "clear_system_cache"):
+                    client.clear_system_cache()
+            except Exception:
+                pass
+        logger.debug("[VectorMemory] closed path=%s", self._path)

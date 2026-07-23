@@ -23,10 +23,23 @@ var KazmaStream = (function() {
       var decoder = new TextDecoder();
       var buffer = '';
 
+      // Guard: the SSE ``event: done`` frame already completes the turn.
+      // When the HTTP body closes, the reader also ends — without this flag
+      // chat.js would call onDone a *second* time with no payload and paint
+      // the false ``No response received…`` bubble after a good reply.
+      var streamFinished = false;
+
+      function finishStream(data) {
+        if (streamFinished) return;
+        streamFinished = true;
+        if (callbacks.onDone) callbacks.onDone(data);
+      }
+
       function pump() {
         reader.read().then(function(result) {
           if (result.done) {
-            if (callbacks.onDone) callbacks.onDone();
+            // Only fire if the server never sent ``event: done`` (truncated stream)
+            finishStream(undefined);
             return;
           }
           buffer += decoder.decode(result.value, { stream: true });
@@ -69,7 +82,7 @@ var KazmaStream = (function() {
             if (callbacks.onToolResult) callbacks.onToolResult(data);
             break;
           case 'done':
-            if (callbacks.onDone) callbacks.onDone(data);
+            finishStream(data);
             break;
           case 'approval_required':
             if (callbacks.onApprovalRequired) callbacks.onApprovalRequired(data);
@@ -212,14 +225,32 @@ var KazmaStream = (function() {
       // Inline code
       html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
 
-      // Links — sanitize URL to prevent javascript: protocol XSS
+      // Markdown links — sanitize URL to prevent javascript: protocol XSS
       html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, text, url) {
         var decodedUrl = url.replace(/&amp;/g, '&');
         if (/^(https?:|mailto:)/i.test(decodedUrl)) {
-          return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener">' + text + '</a>';
+          return '<a href="' + esc(decodedUrl) + '" target="_blank" rel="noopener noreferrer">' + text + '</a>';
         }
-        return '<a href="#" rel="noopener">' + text + '</a>';
+        // Relative paths like /workspace or /chat — keep in-app
+        if (/^\/[A-Za-z0-9_./?#&=%-]+$/.test(decodedUrl)) {
+          return '<a href="' + esc(decodedUrl) + '">' + text + '</a>';
+        }
+        return '<span class="dead-link" title="Blocked URL">' + text + '</span>';
       });
+
+      // Autolink bare URLs that were not already turned into <a href>
+      // (esc() turns & into &amp; so match the escaped form too).
+      html = html.replace(
+        /(^|[\s>(])((?:https?:\/\/|www\.)[^\s<]+[^\s<.,;:!?'")\]])/g,
+        function(_, pre, url) {
+          var href = url;
+          if (/^www\./i.test(href)) href = 'https://' + href;
+          // Decode &amp; back for the href attribute only
+          var rawHref = href.replace(/&amp;/g, '&');
+          if (!/^(https?:)/i.test(rawHref)) return pre + url;
+          return pre + '<a href="' + esc(rawHref) + '" target="_blank" rel="noopener noreferrer">' + url + '</a>';
+        }
+      );
 
       // Line breaks
       html = html.replace(/\n\n/g, '</p><p>');

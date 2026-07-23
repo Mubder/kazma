@@ -23,6 +23,26 @@ from kazma_core.swarm.safety import SafetyMiddleware
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# Phase 1b: MCP force_danger parity (C1 regression helpers)
+
+class TestMcpForceDangerParity:
+    """MCP names must be forceable as danger even when not in static list."""
+
+    def test_mcp_names_not_in_static_danger_list(self):
+        from kazma_core.swarm.safety import SafetyMiddleware
+        s = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        for name in ("write_file", "run_command", "execute_code", "delete_file"):
+            assert s.is_danger_tool(name) is False
+            assert s.check_sync(name, force_danger=True) is False
+
+    def test_builtin_names_still_danger(self):
+        from kazma_core.swarm.safety import SafetyMiddleware
+        s = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        for name in ("file_write", "shell_exec", "file_delete"):
+            assert s.is_danger_tool(name) is True
+            assert s.check_sync(name) is False
+
+
 # Phase 2: SafetyMiddleware fail-closed gate
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -65,10 +85,10 @@ class TestSafetyFailClosedAsync:
     """check (async) must mirror check_sync and block danger tools when no
     real bus adapter is wired.
 
-    Regression guard: the async path used to call
-    ``NullBusAdapter.request_approval()`` which returns ``True``,
-    silently auto-approving every danger tool in headless / web-only
-    deployments. Both paths must now fail-closed consistently.
+    Regression guard: the async path must not call through to a
+    fail-open adapter. ``NullBusAdapter.request_approval()`` returns
+    ``False`` (fail-closed); SafetyMiddleware also short-circuits before
+    the bus when only NullBus is present. Both paths must stay fail-closed.
     """
 
     @pytest.fixture(autouse=True)
@@ -143,6 +163,35 @@ class TestHitlConfig:
         assert "shell_exec" in DEFAULT_DANGER_TOOLS
         assert "vault_retrieve" in DEFAULT_DANGER_TOOLS
         assert "vault_delete" in DEFAULT_DANGER_TOOLS
+
+    def test_canonical_danger_list_is_single_source(self):
+        """Graph defaults, swarm bus, and hitl module must share one list."""
+        from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+        from kazma_core.swarm.safety import SafetyMiddleware, _EXTENDED_DANGER
+
+        assert set(DEFAULT_DANGER_TOOLS) == set(CANONICAL_DANGER_TOOLS)
+        assert set(_EXTENDED_DANGER) == set(CANONICAL_DANGER_TOOLS)
+
+        safety = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        for name in CANONICAL_DANGER_TOOLS:
+            assert safety.is_danger_tool(name), f"{name} missing from SafetyMiddleware"
+
+    def test_yaml_require_approval_matches_canonical(self):
+        """kazma.yaml must not drift from CANONICAL_DANGER_TOOLS."""
+        from pathlib import Path
+
+        import yaml
+
+        from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+
+        root = Path(__file__).resolve().parents[1]
+        yaml_path = root / "kazma.yaml"
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        listed = set(data["safety"]["hitl"]["require_approval_for"])
+        assert listed == set(CANONICAL_DANGER_TOOLS), (
+            f"yaml/list drift: missing={set(CANONICAL_DANGER_TOOLS) - listed} "
+            f"extra={listed - set(CANONICAL_DANGER_TOOLS)}"
+        )
 
     def test_tool_tiers(self):
         assert get_tool_tier("file_read") == "read"
@@ -362,9 +411,10 @@ class _MockTask:
 
 class _MockSnapshot:
     """Mock StateSnapshot."""
-    def __init__(self, next_nodes, tasks):
+    def __init__(self, next_nodes, tasks, values=None):
         self.next = next_nodes
         self.tasks = tasks
+        self.values = values if values is not None else {}
 
 
 class _MockGraph:
@@ -420,7 +470,11 @@ class TestSseApprovalFrame:
         from kazma_ui.sse_chat import _stream_langgraph_events
 
         # snapshot.next is empty → graph completed normally
-        snapshot = _MockSnapshot(next_nodes=(), tasks=[])
+        snapshot = _MockSnapshot(
+            next_nodes=(),
+            tasks=[],
+            values={"messages": [{"role": "assistant", "content": "Hello"}]},
+        )
         graph = _MockGraph(snapshot)
         config = {"configurable": {"thread_id": "sse-test-2"}}
 
@@ -430,3 +484,45 @@ class TestSseApprovalFrame:
 
         approval_frames = [f for f in frames if "approval_required" in f]
         assert len(approval_frames) == 0, "No approval frame on normal completion"
+        # Custom LLM path has no stream events — backfill from checkpoint
+        token_frames = [f for f in frames if "event: token" in f or '"content"' in f and "Hello" in f]
+        assert any("Hello" in f for f in frames)
+
+    @pytest.mark.asyncio
+    async def test_empty_turn_emits_recovery_notice(self):
+        """Never leave the UI with only Thinking… — emit a recovery token."""
+        from kazma_ui.sse_chat import _stream_langgraph_events
+
+        snapshot = _MockSnapshot(next_nodes=(), tasks=[], values={"messages": []})
+        graph = _MockGraph(snapshot)
+        config = {"configurable": {"thread_id": "sse-empty"}}
+
+        frames = []
+        async for frame in _stream_langgraph_events(graph, {"messages": []}, config):
+            frames.append(frame)
+
+        assert any("No assistant text" in f or "try again" in f.lower() for f in frames)
+        assert any("event: done" in f or "done" in f for f in frames)
+
+    @pytest.mark.asyncio
+    async def test_hitl_payload_without_type_tag(self):
+        """tool/args shape without type=hitl_approval still surfaces a card."""
+        from kazma_ui.sse_chat import _stream_langgraph_events
+
+        snapshot = _MockSnapshot(
+            next_nodes=("tool_worker",),
+            tasks=[_MockTask([_MockInterrupt({
+                "tool": "shell_exec",
+                "args": {"command": "ls"},
+                "message": "need approval",
+            })])],
+        )
+        graph = _MockGraph(snapshot)
+        config = {"configurable": {"thread_id": "sse-fallback-type"}}
+
+        frames = []
+        async for frame in _stream_langgraph_events(graph, {"messages": []}, config):
+            frames.append(frame)
+
+        assert any("approval_required" in f for f in frames)
+        assert any("shell_exec" in f for f in frames)

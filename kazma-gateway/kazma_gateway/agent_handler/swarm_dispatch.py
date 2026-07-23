@@ -22,6 +22,8 @@ from .swarm_output import send_swarm_output
 
 logger = logging.getLogger(__name__)
 
+__all__: list[str] = []
+
 
 def _extract_swarm_task(text: str) -> str:
     """Extract the task description from a bare 'swarm' mention.

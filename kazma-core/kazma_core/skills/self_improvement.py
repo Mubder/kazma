@@ -16,6 +16,10 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from kazma_core.config_store import get_config_store
+
+__all__ = ["SelfImprovementSkill", "get_self_improvement"]
+
 logger = logging.getLogger(__name__)
 
 # Bound self-improvement prompt growth so approved deltas cannot accumulate
@@ -99,16 +103,34 @@ class SelfImprovementSkill:
         if not self._enabled:
             return {"action": "skip", "delta": "", "reason": "Self-improvement disabled"}
 
-        # Compute success metrics — count both "failed" and "timeout" as failures
+        # Compute success metrics. Swarm WorkerResult uses status="error" on
+        # failure (not always "failed"); patterns may also pass "timeout".
+        _FAIL = frozenset({"failed", "error", "timeout", "failure", "cancelled"})
+        _OK = frozenset({"completed", "success", "ok"})
         total = len(stages)
-        succeeded = sum(1 for s in stages if getattr(s, "status", "") == "completed")
-        failed = sum(1 for s in stages if getattr(s, "status", "") in ("failed", "timeout"))
+        succeeded = sum(
+            1 for s in stages if str(getattr(s, "status", "") or "").lower() in _OK
+        )
+        failed = sum(
+            1 for s in stages if str(getattr(s, "status", "") or "").lower() in _FAIL
+        )
         success_rate = succeeded / total if total > 0 else 0.0
+        st = str(status or "").lower()
+        # Normalize pipeline-level status: fan-out uses "success", finalize uses "completed"
+        if st in ("success", "ok"):
+            st = "completed"
+        if st in ("error", "failure"):
+            st = "failed"
 
-        if status == "completed" and success_rate >= 1.0:
+        if st == "completed" and success_rate >= 1.0:
             return await self._analyze_success(worker_name, task, stages, success_rate)
-        elif status in ("failed", "partial", "timeout") or success_rate < 0.5:
-            return await self._analyze_failure(worker_name, task, stages, success_rate, failed)
+        elif st in ("failed", "partial", "timeout") or success_rate < 0.5:
+            # If stages used non-standard labels, still treat all non-OK as failures
+            if failed == 0 and total > 0 and succeeded < total:
+                failed = total - succeeded
+            return await self._analyze_failure(
+                worker_name, task, stages, success_rate, failed
+            )
         return {"action": "skip", "delta": "", "reason": f"Mixed results — rate={success_rate:.0%}"}
 
     # ── Success analysis ────────────────────────────────────────────────
@@ -160,6 +182,20 @@ Output ONLY the delta text, no preamble."""
                     {"role": "system", "content": "You are a concise meta-learning expert."},
                     {"role": "user", "content": refiner_prompt},
                 ])
+                # Prompt-injection guard (audit C1): the Meta-Refiner reads
+                # untrusted conversation/tool text, so a malicious input can
+                # ask it to emit an override directive. Reject any delta that
+                # looks like an injection attempt rather than persisting it
+                # into the Soul (where it would poison every future prompt).
+                from kazma_core.safety.prompt_fence import is_override_delta
+
+                if is_override_delta(response.content or ""):
+                    logger.warning(
+                        "[SelfImprovement] %s SUCCESS delta REJECTED (injection marker) — dropped",
+                        worker_name,
+                    )
+                    return {"action": "skip", "delta": "",
+                            "reason": "rejected: prompt-injection override marker"}
                 delta = f"\n\n[SelfImprovement] {response.content}\nTask context: '{task[:100]}'"
                 reason = f"LLM-generated reinforcement from {len(stages)} stages ({rate:.0%} rate)"
                 logger.info("[SelfImprovement] %s SUCCESS — %s", worker_name, reason)
@@ -167,7 +203,7 @@ Output ONLY the delta text, no preamble."""
         except Exception as exc:
             logger.warning("[SelfImprovement] LLM delta failed: %s", exc)
 
-        # Fallback: minimal template
+        # Fallback: minimal template (static text — not injection-derived)
         delta = f"\n\n[SelfImprovement] Task successfully completed ({rate:.0%} rate).\nTask hint: '{task[:100]}'."
         return {"action": "mutate", "delta": delta, "reason": f"Template fallback — {len(stages)} stages"}
 
@@ -180,13 +216,18 @@ Output ONLY the delta text, no preamble."""
         if failed_count == 0:
             return {"action": "skip", "delta": "", "reason": "No failed stages"}
 
-        # Collect failure details
+        # Collect failure details (WorkerResult.status is often "error")
+        _FAIL = frozenset({"failed", "error", "timeout", "failure", "cancelled"})
         failed_details = []
         for s in stages:
-            if getattr(s, "status", "") == "failed":
+            st = str(getattr(s, "status", "") or "").lower()
+            if st in _FAIL or (failed_count and st not in ("completed", "success", "ok")):
                 role = getattr(s, "role", str(s))
-                error = getattr(s, "error", "")
-                failed_details.append(f"- {role}: {error[:200] if error else 'unknown error'}")
+                error = getattr(s, "error", "") or getattr(s, "output", "") or ""
+                detail = (error[:200] if error else f"status={st or 'unknown'}")
+                failed_details.append(f"- {role}: {detail}")
+        if not failed_details and failed_count:
+            failed_details.append(f"- (aggregate) {failed_count} failed stage(s)")
 
         # Query memory for past failure patterns
         past_context = ""
@@ -222,6 +263,16 @@ Output ONLY the delta text, no preamble."""
                     {"role": "system", "content": "You are a concise meta-learning expert."},
                     {"role": "user", "content": refiner_prompt},
                 ])
+                # Prompt-injection guard (audit C1) — see _analyze_success.
+                from kazma_core.safety.prompt_fence import is_override_delta
+
+                if is_override_delta(response.content or ""):
+                    logger.warning(
+                        "[SelfImprovement] %s FAILURE delta REJECTED (injection marker) — dropped",
+                        worker_name,
+                    )
+                    return {"action": "skip", "delta": "",
+                            "reason": "rejected: prompt-injection override marker"}
                 delta = f"\n\n[SelfImprovement] {response.content}\nTask context: '{task[:100]}'"
                 reason = f"LLM-generated correction from {failed_count} failures"
                 logger.warning("[SelfImprovement] %s FAILURE — %s", worker_name, reason)
@@ -244,7 +295,10 @@ Output ONLY the delta text, no preamble."""
 
         Returns True if the delta was applied.
         """
-        if not delta or not self._enabled:
+        # Re-check the live env, not the cached singleton flag (audit M2):
+        # toggling KAZMA_SELF_IMPROVEMENT=0 at runtime must also stop the
+        # worker-mutation path, not only the chat/supervisor path.
+        if not delta or not self_improvement_enabled():
             return False
         try:
             return await self._auto_apply(worker_name, delta)
@@ -254,6 +308,18 @@ Output ONLY the delta text, no preamble."""
 
     async def _auto_apply(self, worker_name: str, delta: str) -> bool:
         """Apply the delta to the worker's system prompt with safety caps."""
+        # Defense-in-depth injection guard (audit C1): the creation-time check
+        # in _analyze_* already rejects injected deltas, but re-check here in
+        # case a caller bypasses analyze() or a stored delta is replayed.
+        from kazma_core.safety.prompt_fence import is_override_delta
+
+        if is_override_delta(delta):
+            logger.warning(
+                "[SelfImprovement] Delta for '%s' REJECTED at apply (injection marker) — dropped",
+                worker_name,
+            )
+            return False
+
         from kazma_core.swarm.registry import get_worker_registry
 
         # Use the process-wide singleton, not a fresh in-memory copy — a
@@ -424,10 +490,248 @@ Output ONLY the delta text, no preamble."""
 # Module-level singleton
 _self_improvement: SelfImprovementSkill | None = None
 
+# ── Kazma-wide (supervisor / chat) Soul evolution ───────────────────────
+# Swarm workers keep deltas on WorkerRegistry. The main chat agent has no
+# worker entry — store [SelfImprovement] blocks here and inject every turn.
+#
+# Storage: the agent evolution is persisted via the process-wide ConfigStore
+# (SQLite, WAL + busy_timeout=5000, atomic transactions) under a single key.
+# This replaces the former non-atomic ``agent_evolution.json`` write, which
+# was corruptible on crash and unsafe under multi-worker deploys. ConfigStore
+# guarantees the individual write is atomic (no torn file) and durable.
+#
+# A separate ``_agent_evo_lock`` serializes the compound read-modify-write
+# in ``apply_agent_mutation`` (load → mutate → save). ConfigStore's own lock
+# only protects individual get/set calls, NOT the multi-step sequence —
+# without this lock, concurrent apply calls within one process would each
+# read the old doc and clobber each other (lost update). This mirrors how
+# WorkspaceStore/TaskStore wrap their BEGIN/COMMIT in a threading.Lock.
+# See AGENTS.md §8 (ConfigStore Singleton + Atomicity).
+
+_DEFAULT_AGENT_ID = "supervisor"
+_AGENT_EVO_KEY = "self_improvement.agent_evolution"
+_agent_evo_lock = __import__("threading").Lock()
+
+# Strong references to fire-and-forget chat-SI tasks (audit H3): without a
+# retained reference, CPython may GC the task mid-execution. Entries are
+# removed by add_done_callback when the task completes.
+_si_tasks: set[Any] = set()
+
+
+def _agent_evolution_path() -> Path:
+    """Legacy JSON path — only used for one-time migration to ConfigStore."""
+    from kazma_core.paths import data_dir
+
+    return data_dir() / "agent_evolution.json"
+
+
+def _migrate_legacy_evolution_if_present() -> None:
+    """One-time migration: move the old ``agent_evolution.json`` into ConfigStore.
+
+    Idempotent — renames the legacy file to ``.migrated`` after copying so a
+    repeat run is a no-op. Safe to call from multiple processes (ConfigStore
+    ``set`` is atomic; a rename race only leaves the file already-migrated).
+    """
+    import json
+
+    legacy = _agent_evolution_path()
+    if not legacy.exists():
+        return
+    try:
+        data = json.loads(legacy.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data.setdefault("agents", {})
+            get_config_store().set(_AGENT_EVO_KEY, data)
+            logger.info(
+                "[SelfImprovement] Migrated legacy %s → ConfigStore (%d agents)",
+                legacy.name,
+                len(data.get("agents") or {}),
+            )
+        legacy.rename(legacy.with_suffix(".json.migrated"))
+    except Exception as exc:
+        # Non-fatal: leave the file in place; we'll retry next load.
+        logger.warning("[SelfImprovement] Legacy migration failed (non-fatal): %s", exc)
+
+
+def _load_agent_evolution() -> dict[str, Any]:
+    """Load the agent evolution doc from ConfigStore (atomic, WAL-backed)."""
+    data = get_config_store().get(_AGENT_EVO_KEY)
+    if not isinstance(data, dict):
+        return {"agents": {}}
+    data.setdefault("agents", {})
+    return data
+
+
+def _save_agent_evolution(data: dict[str, Any]) -> None:
+    """Persist the agent evolution doc via ConfigStore (atomic single-key set)."""
+    get_config_store().set(_AGENT_EVO_KEY, data)
+
+
+def self_improvement_enabled() -> bool:
+    """Global kill-switch: KAZMA_SELF_IMPROVEMENT=0|false|off disables all SI."""
+    import os
+
+    raw = (os.environ.get("KAZMA_SELF_IMPROVEMENT") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off", "disabled")
+
+
+def get_agent_evolution_block(agent_id: str = _DEFAULT_AGENT_ID) -> str:
+    """Return the cumulative [SelfImprovement] Soul block for the main agent.
+
+    Empty when none applied or SI disabled. Safe to append as a system message
+    every chat turn (Web SSE / gateway).
+    """
+    if not self_improvement_enabled():
+        return ""
+    with _agent_evo_lock:
+        _migrate_legacy_evolution_if_present()
+        data = _load_agent_evolution()
+        entry = (data.get("agents") or {}).get(agent_id) or {}
+        block = str(entry.get("soul") or "").strip()
+        return block
+
+
+def apply_agent_mutation(agent_id: str, delta: str) -> bool:
+    """Cap and persist a Soul delta for the main (or named) agent."""
+    if not delta or not self_improvement_enabled():
+        return False
+    # Defense-in-depth injection guard (audit C1): the creation-time check in
+    # _analyze_* already rejects injected deltas, but re-check here in case a
+    # caller bypasses analyze() or a stored delta is replayed.
+    from kazma_core.safety.prompt_fence import is_override_delta
+
+    if is_override_delta(delta):
+        logger.warning(
+            "[SelfImprovement] Agent '%s' delta REJECTED at apply (injection marker) — dropped",
+            agent_id,
+        )
+        return False
+    import time as _time
+
+    # Serialize the read-modify-write: ConfigStore's lock only protects
+    # individual get/set, not this multi-step compound mutation. Without
+    # this, concurrent apply_agent_mutation calls would each load the old
+    # doc and clobber each other (lost update).
+    with _agent_evo_lock:
+        _migrate_legacy_evolution_if_present()
+        data = _load_agent_evolution()
+        agents = data.setdefault("agents", {})
+        entry = agents.get(agent_id) or {"soul": "", "history": []}
+        old = str(entry.get("soul") or "")
+        # Cap treats prior soul as base + existing blocks
+        new_soul = _cap_evolution_prompt(old or "You are Kazma, the main supervisor agent.", delta)
+        entry["soul"] = new_soul
+        hist = list(entry.get("history") or [])
+        hist.append(
+            {
+                "ts": _time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "delta": delta[:_MAX_DELTA_CHARS],
+            }
+        )
+        entry["history"] = hist[-40:]
+        agents[agent_id] = entry
+        _save_agent_evolution(data)
+    logger.info(
+        "[SelfImprovement] Agent '%s' Soul updated (%d → %d chars)",
+        agent_id,
+        len(old),
+        len(new_soul),
+    )
+    return True
+
+
+async def analyze_and_apply_chat_turn(
+    *,
+    user_message: str,
+    success: bool,
+    error: str = "",
+    output_snippet: str = "",
+    agent_id: str = _DEFAULT_AGENT_ID,
+) -> dict[str, Any]:
+    """Run Meta-Refiner for a main-agent chat turn and persist Soul delta.
+
+    Call after Web SSE / gateway turns (not HITL pauses). Skips empty turns.
+    """
+    if not self_improvement_enabled():
+        return {"action": "skip", "reason": "disabled"}
+    msg = (user_message or "").strip()
+    if len(msg) < 2:
+        return {"action": "skip", "reason": "empty user message"}
+    # Skip pure acknowledgements
+    if msg.lower() in ("ok", "thanks", "thank you", "yes", "no", "y", "n", "👍"):
+        return {"action": "skip", "reason": "ack-only"}
+
+    si = get_self_improvement()
+    if not si._enabled:
+        return {"action": "skip", "reason": "skill disabled"}
+
+    class _Stage:
+        def __init__(self) -> None:
+            self.role = agent_id
+            self.worker_name = agent_id
+            self.status = "completed" if success else "failed"
+            self.output = (output_snippet or "")[:800]
+            self.error = (error or "")[:400]
+            self.duration_ms = 0
+
+    status = "completed" if success else "failed"
+    analysis = await si.analyze(
+        worker_name=agent_id,
+        task=msg[:500],
+        stages=[_Stage()],
+        status=status,
+    )
+    if analysis.get("action") != "mutate":
+        return analysis
+    delta = analysis.get("delta") or ""
+    ok = apply_agent_mutation(agent_id, delta)
+    analysis["applied"] = ok
+    analysis["agent_id"] = agent_id
+    return analysis
+
+
+def schedule_chat_self_improvement(
+    *,
+    user_message: str,
+    success: bool,
+    error: str = "",
+    output_snippet: str = "",
+    agent_id: str = _DEFAULT_AGENT_ID,
+) -> None:
+    """Fire-and-forget SI after a chat turn (does not block the response)."""
+    if not self_improvement_enabled():
+        return
+    import asyncio
+
+    async def _run() -> None:
+        try:
+            await analyze_and_apply_chat_turn(
+                user_message=user_message,
+                success=success,
+                error=error,
+                output_snippet=output_snippet,
+                agent_id=agent_id,
+            )
+        except Exception as exc:
+            logger.debug("[SelfImprovement] chat SI failed: %s", exc)
+
+    try:
+        loop = asyncio.get_running_loop()
+        # Retain a strong reference to the task so CPython doesn't garbage-
+        # collect it mid-execution (the loop only holds a weak ref). The
+        # done-callback discards it once complete to avoid a leak. This is
+        # the same idiom SwarmEngine uses for task-handle retention.
+        task = loop.create_task(_run())
+        _si_tasks.add(task)
+        task.add_done_callback(_si_tasks.discard)
+    except RuntimeError:
+        # No running loop (sync context) — best-effort skip
+        logger.debug("[SelfImprovement] no event loop for chat SI")
+
 
 def get_self_improvement() -> SelfImprovementSkill:
     """Return the shared SelfImprovementSkill instance."""
     global _self_improvement
     if _self_improvement is None:
-        _self_improvement = SelfImprovementSkill()
+        _self_improvement = SelfImprovementSkill(enabled=self_improvement_enabled())
     return _self_improvement

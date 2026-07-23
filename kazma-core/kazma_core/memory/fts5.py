@@ -12,10 +12,13 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+__all__ = ["FTS5Memory"]
 
 logger = logging.getLogger(__name__)
 
@@ -40,37 +43,40 @@ class FTS5Memory:
         self._db_path = str(Path(db_path).expanduser().resolve())
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._table_name = table_name
-        self._conn = sqlite3.connect(self._db_path)
+        # check_same_thread=False + lock: concurrent async tool use (audit M16)
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         from kazma_core.config_store import apply_sqlite_pragmas
 
         apply_sqlite_pragmas(self._conn)
         self._conn.row_factory = sqlite3.Row
-        self._create_table()
+        with self._lock:
+            self._create_table()
         logger.info("[FTS5Memory] Initialized at %s (table=%s)", self._db_path, table_name)
 
     def _create_table(self) -> None:
         """Create FTS5 virtual table if not exists.
 
-        Uses Arabic tokenization if kazma_memory.ArabicTokenizer is available.
-        Falls back to porter unicode61 (English) otherwise.
+        Uses ``unicode61 remove_diacritics 2`` which handles both English and
+        Arabic (diacritics stripped, Arabic script tokenized by Unicode rules).
+        Falls back to ``porter unicode61`` only if the FTS5 build lacks
+        ``remove_diacritics`` support.
         """
         try:
-            # Try to use Arabic tokenization from kazma_memory
-            from kazma_memory.arabic_tokenizer import ArabicTokenizer
-
             self._conn.execute(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS {self._table_name}
                 USING fts5(
                     text,
                     metadata,
                     doc_id UNINDEXED,
-                    timestamp UNINDEXED
+                    timestamp UNINDEXED,
+                    tokenize='unicode61 remove_diacritics 2'
                 )
             """)
             self._conn.commit()
-            logger.info("[FTS5Memory] Using Arabic tokenization via SQLiteMemoryBackend")
-        except ImportError:
-            # Fallback to English tokenizer
+            logger.info("[FTS5Memory] Using unicode61 remove_diacritics 2 tokenizer")
+        except Exception:
+            # Older SQLite without remove_diacritics support
             self._conn.execute(f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS {self._table_name}
                 USING fts5(
@@ -82,7 +88,7 @@ class FTS5Memory:
                 )
             """)
             self._conn.commit()
-            logger.info("[FTS5Memory] Using porter unicode61 tokenizer (English)")
+            logger.info("[FTS5Memory] Using porter unicode61 tokenizer (fallback)")
 
     def add(
         self,
@@ -104,11 +110,12 @@ class FTS5Memory:
         meta_json = json.dumps(metadata or {"source": "agent"})
         timestamp = datetime.now(UTC).isoformat()
 
-        self._conn.execute(
-            f"INSERT INTO {self._table_name} (text, metadata, doc_id, timestamp) VALUES (?, ?, ?, ?)",
-            (text, meta_json, doc_id, timestamp),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                f"INSERT INTO {self._table_name} (text, metadata, doc_id, timestamp) VALUES (?, ?, ?, ?)",
+                (text, meta_json, doc_id, timestamp),
+            )
+            self._conn.commit()
         logger.debug("[FTS5Memory] Stored doc %s: %.80s", doc_id, text)
         return doc_id
 
@@ -129,16 +136,19 @@ class FTS5Memory:
             List of dicts with 'text', 'metadata', 'doc_id', 'score' keys.
         """
         try:
-            rows = self._conn.execute(
-                f"""
-                SELECT text, metadata, doc_id, rank
-                FROM {self._table_name}
-                WHERE {self._table_name} MATCH ?
-                ORDER BY rank
-                LIMIT ?
-                """,
-                (query, limit),
-            ).fetchall()
+            safe_query = query.strip().replace('"', '""')
+            safe_query = f'"{safe_query}"' if safe_query else '""'
+            with self._lock:
+                rows = self._conn.execute(
+                    f"""
+                    SELECT text, metadata, doc_id, rank
+                    FROM {self._table_name}
+                    WHERE {self._table_name} MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                    """,
+                    (safe_query, limit),
+                ).fetchall()
 
             results = []
             for row in rows:
@@ -159,26 +169,33 @@ class FTS5Memory:
 
     def delete(self, doc_id: str) -> bool:
         """Delete a document by ID."""
-        cursor = self._conn.execute(
-            f"DELETE FROM {self._table_name} WHERE doc_id = ?",
-            (doc_id,),
-        )
-        self._conn.commit()
-        return cursor.rowcount > 0
+        with self._lock:
+            cursor = self._conn.execute(
+                f"DELETE FROM {self._table_name} WHERE doc_id = ?",
+                (doc_id,),
+            )
+            self._conn.commit()
+            return cursor.rowcount > 0
 
     def count(self) -> int:
         """Number of stored fragments."""
-        row = self._conn.execute(
-            f"SELECT COUNT(*) FROM {self._table_name}"
-        ).fetchone()
-        return row[0] if row else 0
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT COUNT(*) FROM {self._table_name}"
+            ).fetchone()
+            return row[0] if row else 0
 
     def clear(self) -> int:
         """Delete all documents. Returns count deleted."""
-        cursor = self._conn.execute(f"DELETE FROM {self._table_name}")
-        self._conn.commit()
-        return cursor.rowcount
+        with self._lock:
+            cursor = self._conn.execute(f"DELETE FROM {self._table_name}")
+            self._conn.commit()
+            return cursor.rowcount
 
     def close(self) -> None:
         """Close the database connection."""
-        self._conn.close()
+        with self._lock:
+            try:
+                self._conn.close()
+            except Exception:
+                pass

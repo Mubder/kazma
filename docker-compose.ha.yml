@@ -1,0 +1,97 @@
+# Multi-replica Kazma + Postgres (LB-ready)
+#
+#   docker compose -f docker-compose.ha.yml up -d --build --scale kazma=2
+#
+# External load balancer should:
+#   - health check GET /health/ready (expect 200)
+#   - liveness GET /health/live
+#   - prefer sticky sessions optional (opaque cookies work without stickiness
+#     once all replicas share the same Postgres + KAZMA_SECRET/KAZMA_VAULT_KEY)
+#
+# Required in .env: KAZMA_SECRET, KAZMA_VAULT_KEY, POSTGRES_PASSWORD
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: kazma-db
+    environment:
+      POSTGRES_USER: kazma
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kazma_change_me}
+      POSTGRES_DB: kazma
+    volumes:
+      - kazma_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kazma -d kazma"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  kazma:
+    build: .
+    # No fixed container_name so --scale works
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      KAZMA_HOST: "0.0.0.0"
+      KAZMA_TRUST_LAN: "0"
+      KAZMA_PRODUCTION: "1"
+      KAZMA_CODE_EXEC_DOCKER: "${KAZMA_CODE_EXEC_DOCKER:-force}"
+      KAZMA_VECTOR_PATH: "/home/kazma/.kazma/vector_memory"
+      KAZMA_DATABASE_URL: "postgresql://kazma:${POSTGRES_PASSWORD:-kazma_change_me}@db:5432/kazma"
+      KAZMA_DB_BACKEND: "postgres"
+      KAZMA_SECRET: ${KAZMA_SECRET:?set KAZMA_SECRET}
+      KAZMA_VAULT_KEY: ${KAZMA_VAULT_KEY:?set KAZMA_VAULT_KEY}
+      KAZMA_PUBLIC_URL: ${KAZMA_PUBLIC_URL:-}
+      KAZMA_OIDC_ISSUER: ${KAZMA_OIDC_ISSUER:-}
+      KAZMA_OIDC_CLIENT_ID: ${KAZMA_OIDC_CLIENT_ID:-}
+      KAZMA_OIDC_CLIENT_SECRET: ${KAZMA_OIDC_CLIENT_SECRET:-}
+    volumes:
+      # Prefer empty volumes for true multi-replica (state in Postgres).
+      # Local vector cache is per-replica (OK).
+      - kazma_vectors:/home/kazma/.kazma/vector_memory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Simple edge LB for local multi-replica demos (Traefik)
+  lb:
+    image: traefik:v3.1
+    container_name: kazma-lb
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "${HOST_PORT:-9090}:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - kazma
+    labels:
+      - "traefik.enable=false"
+    restart: unless-stopped
+
+  # Attach labels to kazma via compose extension fields is awkward;
+  # use the reverse-proxy profile with nginx instead for simple demos:
+  # docker compose -f docker-compose.ha.yml --profile nginx up -d
+
+  nginx:
+    profiles: ["nginx"]
+    image: nginx:1.27-alpine
+    container_name: kazma-nginx
+    ports:
+      - "${HOST_PORT:-9090}:80"
+    volumes:
+      - ./deploy/nginx-ha.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - kazma
+    restart: unless-stopped
+
+volumes:
+  kazma_pgdata:
+  kazma_vectors:

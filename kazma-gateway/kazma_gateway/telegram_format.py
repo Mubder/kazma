@@ -19,6 +19,15 @@ _ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)([^*\n]+?)(?<!\*)\*(?!\*)|(?<!_)_(?!_)(
 _HEADING_MD_RE = re.compile(r"(?m)^(#{1,6})\s+(.+)$")
 _LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 
+__all__ = [
+    "HEADING_RULE",
+    "format_swarm_task_result",
+    "md_to_tg_html",
+    "tg_escape",
+    "tg_heading",
+    "tg_quote",
+]
+
 
 def tg_escape(text: str) -> str:
     """Escape user content for Telegram HTML parse mode."""

@@ -10,6 +10,8 @@ from textual.widgets import Button, Label, ProgressBar, Static
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["TutorialScreen"]
+
 
 class TutorialScreen(ModalScreen[bool]):
     """Interactive tutorial for first-time Kazma TUI users.

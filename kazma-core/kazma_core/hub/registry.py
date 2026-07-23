@@ -13,6 +13,8 @@ import aiosqlite
 
 from kazma_core.hub.manifest_schema import SkillManifest
 
+__all__ = ["AgentInfo", "KazmaHub"]
+
 # ─── Agent Info (for delegation discovery) ────────────────────────────
 
 

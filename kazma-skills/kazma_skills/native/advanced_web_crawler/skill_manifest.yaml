@@ -1,19 +1,25 @@
 name: advanced-web-crawler
-version: 0.1.0
-description: Crawl websites, search DuckDuckGo, and parse local PDFs, CSVs, and Excel files
+version: 0.1.1
+description: >
+  Single-page web fetch + search + local document parse.
+  Built on Kazma core tools (not a multi-page spider or anti-bot product).
 author: Kazma Team
 license: MIT
 
 tools:
   web_search_duckduckgo:
     arabic_name: "بحث الويب المتقدم"
-    description: "Search DuckDuckGo or Bing fallback and return markdown results."
+    description: >
+      Search the public web via core web_search (SearXNG / DuckDuckGo / Bing).
+      Markdown titles, URLs, snippets. May rate-limit without SearXNG.
     category: "web"
     prompt_chain:
       - "ابحث في الويب عن معلومات حديثة ودقيقة"
   crawl_page:
     arabic_name: "زحف لصفحة ويب"
-    description: "Fetch and extract clean markdown content from a public URL."
+    description: >
+      Fetch ONE public URL and extract readable text (alias of read_url).
+      Not multi-page crawl. Playwright fallback for bot walls / thin JS shells when installed.
     category: "web"
     prompt_chain:
       - "اقرأ محتويات الصفحة الإلكترونية واستخرج النص الصافي"

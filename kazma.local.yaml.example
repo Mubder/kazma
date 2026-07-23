@@ -1,0 +1,24 @@
+# Copy to kazma.local.yaml and edit (gitignored — safe for local secrets).
+#
+# Priority (highest wins):
+#   1. ConfigStore / Settings UI  (kazma-data/settings.db)
+#   2. kazma.local.yaml           (this file, after you copy it)
+#   3. kazma.yaml                 (shipped defaults — DO NOT edit for day-to-day)
+#
+# Why: editing tracked kazma.yaml causes "local changes would be overwritten
+# by merge" on every git pull / kazma update. Keep product defaults clean.
+
+# ui:
+#   port: 9090
+#   host: 127.0.0.1
+
+# gateway:
+#   voice:
+#     enabled: true
+#     stt_provider: groq
+#     tts_provider: edgetts
+
+# connectors:
+#   telegram:
+#     enabled: true
+#     # Prefer TELEGRAM_BOT_TOKEN env var for the actual secret

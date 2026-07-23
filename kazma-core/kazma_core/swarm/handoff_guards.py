@@ -11,6 +11,8 @@ from time import perf_counter
 
 from kazma_core.swarm.task import WorkerResult
 
+__all__ = ["MAX_HANDOFF_DEPTH", "MAX_VISITS", "build_available_workers_list", "handoff_guard_error", "register_visit"]
+
 logger = logging.getLogger(__name__)
 
 MAX_HANDOFF_DEPTH = 5

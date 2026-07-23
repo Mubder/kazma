@@ -1,0 +1,59 @@
+name: browser-automation
+version: 0.1.0
+description: >
+  Headless browser automation via Playwright — navigate, click, extract text,
+  screenshot, fill forms, and evaluate JavaScript on live web pages.
+author: Kazma Team
+license: MIT
+
+tools:
+  browser_navigate:
+    arabic_name: "تصفّح صفحة"
+    description: >
+      Open a URL in a headless browser and return the page title plus the
+      visible body text (truncated). Use for JS-rendered pages a plain HTTP
+      fetch cannot read.
+    category: browser
+    prompt_chain:
+      - "افتح الرابط في المتصفح الوهمي"
+      - "أعد العنوان والنص الظاهر"
+  browser_click:
+    arabic_name: "نقر عنصر"
+    description: >
+      Click an element matched by a CSS selector on the current page and
+      return the updated text.
+    category: browser
+    prompt_chain:
+      - "انقر على العنصر المحدد بـ CSS selector"
+  browser_extract_text:
+    arabic_name: "استخراج النص"
+    description: >
+      Extract text content from elements matching a CSS selector on the
+      current page (or the full body if no selector).
+    category: browser
+    prompt_chain:
+      - "استخرج النص من العناصر المحددة"
+  browser_screenshot:
+    arabic_name: "لقطة شاشة"
+    description: >
+      Capture a screenshot of the current page (full page) and save it to
+      kazma-data/images/. Returns the file path.
+    category: browser
+    prompt_chain:
+      - "التقط لقطة شاشة كاملة للصفحة"
+  browser_fill_form:
+    arabic_name: "تعبئة نموذج"
+    description: >
+      Fill input fields on the current page from a mapping of CSS selectors
+      to values, optionally submitting the form.
+    category: browser
+    prompt_chain:
+      - "عبّئ حقول النموذج بالقيم المعطاة"
+  browser_eval_js:
+    arabic_name: "تنفيذ جافاسكربت"
+    description: >
+      Evaluate a JavaScript expression on the current page and return the
+      result. Use with care — this executes arbitrary page-side code.
+    category: browser
+    prompt_chain:
+      - "نفّذ تعبير جافاسكربت في الصفحة"

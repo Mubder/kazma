@@ -9,7 +9,16 @@ import tempfile
 
 import pytest
 from kazma_core.tools import code_exec
-from kazma_core.tools.code_exec import python_exec
+from kazma_core.tools.code_exec import python_exec, use_docker_jail, reset_docker_probe
+
+
+@pytest.fixture(autouse=True)
+def _force_local_sandbox(monkeypatch: pytest.MonkeyPatch):
+    """Unit tests use local sandbox so CI does not require Docker."""
+    monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "0")
+    reset_docker_probe()
+    yield
+    reset_docker_probe()
 
 
 class TestPythonExec:
@@ -79,6 +88,25 @@ for i in range(5):
         assert "ModuleNotFoundError" in result
 
     @pytest.mark.asyncio
+    async def test_python_exec_blocks_socket_import(self) -> None:
+        """Network modules are blocked after HITL (defense-in-depth)."""
+        result = await python_exec("import socket")
+        assert "[Exit code:" in result
+        assert "blocked" in result.lower() or "ImportError" in result
+
+    @pytest.mark.asyncio
+    async def test_python_exec_blocks_subprocess_import(self) -> None:
+        result = await python_exec("import subprocess")
+        assert "[Exit code:" in result
+        assert "blocked" in result.lower() or "ImportError" in result
+
+    @pytest.mark.asyncio
+    async def test_python_exec_allows_math(self) -> None:
+        result = await python_exec("import math; print(math.sqrt(16))")
+        assert "[Exit code: 0]" in result
+        assert "4.0" in result
+
+    @pytest.mark.asyncio
     async def test_python_exec_cleanup(self) -> None:
         """Temp directory is cleaned up after execution."""
         # Track temp dirs before
@@ -110,6 +138,56 @@ for i in range(5):
         assert "[Exit code: 42]" in result
 
 
+class TestDockerJailConfig:
+    """Docker jail selection without requiring a real daemon."""
+
+    def test_force_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "0")
+        reset_docker_probe()
+        assert use_docker_jail() is False
+
+    def test_force_docker_even_if_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "1")
+        reset_docker_probe()
+        assert use_docker_jail() is True
+
+    @pytest.mark.asyncio
+    async def test_docker_path_builds_network_none_cmd(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: list[tuple] = []
+
+        class _FakeProc:
+            returncode = 0
+
+            async def communicate(self) -> tuple[bytes, bytes]:
+                return (b"hi\n", b"")
+
+            def kill(self) -> None:
+                pass
+
+            async def wait(self) -> int:
+                return 0
+
+        async def _fake_exec(*args, **kwargs):
+            captured.append(args)
+            return _FakeProc()
+
+        monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "1")
+        monkeypatch.setenv("KAZMA_CODE_EXEC_IMAGE", "python:3.12-slim")
+        reset_docker_probe()
+        monkeypatch.setattr(code_exec, "_docker_cli", lambda: "docker")
+        monkeypatch.setattr(code_exec.asyncio, "create_subprocess_exec", _fake_exec)
+
+        result = await python_exec("print('hi')")
+        assert "docker" in result.lower() or "sandbox: docker" in result
+        assert captured, "docker run was not invoked"
+        args = captured[0]
+        assert args[0] == "docker"
+        assert "run" in args
+        assert "--network" in args
+        assert "none" in args
+        assert "--memory" in args
+
+
 class TestCodeExecWindowsPortability:
     """Tests ensuring code_exec.py works on Windows (and all platforms)."""
 
@@ -126,10 +204,10 @@ class TestCodeExecWindowsPortability:
         assert '"python3"' not in source, "Hardcoded \"python3\" found in code_exec.py source"
 
     def test_subprocess_uses_sys_executable(self) -> None:
-        """python_exec must invoke sys.executable, not 'python3'."""
-        source = inspect.getsource(code_exec.python_exec)
-        assert "sys.executable" in source, "python_exec does not use sys.executable"
-        assert "python3" not in source, "python_exec still references 'python3'"
+        """Local sandbox path must invoke sys.executable, not 'python3'."""
+        source = inspect.getsource(code_exec._run_local_subprocess)
+        assert "sys.executable" in source, "local sandbox does not use sys.executable"
+        assert '"python3"' not in source, "local sandbox still references 'python3'"
 
     def test_preexec_fn_conditional_on_platform(self) -> None:
         """preexec_fn must only be set on Unix, not unconditionally."""
@@ -168,6 +246,8 @@ class TestCodeExecWindowsPortability:
             captured_args.append(args)
             return _FakeProc()
 
+        monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "0")
+        code_exec.reset_docker_probe()
         monkeypatch.setattr(code_exec.asyncio, "create_subprocess_exec", _fake_create_subprocess_exec)
         await python_exec("print('test')")
         assert len(captured_args) == 1

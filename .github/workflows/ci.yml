@@ -95,7 +95,7 @@ jobs:
         run: pip install -e ".[test]"
 
       - name: Run Core Tests
-        run: python -m pytest kazma-core/kazma_core_tests -v --tb=short
+        run: python -m pytest kazma-core/kazma_core_tests kazma-core/tests -v --tb=short
 
       - name: Run Docs Sync Check
         run: python scripts/check_docs_sync.py
@@ -217,7 +217,7 @@ jobs:
       # codecov report despite being covered by their own dedicated jobs.
       - name: Run tests with coverage
         run: |
-          python -m pytest kazma-core/kazma_core_tests kazma-gateway/kazma_gateway_tests kazma-ui/kazma_ui_tests \
+          python -m pytest kazma-core/kazma_core_tests kazma-core/tests kazma-gateway/kazma_gateway_tests kazma-ui/kazma_ui_tests \
             kazma-tui/kazma_tui_tests tests/ \
             --cov=kazma-core/kazma_core --cov=kazma-gateway/kazma_gateway --cov=kazma-ui/kazma_ui --cov=kazma-tui/kazma_tui \
             --cov-report=xml --cov-report=term-missing
@@ -238,10 +238,16 @@ jobs:
       - name: Run Bandit
         run: |
           pip install bandit
-          bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui -f json -o bandit-report.json || true
+          # Fail CI on High severity (medium+ confidence). Full scan still
+          # written to the artifact for review of lower findings.
+          bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui \
+            -f json -o bandit-report.json || true
+          bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui \
+            -lll -ii -f txt
 
       - name: Upload Bandit Report
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: bandit-report
           path: bandit-report.json

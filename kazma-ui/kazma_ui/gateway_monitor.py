@@ -20,6 +20,8 @@ from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_gateway_router"]
+
 _ROADMAP_PATH = Path(__file__).resolve().parent.parent / "data" / "roadmaps.json"
 
 

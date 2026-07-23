@@ -19,6 +19,8 @@ from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_hitl_approval_router"]
+
 
 def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
     """Extract tool name and arguments from a PregelTask interrupt payload.
@@ -59,6 +61,34 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
     return None
 
 
+async def _enumerate_thread_ids(conn: Any) -> list[str]:
+    """Return distinct thread_ids from the checkpoint store.
+
+    Handles two backends:
+      * aiosqlite (SQLite checkpointer) — ``conn`` has a top-level ``.execute()``.
+      * psycopg ``AsyncConnectionPool`` (Postgres checkpointer via
+        ``AsyncPostgresSaver``) — must acquire a connection first; the table
+        is also namespaced under the ``public`` schema and column is ``thread_id``.
+    """
+    # Postgres pool: acquire a connection, run, release.
+    if type(conn).__name__ == "AsyncConnectionPool" or hasattr(conn, "getconn"):
+        async with conn.connection() as pg_conn:  # type: ignore[union-attr]
+            cursor = await pg_conn.execute(
+                "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id IS NOT NULL"
+            )
+            if cursor is None:
+                return []
+            rows = await cursor.fetchall()
+            return [r[0] for r in rows if r[0]]
+
+    # aiosqlite connection.
+    cursor = await conn.execute(  # type: ignore[union-attr]
+        "SELECT DISTINCT thread_id FROM checkpoints"
+    )
+    rows = await cursor.fetchall()
+    return [row[0] for row in rows if row[0]]
+
+
 async def _get_pending_approvals(
     graph: Any,
     checkpointer: Any,
@@ -87,9 +117,7 @@ async def _get_pending_approvals(
 
     if conn is not None:
         try:
-            cursor = await conn.execute("SELECT DISTINCT thread_id FROM checkpoints")
-            rows = await cursor.fetchall()
-            thread_ids = [row[0] for row in rows if row[0]]
+            thread_ids = await _enumerate_thread_ids(conn)
         except Exception as exc:
             logger.warning("[HITL] Failed to enumerate threads from DB: %s", exc)
             return []

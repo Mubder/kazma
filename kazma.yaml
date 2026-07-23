@@ -1,8 +1,8 @@
 agent:
   name: kazma
-  version: 0.5.0
-  language: ar
-  rtl: true
+  version: 0.6.1
+  language: en
+  rtl: false
 models:
   default: gpt-4o-mini
   router: litellm
@@ -29,13 +29,16 @@ mcp:
     enabled: true
     root: .
     max_file_size: 1048576
-system_prompt: 'You are Kazma, an autonomous AI agent framework.
+system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كازما), an autonomous
+  multi-platform AI agent framework.
 
   You are capable of understanding Arabic dialects including Kuwaiti/Gulf Arabic
   when the user speaks Arabic, but your default response language is always
   determined by the user''s input language.
 
-  Be helpful, precise, and culturally aware.
+  Be helpful, precise, and culturally aware. When users ask about Kazma itself,
+  teach them accurately: chat, IDE, swarm, settings, HITL, memory, tools, and
+  how to fix common errors. Prefer tools over guessing about the live workspace.
 
   When you don''t know something, say so honestly.
 
@@ -46,7 +49,8 @@ system_prompt: 'You are Kazma, an autonomous AI agent framework.
   If they mix Arabic and English (code-switching), match their mixing pattern.
   If the input is gibberish or unclear, respond in English. This rule OVERRIDES
   all other instructions, personality settings, and cultural context.
-  NEVER switch languages unless explicitly asked.'
+  NEVER switch languages unless explicitly asked.
+  When speaking Arabic, refer to yourself as كاظمه (or كاظمة) — never كازما.'
 storage:
   engine: sqlite
   path: kazma-data/checkpoints.db
@@ -56,18 +60,31 @@ memory:
   # Per-turn RAG: retrieve relevant memories on every user message (not just
   # at context compaction). This is what makes the memory system useful.
   per_turn_retrieval: true
+  # Auto-store durable facts (and optional turn snapshots) at end of each
+  # turn so recall works without the LLM calling memory_store.
+  # mode: durable | turns | both
+  auto_store: true
+  auto_store_mode: both
   max_context_tokens: 128000
   retrieval_top_k: 5
   provenance: true
   # Pluggable embedding backend. provider "local" uses sentence-transformers
   # in-process (free, 384-dim). provider "openai-compatible" uses any
   # OpenAI-compatible /embeddings endpoint (NVIDIA NIM, OpenAI, TEI).
+  # Default is local so memory works out of the box; set provider to
+  # openai-compatible + KAZMA_EMBED_API_KEY for NVIDIA NIM nv-embed-v1.
   embedding:
-    provider: openai-compatible   # local | openai-compatible
-    model: nvidia/nv-embed-v1     # NVIDIA NIM NeMo Retriever
-    dim: 4096                     # nv-embed-v1 output dimension
+    provider: local               # local | openai-compatible
+    model: all-MiniLM-L6-v2       # free local default (384-dim)
+    dim: 384
+    # Remote NIM example (uncomment + set key):
+    # provider: openai-compatible
+    # model: nvidia/nv-embed-v1
+    # dim: 4096
+    # base_url: https://integrate.api.nvidia.com/v1
+    # api_key_env: KAZMA_EMBED_API_KEY
     base_url: https://integrate.api.nvidia.com/v1
-    api_key_env: KAZMA_EMBED_API_KEY   # env var name holding the API key (never inline)
+    api_key_env: KAZMA_EMBED_API_KEY
 # Bot commit identity — when enabled, Kazma's agent commits as a bot
 # (e.g. "Kazma Agent [bot]") instead of the local git user. Shows up in
 # the GitHub Contributors list with a [bot] label, like Dependabot.
@@ -106,33 +123,49 @@ gateway:
     enabled: true
   voice:
     enabled: false
-    provider: openai  # openai | local | groq
+    stt_provider: openai   # openai | groq | cohere | nvidia | faster-whisper
+    tts_provider: edgetts  # edgetts | openai | nvidia | kokoro | coqui
+    tts_voice: default     # provider-specific voice name
+    stt_language: auto     # auto or ISO-639-1 (en, ar, fr, etc.)
+    tts_output_format: mp3 # mp3 | wav | opus | flac
 
 safety:
   hitl:
     enabled: true
+    # Must match CANONICAL_DANGER_TOOLS in kazma_core.safety.hitl
+    # (parity enforced by tests/test_hitl_wiring.py).
     require_approval_for:
       - file_write
       - file_delete
       - shell_exec
       - code_exec
       - python_exec
-      # Extended for swarm bus parity (spawn/schedule are danger in SafetyMiddleware too)
       - spawn_agent
       - spawn_agents
       - schedule_task
       - cancel_scheduled
-      # Secret vault — retrieving or deleting secrets requires approval
       - vault_retrieve
       - vault_delete
-      # Config changes require approval
       - config_save
+      - run_tests
+      - git_commit
+      - git_push_pull
+      - github_create_pr
+      - install_python_packages
+      - install_npm_packages
+      - install_agent_skill
+      - uninstall_agent_skill
+      - email_send
+      - email_delete
+      - email_categorize
+      - browser_eval_js
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 
 ui:
   host: 127.0.0.1
-  port: 8000
+  # Default matches CLI `kazma serve` / AGENTS.md (override with KAZMA_PORT).
+  port: 9090
   rtl: true
   title: Kazma Dashboard
 logging:

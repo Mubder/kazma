@@ -1,0 +1,76 @@
+---
+id: intro
+slug: /
+title: Kazma Documentation
+sidebar_label: Docs home
+description: Map of all Kazma documentation — start here
+---
+
+# Kazma documentation
+
+**Single source of truth** for the Kazma agent framework (v0.6.1+).  
+Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historical trees live in [`archive/`](https://github.com/kazma-ai/kazma/tree/main/archive).
+
+## Start here
+
+| I want to… | Go to |
+|------------|--------|
+| Install and send a first message | [Quickstart](guide/quickstart) |
+| Understand the engine | [Architecture](guide/architecture) |
+| Configure providers / YAML / env | [Configuration](guide/configuration) · [LLM providers](reference/llm-providers) · [Environment variables](reference/environment-variables) |
+| Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) |
+| Use tools safely | [Tools catalog](reference/tools-catalog) · [Security & HITL](guide/security-and-safety) |
+| Use built-in skills (browser, calendar, docs, …) | [Native skills](guide/native-skills) |
+| Send voice / images / documents | [Voice & media](guide/voice-and-media) |
+| Connect MCP servers (stdio/sse/streamable_http) | [Skills, MCP & tools](guide/skills-mcp-and-tools) |
+| Web search / scrape / research | [Web research](guide/web-research) |
+| Email (Gmail / Microsoft / sandbox) | [Email integration](guide/email-integration) |
+
+## Documentation map
+
+### Guide (concepts & how-to)
+
+- [Quickstart](guide/quickstart) · [Architecture](guide/architecture) · [Configuration](guide/configuration)
+- [Gateways & platforms](guide/gateways-and-platforms) · [CLI](guide/cli-reference) · [Skills, MCP & tools](guide/skills-mcp-and-tools)
+- [Native skills](guide/native-skills) · [Voice & media](guide/voice-and-media)
+- [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Security](guide/security-and-safety)
+- [Web research](guide/web-research) · [Email](guide/email-integration) · [Arabic & cultural](guide/arabic-cultural-features) · [Deployment](guide/deployment) · [Development](guide/development)
+- [Troubleshooting](guide/troubleshooting-and-workarounds) · [FAQ](guide/faq) · [Glossary](guide/glossary) · [Roadmap](guide/roadmap-and-future)
+
+### Products (UI surfaces)
+
+- [Web UI](products/web-ui) · [IDE](products/ide) · [TUI](products/tui)
+- [Command Center / Swarm panel](products/command-center-swarm) · [Multi-user SaaS](products/multi-user-saas)
+
+### Reference (exhaustive catalogs)
+
+- [Tools catalog](reference/tools-catalog) · [LLM providers](reference/llm-providers) · [Slash commands](reference/slash-commands)
+- [Environment variables](reference/environment-variables) · [API routes](reference/api-routes)
+- [Skill manifest](reference/skill-manifest) · [System map](reference/system-map)
+
+### Ops (production)
+
+- [Production checklist](ops/production-checklist) · [Postgres & SaaS](ops/postgres-and-saas)
+- [Disaster recovery](ops/disaster-recovery) · [Multi-region / HA](ops/multi-region) · [OIDC](ops/oidc-setup)
+- [Portability](ops/portability) · [WSL fixed access](ops/wsl-fixed-access)
+
+### Skills · Security · Contributing
+
+- Skill development & Hub sidebars in the navbar  
+- [Security policy](security/security-policy) · [Vulnerability reporting](security/vulnerability-reporting)
+
+## Engineering (not in this site)
+
+| Path | Purpose |
+|------|---------|
+| `docs/audits/` | Security & architecture audits |
+| `docs/plans/` | Implementation plans (e.g. full email integration) |
+| `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` | Full monorepo map (linked from [System map](reference/system-map)) |
+| `docs/DOCS_CONSOLIDATION_PLAN.md` | This docs consolidation plan |
+| `AGENTS.md` | Rules for coding agents working in the repo |
+| `CHANGELOG.md` | Sprint history |
+| `archive/` | Retired docs trees (`docs-v2`, legacy pages) |
+
+## Honesty policy
+
+Docs distinguish **what the code does today** from **planned / library-only** features. Retired/unwired code is moved to `archive/` (e.g. the former `delegation/*` package) — see [Roadmap](guide/roadmap-and-future) and audits `UNWIRED_INVENTORY.md`.

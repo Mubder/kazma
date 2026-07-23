@@ -32,9 +32,18 @@ from typing import Any
 
 import httpx
 
-from kazma_gateway.gateway import BaseAdapter, IncomingMessage, OutboundMessage
+from kazma_gateway.gateway import (
+    Attachment,
+    BaseAdapter,
+    IncomingMessage,
+    OutboundMessage,
+)
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "SlackAdapter",
+]
 
 _SLACK_API = "https://slack.com/api"
 _POLL_INTERVAL = 2.0
@@ -133,17 +142,50 @@ class SlackAdapter(BaseAdapter):
             return None
 
         text = event.get("text", "")
-        if not text:
+        raw_files = event.get("files") or []
+
+        # Accept if there is text OR any attached file. Media-only uploads
+        # are common, so don't require text when files are present.
+        if not text and not raw_files:
             return None
 
         ts = event.get("ts", "")
         team_id = event.get("team", "")
         username = event.get("username") or f"slack_{user_id}"
 
+        attachments: list[Attachment] = []
+        for f in raw_files:
+            mime = (f.get("mimetype") or "").lower()
+            if mime.startswith("image/"):
+                kind = "image"
+            elif mime.startswith("video/"):
+                kind = "video"
+            elif mime.startswith("audio/"):
+                kind = "audio"
+            else:
+                kind = "file"
+            # url_private_download is the direct fetch URL (needs the bearer
+            # token); url_private is the authenticated asset URL.
+            attachments.append(
+                Attachment(
+                    kind=kind,
+                    mime=mime or "application/octet-stream",
+                    filename=f.get("name", "") or f"slack_{f.get('id', 'file')}",
+                    url=f.get("url_private_download") or f.get("url_private"),
+                    meta={
+                        "file_id": f.get("id"),
+                        "source": "slack",
+                        "size": f.get("size"),
+                    },
+                )
+            )
+
+        msg_text = text or (f"[{attachments[0].kind}]" if attachments else "")
         return IncomingMessage(
             platform="slack",
             sender_id=f"slack:{user_id}",
-            text=text,
+            text=msg_text,
+            attachments=attachments,
             context_metadata={
                 "channel_id": channel_id,
                 "user_id": user_id,
@@ -151,6 +193,7 @@ class SlackAdapter(BaseAdapter):
                 "thread_ts": event.get("thread_ts"),
                 "message_ts": ts,
                 "username": username,
+                "media": bool(attachments),
             },
         )
 
@@ -231,6 +274,15 @@ class SlackAdapter(BaseAdapter):
                 data = resp.json()
                 if data.get("ok"):
                     logger.info("[Slack] Sent to channel=%s (ts=%s)", channel_id, data.get("ts", "?"))
+                    # Deliver any media attachments after the text.
+                    for att in outbound.attachments:
+                        await self._send_attachment(channel_id, att, thread_ts)
+                    # Voice reply: if the inbound was transcribed audio, reply
+                    # with synthesized speech.
+                    if outbound.context_metadata.get("voice_transcribed") and outbound.text:
+                        asyncio.create_task(
+                            self._send_voice_reply(channel_id, outbound.text, thread_ts)
+                        )
                     return True
                 else:
                     logger.error("[Slack] Send failed: %s", data.get("error", "unknown"))
@@ -244,6 +296,173 @@ class SlackAdapter(BaseAdapter):
                 return False
 
         return False
+
+    async def _maybe_transcribe_audio(self, msg: IncomingMessage) -> IncomingMessage:
+        """When voice is enabled, transcribe any audio attachment to text.
+
+        Slack's ``url_private`` requires the bearer token, so the download is
+        authenticated. Replaces ``msg.text`` with the transcript and tags
+        ``voice_transcribed`` for the outbound TTS reply path.
+        """
+        audio = next((a for a in msg.attachments if a.kind == "audio"), None)
+        if audio is None or not self._http:
+            return msg
+        try:
+            from kazma_gateway.adapters.voice_helpers import (
+                live_voice_settings,
+                transcribe_audio,
+            )
+
+            if not live_voice_settings().get("enabled"):
+                return msg
+            data = audio.data
+            if data is None and audio.url:
+                resp = await self._http.get(
+                    audio.url,
+                    timeout=30.0,
+                    headers={"Authorization": f"Bearer {self._bot_token}"},
+                )
+                resp.raise_for_status()
+                data = resp.content
+            if not data:
+                return msg
+            transcript = await transcribe_audio(data)
+            if transcript:
+                msg.text = transcript
+                msg.context_metadata["voice_transcribed"] = True
+                logger.info("[Slack] transcribed audio (%d bytes) from %s",
+                            len(data), msg.context_metadata.get("channel_id"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Slack] audio transcription failed: %s", type(exc).__name__)
+        return msg
+
+    async def _send_voice_reply(self, channel_id: str, text: str, thread_ts: str | None = None) -> bool:
+        """Synthesize *text* and upload it as an audio file to Slack."""
+        try:
+            from kazma_gateway.adapters.voice_helpers import (
+                live_voice_settings,
+                synthesize_speech,
+            )
+
+            if not live_voice_settings().get("enabled") or not self._http or not text:
+                return False
+            audio = await synthesize_speech(text)
+            if not audio:
+                return False
+            # Reuse the modern upload flow.
+            safe_name = "reply.mp3"
+            resp = await self._http.post(
+                f"{_SLACK_API}/files.getUploadURLExternal",
+                params={"filename": safe_name, "length": str(len(audio))},
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            up = resp.json()
+            if not up.get("ok"):
+                return False
+            ul_resp = await self._http.post(
+                up["upload_url"],
+                files={"file": (safe_name, audio, "audio/mpeg")},
+            )
+            ul_resp.raise_for_status()
+            complete_body: dict[str, Any] = {
+                "files": [{"id": up["file_id"], "title": safe_name}],
+                "channel_id": channel_id,
+            }
+            cp = await self._http.post(
+                f"{_SLACK_API}/files.completeUploadExternal",
+                json=complete_body,
+                headers=self._headers(),
+            )
+            cp.raise_for_status()
+            ok = cp.json().get("ok", False)
+            if ok:
+                logger.info("[Slack] voice reply sent to %s (%d bytes)", channel_id, len(audio))
+            return ok
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Slack] voice reply failed: %s", type(exc).__name__)
+            return False
+
+    async def _send_attachment(
+        self,
+        channel_id: str,
+        att: Attachment,
+        thread_ts: str | None = None,
+    ) -> bool:
+        """Upload a file to Slack via the modern async upload flow.
+
+        Slack deprecated ``files.upload``; the current flow is:
+        1. ``files.getUploadURLExternal`` → returns a one-time upload URL.
+        2. POST the bytes to that URL (no auth header).
+        3. ``files.completeUploadExternal`` → registers the file + shares it
+           to the channel.
+
+        Bytes come from ``att.data`` or are fetched from ``att.url``.
+        """
+        if self._http is None:
+            return False
+
+        data = att.data
+        if data is None and att.url:
+            try:
+                resp = await self._http.get(
+                    att.url,
+                    timeout=30.0,
+                    headers={"Authorization": f"Bearer {self._bot_token}"},
+                )
+                resp.raise_for_status()
+                data = resp.content
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[Slack] attachment fetch failed: %s", exc)
+                return False
+        if not data:
+            return False
+
+        safe_name = att.filename or f"kazma_{att.kind}"
+        try:
+            # 1. Get upload URL
+            resp = await self._http.post(
+                f"{_SLACK_API}/files.getUploadURLExternal",
+                params={"filename": safe_name, "length": str(len(data))},
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            up = resp.json()
+            if not up.get("ok"):
+                logger.error("[Slack] getUploadURLExternal failed: %s", up.get("error"))
+                return False
+            upload_url = up["upload_url"]
+            file_id = up["file_id"]
+
+            # 2. POST bytes to the upload URL (multipart, NO auth header).
+            ul_resp = await self._http.post(
+                upload_url,
+                files={"file": (safe_name, data, att.mime or "application/octet-stream")},
+            )
+            ul_resp.raise_for_status()
+
+            # 3. Complete upload + share to the channel.
+            complete_body: dict[str, Any] = {
+                "files": [{"id": file_id, "title": safe_name}],
+                "channel_id": channel_id,
+            }
+            if thread_ts:
+                complete_body["initial_comment"] = ""
+            cp = await self._http.post(
+                f"{_SLACK_API}/files.completeUploadExternal",
+                json=complete_body,
+                headers=self._headers(),
+            )
+            cp.raise_for_status()
+            cd = cp.json()
+            if not cd.get("ok"):
+                logger.error("[Slack] completeUploadExternal failed: %s", cd.get("error"))
+                return False
+            logger.info("[Slack] uploaded %s (%d bytes) to %s", safe_name, len(data), channel_id)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Slack] attachment send failed: %s", type(exc).__name__)
+            return False
 
     # ── Listen (abstract method) ────────────────────────────────────
 
@@ -432,6 +651,8 @@ class SlackAdapter(BaseAdapter):
                                 if self._allowed_channels and cid not in self._allowed_channels:
                                     logger.debug("[Slack] Event from non-whitelisted channel %s — skipping", cid)
                                     continue
+                                # Voice: transcribe any audio attachment.
+                                incoming = await self._maybe_transcribe_audio(incoming)
                                 try:
                                     self._queue.put_nowait(incoming)
                                     logger.debug("[Slack] ← event: type=%s user=%s text=%.80s",
@@ -550,30 +771,59 @@ class SlackAdapter(BaseAdapter):
             return
 
         text = msg.get("text", "").strip()
-        if not text:
+        raw_files = msg.get("files") or []
+        # Polling (conversations.history) rarely includes files inline; Socket
+        # Mode is the primary media path. Still honor any that are present.
+        if not text and not raw_files:
             return
 
         user_id = msg.get("user", "")
         username = f"slack_{user_id}" if user_id else "slack_unknown"
 
+        attachments: list[Attachment] = []
+        for f in raw_files:
+            mime = (f.get("mimetype") or "").lower()
+            if mime.startswith("image/"):
+                kind = "image"
+            elif mime.startswith("video/"):
+                kind = "video"
+            elif mime.startswith("audio/"):
+                kind = "audio"
+            else:
+                kind = "file"
+            attachments.append(
+                Attachment(
+                    kind=kind,
+                    mime=mime or "application/octet-stream",
+                    filename=f.get("name", "") or f"slack_{f.get('id', 'file')}",
+                    url=f.get("url_private_download") or f.get("url_private"),
+                    meta={"file_id": f.get("id"), "source": "slack"},
+                )
+            )
+
+        msg_text = text or (f"[{attachments[0].kind}]" if attachments else "")
         incoming = IncomingMessage(
             platform="slack",
             sender_id=f"slack:{channel_id}",
-            text=text,
+            text=msg_text,
+            attachments=attachments,
             context_metadata={
                 "channel_id": channel_id,
                 "user_id": user_id,
                 "thread_ts": msg.get("thread_ts"),
                 "message_ts": msg.get("ts"),
                 "username": username,
+                "media": bool(attachments),
             },
         )
+        # Voice: transcribe any audio attachment (polling path).
+        incoming = await self._maybe_transcribe_audio(incoming)
         try:
             self._queue.put_nowait(incoming)
         except asyncio.QueueFull:
             logger.warning("[Slack] Queue full — dropping message from %s", user_id)
             return
-        logger.debug("[Slack] ← from %s: %.80s", user_id, text)
+        logger.debug("[Slack] ← from %s: %.80s", user_id, incoming.text)
 
     # ── Lifecycle ───────────────────────────────────────────────────
 

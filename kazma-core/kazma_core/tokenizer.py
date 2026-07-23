@@ -8,6 +8,8 @@ from kazma_core.dialect_detector import DialectDetector, DialectResult
 from kazma_core.kuwaiti_tokenizer import KuwaitiTokenizer, Token
 from kazma_core.msa_tokenizer import MSATokenizer
 
+__all__ = ["DualEngineTokenizer", "TokenResult"]
+
 
 @dataclass(frozen=True, slots=True)
 class TokenResult:

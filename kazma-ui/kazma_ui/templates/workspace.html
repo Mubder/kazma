@@ -9,7 +9,7 @@
   <!-- ── Workspace Selector Bar ── -->
   <div class="card" style="margin-bottom:16px;padding:12px 16px;background:linear-gradient(135deg, var(--bg-surface) 0%, var(--bg-elevated) 100%);border:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;">
     <div style="display:flex;align-items:center;gap:12px;">
-      <div style="font-size:1.5rem;">🏗️</div>
+      <div style="font-size:1.5rem;"><span class="ki" data-icon="construction" aria-hidden="true"></span></div>
       <div>
         <h2 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);letter-spacing:-0.02em;">{{ t('workspace.engine_title') }}</h2>
         <p style="margin:0;font-size:0.75rem;color:var(--text-muted);">{{ t('workspace.engine_desc') }}</p>
@@ -33,7 +33,13 @@
         <span><span x-html="KazmaIcons.plus()"></span></span> {{ t('workspace.create') }}
       </button>
       <button x-show="ghOAuthConnected" class="btn btn-sm btn-secondary ws-action-btn" @click="openRepoPicker()" style="display:flex;align-items:center;justify-content:center;gap:6px;" x-cloak>
-        <span>🐙</span> {{ t('workspace.switch_repo') }}
+        <span><span class="ki" data-icon="github" aria-hidden="true"></span></span> {{ t('workspace.switch_repo') }}
+      </button>
+      <button class="btn btn-sm btn-danger ws-action-btn" @click="deleteActiveWorkspace()"
+              :disabled="!activeWorkspaceId"
+              style="display:flex;align-items:center;justify-content:center;gap:6px;"
+              title="{{ t('workspace.delete_title') }}">
+        <span><span class="ki" data-icon="trash" aria-hidden="true"></span></span> {{ t('workspace.delete') }}
       </button>
     </div>
   </div>
@@ -53,7 +59,7 @@
     <div class="card" style="max-width:520px;width:100%;padding:0;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);display:flex;flex-direction:column;">
       <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
         <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span x-html="KazmaIcons.plus()"></span> {{ t('workspace.create_modal_title') }}</h3>
-        <button class="btn-icon" @click="showCreateModal = false" style="font-size:1rem;">✕</button>
+        <button class="btn-icon" @click="showCreateModal = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
       </div>
       
       <div style="display:flex;flex-direction:column;gap:16px;padding:16px 24px;">
@@ -79,8 +85,8 @@
   <div x-show="showFolderModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
     <div class="card" style="max-width:480px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;">📂 {{ t('workspace.folder_modal_title') }}</h3>
-        <button class="btn-icon" @click="showFolderModal = false" style="font-size:1rem;">✕</button>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;"><span class="ki" data-icon="folder-open" aria-hidden="true"></span> {{ t('workspace.folder_modal_title') }}</h3>
+        <button class="btn-icon" @click="showFolderModal = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
       </div>
 
       <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
@@ -91,7 +97,7 @@
           <div x-show="suggestList.length > 0" x-cloak style="position:absolute;top:100%;left:0;right:0;max-height:180px;overflow-y:auto;background:var(--bg-surface);border:1px solid var(--border-strong);border-radius:0 0 var(--radius-sm) var(--radius-sm);z-index:100;box-shadow:var(--shadow-md);">
             <template x-for="s in suggestList" :key="s.path">
               <div @click="pickSuggestion(s.path)" @mousedown.prevent style="padding:6px 12px;font-size:0.78rem;font-family:var(--font-mono);cursor:pointer;border-bottom:1px solid var(--tint);display:flex;align-items:center;gap:6px;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-                <span style="color:var(--text-muted);">📁</span>
+                <span style="color:var(--text-muted);"><span class="ki" data-icon="folder" aria-hidden="true"></span></span>
                 <span style="color:var(--text-primary);" x-text="s.name"></span>
               </div>
             </template>
@@ -111,8 +117,8 @@
   <div x-show="showRepoPicker" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak @click.self="showRepoPicker = false">
     <div class="card" style="max-width:520px;width:100%;max-height:80vh;display:flex;flex-direction:column;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding:16px 24px 12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🐙 {{ t('workspace.repo_picker_title') }}</h3>
-        <button class="btn-icon" @click="showRepoPicker = false" style="font-size:1rem;">✕</button>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="github" aria-hidden="true"></span> {{ t('workspace.repo_picker_title') }}</h3>
+        <button class="btn-icon" @click="showRepoPicker = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
       </div>
       <div style="padding:0 24px 12px;">
         <input type="text" class="form-input" placeholder="{{ t('workspace.repo_search_ph') }}" x-model="ghRepoSearch" style="width:100%;font-size:0.85rem;">
@@ -121,7 +127,7 @@
         <template x-for="r in ghRepoFiltered" :key="r.full_name">
           <div @click="pickRepo(r)" style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-bottom:1px solid var(--tint);cursor:pointer;border-radius:var(--radius-xs);transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
             <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-              <span style="font-size:0.9rem;">📦</span>
+              <span style="font-size:0.9rem;"><span class="ki" data-icon="package" aria-hidden="true"></span></span>
               <span style="font-size:0.82rem;font-weight:500;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="r.full_name"></span>
             </div>
             <span x-show="r.private" style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 6px;border-radius:3px;flex-shrink:0;" x-cloak x-text="t('workspace.private_badge')"></span>
@@ -142,8 +148,8 @@
   <div x-show="showPatModal" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:9999;" x-transition x-cloak>
     <div class="card" style="max-width:480px;width:100%;padding:24px;background:var(--bg-surface);box-shadow:var(--shadow-lg);border-radius:var(--radius-md);border:1px solid var(--border-strong);">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px;">
-        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);">🔑 {{ t('workspace.pat_modal_title') }}</h3>
-        <button class="btn-icon" @click="showPatModal = false" style="font-size:1rem;">✕</button>
+        <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:var(--text-primary);"><span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.pat_modal_title') }}</h3>
+        <button class="btn-icon" @click="showPatModal = false" style="font-size:1rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
       </div>
 
       <div style="display:flex;flex-direction:column;gap:16px;margin-bottom:24px;">
@@ -192,7 +198,7 @@
     <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
       <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:10px 16px;">
         <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-size:1.1rem;">🔀</span>
+          <span style="font-size:1.1rem;"><span class="ki" data-icon="git-branch" aria-hidden="true"></span></span>
           <h3 style="margin:0;font-size:1rem;font-weight:600;">{{ t('workspace.git_status') }}</h3>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
@@ -278,14 +284,14 @@
           <h3 style="margin:0;font-size:1rem;font-weight:600;letter-spacing:-0.01em;">{{ t('workspace.gh_title') }}</h3>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <!-- Status indicator badge -->
-          <template x-if="ghIsGitHub && ghHasToken && ghTokenValid">
+          <!-- Status indicator badge: authenticated = OAuth or valid PAT/env token -->
+          <template x-if="ghIsGitHub && ghAuthenticated">
             <span class="badge" style="background:rgba(16, 185, 129, 0.1);color:#10b981;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(16, 185, 129, 0.2);display:inline-flex;align-items:center;gap:4px;">
               <span style="display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;box-shadow:0 0 8px #10b981;animation:pulse 2s infinite;"></span>
               {{ t('workspace.gh_connected') }}
             </span>
           </template>
-          <template x-if="ghIsGitHub && (!ghHasToken || !ghTokenValid)">
+          <template x-if="ghIsGitHub && !ghAuthenticated">
             <span class="badge" style="background:rgba(245, 158, 11, 0.1);color:#f59e0b;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:12px;border:1px solid rgba(245, 158, 11, 0.2);display:inline-flex;align-items:center;gap:4px;">
               <span style="display:inline-block;width:6px;height:6px;background:#f59e0b;border-radius:50%;"></span>
               {{ t('workspace.gh_token_missing') }}
@@ -296,9 +302,9 @@
               {{ t('workspace.gh_rate_limited') }}
             </span>
           </template>
-          <!-- Connect / Disconnect (OAuth) -->
-          <button x-show="!ghOAuthConnected" class="btn btn-xs btn-primary" @click="connectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 10px;">
-            🔑 {{ t('workspace.gh_connect') }}
+          <!-- Connect when not authenticated; Disconnect only clears OAuth (PAT stays until replaced) -->
+          <button x-show="!ghAuthenticated" class="btn btn-xs btn-primary" @click="connectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 10px;">
+            <span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.gh_connect') }}
           </button>
           <button x-show="ghOAuthConnected" class="btn btn-xs btn-secondary" @click="disconnectGitHub()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
             {{ t('workspace.gh_disconnect') }}
@@ -306,17 +312,19 @@
         </div>
       </div>
 
-      <!-- OAuth not connected state (only after status has been checked) -->
-      <div x-show="ghIsGitHub && ghOAuthChecked && !ghOAuthConnected" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
-        <div style="font-size:1.5rem;margin-bottom:8px;">🔒</div>
+      <!-- Not authenticated (only after status has been checked) — PAT alone counts as connected -->
+      <div x-show="ghIsGitHub && ghOAuthChecked && !ghAuthenticated" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
+        <div style="font-size:1.5rem;margin-bottom:8px;"><span class="ki" data-icon="lock" aria-hidden="true"></span></div>
         <h4 style="margin:0 0 4px 0;font-size:0.9rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.gh_connect_heading') }}</h4>
         <p style="font-size:0.75rem;max-width:340px;margin:0 auto 12px auto;line-height:1.5;">{{ t('workspace.gh_connect_body') }} <span style="color:var(--accent);font-family:var(--font-mono);" x-text="ghOwner + '/' + ghRepo"></span>.</p>
-        <button class="btn btn-sm btn-primary" @click="connectGitHub()" style="font-size:0.8rem;">🔑 {{ t('workspace.gh_connect_with') }}</button>
+        <button class="btn btn-sm btn-primary" @click="connectGitHub()" style="font-size:0.8rem;"><span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.gh_connect_with') }}</button>
         <p style="font-size:0.65rem;color:var(--text-tertiary);margin-top:10px;">{{ t('workspace.gh_oauth_note') }}</p>
       </div>
 
-      <!-- Main GitHub Card Body -->
-      <div style="padding:12px;background:var(--bg-surface);" x-show="ghIsGitHub && ghOAuthConnected" x-cloak>
+      <!-- Main GitHub Card Body — OAuth *or* valid PAT/env token -->
+      <div style="padding:12px;background:var(--bg-surface);" x-show="ghIsGitHub && ghAuthenticated" x-cloak>
+        <!-- Surface API errors (rate limit / 403 / private repo) above the zeroed stats -->
+        <div x-show="ghError" x-cloak style="margin-bottom:10px;padding:8px 10px;border-radius:var(--radius-sm);background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);color:#fca5a5;font-size:0.75rem;line-height:1.4;" x-text="ghError"></div>
         <!-- Tab navigation -->
         <div style="display:flex;gap:2px;border-bottom:1px solid var(--border-subtle);margin-bottom:10px;overflow-x:auto;">
           <template x-for="tab in [['overview',t('workspace.gh_tab_overview')],['pulls',t('workspace.gh_tab_prs')],['issues',t('workspace.gh_tab_issues')],['commits',t('workspace.gh_tab_commits')],['workflows',t('workspace.gh_tab_actions')],['releases',t('workspace.gh_tab_releases')]]" :key="tab[0]">
@@ -371,7 +379,7 @@
         <!-- GitHub Action / CI/CD Live Workflows -->
         <div style="border-top:1px solid var(--border-subtle);padding-top:10px;">
           <h4 style="margin:0 0 6px 0;font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-tertiary);font-weight:600;display:flex;align-items:center;gap:6px;">
-            <span>🤖</span> {{ t('workspace.gh_actions_title') }}
+            <span><span class="ki" data-icon="bot" aria-hidden="true"></span></span> {{ t('workspace.gh_actions_title') }}
           </h4>
           
           <template x-if="ghLatestWorkflow">
@@ -394,13 +402,13 @@
                   <!-- Success -->
                   <template x-if="ghLatestWorkflow.conclusion === 'success'">
                     <span style="background:rgba(16,185,129,0.1);color:#10b981;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(16,185,129,0.2);display:inline-flex;align-items:center;gap:4px;">
-                      <span style="color:#10b981;font-size:0.8rem;">✓</span> <span x-text="t('workspace.gh_passed')"></span>
+                      <span style="color:#10b981;font-size:0.8rem;"><span class="ki" data-icon="check" aria-hidden="true"></span></span> <span x-text="t('workspace.gh_passed')"></span>
                     </span>
                   </template>
                   <!-- Failure -->
                   <template x-if="ghLatestWorkflow.conclusion === 'failure' || ghLatestWorkflow.conclusion === 'cancelled'">
                     <span style="background:rgba(239,68,68,0.1);color:#ef4444;font-size:0.7rem;font-weight:600;padding:2px 8px;border-radius:4px;border:1px solid rgba(239,68,68,0.2);display:inline-flex;align-items:center;gap:4px;">
-                      <span style="color:#ef4444;font-size:0.8rem;">✕</span> <span x-text="t('workspace.gh_failed')"></span>
+                      <span style="color:#ef4444;font-size:0.8rem;"><span class="ki" data-icon="x" aria-hidden="true"></span></span> <span x-text="t('workspace.gh_failed')"></span>
                     </span>
                   </template>
                   <!-- In progress -->
@@ -515,7 +523,7 @@
         <p style="font-size:0.75rem;max-width:320px;margin:0 auto 10px auto;line-height:1.4;" x-text="ghError || t('workspace.gh_offline_body')"></p>
         <div style="display:flex;align-items:center;justify-content:center;gap:8px;">
           <button class="btn btn-xs btn-secondary" @click="showPatModal = true">
-            🔑 {{ t('workspace.configure_pat') }}
+            <span class="ki" data-icon="key" aria-hidden="true"></span> {{ t('workspace.configure_pat') }}
           </button>
         </div>
       </div>
@@ -525,13 +533,13 @@
     <div class="card" style="padding:0;overflow:hidden;border:1px solid var(--border-subtle);">
       <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:10px 16px;">
         <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-size:1.1rem;">📁</span>
+          <span style="font-size:1.1rem;"><span class="ki" data-icon="folder" aria-hidden="true"></span></span>
           <h3 style="margin:0;font-size:1rem;font-weight:600;color:var(--text-primary);">{{ t('workspace.files_title') }}</h3>
         </div>
         <div style="display:flex;align-items:center;gap:12px;">
           <code style="font-family:var(--font-mono);font-size:0.75rem;background:var(--bg-elevated);padding:3px 8px;border-radius:var(--radius-sm);color:var(--text-secondary);border:1px solid var(--border-subtle);" x-text="absoluteRoot || t('workspace.loading_path')"></code>
           <button class="btn btn-xs btn-secondary" @click="triggerSelectFolder()" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
-            <span>📂</span> {{ t('workspace.select_folder') }}
+            <span><span class="ki" data-icon="folder-open" aria-hidden="true"></span></span> {{ t('workspace.select_folder') }}
           </button>
         </div>
       </div>
@@ -552,13 +560,13 @@
                :class="{ 'is-directory': item.is_dir }"
                @click="navigate(item)"
                style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;transition:background 0.15s;font-size:0.8rem;">
-            <span x-text="item.is_dir ? '📁' : fileIcon(item.name)" style="width:20px;"></span>
+            <span x-text="item.is_dir ? '<span class="ki" data-icon="folder" aria-hidden="true"></span>' : fileIcon(item.name)" style="width:20px;"></span>
             <span x-text="item.name" style="flex:1;" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
             <span x-text="item.size || ''" style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
           </div>
         </template>
         <div x-show="files.length === 0 && !loading" style="padding:20px;text-align:center;color:var(--text-muted);">
-          <div style="font-size:1.5rem;margin-bottom:4px;">📭</div>
+          <div style="font-size:1.5rem;margin-bottom:4px;"><span class="ki" data-icon="inbox" aria-hidden="true"></span></div>
           <p style="margin:0;font-size:0.8rem;">{{ t('workspace.no_files') }}</p>
         </div>
         <div x-show="loading" style="padding:15px;text-align:center;color:var(--text-muted);">
@@ -585,7 +593,7 @@
           <div @click="a.html_url && window.open(a.html_url, '_blank')"
                style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--tint);font-size:0.78rem;cursor:pointer;transition:background 0.15s;"
                onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
-            <span style="width:18px;font-size:0.85rem;" x-text="{commit:'📦',pr:'🔀',issue:'🐛',ci:'🤖'}[a.type] || '•'"></span>
+            <span style="width:18px;font-size:0.85rem;" x-text="{commit:'<span class="ki" data-icon="package" aria-hidden="true"></span>',pr:'<span class="ki" data-icon="git-branch" aria-hidden="true"></span>',issue:'<span class="ki" data-icon="bug" aria-hidden="true"></span>',ci:'<span class="ki" data-icon="bot" aria-hidden="true"></span>'}[a.type] || '•'"></span>
             <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-primary);" x-text="a.descriptor"></span>
             <span style="font-size:0.65rem;color:var(--text-muted);flex-shrink:0;" x-text="a.actor"></span>
             <span style="font-size:0.6rem;color:var(--text-tertiary);flex-shrink:0;" x-text="ghRelativeTime(a.timestamp)"></span>
@@ -600,8 +608,8 @@
     <!-- Terminal Output -->
     <div class="card" x-show="showTerminal" style="padding:0;overflow:hidden;grid-column:1/-1;">
       <div class="card-header">
-        <h3>💻 <span x-text="t('workspace.terminal_title')"></span></h3>
-        <button class="btn-icon" @click="showTerminal = false">✕ <span x-text="t('workspace.terminal_close')"></span></button>
+        <h3><span class="ki" data-icon="laptop" aria-hidden="true"></span> <span x-text="t('workspace.terminal_title')"></span></h3>
+        <button class="btn-icon" @click="showTerminal = false"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="t('workspace.terminal_close')"></span></button>
       </div>
       <div class="terminal-output" x-ref="terminal" style="background:var(--bg-deep);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;padding:16px;max-height:300px;overflow-y:auto;">
         <div x-show="termOutput.length === 0" style="color:var(--text-muted);" x-text="t('workspace.terminal_ready')"></div>
@@ -673,6 +681,7 @@ function workspaceApp() {
     showPatModal: false,
     githubPat: '',
     // OAuth + tabbed read-only views
+    // Use get ghAuthenticated() — OAuth connected OR valid PAT/env token.
     ghOAuthConnected: false,
     ghOAuthChecked: false,
     ghOAuthConfigured: false,
@@ -720,11 +729,12 @@ function workspaceApp() {
       setInterval(() => {
         this.loadGitStatus();
         this.loadOAuthStatus();
-        if (this.ghOAuthConnected) this.loadGitHubStatus();
+        // Refresh telemetry when authenticated via OAuth *or* PAT.
+        if (this.ghAuthenticated) this.loadGitHubStatus();
       }, 10000);
       // Lighter poll for the active tab's list (30s).
       setInterval(() => {
-        if (this.ghOAuthConnected && this.ghActiveTab !== 'overview') this.ghLoadTab(this.ghActiveTab);
+        if (this.ghAuthenticated && this.ghActiveTab !== 'overview') this.ghLoadTab(this.ghActiveTab);
       }, 30000);
       // Activity card refreshes every 60s (deliberately slower — protects
       // the rate budget since /activity is a GraphQL + 1 REST call).
@@ -767,6 +777,69 @@ function workspaceApp() {
         }
       } catch (e) {
         KazmaStream.toast(t('workspace.toast_error', {msg: e.message}), 'error', 3000);
+      }
+    },
+
+    async deleteActiveWorkspace() {
+      const id = this.activeWorkspaceId;
+      if (!id) return;
+      const ws = (this.workspaces || []).find(w => w.id === id) || {};
+      const name = ws.name || id.slice(0, 8);
+      const path = ws.root_path || '';
+
+      const okRemove = window.kazmaConfirm
+        ? await window.kazmaConfirm({
+            title: t('workspace.delete_title'),
+            message: t('workspace.delete_confirm', { name: name, path: path }),
+            confirmLabel: t('workspace.delete_registry'),
+            danger: true,
+          })
+        : confirm('Remove workspace "' + name + '" from the list?');
+      if (!okRemove) return;
+
+      let deleteFiles = false;
+      if (path) {
+        deleteFiles = window.kazmaConfirm
+          ? await window.kazmaConfirm({
+              title: t('workspace.delete_files_title'),
+              message: t('workspace.delete_files_confirm', { path: path }),
+              confirmLabel: t('workspace.delete_files_btn'),
+              danger: true,
+            })
+          : confirm('Also DELETE all files on disk at:\n' + path + '\n\nThis cannot be undone.');
+      }
+
+      try {
+        const resp = await fetch('/api/workspaces/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspace_id: id, delete_files: !!deleteFiles }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          KazmaStream.toast(
+            t('workspace.toast_error', { msg: data.detail || data.error || ('HTTP ' + resp.status) }),
+            'error',
+            4000
+          );
+          return;
+        }
+        const msg = data.files_deleted
+          ? t('workspace.toast_deleted_with_files', { name: name })
+          : t('workspace.toast_deleted', { name: name });
+        KazmaStream.toast(msg, 'success', 3000);
+        await this.loadWorkspaces();
+        if (data.active_workspace_id) {
+          this.activeWorkspaceId = data.active_workspace_id;
+          if (data.active_workspace && data.active_workspace.root_path) {
+            this.absoluteRoot = data.active_workspace.root_path;
+          }
+        } else {
+          this.activeWorkspaceId = '';
+        }
+        await this.refreshAll();
+      } catch (e) {
+        KazmaStream.toast(t('workspace.toast_error', { msg: e.message }), 'error', 3000);
       }
     },
 
@@ -948,16 +1021,41 @@ function workspaceApp() {
           const data = await resp.json();
           this.ghOAuthConfigured = data.configured || false;
           this.ghOAuthConnected = data.connected || false;
+          // Server reports any usable token (OAuth or PAT/env) so PAT-only
+          // setups don't sit on the "Connect GitHub" empty state forever.
+          if (data.has_token) {
+            this.ghHasToken = true;
+          }
           this.ghOAuthChecked = true;
-          // If just connected, refresh the overview + first tab.
-          if (this.ghOAuthConnected) {
+          // If just connected (OAuth or token present), refresh overview.
+          if (this.ghOAuthConnected || data.has_token) {
             await this.loadGitHubStatus();
           }
         }
       } catch (e) { /* non-fatal */ }
     },
 
-    connectGitHub() {
+    async connectGitHub() {
+      // Check OAuth App config first so we don't open a raw error tab.
+      try {
+        await this.loadOAuthStatus();
+      } catch (e) { /* ignore */ }
+      if (this.ghOAuthChecked && !this.ghOAuthConfigured) {
+        const useSetup = window.kazmaConfirm
+          ? await window.kazmaConfirm({
+              title: 'GitHub OAuth not configured',
+              message: 'Create a GitHub OAuth App and set GITHUB_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_SECRET in .env, then restart Kazma. Or use a Personal Access Token (PAT) on this page instead.',
+              confirmText: 'Open setup guide',
+              cancelText: 'Use PAT instead',
+            })
+          : confirm('GitHub OAuth is not configured. OK = open setup guide, Cancel = stay here for PAT.');
+        if (useSetup) {
+          window.open('/api/github/oauth/start', '_blank');
+        } else if (this.showPatModal !== undefined) {
+          this.showPatModal = true;
+        }
+        return;
+      }
       // Open the GitHub OAuth flow in a new tab.
       window.open('/api/github/oauth/start', '_blank');
       // Poll for connection — the callback tab may not be able to
@@ -1031,6 +1129,11 @@ function workspaceApp() {
     },
 
     // Computed: activity filtered by the active chip (client-side, no refetch).
+    // True when we can call the GitHub API: OAuth token or valid PAT/env.
+    get ghAuthenticated() {
+      return !!(this.ghOAuthConnected || (this.ghHasToken && this.ghTokenValid));
+    },
+
     get ghActivityFiltered() {
       if (this.ghActivityFilter === 'all') return this.ghActivity;
       return this.ghActivity.filter(a => a.type === this.ghActivityFilter);
@@ -1137,6 +1240,10 @@ function workspaceApp() {
           KazmaStream.toast(t('workspace.toast_pat_saved'), 'success', 2500);
           this.showPatModal = false;
           this.githubPat = '';
+          // Mark authenticated immediately so telemetry panel unhides before
+          // the status round-trip completes (PAT path, not OAuth).
+          this.ghHasToken = true;
+          this.ghTokenValid = true;
           await this.loadGitHubStatus();
         } else {
           const err = await resp.json();
@@ -1163,18 +1270,18 @@ function workspaceApp() {
     },
 
     fileIcon(name) {
-      if (!name) return '📄';
+      if (!name) return '<span class="ki" data-icon="file" aria-hidden="true"></span>';
       const ext = name.split('.').pop().toLowerCase();
       const icons = {
-        py: '🐍', js: '🟨', ts: '🔷', tsx: '⚛️', jsx: '⚛️',
-        html: '🌐', css: '🎨', json: '📋', yaml: '⚙️', yml: '⚙️',
-        md: '📝', txt: '📄', log: '📋', csv: '📊',
-        toml: '⚙️', ini: '⚙️', cfg: '⚙️', env: '🔒',
-        sh: '💻', bash: '💻', zsh: '💻',
-        gitignore: '🙈', lock: '🔒', dockerfile: '🐳',
-        png: '🖼', jpg: '🖼', svg: '🎯', ico: '🎯',
+        py: '<span class="ki" data-icon="code" aria-hidden="true"></span>', js: '<span class="ki" data-icon="square" aria-hidden="true"></span>', ts: '<span class="ki" data-icon="hexagon" aria-hidden="true"></span>', tsx: '<span class="ki" data-icon="atom" aria-hidden="true"></span>', jsx: '<span class="ki" data-icon="atom" aria-hidden="true"></span>',
+        html: '<span class="ki" data-icon="globe" aria-hidden="true"></span>', css: '<span class="ki" data-icon="palette" aria-hidden="true"></span>', json: '<span class="ki" data-icon="clipboard" aria-hidden="true"></span>', yaml: '<span class="ki" data-icon="settings" aria-hidden="true"></span>', yml: '<span class="ki" data-icon="settings" aria-hidden="true"></span>',
+        md: '<span class="ki" data-icon="file-text" aria-hidden="true"></span>', txt: '<span class="ki" data-icon="file" aria-hidden="true"></span>', log: '<span class="ki" data-icon="clipboard" aria-hidden="true"></span>', csv: '<span class="ki" data-icon="bar-chart" aria-hidden="true"></span>',
+        toml: '<span class="ki" data-icon="settings" aria-hidden="true"></span>', ini: '<span class="ki" data-icon="settings" aria-hidden="true"></span>', cfg: '<span class="ki" data-icon="settings" aria-hidden="true"></span>', env: '<span class="ki" data-icon="lock" aria-hidden="true"></span>',
+        sh: '<span class="ki" data-icon="laptop" aria-hidden="true"></span>', bash: '<span class="ki" data-icon="laptop" aria-hidden="true"></span>', zsh: '<span class="ki" data-icon="laptop" aria-hidden="true"></span>',
+        gitignore: '<span class="ki" data-icon="eye-off" aria-hidden="true"></span>', lock: '<span class="ki" data-icon="lock" aria-hidden="true"></span>', dockerfile: '<span class="ki" data-icon="box" aria-hidden="true"></span>',
+        png: '<span class="ki" data-icon="image" aria-hidden="true"></span>', jpg: '<span class="ki" data-icon="image" aria-hidden="true"></span>', svg: '<span class="ki" data-icon="target" aria-hidden="true"></span>', ico: '<span class="ki" data-icon="target" aria-hidden="true"></span>',
       };
-      return icons[ext] || '📄';
+      return icons[ext] || '<span class="ki" data-icon="file" aria-hidden="true"></span>';
     },
 
     runTests() {

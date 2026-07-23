@@ -26,6 +26,8 @@ from fastapi import APIRouter, Query
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_workspace_router"]
+
 # ── Workspace root resolution ──────────────────────────────────────────
 
 _DEFAULT_WORKSPACE_RELS = [
@@ -48,17 +50,7 @@ def _resolve_workspace_root() -> Path:
     The directory is created if it does not yet exist so the UI always
     has a valid, browsable location.
     """
-    # 1. Try env var override (highest priority for testing/custom overrides)
-    env_ws = os.environ.get("KAZMA_WORKSPACE", "").strip()
-    if env_ws:
-        root = Path(env_ws).expanduser().resolve()
-        root.mkdir(parents=True, exist_ok=True)
-        return root
-
-    # 2. Try WorkspaceStore — the active workspace is the single source of
-    # truth. Use it even if its dir is momentarily missing, so all 3 cards
-    # (Files / Git Status / GitHub) consistently point at the same root
-    # rather than silently falling through to a drifted selected_path.
+    # 1. Active WorkspaceStore — Switch Repo / clone (must match agent tools)
     try:
         from kazma_core.stores import get_workspace_store
         active_ws = get_workspace_store().get_active_workspace()
@@ -66,6 +58,13 @@ def _resolve_workspace_root() -> Path:
             return Path(active_ws["root_path"]).resolve()
     except Exception as exc:
         logger.debug("[workspace_api] WorkspaceStore lookup failed: %s", exc)
+
+    # 2. Env override only when no active workspace row exists
+    env_ws = os.environ.get("KAZMA_WORKSPACE", "").strip()
+    if env_ws:
+        root = Path(env_ws).expanduser().resolve()
+        root.mkdir(parents=True, exist_ok=True)
+        return root
 
     # 3. ConfigStore selected_path — only used when there is NO active
     # workspace at all (e.g. a fresh install before any workspace switch).

@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_mcp_router"]
+
 
 def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRouter:
     """Create the MCP management router."""

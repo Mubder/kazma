@@ -65,6 +65,8 @@ _START_TIME = time.monotonic()
 from kazma_core.settings_providers import ProviderSettingsService  # re-export
 from kazma_core.settings_mcp import MCPSettingsService  # re-export
 
+__all__ = ["DEFAULT_APPEARANCE", "DEFAULT_MODEL_DEFAULTS", "DEFAULT_SHORTCUTS", "SettingsManager"]
+
 
 class SettingsManager:
     """Comprehensive settings manager wrapping ConfigStore."""
@@ -392,12 +394,33 @@ class SettingsManager:
             self._cs.set(f"connectors.{platform_name}.{key}", value, category="connectors")
 
     async def test_connector(self, platform_name: str) -> dict[str, Any]:
-        """Test a connector connection."""
-        token = self._cs.get(f"connectors.{platform_name}.token", "")
+        """Test a connector connection.
+
+        Uses ConfigStore.get() so vault-backed secrets decrypt (get_all raw
+        pointers must never be sent to Telegram/Discord).
+        """
+        import os
+
+        token = str(self._cs.get(f"connectors.{platform_name}.token", "") or "").strip()
+        if not token and platform_name == "telegram":
+            token = (
+                os.environ.get("TELEGRAM_BOT_TOKEN", "")
+                or os.environ.get("TELEGRAM_TOKEN", "")
+            ).strip()
         if not token:
-            return {"success": False, "error": f"No token configured for {platform_name}"}
+            return {
+                "success": False,
+                "error": (
+                    f"No token configured for {platform_name} "
+                    f"(or vault could not decrypt connectors.{platform_name}.token)."
+                ),
+            }
 
         if platform_name == "telegram":
+            token = token.strip().strip("\"'")
+            # Docs-style paste only: leading "bot" + digits.
+            if len(token) > 4 and token[:3].lower() == "bot" and token[3].isdigit():
+                token = token[3:]
             return await self._test_http_connector(
                 f"https://api.telegram.org/bot{token}/getMe",
                 headers=None,
@@ -512,10 +535,6 @@ class SettingsManager:
             logger.debug("Failed to parse skill frontmatter for %s: %s", path, _e)
             return {"name": path.parent.name, "description": ""}
 
-    def install_skill(self, skill_id: str) -> dict[str, Any]:
-        """Install a skill (stub — marketplace integration pending)."""
-        return {"status": "pending", "message": f"Skill marketplace for '{skill_id}' not yet implemented"}
-
     def uninstall_skill(self, skill_id: str) -> None:
         """Uninstall a skill."""
         self._cs.set(f"skills.{skill_id}.enabled", False, category="skills")
@@ -572,9 +591,7 @@ class SettingsManager:
 
     def reset_shortcuts(self) -> None:
         """Reset shortcuts to defaults."""
-        for action in DEFAULT_SHORTCUTS:
-            self._cs.delete(f"shortcuts.{action}")
-        self._cs.set("shortcuts", json.dumps(DEFAULT_SHORTCUTS), category="shortcuts")
+        self._cs.set("shortcuts", DEFAULT_SHORTCUTS, category="shortcuts")
 
     def detect_conflicts(self, shortcuts: dict[str, str] | None = None) -> list[dict[str, str]]:
         """Find conflicting key bindings."""
@@ -637,14 +654,22 @@ class SettingsManager:
         return {"status": "ok"}
 
     def get_api_tokens(self) -> list[dict[str, Any]]:
-        """List API tokens."""
+        """List API tokens (metadata only; raw secret is never stored)."""
         tokens = self._cs.get("account.tokens", [])
-        if isinstance(tokens, str):
-            try:
-                tokens = json.loads(tokens)
-            except (json.JSONDecodeError, TypeError):
-                tokens = []
-        return tokens if isinstance(tokens, list) else []
+        # ConfigStore json.dumps on write; older code double-encoded with
+        # json.dumps before set(), so peel nested JSON strings.
+        for _ in range(3):
+            if isinstance(tokens, str):
+                try:
+                    tokens = json.loads(tokens)
+                except (json.JSONDecodeError, TypeError):
+                    tokens = []
+                    break
+            else:
+                break
+        if not isinstance(tokens, list):
+            return []
+        return [t for t in tokens if isinstance(t, dict)]
 
     def create_api_token(self, name: str) -> dict[str, Any]:
         """Generate a new API token."""
@@ -653,7 +678,7 @@ class SettingsManager:
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         token_entry = {
             "id": secrets.token_hex(8),
-            "name": name,
+            "name": (name or "unnamed").strip() or "unnamed",
             "token_prefix": token[:16],
             "token_hash": token_hash,
             "created_at": datetime.now(UTC).isoformat(),
@@ -661,14 +686,21 @@ class SettingsManager:
         }
         tokens = self.get_api_tokens()
         tokens.append(token_entry)
-        self._cs.set("account.tokens", json.dumps(tokens), category="account")
+        # Pass a list — ConfigStore already json.dumps; do NOT double-encode.
+        self._cs.set("account.tokens", tokens, category="account")
         return {"status": "ok", "token": token, "id": token_entry["id"]}
 
-    def revoke_api_token(self, token_id: str) -> None:
-        """Revoke an API token."""
+    def revoke_api_token(self, token_id: str) -> bool:
+        """Revoke an API token by id. Returns True if a token was removed."""
+        tid = (token_id or "").strip()
+        if not tid:
+            return False
         tokens = self.get_api_tokens()
-        tokens = [t for t in tokens if t.get("id") != token_id]
-        self._cs.set("account.tokens", json.dumps(tokens), category="account")
+        kept = [t for t in tokens if str(t.get("id", "")) != tid]
+        if len(kept) == len(tokens):
+            return False
+        self._cs.set("account.tokens", kept, category="account")
+        return True
 
     def get_sessions(self) -> list[dict[str, Any]]:
         """List active sessions."""
@@ -761,7 +793,7 @@ class SettingsManager:
 
     def check_updates(self) -> dict[str, Any]:
         """Check for new Kazma versions."""
-        current_version = "0.2.0"
+        current_version = "0.5.0"
         try:
             import kazma_core
             current_version = getattr(kazma_core, "__version__", current_version)
@@ -835,12 +867,49 @@ class SettingsManager:
     # IMPORT / EXPORT
     # ══════════════════════════════════════════════════════════════════
 
-    def export_config(self, fmt: str = "yaml") -> str:
-        """Export configuration as YAML or JSON."""
+    def export_config(self, fmt: str = "yaml", mask_secrets: bool = False) -> str:
+        """Export configuration as YAML or JSON.
+
+        When ``mask_secrets=True``, sensitive values (api keys, tokens,
+        passwords) are replaced with ``***`` to prevent leaking through
+        browser download dialogs or network logs.
+        """
         if fmt == "json":
             all_settings = self._cs.get_all()
+            if mask_secrets:
+                self._mask_secrets_in_dict(all_settings)
             return json.dumps(all_settings, indent=2, ensure_ascii=False)
+        # YAML export
+        if mask_secrets:
+            all_settings = self._cs.get_all()
+            self._mask_secrets_in_dict(all_settings)
+            import yaml as _yaml
+            return _yaml.dump(all_settings, default_flow_style=False, allow_unicode=True)
         return self._cs.export_yaml()
+
+    @staticmethod
+    def _mask_secrets_in_dict(data: dict) -> None:
+        """Recursively replace values whose key looks like a secret with '***'."""
+        _SENSITIVE = ("api_key", "token", "secret", "password", "passphrase")
+        for category, settings_dict in data.items():
+            if not isinstance(settings_dict, dict):
+                continue
+            for key in list(settings_dict.keys()):
+                if any(frag in key.lower() for frag in _SENSITIVE):
+                    raw = settings_dict[key]
+                    if isinstance(raw, str) and raw.strip():
+                        try:
+                            import json as _json
+                            parsed = _json.loads(raw)
+                            if isinstance(parsed, dict):
+                                for sub_k in list(parsed.keys()):
+                                    if isinstance(parsed[sub_k], str) and parsed[sub_k].strip():
+                                        parsed[sub_k] = "***"
+                                settings_dict[key] = _json.dumps(parsed)
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+                        settings_dict[key] = "***"
 
     def import_config(self, data: str, fmt: str = "yaml", selective: bool = False, sections: list[str] | None = None) -> int:
         """Import configuration from YAML or JSON string."""

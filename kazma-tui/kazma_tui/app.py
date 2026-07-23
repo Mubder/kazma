@@ -42,6 +42,8 @@ from kazma_tui.widgets.toast import Toast
 from kazma_tui.widgets.tutorial import TutorialScreen
 from kazma_tui.widgets.hitl_modal import HitlApprovalScreen
 
+__all__ = ["KazmaTUI", "main"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -170,14 +172,13 @@ class KazmaTUI(App[None]):
             # get_config_store() lazily creates a singleton and never raises.
             # Check if the singleton is already set; if not, create one
             # and load values from kazma.yaml.
-            if _cs_mod._config_store is None:
-                cs = ConfigStore()
-                set_config_store(cs)
+            # Always use the process-wide singleton (never ConfigStore() here).
+            cs = get_config_store()
+            try:
                 cs.reconcile_from_yaml()
-                logger.info("[TUI] ConfigStore initialized from kazma.yaml")
-            else:
-                cs = get_config_store()
-                logger.info("[TUI] ConfigStore already initialized")
+            except Exception:
+                pass
+            logger.info("[TUI] ConfigStore ready (singleton)")
         except Exception as e:
             logger.warning("[TUI] ConfigStore init failed: %s", e)
 
@@ -243,6 +244,22 @@ class KazmaTUI(App[None]):
                     logger.warning("[TUI] Failed to load workers from registry: %s", exc)
         except Exception as e:
             logger.warning("[TUI] SwarmEngine init failed: %s", e)
+
+        # ── VectorMemory (RAG) ─────────────────────────────────────
+        try:
+            import os
+            _demo = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
+            if not _demo:
+                from kazma_core.agent.tool_registry import set_vector_memory
+                from kazma_core.memory.vector_store import VectorMemory
+
+                vec_collection = os.environ.get("KAZMA_VECTOR_COLLECTION", "agent_memory")
+                vec_model = os.environ.get("KAZMA_VECTOR_MODEL", "all-MiniLM-L6-v2")
+                vm = VectorMemory(collection_name=vec_collection, model_name=vec_model)
+                set_vector_memory(vm)
+                logger.info("[TUI] VectorMemory initialized (collection=%s)", vec_collection)
+        except Exception as e:
+            logger.debug("[TUI] VectorMemory init skipped: %s", e)
 
         # ── Update status bar with active model info ──────────────────
         try:
@@ -565,7 +582,7 @@ class KazmaTUI(App[None]):
         try:
             header = self.query_one(Header)
             if lang == "ar":
-                header.title_comp.add_class("header-title")
+                header.add_class("header-title")
         except Exception as exc:
             logger.debug("Failed to update header localization: %s", exc)
 

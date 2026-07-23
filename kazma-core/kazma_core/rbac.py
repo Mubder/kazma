@@ -15,9 +15,16 @@ from typing import Any
 
 import aiosqlite
 
+from kazma_core.paths import rbac_db
+
+__all__ = ["DIVISIONS", "PermissionResult", "RBACEngine", "SENSITIVE_RESOURCES"]
+
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = str(Path.cwd() / "kazma-data" / "rbac.db")
+# Project-root ``kazma-data/rbac.db`` (via paths.py), not bare CWD.
+# Re-resolved at construction time so subdir launches still hit the repo root.
+def _default_db() -> str:
+    return rbac_db()
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS user_roles (
@@ -134,7 +141,7 @@ class RBACEngine:
         db_path: str | None = None,
         divisions: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        self.db_path = db_path or _DEFAULT_DB
+        self.db_path = db_path or _default_db()
         self.divisions = divisions or DIVISIONS
         self._db: aiosqlite.Connection | None = None
 

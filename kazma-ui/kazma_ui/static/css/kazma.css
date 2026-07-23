@@ -39,6 +39,7 @@
   --accent-light: #67e8f9;
   --accent-subtle: rgba(34, 211, 238, 0.12);
   --accent-glow: rgba(34, 211, 238, 0.25);
+  --accent-rgb: 34, 211, 238;
   --gradient-accent: linear-gradient(135deg, #22d3ee 0%, #0891b2 100%);
 
   /* Secondary — blue (kazma.ai secondary) */
@@ -672,6 +673,27 @@ button { cursor: pointer; font-family: inherit; }
   margin-bottom: var(--sp-4);
   padding-bottom: var(--sp-2);
   border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+/* Section title icons stay neutral (not accent/cyan “emoji plate”) */
+.settings-group h3 .ki,
+.settings-group h3 .ki svg,
+.card-header h3 .ki,
+.card-header h3 .ki svg,
+.card-title .ki,
+.card-title .ki svg {
+  color: var(--text-secondary);
+  width: 1.05em;
+  height: 1.05em;
+  flex-shrink: 0;
+}
+.personality-card-icon svg {
+  width: 1.35rem;
+  height: 1.35rem;
+  color: var(--text-secondary);
 }
 
 /* Settings navigation (12-tab system) */
@@ -691,6 +713,84 @@ button { cursor: pointer; font-family: inherit; }
 .settings-tab.active { color: var(--accent-light); border-bottom-color: var(--accent); }
 .provider-card { transition: border-color 0.15s; }
 .provider-card:hover { border-color: var(--border-strong) !important; }
+
+/* Account token / session lists — fixed columns so rows stay aligned */
+.account-list-table {
+  width: 100%;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-deep);
+}
+.account-list-head,
+.account-list-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 1.2fr) minmax(110px, 1fr) minmax(140px, 1.2fr) 88px;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+}
+.account-sessions-head,
+.account-sessions-row {
+  grid-template-columns: minmax(100px, 1.2fr) minmax(140px, 1.4fr) 88px;
+}
+.account-list-head {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.account-list-row {
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border-subtle);
+  min-height: 44px;
+}
+.account-list-row:last-child { border-bottom: none; }
+.account-list-name {
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-list-mono {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-list-meta {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.account-list-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+@media (max-width: 640px) {
+  .account-list-head,
+  .account-list-row {
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 10px;
+  }
+  .account-list-head span:nth-child(3),
+  .account-list-row .account-list-meta { display: none; }
+  .account-list-actions { justify-content: flex-start; }
+  .account-sessions-head,
+  .account-sessions-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 
 /* ── 7. Buttons ─────────────────────────────────────────────────── */
 .btn {
@@ -795,6 +895,30 @@ button { cursor: pointer; font-family: inherit; }
 .icon-lg { width: 20px; height: 20px; flex-shrink: 0; }
 .btn svg, .btn-xs svg, .btn-sm svg { width: 14px; height: 14px; flex-shrink: 0; }
 .btn-lg svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+/* KazmaIcons host (.ki) — high-quality SVG stand-in for emoji */
+.ki {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: -0.125em;
+  line-height: 1;
+  color: inherit;
+  flex-shrink: 0;
+}
+.ki svg {
+  width: 1em;
+  height: 1em;
+  display: block;
+}
+.ki.icon-sm svg, .icon-sm.ki svg { width: 14px; height: 14px; }
+.ki.icon-md svg, .icon-md.ki svg { width: 16px; height: 16px; }
+.ki.icon-lg svg, .icon-lg.ki svg { width: 20px; height: 20px; }
+.metric-icon .ki svg { width: 1.25rem; height: 1.25rem; }
+.nav-icon .ki svg,
+.nav-icon svg { width: 18px; height: 18px; }
+.btn .ki { margin-inline-end: 0.15em; }
+.btn .ki:only-child { margin-inline-end: 0; }
 
 .btn-icon {
   padding: var(--sp-1);
@@ -1264,9 +1388,15 @@ tbody tr:last-child td {
 }
 .hitl-approval-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-2);
   margin-top: var(--sp-3);
   align-items: center;
+}
+.hitl-approval-actions .btn-warning {
+  background: var(--warning, #f59e0b);
+  border-color: var(--warning, #f59e0b);
+  color: #111;
 }
 .hitl-approval-card.hitl-approved { border-color: var(--success); }
 .hitl-approval-card.hitl-denied { border-color: var(--danger); }
@@ -1672,25 +1802,66 @@ tbody tr:last-child td {
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 /* ── 21. Provider Card ──────────────────────────────────────────── */
+/* Vertical stack: identity/actions on top, discovered models full-width below.
+   Do NOT use horizontal align-items:center — it crushed the model panel. */
 .provider-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--sp-3);
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
   background: var(--tint);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  margin-bottom: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  width: 100%;
+  box-sizing: border-box;
+}
+.provider-card .provider-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  width: 100%;
 }
 .provider-card .provider-info {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 0.875rem;
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.provider-card .provider-title-row {
+  display: flex;
   align-items: center;
   gap: var(--sp-2);
-  font-size: 0.875rem;
+  flex-wrap: wrap;
 }
 .provider-card .provider-actions {
   display: flex;
+  align-items: center;
   gap: var(--sp-1);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.provider-card .discovered-models-panel {
+  width: 100%;
+  min-width: 0;
+}
+.provider-card .discovered-models-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
 }
 
 /* Input with icon */
@@ -1763,6 +1934,7 @@ tbody tr:last-child td {
   --accent-light: #0891b2;
   --accent-subtle: rgba(8, 145, 178, 0.10);
   --accent-glow: rgba(8, 145, 178, 0.22);
+  --accent-rgb: 8, 145, 178;
   --gradient-accent: linear-gradient(135deg, #0891b2 0%, #0e7490 100%);
 
   --secondary: #2563eb;
@@ -2162,16 +2334,24 @@ tbody tr:last-child td {
 /* ── Bottom navigation (shown only on Tier 2 phones/tablets) ── */
 .bottom-nav { display: none; }
 @media (max-width: 768px) {
+  /* Shared height so chat/composer can sit above the dock, not under it */
+  :root {
+    --bottom-nav-height: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
   .bottom-nav {
     display: flex;
     position: fixed;
     bottom: 0; left: 0; right: 0;
-    z-index: 250;
+    /* Below chat composer (z-index 260) so the input/mic bar is never covered */
+    z-index: 200;
+    height: var(--bottom-nav-height);
+    box-sizing: border-box;
     background: rgba(14, 20, 27, 0.94);
     backdrop-filter: blur(16px);
     border-top: 1px solid var(--border-subtle);
-    padding: 6px max(8px, env(safe-area-inset-bottom)) 6px;
+    padding: 6px 8px max(6px, env(safe-area-inset-bottom, 0px));
     justify-content: space-around;
+    align-items: center;
   }
   .bottom-nav a, .bottom-nav button.bottom-nav-more {
     flex: 1;
@@ -2183,9 +2363,32 @@ tbody tr:last-child td {
   }
   .bottom-nav a.active { color: var(--accent); }
   .bottom-nav svg { width: 22px; height: 22px; }
-  /* keep content clear of the fixed bottom bar */
-  .page-body { padding-bottom: calc(var(--sp-8) + 56px); }
-  .chat-container { height: calc(100vh - var(--header-height) - 56px) !important; }
+  /* keep page content clear of the fixed bottom bar */
+  .page-body { padding-bottom: calc(var(--sp-8) + var(--bottom-nav-height)); }
+  /* Chat fills space above bottom nav; composer is sticky above the dock */
+  .chat-container {
+    height: calc(100dvh - var(--header-height) - var(--bottom-nav-height)) !important;
+    max-height: calc(100dvh - var(--header-height) - var(--bottom-nav-height)) !important;
+  }
+  .chat-input-area {
+    position: sticky;
+    bottom: 0;
+    z-index: 260;
+    flex-shrink: 0;
+    /* Sit visually above the fixed bottom-nav */
+    margin-bottom: 0;
+    box-shadow: 0 -6px 20px rgba(0, 0, 0, 0.28);
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-panel);
+  }
+  /* IDE chat composer — same clearance when mobile dock is visible */
+  .ide-chat-panel .chat-input-row,
+  .chat-input-row {
+    position: sticky;
+    bottom: 0;
+    z-index: 260;
+    background: var(--bg-panel);
+  }
 }
 
 /* Touch devices: guarantee ≥44px tap targets (non-touch stays compact) */
@@ -2284,9 +2487,10 @@ tbody tr:last-child td {
   .breadcrumbs { display: none; }
 
   /* ── Chat layout adjustments ──
-     Override the inline margin:-24px / calc(100vh - 60px) from chat.html. */
+     Keep height clearance for bottom-nav (do not wipe --bottom-nav-height). */
   .chat-container {
-    height: calc(100vh - var(--header-height)) !important;
+    height: calc(100dvh - var(--header-height) - var(--bottom-nav-height, 0px)) !important;
+    max-height: calc(100dvh - var(--header-height) - var(--bottom-nav-height, 0px)) !important;
     margin: 0 !important;
   }
   .chat-messages { padding: var(--sp-3); }
@@ -2351,7 +2555,16 @@ tbody tr:last-child td {
   transition: border-color 0.15s;
 }
 .metric-card:hover { border-color: var(--border-strong); }
-.metric-icon { font-size: 1.25rem; margin-bottom: 4px; }
+.metric-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  margin: 0 auto 8px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+}
 .metric-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
 .metric-value { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.03em; margin-bottom: 2px; }
 .metric-sub { font-size: 0.72rem; color: var(--text-tertiary); }
@@ -2473,29 +2686,52 @@ canvas { display: block; border-radius: 4px; }
 }
 .session-item {
   position: relative;
-  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background 0.15s;
 }
 .session-item:hover { background: var(--bg-hover); }
 .session-item.active { background: rgba(94, 106, 210, 0.1); border: 1px solid rgba(94, 106, 210, 0.2); }
-.session-delete {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
+.session-info { flex: 1; min-width: 0; overflow: hidden; }
+.session-info .session-title {
+  display: block;
+  font-weight: 500;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-info .session-meta {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-rename, .session-delete, .session-archive, .session-unarchive {
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
   font-size: 0.7rem;
-  padding: 2px 6px;
+  padding: 3px 5px;
   border-radius: 3px;
   opacity: 0;
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, color 0.15s;
+  flex-shrink: 0;
 }
-.session-item:hover .session-delete { opacity: 1; }
+.session-item:hover .session-rename,
+.session-item:hover .session-delete,
+.session-item:hover .session-archive,
+.session-item:hover .session-unarchive { opacity: 1; }
+.session-rename:hover { color: var(--accent); background: var(--accent-subtle); }
+.session-archive:hover { color: var(--warning); background: var(--warning-bg, rgba(245,158,11,0.1)); }
+.session-unarchive:hover { color: var(--accent); background: var(--accent-subtle); }
 .session-delete:hover { color: var(--danger); background: var(--danger-subtle); }
 .session-empty {
   text-align: center;
@@ -2935,17 +3171,9 @@ canvas { display: block; border-radius: 4px; }
 .table-container::-webkit-scrollbar-thumb:hover,
 .modal-body::-webkit-scrollbar-thumb:hover { background: var(--accent-glow); }
 
-/* Hero glow accent — soft radial behind page heroes */
+/* Hero glow accent — disabled (was neon radial, looked unprofessional) */
 .hero-glow {
-  position: absolute;
-  top: -180px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 760px;
-  height: 480px;
-  background: radial-gradient(ellipse at center, var(--accent-glow), transparent 65%);
-  pointer-events: none;
-  z-index: 0;
+  display: none;
 }
 .hitl-approval-status {
   font-size: 0.75rem;
@@ -3040,37 +3268,49 @@ body {
   transform: translateY(-2px);
 }
 
-/* Metric cards — glowing icon chip + hover halo */
+/* Metric cards — clean, professional (no neon glow) */
 .metric-card {
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, #ffffff 3%), var(--bg-panel));
+  background: var(--bg-panel);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
-  transition: border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
   position: relative;
   overflow: hidden;
 }
 .metric-card:hover {
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
-  box-shadow: var(--shadow-glow);
-  transform: translateY(-2px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow);
 }
+/* Neutral icon row above metric values — no accent/green “emoji plate” */
 .metric-icon {
-  background: var(--accent-subtle);
-  color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, transparent);
-  box-shadow: 0 0 18px var(--accent-glow);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 8px;
+  width: auto;
+  height: auto;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
 }
-.metric-icon svg { width: 20px; height: 20px; }
+.metric-icon svg,
+.metric-icon .ki svg {
+  width: 20px;
+  height: 20px;
+  opacity: 0.9;
+}
 .metric-value { font-size: var(--fs-fluid-2xl); }
 
-/* Primary buttons get a soft glow */
+/* Primary buttons — clean, no glow */
 .btn-primary {
-  box-shadow: var(--shadow-glow);
+  box-shadow: var(--shadow-sm);
 }
 .btn-primary:hover:not(:disabled) {
-  box-shadow: 0 0 28px var(--accent-glow);
+  box-shadow: var(--shadow);
   transform: translateY(-1px);
 }
 
@@ -3102,12 +3342,12 @@ body {
   border-radius: var(--radius);
   background: var(--gradient-accent);
   color: #001016;
-  box-shadow: var(--shadow-glow);
+  box-shadow: var(--shadow-sm);
   transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
 }
 .send-btn:hover:not(:disabled) {
   filter: brightness(1.08);
-  box-shadow: 0 0 22px var(--accent-glow);
+  box-shadow: var(--shadow);
   transform: translateY(-1px);
 }
 
@@ -3135,4 +3375,27 @@ body {
 }
 .message-avatar.a { background: var(--accent-subtle); color: var(--accent); }
 .message-avatar.u { background: var(--gradient-accent); color: #001016; }
+
+/* ── Soft-nav progress bar (body.kazma-soft-nav while navigating) ── */
+body.kazma-soft-nav::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 99999;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 200% 100%;
+  animation: kazma-soft-nav-slide 0.9s linear infinite;
+  pointer-events: none;
+}
+@keyframes kazma-soft-nav-slide {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+html.kazma-soft-nav #main-content {
+  opacity: 0.92;
+  transition: opacity 0.12s ease;
+}
 

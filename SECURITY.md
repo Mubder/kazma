@@ -4,12 +4,37 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.1.x   | :white_check_mark: |
-| < 0.1   | :x:                |
+| 0.6.x   | :white_check_mark: |
+| 0.5.x   | :white_check_mark: (security fixes only) |
+| < 0.5   | :x:                |
 
-Only the latest release in the 0.1.x series receives security patches. Versions
-prior to 0.1 are end-of-life and will not receive updates. Users are strongly
-encouraged to upgrade to the latest supported version.
+Only the latest 0.6.x release receives feature work and security patches.
+0.5.x receives critical security fixes for a limited window. Users are
+strongly encouraged to upgrade to the latest supported version.
+
+## Threat Model (operator)
+
+Kazma is designed as a **single-operator trusted-host agent** by default:
+
+| Profile | Ready when |
+|---------|------------|
+| Localhost + strong `KAZMA_SECRET` + HITL on | Recommended daily use |
+| Docker / LAN with `KAZMA_PRODUCTION=1` | After production hardening (see `.env.example`) |
+| Public multi-user SaaS | **Not** the default threat model — needs IdP, opaque sessions, real tenancy |
+
+**Production flags (summary):**
+
+- `KAZMA_HOST=127.0.0.1` default; non-loopback requires strong secret
+- `KAZMA_TRUST_LAN=0` (default) — no LAN auto-cookie
+- `KAZMA_PRODUCTION=1` — Docker code_exec, YOLO off (override: `KAZMA_ALLOW_YOLO=1`), workspace root required
+- `KAZMA_VAULT_KEY` — encrypt secrets at rest
+- Never use the historical default secret `kazma-local-dev-secret`
+
+**Multi-replica / multi-user (Phase 4):**
+
+- Shared state: `KAZMA_DATABASE_URL=postgresql://…` + `pip install -e ".[postgres]"` — never share SQLite across replicas
+- Roles: viewer / operator / admin (`platform_rbac`); OIDC via `KAZMA_OIDC_*`
+- DR: `docs/ops/DISASTER_RECOVERY.md` + `scripts/backup_kazma.py` / `restore_kazma.py`
 
 ## Reporting a Vulnerability
 

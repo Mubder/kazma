@@ -11,6 +11,8 @@ from kazma_gateway.gateway import IncomingMessage, SessionStore
 
 logger = logging.getLogger(__name__)
 
+__all__: list[str] = []
+
 _MAX_DICT_ENTRIES = 10_000
 
 _PLATFORM_KEYS = frozenset(
@@ -51,12 +53,23 @@ def _resolve_thread(msg: IncomingMessage) -> str:
     if ctx.get("thread_id"):
         return ctx["thread_id"]
 
-    # 2. Deterministic from sender_id (e.g. "telegram:12345" → "gw-telegram-12345")
+    # 2. Persistent active thread mapping in ConfigStore
+    if msg.sender_id:
+        try:
+            from kazma_core.config_store import get_config_store
+            cs = get_config_store()
+            persisted = cs.get(f"active_thread.{msg.sender_id}")
+            if persisted:
+                return str(persisted)
+        except Exception:
+            pass
+
+    # 3. Deterministic from sender_id (e.g. "telegram:12345" → "gw-telegram-12345")
     if msg.sender_id and ":" in msg.sender_id:
         platform, sender = msg.sender_id.split(":", 1)
         return f"gw-{platform}-{sender}"
 
-    # 3. Fallback UUID
+    # 4. Fallback UUID
     return f"gw-{uuid.uuid4().hex[:12]}"
 
 
@@ -116,7 +129,15 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     # never inside context_metadata — but hitl.py's cross-thread approval
     # ownership check reads original_sender from the persisted context, so
     # without this it always sees "" and the authz guard never fires.
-    persisted_ctx = dict(ctx)
+    #
+    # Merge with any existing session keys (e.g. active_agent_skill from
+    # /skill activate) so a normal chat turn does not wipe them.
+    existing: dict[str, Any] = {}
+    try:
+        existing = dict(await store.get(thread_id) or {})
+    except Exception:
+        existing = {}
+    persisted_ctx = {**existing, **dict(ctx)}
     persisted_ctx.setdefault("sender_id", msg.sender_id)
     await store.put(thread_id, persisted_ctx)
 
@@ -134,8 +155,16 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
         "platform": msg.platform,
     }
 
-    # Attach the user message
-    state["messages"] = [{"role": "user", "content": msg.text}]
+    # Attach the user message — multimodal when media is present.
+    # Plain text (no attachments) stays a string; images become an OpenAI
+    # vision content list; documents are persisted and referenced as text.
+    try:
+        from kazma_gateway.agent_handler.attachments import build_user_content
+
+        user_content = build_user_content(msg.text, msg.attachments)
+    except Exception:  # noqa: BLE001 — never block a turn on attachment building
+        user_content = msg.text
+    state["messages"] = [{"role": "user", "content": user_content}]
 
     # Defense-in-depth: strip any platform-specific identifiers that might
     # have leaked into the top-level state. ``_PLATFORM_KEYS`` is the

@@ -22,6 +22,14 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "CloneRepoRequest",
+    "TokenSaveRequest",
+    "create_github_router",
+    "parse_github_slug",
+    "save_github_token_to_env",
+]
+
 router = APIRouter(prefix="/api/github", tags=["github"])
 
 
@@ -155,69 +163,83 @@ async def github_status() -> JSONResponse:
 
     owner, repo = slug_info
 
-    # 3. Retrieve token from ConfigStore, env, or settings
-    token = ""
-    try:
-        from kazma_core.config_store import get_config_store
-        token = get_config_store().get("connectors.github.token", "")
-    except Exception:
-        pass
+    # 3. Shared token resolution (OAuth → PAT ConfigStore → env).
+    # Must match GitHubClient / get_github_token() — the old path only read
+    # connectors.github.token and ignored OAuth, which caused "Token Missing"
+    # + unauthenticated 60/hr rate limits while the user was OAuth-connected.
+    from kazma_gateway.routers.github_client import get_github_token, is_oauth_connected
 
-    if not token:
-        token = os.environ.get("GITHUB_TOKEN", "") or os.environ.get("GITHUB_PAT", "")
+    token = get_github_token()
+    oauth_connected = is_oauth_connected()
 
     # 4. Fetch details from GitHub API
     headers = {
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "Kazma-Agent-Framework"
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Kazma-Agent-Framework",
     }
     if token:
-        headers["Authorization"] = f"token {token}"
+        # Bearer works for OAuth + classic/fine-grained PATs.
+        headers["Authorization"] = f"Bearer {token}"
 
     api_url = f"https://api.github.com/repos/{owner}/{repo}"
     pulls_url = f"https://api.github.com/repos/{owner}/{repo}/pulls?state=open&per_page=1"
     workflows_url = f"https://api.github.com/repos/{owner}/{repo}/actions/runs?per_page=1"
+
+    def _base_payload(**extra: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "is_github": True,
+            "owner": owner,
+            "repo": repo,
+            "has_token": bool(token),
+            "oauth_connected": oauth_connected,
+        }
+        payload.update(extra)
+        return payload
 
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
             # Fetch repo metadata
             repo_resp = await client.get(api_url, headers=headers)
             if repo_resp.status_code == 401:
-                return JSONResponse({
-                    "is_github": True,
-                    "owner": owner,
-                    "repo": repo,
-                    "has_token": bool(token),
-                    "token_valid": False,
-                    "error": "Invalid GitHub Token (401 Unauthorized)."
-                })
+                return JSONResponse(_base_payload(
+                    token_valid=False,
+                    error="Invalid GitHub Token (401 Unauthorized).",
+                ))
             elif repo_resp.status_code == 403:
                 # Check rate limit
                 rate_limit_remaining = repo_resp.headers.get("X-RateLimit-Remaining", "")
                 if rate_limit_remaining == "0":
-                    return JSONResponse({
-                        "is_github": True,
-                        "owner": owner,
-                        "repo": repo,
-                        "has_token": bool(token),
-                        "rate_limited": True,
-                        "error": "GitHub API rate limit exceeded. Please configure a Personal Access Token to lift limits."
-                    })
+                    return JSONResponse(_base_payload(
+                        token_valid=bool(token),
+                        rate_limited=True,
+                        error=(
+                            "GitHub API rate limit exceeded."
+                            if token
+                            else "GitHub API rate limit exceeded (unauthenticated 60/hr). "
+                            "Connect GitHub OAuth or save a Personal Access Token."
+                        ),
+                    ))
                 else:
-                    return JSONResponse({
-                        "is_github": True,
-                        "owner": owner,
-                        "repo": repo,
-                        "has_token": bool(token),
-                        "error": "Access Forbidden (403). For private repositories, please ensure your Personal Access Token has correct access."
-                    })
+                    return JSONResponse(_base_payload(
+                        token_valid=bool(token),
+                        error="Access Forbidden (403). For private repositories, ensure your token has the correct scopes.",
+                    ))
+            elif repo_resp.status_code == 404:
+                return JSONResponse(_base_payload(
+                    token_valid=bool(token),
+                    error=(
+                        "Repository not found (404). It may be private — configure a token with access, "
+                        "or the remote owner/repo may be wrong."
+                        if not token
+                        else "Repository not found (404). Check remote URL and token scopes."
+                    ),
+                ))
             elif repo_resp.status_code != 200:
-                return JSONResponse({
-                    "is_github": True,
-                    "owner": owner,
-                    "repo": repo,
-                    "error": f"Failed to retrieve repository details. HTTP {repo_resp.status_code}"
-                })
+                return JSONResponse(_base_payload(
+                    token_valid=bool(token),
+                    error=f"Failed to retrieve repository details. HTTP {repo_resp.status_code}",
+                ))
 
             repo_data = repo_resp.json()
 
@@ -257,30 +279,23 @@ async def github_status() -> JSONResponse:
             raw_issues = repo_data.get("open_issues_count", 0)
             net_issues = max(0, raw_issues - open_prs_count)
 
-            return JSONResponse({
-                "is_github": True,
-                "owner": owner,
-                "repo": repo,
-                "has_token": bool(token),
-                "token_valid": True,
-                "private": repo_data.get("private", False),
-                "stars": repo_data.get("stargazers_count", 0),
-                "forks": repo_data.get("forks_count", 0),
-                "open_issues": net_issues,
-                "open_prs": open_prs_count,
-                "description": repo_data.get("description", ""),
-                "html_url": repo_data.get("html_url", ""),
-                "latest_workflow": latest_run
-            })
+            return JSONResponse(_base_payload(
+                token_valid=True,
+                private=repo_data.get("private", False),
+                stars=repo_data.get("stargazers_count", 0),
+                forks=repo_data.get("forks_count", 0),
+                open_issues=net_issues,
+                open_prs=open_prs_count,
+                description=repo_data.get("description", ""),
+                html_url=repo_data.get("html_url", ""),
+                latest_workflow=latest_run,
+            ))
 
         except httpx.RequestError as exc:
             logger.error("[github/status] Connection error: %s", exc)
-            return JSONResponse({
-                "is_github": True,
-                "owner": owner,
-                "repo": repo,
-                "error": "Failed to reach GitHub API."
-            })
+            return JSONResponse(_base_payload(
+                error="Failed to reach GitHub API.",
+            ))
 
 
 # ── OAuth flow (read-only integration) ────────────────────────────────
@@ -291,21 +306,44 @@ async def github_status() -> JSONResponse:
 
 
 def _oauth_redirect_uri(request: Request) -> str:
-    """Build the callback URL from the incoming request."""
+    """Build the callback URL from the incoming request.
+
+    Prefer ``KAZMA_PUBLIC_URL`` (audit M4) so Host-header spoofing cannot
+    redirect the OAuth callback to an attacker-controlled host.
+    """
+    import os
+
+    public = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
+    if public:
+        return f"{public}/api/github/oauth/callback"
     # Prefer the Host header (handles reverse proxies) over request.url.
     host = request.headers.get("host") or f"{request.url.hostname}:{request.url.port}"
     scheme = request.url.scheme
+    # Prefer X-Forwarded-Proto when behind TLS-terminating proxy
+    xf = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
+    if xf in ("http", "https"):
+        scheme = xf
     return f"{scheme}://{host}/api/github/oauth/callback"
 
 
 @router.get("/oauth/status")
 async def oauth_status() -> JSONResponse:
-    """Report whether the OAuth App is configured and a token is stored."""
-    from kazma_gateway.routers.github_client import is_oauth_connected, oauth_configured
+    """Report whether the OAuth App is configured and any usable token exists.
+
+    ``connected`` remains OAuth-specific (Disconnect button). ``has_token`` is
+    true for OAuth *or* PAT/env so the Workspace UI can show telemetry after a
+    PAT-only setup without requiring the OAuth flow.
+    """
+    from kazma_gateway.routers.github_client import (
+        get_github_token,
+        is_oauth_connected,
+        oauth_configured,
+    )
 
     return JSONResponse({
         "configured": oauth_configured(),
         "connected": is_oauth_connected(),
+        "has_token": bool(get_github_token()),
     })
 
 
@@ -315,8 +353,16 @@ async def oauth_start(request: Request) -> RedirectResponse | JSONResponse:
     from kazma_gateway.routers.github_client import build_authorize_url, oauth_configured
 
     if not oauth_configured():
+        # Browser tab expects HTML, not raw JSON (window.open from Workspace).
+        accept = (request.headers.get("accept") or "").lower()
+        if "text/html" in accept or "Kazma-Soft-Nav" not in request.headers:
+            return _oauth_setup_page(request)
         return JSONResponse(
-            {"error": "GitHub OAuth App is not configured (set GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET)."},
+            {
+                "error": "GitHub OAuth App is not configured",
+                "hint": "Set GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET in .env, "
+                "or paste a Personal Access Token on the Workspace page.",
+            },
             status_code=503,
         )
     state = secrets.token_urlsafe(16)
@@ -405,6 +451,64 @@ async def oauth_revoke() -> JSONResponse:
     clear_oauth_token()
     logger.info("[github/oauth] OAuth token cleared (disconnected)")
     return JSONResponse({"status": "ok", "connected": False})
+
+
+def _oauth_setup_page(request: Request) -> HTMLResponseType:
+    """HTML guide when OAuth App env vars are missing (browser-friendly)."""
+    from fastapi.responses import HTMLResponse
+
+    host = request.headers.get("host") or "127.0.0.1:9090"
+    scheme = request.url.scheme or "http"
+    callback = f"{scheme}://{host}/api/github/oauth/callback"
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>GitHub OAuth setup</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; background: #0f1117; color: #e5e7eb;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 24px; }}
+  .card {{ padding: 28px 32px; border-radius: 12px; background: #1a1d27; border: 1px solid #2a2f3e;
+           max-width: 560px; line-height: 1.5; }}
+  h1 {{ font-size: 1.15rem; margin: 0 0 12px; color: #fbbf24; }}
+  code {{ background: #0f1117; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; color: #67e8f9; }}
+  ol {{ margin: 12px 0; padding-left: 1.25rem; color: #cbd5e1; font-size: 0.9rem; }}
+  li {{ margin-bottom: 8px; }}
+  .cb {{ display: block; margin: 10px 0 16px; padding: 10px 12px; background: #0f1117;
+         border: 1px solid #2a2f3e; border-radius: 8px; word-break: break-all; font-family: ui-monospace, monospace;
+         font-size: 0.8rem; color: #a5f3fc; }}
+  a.btn {{ display: inline-block; margin-top: 8px; margin-right: 8px; padding: 8px 14px; border-radius: 8px;
+           background: #22d3ee; color: #0a0f14; font-weight: 600; text-decoration: none; font-size: 0.88rem; }}
+  a.btn2 {{ background: transparent; color: #94a3b8; border: 1px solid #334155; }}
+  .alt {{ margin-top: 18px; padding-top: 14px; border-top: 1px solid #2a2f3e; font-size: 0.88rem; color: #94a3b8; }}
+</style></head>
+<body><div class="card">
+  <h1>GitHub OAuth App is not configured</h1>
+  <p style="margin:0 0 8px;font-size:0.9rem;color:#cbd5e1">
+    Create a free GitHub OAuth App, put the credentials in <code>.env</code>, restart Kazma, then try again.
+  </p>
+  <ol>
+    <li>Open <a href="https://github.com/settings/developers" style="color:#67e8f9" target="_blank" rel="noopener">GitHub → Developer settings → OAuth Apps</a> → <strong>New OAuth App</strong>.</li>
+    <li>Application name: <code>Kazma</code> (any name).</li>
+    <li>Homepage URL: <code>{scheme}://{host}/</code></li>
+    <li><strong>Authorization callback URL</strong> (must match exactly):</li>
+  </ol>
+  <code class="cb">{callback}</code>
+  <ol start="5">
+    <li>Create the app → copy <strong>Client ID</strong>.</li>
+    <li>Generate a new <strong>Client secret</strong> and copy it.</li>
+    <li>Add to your Kazma <code>.env</code> file:</li>
+  </ol>
+  <code class="cb">GITHUB_OAUTH_CLIENT_ID=Iv1.xxxxxxxx<br>GITHUB_OAUTH_CLIENT_SECRET=xxxxxxxxxxxxxxxx</code>
+  <ol start="8">
+    <li>Restart the Kazma server, then click <strong>Connect GitHub</strong> again.</li>
+  </ol>
+  <div class="alt">
+    <strong>Faster alternative:</strong> on the Workspace page use a
+    <a href="https://github.com/settings/tokens" style="color:#67e8f9" target="_blank" rel="noopener">Personal Access Token</a>
+    (classic, scope <code>repo</code>) via the PAT field — no OAuth App required.
+  </div>
+  <a class="btn" href="/workspace">Back to Workspace</a>
+  <a class="btn btn2" href="https://github.com/settings/developers" target="_blank" rel="noopener">Open GitHub OAuth Apps</a>
+</div></body></html>"""
+    return HTMLResponse(html)
 
 
 def _oauth_result_page(success: bool, message: str) -> HTMLResponseType:

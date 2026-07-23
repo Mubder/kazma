@@ -23,6 +23,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "clear_all_sessions",
+    "dashboard",
+    "dashboard_status",
+    "delete_session",
+    "list_sessions",
+    "router",
+    "set_dashboard_context",
+    "set_templates",
+]
+
 router = APIRouter(tags=["dashboard"])
 
 # Start with a fallback templates instance (gets English defaults from the
@@ -93,20 +104,43 @@ def _get_trace_data() -> list[dict[str, Any]]:
     return traces
 
 
+def _format_uptime(uptime_seconds: float) -> str:
+    """Human-readable process uptime for the dashboard card."""
+    secs = max(0, int(uptime_seconds))
+    if secs < 60:
+        return f"{secs}s"
+    mins = secs // 60
+    if mins < 60:
+        return f"{mins}m"
+    hours = mins // 60
+    rem_m = mins % 60
+    if hours < 48:
+        return f"{hours}h {rem_m}m"
+    days = hours // 24
+    rem_h = hours % 24
+    return f"{days}d {rem_h}h"
+
+
 def _get_metrics() -> dict[str, Any]:
-    """Get aggregate metrics from the trace store."""
+    """Get aggregate metrics from the in-memory TraceStore.
+
+    Returns **numeric** totals for cost/tokens/calls so the dashboard JS can
+    format them (legacy string forms like ``"$0.12"`` / ``"1,234"`` broke
+    ``Number()`` and painted NaN/0 on refresh).
+    """
     from kazma_core.tracing import get_trace_store
 
     store = get_trace_store()
     stats = store.stats()
-    uptime_mins = int(stats["uptime_seconds"] / 60)
+    uptime_s = float(stats.get("uptime_seconds") or 0)
     return {
-        "total_cost": f"${stats['total_cost']:.4f}",
-        "total_tokens": f"{stats['total_tokens']:,}",
-        "total_llm_calls": stats["total_llm_calls"],
-        "total_tool_calls": stats["total_tool_calls"],
-        "total_traces": stats["total_traces"],
-        "uptime": f"{uptime_mins}m" if uptime_mins < 60 else f"{uptime_mins // 60}h {uptime_mins % 60}m",
+        "total_cost": float(stats.get("total_cost") or 0.0),
+        "total_tokens": int(stats.get("total_tokens") or 0),
+        "total_llm_calls": int(stats.get("total_llm_calls") or 0),
+        "total_tool_calls": int(stats.get("total_tool_calls") or 0),
+        "total_traces": int(stats.get("total_traces") or 0),
+        "uptime_seconds": uptime_s,
+        "uptime": _format_uptime(uptime_s),
     }
 
 
@@ -146,6 +180,21 @@ async def dashboard(request: Request) -> HTMLResponse:
     if _tracer:
         tracing_backend = _tracer.backend.value
 
+    raw_metrics = _get_metrics()
+    # Prefer TraceStore totals for the cost card when the cost breaker is
+    # still at zero (e.g. breaker not yet wired) but LLM traces accumulated.
+    display_cost = max(float(cost_current or 0.0), float(raw_metrics.get("total_cost") or 0.0))
+    if display_cost > cost_current:
+        cost_current = display_cost
+        cost_headroom = max(0.0, cost_max - cost_current)
+
+    # Template expects display strings for some fields (legacy SSR)
+    metrics_ssr = {
+        **raw_metrics,
+        "total_cost": f"${raw_metrics['total_cost']:.4f}",
+        "total_tokens": f"{raw_metrics['total_tokens']:,}",
+    }
+
     return templates.TemplateResponse(
         request,
         "dashboard.html",
@@ -159,7 +208,7 @@ async def dashboard(request: Request) -> HTMLResponse:
             "silence_info": silence_info,
             "tracing_backend": tracing_backend,
             "traces": _get_trace_data(),
-            "metrics": _get_metrics(),
+            "metrics": metrics_ssr,
             "active_page": "dashboard",
         },
     )
@@ -306,17 +355,27 @@ async def delete_session(thread_id: str) -> JSONResponse:
         )
         await conn.commit()
 
-        # Also delete from session store if available (fixes H3: data leak
-        # where dashboard.py only deleted checkpoints, leaving session store data)
+        # Gateway platform SessionStore (chat_id mapping)
         try:
-            from kazma_gateway.stores.session_store import get_session_store
-            store = get_session_store()
-            if store is not None:
-                await store.delete(thread_id)
+            if _session_store is not None:
+                await _session_store.delete(thread_id)
         except Exception as exc:
-            logger.debug("session store delete skipped (may be uninitialized): %s", exc)
+            logger.debug("gateway session store delete skipped: %s", exc)
 
-        logger.info("Deleted session: %s (checkpoints + session store)", thread_id)
+        # Web UI chat projection
+        try:
+            from kazma_ui.session_manager import get_session_manager
+
+            sm = get_session_manager()
+            sm.delete(thread_id)
+            # Also try platform-prefixed ids that share this thread
+            for s in list(sm.list_all(include_archived=True)):
+                if s.thread_id == thread_id or s.session_id == thread_id:
+                    sm.delete(s.session_id)
+        except Exception as exc:
+            logger.debug("SessionManager delete skipped: %s", exc)
+
+        logger.info("Deleted session: %s (checkpoints + stores)", thread_id)
         return JSONResponse({
             "deleted": True,
             "thread_id": thread_id,

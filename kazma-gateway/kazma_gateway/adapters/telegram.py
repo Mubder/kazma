@@ -39,6 +39,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from kazma_gateway.gateway import (
+    Attachment,
     BaseAdapter,
     IncomingMessage,
     OutboundMessage,
@@ -47,10 +48,18 @@ from kazma_gateway.gateway import (
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "TelegramAdapter",
+]
+
 _TELEGRAM_API = "https://api.telegram.org/bot{token}"
 
 # Voice download size cap
 MAX_VOICE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+# Generic media (photo/document/video) download cap. Telegram Bot API limits
+# downloads to 20 MB, so we cap just below that.
+MAX_MEDIA_BYTES = 19 * 1024 * 1024  # 19 MB
 
 # Rate-limit constants
 _SEND_MAX_RETRIES = 3
@@ -107,6 +116,10 @@ class TelegramAdapter(BaseAdapter):
         voice_enabled: bool = False,
         voice_provider: str = "openai",
         stt_api_key: str | None = None,
+        tts_provider: str = "edgetts",
+        tts_voice: str = "default",
+        tts_output_format: str = "mp3",
+        stt_language: str = "auto",
         webhook_secret: str | None = None,
     ) -> None:
         super().__init__()
@@ -120,10 +133,14 @@ class TelegramAdapter(BaseAdapter):
         self._rate_limiter = RateLimiter(max_per_second=30)
         # Queue ref stored for webhook ingress (set by start() in BaseAdapter)
         self._queue: asyncio.Queue[IncomingMessage] | None = None
-        # Voice transcription config
+        # Voice config
         self._voice_enabled = voice_enabled
         self._voice_provider = voice_provider
         self._stt_api_key = stt_api_key
+        self._tts_provider = tts_provider
+        self._tts_voice = tts_voice
+        self._tts_output_format = tts_output_format
+        self._stt_language = stt_language
         # Webhook secret token for validating webhook ingress (optional)
         self._webhook_secret = webhook_secret or ""
 
@@ -273,6 +290,7 @@ class TelegramAdapter(BaseAdapter):
                             continue
 
                         # Handle voice messages (async download + transcribe)
+                        # and generic media (photo/document/video/animation).
                         msg = self._parse_update(update)
                         if msg is None:
                             message = (
@@ -307,6 +325,12 @@ class TelegramAdapter(BaseAdapter):
                                         "voice_transcribed": True,
                                     },
                                 )
+                            elif message and self._detect_media_message(message):
+                                # Photo / document / video / animation:
+                                # download and attach instead of dropping.
+                                msg = await self._handle_media_message(message)
+                                if msg is None:
+                                    continue
                             else:
                                 continue
 
@@ -428,13 +452,23 @@ class TelegramAdapter(BaseAdapter):
             X-Telegram-Bot-Api-Secret-Token header to prevent
             unauthorized webhook posts.
             """
-            # Webhook secret validation (if configured)
-            if self._webhook_secret:
-                import hmac
-                provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
-                if not hmac.compare_digest(provided, self._webhook_secret):
-                    logger.warning("[telegram-webhook] Invalid or missing secret token")
-                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            # Always require a webhook secret when this route is mounted (audit H2).
+            # Polling mode never hits this path.
+            import hmac
+            import secrets as _secrets
+
+            if not self._webhook_secret:
+                # Lazy one-time generation so accidental open mount is still gated
+                self._webhook_secret = _secrets.token_urlsafe(24)
+                logger.warning(
+                    "[telegram-webhook] No webhook_secret configured — generated "
+                    "ephemeral secret for this process. Set TELEGRAM_WEBHOOK_SECRET "
+                    "(or connector webhook_secret) and pass it to setWebhook."
+                )
+            provided = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+            if not provided or not hmac.compare_digest(provided, self._webhook_secret):
+                logger.warning("[telegram-webhook] Invalid or missing secret token")
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
             try:
                 update = await request.json()
@@ -550,37 +584,258 @@ class TelegramAdapter(BaseAdapter):
             logger.error("[telegram] Failed to download voice file: %s", type(exc).__name__)
             return None
 
+    # --- Generic media (photo/document/video) -------------------------
+
+    # Telegram media key → coarse kind + the size-ordered array to pick from.
+    # `photo` is a size-ordered array (smallest→largest); pick the largest.
+    # `document`/`video`/`animation`/`audio` are single objects with file_id.
+    _MEDIA_KEYS: dict[str, str] = {
+        "photo": "image",
+        "document": "file",
+        "video": "video",
+        "animation": "video",
+        "audio": "audio",
+    }
+
+    def _detect_media_message(self, message: dict[str, Any]) -> bool:
+        """Return True if *message* carries a downloadable media payload."""
+        return any(key in message for key in self._MEDIA_KEYS)
+
+    async def _download_media_file(self, file_id: str) -> bytes | None:
+        """Download any Telegram file by ``file_id`` (reuses the getFile flow).
+
+        Capped at :data:`MAX_MEDIA_BYTES`. Returns raw bytes or None on error.
+        """
+        if self._http is None:
+            raise RuntimeError("HTTP client not initialized -- adapter not started")
+        try:
+            resp = await self._http.get("/getFile", params={"file_id": file_id})
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("ok"):
+                logger.error("[telegram] getFile ok=false for media: %s", data)
+                return None
+            file_path = data["result"].get("file_path")
+            if not file_path:
+                return None
+            file_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
+            dl_resp = await self._http.get(file_url)
+            dl_resp.raise_for_status()
+            if len(dl_resp.content) > MAX_MEDIA_BYTES:
+                logger.warning(
+                    "[telegram] media file too large: %d bytes", len(dl_resp.content)
+                )
+                return None
+            logger.info(
+                "[telegram] Downloaded media file: %s (%d bytes)",
+                file_path, len(dl_resp.content),
+            )
+            return dl_resp.content
+        except Exception as exc:
+            logger.error("[telegram] media download failed: %s", type(exc).__name__)
+            return None
+
+    async def _handle_media_message(
+        self, message: dict[str, Any]
+    ) -> IncomingMessage | None:
+        """Download a media payload and build an :class:`IncomingMessage`.
+
+        Captures photo / document / video / animation / audio. Caption (if
+        any) becomes the message text; otherwise a minimal ``[image]`` /
+        ``[file]`` placeholder keeps downstream ``if msg.text`` guards from
+        skipping the turn. Images become vision attachments; everything
+        else is attached as a file (the builder persists + references it).
+        """
+        # Pick the first present media key by priority order.
+        media_kind: str | None = None
+        for key in ("photo", "document", "video", "animation", "audio"):
+            if key in message:
+                media_kind = self._MEDIA_KEYS[key]
+                payload = message[key]
+                break
+        else:
+            return None
+
+        # Resolve a file_id + filename + mime.
+        file_id = ""
+        filename = ""
+        mime = ""
+        if media_kind == "image":
+            # photo is an array of PhotoSize; largest is last.
+            sizes = payload  # type: ignore[assignment]
+            if not isinstance(sizes, list) or not sizes:
+                return None
+            largest = sizes[-1]
+            file_id = largest.get("file_id", "")
+            mime = "image/jpeg"  # Telegram photos are JPEG
+            filename = f"photo_{largest.get('file_unique_id', 'tg')}.jpg"
+        else:
+            file_id = payload.get("file_id", "")
+            mime = payload.get("mime_type", "") or "application/octet-stream"
+            filename = payload.get("file_name", "") or f"{media_kind}_{file_id[:8]}"
+
+        if not file_id:
+            return None
+
+        data = await self._download_media_file(file_id)
+        if data is None:
+            return None
+
+        caption = message.get("caption") or ""
+        from_user = message.get("from", {})
+        user_id = from_user.get("id", 0)
+        chat_id = message.get("chat", {}).get("id", 0)
+        username = (
+            from_user.get("username", "")
+            or from_user.get("first_name", "")
+            or f"tg_{user_id}"
+        )
+        sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
+        text = caption or f"[{media_kind}]"
+        attachment = Attachment(
+            kind=media_kind,
+            mime=mime,
+            filename=filename,
+            data=data,
+            meta={"file_id": file_id, "source": "telegram"},
+        )
+        logger.info(
+            "[telegram] media attached: %s (%s, %d bytes) thread=%s",
+            filename, mime, len(data), chat_id,
+        )
+        return IncomingMessage(
+            platform="telegram",
+            sender_id=sender_id,
+            text=text,
+            attachments=[attachment],
+            context_metadata={
+                "chat_id": chat_id,
+                "user_id": user_id,
+                "username": username,
+                "message_id": message.get("message_id", 0),
+                "chat_type": message.get("chat", {}).get("type", "private"),
+                "update_id": message.get("update_id", 0) or 0,
+                "media": True,
+            },
+        )
+
+    def _live_voice_settings(self) -> dict[str, str | bool]:
+        """Read voice settings from ConfigStore (Settings UI) with ctor fallbacks.
+
+        Voice is a separate subsystem from LLM providers. Settings saved in the
+        Web UI land in ConfigStore; boot-time yaml/ctor values are defaults only.
+        """
+        out: dict[str, str | bool] = {
+            "enabled": bool(self._voice_enabled),
+            "stt_provider": self._voice_provider,
+            "stt_language": self._stt_language,
+            "tts_provider": self._tts_provider,
+            "tts_voice": self._tts_voice,
+            "tts_output_format": self._tts_output_format,
+        }
+        try:
+            from kazma_core.config_store import get_config_store
+
+            cs = get_config_store()
+            enabled = cs.get("voice.enabled")
+            if enabled is not None:
+                out["enabled"] = str(enabled).lower() in ("1", "true", "yes", "on")
+            for key, attr in (
+                ("voice.stt_provider", "stt_provider"),
+                ("voice.stt_language", "stt_language"),
+                ("voice.tts_provider", "tts_provider"),
+                ("voice.tts_voice", "tts_voice"),
+                ("voice.tts_output_format", "tts_output_format"),
+            ):
+                val = cs.get(key)
+                if val is not None and str(val).strip() and str(val).strip().lower() != "none":
+                    out[attr] = str(val).strip()
+        except Exception:
+            logger.debug("[telegram] live voice settings unavailable", exc_info=True)
+        return out
+
     async def transcribe_voice(self, audio_bytes: bytes) -> str | None:
         """Transcribe audio bytes using the configured STT provider."""
-        if self._voice_provider == "openai":
-            return await self._transcribe_openai(audio_bytes)
-        elif self._voice_provider == "groq":
-            return await self._transcribe_groq(audio_bytes)
-        elif self._voice_provider == "local":
-            logger.warning("[telegram] Local STT provider not yet implemented")
-            return None
-        else:
-            logger.error("[telegram] Unknown STT provider: %s", self._voice_provider)
-            return None
+        from kazma_core.voice.stt import transcribe
 
-    async def _transcribe_openai(self, audio_bytes: bytes) -> str | None:
-        """Transcribe via OpenAI Whisper API."""
-        from kazma_gateway.adapters.telegram_stt import transcribe_openai
+        cfg = self._live_voice_settings()
+        return await transcribe(
+            audio_bytes,
+            provider=str(cfg["stt_provider"]),
+            language=str(cfg["stt_language"]),
+            api_key=self._stt_api_key,
+        )
 
-        return await transcribe_openai(audio_bytes, self._stt_api_key)
+    async def synthesize_reply(self, text: str) -> bytes | None:
+        """Synthesize text to audio using the configured TTS provider."""
+        from kazma_core.voice.tts import synthesize
 
-    async def _transcribe_groq(self, audio_bytes: bytes) -> str | None:
-        """Transcribe via Groq Whisper API."""
-        from kazma_gateway.adapters.telegram_stt import transcribe_groq
+        cfg = self._live_voice_settings()
+        return await synthesize(
+            text,
+            provider=str(cfg["tts_provider"]),
+            voice=str(cfg["tts_voice"]),
+            output_format=str(cfg["tts_output_format"]),
+        )
 
-        return await transcribe_groq(audio_bytes, self._stt_api_key)
+    async def send_voice_reply(self, chat_id: int, audio_bytes: bytes, reply_to: int | None = None) -> bool:
+        """Send an audio voice message to a Telegram chat."""
+        if not self._http:
+            return False
+        try:
+            form_data = httpx.AsyncClient()
+            files = {"voice": ("reply.ogg", audio_bytes, "audio/ogg")}
+            data: dict[str, Any] = {"chat_id": chat_id}
+            if reply_to:
+                data["reply_to_message_id"] = reply_to
+            resp = await self._http.post(
+                "/sendVoice",
+                files=files,
+                data=data,
+            )
+            if resp.status_code == 200:
+                logger.info("[telegram] Voice reply sent to %d (%d bytes)", chat_id, len(audio_bytes))
+                return True
+            logger.warning("[telegram] sendVoice failed: %d", resp.status_code)
+            return False
+        except Exception:
+            logger.exception("[telegram] sendVoice failed")
+            return False
+
+    async def _send_tts_reply(self, chat_id: int, text: str, reply_to: int | None = None) -> None:
+        """Synthesize and send a voice reply after a text response.
+
+        Strips markdown/HTML from the text before synthesis so the TTS
+        engine gets clean spoken text.
+        """
+        if not text or not self._live_voice_settings().get("enabled"):
+            return
+        try:
+            # Strip markdown/HTML for clean TTS input
+            import re
+            clean = re.sub(r"`[^`]*`", "", text)  # inline code
+            clean = re.sub(r"```.*?```", "", clean, flags=re.DOTALL)  # code blocks
+            clean = re.sub(r"[*_~]+", "", clean)  # bold/italic/strike
+            clean = re.sub(r"<[^>]+>", "", clean)  # HTML tags
+            clean = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", clean)  # links → text
+            clean = clean.strip()
+            if not clean or len(clean) < 5:
+                return
+            # Truncate very long responses for TTS
+            if len(clean) > 2000:
+                clean = clean[:2000] + "... (truncated)"
+            audio = await self.synthesize_reply(clean)
+            if audio:
+                await self.send_voice_reply(chat_id, audio, reply_to=reply_to)
+        except Exception:
+            logger.debug("[telegram] TTS reply failed (non-critical)")
 
     async def _handle_voice_message(self, message: dict[str, Any]) -> str | None:
         """Full voice pipeline: detect -> download -> transcribe -> return text."""
         voice_obj = message.get("voice") or message.get("audio")
         if not voice_obj:
             return None
-        if not self._voice_enabled:
+        if not self._live_voice_settings().get("enabled"):
             return None
         file_id = voice_obj.get("file_id")
         if not file_id:
@@ -721,13 +976,39 @@ class TelegramAdapter(BaseAdapter):
                 asyncio.create_task(self._answer_callback_query(cb_id, "Not authorized"))
                 return
 
-        # Dismiss loading indicator
-        asyncio.create_task(self._answer_callback_query(cb_id))
-
         from kazma_gateway.adapters.telegram_callbacks import parse_callback_data
 
         action = parse_callback_data(data)
         text = action.text
+
+        # Dismiss loading indicator with status text
+        alert_text = None
+        if action.kind == "hitl":
+            approved = "approve" in data
+            alert_text = "✅ Approved — processing..." if approved else "❌ Denied."
+        asyncio.create_task(self._answer_callback_query(cb_id, alert_text))
+
+        # Immediately deactivate the inline keyboard to prevent double-click or stale interaction
+        if action.kind == "hitl":
+            chat_id = message.get("chat", {}).get("id")
+            message_id = message.get("message_id")
+            if chat_id and message_id:
+                try:
+                    if not self._http:
+                        self._http = httpx.AsyncClient(
+                            base_url=self._api_base,
+                            timeout=httpx.Timeout(30.0, connect=5.0),
+                        )
+                    await self._http.post(
+                        "/editMessageReplyMarkup",
+                        json={
+                            "chat_id": chat_id,
+                            "message_id": message_id,
+                            "reply_markup": {"inline_keyboard": []},
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning("[telegram] Failed to remove HITL keyboard: %s", exc)
 
         if action.kind == "swarm":
             # Swarm HITL approval — resolve bus Event in-process
@@ -904,8 +1185,8 @@ class TelegramAdapter(BaseAdapter):
         Returns:
             True if sent successfully.
         """
-        # Fire typing indicator before sending
-        asyncio.create_task(self._trigger_typing(outbound.target_id))
+        # Typing is kept alive by agent_handler during the whole turn.
+        # One final pulse before send keeps the indicator visible for the reply.
 
         if not self._http:
             self._http = httpx.AsyncClient(
@@ -948,6 +1229,12 @@ class TelegramAdapter(BaseAdapter):
                 asyncio.create_task(
                     self._set_reaction(chat_id, original_msg_id, emoji)
                 )
+            # Send any media attachments (photos/documents/video) after text.
+            for att in outbound.attachments:
+                await self._send_attachment(chat_id, att)
+            # Send TTS voice reply if original message was voice
+            if self._live_voice_settings().get("enabled") and outbound.context_metadata.get("voice_transcribed"):
+                asyncio.create_task(self._send_tts_reply(chat_id, outbound.text, original_msg_id))
             return True
         else:
             # React with ❌ on failure
@@ -956,6 +1243,60 @@ class TelegramAdapter(BaseAdapter):
                 asyncio.create_task(
                     self._set_reaction(chat_id, original_msg_id, "❌")
                 )
+            return False
+
+    async def _send_attachment(self, chat_id: int, att: Attachment) -> bool:
+        """Deliver one media attachment via the matching Telegram API.
+
+        Routes by ``att.kind``: image→``/sendPhoto``, video→``/sendVideo``,
+        audio→``/sendAudio``, otherwise ``/sendDocument``. Bytes must be in
+        ``att.data``; if absent and ``att.url`` is set, the file is fetched
+        first. Failures are logged but never abort the whole send.
+        """
+        if self._http is None:
+            return False
+
+        data = att.data
+        if data is None and att.url:
+            try:
+                resp = await self._http.get(att.url, timeout=30.0)
+                resp.raise_for_status()
+                data = resp.content
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[telegram] attachment fetch failed: %s", exc)
+                return False
+        if not data:
+            return False
+
+        if att.kind == "image":
+            endpoint = "/sendPhoto"
+            field = "photo"
+        elif att.kind == "video":
+            endpoint = "/sendVideo"
+            field = "video"
+        elif att.kind == "audio":
+            endpoint = "/sendAudio"
+            field = "audio"
+        else:
+            endpoint = "/sendDocument"
+            field = "document"
+
+        safe_name = att.filename or f"kazma_{att.kind}"
+        try:
+            await self._rate_limiter.acquire()
+            resp = await self._http.post(
+                endpoint,
+                params={"chat_id": chat_id},
+                files={field: (safe_name, data, att.mime or "application/octet-stream")},
+            )
+            resp.raise_for_status()
+            if not resp.json().get("ok"):
+                logger.error("[telegram] %s returned ok=false", endpoint)
+                return False
+            logger.info("[telegram] sent %s (%d bytes) to %d", endpoint, len(data), chat_id)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[telegram] %s failed: %s", endpoint, type(exc).__name__)
             return False
 
     async def _register_bot_commands(self) -> None:
@@ -968,6 +1309,9 @@ class TelegramAdapter(BaseAdapter):
         Uses the shared ``self._http`` client (already initialized
         in ``listen()`` before this method is called).
         """
+        # Telegram shows only what we register here (menu next to the input).
+        # Handlers may support more commands than this list; keep this in sync
+        # with slash_commands help + gateway intercepts (_try_skill, _try_ide, …).
         commands = [
             {"command": "help", "description": "Show available commands"},
             {"command": "reset", "description": "Clear conversation history"},
@@ -982,6 +1326,14 @@ class TelegramAdapter(BaseAdapter):
             {"command": "undo", "description": "Undo last response"},
             {"command": "edit", "description": "Edit last response"},
             {"command": "swarm", "description": "Swarm orchestration"},
+            {
+                "command": "skill",
+                "description": "Agent Skills: list / install / activate (agentskills.io)",
+            },
+            {"command": "ide", "description": "IDE: files, git, coding skills"},
+            {"command": "new", "description": "Create a brand new session/season"},
+            {"command": "compact", "description": "Manually trigger context compaction"},
+            {"command": "yolo", "description": "Toggle session YOLO safety bypass"},
         ]
 
         scopes: list[tuple[str, str]] = [

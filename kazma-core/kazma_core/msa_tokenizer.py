@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from kazma_core.kuwaiti_tokenizer import Token, TokenType
 
+__all__ = ["MSATokenizer"]
+
 # ── Alef normalization map ────────────────────────────────────────────
 _ALEF_VARIANTS = {
     "\u0622": "\u0627",  # آ → ا

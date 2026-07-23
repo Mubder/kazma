@@ -2,6 +2,18 @@
 # Curated list of tested, documented, Arabic-aware MCP servers.
 # Each entry includes: name, command, transport, Arabic support, and certification status.
 # Last verified: 2026-06-20
+#
+# Supported transports in kazma.yaml mcp.servers config:
+#   stdio            — spawn a local subprocess (command required). Used by all
+#                      entries below.
+#   sse              — connect to a remote SSE endpoint (url required).
+#   streamable_http  — connect to a remote Streamable HTTP endpoint (url required,
+#                      MCP 2025-03-26 spec). Single POST endpoint with SSE response
+#                      streaming + Mcp-Session-Id tracking. Example:
+#                        - name: remote-mcp
+#                          transport: streamable_http
+#                          url: https://mcp.example.com/mcp
+#                          trust: approval_required
 
 servers:
   # ──────────────────────────────────────────────────────────────────────────

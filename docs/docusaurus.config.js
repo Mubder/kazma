@@ -3,36 +3,28 @@ const {themes: prismThemes} = require('prism-react-renderer');
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
-  title: 'Kazma Hub',
-  tagline: 'Autonomous AI Agent Framework — Skills, Hub & Marketplace',
+  title: 'Kazma',
+  tagline: 'Autonomous AI Agent Framework — LangGraph, Swarm, HITL, Arabic RTL',
   favicon: 'img/logo.svg',
   url: 'https://kazma.ai',
   baseUrl: '/kazma/',
   organizationName: 'kazma-ai',
   projectName: 'kazma',
   onBrokenLinks: 'warn',
-  onBrokenMarkdownLinks: 'warn',
+  onBrokenAnchors: 'warn',
   i18n: {
     defaultLocale: 'en',
     locales: ['en'],
   },
-  presets: [
-    [
-      'classic',
-      /** @type {import('@docusaurus/preset-classic').Options} */
-      ({
-        docs: {
-          sidebarPath: require.resolve('./sidebars.js'),
-          editUrl: 'https://github.com/kazma-ai/kazma/tree/main/docs/',
-        },
-        blog: false,
-        theme: {
-          customCss: require.resolve('./src/css/custom.css'),
-        },
-      }),
-    ],
-  ],
+  // Mermaid diagrams (architecture, swarm, HITL flows)
+  markdown: {
+    mermaid: true,
+    hooks: {
+      onBrokenMarkdownLinks: 'warn',
+    },
+  },
   themes: [
+    '@docusaurus/theme-mermaid',
     [
       require.resolve('@easyops-cn/docusaurus-search-local'),
       /** @type {import('@easyops-cn/docusaurus-search-local').PluginOptions} */
@@ -45,12 +37,34 @@ const config = {
       }),
     ],
   ],
+  presets: [
+    [
+      'classic',
+      /** @type {import('@docusaurus/preset-classic').Options} */
+      ({
+        docs: {
+          sidebarPath: require.resolve('./sidebars.js'),
+          editUrl: 'https://github.com/kazma-ai/kazma/tree/main/docs/',
+          // Default landing after /docs
+          routeBasePath: 'docs',
+        },
+        blog: false,
+        theme: {
+          customCss: require.resolve('./src/css/custom.css'),
+        },
+      }),
+    ],
+  ],
   themeConfig:
     /** @type {import('@docusaurus/preset-classic').ThemeConfig} */
     ({
       image: 'img/logo.svg',
+      colorMode: {
+        defaultMode: 'dark',
+        respectPrefersColorScheme: true,
+      },
       navbar: {
-        title: 'Kazma Hub',
+        title: 'Kazma',
         logo: {
           alt: 'Kazma Logo',
           src: 'img/logo.svg',
@@ -58,27 +72,27 @@ const config = {
         items: [
           {
             type: 'docSidebar',
-            sidebarId: 'gettingStarted',
+            sidebarId: 'docs',
             position: 'left',
-            label: 'Getting Started',
+            label: 'Docs',
           },
           {
             type: 'docSidebar',
-            sidebarId: 'coreConcepts',
+            sidebarId: 'skills',
             position: 'left',
-            label: 'Core Concepts',
+            label: 'Skills',
           },
           {
             type: 'docSidebar',
-            sidebarId: 'skillDev',
+            sidebarId: 'security',
             position: 'left',
-            label: 'Skill Development',
+            label: 'Security',
           },
           {
             type: 'docSidebar',
-            sidebarId: 'apiReference',
+            sidebarId: 'contributing',
             position: 'left',
-            label: 'API Reference',
+            label: 'Contributing',
           },
           {
             href: 'https://github.com/kazma-ai/kazma',
@@ -91,11 +105,23 @@ const config = {
         style: 'dark',
         links: [
           {
-            title: 'Documentation',
+            title: 'Docs',
             items: [
-              { label: 'Getting Started', to: '/docs/getting-started/installation' },
-              { label: 'Core Concepts', to: '/docs/core-concepts/architecture' },
-              { label: 'Skill Development', to: '/docs/skill-development/creating-skills' },
+              { label: 'Home', to: '/docs/' },
+              { label: 'Quickstart', to: '/docs/guide/quickstart' },
+              { label: 'Architecture', to: '/docs/guide/architecture' },
+              { label: 'Tools catalog', to: '/docs/reference/tools-catalog' },
+              { label: 'Security & Safety', to: '/docs/guide/security-and-safety' },
+            ],
+          },
+          {
+            title: 'Products & Ops',
+            items: [
+              { label: 'Web UI', to: '/docs/products/web-ui' },
+              { label: 'IDE', to: '/docs/products/ide' },
+              { label: 'Production checklist', to: '/docs/ops/production-checklist' },
+              { label: 'Troubleshooting', to: '/docs/guide/troubleshooting-and-workarounds' },
+              { label: 'FAQ', to: '/docs/guide/faq' },
             ],
           },
           {
@@ -106,21 +132,16 @@ const config = {
               { label: 'Twitter', href: 'https://x.com/kazma_ai' },
             ],
           },
-          {
-            title: 'More',
-            items: [
-              { label: 'Hub', to: '/docs/kazma-hub/overview' },
-              { label: 'Security', to: '/docs/security/security-policy' },
-              { label: 'Contributing', to: '/docs/contributing/development-setup' },
-            ],
-          },
         ],
-        copyright: `Copyright © ${new Date().getFullYear()} Kazma AI. Built with Docusaurus.`,
+        copyright: `Copyright © ${new Date().getFullYear()} Kazma AI. Unified docs under docs/ (v0.6.1+). Built with Docusaurus.`,
       },
       prism: {
         theme: prismThemes.github,
         darkTheme: prismThemes.dracula,
-        additionalLanguages: ['python', 'bash', 'yaml', 'json', 'typescript'],
+        additionalLanguages: ['python', 'bash', 'yaml', 'json', 'typescript', 'powershell'],
+      },
+      mermaid: {
+        theme: { light: 'neutral', dark: 'dark' },
       },
     }),
 };

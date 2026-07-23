@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+__all__ = ["sse_frame"]
+
 
 def sse_frame(event: str, data: str | dict[str, Any] | list[Any]) -> str:
     """Format a single SSE frame.

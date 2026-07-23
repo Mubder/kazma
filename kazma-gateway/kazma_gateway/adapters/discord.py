@@ -31,6 +31,7 @@ from typing import Any
 import httpx
 
 from kazma_gateway.gateway import (
+    Attachment,
     BaseAdapter,
     IncomingMessage,
     OutboundMessage,
@@ -38,6 +39,10 @@ from kazma_gateway.gateway import (
 )
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "DiscordAdapter",
+]
 
 _DISCORD_API = "https://discord.com/api/v10"
 _DISCORD_GATEWAY = "wss://gateway.discord.gg/?v=10&encoding=json"
@@ -218,6 +223,10 @@ class DiscordAdapter(BaseAdapter):
                                     )
                                     continue
 
+                            # Voice: if enabled and an audio attachment is
+                            # present, fetch + transcribe it into msg.text.
+                            parsed = await self._maybe_transcribe_audio(parsed)
+
                             try:
                                 queue.put_nowait(parsed)
                                 logger.info(
@@ -346,11 +355,15 @@ class DiscordAdapter(BaseAdapter):
     def _parse_message(self, data: dict[str, Any] | None) -> IncomingMessage | None:
         """Parse a Discord MESSAGE_CREATE event into an IncomingMessage.
 
+        Captures any attachments (images/files) alongside the text. A message
+        with attachments but no text is still accepted so media-only uploads
+        reach the agent.
+
         Args:
             data: The MESSAGE_CREATE event data.
 
         Returns:
-            IncomingMessage or None if not a valid text message.
+            IncomingMessage or None if not a valid message.
         """
         if not data:
             return None
@@ -361,7 +374,12 @@ class DiscordAdapter(BaseAdapter):
             return None
 
         content = (data.get("content") or "").strip()
-        if not content:
+        raw_attachments = data.get("attachments") or []
+        embeds = data.get("embeds") or []
+
+        # Accept if there is text OR any attachment. Media-only messages are
+        # common (e.g. uploading a screenshot), so don't require content.
+        if not content and not raw_attachments:
             return None
 
         channel_id = str(data.get("channel_id", ""))
@@ -373,10 +391,53 @@ class DiscordAdapter(BaseAdapter):
         username = author.get("username", "") or author.get("global_name", "") or f"discord_{user_id}"
         message_id = str(data.get("id", ""))
 
+        attachments: list[Attachment] = []
+        for a in raw_attachments:
+            mime = (a.get("content_type") or "").lower()
+            if mime.startswith("image/"):
+                kind = "image"
+            elif mime.startswith("video/"):
+                kind = "video"
+            elif mime.startswith("audio/"):
+                kind = "audio"
+            else:
+                kind = "file"
+            attachments.append(
+                Attachment(
+                    kind=kind,
+                    mime=mime or "application/octet-stream",
+                    filename=a.get("filename", "") or f"discord_{a.get('id', 'file')}",
+                    url=a.get("url"),
+                    meta={
+                        "attachment_id": a.get("id"),
+                        "source": "discord",
+                        "width": a.get("width"),
+                        "height": a.get("height"),
+                    },
+                )
+            )
+        # Embeds with a single image (e.g. link previews) are treated as
+        # image attachments too, when the embed carries an image url.
+        for e in embeds:
+            img = e.get("image") or {}
+            url = img.get("url")
+            if url:
+                attachments.append(
+                    Attachment(
+                        kind="image",
+                        mime="image/png",
+                        filename="embed.png",
+                        url=url,
+                        meta={"source": "discord_embed"},
+                    )
+                )
+
+        text = content or (f"[{attachments[0].kind}]" if attachments else "")
         return IncomingMessage(
             platform="discord",
             sender_id=f"discord:{channel_id}",
-            text=content,
+            text=text,
+            attachments=attachments,
             context_metadata={
                 "channel_id": channel_id,
                 "guild_id": str(guild_id) if guild_id else None,
@@ -384,6 +445,7 @@ class DiscordAdapter(BaseAdapter):
                 "message_id": message_id,
                 "username": username,
                 "guild_name": data.get("guild_name"),
+                "media": bool(attachments),
             },
         )
 
@@ -470,4 +532,113 @@ class DiscordAdapter(BaseAdapter):
 
         if all_sent:
             logger.debug("[discord] Sent to channel %s: %.80s", channel_id, outbound.text)
+            # Deliver any media attachments after the text.
+            for att in outbound.attachments:
+                await self._send_attachment(channel_id, att)
+            # Voice reply: if the inbound turn was transcribed audio and TTS
+            # is enabled, synthesize the text and send it back as audio.
+            if outbound.context_metadata.get("voice_transcribed") and outbound.text:
+                asyncio.create_task(self._send_voice_reply(channel_id, outbound.text))
         return all_sent
+
+    async def _send_voice_reply(self, channel_id: str, text: str) -> bool:
+        """Synthesize *text* and upload it as an audio attachment."""
+        try:
+            from kazma_gateway.adapters.voice_helpers import (
+                live_voice_settings,
+                synthesize_speech,
+            )
+
+            if not live_voice_settings().get("enabled") or not self._http:
+                return False
+            audio = await synthesize_speech(text)
+            if not audio:
+                return False
+            await self._rate_limiter.acquire()
+            resp = await self._http.post(
+                f"/channels/{channel_id}/messages",
+                data={"payload_json": json.dumps({"content": ""})},
+                files={"files[0]": ("reply.mp3", audio, "audio/mpeg")},
+            )
+            resp.raise_for_status()
+            logger.info("[discord] voice reply sent to %s (%d bytes)", channel_id, len(audio))
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[discord] voice reply failed: %s", type(exc).__name__)
+            return False
+
+    async def _maybe_transcribe_audio(self, msg: IncomingMessage) -> IncomingMessage:
+        """When voice is enabled, transcribe any audio attachment to text.
+
+        Downloads the audio (Discord exposes a URL) and replaces ``msg.text``
+        with the transcript, tagging ``voice_transcribed`` so the outbound
+        path can reply with TTS. No-op when voice is disabled or no audio is
+        present.
+        """
+        audio = next((a for a in msg.attachments if a.kind == "audio"), None)
+        if audio is None:
+            return msg
+        try:
+            from kazma_gateway.adapters.voice_helpers import (
+                live_voice_settings,
+                transcribe_audio,
+            )
+
+            if not live_voice_settings().get("enabled"):
+                return msg
+            data = audio.data
+            if data is None and audio.url:
+                resp = await self._http.get(audio.url, timeout=30.0)
+                resp.raise_for_status()
+                data = resp.content
+            if not data:
+                return msg
+            transcript = await transcribe_audio(data)
+            if transcript:
+                msg.text = transcript
+                msg.context_metadata["voice_transcribed"] = True
+                logger.info("[discord] transcribed audio (%d bytes) from %s",
+                            len(data), msg.context_metadata.get("channel_id"))
+        except Exception as exc:  # noqa: BLE001 — never drop a turn over STT
+            logger.warning("[discord] audio transcription failed: %s", type(exc).__name__)
+        return msg
+
+    async def _send_attachment(self, channel_id: str, att: Attachment) -> bool:
+        """Upload one attachment to a Discord channel via multipart.
+
+        Discord's create-message endpoint accepts ``files[N]`` parts plus a
+        ``payload_json`` describing the message. Bytes come from ``att.data``
+        or, failing that, are fetched from ``att.url``.
+        """
+        if self._http is None:
+            return False
+
+        data = att.data
+        if data is None and att.url:
+            try:
+                resp = await self._http.get(att.url, timeout=30.0)
+                resp.raise_for_status()
+                data = resp.content
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[discord] attachment fetch failed: %s", exc)
+                return False
+        if not data:
+            return False
+
+        safe_name = att.filename or f"kazma_{att.kind}"
+        try:
+            await self._rate_limiter.acquire()
+            resp = await self._http.post(
+                f"/channels/{channel_id}/messages",
+                data={"payload_json": json.dumps({"content": ""})},
+                files={"files[0]": (safe_name, data, att.mime or "application/octet-stream")},
+            )
+            resp.raise_for_status()
+            logger.info(
+                "[discord] sent attachment %s (%d bytes) to %s",
+                safe_name, len(data), channel_id,
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[discord] attachment send failed: %s", type(exc).__name__)
+            return False

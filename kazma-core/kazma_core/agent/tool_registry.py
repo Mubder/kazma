@@ -56,6 +56,8 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any, get_type_hints
 
+__all__ = ["LocalTool", "LocalToolRegistry", "get_tool_registry", "get_vector_memory", "set_vector_memory", "tool"]
+
 logger = logging.getLogger(__name__)
 
 #: ContextVar set by the graph's interrupt() gate after HITL approval.
@@ -64,6 +66,38 @@ logger = logging.getLogger(__name__)
 #: stripped and never honored (prevents prompt-injection bypass).
 _hitl_approved_ctx: ContextVar[bool] = ContextVar("_hitl_approved", default=False)
 
+#: ContextVar set by the supervisor graph's tool_worker_node whenever the
+#: graph is compiled WITH a HITL config (i.e. the graph's interrupt() gate
+#: is the authority for single-agent chat). When True, ``execute()`` skips
+#: the SwarmMessageBus ``safety.check()`` (mechanism B) so a graph-gated
+#: danger tool is not prompted twice — once by the graph interrupt and
+#: again by the bus. The bus gate remains the authority for /swarm dispatch
+#: and IDE paths (which do not set this ContextVar).
+_graph_hitl_gate_ctx: ContextVar[bool] = ContextVar("_graph_hitl_gate", default=False)
+
+
+def _is_under_agent_skill_dir(resolved_p: Path) -> bool:
+    """True if path is inside a known Agent Skills install/scan directory.
+
+    Allows progressive disclosure (tier 3) — agents can ``file_read``
+    scripts/references/assets under installed skills without opening the
+    whole filesystem. Write/delete ops must still reject these paths.
+    """
+    try:
+        from kazma_core.agent_skills.discovery import skill_base_dirs
+
+        for _scope, base in skill_base_dirs():
+            if not base.is_dir():
+                continue
+            try:
+                resolved_p.relative_to(base.resolve())
+                return True
+            except ValueError:
+                continue
+    except Exception:
+        pass
+    return False
+
 
 def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     """Return a safety error string if *p* is outside the workspace.
@@ -71,6 +105,9 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     Returns ``None`` when the path is allowed.  Denies by default when
     the workspace module cannot be imported (fail-closed) so a broken
     install never silently opens the whole filesystem.
+
+    Read-like ops (``reads``, ``listings``, ``searches``) may also access
+    Agent Skills directories so skill resources load on demand.
     """
     try:
         from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _get_workspace
@@ -92,6 +129,11 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
                 try:
                     resolved_p.relative_to(sys_temp)
                 except ValueError:
+                    # Allow skill resource reads outside workspace
+                    if op in ("reads", "listings", "searches") and _is_under_agent_skill_dir(
+                        resolved_p
+                    ):
+                        return None
                     return f"Safety: {op} outside workspace are not allowed. Path: {path}"
     return None
 
@@ -395,8 +437,12 @@ class LocalToolRegistry:
         # Use the async check() so a real bus adapter can post an approval
         # request and await the operator's response. check_sync() only
         # blocks; it can never approve. Skip when the graph's interrupt()
-        # gate already approved this call.
-        if not _hitl_already_approved:
+        # gate already approved this call, OR when the supervisor graph
+        # itself is the HITL authority (single-agent chat) — in that case
+        # the graph's interrupt() is the only gate and a second bus prompt
+        # would deadlock the turn (the bus waits for an approval the user
+        # already gave to the graph).
+        if not _hitl_already_approved and not _graph_hitl_gate_ctx.get():
             try:
                 import json as _json
 
@@ -706,17 +752,32 @@ class LocalToolRegistry:
             category="system",
         )
         async def config_save(key: str, value: str) -> str:
-            from kazma_core.config_store import get_config_store
+            from kazma_core.config_store import get_config_store, is_sensitive_config_key
 
-            # Block writes to security-critical keys
-            _BLOCKED_PREFIXES = ("security.", "kazma_secret", "vault.")
-            if any(key.startswith(p) for p in _BLOCKED_PREFIXES):
+            # Block security-critical + any secret-class keys (audit H8)
+            _BLOCKED_PREFIXES = (
+                "security.",
+                "kazma_secret",
+                "vault.",
+                "yolo.",
+            )
+            if any(key.startswith(p) or key == p.rstrip(".") for p in _BLOCKED_PREFIXES):
                 return f"Error: Cannot modify restricted key '{key}'."
+            if is_sensitive_config_key(key):
+                return (
+                    f"Error: '{key}' is a sensitive credential. "
+                    "Change it in Settings UI — not via tools."
+                )
 
             store = get_config_store()
-            store.set(key, value, category="connectors" if key.startswith("connectors.") else "general")
+            store.set(
+                key,
+                value,
+                category="connectors" if key.startswith("connectors.") else "general",
+            )
             logger.info("[config_save] Saved setting: %s", key)
-            return f"Setting saved: {key} = {value}"
+            # Never echo secret-like values back into chat
+            return f"Setting saved: {key}"
 
         @self.register(
             description=(
@@ -731,7 +792,19 @@ class LocalToolRegistry:
 
             store = get_config_store()
             val = store.get(key, "")
-            return f"{key} = {val}" if val else f"No value set for {key}"
+            if not val:
+                return f"No value set for {key}"
+            # Never return secrets in plain text (prompt-injection exfil risk).
+            key_l = (key or "").lower()
+            secret_markers = (
+                "api_key", "apikey", "token", "secret", "password",
+                "passwd", "private_key", "credentials", "auth",
+            )
+            if any(m in key_l for m in secret_markers):
+                return (
+                    f"{key} = [set]  (value hidden — secrets are not readable via tools)"
+                )
+            return f"{key} = {val}"
 
         @self.register(
             description="Execute a shell command and return stdout+stderr. Use with caution.",
@@ -754,33 +827,34 @@ class LocalToolRegistry:
             if not args:
                 return "Error: Empty command"
 
-            # Restricted PATH — only allow read-only / build-safe binaries
-            # NO network tools (curl, wget), NO container runtimes (docker),
-            # NO file modification (chmod, sed). Python/node interpreters are
-            # allowed because the agent needs to run scripts (python_exec,
-            # run_tests, run_file) — they're HITL-gated as danger tools.
+            # Restricted PATH — only allow read-only / build-safe binaries.
+            # NO interpreters (python/node/bash/sh) — those are RCE vectors
+            # even after a single HITL approval. Use python_exec / code_exec
+            # for code. Aligns with swarm ShellTool._READ_ONLY_COMMANDS.
+            # NO network tools (curl, wget), NO container runtimes (docker).
             _SAFE_BINARIES = {
-                # Read-only system
+                # Read-only system (no `env` — dumps secrets after one HITL)
                 "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
-                "uniq", "echo", "printf", "date", "whoami", "pwd", "env",
+                "uniq", "echo", "printf", "date", "whoami", "pwd",
                 "df", "du", "free", "uptime", "uname", "hostname",
-                # Interpreters (HITL-gated as danger tools)
-                "python", "python3", "node", "npx", "bash", "sh",
-                # Build tools
+                # Build tools (no shell interpreters)
                 "git", "uv", "pytest", "ruff", "mypy",
                 # Archive
                 "tar", "gzip", "gunzip", "zip", "unzip",
-                # Process info (read-only)
-                "ps", "pgrep",
-                # Text processing (read-only)
+                # Text processing (read-only) — no `ps` (env leak on some OS)
                 "jq", "tr", "cut",
-                # File ops (write — HITL approval required in practice via safety layer)
+                # File ops (write — HITL-gated via safety layer)
                 "mkdir", "cp", "mv", "touch",
                 # Process control (safe)
                 "sleep",
-                # Kazma internal
-                "hermes", "kazma",
+                # Note: `kazma` / `ps` removed from prod allowlist (audit H4)
             }
+            # Dev-only extras when not in production
+            import os as _os_bin
+            if (_os_bin.environ.get("KAZMA_PRODUCTION") or "").lower() not in (
+                "1", "true", "on", "yes",
+            ):
+                _SAFE_BINARIES = set(_SAFE_BINARIES) | {"ps", "pgrep", "kazma"}
             import os
 
             p = Path(args[0])
@@ -795,15 +869,89 @@ class LocalToolRegistry:
                     posix_path.endswith(f"/{b}") or (os.name == "nt" and posix_path.endswith(f"/{b}.exe"))
                     for b in _SAFE_BINARIES
                 ):
+                    hint = ""
+                    low = command.lower()
+                    if binary in ("node", "npm", "npx") or "skills add" in low or "agent-skills" in low:
+                        hint = (
+                            "\n\nTo install an Agent Skill (agentskills.io / SKILL.md), "
+                            "use install_agent_skill(source='owner/repo') instead — "
+                            "e.g. install_agent_skill(source='shadcn/improve'). "
+                            "Node/npm/npx are intentionally blocked; skill install "
+                            "does not need them."
+                        )
                     return (
                         f"Error: '{binary}' is not in the allowed binary list. "
                         f"Allowed: {', '.join(sorted(_SAFE_BINARIES))}"
+                        f"{hint}"
                     )
 
             try:
                 # Restrict context strictly to active workspace
                 from kazma_core.tools.file_write import _get_workspace
                 cwd = _get_workspace()
+                cwd_s = str(cwd)
+
+                # Reject absolute paths outside workspace (audit H4)
+                for a in args[1:]:
+                    if not a or a.startswith("-"):
+                        continue
+                    # Rough path detection
+                    looks_path = (
+                        a.startswith("/")
+                        or a.startswith("\\")
+                        or (len(a) > 2 and a[1] == ":" and a[0].isalpha())
+                        or ".." in a.replace("\\", "/")
+                    )
+                    if not looks_path:
+                        continue
+                    try:
+                        import os as _os
+
+                        cand = _os.path.normpath(
+                            a if _os.path.isabs(a) else _os.path.join(cwd_s, a)
+                        )
+                        root_n = _os.path.normpath(cwd_s)
+                        if cand != root_n and not cand.startswith(root_n + _os.sep):
+                            return (
+                                f"Error: path '{a}' is outside the workspace "
+                                f"({cwd_s}). Absolute paths must stay inside the workspace."
+                            )
+                    except Exception:
+                        pass
+
+                # git subcommand denylist (destructive / credential)
+                if binary == "git" and len(args) > 1:
+                    sub = args[1].lstrip("-")
+                    blocked_git = {
+                        "push", "credential", "credential-manager",
+                        "credential-store", "credential-cache",
+                    }
+                    joined = " ".join(args[1:]).lower()
+                    if sub in blocked_git or "config --global" in joined or "clean -fd" in joined:
+                        return (
+                            f"Error: git subcommand/args not allowed: {' '.join(args[1:])}. "
+                            "push/credential/global config/clean -fd are blocked."
+                        )
+
+                # Scrub parent env so API keys are not inherited (audit H4)
+                import os as _os_env
+
+                child_env = {
+                    "PATH": _os_env.environ.get("PATH", ""),
+                    "LANG": _os_env.environ.get("LANG", "C.UTF-8"),
+                    "LC_ALL": _os_env.environ.get("LC_ALL", "C.UTF-8"),
+                    "HOME": cwd_s,
+                    "USERPROFILE": cwd_s,
+                    "TMPDIR": cwd_s,
+                    "TEMP": cwd_s,
+                    "TMP": cwd_s,
+                    "SYSTEMROOT": _os_env.environ.get("SYSTEMROOT", ""),
+                    "COMSPEC": _os_env.environ.get("COMSPEC", ""),
+                    "PATHEXT": _os_env.environ.get("PATHEXT", ""),
+                    "WINDIR": _os_env.environ.get("WINDIR", ""),
+                }
+                # Drop empty Windows-only keys on POSIX
+                child_env = {k: v for k, v in child_env.items() if v}
 
                 # Run process asynchronously with timeout and restricted context
                 proc = await asyncio.create_subprocess_exec(
@@ -812,6 +960,7 @@ class LocalToolRegistry:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     cwd=cwd,
+                    env=child_env,
                 )
                 
                 try:
@@ -937,24 +1086,110 @@ class LocalToolRegistry:
         # ── Register tools from kazma_core/tools/ ──────────────────────
         try:
             from kazma_core.tools.web_search import web_search
-            self.register_function("web_search", web_search,
-                description="Search the web using DuckDuckGo. Returns markdown results with titles, URLs, and snippets.",
-                category="search")
+            self.register_function(
+                "web_search",
+                web_search,
+                description=(
+                    "Search the public web (SearXNG if configured, else DuckDuckGo, "
+                    "Bing HTML last). Returns markdown titles/URLs/snippets. "
+                    "Not guaranteed against rate limits; prefer KAZMA_SEARXNG_URL for reliability."
+                ),
+                category="search",
+            )
         except ImportError:
             logger.debug("web_search not available (missing duckduckgo-search)")
 
         try:
-            from kazma_core.tools.read_url import read_url
-            self.register_function("read_url", read_url,
-                description="Fetch and extract readable content from a URL. Returns text content.",
-                category="search")
+            from kazma_core.tools.read_url import (
+                digest_research_file,
+                list_research_chunks,
+                read_research_chunk,
+                read_url,
+                read_url_to_file,
+                summarize_research_file,
+            )
+
+            self.register_function(
+                "read_url",
+                read_url,
+                description=(
+                    "Fetch one public URL; text window (default ~16k, KAZMA_READ_URL_MAX_CHARS). "
+                    "Args: url, offset=0, max_chars=None. Optional backends: "
+                    "KAZMA_FIRECRAWL_API_KEY, KAZMA_JINA_READER=1, KAZMA_FETCH_BACKEND. "
+                    "Full page: read_url_to_file; multi-page: crawl_site; long digest: digest_research_file."
+                ),
+                category="search",
+            )
+            self.register_function(
+                "read_url_to_file",
+                read_url_to_file,
+                description=(
+                    "Fetch URL and save FULL extract anywhere under the workspace "
+                    "(default folder KAZMA_RESEARCH_DIR=research). Args: url, path=workspace-relative."
+                ),
+                category="search",
+            )
+            self.register_function(
+                "list_research_chunks",
+                list_research_chunks,
+                description=(
+                    "List chunk indices and previews for a saved research file. "
+                    "Args: path, chunk_size=4000."
+                ),
+                category="search",
+            )
+            self.register_function(
+                "read_research_chunk",
+                read_research_chunk,
+                description=(
+                    "Read one chunk of a saved research file. "
+                    "Args: path, chunk_index=0, chunk_size=4000."
+                ),
+                category="search",
+            )
+            self.register_function(
+                "summarize_research_file",
+                summarize_research_file,
+                description=(
+                    "Light extractive outline (per-chunk previews). "
+                    "Args: path, chunk_size=4000, max_chunks=40."
+                ),
+                category="search",
+            )
+            self.register_function(
+                "digest_research_file",
+                digest_research_file,
+                description=(
+                    "Walk ALL chunks in-tool and return one bounded extractive digest "
+                    "(default ~12k via KAZMA_RESEARCH_DIGEST_MAX). Context-safe for long files. "
+                    "Args: path, chunk_size=4000, max_output_chars=12000."
+                ),
+                category="search",
+            )
         except ImportError:
-            logger.debug("read_url not available (missing trafilatura)")
+            logger.debug("read_url / research tools not available (missing trafilatura)")
+
+        try:
+            from kazma_core.tools.web_research import crawl_site
+
+            self.register_function(
+                "crawl_site",
+                crawl_site,
+                description=(
+                    "Bounded multi-page crawl (same-domain by default). "
+                    "Args: start_url, max_pages=8 (hard max 50), max_depth=2, same_domain_only=True, "
+                    "delay_ms=300, save=True, path_prefix=optional. Saves pages under workspace; "
+                    "returns markdown index. SSRF-safe; not unlimited spidering."
+                ),
+                category="search",
+            )
+        except ImportError:
+            logger.debug("crawl_site not available")
 
         try:
             from kazma_core.tools.image_gen import generate_image
             self.register_function("generate_image", generate_image,
-                description="Generate an image from a text prompt using pollinations.ai. Returns the saved file path.",
+                description="Generate an image from a text prompt. provider can be 'auto' (first available), 'pollinations' (free, no key), 'dall-e' (OpenAI), 'stability' (SDXL), or 'flux' (FAL). Returns the saved file path.",
                 category="media")
         except ImportError:
             logger.debug("generate_image not available")
@@ -974,6 +1209,54 @@ class LocalToolRegistry:
                 category="utility")
         except ImportError:
             logger.debug("export_session not available")
+
+        # ── Agent Skills (agentskills.io / SKILL.md) ───────────────────
+        try:
+            from kazma_core.agent_skills.tools import (
+                activate_skill,
+                install_agent_skill,
+                list_agent_skills,
+                uninstall_agent_skill,
+            )
+            self.register_function(
+                "list_agent_skills",
+                list_agent_skills,
+                description=(
+                    "List installed Agent Skills (SKILL.md / agentskills.io format). "
+                    "Shows name, description, and location for each skill."
+                ),
+                category="skills",
+            )
+            self.register_function(
+                "activate_skill",
+                activate_skill,
+                description=(
+                    "Load full instructions for an installed Agent Skill into context. "
+                    "Call this when a task matches a skill's description before proceeding. "
+                    "Pass the skill name from list_agent_skills / the available_skills catalog."
+                ),
+                category="skills",
+            )
+            self.register_function(
+                "install_agent_skill",
+                install_agent_skill,
+                description=(
+                    "Install an Agent Skill from GitHub or a local path. "
+                    "Preferred over npx/npm (node is not in the shell allowlist). "
+                    "Accepts owner/repo (e.g. 'shadcn/improve'), a GitHub URL, "
+                    "or a local path with SKILL.md. One approval covers the whole install. "
+                    "Hub: https://agentskills.io/"
+                ),
+                category="skills",
+            )
+            self.register_function(
+                "uninstall_agent_skill",
+                uninstall_agent_skill,
+                description="Uninstall a user-level Agent Skill by name.",
+                category="skills",
+            )
+        except Exception as e:
+            logger.error("Failed to register agent skills tools: %s", e, exc_info=True)
 
         # Load and register Top 10 Native Skills
         try:

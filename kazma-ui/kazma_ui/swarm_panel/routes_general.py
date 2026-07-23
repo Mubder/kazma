@@ -16,6 +16,8 @@ from kazma_ui.services import get_swarm_service
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["register_general_routes"]
+
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
 

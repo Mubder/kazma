@@ -37,6 +37,8 @@ from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
+__all__ = ["DEFAULT_DB_PATH", "DEFAULT_MAX_SNAPSHOTS", "ReplayEngine", "SnapshotRecord", "SnapshotRecorder", "SnapshotStore", "create_recorder"]
+
 logger = logging.getLogger(__name__)
 
 # Default paths / limits

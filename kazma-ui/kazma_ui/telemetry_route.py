@@ -28,6 +28,8 @@ from fastapi.responses import StreamingResponse
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_telemetry_router", "router"]
+
 router = APIRouter(tags=["telemetry"])
 
 

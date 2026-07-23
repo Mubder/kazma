@@ -644,6 +644,98 @@ class TestSettingsAPI:
         assert resp.status_code == 200
         assert "token" in resp.json()
 
+    def test_voice_settings_get_and_put(self, client):
+        """GET and PUT /api/settings/voice fetches and saves voice settings."""
+        # 1. GET defaults
+        resp = client.get("/api/settings/voice")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "enabled" in data
+        assert "stt_provider" in data
+        assert "stt_model" in data
+        assert "tts_provider" in data
+
+        # 2. PUT updates
+        payload = {
+            "enabled": True,
+            "stt_provider": "groq",
+            "stt_model": "distil-whisper-large-v3-en",
+            "tts_provider": "kokoro",
+            "tts_voice": "en-US-1",
+            "stt_language": "en",
+            "tts_output_format": "opus"
+        }
+        resp = client.put("/api/settings/voice", json=payload)
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+
+        # 3. Verify GET returns updated values
+        resp = client.get("/api/settings/voice")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["enabled"] is True
+        assert data["stt_provider"] == "groq"
+        assert data["stt_model"] == "distil-whisper-large-v3-en"
+        assert data["tts_provider"] == "kokoro"
+        assert data["tts_voice"] == "en-US-1"
+        assert data["stt_language"] == "en"
+        assert data["tts_output_format"] == "opus"
+
+    def test_voice_providers_get(self, client):
+        """GET /api/voice/providers returns available STT and TTS providers."""
+        resp = client.get("/api/voice/providers")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "stt" in data
+        assert "tts" in data
+        assert isinstance(data["stt"], list)
+        assert isinstance(data["tts"], list)
+
+    def test_voice_voices_get(self, client):
+        """GET /api/voice/voices returns voice list for a provider."""
+        # 1. Test OpenAI
+        resp = client.get("/api/voice/voices?provider=openai")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "alloy" in data
+        assert "shimmer" in data
+
+        # 2. Test Nvidia
+        resp = client.get("/api/voice/voices?provider=nvidia")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "Magpie-Multilingual.EN-US.Aria" in data
+
+        # 3. Test EdgeTTS
+        resp = client.get("/api/voice/voices?provider=edgetts")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) > 0
+        assert "default" in data
+
+    def test_voice_stt_models_get(self, client):
+        """GET /api/voice/stt-models returns transcription models for a provider."""
+        # 1. Test OpenAI
+        resp = client.get("/api/voice/stt-models?provider=openai")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "whisper-1" in data
+
+        # 2. Test Groq
+        resp = client.get("/api/voice/stt-models?provider=groq")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "whisper-large-v3" in data
+
+        # 3. Test Nvidia
+        resp = client.get("/api/voice/stt-models?provider=nvidia")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "nvidia/whisper-large-v3" in data
+
+
+
+
 
 # ══════════════════════════════════════════════════════════════════════
 # TestUnifiedProvidersRouterAPI — New unified providers & connectors hub

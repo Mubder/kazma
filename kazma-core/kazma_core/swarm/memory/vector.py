@@ -18,6 +18,8 @@ from typing import Any
 
 from kazma_core.swarm.memory.embedder import get_embedder
 
+__all__ = ["VectorStore", "get_encoder"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_COLLECTION = "kazma_global"
@@ -68,6 +70,7 @@ class VectorStore:
             return True
         try:
             import chromadb
+            from kazma_core.swarm.memory.embedder import make_chroma_embedding_function
 
             if self._persist_dir:
                 self._client = chromadb.PersistentClient(path=self._persist_dir)
@@ -75,15 +78,22 @@ class VectorStore:
                 self._client = chromadb.Client(
                     chromadb.config.Settings(anonymized_telemetry=False)
                 )
-            # Get or create the collection
+            # Build the embedding function from the shared embedder
+            self._model = get_encoder()
+            chroma_ef = make_chroma_embedding_function(self._model) if self._model else None
+            # Get or create the collection — pass the EF so ChromaDB
+            # can embed on insert/query without a second model load.
             try:
-                self._collection = self._client.get_collection(self._collection_name)
+                self._collection = self._client.get_collection(
+                    self._collection_name,
+                    embedding_function=chroma_ef,
+                )
             except Exception:
                 self._collection = self._client.create_collection(
                     name=self._collection_name,
                     metadata={"description": "Kazma global semantic memory"},
+                    embedding_function=chroma_ef,
                 )
-            self._model = get_encoder()
             self._ready = True
             logger.info("[VectorStore] ChromaDB collection ready: %s", self._collection_name)
             return True
@@ -125,14 +135,20 @@ class VectorStore:
         if not self.available:
             return False
         embedding = self._encode(text)
-        if embedding is None:
+        # encode() returns [] on failure (not None) — treat empty as miss.
+        if not embedding:
+            logger.warning("[VectorStore] Index skipped — empty embedding for %s", doc_id)
             return False
         try:
+            # ChromaDB rejects empty metadata dicts — always pass at least one key.
+            meta = dict(metadata or {})
+            if not meta:
+                meta = {"source": "memory"}
             self._collection.upsert(
                 ids=[doc_id],
                 embeddings=[embedding],
                 documents=[text[:2000]],
-                metadatas=[metadata or {}],
+                metadatas=[meta],
             )
             return True
         except Exception as exc:
@@ -144,21 +160,35 @@ class VectorStore:
         text: str,
         limit: int = 10,
         where: dict[str, Any] | None = None,
+        tenant_id: str | None = None,
     ) -> list[tuple[str, float]]:
         """Semantic search via cosine similarity.
 
         Returns list of (doc_id, similarity_score) tuples.
+
+        Args:
+            tenant_id: If provided, results are filtered to this tenant.
         """
         if not self.available:
             return []
         embedding = self._encode(text)
-        if embedding is None:
+        if not embedding:
+            logger.warning("[VectorStore] Query skipped — empty embedding")
             return []
+        # Build combined where filter
+        filters: dict[str, Any] = {}
+        if where:
+            filters.update(where)
+        if tenant_id:
+            filters["tenant_id"] = tenant_id
         try:
+            count = self._collection.count() if hasattr(self._collection, "count") else limit
+            if count <= 0:
+                return []
             results = self._collection.query(
                 query_embeddings=[embedding],
-                n_results=min(limit, self._collection.count() if hasattr(self._collection, "count") else limit),
-                where=where,
+                n_results=min(limit, count),
+                where=filters or None,
             )
             if not results or not results.get("ids") or not results["ids"][0]:
                 return []

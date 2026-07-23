@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from kazma_core.system.installer import asynchronous_install_package
+from kazma_core.system.installer import (
+    ALLOWED_EXTRAS,
+    ALLOWED_PACKAGES,
+    asynchronous_install_extra,
+    asynchronous_install_package,
+)
 from kazma_core.system.maintenance import (
     create_memory_backup,
     restore_memory_backup,
@@ -12,6 +17,9 @@ from kazma_core.system.maintenance import (
 from kazma_core.system.runtime_manager import trigger_package_promotion
 
 __all__ = [
+    "ALLOWED_EXTRAS",
+    "ALLOWED_PACKAGES",
+    "asynchronous_install_extra",
     "asynchronous_install_package",
     "create_memory_backup",
     "restore_memory_backup",

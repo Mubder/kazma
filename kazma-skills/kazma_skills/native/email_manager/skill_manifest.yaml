@@ -1,0 +1,56 @@
+name: email-manager
+version: 0.1.0
+description: >
+  Full email integration: list/get/send/delete/categorize/analyze.
+  Providers: sandbox (default without creds), Gmail IMAP/SMTP, Microsoft Graph, generic IMAP.
+author: Kazma Team
+license: MIT
+
+tools:
+  email_list:
+    arabic_name: "قائمة البريد"
+    description: >
+      List, search, and page emails in a folder (INBOX default).
+      Args: folder, query, limit, offset, unread_only, provider (auto|sandbox|gmail|microsoft|imap), account (optional multi-account alias).
+    category: email
+    prompt_chain:
+      - "اعرض رسائل البريد في الصندوق"
+  email_get:
+    arabic_name: "قراءة رسالة"
+    description: >
+      Fetch full email by message_id. Args: message_id, include_body, max_body_chars, provider.
+    category: email
+    prompt_chain:
+      - "اقرأ نص الرسالة بالكامل"
+  email_send:
+    arabic_name: "إرسال بريد"
+    description: >
+      Send, reply, forward, or save draft. HITL required.
+      Args: to, subject, body, action (send|reply|forward|draft), cc, message_id, body_format, provider.
+    category: email
+    prompt_chain:
+      - "أرسل أو احفظ مسودة بريد (يتطلب موافقة)"
+  email_delete:
+    arabic_name: "حذف بريد"
+    description: >
+      Move message to trash or permanently delete. HITL required.
+      Args: message_id, permanent, provider.
+    category: email
+    prompt_chain:
+      - "احذف الرسالة أو انقلها إلى المهملات (يتطلب موافقة)"
+  email_categorize:
+    arabic_name: "تصنيف بريد"
+    description: >
+      Mark read/unread, star/flag, add/remove labels, move folder. HITL required.
+      Args: message_id, mark_read, star, add_labels, remove_labels, move_to_folder, provider.
+    category: email
+    prompt_chain:
+      - "صنّف الرسالة أو علّمها كمقروءة (يتطلب موافقة)"
+  email_analyze:
+    arabic_name: "تحليل بريد"
+    description: >
+      Summarize email, extract action items/deadlines, sentiment, phishing risk.
+      Args: message_id or raw_text, focus (full|security|actions), provider.
+    category: email
+    prompt_chain:
+      - "حلّل الرسالة للتلخيص والمخاطر والإجراءات"

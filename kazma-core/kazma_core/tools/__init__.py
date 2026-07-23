@@ -14,9 +14,17 @@ from kazma_core.tools.file_read import file_read
 from kazma_core.tools.file_write import file_write
 from kazma_core.tools.image_gen import generate_image
 from kazma_core.tools.personality_cmd import handle_personality_command, is_personality_command
-from kazma_core.tools.read_url import read_url
+from kazma_core.tools.read_url import (
+    digest_research_file,
+    list_research_chunks,
+    read_research_chunk,
+    read_url,
+    read_url_to_file,
+    summarize_research_file,
+)
 from kazma_core.tools.send_message import register_message_backend, send_message
 from kazma_core.tools.vision_analyze import analyze_image
+from kazma_core.tools.web_research import crawl_site
 from kazma_core.tools.web_search import web_search
 
 __all__ = [
@@ -24,6 +32,12 @@ __all__ = [
     "register_message_backend",
     "web_search",
     "read_url",
+    "read_url_to_file",
+    "list_research_chunks",
+    "read_research_chunk",
+    "summarize_research_file",
+    "digest_research_file",
+    "crawl_site",
     "export_session",
     "file_read",
     "file_write",

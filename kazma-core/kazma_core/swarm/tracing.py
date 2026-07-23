@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+__all__ = ["DEFAULT_MAX_SPANS", "InMemorySpanExporter", "Span", "TracingEmitter"]
+
 logger = logging.getLogger(__name__)
 
 

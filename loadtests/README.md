@@ -24,13 +24,13 @@ sudo apt-get update && sudo apt-get install k6
 
 ```bash
 # Run swarm dispatch load test (headless)
-locust -f loadtests/locustfile_swarm.py --host=http://localhost:8090 --users=50 --spawn-rate=5 --run-time=60s --headless
+locust -f loadtests/locustfile_swarm.py --host=http://localhost:9090 --users=50 --spawn-rate=5 --run-time=60s --headless
 
 # Run WebSocket/SSE/HITL load test
-locust -f loadtests/locustfile_websocket.py --host=http://localhost:8090 --users=30 --spawn-rate=3 --run-time=120s --headless
+locust -f loadtests/locustfile_websocket.py --host=http://localhost:9090 --users=30 --spawn-rate=3 --run-time=120s --headless
 
 # Run with Web UI (for debugging)
-locust -f loadtests/locustfile_swarm.py --host=http://localhost:8090
+locust -f loadtests/locustfile_swarm.py --host=http://localhost:9090
 
 # Run using the runner script
 python loadtests/run_loadtests.py --scenario=swarm --users=100 --spawn-rate=10 --run-time=120s
@@ -131,7 +131,7 @@ jobs:
       - name: Start Kazma Server
         run: |
           # Start server in background
-          cd kazma-ui && python -m uvicorn app:create_app --factory --host 0.0.0.0 --port 8090 &
+          cd kazma-ui && python -m uvicorn app:create_app --factory --host 0.0.0.0 --port 9090 &
           sleep 10
       
       - name: Run Load Test
@@ -165,8 +165,8 @@ K6_CLOUD_TOKEN=<token> k6 run loadtests/k6_swarm.js --out cloud
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KAZMA_HOST` | `http://localhost:8090` | Target host for load tests |
-| `KAZMA_WS_HOST` | `ws://localhost:8090` | WebSocket host |
+| `KAZMA_HOST` | `http://localhost:9090` | Target host for load tests |
+| `KAZMA_WS_HOST` | `ws://localhost:9090` | WebSocket host |
 | `KAZMA_API_KEY` | (empty) | API key for authenticated endpoints |
 
 ### Locust Configuration

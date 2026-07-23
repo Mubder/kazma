@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
+__all__ = ["BoundedConcurrency", "CircuitBreaker", "CircuitBreakerOpenError", "CircuitState", "FallbackChain", "OutputValidator", "RetryPolicy", "TimeoutGuard"]
+
 if TYPE_CHECKING:
     from kazma_core.swarm.task import WorkerResult
 
@@ -292,6 +294,14 @@ class CircuitBreaker:
             self._probe_in_flight = True
             return True
         return False
+
+    def release_probe(self) -> None:
+        """Clear half-open probe flag (audit H8 — cancel/timeout safety).
+
+        Call from a ``finally`` when a dispatch that held the probe may exit
+        without ``record_success`` / ``record_failure``.
+        """
+        self._probe_in_flight = False
 
     def check_or_raise(self, worker_name: str) -> None:
         """Raise :class:`CircuitBreakerOpenError` if the breaker is open."""

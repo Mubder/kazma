@@ -31,6 +31,8 @@ from kazma_core.config_schema import TracingConfig
 
 from kazma_core.config_store import apply_sqlite_pragmas_async
 
+__all__ = ["AgentConfig", "CHECKPOINT_DB", "CONFIG_FILE", "KazmaAgent", "MAX_ITERATIONS", "load_config", "main", "run_agent"]
+
 # NOTE: kazma_core.agent.graph_builder / .state are imported lazily inside
 # run()/_ensure_graph() to avoid a circular import — the kazma_core.agent
 # package __init__ re-exports names from this module.
@@ -54,7 +56,7 @@ class AgentConfig:
     """Configuration loaded from kazma.yaml."""
 
     name: str = "kazma"
-    version: str = "0.2.0"
+    version: str = "0.5.0"
     language: str = "ar"
     rtl: bool = True
     default_model: str = "gpt-4o-mini"
@@ -65,14 +67,19 @@ class AgentConfig:
 
 
 def load_config(config_path: str | Path | None = None) -> AgentConfig:
-    """Load configuration from YAML file."""
+    """Load configuration from shipped YAML + optional local overrides.
+
+    See :mod:`kazma_core.config_loader` — users should not edit tracked
+    ``kazma.yaml`` for day-to-day settings (use Settings UI or
+    ``kazma.local.yaml``).
+    """
+    from kazma_core.config_loader import load_merged_yaml
+
     path = Path(config_path) if config_path else Path(CONFIG_FILE)
-    if not path.exists():
+    raw = load_merged_yaml(path if path.exists() or config_path else None)
+    if not raw and not path.exists():
         logger.warning("Config file %s not found, using defaults", path)
         return AgentConfig()
-
-    with open(path) as f:
-        raw = yaml.safe_load(f) or {}
 
     agent_cfg = raw.get("agent", {})
     models_cfg = raw.get("models", {})
@@ -80,9 +87,11 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
 
     return AgentConfig(
         name=agent_cfg.get("name", "kazma"),
-        version=agent_cfg.get("version", "0.2.0"),
-        language=agent_cfg.get("language", "ar"),
-        rtl=agent_cfg.get("rtl", True),
+        version=agent_cfg.get("version", "0.6.0"),
+        # Default to English so cultural Arabic context does not bias every
+        # reply when the user has not set agent.language explicitly.
+        language=agent_cfg.get("language", "en"),
+        rtl=agent_cfg.get("rtl", False),
         default_model=models_cfg.get("default", "gpt-4o-mini"),
         storage_path=storage_cfg.get("path", "data/kazma.db"),
         vector_dim=storage_cfg.get("vector_dim", 384),
@@ -187,6 +196,22 @@ class KazmaAgent:
         )
         self.system_prompt = self.config.system_prompt or self._default_system_prompt()
 
+        # ── Product self-knowledge (identity, Arabic name, how-to) ──
+        # Always append unless already present so ConfigStore/YAML overrides
+        # still get correct branding + capability map.
+        try:
+            from kazma_core.product_knowledge import (
+                build_product_knowledge,
+                knowledge_already_present,
+            )
+
+            if not knowledge_already_present(self.system_prompt):
+                self.system_prompt = (
+                    self.system_prompt.rstrip() + "\n\n" + build_product_knowledge()
+                )
+        except Exception:
+            logger.debug("[agent_runner] product knowledge injection skipped", exc_info=True)
+
         # Inject cultural context enrichment
         try:
             from kazma_core.cultural_context_enrichment import get_cultural_prompt_suffix
@@ -208,6 +233,45 @@ class KazmaAgent:
                 self.system_prompt = self.system_prompt.rstrip() + "\n\n" + env_block
         except Exception:
             logger.debug("[agent_runner] env context injection skipped", exc_info=True)
+
+        # Agent Skills catalog (agentskills.io progressive disclosure tier 1).
+        # Only name+description — full body loads via activate_skill.
+        try:
+            from kazma_core.agent_skills.catalog import build_catalog_prompt
+
+            skills_block = build_catalog_prompt()
+            if skills_block and skills_block not in self.system_prompt:
+                self.system_prompt = self.system_prompt.rstrip() + "\n\n" + skills_block
+            elif not skills_block:
+                # Still teach install path when catalog is empty
+                install_hint = (
+                    "\n\n## Agent Skills\n"
+                    "You can install skills from https://agentskills.io/ using "
+                    "`install_agent_skill(source='owner/repo')` "
+                    "(e.g. `shadcn/improve`). Do **not** use npx/npm/shell for "
+                    "skill installs — use install_agent_skill (one approval)."
+                )
+                if "install_agent_skill" not in self.system_prompt:
+                    self.system_prompt = self.system_prompt.rstrip() + install_hint
+        except Exception:
+            logger.debug("[agent_runner] agent skills catalog injection skipped", exc_info=True)
+
+        # Self-improvement Soul (Kazma-wide) — accumulated from past chat/swarm
+        # outcomes. Also re-injected per turn in SSE (may grow after init).
+        # Wrapped in an untrusted data fence so the model treats deltas as
+        # observation context, never instructions (prompt-injection defense).
+        try:
+            from kazma_core.safety.prompt_fence import format_untrusted_block
+            from kazma_core.skills.self_improvement import get_agent_evolution_block
+
+            evo = get_agent_evolution_block("supervisor")
+            fenced = format_untrusted_block(evo, source="self_improvement")
+            if fenced and fenced not in self.system_prompt:
+                self.system_prompt = (
+                    self.system_prompt.rstrip() + "\n\n" + fenced
+                )
+        except Exception:
+            logger.debug("[agent_runner] agent evolution injection skipped", exc_info=True)
 
         # Universal language directive — injected LAST so it's the final
         # instruction the model sees, after all cultural context. This
@@ -233,11 +297,13 @@ class KazmaAgent:
 
     def _default_system_prompt(self) -> str:
         return (
-            "You are Kazma, an autonomous AI agent framework. "
+            "You are Kazma (Arabic: كاظمه / كاظمة — never كازما), "
+            "an autonomous multi-platform AI agent framework. "
             "You are capable of understanding Arabic dialects including Kuwaiti/Gulf Arabic "
             "when the user speaks Arabic, but your default response language is always "
             "determined by the user's input language. "
-            "\n\nBe helpful, precise, and culturally aware. "
+            "\n\nBe helpful, precise, and culturally aware. Teach users how to use Kazma "
+            "(chat, IDE, swarm, settings, HITL, memory) when they ask about the product. "
             "\n\nCRITICAL LANGUAGE RULE: You MUST respond in the EXACT language the user "
             "writes in. Arabic input = Arabic output. English input = English output. "
             "If they mix, match their pattern. If the input is gibberish or unclear, "
@@ -596,6 +662,45 @@ class KazmaAgent:
         )
         return self._streaming_graph
 
+    def build_child_graph(
+        self,
+        *,
+        tools: list[str] | None = None,
+        hitl_config: dict[str, Any] | None = None,
+    ) -> Any:
+        """Build a one-shot supervisor graph for sub-agents (audit M19).
+
+        Not cached — each spawn can carry auto-deny HITL and tool filters.
+        """
+        from kazma_core.agent.graph_builder import build_supervisor_graph
+        from kazma_core.safety.hitl import get_hitl_config
+
+        tool_defs = list(self.tools.get_tool_definitions())
+        if tools:
+            allow = {str(t).lower() for t in tools}
+            tool_defs = [
+                d for d in tool_defs
+                if str(d.get("function", d).get("name", d.get("name", ""))).lower()
+                in allow
+                or str(d.get("name", "")).lower() in allow
+            ]
+
+        hitl = hitl_config if hitl_config is not None else get_hitl_config(self.config.raw)
+        if isinstance(hitl, dict) and not hitl.get("enabled", True):
+            hitl = None
+
+        return build_supervisor_graph(
+            llm=self.llm,
+            system_prompt=self.system_prompt,
+            tool_definitions=tool_defs,
+            tool_executor=self.tools,
+            cost_breaker=self.cost_breaker,
+            authority=self.authority,
+            tracer=self.tracer,
+            hitl_config=hitl,
+            checkpointer=None,
+        )
+
     async def _ensure_graph(self) -> Any:
         """Build (once) the LangGraph supervisor graph this agent runs on.
 
@@ -609,16 +714,40 @@ class KazmaAgent:
 
         from kazma_core.agent.graph_builder import build_supervisor_graph
 
-        # Durable checkpointer (SIGKILL-safe). One connection per agent,
-        # closed in shutdown().
+        # Durable checkpointer — Postgres when multi-replica, else SQLite.
         db_path = self.config.raw.get("storage", {}).get("checkpoint_path", CHECKPOINT_DB)
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._checkpoint_conn = await aiosqlite.connect(db_path)
-        await apply_sqlite_pragmas_async(self._checkpoint_conn)
-        self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
-        await self._checkpointer.setup()
+        self._checkpointer = None
+        self._checkpoint_conn = None
+        try:
+            from kazma_core.db.backend import get_database_url, is_postgres
 
-        hitl_config = self.config.raw.get("safety", {}).get("hitl") or None
+            if is_postgres():
+                dsn = get_database_url() or ""
+                if dsn.startswith("postgres://"):
+                    dsn = "postgresql://" + dsn[len("postgres://") :]
+                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
+                from psycopg_pool import AsyncConnectionPool  # type: ignore
+
+                pool = AsyncConnectionPool(conninfo=dsn, min_size=1, max_size=8, open=False)
+                await pool.open()
+                self._checkpointer = AsyncPostgresSaver(conn=pool)  # type: ignore[arg-type]
+                await self._checkpointer.setup()
+                logger.info("KazmaAgent checkpointer: AsyncPostgresSaver")
+        except Exception as exc:
+            logger.debug("Postgres checkpointer unavailable (%s) — SQLite", exc)
+
+        if self._checkpointer is None:
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+            self._checkpoint_conn = await aiosqlite.connect(db_path)
+            await apply_sqlite_pragmas_async(self._checkpoint_conn)
+            self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
+            await self._checkpointer.setup()
+            logger.info("KazmaAgent checkpointer: AsyncSqliteSaver path=%s", db_path)
+
+        # Prefer get_hitl_config() so ConfigStore / Settings UI overrides
+        # apply on the run path the same way as the streaming graph.
+        from kazma_core.safety.hitl import get_hitl_config
+        hitl_config = get_hitl_config(self.config.raw)
 
         self._graph = build_supervisor_graph(
             llm=self.llm,
@@ -631,7 +760,7 @@ class KazmaAgent:
             checkpointer=self._checkpointer,
             hitl_config=hitl_config,
         )
-        logger.info("KazmaAgent run path bound to supervisor graph (checkpoint=%s)", db_path)
+        logger.info("KazmaAgent run path bound to supervisor graph")
         return self._graph
 
     async def run(self, user_input: str, state: AgentState | None = None) -> str:
@@ -671,11 +800,43 @@ class KazmaAgent:
         graph_state["messages"] = messages
         config = {"configurable": {"thread_id": self._thread_id}}
 
+        from kazma_core.safety.hitl import set_current_thread_id, reset_current_thread_id
+
+        token = set_current_thread_id(self._thread_id)
         try:
-            result = await graph.ainvoke(graph_state, config)
+            import os as _os_to
+
+            # Wall-clock turn budget (audit M14). Override: KAZMA_TURN_TIMEOUT_SECONDS
+            raw_to = (_os_to.environ.get("KAZMA_TURN_TIMEOUT_SECONDS") or "600").strip()
+            try:
+                turn_timeout = float(raw_to)
+            except ValueError:
+                turn_timeout = 600.0
+            if turn_timeout <= 0:
+                result = await graph.ainvoke(graph_state, config)
+            else:
+                import asyncio as _asyncio
+
+                try:
+                    result = await _asyncio.wait_for(
+                        graph.ainvoke(graph_state, config),
+                        timeout=turn_timeout,
+                    )
+                except _asyncio.TimeoutError:
+                    logger.error(
+                        "Graph turn timed out after %.0fs (thread=%s)",
+                        turn_timeout,
+                        self._thread_id,
+                    )
+                    return (
+                        f"⚠️ Turn timed out after {int(turn_timeout)}s. "
+                        "Try a shorter request or raise KAZMA_TURN_TIMEOUT_SECONDS."
+                    )
         except Exception as e:
             logger.error("Graph invocation failed: %s", e)
             return "عذراً، حدث خطأ تقني. يرجى المحاولة مرة أخرى."
+        finally:
+            reset_current_thread_id(token)
 
         # Extract the final assistant message text.
         final_messages = result.get("messages", [])

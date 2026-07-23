@@ -34,6 +34,12 @@ from langgraph.checkpoint.serde._msgpack import SAFE_MSGPACK_TYPES
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "CheckpointManager",
+    "create_checkpointer",
+    "create_checkpoint_manager",
+]
+
 # Maximum number of per-thread locks retained in memory.  When exceeded
 # the least-recently-used lock is evicted (LRU via OrderedDict).
 _MAX_THREAD_LOCKS = 10_000
@@ -333,30 +339,80 @@ async def create_checkpoint_manager(
 ) -> CheckpointManager:
     """Create and initialize a CheckpointManager with per-thread locking.
 
-    Opens an aiosqlite connection with WAL journal mode for concurrent
-    reads during graph execution. Creates the parent directory and
-    database file if they don't exist.
-
-    Args:
-        path: Path to the SQLite checkpoint database.
+    Backend:
+      * Postgres when ``KAZMA_DATABASE_URL`` is set (requires
+        ``langgraph-checkpoint-postgres`` + ``psycopg``).
+      * SQLite otherwise (``path``).
 
     Returns:
         Initialized CheckpointManager ready for graph.compile(checkpointer=...).
     """
+    serde = JsonPlusSerializer(
+        allowed_msgpack_modules=list(SAFE_MSGPACK_TYPES) + [
+            ("kazma_core.agent.state", "NodeName"),
+        ]
+    )
+
+    # ── Postgres checkpointer (multi-replica) ──────────────────────
+    try:
+        from kazma_core.db.backend import get_database_url, is_postgres
+
+        if is_postgres():
+            dsn = get_database_url() or ""
+            if dsn.startswith("postgres://"):
+                dsn = "postgresql://" + dsn[len("postgres://") :]
+            try:
+                from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
+                from psycopg.rows import dict_row  # type: ignore
+                from psycopg_pool import AsyncConnectionPool  # type: ignore
+
+                # LangGraph setup() may run CREATE INDEX CONCURRENTLY, which
+                # requires autocommit (not a transaction block). Official
+                # from_conn_string() uses autocommit=True; the pool must match.
+                pool = AsyncConnectionPool(
+                    conninfo=dsn,
+                    min_size=1,
+                    max_size=10,
+                    kwargs={
+                        "autocommit": True,
+                        "prepare_threshold": 0,
+                        "row_factory": dict_row,
+                    },
+                    open=False,
+                )
+                await pool.open()
+                saver = AsyncPostgresSaver(conn=pool, serde=serde)  # type: ignore[arg-type]
+
+                if hasattr(saver, "setup"):
+                    await saver.setup()
+                manager = CheckpointManager(saver)  # type: ignore[arg-type]
+                logger.info(
+                    "[Checkpoint] CheckpointManager using AsyncPostgresSaver (multi-replica)"
+                )
+                return manager
+            except ImportError as exc:
+                logger.warning(
+                    "[Checkpoint] Postgres URL set but langgraph-checkpoint-postgres "
+                    "unavailable (%s) — falling back to SQLite. "
+                    "pip install -e '.[postgres]'",
+                    exc,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "[Checkpoint] AsyncPostgresSaver failed (%s) — SQLite fallback",
+                    exc,
+                )
+    except Exception:
+        pass
+
+    # ── SQLite checkpointer (default) ──────────────────────────────
     db_path = Path(path).expanduser().resolve()
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = await aiosqlite.connect(str(db_path))
     await apply_sqlite_pragmas_async(conn)
 
-    saver = AsyncSqliteSaver(
-        conn,
-        serde=JsonPlusSerializer(
-            allowed_msgpack_modules=list(SAFE_MSGPACK_TYPES) + [
-                ("kazma_core.agent.state", "NodeName"),
-            ]
-        ),
-    )
+    saver = AsyncSqliteSaver(conn, serde=serde)
     await saver.setup()
 
     manager = CheckpointManager(saver)

@@ -13,6 +13,8 @@ from typing import Any
 
 import yaml
 
+__all__ = ["PermissionManager"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG = Path(__file__).resolve().parent.parent.parent / "kazma-permissions.yaml"

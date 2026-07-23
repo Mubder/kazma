@@ -7,6 +7,36 @@ function skillsApp() {
         hubResults: [],
         validatePath: '',
         validateResult: null,
+        agentSkillSource: '',
+        installing: false,
+
+        async installAgentSkill() {
+            var source = (this.agentSkillSource || '').trim();
+            if (!source) {
+                showToast('Enter owner/repo or a GitHub URL', 'error');
+                return;
+            }
+            this.installing = true;
+            try {
+                var resp = await fetch('/api/skills/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ skill_id: source })
+                });
+                var result = await resp.json();
+                if (result.status === 'ok') {
+                    showToast(result.message || 'Skill installed', 'success');
+                    this.agentSkillSource = '';
+                    location.reload();
+                } else {
+                    showToast('Install failed: ' + (result.error || ''), 'error');
+                }
+            } catch (e) {
+                showToast('Install failed', 'error');
+            } finally {
+                this.installing = false;
+            }
+        },
 
         async toggleSkill(skillId, enabled) {
             try {

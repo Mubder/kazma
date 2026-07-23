@@ -13,6 +13,8 @@ from textual.widgets import RichLog, Static
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["LoadingSpinner", "LogStream"]
+
 # Maximum number of log lines to retain in the buffer.
 _MAX_LINES = 500
 

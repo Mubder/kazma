@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = ["create_skills_router"]
+
 
 def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRouter:
     """Create the skills management router."""
@@ -108,6 +110,32 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                 })
         except Exception as exc:
             logger.debug("Hub skills load failed: %s", exc)
+
+        # ── 3. Agent Skills (agentskills.io / SKILL.md)
+        try:
+            from kazma_core.agent_skills.discovery import discover_skills
+
+            for skill in discover_skills(include_disabled=True).values():
+                if skill.name in seen_names:
+                    continue
+                seen_names.add(skill.name)
+                skills.append({
+                    "id": f"agent-skill:{skill.name}",
+                    "name": skill.name,
+                    "version": skill.version or "—",
+                    "description": skill.description,
+                    "author": skill.author or skill.source or "agent-skills",
+                    "enabled": skill.enabled,
+                    "security_score": 100,
+                    "certification_level": "agent-skills",
+                    "capabilities": [],
+                    "tags": ["agent-skills", skill.scope],
+                    "location": str(skill.location),
+                    "source": skill.source,
+                })
+        except Exception as exc:
+            logger.debug("Agent Skills scan failed: %s", exc)
+
         return skills
 
     async def _search_hub(query: str = "") -> list[dict[str, Any]]:
@@ -160,12 +188,42 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
 
     @router.post("/api/skills/install")
     async def api_install_skill(req: SkillInstallRequest) -> dict[str, str]:
-        """Install a skill from the hub."""
+        """Install a skill from the Kazma hub or Agent Skills (GitHub / path).
+
+        * ``kazma-hub://author/name@version`` → hub registry install
+        * ``owner/repo``, GitHub URL, or local path → Agent Skills installer
+        """
+        skill_id = (req.skill_id or "").strip()
+        if not skill_id:
+            return {"status": "error", "error": "skill_id is required"}
+
+        # Agent Skills path (agentskills.io)
+        if not skill_id.startswith("kazma-hub://"):
+            try:
+                from kazma_core.agent_skills.installer import install_from_any
+
+                result = await install_from_any(skill_id, scope="user")
+                if result.success:
+                    paths = ", ".join(i.get("path", "") for i in result.installed)
+                    return {
+                        "status": "ok",
+                        "path": paths,
+                        "message": result.message,
+                        "installed": str(len(result.installed)),
+                    }
+                return {
+                    "status": "error",
+                    "error": "; ".join(result.errors) or result.message,
+                }
+            except Exception as exc:
+                logger.exception("Agent skill install failed")
+                return {"status": "error", "error": str(exc)}
+
         try:
             from kazma_core.hub.registry import KazmaHub
 
             hub = KazmaHub()
-            path = await hub.install(req.skill_id)
+            path = await hub.install(skill_id)
             await hub.close()
             return {"status": "ok", "path": str(path)}
         except Exception:
@@ -173,12 +231,20 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
 
     @router.post("/api/skills/uninstall")
     async def api_uninstall_skill(req: SkillInstallRequest) -> dict[str, str]:
-        """Uninstall a skill."""
+        """Uninstall a hub skill or Agent Skill."""
+        skill_id = (req.skill_id or "").strip()
         try:
+            if skill_id.startswith("agent-skill:"):
+                name = skill_id.split(":", 1)[1]
+                from kazma_core.agent_skills.installer import uninstall_skill
+
+                result = uninstall_skill(name)
+                return {"status": "ok" if result.success else "not_found"}
+
             from kazma_core.hub.registry import KazmaHub
 
             hub = KazmaHub()
-            removed = await hub.unregister(req.skill_id)
+            removed = await hub.unregister(skill_id)
             await hub.close()
             return {"status": "ok" if removed else "not_found"}
         except Exception:
@@ -187,14 +253,28 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
     @router.post("/api/skills/toggle")
     async def api_toggle_skill(req: SkillToggleRequest) -> dict[str, str]:
         """Enable or disable a skill."""
-        # Store toggle state in config
-        from kazma_core.config_store import get_config_store
+        try:
+            from kazma_core.config_store import get_config_store
 
-        store = get_config_store()
-        store.set(f"skills.enabled.{req.skill_id}", req.enabled, category="skills")
-        # Do NOT close the shared ConfigStore singleton — it would break
-        # all other components that use it.
-        return {"status": "ok", "enabled": str(req.enabled)}
+            store = get_config_store()
+            skill_id = req.skill_id
+            # Agent Skills use agent_skills.enabled.<name>
+            if skill_id.startswith("agent-skill:"):
+                name = skill_id.split(":", 1)[1]
+                store.set(
+                    f"agent_skills.enabled.{name}",
+                    req.enabled,
+                    category="skills",
+                )
+            else:
+                store.set(
+                    f"skills.enabled.{skill_id}",
+                    req.enabled,
+                    category="skills",
+                )
+            return {"status": "ok", "enabled": str(req.enabled)}
+        except Exception:
+            return {"status": "error", "error": "Internal error"}
 
     @router.post("/api/skills/validate")
     async def api_validate_skill(request: Request) -> dict[str, Any]:

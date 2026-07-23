@@ -106,6 +106,40 @@ class TestUnifiedExecutorHitlGate:
             set_safety(get_safety())  # restore
 
     @pytest.mark.asyncio
+    async def test_mcp_write_file_blocked_by_real_safety_middleware(self):
+        """Regression C1: real SafetyMiddleware must block MCP danger names.
+
+        Previously check() only knew static names (file_write/shell_exec), so
+        MCP write_file/run_command auto-passed. force_danger=True closes this.
+        """
+        from kazma_core.swarm.bus import NullBusAdapter, SwarmMessageBus, get_message_bus
+        from kazma_core.swarm.safety import SafetyMiddleware, set_safety
+
+        bus = get_message_bus()
+        bus._adapter = NullBusAdapter()
+        real_safety = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        # Do NOT mock check — exercise the real force_danger path.
+        set_safety(real_safety)
+
+        try:
+            # Static allowlist alone would treat write_file as safe
+            assert real_safety.is_danger_tool("write_file") is False
+            assert real_safety.check_sync("write_file") is True
+            assert real_safety.check_sync("write_file", force_danger=True) is False
+
+            mcp_mgr = _MockMCPManager({"write_file": "filesystem", "run_command": "shell"})
+            executor = UnifiedToolExecutor(local=None, mcp=mcp_mgr)  # type: ignore
+
+            for name in ("write_file", "run_command"):
+                result = await executor.execute(name, {"path": "/tmp/x"})
+                assert result["is_error"] is True, f"{name} must be blocked"
+                assert "denied" in result["content"].lower() or "blocked" in result["content"].lower()
+
+            mcp_mgr.execute_mcp_tool.assert_not_awaited()
+        finally:
+            set_safety(SafetyMiddleware(enabled=True, allow_headless_danger=True))
+
+    @pytest.mark.asyncio
     async def test_danger_mcp_tool_executed_when_approved(self):
         """A danger-tier MCP tool executes when safety approves."""
         from kazma_core.swarm.safety import SafetyMiddleware, set_safety

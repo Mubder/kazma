@@ -12,7 +12,11 @@ export const KazmaAPI = {
      */
     async fetch(url, opts = {}) {
         const defaults = {
-            headers: { 'Content-Type': 'application/json' },
+            // X-Requested-With marks requests as AJAX. The email_api CSRF guard
+            // (and future same-origin checks) require it on mutating POSTs — a
+            // browser cannot be tricked into sending a custom header cross-site
+            // without a CORS preflight, which Kazma never grants.
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
             credentials: 'same-origin',
         };
         const config = { ...defaults, ...opts };
@@ -22,6 +26,15 @@ export const KazmaAPI = {
 
         try {
             const res = await fetch(url, config);
+            if (res.status === 401 || res.status === 403) {
+                // Remote / LAN session expired — send browser to login once
+                if (!window.__kazmaAuthRedirecting && !url.includes('/api/auth/')) {
+                    window.__kazmaAuthRedirecting = true;
+                    const next = encodeURIComponent(location.pathname + location.search);
+                    window.location.href = '/login?next=' + next;
+                }
+                throw new Error('HTTP 401: Unauthorized');
+            }
             if (!res.ok) {
                 const text = await res.text().catch(() => res.statusText);
                 throw new Error(`HTTP ${res.status}: ${text}`);

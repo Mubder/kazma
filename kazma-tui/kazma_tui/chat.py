@@ -8,7 +8,9 @@ from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Input, ProgressBar, RichLog, Static
+from textual.widgets import Input, ListItem, ListView, ProgressBar, RichLog, Static
+
+__all__ = ["ChatPanel", "ROLE_HEX"]
 
 logger = logging.getLogger(__name__)
 
@@ -31,17 +33,17 @@ class ChatPanel(Vertical):
         ("/help", "Show available commands"),
         ("/clear", "Clear chat history"),
         ("/reset", "Reset conversation context"),
-        ("/model", "Show or switch active model"),
+        ("/model [set <name>]", "Show/switch active model (interactive picker)"),
         ("/models", "Alias for /model"),
         ("/status", "Gateway health overview"),
         ("/memory", "Memory store stats"),
         ("/cost", "Session token spend"),
         ("/context", "Context window usage"),
-        ("/personality", "Show or switch personality"),
+        ("/personality [list|<name>]", "Show/switch personality"),
         ("/config", "Interactive config wizard"),
-        ("/replay", "Time travel: list/replay snapshots"),
+        ("/replay [list|clear|<n>]", "Time travel: list/replay snapshots"),
         ("/export", "Export session to file"),
-        ("/swarm", "Swarm dispatch and management"),
+        ("/swarm [status|list|<task>]", "Swarm dispatch and management"),
         ("/quit", "Exit Kazma TUI"),
     ]
 
@@ -59,12 +61,17 @@ class ChatPanel(Vertical):
         dock: bottom; offset: 0 -4;
         width: auto; min-width: 30; max-height: 18;
         background: $panel; border: solid $primary;
-        padding: 0 1; display: none;
-        overflow-y: auto;
+        display: none;
+    }
+    ChatPanel > #autocomplete ListItem {
+        padding: 0 1;
+        height: auto;
+    }
+    ChatPanel > #autocomplete ListItem.-highlight {
+        background: $primary 20%;
     }
     ChatPanel > #autocomplete .ac-cmd { color: $primary; text-style: bold; }
     ChatPanel > #autocomplete .ac-desc { color: $text-muted; }
-    ChatPanel > #autocomplete .ac-selected { background: $primary 15%; }
     """
 
     BINDINGS = [
@@ -76,75 +83,147 @@ class ChatPanel(Vertical):
     def __init__(self) -> None:
         super().__init__()
         self._last_response: str = ""
+        self._messages: list[dict[str, Any]] = []
         self._pulse_timer = None
         self._busy: bool = False
         self._ac_matches: list[tuple[str, str]] = []
         self._ac_index: int = 0
+        self._model_cache: list[str] = []
+        self._ac_suppress: bool = False
 
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
         yield ProgressBar(id="chat-progress", total=100, show_eta=False)
         yield Input(placeholder="Type... / for commands", id="chat-input")
-        yield Static("", id="autocomplete")
+        yield ListView(id="autocomplete")
 
     # ── Slash command autocomplete ─────────────────────────────────
     def on_input_changed(self, event: Input.Changed) -> None:
         """Show autocomplete suggestions when the user types /."""
         if event.input.id != "chat-input":
             return
+        if self._ac_suppress:
+            return
         val = event.value
-        ac = self.query_one("#autocomplete", Static)
+        ac = self.query_one("#autocomplete", ListView)
 
         if not val.startswith("/"):
-            ac.styles.display = "none"
+            ac.display = False
             self._ac_matches = []
             return
 
-        partial = val.split()[0] if val.split() else val
+        parts = val.split(None, 2)
+        cmd = parts[0].lower() if parts else val
+
+        # /model set <partial> → show matching models
+        if cmd in ("/model", "/models") and len(parts) >= 2 and parts[1].lower() == "set":
+            partial = parts[2] if len(parts) > 2 else ""
+            if not self._model_cache:
+                self._refresh_model_cache()
+            matches = [
+                (m, "")
+                for m in self._model_cache
+                if partial.lower() in m.lower()
+            ]
+            self._ac_matches = matches[:15]
+            self._ac_index = 0
+            self._populate_ac_list(ac)
+            return
+
+        # Default: match slash commands
+        partial = parts[0] if parts else val
         matches = [(c, d) for c, d in self.SLASH_COMMANDS if c.startswith(partial)]
         self._ac_matches = matches
         self._ac_index = 0
+        self._populate_ac_list(ac)
 
-        if matches:
-            lines = []
-            for i, (cmd, desc) in enumerate(matches):
-                marker = ">" if i == self._ac_index else " "
-                lines.append(f"{marker} [bold $primary]{cmd:<10}[/] [dim]{desc}[/]")
-            ac.update("\n".join(lines))
-            ac.styles.display = "block"
-        else:
-            ac.styles.display = "none"
+    def _populate_ac_list(self, ac: ListView) -> None:
+        """Fill the autocomplete ListView with current matches."""
+        ac.clear()
+        if not self._ac_matches:
+            ac.display = False
+            return
+        for cmd, desc in self._ac_matches:
+            if desc:
+                label = f" [bold $primary]{cmd}[/]  [dim]{desc}[/]"
+            else:
+                label = f" [bold $primary]{cmd}[/]"
+            ac.append(ListItem(Static(label)))
+        ac.display = True
+        # Highlight the current index
+        if self._ac_index < len(self._ac_matches):
+            ac.index = self._ac_index
+
+    def _refresh_model_cache(self) -> None:
+        """Load available model names for autocomplete."""
+        try:
+            from kazma_core.settings.model_registry import get_universal_models
+            self._model_cache = [m["name"] for m in get_universal_models()]
+        except Exception:
+            self._model_cache = []
 
     def on_key(self, event) -> None:
         """Handle Tab/Arrow keys for autocomplete navigation."""
-        ac = self.query_one("#autocomplete", Static)
-        if ac.styles.display == "none" or not self._ac_matches:
+        ac = self.query_one("#autocomplete", ListView)
+        if not ac.display or not self._ac_matches:
             return
 
         if event.key in ("tab", "down"):
             self._ac_index = (self._ac_index + 1) % len(self._ac_matches)
-            self._render_autocomplete()
+            ac.index = self._ac_index
             event.prevent_default()
         elif event.key == "up":
             self._ac_index = (self._ac_index - 1) % len(self._ac_matches)
-            self._render_autocomplete()
+            ac.index = self._ac_index
             event.prevent_default()
-        elif event.key == "enter" and len(self._ac_matches) == 1:
-            # Auto-complete the single match
-            cmd = self._ac_matches[0][0]
-            inp = self.query_one("#chat-input", Input)
-            inp.value = cmd + " "
-            inp.cursor_position = len(cmd) + 1
-            ac.styles.display = "none"
+        elif event.key == "enter" and self._ac_matches:
+            idx = min(self._ac_index, len(self._ac_matches) - 1)
+            self._apply_ac_match(idx)
+            ac.display = False
+            self._ac_matches = []
             event.prevent_default()
 
-    def _render_autocomplete(self) -> None:
-        ac = self.query_one("#autocomplete", Static)
-        lines = []
-        for i, (cmd, desc) in enumerate(self._ac_matches):
-            prefix = ">" if i == self._ac_index else " "
-            lines.append(f" {prefix} [bold $primary]{cmd:<10}[/] [dim]{desc}[/]")
-        ac.update("\n".join(lines))
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Mouse click on autocomplete item = select it."""
+        ac = self.query_one("#autocomplete", ListView)
+        if event.list_view is not ac:
+            return
+        idx = event.index if event.index is not None else self._ac_index
+        if idx is not None and 0 <= idx < len(self._ac_matches):
+            self._apply_ac_match(idx)
+            ac.display = False
+            self._ac_matches = []
+
+    def _apply_ac_match(self, idx: int) -> None:
+        """Fill the input with the selected autocomplete match."""
+        if idx < 0 or idx >= len(self._ac_matches):
+            return
+        match_text = self._ac_matches[idx][0]
+        inp = self.query_one("#chat-input", Input)
+
+        # Check if we're in model set mode
+        parts = inp.value.split(None, 2)
+        if len(parts) >= 2 and parts[0].lower() in ("/model", "/models") and parts[1].lower() == "set":
+            new_val = f"/model set {match_text}"
+        else:
+            new_val = match_text + " "
+
+        # Set value, then immediately override the selection that _watch_value
+        # stretches. Selection is applied synchronously in the reactive setter.
+        self._ac_suppress = True
+        inp.value = new_val
+        pos = len(new_val)
+        inp.selection = (pos, pos)
+        inp.cursor_position = pos
+        inp.focus()
+        # Second pass: timer fires after all reactive watchers settle
+        self.set_timer(0.05, lambda: self._clear_ac_selection(inp, pos))
+
+    def _clear_ac_selection(self, inp: Input, pos: int) -> None:
+        """Final selection clear after all reactive processing settles."""
+        inp.selection = (pos, pos)
+        inp.cursor_position = pos
+        self._ac_suppress = False
 
     # ── Message display ────────────────────────────────────────────
 
@@ -213,6 +292,7 @@ class ChatPanel(Vertical):
                 return
 
             messages = [{"role": "user", "content": prompt}]
+            self._messages.append({"role": "user", "content": prompt})
             # Inject system prompt from kazma.yaml so the model knows to
             # respond in the user's language and follow Kazma's persona.
             system_prompt = self._get_system_prompt()
@@ -222,6 +302,7 @@ class ChatPanel(Vertical):
             content = getattr(response, "content", "") or ""
             if content:
                 self._last_response = content
+                self._messages.append({"role": "assistant", "content": content})
                 log.write(content)
             else:
                 log.write("[dim](empty response)[/]")
@@ -237,6 +318,22 @@ class ChatPanel(Vertical):
                 logger.debug("Re-enable input failed: %s", exc)
 
     # ── Input handling ─────────────────────────────────────────────
+
+    def _on_model_picked(self, model_name: str | None) -> None:
+        """Callback when a model is selected from the picker."""
+        if not model_name:
+            return
+        try:
+            from kazma_core.model_registry import get_model_registry
+            registry = get_model_registry()
+            registry.set_active_model(model_name)
+            self.write("system", f"Active model set to: {model_name}")
+        except Exception as e:
+            self.write("error", f"Failed to set model: {e}")
+        try:
+            self.query_one("#chat-input", Input).focus()
+        except Exception:
+            pass
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = event.value.strip()
@@ -282,20 +379,235 @@ class ChatPanel(Vertical):
             lines.append("Tip: Type / and use Tab/arrows to autocomplete.")
             self.write("system", "\n".join(lines))
         elif cmd == "/clear":
-            # Use the app-level action which shows a confirmation dialog
             self.app.action_clear_chat()
         elif cmd == "/quit":
             self.app.exit()
         elif cmd in ("/model", "/models"):
-            try:
-                from kazma_core.settings.model_registry import get_model_list_text
-                self.write("system", get_model_list_text("tui"))
-            except Exception as e:
-                self.write("error", f"Model registry: {e}")
+            parts = text.split(None, 2)
+            sub = parts[1].lower() if len(parts) > 1 else ""
+            if sub == "set" and len(parts) > 2:
+                model_name = parts[2].strip()
+                try:
+                    from kazma_core.model_registry import get_model_registry
+                    registry = get_model_registry()
+                    registry.set_active_model(model_name)
+                    self.write("system", f"Active model set to: {model_name}")
+                except Exception as e:
+                    self.write("error", f"Failed to set model: {e}")
+            else:
+                try:
+                    from kazma_core.model_registry import get_model_registry
+                    registry = get_model_registry()
+                    active = getattr(registry, "_active_model", "") or ""
+                except Exception:
+                    active = ""
+                from kazma_tui.widgets.model_picker import ModelPicker
+                self.app.push_screen(ModelPicker(active_model=active), self._on_model_picked)
+        elif cmd == "/memory":
+            self._cmd_memory()
+        elif cmd == "/status":
+            self._cmd_status()
+        elif cmd == "/cost":
+            self._cmd_cost()
+        elif cmd == "/context":
+            self._cmd_context()
+        elif cmd == "/reset":
+            self.write("system", "Conversation context reset.")
+        elif cmd == "/personality":
+            self._cmd_personality(text)
+        elif cmd == "/config":
+            self.write("system", "Config wizard available in the Settings tab.")
+        elif cmd == "/replay":
+            self._cmd_replay(text)
+        elif cmd == "/export":
+            self._cmd_export()
         elif cmd == "/swarm":
             self.app.call_later(self._handle_swarm_command, text)
         else:
             self.write("system", f"Unknown: {cmd}")
+
+    def _cmd_memory(self) -> None:
+        try:
+            from kazma_core.memory.health import build_memory_health
+            health = build_memory_health()
+            status = health.get("status", "?")
+            summary = health.get("summary", "")
+            lines = [f"Memory Status: {status}", summary, ""]
+            for c in health.get("components", []):
+                icon = "+" if c.get("ok") else "-"
+                lines.append(f"  [{icon}] {c['name']}: {c.get('status', '?')}")
+            self.write("system", "\n".join(lines))
+        except Exception as e:
+            self.write("error", f"Memory health unavailable: {e}")
+
+    def _cmd_status(self) -> None:
+        try:
+            from kazma_core.model_registry import get_model_registry
+            registry = get_model_registry()
+            provider = getattr(registry, "_active_provider", "") or "none"
+            model = getattr(registry, "_active_model", "") or "none"
+            lines = [
+                "Gateway Status",
+                f"  Provider: {provider}",
+                f"  Model:    {model}",
+            ]
+            try:
+                from kazma_core.swarm import get_swarm_engine
+                engine = get_swarm_engine()
+                if engine:
+                    names = engine.worker_names
+                    lines.append(f"  Workers:  {len(names)}")
+                else:
+                    lines.append("  Workers:  (swarm not initialized)")
+            except Exception:
+                lines.append("  Workers:  (unavailable)")
+            self.write("system", "\n".join(lines))
+        except Exception as e:
+            self.write("error", f"Status unavailable: {e}")
+
+    def _cmd_cost(self) -> None:
+        try:
+            from kazma_core.tracing import get_trace_store
+            stats = get_trace_store().stats()
+            cost = stats.get("total_cost", 0.0)
+            tokens = stats.get("total_tokens", 0)
+            llm_calls = stats.get("total_llm_calls", 0)
+            tool_calls = stats.get("total_tool_calls", 0)
+            uptime_s = stats.get("uptime_seconds", 0)
+            uptime = f"{int(uptime_s // 60)}m {int(uptime_s % 60)}s"
+            lines = [
+                "Session Cost Report",
+                f"  Total Cost:   ${cost:.4f}",
+                f"  Total Tokens: {tokens:,}",
+                f"  LLM Calls:    {llm_calls}",
+                f"  Tool Calls:   {tool_calls}",
+                f"  Uptime:       {uptime}",
+            ]
+            self.write("system", "\n".join(lines))
+        except Exception as e:
+            self.write("error", f"Cost tracking unavailable: {e}")
+
+    def _cmd_context(self) -> None:
+        try:
+            from kazma_core.summarizer import estimate_tokens, TOKEN_THRESHOLD
+            from kazma_core.config_store import get_config_store
+            cs = get_config_store()
+            window = cs.get("memory.max_context_tokens", 128_000)
+            tokens = estimate_tokens(self._messages) if self._messages else 0
+            pct = (tokens / window * 100) if window else 0
+            bar_len = 20
+            filled = int(bar_len * pct / 100)
+            bar = "#" * filled + "-" * (bar_len - filled)
+            lines = [
+                "Context Window",
+                f"  Tokens:    {tokens:,} / {window:,} ({pct:.1f}%)",
+                f"  [{bar}]",
+                f"  Messages:  {len(self._messages)}",
+                f"  Threshold: {TOKEN_THRESHOLD:,} tokens (compaction at 80%)",
+            ]
+            self.write("system", "\n".join(lines))
+        except Exception as e:
+            self.write("error", f"Context info unavailable: {e}")
+
+    def _cmd_personality(self, text: str = "/personality") -> None:
+        try:
+            from kazma_core.tools.personality_cmd import handle_personality_command
+            from kazma_core.personalities import list_personalities, get_current_personality
+            parts = text.strip().split()
+            sub = parts[1].lower() if len(parts) > 1 else ""
+
+            if not sub or sub == "current":
+                # Show current personality
+                p = get_current_personality()
+                self.write("system", f"Current personality: {p.name} {p.emoji}\n{p.description}")
+                # Also list available
+                names = [f"{x.name} {x.emoji}" for x in list_personalities()]
+                self.write("system", "\nAvailable: " + ", ".join(names) + "\nSwitch: /personality <name>")
+            else:
+                response = handle_personality_command(text)
+                self.write("system", response)
+        except Exception as e:
+            self.write("error", f"Personality command failed: {e}")
+
+    def _cmd_replay(self, text: str) -> None:
+        parts = text.strip().split()
+        sub = parts[1].lower() if len(parts) > 1 else ""
+
+        if not sub:
+            self.write("system",
+                "Replay Commands:\n"
+                "  /replay list          — show available snapshots\n"
+                "  /replay <iteration>   — show snapshot details\n"
+                "  /replay clear         — clear all snapshots")
+            return
+
+        try:
+            from kazma_core.time_travel import SnapshotStore, DEFAULT_DB_PATH
+            from pathlib import Path
+            db_path = Path(DEFAULT_DB_PATH)
+            if not db_path.exists():
+                self.write("system", "No snapshots available (snapshot DB not found).")
+                return
+            store = SnapshotStore(str(db_path))
+            thread_id = "tui-session"
+
+            if sub == "list":
+                records = store.list_for_thread(thread_id)
+                if not records:
+                    self.write("system", "No snapshots available for this session.")
+                else:
+                    lines = ["Available snapshots:", ""]
+                    for rec in records:
+                        lines.append(f"  Iteration {rec.iteration}  |  {rec.timestamp}  |  model={rec.model_used or '?'}")
+                    self.write("system", "\n".join(lines))
+            elif sub == "clear":
+                count = store.clear_thread(thread_id)
+                self.write("system", f"Cleared {count} snapshot(s) for this session.")
+            else:
+                try:
+                    iteration = int(sub)
+                except ValueError:
+                    self.write("system", "Unknown sub-command. Use: /replay list, /replay clear, or /replay <number>")
+                    return
+                rec = store.get(thread_id, iteration)
+                if rec is None:
+                    self.write("system", f"No snapshot for iteration {iteration}.")
+                else:
+                    state = rec.get_state()
+                    msg_count = len(state.get("messages", []))
+                    self.write("system", f"Snapshot {rec.iteration}  |  {rec.timestamp}  |  model={rec.model_used or '?'}  |  {msg_count} messages")
+            store.close()
+        except Exception as e:
+            self.write("error", f"Replay command failed: {e}")
+
+    def _cmd_export(self) -> None:
+        try:
+            from datetime import datetime
+            from pathlib import Path
+            import json
+            export_dir = Path("kazma-data/exports")
+            export_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # Markdown
+            md_path = export_dir / f"chat_{ts}.md"
+            lines = [f"# Kazma Chat Export", f"Date: {datetime.now().isoformat()}", ""]
+            for msg in self._messages:
+                role = msg.get("role", "unknown").upper()
+                content = msg.get("content", "")
+                lines.append(f"## {role}")
+                lines.append("")
+                lines.append(content)
+                lines.append("")
+            md_path.write_text("\n".join(lines), encoding="utf-8")
+
+            # JSON
+            json_path = export_dir / f"chat_{ts}.json"
+            json_path.write_text(json.dumps(self._messages, indent=2, ensure_ascii=False), encoding="utf-8")
+
+            self.write("system", f"Exported {len(self._messages)} messages to:\n  {md_path}\n  {json_path}")
+        except Exception as e:
+            self.write("error", f"Export failed: {e}")
 
     async def _handle_swarm_command(self, text: str) -> None:
         """Handle /swarm commands and bare 'swarm' mentions in the TUI chat.
@@ -318,104 +630,111 @@ class ChatPanel(Vertical):
         # Determine if this is a /swarm command or a bare mention
         is_slash = text.lower().startswith("/swarm")
 
-        if is_slash:
-            parts = text.split(None, 2)  # ["/swarm", sub, rest]
-            if len(parts) < 2:
-                self.write("system",
-                    "Swarm Commands:\n"
-                    "  /swarm <task> — auto-route to best worker\n"
-                    "  /swarm <worker> <task> — dispatch to one worker\n"
-                    "  /swarm broadcast <task> — all workers\n"
-                    "  /swarm status — show swarm status\n"
-                    "  /swarm list — list workers")
-                return
-            sub = parts[1].lower()
-            task_body = parts[2] if len(parts) > 2 else ""
-        else:
-            # Bare mention: strip "swarm" keyword and treat the rest as a task
-            sub = ""
-            # Remove "swarm" (and optional colon) from the start or middle
-            task_body = re.sub(r'\bswarm\b\s*:?\s*', '', text, count=1, flags=re.IGNORECASE).strip()
-            if not task_body:
-                self.write("system",
-                    "Swarm Commands:\n"
-                    "  /swarm <task> — auto-route to best worker\n"
-                    "  /swarm <worker> <task> — dispatch to one worker\n"
-                    "  /swarm broadcast <task> — all workers\n"
-                    "  /swarm status — show swarm status\n"
-                    "  /swarm list — list workers\n"
-                    "  Or just say: swarm <task>")
-                return
-
         try:
-            from kazma_core.swarm import get_swarm_engine
-        except Exception:
-            self.write("error", "Swarm engine not available.")
-            return
+            if is_slash:
+                parts = text.split(None, 2)  # ["/swarm", sub, rest]
+                if len(parts) < 2:
+                    self.write("system",
+                        "Swarm Commands:\n"
+                        "  /swarm <task> — auto-route to best worker\n"
+                        "  /swarm <worker> <task> — dispatch to one worker\n"
+                        "  /swarm broadcast <task> — all workers\n"
+                        "  /swarm status — show swarm status\n"
+                        "  /swarm list — list workers")
+                    return
+                sub = parts[1].lower()
+                task_body = parts[2] if len(parts) > 2 else ""
+            else:
+                # Bare mention: strip "swarm" keyword and treat the rest as a task
+                sub = ""
+                # Remove "swarm" (and optional colon) from the start or middle
+                task_body = re.sub(r'\bswarm\b\s*:?\s*', '', text, count=1, flags=re.IGNORECASE).strip()
+                if not task_body:
+                    self.write("system",
+                        "Swarm Commands:\n"
+                        "  /swarm <task> — auto-route to best worker\n"
+                        "  /swarm <worker> <task> — dispatch to one worker\n"
+                        "  /swarm broadcast <task> — all workers\n"
+                        "  /swarm status — show swarm status\n"
+                        "  /swarm list — list workers\n"
+                        "  Or just say: swarm <task>")
+                    return
 
-        engine = get_swarm_engine()
-        if engine is None:
-            self.write("error", "Swarm engine not initialized.")
-            return
-
-        # sub and task_body are already set above (in the is_slash / else block)
-
-        # ── Known subcommands (only for /swarm prefix) ──────────────
-        if is_slash:
-            # /swarm status
-            if sub == "status":
-                names = engine.worker_names
-                lines = [f"Swarm Status ({len(names)} workers):"]
-                for name in names:
-                    w = engine.get_worker(name)
-                    model = getattr(w, "model", "") or "?"
-                    lines.append(f"  {name} [{model}]")
-                if not names:
-                    lines.append("  (no workers registered)")
-                self.write("system", "\n".join(lines))
+            try:
+                from kazma_core.swarm import get_swarm_engine
+            except Exception:
+                self.write("error", "Swarm engine not available.")
                 return
 
-            # /swarm list
-            if sub == "list":
-                names = engine.worker_names
-                if not names:
-                    self.write("system", "No workers registered. Add workers via the Web UI Swarm panel.")
-                else:
-                    lines = [f"Workers ({len(names)}):"]
+            engine = get_swarm_engine()
+            if engine is None:
+                self.write("error", "Swarm engine not initialized.")
+                return
+
+            # sub and task_body are already set above (in the is_slash / else block)
+
+            # ── Known subcommands (only for /swarm prefix) ──────────────
+            if is_slash:
+                # /swarm status
+                if sub == "status":
+                    names = engine.worker_names
+                    lines = [f"Swarm Status ({len(names)} workers):"]
                     for name in names:
                         w = engine.get_worker(name)
-                        role = getattr(w, "role", "") or ""
-                        model = getattr(w, "model", "") or ""
-                        lines.append(f"  {name}" + (f" ({role})" if role else "") + (f" [{model}]" if model else ""))
+                        model = getattr(w, "model", "") or "?"
+                        lines.append(f"  {name} [{model}]")
+                    if not names:
+                        lines.append("  (no workers registered)")
                     self.write("system", "\n".join(lines))
-                return
-
-            # /swarm broadcast <task>
-            if sub == "broadcast":
-                if not task_body:
-                    self.write("error", "Usage: /swarm broadcast <task>")
                     return
-                await self._dispatch_swarm(task_body, engine, broadcast=True)
-                return
 
-            # /swarm <worker> <task>
-            if sub in [n.lower() for n in engine.worker_names]:
-                if not task_body:
-                    self.write("error", f"Usage: /swarm {sub} <task>")
+                # /swarm list
+                if sub == "list":
+                    names = engine.worker_names
+                    if not names:
+                        self.write("system", "No workers registered. Add workers via the Web UI Swarm panel.")
+                    else:
+                        lines = [f"Workers ({len(names)}):"]
+                        for name in names:
+                            w = engine.get_worker(name)
+                            role = getattr(w, "role", "") or ""
+                            model = getattr(w, "model", "") or ""
+                            lines.append(f"  {name}" + (f" ({role})" if role else "") + (f" [{model}]" if model else ""))
+                        self.write("system", "\n".join(lines))
                     return
-                await self._dispatch_swarm(task_body, engine, worker_name=sub)
+
+                # /swarm broadcast <task>
+                if sub == "broadcast":
+                    if not task_body:
+                        self.write("error", "Usage: /swarm broadcast <task>")
+                        return
+                    await self._dispatch_swarm(task_body, engine, broadcast=True)
+                    return
+
+                # /swarm <worker> <task>
+                if sub in [n.lower() for n in engine.worker_names]:
+                    if not task_body:
+                        self.write("error", f"Usage: /swarm {sub} <task>")
+                        return
+                    await self._dispatch_swarm(task_body, engine, worker_name=sub)
+                    return
+
+                # /swarm <task> — auto-route
+                task = text[len("/swarm "):].strip()
+                if not task:
+                    self.write("error", "Usage: /swarm <task>")
+                    return
+                await self._dispatch_swarm(task, engine)
                 return
 
-            # /swarm <task> — auto-route
-            task = text[len("/swarm "):].strip()
-            if not task:
-                self.write("error", "Usage: /swarm <task>")
-                return
-            await self._dispatch_swarm(task, engine)
-            return
-
-        # Bare mention: dispatch the extracted task body
-        await self._dispatch_swarm(task_body, engine)
+            # Bare mention: dispatch the extracted task body
+            await self._dispatch_swarm(task_body, engine)
+        finally:
+            self._busy = False
+            try:
+                self.query_one("#chat-input", Input).disabled = False
+            except Exception:
+                pass
 
     async def _dispatch_swarm(
         self,

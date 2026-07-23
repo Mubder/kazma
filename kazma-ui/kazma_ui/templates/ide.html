@@ -218,7 +218,7 @@
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <input type="text" class="form-input" placeholder="Send instruction to swarm…"
                  x-model="swarmInstruction" @keydown.enter="sendToSwarm()" style="flex:1;min-width:180px;font-size:0.8rem;">
-          <button class="btn btn-sm btn-primary" @click="sendToSwarm()" :disabled="busy">🐝 Send to swarm</button>
+          <button class="btn btn-sm btn-primary" @click="sendToSwarm()" :disabled="busy"><span class="ki" data-icon="swarm" aria-hidden="true"></span> Send to swarm</button>
         </div>
       </div>
 
@@ -240,14 +240,14 @@
          style="padding:0;border:1px solid var(--border-subtle);flex-direction:column;display:flex;">
       <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:8px 12px;">
         <div style="display:flex;align-items:center;gap:6px;">
-          <span>💬</span>
+          <span><span class="ki" data-icon="message" aria-hidden="true"></span></span>
           <h3 style="margin:0;font-size:0.9rem;font-weight:600;">AI Chat</h3>
           <span x-show="currentFile" style="font-size:0.68rem;color:var(--text-muted);"
                 x-text="'· ' + currentFile"></span>
         </div>
         <div style="display:flex;gap:6px;">
-          <button class="btn btn-xs btn-secondary" @click="clearChat()" title="Clear conversation">🆕</button>
-          <button class="btn btn-xs btn-secondary" @click="toggleChat()" title="Close panel">✕</button>
+          <button class="btn btn-xs btn-secondary" @click="clearChat()" title="Clear conversation"><span class="ki" data-icon="sparkles" aria-hidden="true"></span></button>
+          <button class="btn btn-xs btn-secondary" @click="toggleChat()" title="Close panel"><span class="ki" data-icon="x" aria-hidden="true"></span></button>
         </div>
       </div>
       <div id="ide-chat-messages" class="ide-chat-msgs" style="padding:12px;flex:1;">
@@ -266,7 +266,7 @@
             <!-- tool call -->
             <template x-if="m.role === 'tool_call'">
               <div class="chat-tool">
-                <span style="font-weight:600;color:var(--accent);">🔧 <span x-text="m.tool"></span></span>
+                <span style="font-weight:600;color:var(--accent);"><span class="ki" data-icon="wrench" aria-hidden="true"></span> <span x-text="m.tool"></span></span>
                 <pre x-text="_fmtToolArgs(m.args)"></pre>
               </div>
             </template>
@@ -280,7 +280,7 @@
             <!-- HITL approval -->
             <template x-if="m.role === 'approval'">
               <div class="chat-bubble" style="background:var(--warning-bg, #fef3c7);border:1px solid var(--warning);">
-                <span style="font-weight:600;">⚠️ Approval required</span>
+                <span style="font-weight:600;"><span class="ki" data-icon="alert" aria-hidden="true"></span> Approval required</span>
                 <div x-text="m.message || ('Tool: ' + m.tool)" style="font-size:0.78rem;margin-top:4px;"></div>
                 <div style="margin-top:6px;font-size:0.72rem;color:var(--text-muted);">Approve via the chat or Telegram/Discord.</div>
               </div>
@@ -295,7 +295,7 @@
                   :disabled="chatBusy"
                   style="flex:1;resize:none;font-size:0.82rem;font-family:inherit;"></textarea>
         <div style="display:flex;flex-direction:column;gap:4px;">
-          <button class="btn btn-sm btn-primary" @click="sendChat()" :disabled="chatBusy || !chatInput.trim()">➤</button>
+          <button class="btn btn-sm btn-primary" @click="sendChat()" :disabled="chatBusy || !chatInput.trim()"><span class="ki" data-icon="chevron-right" aria-hidden="true"></span></button>
           <button class="btn btn-sm btn-secondary" @click="abortChat()" x-show="chatBusy" x-cloak>⏹</button>
         </div>
       </div>

@@ -2,7 +2,7 @@
 
 Verifies:
 1. Context-scoped tenant_id extraction from inbound X-Tenant-ID headers.
-2. Fallback to cookies and base64 JWT payload decoding.
+2. Fallback to cookies; JWT only when KAZMA_JWT_SECRET is set (verified).
 3. Clean thread/async context boundary reset after request completes.
 4. Response cookie propagation of the active tenant.
 """
@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -30,15 +33,26 @@ def read_tenant():
 
 
 def create_mock_jwt(tenant_id: str) -> str:
-    """Generate a mock base64url-encoded JWT token containing the tenant_id claim."""
+    """Generate an *unsigned* mock JWT (forgery vector — must be rejected)."""
     header = {"alg": "HS256", "typ": "JWT"}
     payload = {"tenant_id": tenant_id, "user": "test-user"}
-    
+
     header_b64 = base64.urlsafe_b64encode(json.dumps(header).encode()).decode().rstrip("=")
     payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
     signature_b64 = base64.urlsafe_b64encode(b"mock-signature").decode().rstrip("=")
-    
+
     return f"{header_b64}.{payload_b64}.{signature_b64}"
+
+
+def create_signed_jwt(tenant_id: str, secret: str) -> str:
+    """HS256-signed JWT with exp claim for verified tenant extraction."""
+    import jwt as _jwt
+
+    payload = {
+        "tenant_id": tenant_id,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+    }
+    return _jwt.encode(payload, secret, algorithm="HS256")
 
 
 def test_tenant_middleware_no_tenant():
@@ -87,31 +101,46 @@ def test_tenant_middleware_cookie():
     assert response.json() == {"active_tenant": "tenant-delta"}
 
 
-def test_tenant_middleware_bearer_jwt():
-    """Verify tenant extraction from Authorization Bearer JWT."""
+def test_tenant_middleware_bearer_jwt_unsigned_rejected(monkeypatch):
+    """Unsigned/forged JWT must not set tenant (C2/H5 — no verify = no trust)."""
+    monkeypatch.delenv("KAZMA_JWT_SECRET", raising=False)
     client = TestClient(app)
     jwt_token = create_mock_jwt("tenant-epsilon")
-    
+
     response = client.get(
         "/api/test-tenant",
-        headers={"Authorization": f"Bearer {jwt_token}"}
+        headers={"Authorization": f"Bearer {jwt_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {"active_tenant": None}
+
+
+def test_tenant_middleware_bearer_jwt_verified(monkeypatch):
+    """Signed JWT with KAZMA_JWT_SECRET set extracts tenant_id."""
+    secret = "unit-test-jwt-secret-key"
+    monkeypatch.setenv("KAZMA_JWT_SECRET", secret)
+    client = TestClient(app)
+    jwt_token = create_signed_jwt("tenant-epsilon", secret)
+
+    response = client.get(
+        "/api/test-tenant",
+        headers={"Authorization": f"Bearer {jwt_token}"},
     )
     assert response.status_code == 200
     assert response.json() == {"active_tenant": "tenant-epsilon"}
     assert response.cookies.get("X-Tenant-ID") == "tenant-epsilon"
 
 
-def test_tenant_middleware_cookie_jwt():
-    """Verify tenant extraction from JWT passed in cookie."""
+def test_tenant_middleware_cookie_jwt_unsigned_rejected(monkeypatch):
+    """Unsigned JWT cookie must not set tenant without KAZMA_JWT_SECRET."""
+    monkeypatch.delenv("KAZMA_JWT_SECRET", raising=False)
     client = TestClient(app)
     jwt_token = create_mock_jwt("tenant-zeta")
-    
-    # Test cookie named 'jwt'
+
     client.cookies.set("jwt", jwt_token)
     response = client.get("/api/test-tenant")
     assert response.status_code == 200
-    assert response.json() == {"active_tenant": "tenant-zeta"}
-    assert response.cookies.get("X-Tenant-ID") == "tenant-zeta"
+    assert response.json() == {"active_tenant": None}
 
 
 def test_tenant_context_leak_isolation():

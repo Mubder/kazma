@@ -10,6 +10,8 @@ from .store import _build_target_id
 
 logger = logging.getLogger(__name__)
 
+__all__: list[str] = []
+
 
 async def _check_graph_interrupt(graph: Any, config: dict[str, Any]) -> dict[str, Any] | None:
     """Return the hitl_approval interrupt payload if the graph is paused, else None.
@@ -28,8 +30,23 @@ async def _check_graph_interrupt(graph: Any, config: dict[str, Any]) -> dict[str
     for task in getattr(snapshot, "tasks", []) or []:
         for intr in getattr(task, "interrupts", []) or []:
             payload = getattr(intr, "value", None)
+            if payload is None and isinstance(intr, dict):
+                payload = intr.get("value", intr)
+            if isinstance(payload, (list, tuple)) and payload:
+                payload = payload[0]
             if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
                 return payload
+            # Fallback: tool/args shape without type tag
+            if isinstance(payload, dict) and (
+                "tool" in payload or "args" in payload or "tools" in payload
+            ):
+                return {
+                    "type": "hitl_approval",
+                    "tool": payload.get("tool", "unknown"),
+                    "args": payload.get("args", payload.get("arguments", {})),
+                    "tools": payload.get("tools") or [],
+                    "message": payload.get("message", ""),
+                }
     return None
 
 
@@ -70,6 +87,7 @@ async def _handle_hitl_resume(
     thread_id: str,
     store: SessionStore,
     manager: Any,
+    lock_getter: Any = None,
 ) -> bool:
     """Process a ``hitl approve|deny <thread_id>`` message.
 
@@ -78,6 +96,17 @@ async def _handle_hitl_resume(
 
     Resumes the paused graph with ``Command(resume=...)`` and sends the
     resulting assistant reply back to the platform.
+
+    ``lock_getter`` is the handler's per-thread lock factory. The resume
+    MUST serialize against regular turns on the same thread: a concurrent
+    ``graph.ainvoke()`` would interleave checkpoint writes and corrupt the
+    message history.
+
+    Stale cards: on langgraph >= 1.x, a new user message on a paused thread
+    silently discards the pending interrupt, and a later ``Command(resume=)``
+    is a silent no-op that replays old state. We therefore verify a pending
+    ``hitl_approval`` interrupt actually exists before resuming, and tell
+    the user when their card has expired instead of pretending to approve.
 
     Returns True if the message was handled (always, for hitl commands).
     """
@@ -105,36 +134,91 @@ async def _handle_hitl_resume(
     # initiated the paused task. Look up the target thread's context
     # and compare sender_id. This prevents any user from approving
     # another user's paused danger-tool execution.
+    # Fail-closed: if the target session is missing, deny cross-thread
+    # approvals rather than skipping the check.
     if target_thread != thread_id:
         target_ctx = await store.get(target_thread)
-        if target_ctx:
-            original_sender = target_ctx.get("sender_id", "")
-            current_sender = msg.sender_id
-            if original_sender and original_sender != current_sender:
-                logger.warning(
-                    "[HITL] Authz denied: %s tried to approve thread %s owned by %s",
-                    current_sender, target_thread, original_sender,
+        if not target_ctx:
+            logger.warning(
+                "[HITL] Authz denied: cross-thread approve for missing session %s by %s",
+                target_thread, msg.sender_id,
+            )
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text="⚠️ Cannot approve: target session not found.",
+                    context_metadata=ctx,
+                )
+            )
+            return True
+        original_sender = (target_ctx.get("sender_id") or "").strip()
+        current_sender = (msg.sender_id or "").strip()
+        # Fail-closed (audit M6): empty owner or mismatch → deny
+        if not original_sender or not current_sender or original_sender != current_sender:
+            logger.warning(
+                "[HITL] Authz denied: %s tried to approve thread %s owned by %s",
+                current_sender or "(empty)",
+                target_thread,
+                original_sender or "(empty)",
+            )
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text="⚠️ You are not authorized to approve this task.",
+                    context_metadata=ctx,
+                )
+            )
+            return True
+
+    try:
+        import contextlib
+
+        from langgraph.types import Command
+
+        lock = await lock_getter(target_thread) if lock_getter is not None else None
+        async with (lock if lock is not None else contextlib.AsyncExitStack()):
+            # ── Stale-card guard ────────────────────────────────────
+            # Verify the graph is actually paused on a hitl_approval
+            # interrupt. If not (a newer message superseded the card, or
+            # it was already resolved), Command(resume=...) would be a
+            # silent no-op replaying old state — the "approve did nothing"
+            # bug. Fail loudly instead.
+            pending = await _check_graph_interrupt(graph, resume_config)
+            if pending is None:
+                logger.info(
+                    "[HITL] Stale approval ignored: thread=%s action=%s "
+                    "(no pending interrupt)", target_thread, action,
                 )
                 await manager.send(
                     OutboundMessage(
                         target_id=_build_target_id(msg.platform, ctx),
-                        text="⚠️ You are not authorized to approve this task.",
+                        text=(
+                            "⚠️ This approval request has expired — a newer "
+                            "message superseded it or it was already resolved. "
+                            "Nothing was executed. Please repeat your request "
+                            "if you still want the action performed."
+                        ),
                         context_metadata=ctx,
                     )
                 )
                 return True
 
-    try:
-        from langgraph.types import Command
+            logger.info(
+                "[HITL] Resume: thread=%s approved=%s action=%s",
+                target_thread, approved, action,
+            )
+            result_state = await graph.ainvoke(
+                Command(resume={"approved": approved, "reason": action}),
+                resume_config,
+            )
 
-        logger.info(
-            "[HITL] Resume: thread=%s approved=%s action=%s",
-            target_thread, approved, action,
-        )
-        result_state = await graph.ainvoke(
-            Command(resume={"approved": approved, "reason": action}),
-            resume_config,
-        )
+            # Re-surface a chained interrupt (a second danger tool paused in
+            # the same resumed turn). Without this the user sees "Approved —
+            # continuing." while the graph is actually still paused on
+            # another tool, so the agent appears to "do nothing".
+            chained = await _check_graph_interrupt(graph, resume_config)
+
+        from .graph import _prepare_tg_outbound
 
         # Extract the assistant's response from the resumed turn.
         assistant_text = ""
@@ -143,16 +227,41 @@ async def _handle_hitl_resume(
             if isinstance(m, dict) and m.get("role") == "assistant" and m.get("content"):
                 assistant_text = m["content"]
                 break
-        if not assistant_text:
-            assistant_text = "✅ Approved — continuing." if approved else "🚫 Denied."
 
-        await manager.send(
-            OutboundMessage(
-                target_id=_build_target_id(msg.platform, ctx),
-                text=assistant_text,
-                context_metadata=ctx,
+        # If there is assistant text, send it first
+        if assistant_text:
+            tg_text, tg_ctx = _prepare_tg_outbound(msg, assistant_text, ctx)
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=tg_text,
+                    context_metadata=tg_ctx,
+                )
             )
-        )
+
+        if chained is not None:
+            prompt = _build_approval_prompt(chained, target_thread)
+            prompt_text, send_ctx = _prepare_tg_outbound(msg, prompt["text"], ctx)
+            if prompt.get("markup"):
+                send_ctx["reply_markup"] = prompt["markup"]
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=prompt_text,
+                    context_metadata=send_ctx,
+                )
+            )
+            return True
+
+        if not assistant_text:
+            fallback_text = "✅ Approved — continuing." if approved else "🚫 Denied."
+            await manager.send(
+                OutboundMessage(
+                    target_id=_build_target_id(msg.platform, ctx),
+                    text=fallback_text,
+                    context_metadata=ctx,
+                )
+            )
     except Exception:
         logger.exception("[HITL] Resume failed for thread=%s", target_thread)
         await manager.send(

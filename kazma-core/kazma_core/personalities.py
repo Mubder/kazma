@@ -24,6 +24,8 @@ import logging
 import os
 from typing import Any
 
+__all__ = ["PERSONALITIES", "Personality", "get_current_personality", "get_runtime_personality", "list_personalities", "load_personality", "reset_runtime_personality", "set_runtime_personality"]
+
 logger = logging.getLogger(__name__)
 
 # ── Personality template type ───────────────────────────────────────────

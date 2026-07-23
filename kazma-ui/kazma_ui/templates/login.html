@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kazma — Login</title>
+  <link rel="icon" href="/static/img/favicon.png">
+  <link rel="stylesheet" href="/static/css/kazma.css">
+  <style>
+    body.login-page {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg-deep, #0d0f14);
+      margin: 0;
+      font-family: var(--font-sans, system-ui, sans-serif);
+    }
+    .login-card {
+      width: min(440px, 92vw);
+      background: var(--bg-panel, #161a22);
+      border: 1px solid var(--border-subtle, #2a3140);
+      border-radius: 12px;
+      padding: 28px 24px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    .login-card h1 { margin: 0 0 6px; font-size: 1.25rem; color: var(--text-primary, #e8ecf4); }
+    .login-card p { margin: 0 0 14px; font-size: 0.85rem; color: var(--text-muted, #8b93a7); line-height: 1.45; }
+    .login-card label {
+      display: block; font-size: 0.78rem; font-weight: 600;
+      color: var(--text-secondary, #b4bcd0); margin-bottom: 6px;
+    }
+    .login-card input[type="password"],
+    .login-card input[type="text"] {
+      width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px;
+      border: 1px solid var(--border-subtle, #2a3140); background: var(--bg-deep, #0d0f14);
+      color: var(--text-primary, #e8ecf4); font-size: 0.9rem; margin-bottom: 14px;
+    }
+    .login-card input:focus { outline: 2px solid var(--accent, #5e6ad2); outline-offset: 1px; }
+    .login-card button, .login-card .btn-oidc {
+      width: 100%; padding: 10px 14px; border: none; border-radius: 8px;
+      background: var(--accent, #5e6ad2); color: #fff; font-weight: 600;
+      font-size: 0.9rem; cursor: pointer; margin-bottom: 8px; text-align: center;
+      text-decoration: none; display: inline-block; box-sizing: border-box;
+    }
+    .login-card .btn-oidc {
+      background: transparent; border: 1px solid var(--border-subtle, #2a3140);
+      color: var(--text-primary, #e8ecf4);
+    }
+    .login-card button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .login-error {
+      display: none; margin-bottom: 12px; padding: 8px 10px; border-radius: 6px;
+      background: rgba(220, 80, 80, 0.15); color: #f0a0a0; font-size: 0.82rem;
+    }
+    .login-error.show { display: block; }
+    .login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .login-brand img { height: 32px; width: 32px; border-radius: 6px; }
+    .login-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+    .login-tabs button {
+      flex: 1; background: transparent; border: 1px solid var(--border-subtle, #2a3140);
+      color: var(--text-muted, #8b93a7); padding: 8px; border-radius: 8px; cursor: pointer;
+      font-size: 0.8rem; font-weight: 600; margin: 0;
+    }
+    .login-tabs button.active {
+      border-color: var(--accent, #5e6ad2); color: var(--text-primary, #e8ecf4);
+      background: rgba(94, 106, 210, 0.12);
+    }
+    .mode-panel { display: none; }
+    .mode-panel.active { display: block; }
+    .login-divider {
+      text-align: center; color: var(--text-muted, #8b93a7); font-size: 0.75rem;
+      margin: 12px 0; position: relative;
+    }
+  </style>
+</head>
+<body class="login-page">
+  <div class="login-card">
+    <div class="login-brand">
+      <img src="/static/img/kazma-icon.png" alt="Kazma">
+      <div><h1>Sign in</h1></div>
+    </div>
+    <p id="blurb">Sign in with a platform user, the server secret, or your organization IdP.</p>
+    <div id="err" class="login-error" role="alert"></div>
+
+    <div class="login-tabs" id="tabs">
+      <button type="button" class="active" data-mode="user">User</button>
+      <button type="button" data-mode="secret">Secret</button>
+    </div>
+
+    <div id="mode-user" class="mode-panel active">
+      <form id="userForm" autocomplete="on">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" autocomplete="username" placeholder="alice">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••">
+        <button type="submit" id="btnUser">Sign in</button>
+      </form>
+    </div>
+
+    <div id="mode-secret" class="mode-panel">
+      <form id="secretForm" autocomplete="off">
+        <label for="secret">Server secret</label>
+        <input id="secret" name="secret" type="password" placeholder="KAZMA_SECRET value" autocomplete="current-password">
+        <button type="submit" id="btnSecret">Sign in with secret</button>
+      </form>
+    </div>
+
+    <div id="oidcWrap" style="display:none">
+      <div class="login-divider">or</div>
+      <a class="btn-oidc" id="oidcBtn" href="/api/auth/oidc/start">Continue with SSO (OIDC)</a>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var err = document.getElementById('err');
+      var params = new URLSearchParams(location.search);
+      var next = params.get('next') || '/';
+      if (!next.startsWith('/') || next.startsWith('//')) next = '/';
+
+      document.querySelectorAll('.login-tabs button').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          document.querySelectorAll('.login-tabs button').forEach(function (b) { b.classList.remove('active'); });
+          btn.classList.add('active');
+          var mode = btn.getAttribute('data-mode');
+          document.querySelectorAll('.mode-panel').forEach(function (p) { p.classList.remove('active'); });
+          document.getElementById('mode-' + mode).classList.add('active');
+        });
+      });
+
+      async function doLogin(body, btn) {
+        err.classList.remove('show');
+        err.textContent = '';
+        if (btn) btn.disabled = true;
+        try {
+          var res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify(body),
+          });
+          var data = {};
+          try { data = await res.json(); } catch (_) {}
+          if (!res.ok) {
+            err.textContent = data.detail || data.message || data.error || 'Login failed';
+            err.classList.add('show');
+            if (btn) btn.disabled = false;
+            return;
+          }
+          window.location.href = next;
+        } catch (ex) {
+          err.textContent = 'Network error — try again';
+          err.classList.add('show');
+          if (btn) btn.disabled = false;
+        }
+      }
+
+      document.getElementById('userForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        doLogin({
+          username: document.getElementById('username').value,
+          password: document.getElementById('password').value,
+        }, document.getElementById('btnUser'));
+      });
+      document.getElementById('secretForm').addEventListener('submit', function (e) {
+        e.preventDefault();
+        doLogin({ secret: document.getElementById('secret').value }, document.getElementById('btnSecret'));
+      });
+
+      // Detect OIDC via open auth status
+      fetch('/api/auth/status', { credentials: 'same-origin' }).then(function (r) {
+        return r.ok ? r.json() : null;
+      }).then(function (st) {
+        if (st && st.oidc) {
+          document.getElementById('oidcWrap').style.display = 'block';
+        }
+      }).catch(function () {});
+    })();
+  </script>
+</body>
+</html>

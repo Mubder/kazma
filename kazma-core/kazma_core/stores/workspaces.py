@@ -24,6 +24,8 @@ from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
+__all__ = ["WorkspaceStore", "get_workspace_store", "reset_workspace_store"]
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DB = "kazma-data/settings.db"
@@ -277,20 +279,70 @@ class WorkspaceStore:
             "is_github": bool(row["is_github"]) if row["is_github"] is not None else None,
         }
 
+    def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
+        """Return one workspace by id, or None."""
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                f"SELECT id, name, root_path, created_at, is_active, {_REPO_COLS} "
+                "FROM workspaces WHERE id = ?",
+                (workspace_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return self._row_to_dict(row)
+
+    def delete_workspace(self, workspace_id: str) -> dict[str, Any] | None:
+        """Remove a workspace registration. Returns the deleted record or None.
+
+        Does **not** delete files on disk — the API layer decides that.
+        If the deleted row was active, no workspace remains active (caller
+        should activate another or re-pin tools).
+        """
+        record = self.get_workspace(workspace_id)
+        if not record:
+            return None
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute("BEGIN")
+                conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+                conn.execute("COMMIT")
+            except Exception as exc:
+                conn.execute("ROLLBACK")
+                logger.error(
+                    "[WorkspaceStore] Failed to delete workspace %s: %s",
+                    workspace_id,
+                    exc,
+                )
+                raise
+        logger.info(
+            "[WorkspaceStore] Deleted workspace %r (%s) root=%s",
+            record.get("name"),
+            workspace_id,
+            record.get("root_path"),
+        )
+        return record
+
     def set_active_workspace(self, workspace_id: str) -> bool:
         """Set the workspace with workspace_id as active and others as inactive.
+
+        Also re-pins ``configure_workspace()`` so file/shell/git tools and
+        ``build_env_context()`` follow Switch Repo / clone without restart.
 
         Returns:
             True if setting succeeded, False if the workspace was not found.
         """
+        root_path: str | None = None
         with self._lock:
             conn = self._get_conn()
-            # Validate workspace exists
+            # Validate workspace exists and capture root for tool pin
             row = conn.execute(
-                "SELECT 1 FROM workspaces WHERE id = ?", (workspace_id,)
+                "SELECT root_path FROM workspaces WHERE id = ?", (workspace_id,)
             ).fetchone()
             if not row:
                 return False
+            root_path = row["root_path"] if isinstance(row, sqlite3.Row) else row[0]
 
             try:
                 conn.execute("BEGIN")
@@ -301,11 +353,29 @@ class WorkspaceStore:
                 )
                 conn.execute("COMMIT")
                 logger.info("[WorkspaceStore] Set active workspace to %s", workspace_id)
-                return True
             except Exception as exc:
                 conn.execute("ROLLBACK")
                 logger.error("[WorkspaceStore] Failed to activate workspace %s: %s", workspace_id, exc)
                 raise exc
+
+        # Outside the lock: re-pin process workspace so tools don't keep a
+        # stale boot-time root (e.g. the Kazma monorepo).
+        if root_path:
+            try:
+                from kazma_core.tools.file_write import configure_workspace
+
+                configure_workspace(workspace=str(root_path))
+                logger.info(
+                    "[WorkspaceStore] Tools re-pinned to workspace root %s",
+                    root_path,
+                )
+            except Exception as pin_exc:
+                logger.warning(
+                    "[WorkspaceStore] configure_workspace failed for %s: %s",
+                    root_path,
+                    pin_exc,
+                )
+        return True
 
     def close(self) -> None:
         """Close the underlying SQLite connection."""

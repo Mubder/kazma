@@ -15,31 +15,15 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from kazma_core.safety.hitl import DEFAULT_DANGER_TOOLS
+from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+
+__all__ = ["SafetyMiddleware", "SafetyViolationError", "get_safety", "set_safety"]
 
 logger = logging.getLogger(__name__)
 
-# Extended danger tier — adds tools that were previously un-gated.
-_EXTENDED_DANGER = DEFAULT_DANGER_TOOLS + [
-    "python_exec",
-    "code_exec",
-    "spawn_agent",
-    "spawn_agents",
-    "schedule_task",
-    "cancel_scheduled",
-    "run_tests",  # MCP IDE test runner tool
-    "vault_retrieve",
-    "vault_delete",
-    # Git operations — commit/push publish code to the remote without
-    # the operator's review. github_create_pr opens a PR. These must be
-    # HITL-gated just like file_write/shell_exec.
-    "git_commit",
-    "git_push_pull",
-    "github_create_pr",
-    # Package installation — supply-chain risk (typosquats, malicious packages).
-    "install_python_packages",
-    "install_npm_packages",
-]
+# Single source of truth — see kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS.
+# Alias kept so existing imports of _EXTENDED_DANGER keep working.
+_EXTENDED_DANGER: list[str] = list(CANONICAL_DANGER_TOOLS)
 
 # Tools classified as "sensitive reads" — allowed but logged.
 _SENSITIVE_READS = [
@@ -120,6 +104,8 @@ class SafetyMiddleware:
         tool_args: str | None = None,
         task_id: str = "",
         worker_name: str = "",
+        *,
+        force_danger: bool = False,
     ) -> bool:
         """Check if a tool call should be allowed.
 
@@ -128,6 +114,13 @@ class SafetyMiddleware:
 
         For danger-tier tools, this will post an approval request to
         the bus and wait for the operator's response.
+
+        Args:
+            force_danger: When True, treat *tool_name* as danger-tier even
+                if it is not in the static ``_EXTENDED_DANGER`` list.
+                Required for MCP tools whose names (e.g. ``write_file``,
+                ``run_command``) differ from local builtins (``file_write``,
+                ``shell_exec``) but were classified as danger/unknown.
 
         Fail-closed: when no real bus adapter is wired (``NullBusAdapter``),
         danger tools are rejected unless ``allow_headless_danger`` is set
@@ -138,11 +131,26 @@ class SafetyMiddleware:
         if not self.enabled:
             return True  # development mode
 
-        if self.is_sensitive_read(tool_name):
+        from kazma_core.safety.hitl import get_current_thread_id
+        tid = get_current_thread_id()
+        if tid:
+            try:
+                from kazma_core.safety.yolo import is_yolo_active
+                if is_yolo_active(tid):
+                    logger.warning(
+                        "[Safety] YOLO mode active for thread=%s — auto-approving: %s",
+                        tid,
+                        tool_name,
+                    )
+                    return True
+            except Exception:
+                pass
+
+        if not force_danger and self.is_sensitive_read(tool_name):
             logger.info("[Safety] Sensitive read allowed: %s (task=%s)", tool_name, task_id)
             return True
 
-        if not self.is_danger_tool(tool_name):
+        if not force_danger and not self.is_danger_tool(tool_name):
             return True  # safe tool
 
         # ── Danger tool — request approval ─────────────────
@@ -187,12 +195,12 @@ class SafetyMiddleware:
 
         return approved
 
-    def check_sync(self, tool_name: str) -> bool:
+    def check_sync(self, tool_name: str, *, force_danger: bool = False) -> bool:
         """Synchronous check — fail-closed gate for danger tools.
 
         Returns True (allow) if:
           - SafetyMiddleware is disabled
-          - Tool is not danger-tier
+          - Tool is not danger-tier (unless force_danger=True)
         Returns False (block) if:
           - Tool is danger-tier AND either:
             - a real bus adapter is available (use async check() to approve), OR
@@ -202,7 +210,7 @@ class SafetyMiddleware:
         """
         if not self.enabled:
             return True
-        if not self.is_danger_tool(tool_name):
+        if not force_danger and not self.is_danger_tool(tool_name):
             return True
         # Danger tool — check bus adapter state.
         try:

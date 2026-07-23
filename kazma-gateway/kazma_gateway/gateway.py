@@ -50,6 +50,49 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "Attachment",
+    "BaseAdapter",
+    "GatewayManager",
+    "IncomingMessage",
+    "MessageHandler",
+    "MessageMetrics",
+    "OutboundMessage",
+    "RateLimiter",
+    "SessionStore",
+]
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Attachment — a media payload carried alongside message text
+# ══════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(slots=True)
+class Attachment:
+    """A normalized media/file payload, platform-agnostic.
+
+    Exactly one of ``data`` (in-memory bytes) or ``url`` (fetchable
+    location) should be populated by the producing adapter. ``meta`` holds
+    platform-specific references (e.g. Telegram ``file_id``, Discord
+    attachment id) needed to re-fetch or forward the media.
+
+    Attributes:
+        kind:     Coarse category — ``"image"``, ``"file"``, ``"audio"``, ``"video"``.
+        mime:     MIME type (e.g. ``"image/png"``, ``"application/pdf"``).
+        filename: Suggested filename for the payload.
+        data:     Raw bytes when already downloaded (small media).
+        url:      HTTP/platform URL when not yet downloaded.
+        meta:     Opaque per-platform reference dict (file_id, attachment id, ...).
+    """
+
+    kind: str
+    mime: str
+    filename: str = ""
+    data: bytes | None = None
+    url: str | None = None
+    meta: dict[str, Any] = field(default_factory=dict)
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # IncomingMessage — the ONLY message type the Brain ever sees
@@ -68,6 +111,8 @@ class IncomingMessage:
         platform:       Source platform ("telegram", "discord", ...).
         sender_id:      Stable sender identifier (e.g. "telegram:12345").
         text:           The message body.
+        attachments:    Media/files attached to the message (photos, docs,
+                        audio, video). Empty for plain-text messages.
         context_metadata: Opaque dict carrying raw platform IDs and any
                           platform-specific data the adapter needs for
                           routing replies. The Brain passes this back
@@ -79,6 +124,7 @@ class IncomingMessage:
     platform: str
     sender_id: str
     text: str
+    attachments: list[Attachment] = field(default_factory=list)
     context_metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
     correlation_id: str = field(default_factory=lambda: f"cid-{uuid.uuid4().hex[:12]}")
@@ -100,12 +146,16 @@ class OutboundMessage:
     Attributes:
         target_id:  Platform-prefixed target (e.g. "telegram:12345").
         text:       The message body.
+        attachments: Media/files to deliver alongside the text. Each adapter
+                     dispatches these to its platform's media-send API
+                     (sendPhoto/files.upload/etc.) in list order.
         context_metadata: The same dict from the IncomingMessage — the
                           adapter uses this to extract raw platform IDs.
     """
 
     target_id: str
     text: str
+    attachments: list[Attachment] = field(default_factory=list)
     context_metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -627,8 +677,10 @@ class GatewayManager:
                         continue  # Skip dispatching to handler
 
                 if self._handler:
+                    handler_ok = False
                     try:
                         await self._handler(msg)
+                        handler_ok = True
                     except Exception:
                         logger.exception(
                             "Handler error for message from %s",
@@ -636,16 +688,18 @@ class GatewayManager:
                         )
 
                     # ── Post-task suggestions ────────────────────────
-                    # Send next-step hints after the handler completes.
+                    # Send next-step hints after the handler completes
+                    # successfully — hinting after a failed turn is noise.
                     # detect_tool_intent analyzes the user's message for
-                    # patterns that suggest a tool could help.
-                    if self._suggester is not None and msg.text:
+                    # patterns that suggest a tool could help. Hints are
+                    # already "💡 "-prefixed; do not prefix them again.
+                    if handler_ok and self._suggester is not None and msg.text:
                         try:
                             from kazma_gateway.suggestions import detect_tool_intent
 
                             hints = detect_tool_intent(msg.text)
                             if hints:
-                                hint_text = "\n".join(f"💡 {h}" for h in hints[:2])
+                                hint_text = "\n".join(hints[:2])
                                 try:
                                     await self.send(OutboundMessage(
                                         target_id=msg.reply_target(),
