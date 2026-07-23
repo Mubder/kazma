@@ -45,7 +45,11 @@ param(
     [string] $Distro = "Hermes_API_1",
     [int] $Port = 9090,
     [string] $Hostname = "kazma.wsl",
-    [string] $ListenAddress = "127.0.0.1"
+    [string] $ListenAddress = "127.0.0.1",
+    # When invoked at boot (scheduled task), WSL networking may not be ready
+    # yet. Wait up to this many seconds for a valid 172.x address before
+    # giving up, so we never pin a stale/empty IP (the cause of 1033s).
+    [int] $WaitForNetwork = 60
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,23 +68,33 @@ if (-not (Test-IsAdmin)) {
     exit 1
 }
 
-# Resolve WSL IPv4 (first eth-like address, skip docker bridges when possible)
-$raw = (wsl -d $Distro -e bash -lc "hostname -I 2>/dev/null" 2>$null)
-if (-not $raw) {
-    Write-Host "  [ERROR] Distro '$Distro' not reachable. Check: wsl -l -v" -ForegroundColor Red
-    exit 1
+# Resolve WSL IPv4 (first eth-like address, skip docker bridges when possible).
+# RETRY: at boot WSL may be up but not yet have an IP. Loop until we get a
+# valid 172.x address (or time out) so the portproxy is never pinned to a
+# stale/empty IP -- that drift is exactly what causes Cloudflare tunnel 1033s.
+$wslIp = $null
+$deadline = (Get-Date).AddSeconds($WaitForNetwork)
+$attempt = 0
+while ((Get-Date) -lt $deadline) {
+    $attempt++
+    $raw = (wsl -d $Distro -e bash -lc "hostname -I 2>/dev/null" 2>$null)
+    if ($raw) {
+        $cands = ($raw -split "\s+") | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' }
+        # Prefer 172.28.x (WSL Hyper-V) then 172.x (skip docker 172.17.x)
+        $wslIp = $cands | Where-Object { $_ -like "172.28.*" } | Select-Object -First 1
+        if (-not $wslIp) {
+            $wslIp = $cands | Where-Object { $_ -like "172.*" -and $_ -notlike "172.17.*" } | Select-Object -First 1
+        }
+        if (-not $wslIp) { $wslIp = $cands | Select-Object -First 1 }
+    }
+    if ($wslIp) { break }
+    Write-Host "  [wait] WSL '$Distro' has no 172.x IP yet (attempt $attempt) -- retrying in 3s..." -ForegroundColor DarkGray
+    Start-Sleep -Seconds 3
 }
-$candidates = ($raw -split "\s+") | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' }
-# Prefer 172.28.x (WSL Hyper-V) then 172.x
-$wslIp = $candidates | Where-Object { $_ -like "172.28.*" } | Select-Object -First 1
+
 if (-not $wslIp) {
-    $wslIp = $candidates | Where-Object { $_ -like "172.*" -and $_ -notlike "172.17.*" } | Select-Object -First 1
-}
-if (-not $wslIp) {
-    $wslIp = $candidates | Select-Object -First 1
-}
-if (-not $wslIp) {
-    Write-Host "  [ERROR] No IPv4 from WSL distro '$Distro'." -ForegroundColor Red
+    Write-Host "  [ERROR] Distro '$Distro' not reachable or has no IPv4 after ${WaitForNetwork}s." -ForegroundColor Red
+    Write-Host "         Check: wsl -l -v  (is it Running?)" -ForegroundColor Yellow
     exit 1
 }
 
