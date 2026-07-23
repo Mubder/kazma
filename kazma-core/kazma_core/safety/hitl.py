@@ -69,8 +69,6 @@ TOOL_TIERS: dict[str, str] = {
     "shell_exec": "danger",
     "code_exec": "danger",
     "python_exec": "danger",
-    "spawn_agent": "danger",
-    "spawn_agents": "danger",
     "schedule_task": "danger",
     "cancel_scheduled": "danger",
     "vault_retrieve": "danger",
@@ -84,6 +82,9 @@ TOOL_TIERS: dict[str, str] = {
     "install_npm_packages": "danger",
     "install_agent_skill": "danger",
     "uninstall_agent_skill": "danger",
+    # spawn_agent/spawn_agents are delegation tools, not destructive —
+    # they run isolated sub-agent graphs. Remove from danger so they
+    # don't time out on HITL approval (60s auto-deny killed research).
     "browser_eval_js": "danger",
     "email_list": "safe",
     "email_get": "safe",
@@ -102,8 +103,6 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "shell_exec",
     "code_exec",
     "python_exec",
-    "spawn_agent",
-    "spawn_agents",
     "schedule_task",
     "cancel_scheduled",
     "vault_retrieve",
