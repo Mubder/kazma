@@ -106,6 +106,10 @@ async def execute_db_query(
     Returns:
         JSON string representing rows, or safety/execution error messages.
     """
+    # ── Multi-dialect dispatch: non-SQLite URIs route to the right driver ──
+    if _detect_dialect(db_uri) != "sqlite":
+        return await execute_db_query_any(db_uri, query, params, limit)
+
     # ── Safety: only allow SELECT or WITH ──
     def strip_leading_comments(sql: str) -> str:
         while True:
@@ -202,4 +206,177 @@ async def sqlite_query(
         JSON string representing rows, or safety/execution error messages.
     """
     return await execute_db_query(db_uri=db_path, query=query, params=params, limit=limit)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Multi-dialect support — Postgres / MySQL / MongoDB
+# ════════════════════════════════════════════════════════════════════════
+
+
+def _detect_dialect(db_uri: str) -> str:
+    """Return 'postgres' | 'mysql' | 'mongodb' | 'sqlite' from the URI scheme."""
+    u = (db_uri or "").lower()
+    if u.startswith(("postgresql://", "postgres://")):
+        return "postgres"
+    if u.startswith(("mysql://", "mariadb://")):
+        return "mysql"
+    if u.startswith("mongodb://") or u.startswith("mongodb+srv://"):
+        return "mongodb"
+    return "sqlite"
+
+
+def _validate_readonly_sql(query: str) -> str | None:
+    """Return an error string if *query* is not a safe read-only SELECT/WITH."""
+    def _strip(sql: str) -> str:
+        while True:
+            sql = sql.strip()
+            if sql.startswith("--"):
+                nl = sql.find("\n")
+                if nl == -1:
+                    return ""
+                sql = sql[nl:]
+            elif sql.startswith("/*"):
+                end = sql.find("*/")
+                if end == -1:
+                    break
+                sql = sql[end + 2:]
+            else:
+                break
+        return sql.strip()
+
+    sql_clean = _strip(query)
+    normalized = sql_clean.upper()
+    if not (normalized.startswith("SELECT") or normalized.startswith("WITH")):
+        return "Error: Only SELECT and WITH read-only queries are allowed for safety."
+    if ";" in query.strip().rstrip(";"):
+        return "Error: Multi-statement queries are not allowed."
+    forbidden = re.compile(
+        r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|RENAME|PRAGMA|ATTACH|DETACH|VACUUM|TRUNCATE|GRANT|REVOKE|MERGE)\b",
+        re.IGNORECASE,
+    )
+    if forbidden.search(query):
+        return "Error: Write operations or administrative commands are not allowed."
+    return None
+
+
+async def _query_postgres(db_uri: str, query: str, params: list | None, limit: int) -> str:
+    try:
+        import psycopg  # psycopg3
+    except ImportError:
+        return "Error: psycopg not installed. Run: pip install 'psycopg[binary]'"
+    try:
+        # psycopg3 is sync; run in a worker thread to stay non-blocking.
+        import asyncio
+
+        def _run() -> str:
+            with psycopg.connect(db_uri) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(query, params or [])
+                    cols = [d.name for d in (cur.description or [])]
+                    rows = cur.fetchmany(limit)
+                    if not rows:
+                        return "[]"
+                    return json.dumps(
+                        [dict(zip(cols, r)) for r in rows], ensure_ascii=False, indent=2, default=str
+                    )
+        return await asyncio.to_thread(_run)
+    except Exception as exc:  # noqa: BLE001
+        return f"SQL Error: Postgres query failed. Detail: {exc}"
+
+
+async def _query_mysql(db_uri: str, query: str, params: list | None, limit: int) -> str:
+    try:
+        import pymysql
+    except ImportError:
+        return "Error: pymysql not installed. Run: pip install pymysql"
+    try:
+        import asyncio
+
+        def _run() -> str:
+            from urllib.parse import urlparse
+
+            p = urlparse(db_uri)
+            conn = pymysql.connect(
+                host=p.hostname or "localhost",
+                port=p.port or 3306,
+                user=p.username or "root",
+                password=p.password or "",
+                database=(p.path or "/").lstrip("/"),
+            )
+            try:
+                with conn.cursor(pymysql.cursors.DictCursor) as cur:
+                    cur.execute(query, params or ())
+                    rows = cur.fetchmany(limit)
+                    if not rows:
+                        return "[]"
+                    return json.dumps(rows, ensure_ascii=False, indent=2, default=str)
+            finally:
+                conn.close()
+        return await asyncio.to_thread(_run)
+    except Exception as exc:  # noqa: BLE001
+        return f"SQL Error: MySQL query failed. Detail: {exc}"
+
+
+async def _query_mongodb(db_uri: str, query: str, params: list | None, limit: int) -> str:
+    """Run a MongoDB find() from a JSON *query* document.
+
+    For Mongo, ``query`` is a JSON filter document (not SQL). ``params`` is
+    ignored. The default database is taken from the URI path.
+    """
+    try:
+        from pymongo import MongoClient
+        from urllib.parse import urlparse
+    except ImportError:
+        return "Error: pymongo not installed. Run: pip install pymongo"
+    try:
+        import asyncio
+
+        def _run() -> str:
+            try:
+                filt = json.loads(query) if query.strip() else {}
+            except json.JSONDecodeError as exc:
+                return f"Error: MongoDB filter must be valid JSON — {exc}"
+            p = urlparse(db_uri)
+            db_name = (p.path or "/test").lstrip("/")
+            client = MongoClient(db_uri, serverSelectionTimeoutMS=5000)
+            try:
+                # Infer collection: prefer params[0], else 'documents'.
+                coll_name = (params[0] if params else "documents")
+                docs = list(client[db_name][coll_name].find(filt).limit(limit))
+                if not docs:
+                    return "[]"
+                return json.dumps(docs, ensure_ascii=False, indent=2, default=str)
+            finally:
+                client.close()
+        return await asyncio.to_thread(_run)
+    except Exception as exc:  # noqa: BLE001
+        return f"Mongo Error: query failed. Detail: {exc}"
+
+
+async def execute_db_query_any(
+    db_uri: str,
+    query: str,
+    params: list[Any] | None = None,
+    limit: int = 100,
+) -> str:
+    """Dialect-aware read-only query (Postgres/MySQL/Mongo/SQLite).
+
+    For SQL dialects, *query* must be a SELECT/WITH. For Mongo, *query* is a
+    JSON filter document and ``params[0]`` (optional) names the collection.
+    """
+    dialect = _detect_dialect(db_uri)
+    if dialect == "mongodb":
+        return await _query_mongodb(db_uri, query, params, limit)
+
+    # SQL dialects — enforce read-only.
+    err = _validate_readonly_sql(query)
+    if err:
+        return err
+
+    if dialect == "postgres":
+        return await _query_postgres(db_uri, query, params, limit)
+    if dialect == "mysql":
+        return await _query_mysql(db_uri, query, params, limit)
+    # SQLite — delegate to the existing path-validated implementation.
+    return await execute_db_query(db_uri=db_uri, query=query, params=params, limit=limit)
 

@@ -158,6 +158,7 @@ safety:
       - email_send
       - email_delete
       - email_categorize
+      - browser_eval_js
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 

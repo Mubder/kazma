@@ -84,6 +84,7 @@ TOOL_TIERS: dict[str, str] = {
     "install_npm_packages": "danger",
     "install_agent_skill": "danger",
     "uninstall_agent_skill": "danger",
+    "browser_eval_js": "danger",
     "email_list": "safe",
     "email_get": "safe",
     "email_analyze": "safe",
@@ -119,6 +120,7 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "email_send",
     "email_delete",
     "email_categorize",
+    "browser_eval_js",
 )
 
 # Backward-compatible alias used throughout the codebase / tests.

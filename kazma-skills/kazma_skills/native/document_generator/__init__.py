@@ -1,0 +1,1 @@
+"""Document Generator native skill."""

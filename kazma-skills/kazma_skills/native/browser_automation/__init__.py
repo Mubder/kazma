@@ -1,0 +1,1 @@
+"""Browser Automation native skill."""

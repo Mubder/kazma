@@ -71,10 +71,22 @@ postgres = [
     "psycopg[binary,pool]>=3.1.0",
     "langgraph-checkpoint-postgres>=2.0.0",
 ]
+# Document generation (document_generator skill)
+document = [
+    "reportlab>=4.0.0",
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+]
+# Database drivers beyond SQLite (database_client skill)
+database = [
+    "psycopg[binary]>=3.1.0",
+    "pymysql>=1.1.0",
+    "pymongo>=4.7.0",
+]
 # Convenience meta-extra — installs everything at once.
 # Usage: pip install -e ".[all]"  or  uv sync --all-extras
 all = [
-    "kazma[rag,dev,tui,observability,web,postgres]",
+    "kazma[rag,dev,tui,observability,web,postgres,document,database]",
 ]
 
 [project.scripts]

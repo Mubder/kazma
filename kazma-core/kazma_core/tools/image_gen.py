@@ -1,23 +1,28 @@
-"""Image generation tool — Generate AI images via pollinations.ai.
+"""Image generation tool — multi-provider AI image generation.
 
-No API key required. Uses the public pollinations.ai endpoint:
-    https://image.pollinations.ai/prompt/{encoded_prompt}?width={w}&height={h}
+Backends are selected via the router in ``image_backends/router.py``:
 
+* ``pollinations`` (default, keyless) — https://pollinations.ai
+* ``dall-e``   — OpenAI DALL-E 3 (needs OPENAI_API_KEY)
+* ``stability`` — Stability SDXL (needs STABILITY_API_KEY)
+* ``flux``     — Flux via FAL.ai (needs FAL_KEY)
+
+``provider="auto"`` picks the first credentialed backend, else pollinations.
 Images are saved to kazma-data/images/ and the file path is returned.
 
 Usage:
     from kazma_core.tools.image_gen import generate_image
     result = await generate_image("a cat wearing sunglasses", width=512, height=512)
+    result = await generate_image("a sunset", provider="dall-e")
 """
 
 from __future__ import annotations
 
 import re
 import time
-import urllib.parse
 from pathlib import Path
 
-__all__ = ["DEFAULT_HEIGHT", "DEFAULT_WIDTH", "IMAGE_DIR", "MAX_HEIGHT", "MAX_PROMPT_CHARS", "MAX_WIDTH", "MIN_DIMENSION", "POLLINATIONS_URL", "generate_image"]
+__all__ = ["DEFAULT_HEIGHT", "DEFAULT_WIDTH", "IMAGE_DIR", "MAX_HEIGHT", "MAX_PROMPT_CHARS", "MAX_WIDTH", "MIN_DIMENSION", "generate_image"]
 
 # ── Constants ──────────────────────────────────────────────────────────
 
@@ -28,7 +33,6 @@ MIN_DIMENSION = 64
 DEFAULT_WIDTH = 1024
 DEFAULT_HEIGHT = 1024
 IMAGE_DIR = Path("kazma-data/images")
-POLLINATIONS_URL = "https://image.pollinations.ai/prompt/"
 
 
 def _slugify(text: str, max_len: int = 60) -> str:
@@ -61,11 +65,10 @@ def _validate_dimensions(width: int, height: int) -> str | None:
 def _friendly_error(exc: Exception) -> str:
     """Map low-level exceptions to user-friendly messages."""
     exc_name = type(exc).__name__
-    # httpx-specific errors
     if "ConnectError" in exc_name:
-        return "Error: Could not connect to image.pollinations.ai. Check your internet connection."
+        return "Error: Could not connect to the image provider. Check your internet connection."
     if "TimeoutException" in exc_name:
-        return "Error: Request to image.pollinations.ai timed out."
+        return "Error: Image generation request timed out."
     if "HTTPStatusError" in exc_name:
         status = getattr(exc, "response", None)
         code = getattr(status, "status_code", "unknown")
@@ -80,14 +83,18 @@ async def generate_image(
     width: int = DEFAULT_WIDTH,
     height: int = DEFAULT_HEIGHT,
     *,
+    provider: str = "auto",
     description: str | None = None,
 ) -> str:
-    """Generate an AI image via pollinations.ai and save it locally.
+    """Generate an AI image and save it locally.
 
     Args:
         prompt:      Text description of the image to generate (max 1000 chars).
         width:       Image width in pixels (64–1792, default 1024).
         height:      Image height in pixels (64–1024, default 1024).
+        provider:    Image backend — ``"auto"`` (first credentialed),
+                     ``"pollinations"`` (keyless default), ``"dall-e"``,
+                     ``"stability"``, or ``"flux"``.
         description: Optional human-readable label for what was generated.
                      If omitted, derived from the prompt.
 
@@ -108,35 +115,32 @@ async def generate_image(
     if dim_error:
         return dim_error
 
-    # ── Build URL ───────────────────────────────────────────────────
-    encoded = urllib.parse.quote(prompt, safe="")
-    url = f"{POLLINATIONS_URL}{encoded}?width={width}&height={height}"
-
     # ── Determine description ───────────────────────────────────────
     desc = description if description else prompt[:120]
 
-    # ── Fetch image ─────────────────────────────────────────────────
+    # ── Resolve backend ─────────────────────────────────────────────
     try:
-        import httpx
-    except ImportError:
-        return "Error: httpx package not installed. Run: pip install httpx"
+        from kazma_core.tools.image_backends.router import get_backend, resolve_provider
 
+        backend = get_backend(provider)
+        chosen = resolve_provider(provider)
+    except Exception as exc:  # noqa: BLE001
+        return f"Error: Could not initialise image backend — {exc}"
+
+    # ── Generate ────────────────────────────────────────────────────
     try:
-        async with httpx.AsyncClient(
-            follow_redirects=True,
-            timeout=60.0,
-            headers={"User-Agent": "KazmaBot/1.0 (image generator)"},
-        ) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            image_bytes = response.content
+        image_bytes = await backend.generate(prompt, width, height)
     except Exception as exc:
         return _friendly_error(exc)
+
+    if not image_bytes:
+        return "Error: Image backend returned no image data."
 
     # ── Save to disk ────────────────────────────────────────────────
     timestamp = int(time.time())
     slug = _slugify(prompt)
-    filename = f"{timestamp}_{slug}.png"
+    ext = "png"
+    filename = f"{timestamp}_{slug}.{ext}"
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
     filepath = IMAGE_DIR / filename
 
@@ -149,6 +153,7 @@ async def generate_image(
     return (
         f"Image generated successfully.\n"
         f"  Description: {desc}\n"
+        f"  Provider:    {chosen}\n"
         f"  Dimensions:  {width}x{height}\n"
         f"  Size:        {size_kb:.1f} KB\n"
         f"  Saved to:    {filepath}"

@@ -1189,7 +1189,7 @@ class LocalToolRegistry:
         try:
             from kazma_core.tools.image_gen import generate_image
             self.register_function("generate_image", generate_image,
-                description="Generate an image from a text prompt using pollinations.ai. Returns the saved file path.",
+                description="Generate an image from a text prompt. provider can be 'auto' (first available), 'pollinations' (free, no key), 'dall-e' (OpenAI), 'stability' (SDXL), or 'flux' (FAL). Returns the saved file path.",
                 category="media")
         except ImportError:
             logger.debug("generate_image not available")

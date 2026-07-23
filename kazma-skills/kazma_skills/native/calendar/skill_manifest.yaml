@@ -1,0 +1,48 @@
+name: calendar
+version: 0.1.0
+description: >
+  Read and manage calendar events — list, create, update, delete, and find
+  free time slots. Supports Google Calendar and Microsoft Outlook (MS Graph),
+  with a local sandbox backend when no account is connected.
+author: Kazma Team
+license: MIT
+
+tools:
+  list_events:
+    arabic_name: "قائمة الفعاليات"
+    description: >
+      List upcoming calendar events within a time range (ISO 8601).
+      Defaults to the next 7 days.
+    category: calendar
+    prompt_chain:
+      - "اعرض الفعاليات القادمة في النطاق الزمني المحدد"
+  create_event:
+    arabic_name: "إنشاء فعالية"
+    description: >
+      Create a calendar event with a title, start/end (ISO 8601), optional
+      location and description.
+    category: calendar
+    prompt_chain:
+      - "أنشئ فعالية جديدة بالعنوان والوقت المحدد"
+  update_event:
+    arabic_name: "تحديث فعالية"
+    description: >
+      Update an existing event by id. Only provided fields are changed.
+    category: calendar
+    prompt_chain:
+      - "حدّث الفعالية المحددة بالحقول الجديدة"
+  delete_event:
+    arabic_name: "حذف فعالية"
+    description: >
+      Delete a calendar event by id.
+    category: calendar
+    prompt_chain:
+      - "احذف الفعالية المحددة"
+  find_free_slots:
+    arabic_name: "إيجاد وقت فارغ"
+    description: >
+      Find free time slots of a given duration within a date range, excluding
+      existing busy events.
+    category: calendar
+    prompt_chain:
+      - "ابحث عن أوقات فارغة بالمدة المعطاة"
