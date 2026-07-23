@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from typing import Any, TYPE_CHECKING
 
@@ -139,6 +140,14 @@ class ModelRegistry:
                 effective_model = str(self._config_store.get("llm.model", "") or "")
             if not provider_name:
                 provider_name = "custom"
+
+        # Env-var fallback: when no key was resolved from ConfigStore, try the
+        # conventional <PROVIDER>_API_KEY env var (e.g. GROQ_API_KEY). This
+        # lets deployments (incl. the public demo) configure keys via env
+        # without saving them in the UI.
+        if not api_key and provider_name:
+            env_key = f"{provider_name.upper().replace('-', '_')}_API_KEY"
+            api_key = os.getenv(env_key, "") or os.getenv("KAZMA_API_KEY", "")
 
         return provider_name, base_url, api_key, effective_model
 
@@ -624,6 +633,17 @@ class ModelRegistry:
                 self._active_provider = "custom"
                 if not self._active_model:
                     self._active_model = str(self._config_store.get("llm.model", "") or "")
+
+        # Env-var override: KAZMA_PROVIDER / KAZMA_MODEL take precedence over
+        # stored config so deployments (incl. the public demo) can pin the
+        # active profile via environment without UI interaction. This is the
+        # documented fly.toml contract.
+        env_provider = os.getenv("KAZMA_PROVIDER", "").strip()
+        env_model = os.getenv("KAZMA_MODEL", "").strip()
+        if env_provider:
+            self._active_provider = env_provider
+        if env_model:
+            self._active_model = env_model
 
     def serialize(self) -> None:
         """Save current state to ConfigStore."""
