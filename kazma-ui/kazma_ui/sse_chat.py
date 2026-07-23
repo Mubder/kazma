@@ -778,6 +778,109 @@ def create_sse_chat_router(
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
+        # ── Intercept /swarm <task> and /research <topic> ──────────
+        # These dispatch directly through SwarmEngine — bypassing the LLM's
+        # tool-call decision — so swarm research always works from chat.
+        _lower = raw_msg.lower().strip()
+        if _lower.startswith("/swarm ") or _lower.startswith("/research ") or _lower == "/swarm" or _lower == "/research":
+            _is_research = _lower.startswith("/research")
+            _task_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
+            if not _task_text:
+                _usage = (
+                    "🔍 *Usage:* `/research <topic>` — dispatches the swarm to research a topic.\n\n"
+                    "Example: `/research latest hair transplant techniques`"
+                ) if _is_research else (
+                    "🐝 *Usage:* `/swarm <task>` — dispatches a task to the swarm.\n\n"
+                    "Example: `/swarm analyze competitor pricing`"
+                )
+
+                async def _swarm_usage_gen() -> AsyncGenerator[str, None]:
+                    yield _sse_frame("token", {"content": _usage})
+                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
+
+                return StreamingResponse(
+                    _swarm_usage_gen(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+
+            try:
+                import asyncio as _asyncio
+                from kazma_core.swarm import SwarmTask, TaskType, get_swarm_engine
+
+                _engine = get_swarm_engine()
+                if _engine is None:
+                    raise RuntimeError("Swarm engine not initialized")
+
+                # Auto-register a researcher worker if none exist.
+                if not _engine.worker_names:
+                    from kazma_core.swarm.config import WorkerConfig, WorkerCapabilities
+                    _profile = registry.get_active_profile() if registry else {}
+                    _engine.add_worker(WorkerConfig(
+                        name="researcher",
+                        type="in_process",
+                        model=_profile.get("model", ""),
+                        provider=_profile.get("provider", ""),
+                        role="researcher",
+                        system_prompt="You are a Researcher. Use web_search, read_url, and crawl_site to research thoroughly.",
+                        capabilities=WorkerCapabilities(
+                            role="researcher", expertise=["research"],
+                            tools=["web_search", "read_url", "crawl_site"],
+                        ),
+                    ))
+
+                _worker = _engine.worker_names[0]
+                _swarm_task = SwarmTask(
+                    prompt=_task_text,
+                    workers=[_worker],
+                    type=TaskType.DISPATCH,
+                    timeout=300.0,
+                    metadata={"source": "chat", "kind": "research" if _is_research else "swarm"},
+                )
+                logger.info("[SSE] /swarm dispatch: task=%s worker=%s", _swarm_task.id, _worker)
+
+                # Run dispatch in foreground (blocking) and stream the result.
+                async def _swarm_dispatch_gen() -> AsyncGenerator[str, None]:
+                    yield _sse_frame("token", {"content": f"🐝 Dispatching to swarm worker '{_worker}'...\n\n"})
+                    try:
+                        result = await _engine.dispatch(_swarm_task)
+                        _output = ""
+                        if result:
+                            _output = (
+                                result.aggregated_output
+                                or result.synthesized_output
+                                or (result.worker_results[0].output if result.worker_results else "")
+                                or "(no output)"
+                            )
+                            _cost = getattr(result, "total_cost", 0.0)
+                            _dur = getattr(result, "duration_seconds", 0.0)
+                            _output = f"✅ Swarm task complete (cost: ${_cost:.4f}, duration: {_dur:.1f}s)\n\n{_output}"
+                        else:
+                            _output = "⚠️ Swarm task returned no result."
+                    except Exception as exc:
+                        _output = f"⚠️ Swarm task failed: {exc}"
+                        logger.exception("[SSE] /swarm dispatch failed")
+                    yield _sse_frame("token", {"content": _output})
+                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
+
+                return StreamingResponse(
+                    _swarm_dispatch_gen(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+            except Exception as exc:
+                logger.exception("[SSE] /swarm intercept failed")
+
+                async def _swarm_err_gen() -> AsyncGenerator[str, None]:
+                    yield _sse_frame("token", {"content": f"⚠️ Could not dispatch swarm: {exc}"})
+                    yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
+
+                return StreamingResponse(
+                    _swarm_err_gen(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
+
         # ── Apply model from request body ──────────────────────────
         # The chat frontend sends the selected model so the server can
         # reconfigure the live LLM provider before streaming. We only
