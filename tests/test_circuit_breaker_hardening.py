@@ -56,6 +56,9 @@ async def test_graph_circuit_breaker_tripped_bypass() -> None:
         assert "SYSTEM OVERRIDE: Tool blocked" in tr["content"]
         assert tr["is_error"] is True
 
+    # Tripped breaker must route to RESPOND (not dead-loop to SUPERVISOR)
+    assert result_state["next_node"] == NodeName.RESPOND
+
     # Verify message structures match
     tool_messages = [m for m in result_state["messages"] if m.get("role") == "tool"]
     assert len(tool_messages) == 2
@@ -66,17 +69,19 @@ async def test_graph_circuit_breaker_tripped_bypass() -> None:
 
 @pytest.mark.anyio
 async def test_graph_circuit_breaker_trips_during_execution() -> None:
-    """If consecutive failures hit threshold (2), circuit_breaker_tripped must be set to True."""
+    """If consecutive errors hit threshold (3), circuit_breaker_tripped must be set to True."""
     state = initial_supervisor_state()
     state["consecutive_tool_failures"] = 0
     state["tool_calls_pending"] = [
         {"id": "call_1", "name": "web_search", "arguments": {"query": "fail1"}},
         {"id": "call_2", "name": "other_tool", "arguments": {}},
+        {"id": "call_3", "name": "third_tool", "arguments": {}},
     ]
 
     async def mock_execute(name, args):
-        # Return empty list to trigger failure
-        return {"content": "[]", "is_error": False}
+        # Return actual errors (is_error=True) to trigger failure counting.
+        # Empty results ("[]") no longer count as failures.
+        return {"content": "Error: connection refused", "is_error": True}
 
     executor = DummyToolExecutor(mock_execute)
     tracer = DummyTracer()
@@ -89,14 +94,18 @@ async def test_graph_circuit_breaker_trips_during_execution() -> None:
     )
 
     assert result_state["circuit_breaker_tripped"] is True
-    assert len(result_state["tool_calls_done"]) == 2
-    
-    # First tool failed -> counter became 1
-    # Second tool failed -> counter became 2 -> tripped!
-    # Let's verify that second tool result is overridden to SYSTEM OVERRIDE
+    assert len(result_state["tool_calls_done"]) == 3
+
+    # First tool errored -> counter 1
+    # Second tool errored -> counter 2
+    # Third tool errored -> counter 3 -> tripped!
     done_results = result_state["tool_calls_done"]
-    assert done_results[0]["content"] == "[]"
-    assert "SYSTEM OVERRIDE" in done_results[1]["content"]
+    assert "Error: connection refused" in done_results[0]["content"]
+    assert "Error: connection refused" in done_results[1]["content"]
+    assert "SYSTEM OVERRIDE" in done_results[2]["content"]
+
+    # Tripped breaker must route to RESPOND (not dead-loop to SUPERVISOR)
+    assert result_state["next_node"] == NodeName.RESPOND
 
 
 @pytest.mark.anyio

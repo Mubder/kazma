@@ -637,7 +637,7 @@ async def tool_worker_node(
         return {"next_node": NodeName.SUPERVISOR}
 
     # ── Check Circuit Breaker ──────────────────────────────────────
-    breaker_tripped = state.get("circuit_breaker_tripped", False) or (state.get("consecutive_tool_failures", 0) >= 2)
+    breaker_tripped = state.get("circuit_breaker_tripped", False) or (state.get("consecutive_tool_failures", 0) >= 3)
     if breaker_tripped:
         logger.warning("[ToolWorker] Circuit breaker is active! Bypassing all execution.")
         results = [
@@ -671,7 +671,7 @@ async def tool_worker_node(
             "tool_results": cumulative,
             "consecutive_tool_failures": state.get("consecutive_tool_failures", 0),
             "circuit_breaker_tripped": True,
-            "next_node": NodeName.SUPERVISOR,
+            "next_node": NodeName.RESPOND,
         }
 
     logger.info("[ToolWorker] Executing %d tool calls", len(pending))
@@ -840,20 +840,20 @@ async def tool_worker_node(
                 continue
 
             content_str = str(tr.get("content", "")).strip()
-            is_empty_or_denied = (
-                not content_str or 
-                content_str == "[]" or 
-                "no results" in content_str.lower() or 
-                "denied by user" in content_str.lower() or
+            # Only count actual errors and denials as failures — an empty
+            # search result ("no results" / "[]") is a normal outcome for
+            # research tasks, not a tool malfunction.
+            is_failure = (
                 tr.get("is_error", False)
+                or "denied by user" in content_str.lower()
             )
-            
-            if is_empty_or_denied:
+
+            if is_failure:
                 consecutive_failures += 1
             else:
                 consecutive_failures = 0
 
-            if consecutive_failures >= 2:
+            if consecutive_failures >= 3:
                 logger.warning("[ToolWorker] Circuit breaker tripped! %d consecutive tool failures.", consecutive_failures)
                 tr["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
                 tr["is_error"] = True
@@ -883,7 +883,10 @@ async def tool_worker_node(
             "tool_results": cumulative,
             "consecutive_tool_failures": consecutive_failures,
             "circuit_breaker_tripped": breaker_tripped_now,
-            "next_node": NodeName.SUPERVISOR,  # loop back
+            # If the breaker just tripped, force RESPOND so the model
+            # synthesizes an answer with what it has instead of dead-looping
+            # back to the supervisor which would try more tools → bypass → loop.
+            "next_node": NodeName.RESPOND if breaker_tripped_now else NodeName.SUPERVISOR,
         }
     finally:
         # Always restore the prior ContextVar value, even if a tool
