@@ -159,6 +159,7 @@ safety:
       - email_delete
       - email_categorize
       - browser_eval_js
+      - dispatch_swarm
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 

@@ -33,6 +33,8 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `shell_exec` | system | **danger** | Execute a shell command and return stdout+stderr. Use with caution. |
 | `spawn_agent` | delegation | **danger** |  |
 | `spawn_agents` | delegation | **danger** |  |
+| `dispatch_swarm` | swarm | **danger** |  |
+| `check_swarm_task` | swarm | safe/read |  |
 | `python_exec` | code | **danger** |  |
 | `context_info` | diagnostics | safe/read |  |
 
@@ -161,6 +163,7 @@ From `kazma_core/safety/hitl.py` → `CANONICAL_DANGER_TOOLS` (also mirrored in 
 - `cancel_scheduled`
 - `code_exec`
 - `config_save`
+- `dispatch_swarm`
 - `email_categorize`
 - `email_delete`
 - `email_send`

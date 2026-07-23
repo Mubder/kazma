@@ -1049,6 +1049,99 @@ class LocalToolRegistry:
                 indent=2,
             )
 
+        # ── Swarm dispatch (visible in /swarm panel) ──────────────
+        @self.register(
+            description=(
+                "Dispatch a research or analysis task to the Swarm engine. "
+                "The task appears in the Swarm panel (/swarm) with full worker "
+                "progress, results, cost, and traceability. Returns a task ID "
+                "immediately — use check_swarm_task to retrieve the result when "
+                "ready. Use this instead of spawn_agent when you want the work "
+                "to be visible and traceable in the panel."
+            ),
+            category="swarm",
+        )
+        async def dispatch_swarm(
+            prompt: str,
+            worker: str = "auto",
+            context: str = "",
+        ) -> str:
+            import asyncio as _asyncio
+
+            from kazma_core.swarm import SwarmTask, TaskType, get_swarm_engine
+
+            engine = get_swarm_engine()
+            if engine is None:
+                return (
+                    "Error: Swarm engine not initialized. "
+                    "Configure swarm workers in kazma.yaml."
+                )
+
+            task = SwarmTask(
+                prompt=prompt,
+                workers=[worker],
+                type=TaskType.DISPATCH,
+                context=context,
+                timeout=300.0,
+                metadata={"source": "chat"},
+            )
+            # Dispatch in the background so the tool returns immediately.
+            _asyncio.create_task(engine.dispatch(task))
+            return (
+                f"Swarm task dispatched to worker '{worker}' "
+                f"(id: {task.id}). It's visible in the Swarm panel. "
+                f"Use check_swarm_task('{task.id}') to get the result."
+            )
+
+        @self.register(
+            description=(
+                "Check the status and result of a dispatched Swarm task. "
+                "Returns the full result when the task is complete, or a "
+                "status message if still running. Poll this every few seconds "
+                "until you get a completed result."
+            ),
+            category="swarm",
+        )
+        async def check_swarm_task(task_id: str) -> str:
+            from kazma_core.swarm import get_swarm_engine
+
+            engine = get_swarm_engine()
+            # Check in-memory active tasks first, then TaskStore (persisted).
+            task = None
+            if engine:
+                task = engine.get_active_task(task_id)
+            if task is None and engine and getattr(engine, "_task_store", None):
+                task = engine._task_store.get_task(task_id)
+            if task is None:
+                return f"Task {task_id} not found."
+
+            status_str = str(task.status).lower().replace("taskstatus.", "")
+            if status_str in ("running", "pending"):
+                return (
+                    f"Task {task_id} is still {status_str}. "
+                    f"Check again in a moment."
+                )
+
+            result = task.result
+            if result and result.error:
+                return f"Task {task_id} failed: {result.error}"
+            if result:
+                output = (
+                    result.aggregated_output
+                    or result.synthesized_output
+                    or ""
+                )
+                if not output and result.worker_results:
+                    output = result.worker_results[0].output
+                cost = getattr(result, "total_cost", 0.0)
+                duration = getattr(result, "duration_seconds", 0.0)
+                return (
+                    f"Task {task_id} completed.\n"
+                    f"Cost: ${cost:.4f}\n"
+                    f"Duration: {duration:.1f}s\n\n"
+                    f"{output}"
+                )
+            return f"Task {task_id} status: {status_str} (no result yet)."
 
 
         # ── Code execution tool ───────────────────────────────────
