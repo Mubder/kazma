@@ -312,6 +312,18 @@ async def list_sessions(limit: int = 50) -> JSONResponse:
             "[Dashboard] list_checkpoints returned %d entries (cm=%s)",
             len(checkpoints), type(_checkpoint_manager).__name__,
         )
+        # TEMP DEBUG: expose internal state to diagnose empty results.
+        _dbg: dict[str, Any] = {}
+        try:
+            _saver = await _checkpoint_manager._get_saver()
+            _dbg["saver_type"] = type(_saver).__name__
+            _dbg["saver_has_conn"] = hasattr(_saver, "conn")
+            if hasattr(_saver, "conn") and _saver.conn:
+                _cur = await _saver.conn.execute("SELECT COUNT(*) FROM checkpoints")
+                _row = await _cur.fetchone()
+                _dbg["db_checkpoint_count"] = _row[0] if _row else 0
+        except Exception as exc:
+            _dbg["saver_inspect_error"] = str(exc)
 
         # Build a lookup of session metadata from the session store so we can
         # enrich checkpointed sessions with platform and display_name.
@@ -340,7 +352,7 @@ async def list_sessions(limit: int = 50) -> JSONResponse:
                 "display_name": meta.get("display_name"),
             })
 
-        return JSONResponse({"sessions": sessions, "count": len(sessions)})
+        return JSONResponse({"sessions": sessions, "count": len(sessions), "_debug": _dbg})
     except Exception:
         logger.exception("Failed to list sessions")
         return JSONResponse({"sessions": [], "error": "Internal error"}, status_code=500)
