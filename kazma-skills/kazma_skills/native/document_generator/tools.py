@@ -60,6 +60,9 @@ async def generate_pdf(
             SimpleDocTemplate,
             Spacer,
         )
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.enums import TA_RIGHT
     except ImportError:
         return "Error: reportlab not installed. Run: pip install reportlab"
 
@@ -80,16 +83,61 @@ async def generate_pdf(
         except Exception:
             return text
 
+    # Register an Arabic-capable font. reportlab's built-in Helvetica
+    # has NO Arabic glyphs (shows as nnn). We bundle Amiri (open-source
+    # Arabic font) or fall back to a system font.
+    _arabic_font_name = None
+    _font_candidates = [
+        # Bundled font dir (shipped with the skill)
+        Path(__file__).parent / "fonts" / "Amiri-Regular.ttf",
+        # Common system font locations
+        Path("/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf"),
+        Path("/usr/share/fonts/opentype/noto/NotoNaskhArabic-Regular.otf"),
+        Path("/usr/share/fonts/truetype/amiri/Amiri-Regular.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),  # partial Arabic
+    ]
+    for _fp in _font_candidates:
+        if _fp.exists():
+            try:
+                pdfmetrics.registerFont(TTFont("ArabicFont", str(_fp)))
+                _arabic_font_name = "ArabicFont"
+                logger.info("[PDF] Registered Arabic font: %s", _fp)
+                break
+            except Exception:
+                continue
+
+    # If no Arabic font found, try downloading Amiri from GitHub.
+    if _arabic_font_name is None and _has_arabic:
+        try:
+            import urllib.request
+            _font_dir = Path("kazma-data/fonts")
+            _font_dir.mkdir(parents=True, exist_ok=True)
+            _font_path = _font_dir / "Amiri-Regular.ttf"
+            if not _font_path.exists():
+                _url = "https://github.com/aliftype/amiri/raw/main/fonts/ttf/Amiri-Regular.ttf"
+                logger.info("[PDF] Downloading Amiri Arabic font...")
+                urllib.request.urlretrieve(_url, str(_font_path))
+            pdfmetrics.registerFont(TTFont("ArabicFont", str(_font_path)))
+            _arabic_font_name = "ArabicFont"
+        except Exception as exc:
+            logger.warning("[PDF] Could not obtain Arabic font: %s", exc)
+
     secs = _normalize_sections(sections)
     dest = _filename(title, "pdf")
     try:
         doc = SimpleDocTemplate(str(dest), pagesize=LETTER)
-        styles = getSampleStyleSheet()
-        title_style = styles["Title"]
-        head_style = ParagraphStyle(
-            "SectionHead", parent=styles["Heading2"], spaceBefore=14, spaceAfter=6
-        )
-        body_style = styles["BodyText"]
+
+        if _arabic_font_name:
+            title_style = ParagraphStyle("Title", fontName=_arabic_font_name, fontSize=18, alignment=TA_RIGHT, spaceAfter=12)
+            head_style = ParagraphStyle("SectionHead", fontName=_arabic_font_name, fontSize=14, alignment=TA_RIGHT, spaceBefore=14, spaceAfter=6)
+            body_style = ParagraphStyle("BodyText", fontName=_arabic_font_name, fontSize=10, alignment=TA_RIGHT, leading=16)
+        else:
+            styles = getSampleStyleSheet()
+            title_style = styles["Title"]
+            head_style = ParagraphStyle("SectionHead", parent=styles["Heading2"], spaceBefore=14, spaceAfter=6)
+            body_style = styles["BodyText"]
+
         flow: list[Any] = [Paragraph(_shape(title), title_style), Spacer(1, 12)]
         for s in secs:
             if s["heading"]:
