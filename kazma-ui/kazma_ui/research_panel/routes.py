@@ -70,7 +70,9 @@ async def _set_archived(task_id: str, archived: bool) -> JSONResponse:
     locking and works for both SQLite and Postgres.
     """
     store = _get_store()
+    logger.warning("[research] _set_archived: task_id=%s archived=%s store=%s", task_id, archived, store is not None)
     task = store.get_task(task_id) if store else None
+    logger.warning("[research] _set_archived: get_task returned: %s", task is not None)
     if task is None:
         try:
             from kazma_core.swarm import get_swarm_engine
@@ -86,10 +88,12 @@ async def _set_archived(task_id: str, archived: bool) -> JSONResponse:
     if task.metadata is None:
         task.metadata = {}
     task.metadata["archived"] = archived
+    logger.warning("[research] _set_archived: metadata after mutate: %s", task.metadata)
 
     if store is not None:
         try:
             store.persist_task(task)
+            logger.warning("[research] _set_archived: persist_task succeeded")
         except Exception as exc:
             logger.exception("[research] archive persist failed")
             return JSONResponse({"error": str(exc)}, status_code=500)
