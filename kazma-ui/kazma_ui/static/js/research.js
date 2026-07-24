@@ -12,9 +12,9 @@
   'use strict';
 
   var allTasks = [];
+  var archivedTasks = [];
   var currentId = null;
   var pollTimer = null;
-  var showArchived = false;
 
   function $(id) { return document.getElementById(id); }
 
@@ -50,7 +50,7 @@
     },
 
     switchTab: function (name) {
-      ['list', 'compare', 'about'].forEach(function (t) {
+      ['list', 'archived', 'compare', 'about'].forEach(function (t) {
         var p = $('panel-' + t);
         if (p) p.style.display = 'none';
       });
@@ -59,11 +59,12 @@
       var btn = document.querySelector('.tab[data-tab="' + name + '"]');
       if (panel) panel.style.display = 'block';
       if (btn) btn.classList.add('active');
+      // Lazy-load archived list when switching to that tab.
+      if (name === 'archived') this.loadArchived();
     },
 
     load: function () {
-      var url = '/api/research/tasks?page=1&page_size=50&archived=' + (showArchived ? 'true' : 'false');
-      fetch(url, { credentials: 'same-origin' })
+      fetch('/api/research/tasks?page=1&page_size=50&archived=false', { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : { tasks: [], count: 0 }; })
         .then(function (data) {
           allTasks = data.tasks || [];
@@ -71,6 +72,24 @@
           populateCompareDropdowns(allTasks);
         })
         .catch(function () { /* silent — retry on poll */ });
+    },
+
+    loadArchived: function () {
+      fetch('/api/research/tasks?page=1&page_size=50&archived=true', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : { tasks: [], count: 0 }; })
+        .then(function (data) {
+          archivedTasks = data.tasks || [];
+          renderArchivedList(archivedTasks);
+        })
+        .catch(function () { /* silent */ });
+    },
+
+    searchArchived: function (e) {
+      var q = (e.target.value || '').toLowerCase();
+      var filtered = q ? archivedTasks.filter(function (t) {
+        return (t.prompt || '').toLowerCase().indexOf(q) !== -1;
+      }) : archivedTasks;
+      renderArchivedList(filtered);
     },
 
     search: function (e) {
@@ -182,6 +201,21 @@
         .catch(function () { toast('Delete failed', 'error'); });
     },
 
+    delArchived: function (id) {
+      if (!confirm('Delete this research result?')) return;
+      fetch('/api/research/tasks/' + encodeURIComponent(id), {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.error) { toast('Delete failed: ' + data.error, 'error'); return; }
+          toast('Deleted', 'success');
+          window.KazmaResearch.loadArchived();
+        })
+        .catch(function () { toast('Delete failed', 'error'); });
+    },
+
     archive: function (id) {
       fetch('/api/research/tasks/' + encodeURIComponent(id) + '/archive', {
         method: 'POST',
@@ -190,8 +224,12 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (data.error) { toast('Archive failed: ' + data.error, 'error'); return; }
-          toast(i18n('research.archived_msg'), 'success');
+          toast(i18n('research_archived_msg'), 'success');
           window.KazmaResearch.load();
+          // If the archived panel is visible, refresh it too.
+          if ($('panel-archived') && $('panel-archived').style.display !== 'none') {
+            window.KazmaResearch.loadArchived();
+          }
         })
         .catch(function () { toast('Archive failed', 'error'); });
     },
@@ -204,8 +242,8 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (data.error) { toast('Restore failed: ' + data.error, 'error'); return; }
-          toast(i18n('research.restored_msg'), 'success');
-          window.KazmaResearch.load();
+          toast(i18n('research_restored_msg'), 'success');
+          window.KazmaResearch.loadArchived();
         })
         .catch(function () { toast('Restore failed', 'error'); });
     },
@@ -220,8 +258,9 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (data.error) { toast('Archive failed: ' + data.error, 'error'); return; }
-          toast(i18n('research.archived_msg'), 'success');
+          toast(i18n('research_archived_msg'), 'success');
           window.KazmaResearch.backToList();
+          window.KazmaResearch.load();
         })
         .catch(function () { toast('Archive failed', 'error'); });
     },
@@ -236,22 +275,11 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (data.error) { toast('Restore failed: ' + data.error, 'error'); return; }
-          toast(i18n('research.restored_msg'), 'success');
+          toast(i18n('research_restored_msg'), 'success');
           window.KazmaResearch.backToList();
+          window.KazmaResearch.load();
         })
         .catch(function () { toast('Restore failed', 'error'); });
-    },
-
-    toggleArchived: function () {
-      showArchived = !showArchived;
-      // Update the tab button label
-      var btn = document.querySelector('.tab[data-tab="list"]');
-      if (btn) btn.textContent = showArchived ? i18n('research.tab_archived') : i18n('research.tab_results');
-      // Hide detail if visible
-      $('research-detail').style.display = 'none';
-      $('research-list').style.display = 'flex';
-      currentId = null;
-      this.load();
     },
 
     compare: function () {
@@ -301,17 +329,11 @@
   function renderList(tasks) {
     var el = $('research-list');
     if (!tasks.length) {
-      var msg = showArchived ? i18n('research.no_archived') : i18n('research.no_results');
-      el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(msg) + '</div>';
+      el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_results')) + '</div>';
       return;
     }
     el.innerHTML = tasks.map(function (t) {
-      var isArchived = t.metadata && t.metadata.archived;
-      // In archived view: show Restore + Delete. In normal view: show Archive + Delete.
-      var actionBtn = showArchived
-        ? '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.restore(\'' + t.id + '\')" title="Restore">' + RESTORE_SVG + '</button>'
-        : '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">' + ARCHIVE_SVG + '</button>';
-      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;' + (isArchived ? 'opacity:0.6;' : '') + '" onclick="KazmaResearch.viewDetail(\'' + t.id + '\')">' +
+      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" onclick="KazmaResearch.viewDetail(\'' + t.id + '\')">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
             '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || '(no prompt)') + '</div>' +
@@ -323,8 +345,34 @@
             '</div>' +
           '</div>' +
           '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(t.status) + '</span>' +
-          actionBtn +
+          '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">' + ARCHIVE_SVG + '</button>' +
           '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.del(\'' + t.id + '\')" title="Delete">×</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function renderArchivedList(tasks) {
+    var el = $('research-archived-list');
+    if (!el) return;
+    if (!tasks.length) {
+      el.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--text-muted);">' + esc(i18n('research_no_archived')) + '</div>';
+      return;
+    }
+    el.innerHTML = tasks.map(function (t) {
+      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;opacity:0.7;" onclick="KazmaResearch.viewDetail(\'' + t.id + '\')">' +
+        '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
+          '<div style="flex:1;min-width:0;overflow:hidden;">' +
+            '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || '(no prompt)') + '</div>' +
+            '<div style="font-size:0.85rem;color:var(--text-muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
+              '<span>' + esc((t.workers || []).join(', ')) + '</span> · ' +
+              '<span>$' + (t.cost || 0).toFixed(4) + '</span> · ' +
+              '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(t.status) + '</span>' +
+          '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.restore(\'' + t.id + '\')" title="Restore">' + RESTORE_SVG + '</button>' +
+          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.delArchived(\'' + t.id + '\')" title="Delete">×</button>' +
         '</div>' +
       '</div>';
     }).join('');
