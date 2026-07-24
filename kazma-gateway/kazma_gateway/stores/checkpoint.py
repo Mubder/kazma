@@ -210,7 +210,8 @@ class CheckpointManager(BaseCheckpointSaver):
         """List checkpointed threads with their latest checkpoint metadata.
 
         Queries the underlying checkpoint store for distinct thread_ids
-        and returns summary info for each.
+        and returns summary info for each. Supports both SQLite
+        (AsyncSqliteSaver) and Postgres (AsyncPostgresSaver) backends.
 
         Args:
             limit: Maximum number of threads to return.
@@ -220,19 +221,21 @@ class CheckpointManager(BaseCheckpointSaver):
             message_count, context_tokens.
         """
         saver = await self._get_saver()
+        saver_type = type(saver).__name__
+
+        # ── Postgres backend ──────────────────────────────────────────
+        if "Postgres" in saver_type:
+            return await self._list_checkpoints_postgres(saver, limit)
+
+        # ── SQLite backend (default) ──────────────────────────────────
         conn = saver.conn if hasattr(saver, "conn") else None
         if conn is None:
             logger.warning(
-                "[Checkpoint] list_checkpoints: saver has no conn (type=%s, attrs=%s)",
-                type(saver).__name__,
-                [a for a in dir(saver) if not a.startswith("_")][:15],
+                "[Checkpoint] list_checkpoints: saver has no conn (type=%s)",
+                saver_type,
             )
             return []
         try:
-            # Each checkpoint row stores metadata as JSON in the
-            # ``checkpoint`` column.  We pick the latest checkpoint per
-            # thread (highest checkpoint_id) so the dashboard shows the
-            # most recent state.
             cursor = await conn.execute(
                 """
                 SELECT
@@ -261,8 +264,6 @@ class CheckpointManager(BaseCheckpointSaver):
             for row in rows:
                 thread_id = row[0]
                 checkpoint_id = row[1]
-                # Try to extract message count + created_at from the
-                # checkpoint blob and metadata column.
                 msg_count = 0
                 created_at = ""
                 try:
@@ -288,6 +289,81 @@ class CheckpointManager(BaseCheckpointSaver):
             return results
         except Exception:
             logger.warning("[Checkpoint] list_checkpoints query failed", exc_info=True)
+            return []
+
+    async def _list_checkpoints_postgres(
+        self, saver: Any, limit: int
+    ) -> list[dict[str, Any]]:
+        """Postgres variant of list_checkpoints using the AsyncConnectionPool.
+
+        The ``AsyncPostgresSaver`` stores its pool in ``saver.conn`` (an
+        ``AsyncConnectionPool``). We acquire a connection from the pool,
+        run the equivalent query with ``%s`` placeholders, and decode
+        blobs the same way as the SQLite path.
+        """
+        pool = saver.conn if hasattr(saver, "conn") else None
+        if pool is None:
+            return []
+        try:
+            async with pool.connection() as conn:  # type: ignore[union-attr]
+                async with conn.cursor() as cur:  # type: ignore[union-attr]
+                    await cur.execute(
+                        """
+                        SELECT thread_id, checkpoint_id
+                        FROM (
+                            SELECT
+                                thread_id,
+                                checkpoint_id,
+                                ROW_NUMBER() OVER (
+                                    PARTITION BY thread_id
+                                    ORDER BY checkpoint_id DESC
+                                ) AS rn
+                            FROM checkpoints
+                        ) sub
+                        WHERE rn = 1
+                        ORDER BY checkpoint_id DESC
+                        LIMIT %s
+                        """,
+                        (limit,),
+                    )
+                    rows = await cur.fetchall()
+
+                results: list[dict[str, Any]] = []
+                for row in rows:
+                    thread_id = row[0]
+                    checkpoint_id = row[1]
+                    msg_count = 0
+                    created_at = ""
+                    try:
+                        async with conn.cursor() as bcur:  # type: ignore[union-attr]
+                            await bcur.execute(
+                                "SELECT checkpoint, metadata FROM checkpoints "
+                                "WHERE thread_id = %s AND checkpoint_id = %s LIMIT 1",
+                                (thread_id, checkpoint_id),
+                            )
+                            blob_row = await bcur.fetchone()
+                        if blob_row and blob_row[0]:
+                            blob = blob_row[0]
+                            if isinstance(blob, memoryview):
+                                blob = bytes(blob)
+                            msg_count = self._try_decode_message_count(blob)
+                        if blob_row and blob_row[1]:
+                            meta = blob_row[1]
+                            if isinstance(meta, memoryview):
+                                meta = bytes(meta)
+                            created_at = self._try_decode_created_at(meta)
+                    except Exception as exc:
+                        logger.debug("Checkpoint blob decode failed for thread %s: %s", thread_id, exc)
+                    results.append({
+                        "thread_id": thread_id,
+                        "checkpoint_id": str(checkpoint_id),
+                        "created_at": created_at,
+                        "message_count": msg_count,
+                        "context_tokens": 0,
+                    })
+                return results
+        except Exception:
+            logger.warning("[Checkpoint] list_checkpoints (postgres) query failed", exc_info=True)
             return []
 
     @staticmethod
