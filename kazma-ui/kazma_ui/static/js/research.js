@@ -17,6 +17,11 @@
   var showArchived = false;
 
   function $(id) { return document.getElementById(id); }
+
+  // SVG icons (no emojis — consistent with the rest of the Kazma UI).
+  var ARCHIVE_SVG = '<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><rect x="2" y="4" width="20" height="4" rx="1"/><path d="M4 8v10a2 2 0 002 2h12a2 2 0 002-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
+  var RESTORE_SVG = '<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path d="M3 12a9 9 0 109-9"/><polyline points="3 4 3 10 9 10"/></svg>';
+  var CHECK_SVG = '<svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
   function i18n(key) { return (window.KAZMA_I18N && window.KAZMA_I18N[key]) || key; }
   function esc(s) {
     return String(s == null ? '' : s)
@@ -286,7 +291,7 @@
           if (d.output_diff) {
             html += '<h4 style="margin-top:1.5rem;">' + esc(i18n('research.text_diff')) + '</h4><pre style="background:rgba(0,0,0,0.1);padding:12px;border-radius:6px;font-size:0.8rem;overflow-x:auto;max-height:300px;">' + esc(d.output_diff) + '</pre>';
           }
-          if (d.identical) html += '<p style="color:var(--success);">✅ ' + esc(i18n('research.identical')) + '</p>';
+          if (d.identical) html += '<p style="color:var(--success);display:flex;align-items:center;gap:4px;">' + CHECK_SVG + ' ' + esc(i18n('research.identical')) + '</p>';
           $('research-cmp-result').innerHTML = html;
         })
         .catch(function () { toast('Compare failed', 'error'); });
@@ -304,8 +309,8 @@
       var isArchived = t.metadata && t.metadata.archived;
       // In archived view: show Restore + Delete. In normal view: show Archive + Delete.
       var actionBtn = showArchived
-        ? '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.restore(\'' + t.id + '\')" title="Restore">↺</button>'
-        : '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">📦</button>';
+        ? '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.restore(\'' + t.id + '\')" title="Restore">' + RESTORE_SVG + '</button>'
+        : '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">' + ARCHIVE_SVG + '</button>';
       return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;' + (isArchived ? 'opacity:0.6;' : '') + '" onclick="KazmaResearch.viewDetail(\'' + t.id + '\')">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
