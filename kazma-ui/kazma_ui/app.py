@@ -687,7 +687,6 @@ class KazmaAppBuilder:
                 tracer=self.agent.tracer,
                 cost_breaker=self.agent.cost_breaker,
                 session_store=self.session_store,
-                checkpoint_manager=self._checkpointer,
             )
 
             # Rate feedback (from gateway.rate_limits YAML config)

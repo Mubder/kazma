@@ -59,19 +59,34 @@ _cost_breaker: CostCircuitBreaker | None = None
 _checkpoint_manager: CheckpointManager | None = None
 _session_store: SessionStore | None = None
 
+# Sentinel so callers can update a subset of globals without clobbering the
+# others (e.g. _on_startup sets only checkpoint_manager). Using None for both
+# "not provided" and "clear to None" would wipe tracer/session_store on the
+# second partial call — which is exactly the bug that left Session Management
+# always empty.
+_UNSET: Any = object()
+
 
 def set_dashboard_context(
-    tracer: KazmaTracer | None = None,
-    cost_breaker: CostCircuitBreaker | None = None,
-    checkpoint_manager: CheckpointManager | None = None,
-    session_store: SessionStore | None = None,
+    tracer: Any = _UNSET,
+    cost_breaker: Any = _UNSET,
+    checkpoint_manager: Any = _UNSET,
+    session_store: Any = _UNSET,
 ) -> None:
-    """Set the tracer, cost breaker, checkpoint manager, and session store for the dashboard."""
+    """Set the tracer, cost breaker, checkpoint manager, and session store for the dashboard.
+
+    Only arguments explicitly passed are updated; omitted arguments preserve
+    their existing value. Pass ``None`` explicitly to clear one.
+    """
     global _tracer, _cost_breaker, _checkpoint_manager, _session_store
-    _tracer = tracer
-    _cost_breaker = cost_breaker
-    _checkpoint_manager = checkpoint_manager
-    _session_store = session_store
+    if tracer is not _UNSET:
+        _tracer = tracer
+    if cost_breaker is not _UNSET:
+        _cost_breaker = cost_breaker
+    if checkpoint_manager is not _UNSET:
+        _checkpoint_manager = checkpoint_manager
+    if session_store is not _UNSET:
+        _session_store = session_store
 
 
 def _get_trace_data() -> list[dict[str, Any]]:
