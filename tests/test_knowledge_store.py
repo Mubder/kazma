@@ -1,0 +1,181 @@
+"""Tests for the KnowledgeStore SQLite layer.
+
+Covers: library CRUD, chunk upsert with dedup, FTS5 lexical search,
+cascade delete.  Uses a temp DB so the real settings.db is untouched.
+"""
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-core"))
+
+from kazma_core.stores.knowledge import KnowledgeStore
+
+
+def _fresh_store() -> KnowledgeStore:
+    tmp = tempfile.mkdtemp(prefix="kazma_kb_test_")
+    return KnowledgeStore(db_path=os.path.join(tmp, "settings.db"))
+
+
+def _chunk_dict(library_id: str, source_url: str, idx: int, content: str) -> dict:
+    import hashlib
+    return {
+        "id": f"{library_id}:{hashlib.sha256(content.encode()).hexdigest()[:16]}",
+        "library_id": library_id,
+        "source_url": source_url,
+        "document_title": "T",
+        "section_header": f"Section {idx}",
+        "chunk_index": idx,
+        "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+        "has_code": False,
+        "char_count": len(content),
+        "content": content,
+    }
+
+
+# ── Library CRUD ────────────────────────────────────────────────────────────
+
+
+def test_create_and_get_library():
+    s = _fresh_store()
+    lib = s.create_library("lib_a", "Library A", description="desc", seed_url="https://x/a")
+    assert lib["id"] == "lib_a"
+    assert lib["name"] == "Library A"
+    assert lib["chunk_count"] == 0
+    assert lib["auto_inject"] is False
+    fetched = s.get_library("lib_a")
+    assert fetched and fetched["id"] == "lib_a"
+
+
+def test_list_libraries_ordered():
+    s = _fresh_store()
+    s.create_library("b", "B")
+    s.create_library("a", "A")
+    ids = [l["id"] for l in s.list_libraries()]
+    assert ids == ["b", "a"]  # by created_at, insertion order
+
+
+def test_update_library_auto_inject_toggle():
+    s = _fresh_store()
+    s.create_library("lib", "L")
+    updated = s.update_library("lib", auto_inject=True)
+    assert updated["auto_inject"] is True
+    assert s.get_library("lib")["auto_inject"] is True
+    s.update_library("lib", auto_inject=False)
+    assert s.get_library("lib")["auto_inject"] is False
+
+
+def test_update_nonexistent_returns_none():
+    s = _fresh_store()
+    assert s.update_library("nope", name="x") is None
+
+
+# ── Chunk upsert + dedup ────────────────────────────────────────────────────
+
+
+def test_upsert_chunk_then_dedup_on_same_hash():
+    s = _fresh_store()
+    s.create_library("lib", "L")
+    chunk = _chunk_dict("lib", "https://x/p", 0, "hello world")
+    assert s.upsert_chunk(chunk) is True        # first insert
+    assert s.upsert_chunk(chunk) is False        # same hash → no-op
+    assert s.count_chunks("lib") == 1
+
+
+def test_upsert_replaces_when_content_changed():
+    s = _fresh_store()
+    s.create_library("lib", "L")
+    s.upsert_chunk(_chunk_dict("lib", "https://x/p", 0, "old content"))
+    # Same (library, source_url, chunk_index) but different content_hash.
+    s.upsert_chunk(_chunk_dict("lib", "https://x/p", 0, "new content"))
+    assert s.count_chunks("lib") == 1
+    chunks = s.list_chunks("lib")
+    assert chunks[0]["content"] == "new content"
+
+
+def test_list_chunks_pagination():
+    s = _fresh_store()
+    s.create_library("lib", "L")
+    for i in range(5):
+        s.upsert_chunk(_chunk_dict("lib", "https://x/p", i, f"chunk {i} body {i}"))
+    page1 = s.list_chunks("lib", limit=2, offset=0)
+    page2 = s.list_chunks("lib", limit=2, offset=2)
+    assert len(page1) == 2 and len(page2) == 2
+    assert page1[0]["chunk_index"] == 0
+    assert page2[0]["chunk_index"] == 2
+
+
+def test_get_chunks_by_ids():
+    s = _fresh_store()
+    s.create_library("lib", "L")
+    s.upsert_chunk(_chunk_dict("lib", "https://x/p", 0, "alpha"))
+    s.upsert_chunk(_chunk_dict("lib", "https://x/p", 1, "beta"))
+    all_chunks = s.list_chunks("lib")
+    ids = [c["id"] for c in all_chunks]
+    fetched = s.get_chunks_by_ids(ids)
+    assert set(fetched.keys()) == set(ids)
+    assert fetched[ids[0]]["content"] == "alpha"
+
+
+def test_existing_hashes_map():
+    s = _fresh_store()
+    s.create_library("lib", "L")
+    s.upsert_chunk(_chunk_dict("lib", "https://x/p", 0, "alpha"))
+    h = s.existing_hashes("lib")
+    assert len(h) == 1
+    # The map is content_hash -> chunk_id.
+    assert list(h.values())[0].startswith("lib:")
+
+
+# ── FTS5 lexical search ─────────────────────────────────────────────────────
+
+
+def test_fts_search_finds_keyword():
+    s = _fresh_store()
+    s.create_library("lib", "L")
+    s.upsert_chunk(_chunk_dict(
+        "lib", "https://x/p", 0,
+        "Use a Bearer token in the Authorization header or you get 401.",
+    ))
+    s.upsert_chunk(_chunk_dict(
+        "lib", "https://x/p2", 0,
+        "Completely unrelated Instagram marketing content.",
+    ))
+    hits = s.fts_search("401 authentication token", "lib", limit=5)
+    assert hits, "expected at least one FTS hit"
+    # The auth chunk should be among the results.
+    ids = [hid for hid, _score in hits]
+    auth_chunk = s.list_chunks("lib", limit=100)
+    auth_ids = [c["id"] for c in auth_chunk if "Bearer" in c["content"]]
+    assert any(aid in ids for aid in auth_ids)
+
+
+def test_fts_search_library_scoped():
+    s = _fresh_store()
+    s.create_library("lib_a", "A")
+    s.create_library("lib_b", "B")
+    s.upsert_chunk(_chunk_dict("lib_a", "https://x/a", 0, "whatsapp message endpoint"))
+    s.upsert_chunk(_chunk_dict("lib_b", "https://x/b", 0, "whatsapp message endpoint"))
+    # Searching lib_a must return only lib_a's chunk.
+    hits_a = s.fts_search("whatsapp", "lib_a")
+    all_chunks_a = {c["id"]: c for c in s.list_chunks("lib_a", limit=100)}
+    for hid, _ in hits_a:
+        assert hid in all_chunks_a
+
+
+# ── Cascade delete ──────────────────────────────────────────────────────────
+
+
+def test_delete_library_cascades_to_chunks_and_fts():
+    s = _fresh_store()
+    s.create_library("lib", "L")
+    s.upsert_chunk(_chunk_dict("lib", "https://x/p", 0, "alpha beta gamma"))
+    assert s.count_chunks("lib") == 1
+    assert s.delete_library("lib") is True
+    assert s.get_library("lib") is None
+    assert s.count_chunks("lib") == 0
+    # FTS5 row gone too — search returns nothing.
+    assert s.fts_search("alpha", "lib") == []

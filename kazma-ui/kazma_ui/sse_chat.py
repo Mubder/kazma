@@ -1019,6 +1019,28 @@ def create_sse_chat_router(
         except Exception:
             logger.debug("[sse_chat] agent evolution inject skipped", exc_info=True)
 
+        # Knowledge Library auto-inject (Phase 2). For libraries with
+        # ``auto_inject=1``, fold the top-k chunks for this user message
+        # into the prompt — fenced as untrusted data so a malicious doc
+        # page can't smuggle instructions (AGENTS.md §11).  Kill switch
+        # ``KAZMA_KB_AUTO_INJECT=0`` is checked live inside the getter.
+        try:
+            from kazma_core.safety.prompt_fence import format_untrusted_block
+            from kazma_core.stores.knowledge_index import (
+                get_knowledge_auto_inject_block,
+            )
+
+            kb_block = await get_knowledge_auto_inject_block(user_message)
+            if kb_block:
+                system_msgs.append(
+                    {
+                        "role": "system",
+                        "content": format_untrusted_block(kb_block, source="knowledge"),
+                    }
+                )
+        except Exception:
+            logger.debug("[sse_chat] knowledge auto-inject skipped", exc_info=True)
+
         try:
             from kazma_core.ide.env_context import build_env_context
 

@@ -25,6 +25,7 @@ from .hitl import (
 )
 from .commands import (
     _try_ide_command,
+    _try_kb_command,
     _try_model_command,
     _try_skill_command,
     _try_swarm_command,
@@ -645,6 +646,16 @@ def create_graph_handler(
         if ide_handled:
             return  # IDE command handled, skip graph
 
+        # ── Knowledge Library slash-command intercept ───────────────
+        # /kb list|add|crawl|search|status|delete manages Knowledge
+        # Libraries (ingested doc corpora used by the knowledge_search
+        # tool). Skip the graph on any /kb command.
+        kb_handled = await _try_kb_command(
+            msg, _store, manager, thread_id,
+        )
+        if kb_handled:
+            return  # /kb command handled, skip graph
+
         # ── Agent Skills slash-command intercept ──────────────────
         # /skill install|list|… installs SKILL.md skills without LLM thrash.
         skill_handled = await _try_skill_command(
@@ -822,6 +833,37 @@ def create_graph_handler(
             except Exception:
                 logger.debug(
                     "[agent-handler] agent evolution inject skipped",
+                    exc_info=True,
+                )
+
+            # ── Knowledge Library auto-inject (Phase 2) ────────────
+            # For libraries with ``auto_inject=1``, fold the top-k chunks
+            # relevant to this user message into the prompt — fenced as
+            # untrusted data (doc content may be adversarial).  Kill switch
+            # ``KAZMA_KB_AUTO_INJECT=0`` checked live inside the getter.
+            try:
+                from kazma_core.safety.prompt_fence import format_untrusted_block
+                from kazma_core.stores.knowledge_index import (
+                    get_knowledge_auto_inject_block,
+                )
+
+                kb_block = await get_knowledge_auto_inject_block(msg.text or "")
+                if kb_block:
+                    msgs = list(state.get("messages") or [])
+                    kb_sys = {
+                        "role": "system",
+                        "content": format_untrusted_block(kb_block, source="knowledge"),
+                    }
+                    insert_at = 0
+                    for i, m in enumerate(msgs):
+                        if isinstance(m, dict) and m.get("role") == "user":
+                            insert_at = i
+                            break
+                    msgs.insert(insert_at, kb_sys)
+                    state = {**state, "messages": msgs}
+            except Exception:
+                logger.debug(
+                    "[agent-handler] knowledge auto-inject skipped",
                     exc_info=True,
                 )
 
