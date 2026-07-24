@@ -123,7 +123,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/streaming.js"></script>
-<script src="/static/js/voice.js"></script>
-<script src="/static/js/chat.js"></script>
+<script src="/static/js/streaming.js?v={{ js_version }}"></script>
+<script src="/static/js/voice.js?v={{ js_version }}"></script>
+<script src="/static/js/chat.js?v={{ js_version }}"></script>
 {% endblock %}

@@ -120,6 +120,15 @@
       });
     }
 
+    // Global Escape key — abort generation from anywhere on the page
+    // (not just when the textarea has focus).
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && _isGenerating) {
+        e.preventDefault();
+        abortGeneration();
+      }
+    });
+
     // Load sessions and connect
     loadSessions();
 
@@ -666,8 +675,9 @@
 
       onApprovalRequired: function(data) {
         // HITL: graph paused — render scope-aware approval card.
+        // Keep _isGenerating=true and activeStream alive so the Stop button
+        // can still abort the SSE connection while waiting for approval.
         KS.hideTyping(typingEl);
-        activeStream = null;
         renderHitlCard(data);
       },
 
