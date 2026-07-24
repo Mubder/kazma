@@ -62,6 +62,43 @@ def _flatten(task: Any) -> dict[str, Any]:
     }
 
 
+async def _set_archived(task_id: str, archived: bool) -> JSONResponse:
+    """Toggle the archived flag on a research task's metadata.
+
+    Loads the task from the TaskStore (or in-memory engine), mutates
+    ``metadata["archived"]``, and re-persists. This respects the store's
+    locking and works for both SQLite and Postgres.
+    """
+    store = _get_store()
+    task = store.get_task(task_id) if store else None
+    if task is None:
+        try:
+            from kazma_core.swarm import get_swarm_engine
+            engine = get_swarm_engine()
+            if engine:
+                task = engine.get_task(task_id) or engine.get_active_task(task_id)
+        except Exception:
+            pass
+    if task is None:
+        return JSONResponse({"error": "task not found"}, status_code=404)
+
+    # Mutate metadata and re-persist.
+    if task.metadata is None:
+        task.metadata = {}
+    task.metadata["archived"] = archived
+
+    if store is not None:
+        try:
+            store.persist_task(task)
+        except Exception as exc:
+            logger.exception("[research] archive persist failed")
+            return JSONResponse({"error": str(exc)}, status_code=500)
+    else:
+        return JSONResponse({"error": "store unavailable"}, status_code=503)
+
+    return JSONResponse({"ok": True, "task_id": task_id, "archived": archived})
+
+
 def create_research_router() -> APIRouter:
     """Create the research API router."""
     router = APIRouter(tags=["research"])
@@ -71,8 +108,14 @@ def create_research_router() -> APIRouter:
         page: int = 1,
         page_size: int = 20,
         q: str | None = None,
+        archived: bool = False,
     ) -> JSONResponse:
-        """List research tasks (filtered by metadata.kind=research)."""
+        """List research tasks (filtered by metadata.kind=research).
+
+        Args:
+            archived: When False (default), exclude archived tasks.
+                      When True, show only archived tasks.
+        """
         store = _get_store()
         if store is None:
             return JSONResponse({"tasks": [], "count": 0})
@@ -87,6 +130,17 @@ def create_research_router() -> APIRouter:
             q_lower = q.lower()
             tasks = [t for t in tasks if q_lower in (t.prompt or "").lower()]
             total = len(tasks)
+
+        # Filter by archived flag in metadata.
+        def _is_archived(t: Any) -> bool:
+            meta = t.metadata or {}
+            return bool(meta.get("archived", False))
+
+        if archived:
+            tasks = [t for t in tasks if _is_archived(t)]
+        else:
+            tasks = [t for t in tasks if not _is_archived(t)]
+        total = len(tasks)
 
         return JSONResponse({
             "tasks": [_flatten(t) for t in tasks],
@@ -228,6 +282,16 @@ def create_research_router() -> APIRouter:
             filename=os.path.basename(real_path),
             media_type="application/octet-stream",
         )
+
+    @router.post("/api/research/tasks/{task_id}/archive")
+    async def archive_research(task_id: str) -> JSONResponse:
+        """Archive a research task (sets metadata.archived = true)."""
+        return await _set_archived(task_id, archived=True)
+
+    @router.post("/api/research/tasks/{task_id}/unarchive")
+    async def unarchive_research(task_id: str) -> JSONResponse:
+        """Restore an archived research task (sets metadata.archived = false)."""
+        return await _set_archived(task_id, archived=False)
 
     @router.delete("/api/research/tasks/{task_id}")
     async def delete_research(task_id: str) -> JSONResponse:

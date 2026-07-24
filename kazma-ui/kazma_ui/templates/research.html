@@ -17,6 +17,7 @@
     <div style="display:flex;align-items:center;gap:12px;margin:1rem 0;">
       <input type="text" id="research-search" placeholder="{{ t('research.search_placeholder') }}" class="form-input" style="flex:1;min-width:0;" onkeyup="KazmaResearch.search(event)">
       <button class="btn btn-secondary" onclick="KazmaResearch.load()">{{ t('research.refresh') }}</button>
+      <button class="btn btn-secondary" id="archive-toggle-btn" onclick="KazmaResearch.toggleArchived()" title="{{ t('research.archived') }}">📦</button>
     </div>
     <div id="research-list" style="display:flex;flex-direction:column;gap:8px;max-width:100%;overflow:hidden;"></div>
 
@@ -31,6 +32,8 @@
             <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.exportCurrent('markdown')">MD</button>
             <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.exportCurrent('docx')">DOCX</button>
             <button class="btn btn-secondary btn-sm" onclick="KazmaResearch.exportCurrent('pdf')">PDF</button>
+            <button class="btn btn-secondary btn-sm" id="detail-archive-btn" onclick="KazmaResearch.archiveCurrent()" title="{{ t('research.archive') }}">📦</button>
+            <button class="btn btn-secondary btn-sm" id="detail-restore-btn" onclick="KazmaResearch.restoreCurrent()" title="{{ t('research.restore') }}" style="display:none;">↺</button>
             <button class="btn btn-danger btn-sm" onclick="KazmaResearch.delAndBack()" style="flex-shrink:0;">×</button>
           </div>
         </div>
@@ -80,6 +83,7 @@
 window.KAZMA_I18N = {
   research_compare_desc: "{{ t('research.compare_desc') }}",
   research_no_results: "{{ t('research.no_results') }}",
+  research_no_archived: "{{ t('research.no_archived') }}",
   research_comparing: "{{ t('research.comparing') }}",
   research_metric: "{{ t('research.metric') }}",
   research_run_a: "{{ t('research.run_a') }}",
@@ -87,7 +91,11 @@ window.KAZMA_I18N = {
   research_delta: "{{ t('research.delta') }}",
   research_text_diff: "{{ t('research.text_diff') }}",
   research_identical: "{{ t('research.identical') }}",
+  research_tab_results: "{{ t('research.tab_results') }}",
+  research_tab_archived: "{{ t('research.tab_archived') }}",
+  research_archived_msg: "{{ t('research.archived_msg') }}",
+  research_restored_msg: "{{ t('research.restored_msg') }}",
 };
 </script>
-<script src="/static/js/research.js?v=4"></script>
+<script src="/static/js/research.js?v=5"></script>
 {% endblock %}
