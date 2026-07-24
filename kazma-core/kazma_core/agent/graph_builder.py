@@ -1119,7 +1119,7 @@ def build_supervisor_graph(
         """Route from Supervisor based on next_node field."""
         next_node = state.get("next_node", NodeName.RESPOND)
         iteration = state.get("iteration", 0)
-        max_iter = state.get("max_iterations", 10)
+        max_iter = state.get("max_iterations", 15)
 
         # Force respond on max iterations
         if iteration >= max_iter:
