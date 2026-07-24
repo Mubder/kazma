@@ -330,8 +330,14 @@ class CheckpointManager(BaseCheckpointSaver):
 
                 results: list[dict[str, Any]] = []
                 for row in rows:
-                    thread_id = row[0]
-                    checkpoint_id = row[1]
+                    # psycopg dict_row returns dict; aiosqlite returns tuple.
+                    # Support both for safety.
+                    if isinstance(row, dict):
+                        thread_id = row["thread_id"]
+                        checkpoint_id = row["checkpoint_id"]
+                    else:
+                        thread_id = row[0]
+                        checkpoint_id = row[1]
                     msg_count = 0
                     created_at = ""
                     try:
@@ -342,16 +348,16 @@ class CheckpointManager(BaseCheckpointSaver):
                                 (thread_id, checkpoint_id),
                             )
                             blob_row = await bcur.fetchone()
-                        if blob_row and blob_row[0]:
-                            blob = blob_row[0]
-                            if isinstance(blob, memoryview):
-                                blob = bytes(blob)
-                            msg_count = self._try_decode_message_count(blob)
-                        if blob_row and blob_row[1]:
-                            meta = blob_row[1]
-                            if isinstance(meta, memoryview):
-                                meta = bytes(meta)
-                            created_at = self._try_decode_created_at(meta)
+                        _blob = blob_row.get("checkpoint") if isinstance(blob_row, dict) else (blob_row[0] if blob_row else None)
+                        _meta = blob_row.get("metadata") if isinstance(blob_row, dict) else (blob_row[1] if blob_row else None)
+                        if _blob:
+                            if isinstance(_blob, memoryview):
+                                _blob = bytes(_blob)
+                            msg_count = self._try_decode_message_count(_blob)
+                        if _meta:
+                            if isinstance(_meta, memoryview):
+                                _meta = bytes(_meta)
+                            created_at = self._try_decode_created_at(_meta)
                     except Exception as exc:
                         logger.debug("Checkpoint blob decode failed for thread %s: %s", thread_id, exc)
                     results.append({
