@@ -166,9 +166,9 @@
       currentId = null;
     },
 
-    delAndBack: function () {
+    delAndBack: async function () {
       if (!currentId) return;
-      if (!confirm('Delete this research result?')) return;
+      if (!await confirm('Delete this research result?')) return;
       var id = currentId;
       fetch('/api/research/tasks/' + encodeURIComponent(id), {
         method: 'DELETE',
@@ -186,8 +186,8 @@
         .catch(function () { toast('Delete failed', 'error'); });
     },
 
-    del: function (id) {
-      if (!confirm('Delete this research result?')) return;
+    del: async function (id) {
+      if (!await confirm('Delete this research result?')) return;
       fetch('/api/research/tasks/' + encodeURIComponent(id), {
         method: 'DELETE',
         credentials: 'same-origin',
@@ -201,8 +201,8 @@
         .catch(function () { toast('Delete failed', 'error'); });
     },
 
-    delArchived: function (id) {
-      if (!confirm('Delete this research result?')) return;
+    delArchived: async function (id) {
+      if (!await confirm('Delete this research result?')) return;
       fetch('/api/research/tasks/' + encodeURIComponent(id), {
         method: 'DELETE',
         credentials: 'same-origin',

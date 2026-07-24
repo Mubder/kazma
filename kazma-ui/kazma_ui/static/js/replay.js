@@ -166,9 +166,9 @@
         .catch(function () { toast('Failed to load snapshot detail', 'error'); });
     },
 
-    restoreCurrent: function () {
+    restoreCurrent: async function () {
       if (!currentThread || currentIteration == null) { toast('Select a snapshot first', 'error'); return; }
-      if (!confirm('Rewind this thread to iteration ' + currentIteration + '? Later turns will be lost (use Fork to preserve them).')) return;
+      if (!await confirm('Rewind this thread to iteration ' + currentIteration + '? Later turns will be lost (use Fork to preserve them).')) return;
       fetch('/api/replay/restore', {
         method: 'POST',
         credentials: 'same-origin',

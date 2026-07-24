@@ -1517,7 +1517,7 @@ function settingsApp() {
         },
 
         async deletePlatformUser(username) {
-            if (!confirm('Delete user ' + username + '?')) return;
+            if (!await confirm('Delete user ' + username + '?')) return;
             try {
                 const resp = await fetch('/api/saas/users/' + encodeURIComponent(username), {
                     method: 'DELETE',
@@ -1794,7 +1794,7 @@ function settingsApp() {
                     message: `Install the "${extraName}" extra into this Python environment? This runs uv/pip in the background.`,
                     confirmText: 'Install',
                 })
-                : confirm(`Install optional extra "${extraName}"?`);
+                : await confirm(`Install optional extra "${extraName}"?`);
             if (!ok) return;
 
             this.pkgInstalling = extraName;

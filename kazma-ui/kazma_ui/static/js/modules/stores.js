@@ -241,6 +241,44 @@ export function registerStores() {
             return Promise.resolve(window.prompt(opts && opts.message ? opts.message : ''));
         };
 
+        // ═══════════════════════════════════════════════════════════════
+        // GLOBAL OVERRIDES — kill native browser dialogs everywhere.
+        //
+        // Every window.confirm() / window.alert() / window.prompt() call
+        // across the entire codebase (current AND future) is intercepted
+        // and routed through the styled Kazma modal. No more unstyled
+        // browser dialogs.
+        //
+        // IMPORTANT: these overrides are ASYNC (return Promises). Code that
+        // uses them synchronously must be converted to async/await. The
+        // original native functions are preserved as _nativeConfirm etc.
+        // for the Alpine-not-ready fallback path.
+        // ═══════════════════════════════════════════════════════════════
+        const _nativeConfirm = window.confirm.bind(window);
+        const _nativeAlert = window.alert.bind(window);
+        const _nativePrompt = window.prompt.bind(window);
+
+        window.confirm = function (message) {
+            // If a string is passed, wrap it. If kazmaConfirm is available,
+            // delegate to the styled modal.
+            return window.kazmaConfirm(
+                typeof message === 'string' ? { message: message, danger: true } : message
+            ).catch(function () { return false; });
+        };
+
+        window.alert = function (message) {
+            return window.kazmaAlert(
+                typeof message === 'string' ? { message: message } : message
+            ).catch(function () {});
+        };
+
+        window.prompt = function (message, defaultValue) {
+            var opts = typeof message === 'string'
+                ? { message: message, defaultValue: defaultValue || '' }
+                : message;
+            return window.kazmaPrompt(opts).catch(function () { return null; });
+        };
+
         // ── 3. Search Store ────────────────────────────────────────────
         Alpine.store('search', {
             open: false,

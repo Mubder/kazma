@@ -301,7 +301,7 @@ function ideApp() {
               message: '"' + tab.name + '" has unsaved changes. Close anyway?',
               confirmText: 'Close', danger: true,
             })
-          : window.confirm('"' + tab.name + '" has unsaved changes. Close anyway?');
+          : await window.confirm('"' + tab.name + '" has unsaved changes. Close anyway?');
         if (!ok) return;
       }
       this.tabs.splice(idx, 1);
@@ -360,7 +360,7 @@ function ideApp() {
             message: 'Delete "' + this.currentFile + '"?\nThis cannot be undone.',
             confirmText: 'Delete', danger: true,
           })
-        : window.confirm('Delete "' + this.currentFile + '"?\nThis cannot be undone.');
+        : await window.confirm('Delete "' + this.currentFile + '"?\nThis cannot be undone.');
       if (!ok) return;
       var delPath = this.currentFile;
       this.busy = true;
