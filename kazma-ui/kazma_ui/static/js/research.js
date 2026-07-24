@@ -76,6 +76,10 @@
 
     viewDetail: function (id) {
       currentId = id;
+      // Hide the list, show only the detail view (replaces the list, not appended below).
+      $('research-list').style.display = 'none';
+      $('research-detail').style.display = 'block';
+      $('research-detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
       fetch('/api/research/tasks/' + encodeURIComponent(id), { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (data) {
@@ -124,6 +128,32 @@
         .catch(function () { toast('Export request failed', 'error'); });
     },
 
+    backToList: function () {
+      $('research-detail').style.display = 'none';
+      $('research-list').style.display = 'flex';
+      currentId = null;
+    },
+
+    delAndBack: function () {
+      if (!currentId) return;
+      if (!confirm('Delete this research result?')) return;
+      var id = currentId;
+      fetch('/api/research/tasks/' + encodeURIComponent(id), {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data.error) { toast('Delete failed: ' + data.error, 'error'); return; }
+          toast('Deleted', 'success');
+          currentId = null;
+          $('research-detail').style.display = 'none';
+          $('research-list').style.display = 'flex';
+          window.KazmaResearch.load();
+        })
+        .catch(function () { toast('Delete failed', 'error'); });
+    },
+
     del: function (id) {
       if (!confirm('Delete this research result?')) return;
       fetch('/api/research/tasks/' + encodeURIComponent(id), {
@@ -134,10 +164,6 @@
         .then(function (data) {
           if (data.error) { toast('Delete failed: ' + data.error, 'error'); return; }
           toast('Deleted', 'success');
-          if (currentId === id) {
-            $('research-detail').style.display = 'none';
-            currentId = null;
-          }
           window.KazmaResearch.load();
         })
         .catch(function () { toast('Delete failed', 'error'); });
