@@ -14,13 +14,59 @@
 - **Research panel** (`/research`): browse all research outputs (prompt,
   worker, cost, duration, full text), compare two runs side-by-side (metric
   deltas + text diff), and export any result to DOCX/PDF/Markdown.
+- **Archive/Restore**: research results can be archived (hidden from the
+  active list) and restored. Uses `metadata.archived` flag (no schema
+  migration). Dedicated "Archived" tab with its own list, search, and
+  restore/delete buttons. `POST /api/research/tasks/{id}/archive` and
+  `/unarchive` endpoints.
 - **`compare_task_results()`**: diff function modeled on
   `ReplayEngine.compare_replays` — cost/token/duration deltas + difflib text diff.
 - **`metadata_filter`** on `TaskStore.list_tasks`: SQLite `json_extract` +
   Postgres `@>` JSONB — enables `?kind=research` filtering.
 - Tasks tagged with `metadata={"kind": "research"}` at dispatch time.
 
+### Chat UX
+- **Stop button**: send button transforms into a red pulsing Stop button
+  during generation. Click it or press Escape to abort the SSE stream.
+  Input field stays enabled while the agent works so the user can queue
+  their next message.
+- **Global dialog override**: `window.confirm`, `window.alert`, and
+  `window.prompt` are globally overridden to route through the styled
+  Kazma modal (Alpine-based). No more native browser dialogs anywhere.
+
+### HITL improvements
+- **Gateway timeout wiring**: `SwarmMessageBus.request_approval` now
+  forwards the configured timeout to Telegram/Discord/Slack bus adapters
+  (was hardcoded 60s — the timeout parameter was dead code).
+- **Expired approval UX**: stale approval cards resolve to HTTP 409
+  `status: "expired"` and the UI shows "Expired or already resumed" then
+  removes the card gracefully.
+- **Safe tool deferral**: safe tools in a batch with danger tools now
+  execute after the interrupt resumes, preventing potential double-execution
+  on checkpoint replay.
+
 ### Fixes
+- **Session Management empty on Postgres**: `CheckpointManager.list_checkpoints`
+  was SQLite-only — the Postgres path (`AsyncPostgresSaver` with
+  `AsyncConnectionPool`) failed silently because `dict_row` returns dicts
+  not tuples (`row[0]` → `KeyError`). Added `_list_checkpoints_postgres`
+  with proper dict access + `%s` placeholders. Also fixed
+  `_try_decode_message_count`/`_try_decode_created_at` to accept
+  pre-deserialized JSONB dicts.
+- **`set_dashboard_context` global clobbering**: the second call (startup)
+  passed only `checkpoint_manager`, wiping `tracer`/`session_store`/
+  `cost_breaker` back to None. Fixed with a `_UNSET` sentinel.
+- **HITL pending-approvals on Postgres**: `_enumerate_thread_ids` used
+  tuple indexing on psycopg dict rows → `KeyError: 0`. Fixed to use
+  column-name access.
+- **`NameError: _resolve_llm_from_state`**: `respond_node` called an
+  undefined function when max-iterations forced a respond mid-tool-loop.
+  Fixed by passing `llm` from the `_respond` closure.
+- **Research delete on Postgres**: checked `_get_conn()` (SQLite) before
+  `_pg`, raising "SQLite connection requested while Postgres backend active".
+  Now checks `_pg` first.
+- **Arabic PDF font 404**: the Amiri download URL (aliftype/amiri GitHub)
+  returned 404. Switched to the Google Fonts mirror (google/fonts repo).
 - **Circuit breaker dead-loop**: tripped breaker routed to SUPERVISOR instead
   of RESPOND → 10 wasted iterations, empty response. Now routes to RESPOND.
   Also: empty search results no longer count as failures (only `is_error`);

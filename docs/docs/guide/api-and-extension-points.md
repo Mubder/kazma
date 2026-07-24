@@ -107,6 +107,13 @@ Plus direct routes in `routes_direct.py` and a conditional Telegram webhook at `
 | `done` | Turn complete. | `tokens`, `cost_usd`, `duration_ms` |
 | `error` | Fatal error. | `message` |
 
+**HITL approval expiry**: if the user clicks Approve/Deny on a card that
+has already timed out or been resumed, `POST /api/approve/{thread_id}`
+returns **HTTP 409** with `{"status": "expired", "error": "No pending
+approval for this thread (already resumed or expired)."}`. The frontend
+(`hitl_approval.js`) detects this and transitions the card to
+"Expired or already resumed" then removes it.
+
 ### 3.1 Client-side example (JavaScript)
 
 ```javascript

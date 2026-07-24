@@ -107,7 +107,7 @@ Kazma is a **serious multi-platform agent framework**, not a toy. The brain (Lan
 | **H6** | MCP “safe” name classifier: `get_*` / `list_*` skips HITL | `get_credentials` class patterns. Expand danger patterns |
 | **H7** | Secrets plaintext in `settings.db` unless vault key set | Require `KAZMA_VAULT_KEY` in prod profile |
 | **H8** | `config_save` tool can write connector/LLM secrets after one approval | Block all `is_sensitive_config_key` via tools |
-| **H9** | Dashboard session delete imports missing `session_store` module | Dead cleanup path; platform sessions leak |
+| **H9** | ~~Dashboard session delete imports missing `session_store` module~~ **FIXED** (2026-07-24): `set_dashboard_context` sentinel fix + Postgres `list_checkpoints` dict_row fix. Sessions now populate and delete correctly on both SQLite and Postgres. |
 | **H10** | `signal_shutdown()` never called from app lifespan | Graceful drain flag is dead code |
 
 ---
