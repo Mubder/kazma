@@ -373,12 +373,20 @@ class CheckpointManager(BaseCheckpointSaver):
             return []
 
     @staticmethod
-    def _try_decode_message_count(blob: bytes) -> int:
+    def _try_decode_message_count(blob: Any) -> int:
         """Decode message count from LangGraph checkpoint blob.
 
         Tries msgpack first (LangGraph's serde), then JSON as fallback.
+        Also handles the Postgres JSONB case where psycopg's dict_row
+        factory already deserializes the blob into a Python dict.
         Returns 0 on any decode failure.
         """
+        # Postgres JSONB: psycopg dict_row already parsed it to a dict.
+        if isinstance(blob, dict):
+            msgs = blob.get("channel_values", {}).get("messages", [])
+            return len(msgs) if isinstance(msgs, list) else 0
+
+        # SQLite: stored as msgpack bytes.
         try:
             import msgpack
             cp_data = msgpack.unpackb(blob, raw=False)
@@ -388,23 +396,30 @@ class CheckpointManager(BaseCheckpointSaver):
                 cp_data = json.loads(blob if isinstance(blob, str) else blob.decode("utf-8", errors="replace"))
             except Exception:
                 return 0
+        if not isinstance(cp_data, dict):
+            return 0
         msgs = cp_data.get("channel_values", {}).get("messages", [])
         return len(msgs) if isinstance(msgs, list) else 0
 
     @staticmethod
-    def _try_decode_created_at(metadata_blob: bytes | str) -> str:
+    def _try_decode_created_at(metadata_blob: Any) -> str:
         """Best-effort extraction of a created-at timestamp from metadata.
 
         LangGraph stores ``metadata`` as JSON.  Standard savers do not
         record a timestamp, but custom metadata or tracing integrations
         may include ``created_at``/``ts``/``timestamp``.  Returns ``""``
-        when no timestamp is found.
+        when no timestamp is found. Also handles the Postgres JSONB case
+        where psycopg's dict_row factory already deserializes to a dict.
         """
         import json
 
         try:
-            raw = metadata_blob if isinstance(metadata_blob, str) else metadata_blob.decode("utf-8", errors="replace")
-            data = json.loads(raw)
+            # Postgres JSONB: already a dict.
+            if isinstance(metadata_blob, dict):
+                data = metadata_blob
+            else:
+                raw = metadata_blob if isinstance(metadata_blob, str) else metadata_blob.decode("utf-8", errors="replace")
+                data = json.loads(raw)
             if not isinstance(data, dict):
                 return ""
             for key in ("created_at", "ts", "timestamp", "created"):

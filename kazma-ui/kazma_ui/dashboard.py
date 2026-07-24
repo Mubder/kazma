@@ -328,7 +328,7 @@ async def list_sessions(limit: int = 50) -> JSONResponse:
             meta = session_meta.get(thread_id, {})
             sessions.append({
                 "thread_id": thread_id,
-                "checkpoint_id": cp.get("id", ""),
+                "checkpoint_id": cp.get("checkpoint_id", cp.get("id", "")),
                 "created_at": cp.get("created_at", ""),
                 "context_tokens": cp.get("context_tokens", 0),
                 "message_count": cp.get("message_count", 0),
