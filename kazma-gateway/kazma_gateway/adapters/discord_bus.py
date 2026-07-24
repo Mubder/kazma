@@ -163,7 +163,9 @@ class DiscordBusAdapter(BusAdapter):
 
         await self._post_message(payload)
 
-    async def request_approval(self, approval: ApprovalRequest) -> bool:
+    async def request_approval(
+        self, approval: ApprovalRequest, timeout: float = _APPROVAL_TIMEOUT
+    ) -> bool:
         """Post an approval card with buttons and await the response.
 
         Buttons carry ``custom_id`` = ``swarm_approve_{task_id}`` /
@@ -177,7 +179,7 @@ class DiscordBusAdapter(BusAdapter):
         )
         if approval.proposed_output:
             text += f"```\n{approval.proposed_output[:500]}\n```\n"
-        text += f"\n_(auto-reject in {int(_APPROVAL_TIMEOUT)}s)_"
+        text += f"\n_(auto-reject in {int(timeout)}s)_"
 
         # Discord components v2: a row with two buttons.
         components = [
@@ -208,7 +210,7 @@ class DiscordBusAdapter(BusAdapter):
         if msg_id:
             self._pending_msg_ids[approval.task_id] = msg_id
         try:
-            await asyncio.wait_for(event.wait(), timeout=_APPROVAL_TIMEOUT)
+            await asyncio.wait_for(event.wait(), timeout=timeout)
             approved = self._pending_results.get(approval.task_id, False)
         except TimeoutError:
             logger.warning("[DiscordBus] Approval timed out for task %s", approval.task_id)

@@ -172,11 +172,23 @@
         buttons.forEach(function (b) { b.disabled = false; });
       } else {
         var data = await resp.json().catch(function () { return {}; });
-        if (statusEl) {
+        if (resp.status === 409 || data.status === 'expired' || data.status === 'noop') {
+          if (statusEl) {
+            statusEl.textContent = '⏰ Expired or already resumed';
+            statusEl.className = 'hitl-approval-status hitl-status-denied';
+            statusEl.style.display = 'inline-block';
+          }
+          setTimeout(function () {
+            if (card) card.remove();
+            refreshPending();
+          }, 1500);
+        } else if (statusEl) {
           statusEl.textContent = '⚠ Error: ' + (data.error || resp.statusText);
           statusEl.className = 'hitl-approval-status hitl-status-error';
+          buttons.forEach(function (b) { b.disabled = false; });
+        } else {
+          buttons.forEach(function (b) { b.disabled = false; });
         }
-        buttons.forEach(function (b) { b.disabled = false; });
       }
     } catch (err) {
       if (statusEl) {

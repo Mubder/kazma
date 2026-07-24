@@ -191,7 +191,9 @@ class SlackBusAdapter(BusAdapter):
 
         await self._post_message({"text": f"ALERT: {title}", "blocks": blocks})
 
-    async def request_approval(self, approval: ApprovalRequest) -> bool:
+    async def request_approval(
+        self, approval: ApprovalRequest, timeout: float = _APPROVAL_TIMEOUT
+    ) -> bool:
         """Post an approval card with Block Kit buttons and await the response.
 
         Button values carry ``swarm_approve_{task_id}`` /
@@ -205,7 +207,7 @@ class SlackBusAdapter(BusAdapter):
         )
         if approval.proposed_output:
             text += f"```\n{approval.proposed_output[:500]}\n```\n"
-        text += f"\n_(auto-reject in {int(_APPROVAL_TIMEOUT)}s)_"
+        text += f"\n_(auto-reject in {int(timeout)}s)_"
 
         # Block Kit: a section block + an actions block with two buttons.
         blocks = [
@@ -240,7 +242,7 @@ class SlackBusAdapter(BusAdapter):
         if msg_ts:
             self._pending_msg_ts[approval.task_id] = msg_ts
         try:
-            await asyncio.wait_for(event.wait(), timeout=_APPROVAL_TIMEOUT)
+            await asyncio.wait_for(event.wait(), timeout=timeout)
             approved = self._pending_results.get(approval.task_id, False)
         except TimeoutError:
             logger.warning("[SlackBus] Approval timed out for task %s", approval.task_id)

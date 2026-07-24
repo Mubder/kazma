@@ -233,13 +233,15 @@ class TelegramBusAdapter(BusAdapter):
 
         await self._post(payload)
 
-    async def request_approval(self, approval: ApprovalRequest) -> bool:
+    async def request_approval(
+        self, approval: ApprovalRequest, timeout: float = _APPROVAL_TIMEOUT
+    ) -> bool:
         """Post an approval card with inline keyboard buttons.
 
         Buttons: ``[👍 Approve]`` ``[👎 Reject]``
 
         Waits for the callback query handler to call ``approve()``
-        or ``reject()``, or times out after 60s.
+        or ``reject()``, or times out after configurable timeout.
         """
         safe_name = _escape_md(approval.worker_name)
         safe_task = _escape_md(approval.task_description[:200])
@@ -256,7 +258,7 @@ class TelegramBusAdapter(BusAdapter):
         if safe_output:
             text += f"```\n{safe_output}\n```\n"
         text += "━━━━━━━━━━━━━━━━━━━━━\n"
-        text += f"\\(auto\\-reject in {int(_APPROVAL_TIMEOUT)}s\\)"
+        text += f"\\(auto\\-reject in {int(timeout)}s\\)"
 
         # Inline keyboard
         reply_markup = {
@@ -283,7 +285,7 @@ class TelegramBusAdapter(BusAdapter):
         event = asyncio.Event()
         self._pending_approvals[approval.task_id] = event
         try:
-            await asyncio.wait_for(event.wait(), timeout=_APPROVAL_TIMEOUT)
+            await asyncio.wait_for(event.wait(), timeout=timeout)
             approved = self._pending_results.get(approval.task_id, False)
         except TimeoutError:
             logger.warning("[TelegramBus] Approval timed out for task %s", approval.task_id)

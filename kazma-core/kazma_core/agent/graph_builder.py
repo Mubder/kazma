@@ -759,15 +759,12 @@ async def tool_worker_node(
                 duration_ms=0,
             )
 
-        # ── Execute safe tools in parallel ────────────────────────────
-        results: list[ToolResult] = []
-        if safe_tools:
-            results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
-
         # ── HITL: one combined interrupt for the whole danger batch ──
         # (stops N-click floods when the model emits several danger tools
         # in one turn). Scope grants (tool/yolo) are applied by /api/approve
         # *before* resume so later turns skip the gate entirely.
+        approved = False
+        approved_ids = None
         if danger_tools:
             tools_payload = [
                 {
@@ -804,12 +801,18 @@ async def tool_worker_node(
 
             approved = isinstance(approval, dict) and approval.get("approved", False)
             # Optional selective ids; None/missing → all tools in the batch.
-            approved_ids = None
             if isinstance(approval, dict):
                 raw_ids = approval.get("approved_ids")
                 if isinstance(raw_ids, list):
                     approved_ids = {str(x) for x in raw_ids}
 
+        # ── Execute safe tools in parallel ────────────────────────────
+        results: list[ToolResult] = []
+        if safe_tools:
+            results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
+
+        # ── Execute/deny danger tools ─────────────────────────────────
+        if danger_tools:
             from kazma_core.agent.tool_registry import _hitl_approved_ctx
 
             for tc in danger_tools:

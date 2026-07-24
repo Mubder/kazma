@@ -1160,10 +1160,10 @@ def register_direct_routes(self: Any) -> None:
                     )
                     return _JSONResponse(
                         {
-                            "status": "noop",
+                            "status": "expired",
                             "thread_id": thread_id,
                             "content": "",
-                            "error": "No pending approval for this thread (already resumed or wrong thread_id).",
+                            "error": "No pending approval for this thread (already resumed or expired).",
                         },
                         status_code=409,
                     )
