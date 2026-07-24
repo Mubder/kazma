@@ -754,6 +754,67 @@ class LocalToolRegistry:
             return f"Stored memory (id={doc_id})"
 
         @self.register(
+            description=(
+                "Search an ingested Knowledge Library (documentation corpus) for "
+                "technical reference material — API endpoints, parameters, error codes, "
+                "configuration, examples. Use this when the user asks about a documented "
+                "system (e.g. the WhatsApp Cloud API) and you need authoritative info with "
+                "sources. Each hit includes the source URL and section so you can cite it. "
+                "Leave `library` empty to search across all libraries."
+            ),
+            category="knowledge",
+        )
+        async def knowledge_search(query: str, library: str = "", top_k: int = 5) -> str:
+            # Knowledge Libraries are a managed RAG corpus, decoupled from
+            # chat memory.  See `kazma_core/stores/knowledge_index.py`.
+            try:
+                from kazma_core.stores.knowledge import get_knowledge_store
+                from kazma_core.stores.knowledge_index import get_knowledge_index
+
+                store = get_knowledge_store()
+                index = get_knowledge_index()
+
+                # Pick target library/libraries.
+                lib_id = (library or "").strip()
+                if lib_id:
+                    if not store.get_library(lib_id):
+                        return f"Error: knowledge library '{lib_id}' not found."
+                    hits = await index.search(query, lib_id, top_k=top_k)
+                else:
+                    libs = store.list_libraries()
+                    if not libs:
+                        return (
+                            "No knowledge libraries have been ingested yet. "
+                            "Add one from the /knowledge page or via /kb add."
+                        )
+                    # True cross-library RRF: pool raw per-layer results from
+                    # every library into one fused ranking (not flatten+sort,
+                    # which would double-count RRF contributions).
+                    hits = await index.search_all(
+                        query, [l["id"] for l in libs], top_k=top_k,
+                    )
+
+                if not hits:
+                    scope = f"library '{lib_id}'" if lib_id else "any library"
+                    return f"No knowledge hits in {scope} for: {query!r}"
+
+                lines = [f"# Knowledge search — {len(hits)} hit(s)"]
+                for i, h in enumerate(hits, start=1):
+                    cite = f"{h.source_url}"
+                    if h.section_header:
+                        cite += f" — {h.section_header}"
+                    lines.append(f"\n## [{i}] score={h.score:.4f} — {cite}")
+                    if h.document_title:
+                        lines.append(f"*(page: {h.document_title})*")
+                    lines.append(h.content)
+                lines.append(
+                    "\n---\nCite the source URL + section header above when you use this material."
+                )
+                return "\n".join(lines)
+            except Exception as exc:
+                return f"Error: knowledge search failed — {exc}"
+
+        @self.register(
             description="Get the current date, time, and timezone in ISO-8601 format.",
             category="utility",
         )

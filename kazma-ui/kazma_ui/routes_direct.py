@@ -910,6 +910,17 @@ def register_direct_routes(self: Any) -> None:
             },
         )
 
+    @self.app.get("/knowledge", response_class=HTMLResponse)
+    async def knowledge_page(request: Request) -> HTMLResponse:
+        return self.templates.TemplateResponse(
+            request,
+            "knowledge_base.html",
+            {
+                "config": self.agent.config,
+                "active_page": "knowledge",
+            },
+        )
+
     @self.app.post("/api/gateway/refresh-adapters")
     async def refresh_gateway_adapters() -> dict[str, Any]:
         if self.gateway is None:

@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% set active_page = "knowledge" %}
+{% block title %}Kazma — Knowledge Library{% endblock %}
+{% block page_title %}<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-right:6px;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>Knowledge Library{% endblock %}
+
+{% block content %}
+<div
+  x-data="knowledgePage()"
+  x-init="load()"
+  style="max-width:1000px;margin:0 auto;padding:0 1rem;box-sizing:border-box;"
+>
+
+  {# ── Intro / what this is ── #}
+  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;">
+    <strong>📚 Knowledge Library</strong> — point Kazma at a documentation
+    site (e.g. the Meta WhatsApp Cloud API) and it ingests the whole tree
+    once. The agent then reasons over the corpus and cites sources when
+    you ask questions. This is RAG over a curated, updatable corpus —
+    not live scraping.
+  </div>
+
+  {# ── Add library form ── #}
+  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;">
+    <h3 style="margin:0 0 0.75rem 0;font-size:1rem;">Add a library</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-bottom:8px;">
+      <input
+        type="text" class="form-input" placeholder="Library ID (slug, e.g. shipx_whatsapp_api)"
+        x-model="form.id" :disabled="creating"
+      >
+      <input
+        type="text" class="form-input" placeholder="Display name"
+        x-model="form.name" :disabled="creating"
+      >
+      <input
+        type="text" class="form-input" placeholder="Seed URL (doc root or page)"
+        x-model="form.seed_url" :disabled="creating"
+      >
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button
+        class="btn btn-secondary"
+        @click="ingest('page')"
+        :disabled="creating || !form.id || !form.seed_url"
+      >
+        Ingest single page
+      </button>
+      <button
+        class="btn btn-primary"
+        @click="ingest('site')"
+        :disabled="creating || !form.id || !form.seed_url"
+      >
+        🕷️ Crawl whole doc tree
+      </button>
+      <span x-show="creating" class="spinner-inline" style="align-self:center;"></span>
+    </div>
+    <p style="margin:0.5rem 0 0 0;font-size:0.82rem;color:var(--text-secondary);">
+      Single page is instant. Crawl discovers every page under the seed
+      (via <code>sitemap.xml</code> or link-walk) and runs in the background —
+      watch the progress of the job below.
+    </p>
+  </div>
+
+  {# ── Active job progress ── #}
+  <template x-if="activeJob">
+    <div class="card" style="padding:1rem 1.25rem;margin-bottom:1.25rem;border-left:3px solid var(--primary);">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <span class="spinner-inline" x-show="!jobDone()"></span>
+        <strong x-text="jobTitle()"></strong>
+      </div>
+      <div style="font-size:0.88rem;color:var(--text-secondary);" x-text="activeJob.message || ''"></div>
+      <div style="margin-top:6px;font-size:0.8rem;color:var(--text-secondary);">
+        discovered=<span x-text="activeJob.discovered || 0"></span> ·
+        fetched=<span x-text="activeJob.fetched || 0"></span> ·
+        ingested=<span x-text="activeJob.ingested || 0"></span> ·
+        failed=<span x-text="activeJob.failed || 0"></span>
+      </div>
+      <div x-show="activeJob.current_url" style="margin-top:4px;font-size:0.78rem;color:var(--text-secondary);word-break:break-all;">
+        current: <code x-text="activeJob.current_url"></code>
+      </div>
+    </div>
+  </template>
+
+  {# ── Library list ── #}
+  <div class="card" style="padding:1rem 1.25rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
+      <h3 style="margin:0;font-size:1rem;">Libraries</h3>
+      <button class="btn btn-secondary btn-sm" @click="load()">↻ Refresh</button>
+    </div>
+
+    <div x-show="loading" style="padding:1rem;text-align:center;color:var(--text-secondary);">
+      Loading…
+    </div>
+
+    <div x-show="!loading && libraries.length === 0" style="padding:1.5rem;text-align:center;color:var(--text-secondary);">
+      No libraries yet. Add one above, or from chat with
+      <code>/kb crawl &lt;id&gt; &lt;url&gt;</code>.
+    </div>
+
+    <template x-for="lib in libraries" :key="lib.id">
+      <div style="border:1px solid var(--border);border-radius:6px;padding:0.9rem;margin-bottom:0.6rem;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+          <div style="min-width:0;flex:1;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <strong x-text="lib.name"></strong>
+              <code style="font-size:0.78rem;color:var(--text-secondary);" x-text="lib.id"></code>
+              <span
+                style="font-size:0.7rem;padding:1px 6px;border-radius:8px;background:var(--bg-accent,#2a2a3a);"
+                x-text="lib.chunk_count + ' chunks'"
+              ></span>
+              <label
+                style="font-size:0.72rem;display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-secondary);"
+                :title="lib.auto_inject ? 'Auto-inject ON: top chunks are folded into every prompt.' : 'Auto-inject OFF: the agent must call knowledge_search explicitly.'"
+              >
+                <input
+                  type="checkbox"
+                  :checked="lib.auto_inject"
+                  @change="toggleAutoInject(lib, $event.target.checked)"
+                >
+                auto-inject
+              </label>
+            </div>
+            <div x-show="lib.seed_url" style="font-size:0.8rem;color:var(--text-secondary);margin-top:3px;word-break:break-all;">
+              seed: <a :href="lib.seed_url" target="_blank" rel="noopener" x-text="lib.seed_url"></a>
+            </div>
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0;">
+            <button class="btn btn-secondary btn-sm" @click="testSearch(lib)">🔍 Test</button>
+            <button class="btn btn-secondary btn-sm" @click="refresh(lib)" :disabled="!lib.seed_url">↻ Refresh</button>
+            <button class="btn btn-secondary btn-sm" @click="browse(lib)">📋 Browse</button>
+            <button class="btn btn-secondary btn-sm" @click="del(lib)" style="color:var(--danger,#e53935);">🗑</button>
+          </div>
+        </div>
+        <div x-show="lib._search_open" style="margin-top:0.75rem;border-top:1px dashed var(--border);padding-top:0.6rem;">
+          <div style="display:flex;gap:6px;margin-bottom:6px;">
+            <input
+              type="text" class="form-input" placeholder="Ask something about this corpus…"
+              x-model="lib._query" @keydown.enter="runSearch(lib)"
+            >
+            <button class="btn btn-primary btn-sm" @click="runSearch(lib)" :disabled="lib._searching">Search</button>
+          </div>
+          <template x-if="lib._searching">
+            <div style="font-size:0.8rem;color:var(--text-secondary);">searching…</div>
+          </template>
+          <template x-if="lib._hits">
+            <div>
+              <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:4px;" x-text="lib._hits.length + ' hit(s)'"></div>
+              <template x-for="(h, i) in lib._hits" :key="h.chunk_id">
+                <div style="margin-bottom:0.5rem;border-left:2px solid var(--primary);padding-left:8px;">
+                  <div style="font-size:0.75rem;color:var(--text-secondary);word-break:break-all;">
+                    [<span x-text="i + 1"></span>] score=<span x-text="h.score.toFixed(4)"></span> ·
+                    <a :href="h.source_url" target="_blank" rel="noopener" x-text="h.source_url"></a>
+                    <span x-show="h.section_header"> — <span x-text="h.section_header"></span></span>
+                  </div>
+                  <pre style="margin:4px 0 0 0;font-size:0.78rem;white-space:pre-wrap;background:var(--bg-accent,#1e1e2a);padding:6px;border-radius:4px;max-height:240px;overflow:auto;" x-text="h.content"></pre>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+        <div x-show="lib._browse_open" style="margin-top:0.75rem;border-top:1px dashed var(--border);padding-top:0.6rem;">
+          <template x-if="lib._chunks">
+            <div>
+              <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:6px;">
+                <span x-text="lib._chunks.length"></span> of
+                <span x-text="lib._chunk_total"></span> chunks
+              </div>
+              <template x-for="c in lib._chunks" :key="c.id">
+                <div style="font-size:0.78rem;margin-bottom:4px;border-bottom:1px solid var(--border);padding-bottom:4px;">
+                  <code x-text="'#' + c.chunk_index"></code>
+                  <span x-text="c.section_header || c.document_title || '(untitled)'"></span>
+                  <span x-show="c.has_code" style="color:var(--primary);">⌗</span>
+                  <div style="color:var(--text-secondary);font-size:0.74rem;word-break:break-all;">
+                    <a :href="c.source_url" target="_blank" rel="noopener" x-text="c.source_url"></a>
+                  </div>
+                  <pre style="margin:2px 0;font-size:0.74rem;color:var(--text-secondary);white-space:pre-wrap;" x-text="c.preview + '…'"></pre>
+                </div>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+    </template>
+  </div>
+
+</div>
+
+<script src="/static/js/kb.js?v={{ js_version() }}"></script>
+{% endblock %}

@@ -1000,6 +1000,19 @@ class KazmaAppBuilder:
         self.app.include_router(ide_router)
         logger.info("IDE API router mounted at /api/ide/*")
 
+        # ── Knowledge Base API (delegates to KnowledgeStore / Index) ──
+        # Optional: guarded so a missing optional dep (chromadb, etc.) doesn't
+        # break the whole app — the page still renders, just empty.
+        try:
+            from kazma_ui.kb_api import create_kb_router
+
+            kb_router = create_kb_router()
+            self.app.include_router(kb_router)
+            logger.info("Knowledge Base API router mounted at /api/kb/*")
+        except Exception as e:
+            logger.warning("Knowledge Base API router failed to mount: %s", e)
+            self._init_errors.append({"subsystem": "kb_api", "error": str(e)})
+
         # ── Email integration (status + Microsoft device OAuth) ──
         # Open router (GET / status / OAuth callbacks) + protected router
         # (state-mutating POSTs guarded by Origin + X-Requested-With check).

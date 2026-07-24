@@ -276,6 +276,24 @@ class KazmaAgent:
         except Exception:
             logger.debug("[agent_runner] agent evolution injection skipped", exc_info=True)
 
+        # Knowledge Library auto-inject (kill-switch + per-library opt-in
+        # checked live in the per-turn path; init-time this is a no-op since
+        # there is no user message to retrieve against).  See AGENTS.md §11.
+        try:
+            from kazma_core.safety.prompt_fence import format_untrusted_block
+            from kazma_core.stores.knowledge_index import (
+                get_knowledge_auto_inject_block_sync,
+            )
+
+            kb_block = get_knowledge_auto_inject_block_sync("")
+            fenced = format_untrusted_block(kb_block, source="knowledge")
+            if fenced and fenced not in self.system_prompt:
+                self.system_prompt = (
+                    self.system_prompt.rstrip() + "\n\n" + fenced
+                )
+        except Exception:
+            logger.debug("[agent_runner] knowledge auto-inject skipped", exc_info=True)
+
         # Universal language directive — injected LAST so it's the final
         # instruction the model sees, after all cultural context. This
         # prevents Arabic cultural context from biasing the model to
