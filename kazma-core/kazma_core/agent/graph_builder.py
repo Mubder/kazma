@@ -898,7 +898,7 @@ async def tool_worker_node(
             _graph_hitl_gate_ctx.reset(_graph_gate_token)
 
 
-async def respond_node(state: SupervisorState) -> dict[str, Any]:
+async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any]:
     """Respond node — finalizes the turn.
 
     Extracts the last assistant message as the response and increments
@@ -908,6 +908,12 @@ async def respond_node(state: SupervisorState) -> dict[str, Any]:
     If the last message is a tool result (max-iterations forced respond
     mid-tool-loop), makes a final LLM call to synthesize a text answer
     from the collected tool results so the user gets a response.
+
+    Args:
+        state: The current supervisor state.
+        llm:   The LLMProvider for synthesizing a final answer when
+               max-iterations forces a respond mid-tool-loop. Optional
+               for backward compat (the synthesis step is skipped if None).
     """
     messages = list(state.get("messages", []))
     iteration = state.get("iteration", 0) + 1
@@ -928,10 +934,7 @@ async def respond_node(state: SupervisorState) -> dict[str, Any]:
         and (_last.get("content") or "").strip() and not _last.get("tool_calls")
     ):
         # Inject a "wrap up" instruction and call the LLM for a final answer.
-        _llm = state.get("_llm")
-        if _llm is None:
-            # Try to get the LLM from the global state
-            _llm = _resolve_llm_from_state(state)
+        _llm = llm or state.get("_llm")
         if _llm is not None:
             try:
                 _wrap_msg = {"role": "user", "content": "Based on the tool results above, provide your final answer to the user now. Do not call any more tools."}
@@ -1106,7 +1109,7 @@ def build_supervisor_graph(
         return await tool_worker_node(state, tool_executor=tool_executor, tracer=tracer, hitl_config=hitl_config)
 
     async def _respond(state: SupervisorState) -> dict[str, Any]:
-        return await respond_node(state)
+        return await respond_node(state, llm=llm)
 
     async def _check_saturation(state: SupervisorState) -> dict[str, Any]:
         return await check_saturation_node(state)
