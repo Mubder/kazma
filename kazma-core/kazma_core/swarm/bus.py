@@ -233,7 +233,7 @@ class SwarmMessageBus:
         )
         try:
             return await asyncio.wait_for(
-                self._adapter.request_approval(approval),
+                self._adapter.request_approval(approval, timeout=timeout),
                 timeout=timeout,
             )
         except TimeoutError:

@@ -1477,6 +1477,9 @@ tbody tr:last-child td {
 }
 .send-btn:hover { background: var(--accent-hover); }
 .send-btn:disabled { background: var(--bg-surface); cursor: not-allowed; }
+.send-btn.stop-mode { background: var(--error, #ef4444); animation: pulse-stop 1.5s ease-in-out infinite; }
+.send-btn.stop-mode:hover { background: #dc2626; }
+@keyframes pulse-stop { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
 
 .input-footer {
   display: flex;

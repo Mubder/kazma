@@ -62,7 +62,9 @@
       inputEl.addEventListener('keydown', onInputKeydown);
       inputEl.addEventListener('input', onInputResize);
     }
-    if (sendBtn) sendBtn.addEventListener('click', sendMessage);
+    if (sendBtn) sendBtn.addEventListener('click', function() {
+      if (_isGenerating) { abortGeneration(); } else { sendMessage(); }
+    });
 
     // Make the entire input box focus the text field (no dead zones).
     var inputWrapper = document.querySelector('.input-wrapper');
@@ -206,7 +208,14 @@
     // Ctrl+Enter also sends the message (so users who press Ctrl+Enter
     // from muscle-memory get the expected behaviour).
     if (e.key === 'Escape') {
+      if (_isGenerating) { abortGeneration(); return; }
       hideSlashMenu();
+      return;
+    }
+    // While generating, Enter just inserts a newline (user is typing a
+    // queued message). They can press the Stop button to abort.
+    if (_isGenerating && e.key === 'Enter') {
+      if (!e.shiftKey) e.preventDefault();
       return;
     }
     if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -236,19 +245,48 @@
     }
   }
 
+  // Original SVG icons for the send button (restored after Stop mode).
+  var _SEND_SVG = '<svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+  var _STOP_SVG = '<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+  var _isGenerating = false;
+
   function disableInput() {
-    if (inputEl) { inputEl.disabled = true; inputEl.placeholder = 'Kazma is thinking\u2026'; }
-    if (sendBtn) sendBtn.disabled = true;
+    // Keep the input ENABLED so the user can type their next message while
+    // the agent works. Only the send button transforms into a Stop button.
+    _isGenerating = true;
+    if (inputEl) inputEl.placeholder = 'Kazma is thinking\u2026 type to queue your next message';
     hideSlashMenu();
+    // Transform send button → Stop button.
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.classList.add('stop-mode');
+      sendBtn.title = 'Stop generation';
+      sendBtn.innerHTML = _STOP_SVG;
+    }
   }
 
   function enableInput() {
+    _isGenerating = false;
     if (inputEl) {
-      inputEl.disabled = false;
       inputEl.placeholder = 'Type a message or /yolo \u2026 (Enter to send)';
     }
-    if (sendBtn) sendBtn.disabled = false;
+    // Restore send button from Stop mode.
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.classList.remove('stop-mode');
+      sendBtn.title = 'Send (Enter / Ctrl+Enter)';
+      sendBtn.innerHTML = _SEND_SVG;
+    }
     if (inputEl) inputEl.focus();
+  }
+
+  function abortGeneration() {
+    if (activeStream) {
+      activeStream.abort();
+      activeStream = null;
+      KS.toast('Generation stopped', 'info', 2000);
+    }
+    enableInput();
   }
 
   // ── File handling ─────────────────────────────────────

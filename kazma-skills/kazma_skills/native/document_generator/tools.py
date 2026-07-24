@@ -118,7 +118,9 @@ async def generate_pdf(
             _dl_dir.mkdir(parents=True, exist_ok=True)
             _dl_path = _dl_dir / "Amiri-Regular.ttf"
             if not _dl_path.exists():
-                _url = "https://github.com/aliftype/amiri/raw/main/fonts/ttf/Amiri-Regular.ttf"
+                # The original aliftype/amiri raw URL 404s; use the Google
+                # Fonts mirror (google/fonts repo) which is stable.
+                _url = "https://raw.githubusercontent.com/google/fonts/main/ofl/amiri/Amiri-Regular.ttf"
                 logger.info("[PDF] Downloading Amiri Arabic font...")
                 urllib.request.urlretrieve(_url, str(_dl_path))
             pdfmetrics.registerFont(TTFont("ArabicFont", str(_dl_path)))
