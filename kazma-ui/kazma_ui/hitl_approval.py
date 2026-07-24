@@ -73,13 +73,18 @@ async def _enumerate_thread_ids(conn: Any) -> list[str]:
     # Postgres pool: acquire a connection, run, release.
     if type(conn).__name__ == "AsyncConnectionPool" or hasattr(conn, "getconn"):
         async with conn.connection() as pg_conn:  # type: ignore[union-attr]
-            cursor = await pg_conn.execute(
-                "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id IS NOT NULL"
-            )
-            if cursor is None:
-                return []
-            rows = await cursor.fetchall()
-            return [r[0] for r in rows if r[0]]
+            async with pg_conn.cursor() as cur:  # type: ignore[union-attr]
+                await cur.execute(
+                    "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id IS NOT NULL"
+                )
+                rows = await cur.fetchall()
+            # psycopg dict_row returns dicts; aiosqlite returns tuples.
+            result: list[str] = []
+            for r in rows:
+                tid = r["thread_id"] if isinstance(r, dict) else r[0]
+                if tid:
+                    result.append(tid)
+            return result
 
     # aiosqlite connection.
     cursor = await conn.execute(  # type: ignore[union-attr]
