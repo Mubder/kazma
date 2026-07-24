@@ -792,19 +792,24 @@ def create_sse_chat_router(
         elif _lower.startswith("/research ") or _lower == "/research":
             _swarm_cmd = "research"
             _swarm_text = raw_msg.split(maxsplit=1)[1].strip() if " " in raw_msg else ""
-        elif "/research " in _lower:
-            # Embedded in Arabic text — extract the topic after /research.
-            _idx = _lower.find("/research ")
-            _swarm_cmd = "research"
-            _swarm_text = raw_msg[_idx + 10:].strip()
-            # Strip trailing /swarm or other trailing commands.
-            for _trailer in [" /swarm", "/swarm", " /research"]:
-                if _swarm_text.lower().endswith(_trailer):
-                    _swarm_text = _swarm_text[:-len(_trailer)].strip()
-        elif "/swarm " in _lower:
-            _idx = _lower.find("/swarm ")
-            _swarm_cmd = "swarm"
-            _swarm_text = raw_msg[_idx + 7:].strip()
+        elif "/research" in _lower:
+            # Embedded in Arabic/other text — extract the topic after /research.
+            # Use regex to handle Arabic ligatures/attachments before the command.
+            import re as _re
+            _m = _re.search(r'/research\s+(.*)', raw_msg, _re.DOTALL)
+            if _m:
+                _swarm_cmd = "research"
+                _swarm_text = _m.group(1).strip()
+                # Strip trailing /swarm or other trailing commands.
+                for _trailer in [" /swarm", "/swarm", " /research"]:
+                    if _swarm_text.lower().endswith(_trailer):
+                        _swarm_text = _swarm_text[:-len(_trailer)].strip()
+        elif "/swarm" in _lower and not _lower.startswith("/swarm"):
+            import re as _re
+            _m = _re.search(r'/swarm\s+(.*)', raw_msg, _re.DOTALL)
+            if _m:
+                _swarm_cmd = "swarm"
+                _swarm_text = _m.group(1).strip()
 
         if _swarm_cmd:
             _is_research = _swarm_cmd == "research"
