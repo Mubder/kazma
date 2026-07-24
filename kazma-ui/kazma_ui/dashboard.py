@@ -308,6 +308,10 @@ async def list_sessions(limit: int = 50) -> JSONResponse:
 
     try:
         checkpoints = await _checkpoint_manager.list_checkpoints(limit=limit)
+        logger.warning(
+            "[Dashboard] list_checkpoints returned %d entries (cm=%s)",
+            len(checkpoints), type(_checkpoint_manager).__name__,
+        )
 
         # Build a lookup of session metadata from the session store so we can
         # enrich checkpointed sessions with platform and display_name.

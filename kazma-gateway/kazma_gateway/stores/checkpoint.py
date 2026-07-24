@@ -222,6 +222,11 @@ class CheckpointManager(BaseCheckpointSaver):
         saver = await self._get_saver()
         conn = saver.conn if hasattr(saver, "conn") else None
         if conn is None:
+            logger.warning(
+                "[Checkpoint] list_checkpoints: saver has no conn (type=%s, attrs=%s)",
+                type(saver).__name__,
+                [a for a in dir(saver) if not a.startswith("_")][:15],
+            )
             return []
         try:
             # Each checkpoint row stores metadata as JSON in the
@@ -282,7 +287,7 @@ class CheckpointManager(BaseCheckpointSaver):
                 })
             return results
         except Exception:
-            logger.debug("[Checkpoint] list_checkpoints query failed", exc_info=True)
+            logger.warning("[Checkpoint] list_checkpoints query failed", exc_info=True)
             return []
 
     @staticmethod
