@@ -223,6 +223,11 @@ class InProcessWorker(SwarmWorker):
             if provider is None:
                 return {"worker": self.name, "task_id": task_id, "status": "error", "output": "", "error": "No provider available"}
 
+            # Override the LLM timeout for swarm workers — research tasks
+            # generate long outputs that need more than the default 60s.
+            if hasattr(provider, "config") and hasattr(provider.config, "timeout"):
+                provider.config.timeout = 180.0  # 3 minutes per LLM call
+
             # ── Tool definitions ──────────────────────────────────────
             tool_defs: list[dict[str, Any]] = []
             tool_registry = None
@@ -315,11 +320,30 @@ class InProcessWorker(SwarmWorker):
             _consecutive_tool_failures = 0
 
             for iteration in range(1, MAX_ITERATIONS + 1):
-                response = await provider.chat(
-                    messages,
-                    tools=tool_defs if tool_defs else None,
-                    model=self.model or None,
-                )
+                # Retry the LLM call on transient network errors (timeouts,
+                # connection resets) — common with long research outputs.
+                response = None
+                for _attempt in range(3):
+                    try:
+                        response = await provider.chat(
+                            messages,
+                            tools=tool_defs if tool_defs else None,
+                            model=self.model or None,
+                        )
+                        break
+                    except Exception as _llm_exc:
+                        if _attempt < 2:
+                            logger.warning(
+                                "[InProcessWorker:%s] LLM call failed (attempt %d/3): %s — retrying",
+                                self.name, _attempt + 1, type(_llm_exc).__name__,
+                            )
+                            import asyncio as _aio
+                            await _aio.sleep(2 * (_attempt + 1))  # 2s, 4s backoff
+                        else:
+                            raise  # exhausted retries
+
+                if response is None:
+                    raise RuntimeError("LLM returned no response after retries")
 
                 # Accumulate token/cost across all iterations.
                 # Sum ONLY prompt_tokens + completion_tokens — NOT
