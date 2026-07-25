@@ -149,6 +149,8 @@ function mcpApp() {
         adding: false,            // disable button during validate-then-save
         addError: '',             // inline error during Add Server
         rewriteNotice: '',        // auto-rewrite explanation shown to user
+        selectedPreset: '',       // preset dropdown selection (server id or '')
+        presetCategories: [],     // [{name, presets}] from GET /api/mcp/presets
         newServer: {
             name: '',
             transport: 'stdio',
@@ -164,6 +166,67 @@ function mcpApp() {
         onCommandInput() {
             var r = autoRewriteCommand(this.newServer.commandStr);
             this.rewriteNotice = r.notice;
+        },
+
+        /* Fetch the preset catalog (grouped by category) from the backend.
+         * Called once when the Add Server modal opens (x-init). The catalog
+         * is cached server-side so repeated opens don't re-read the YAML. */
+        async loadPresets() {
+            if (this.presetCategories.length > 0) return;  // already loaded
+            try {
+                var resp = await fetch('/api/mcp/presets');
+                var data = await resp.json();
+                if (data.ok && data.categories) {
+                    this.presetCategories = data.categories;
+                }
+            } catch (e) {
+                // Presets are a convenience — if they fail to load, the
+                // manual form still works fine.
+                console.debug('[MCP] preset load failed:', e);
+            }
+        },
+
+        /* When the user picks a preset from the dropdown, auto-fill all the
+         * fields below. When they pick "— Custom —" (empty), clear them. */
+        applyPreset() {
+            if (!this.selectedPreset) {
+                // Reset to manual/custom mode — clear all fields.
+                this.resetNewServer();
+                return;
+            }
+            // Find the preset across all categories.
+            var preset = null;
+            for (var i = 0; i < this.presetCategories.length; i++) {
+                for (var j = 0; j < this.presetCategories[i].presets.length; j++) {
+                    if (this.presetCategories[i].presets[j].id === this.selectedPreset) {
+                        preset = this.presetCategories[i].presets[j];
+                        break;
+                    }
+                }
+                if (preset) break;
+            }
+            if (!preset) return;
+
+            // Fill the form fields. command[] is joined into commandStr
+            // (the field the user sees); addServer() re-parses it via shlex.
+            this.newServer.name = preset.id;
+            this.newServer.transport = preset.transport || 'stdio';
+            this.newServer.commandStr = (preset.command || []).join(' ');
+            this.newServer.url = preset.url || '';
+            this.newServer.working_dir = '';
+            this.newServer.authToken = '';
+            this.newServer.trust = 'approval_required';
+
+            // Pre-populate env var rows with the keys the preset needs
+            // (values left empty for the user to fill — e.g. FIRECRAWL_API_KEY).
+            var envKeys = preset.env_keys || [];
+            this.newServer._envRows = envKeys.map(function(k) {
+                return { key: k, value: '' };
+            });
+
+            // Clear any stale rewrite notice from a prior entry.
+            this.rewriteNotice = '';
+            this.addError = '';
         },
 
         /* Add Server: validate-then-save. The server is only persisted if
@@ -356,6 +419,7 @@ function mcpApp() {
             };
             this.addError = '';
             this.rewriteNotice = '';
+            this.selectedPreset = '';
         }
     };
 }

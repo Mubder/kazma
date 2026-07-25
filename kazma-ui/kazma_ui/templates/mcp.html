@@ -69,9 +69,25 @@
     </div>
 
     <!-- Add Server Modal -->
-    <div class="modal-overlay" x-show="showAddModal" @click.self="showAddModal = false" style="display:none">
+    <div class="modal-overlay" x-show="showAddModal" @click.self="showAddModal = false" style="display:none" x-init="loadPresets()">
         <div class="modal">
             <h2>{{ t('mcp.modal_title') }}</h2>
+            {# Preset dropdown — one-click setup for known MCP servers.
+               Fetches GET /api/mcp/presets on modal open; selecting a preset
+               auto-fills name, transport, command, and env fields below. #}
+            <div class="form-group">
+                <label>{{ t('mcp.preset_label') }}</label>
+                <select x-model="selectedPreset" @change="applyPreset()" class="form-select">
+                    <option value="">{{ t('mcp.preset_none') }}</option>
+                    <template x-for="cat in presetCategories" :key="cat.name">
+                        <optgroup :label="cat.name">
+                            <template x-for="p in cat.presets" :key="p.id">
+                                <option :value="p.id" x-text="p.name + (p.certified ? ' ✓' : '')"></option>
+                            </template>
+                        </optgroup>
+                    </template>
+                </select>
+            </div>
             <div class="form-group">
                 <label>{{ t('mcp.field_name') }}</label>
                 <input type="text" x-model="newServer.name" class="form-input" placeholder="my-server">
