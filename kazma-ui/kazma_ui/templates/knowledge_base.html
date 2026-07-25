@@ -102,6 +102,14 @@
       <div x-show="activeJob.current_url" style="margin-top:4px;font-size:0.78rem;color:var(--text-secondary);word-break:break-all;">
         current: <code x-text="activeJob.current_url"></code>
       </div>
+      <template x-if="activeJob.errors && activeJob.errors.length">
+        <div style="margin-top:8px;font-size:0.75rem;color:var(--danger,#e53935);border-top:1px dashed var(--border);padding-top:6px;">
+          <div style="font-weight:600;margin-bottom:2px;">Failures:</div>
+          <template x-for="(err, idx) in activeJob.errors.slice(-3)" :key="idx">
+            <div style="margin-bottom:2px;word-break:break-all;" x-text="err"></div>
+          </template>
+        </div>
+      </template>
     </div>
   </template>
 

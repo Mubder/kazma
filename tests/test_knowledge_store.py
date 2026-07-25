@@ -12,7 +12,34 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-core"))
 
-from kazma_core.stores.knowledge import KnowledgeStore
+from kazma_core.stores.knowledge import KnowledgeStore, slugify_library_id
+
+
+# ── Slugification ───────────────────────────────────────────────────────────
+
+
+def test_slugify_normalizes_user_input():
+    """Library IDs become ChromaDB collection names + URL segments, so they
+    must be lowercase [a-z0-9_-].  Without slugification, a user entering
+    'Meta WhatsApp Documentations 2' gets a fragile ID that breaks the
+    collection name and URL-encodes to %20."""
+    assert slugify_library_id("Meta WhatsApp Documentations 2") == "meta_whatsapp_documentations_2"
+    assert slugify_library_id("ShipX-API") == "shipx-api"
+    assert slugify_library_id("  foo / bar!!") == "foo_bar"
+    assert slugify_library_id("already_ok-id") == "already_ok-id"
+    assert slugify_library_id("") == "library"
+    assert slugify_library_id("   ") == "library"
+
+
+def test_create_library_slugifies_id():
+    """The store must slugify on insert so downstream code never sees a
+    raw user string with spaces/uppercase."""
+    s = _fresh_store()
+    lib = s.create_library("Meta WhatsApp Docs", "Meta WhatsApp Docs")
+    assert lib["id"] == "meta_whatsapp_docs"
+    # And the slug-form ID is what's retrievable.
+    assert s.get_library("meta_whatsapp_docs") is not None
+    assert s.get_library("Meta WhatsApp Docs") is None  # raw form not stored
 
 
 def _fresh_store() -> KnowledgeStore:

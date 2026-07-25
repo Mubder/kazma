@@ -29,6 +29,7 @@ Concurrency model
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import threading
 from datetime import UTC, datetime
@@ -41,9 +42,32 @@ __all__ = [
     "KnowledgeStore",
     "get_knowledge_store",
     "reset_knowledge_store",
+    "slugify_library_id",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+_SLUG_RE = re.compile(r"[^a-z0-9_-]+")
+
+
+def slugify_library_id(raw: str) -> str:
+    """Normalize a user-provided library ID into a ChromaDB-safe slug.
+
+    Library IDs become ChromaDB collection names (``kazma_kb_<id>``) and
+    URL path segments, so they must be ``[a-z0-9_-]`` only.  Without this,
+    a user entering ``"Meta WhatsApp Documentations 2"`` gets a fragile ID
+    that breaks collection creation and URL-encodes to ``%20`` in routes.
+
+    Examples:
+      ``"Meta WhatsApp Documentations 2"`` → ``"meta_whatsapp_documentations_2"``
+      ``"ShipX-API"``                       → ``"shipx-api"``
+      ``"  foo / bar!!"``                   → ``"foo_bar"``
+    """
+    s = (raw or "").strip().lower()
+    s = _SLUG_RE.sub("_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "library"
 
 _DEFAULT_DB = "kazma-data/settings.db"
 
@@ -142,7 +166,11 @@ class KnowledgeStore:
         id already exists — callers should use :meth:`get_library` first or
         switch to upsert semantics."""
         now = _now_iso()
-        lib_id = (library_id or "").strip()
+        # Library IDs become ChromaDB collection names + URL path segments,
+        # so they must be slugs (lowercase [a-z0-9_-]).  Slugify whatever
+        # the caller passed — this also protects against spaces/uppercase
+        # that would silently break collection creation or URL-encode badly.
+        lib_id = slugify_library_id(library_id)
         if not lib_id:
             raise ValueError("library_id must not be empty")
         with self._lock:

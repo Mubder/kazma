@@ -137,6 +137,7 @@ class ProgressUpdate:
     failed: int = 0          # pages that failed
     current_url: str = ""
     message: str = ""
+    errors: list[str] = field(default_factory=list)  # per-page failure reasons
     started_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
 
@@ -373,7 +374,18 @@ async def kb_discover_pages(
         return [seed]
     await _safe_progress(on_progress, "rendering seed page to discover nav links…")
     bfs_urls = await _bfs_discover(seed, scope_mode, on_progress=on_progress)
-    return bfs_urls or [seed]
+    if bfs_urls:
+        return bfs_urls
+    # BFS also found nothing usable — the seed page itself was unfetchable
+    # (likely bot-walled).  Tell the user why this dropped to "just the
+    # seed" so they know to enable a fetch backend rather than seeing an
+    # unexplained discovered=1.
+    await _safe_progress(
+        on_progress,
+        "link-walk found no nav links (seed page unreadable — site is likely "
+        "bot-walled; enable KAZMA_FIRECRAWL_API_KEY or KAZMA_JINA_READER=1)",
+    )
+    return [seed]
 
 
 async def _safe_progress(on_progress: Any, msg: str) -> None:
@@ -577,7 +589,7 @@ async def _render_with_playwright(url: str, *, want_text: bool) -> str | None:
         return None
 
 
-async def _extract_page(url: str) -> tuple[str | None, str]:
+async def _extract_page(url: str) -> tuple[str | None, str, str]:
     """Extract markdown from one page.
 
     Tiered:
@@ -586,26 +598,80 @@ async def _extract_page(url: str) -> tuple[str | None, str]:
          like a bot-walled JS/tab page, fall back to Playwright full-DOM
          extraction (hidden panels included).
 
-    Returns ``(markdown_or_None, status)`` where status is one of
-    ``"ok"``, ``"thin"`` (suspiciously short, candidate for retry),
-    ``"empty"``, ``"error"``.
+    Returns ``(markdown_or_None, status, reason)`` where:
+      status is one of ``"ok"``, ``"thin"``, ``"empty"``, ``"error"``;
+      reason is a short human-readable diagnostic (empty when ok).  The
+      reason is what surfaces in the job's failed-URL log so the user can
+      tell *why* a page failed (bot-wall vs. Chromium-missing vs. timeout)
+      instead of seeing an opaque "1 failed".
     """
     text = await _fetch_full_text(url)
     looks_blocked = text.startswith("Error:") or _looks_like_bot_block_html(text)
     if looks_blocked:
         # Try Playwright full-DOM before giving up.
+        pw_reason = _check_playwright_available()
+        if pw_reason:
+            return None, "error", f"blocked by site; Playwright unavailable ({pw_reason})"
         pw = await _render_with_playwright(url, want_text=True)
         if pw and len(pw) >= MIN_USEFUL_CHARS:
-            return pw, "ok"
-        return None, "error"
+            return pw, "ok", ""
+        # Distinguish "Chromium missing" from "bot-walled even for browser".
+        return None, "error", (
+            "page is bot-walled (httpx returned an error stub) and Playwright "
+            "could not extract usable content — install a fetch backend: "
+            "KAZMA_FIRECRAWL_API_KEY (best for bot-walled sites), "
+            "KAZMA_JINA_READER=1, or run `playwright install chromium`"
+        )
     if len(text) < MIN_USEFUL_CHARS:
+        pw_reason = _check_playwright_available()
+        if pw_reason:
+            # No point trying Playwright if it can't launch.
+            if not text.strip():
+                return None, "empty", f"empty extract; Playwright unavailable ({pw_reason})"
+            return text, "thin", f"thin extract ({len(text)} chars); Playwright unavailable ({pw_reason})"
         pw = await _render_with_playwright(url, want_text=True)
         if pw and len(pw) > len(text):
-            return pw, "ok"
+            return pw, "ok", ""
         if not text.strip():
-            return None, "empty"
-        return text, "thin"
-    return text, "ok"
+            return None, "empty", "empty extract after all tiers"
+        return text, "thin", f"thin extract ({len(text)} chars) — likely a JS-only page"
+    return text, "ok", ""
+
+
+def _check_playwright_available() -> str:
+    """Return ``""`` if Playwright + Chromium are usable, else a short reason.
+
+    Distinguishes the two common silent failures:
+      - Playwright Python package not installed (``ImportError``).
+      - Package installed but Chromium binary missing (need
+        ``playwright install chromium``).  This is the failure that produces
+        the opaque "1 failed" — without this check the error stays at
+        ``logger.debug`` and the user can't tell why.
+    """
+    try:
+        from playwright.async_api import async_playwright  # noqa: F401
+    except ImportError:
+        return "playwright package not installed (pip install kazma[web])"
+    # The Python package is present; check whether the Chromium binary is
+    # actually installed by looking for the playwright driver cache.  We
+    # can't easily run a launch() here (it's async), so probe the known
+    # install locations.  If the user ran `playwright install chromium`
+    # there will be a chromium-* dir under the playwright cache.
+    import os
+    import sys
+    candidates = []
+    env_dir = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if env_dir:
+        candidates.append(os.path.join(env_dir, "chromium-*"))
+    if sys.platform.startswith("win"):
+        candidates.append(os.path.join(os.path.expanduser("~"), "AppData", "Local", "ms-playwright", "chromium-*"))
+    else:
+        candidates.append(os.path.join(os.path.expanduser("~"), ".cache", "ms-playwright", "chromium-*"))
+    import glob
+    for pattern in candidates:
+        if glob.glob(pattern):
+            return ""  # Chromium binary looks present.
+    return "Chromium binary not installed (run: playwright install chromium)"
 
 
 async def _extract_playwright_full_dom(url: str) -> str | None:
@@ -698,11 +764,16 @@ async def ingest_url(
         result.pages_failed = 1
         return result
 
-    text, status = await _extract_page(url)
+    text, status, reason = await _extract_page(url)
     if text is None or status == "error":
         result.pages_failed = 1
         result.failed_urls.append(url)
-        result.errors.append(f"fetch failed: {url}")
+        # Surface the actual reason (bot-wall vs. Chromium-missing vs.
+        # timeout) instead of an opaque "fetch failed".
+        msg = f"fetch failed: {url}"
+        if reason:
+            msg += f" — {reason}"
+        result.errors.append(msg)
         return result
 
     _save_provenance(library_id, url, text)
@@ -813,10 +884,31 @@ async def ingest_site(
             started_at=started,
         )
         try:
-            text, status = await _extract_page(url)
+            text, status, reason = await _extract_page(url)
             if text is None or status == "error":
                 failed += 1
                 result.failed_urls.append(url)
+                # Surface the per-tier failure reason in the job log so
+                # the user can tell bot-wall from Chromium-missing from
+                # timeout — previously this was an opaque "failed=1".
+                if reason:
+                    err_msg = f"{url}: {reason}"
+                    result.errors.append(err_msg)
+                    logger.warning("[kb_ingest] page failed %s: %s", url, reason)
+                else:
+                    err_msg = f"{url}: fetch returned no content"
+                    result.errors.append(err_msg)
+                # Push a progress tick so the UI's failed counter and the
+                # error list update live (not just at the end).
+                yield ProgressUpdate(
+                    phase="fetch",
+                    discovered=len(pages), fetched=fetched, ingested=chunks_new,
+                    skipped=chunks_skipped, failed=failed,
+                    current_url=url,
+                    message=f"[{i + 1}/{len(pages)}] failed: {reason or 'no content'}",
+                    errors=list(result.errors[-5:]),  # last 5 to bound size
+                    started_at=started,
+                )
                 continue
             _save_provenance(library_id, url, text)
             chunks = chunk_markdown_doc(
@@ -848,15 +940,25 @@ async def ingest_site(
     except Exception as exc:
         logger.debug("[kb_ingest] set_chunk_count failed: %s", exc)
 
+    # If everything failed, surface the FIRST failure reason in the done
+    # message — that's what the user sees in the toast/progress panel, and
+    # "0/1 pages, 0 chunks, 1 failed" without a reason is unactionable.
+    done_msg = (
+        f"done: {fetched}/{len(pages)} pages, "
+        f"{chunks_new} new chunks (+{chunks_skipped} deduped), "
+        f"{failed} failed"
+    )
+    if failed > 0 and fetched == 0 and result.errors:
+        # All pages failed — append the first reason to the summary so the
+        # user immediately sees *why* (bot-wall / Chromium-missing / etc.).
+        first_reason = result.errors[0]
+        done_msg += f" — first failure: {first_reason}"
+
     yield ProgressUpdate(
         phase="done",
         discovered=len(pages), fetched=fetched, ingested=chunks_new,
         skipped=chunks_skipped, failed=failed,
-        message=(
-            f"done: {fetched}/{len(pages)} pages, "
-            f"{chunks_new} new chunks (+{chunks_skipped} deduped), "
-            f"{failed} failed"
-        ),
+        message=done_msg,
         started_at=started,
     )
 
