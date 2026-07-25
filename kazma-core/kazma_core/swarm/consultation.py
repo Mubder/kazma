@@ -130,13 +130,21 @@ async def execute_consult(
     dispatch_worker_by_name: DispatchWorkerByName,
     aggregator: ResultAggregator,
     max_concurrent: int,
+    concurrency: BoundedConcurrency | None = None,
 ) -> ConsultationExecution:
-    """Execute a consult task across workers and synthesize the opinions."""
+    """Execute a consult task across workers and synthesize the opinions.
+
+    Prefer a shared *concurrency* from ``engine.get_bounded_concurrency``
+    (audit M12) so concurrent consult/fan-out tasks share one limit.
+    """
     if not task.workers:
         raise ConsultationConfigurationError("Consult requires at least one worker.")
 
     blackboard = BlackboardStore()
-    concurrency = BoundedConcurrency(max_concurrent=max(1, min(max_concurrent, len(task.workers))))
+    if concurrency is None:
+        concurrency = BoundedConcurrency(
+            max_concurrent=max(1, min(max_concurrent, len(task.workers)))
+        )
 
     async def dispatch_one(worker_name: str) -> WorkerResult:
         worker = resolve_worker(worker_name)

@@ -921,7 +921,23 @@ async def _try_kb_command(
             kb_store.update_library(lib_id, seed_url=url)
 
         job_id = f"{lib_id}:{thread_id}"
-        _kb_jobs[job_id] = {"phase": "starting", "message": "starting crawl"}
+
+        def _kb_job_set(payload: dict[str, Any]) -> None:
+            """In-memory + durable ConfigStore snapshot (survives restart)."""
+            row = {
+                "library_id": lib_id,
+                "url": url,
+                **payload,
+            }
+            _kb_jobs[job_id] = row
+            try:
+                from kazma_core.stores.kb_jobs import upsert_job
+
+                upsert_job(job_id, **row)
+            except Exception as _kbj_exc:
+                logger.debug("[AgentHandler] durable kb job write failed: %s", _kbj_exc)
+
+        _kb_job_set({"phase": "starting", "message": "starting crawl"})
 
         async def _run_crawl() -> None:
             from kazma_core.stores.knowledge_ingest import ingest_site
@@ -929,7 +945,7 @@ async def _try_kb_command(
             final_msg = ""
             try:
                 async for update in ingest_site(lib_id, url, max_pages=max_pages):
-                    _kb_jobs[job_id] = {
+                    _kb_job_set({
                         "phase": update.phase,
                         "discovered": update.discovered,
                         "fetched": update.fetched,
@@ -938,15 +954,22 @@ async def _try_kb_command(
                         "failed": update.failed,
                         "current_url": update.current_url,
                         "message": update.message,
-                    }
+                    })
                     final_msg = update.message
+                from datetime import UTC, datetime as _dt
+
+                _kb_job_set({
+                    "phase": "done",
+                    "message": final_msg,
+                    "finished_at": _dt.now(UTC).isoformat(),
+                })
                 await _send_model_reply(
                     msg, store, manager, thread_id,
                     f"✅ Crawl complete for `{lib_id}`: {final_msg}",
                 )
             except Exception as exc:
                 logger.warning("[AgentHandler] /kb crawl failed: %s", exc)
-                _kb_jobs[job_id] = {"phase": "error", "message": str(exc)}
+                _kb_job_set({"phase": "error", "message": str(exc)})
                 await _send_model_reply(
                     msg, store, manager, thread_id,
                     f"⚠️ Crawl failed for `{lib_id}`: {exc}",
@@ -1037,6 +1060,15 @@ async def _try_kb_command(
             if jid.startswith(lib_id + ":"):
                 job = jv
                 break
+        if job is None:
+            try:
+                from kazma_core.stores.kb_jobs import list_jobs as _list_kb_jobs
+
+                for row in _list_kb_jobs(library_id=lib_id):
+                    job = row
+                    break
+            except Exception:
+                pass
         if job is None:
             lib = kb_store.get_library(lib_id)
             if lib is None:

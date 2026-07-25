@@ -41,14 +41,46 @@ logger = logging.getLogger(__name__)
 __all__ = ["create_kb_router"]
 
 
-# In-process job registry.  Mirrors the gateway ``_kb_jobs`` dict but
-# separate — the UI is its own process and has its own jobs.
+# In-process job registry for low-latency polling.  Durable mirror lives
+# in ConfigStore via ``kazma_core.stores.kb_jobs`` so restarts don't
+# orphan the UI on "Unknown job_id".
 _kb_api_jobs: dict[str, dict[str, Any]] = {}
+_kb_jobs_bootstrapped = False
+
+
+def _remember_job(job_id: str, data: dict[str, Any]) -> None:
+    """Update in-memory + durable job snapshot."""
+    _kb_api_jobs[job_id] = data
+    try:
+        from kazma_core.stores.kb_jobs import upsert_job
+
+        upsert_job(job_id, **data)
+    except Exception as exc:
+        logger.debug("[kb_api] durable job write failed: %s", exc)
+
+
+def _bootstrap_jobs() -> None:
+    """Load durable jobs + mark mid-crawl jobs interrupted after restart."""
+    global _kb_jobs_bootstrapped
+    if _kb_jobs_bootstrapped:
+        return
+    _kb_jobs_bootstrapped = True
+    try:
+        from kazma_core.stores.kb_jobs import list_jobs, mark_stale_jobs_interrupted
+
+        mark_stale_jobs_interrupted()
+        for row in list_jobs():
+            jid = row.pop("job_id", None)
+            if jid:
+                _kb_api_jobs[jid] = row
+    except Exception as exc:
+        logger.debug("[kb_api] job bootstrap failed: %s", exc)
 
 
 def create_kb_router() -> APIRouter:
     """Create and return the Knowledge Base API router."""
 
+    _bootstrap_jobs()
     router = APIRouter(prefix="/api/kb", tags=["knowledge"])
 
     def _store():
@@ -255,19 +287,23 @@ def create_kb_router() -> APIRouter:
 
         # mode == "site" → background job.
         job_id = f"{lib_id}:{datetime.now(UTC).strftime('%H%M%S%f')}"
-        _kb_api_jobs[job_id] = {
-            "phase": "starting",
-            "library_id": lib_id,
-            "url": url,
-            "started_at": datetime.now(UTC).isoformat(),
-        }
+        _remember_job(
+            job_id,
+            {
+                "phase": "starting",
+                "library_id": lib_id,
+                "url": url,
+                "started_at": datetime.now(UTC).isoformat(),
+            },
+        )
 
         async def _run() -> None:
             from kazma_core.stores.knowledge_ingest import ingest_site
 
             try:
                 async for update in ingest_site(lib_id, url, max_pages=max_pages):
-                    _kb_api_jobs[job_id].update(
+                    snap = dict(_kb_api_jobs.get(job_id) or {})
+                    snap.update(
                         {
                             "phase": update.phase,
                             "discovered": update.discovered,
@@ -278,15 +314,27 @@ def create_kb_router() -> APIRouter:
                             "current_url": update.current_url,
                             "message": update.message,
                             "errors": list(update.errors or []),
+                            "library_id": lib_id,
+                            "url": url,
                         }
                     )
-                _kb_api_jobs[job_id]["finished_at"] = datetime.now(UTC).isoformat()
+                    _remember_job(job_id, snap)
+                snap = dict(_kb_api_jobs.get(job_id) or {})
+                snap["finished_at"] = datetime.now(UTC).isoformat()
+                if snap.get("phase") not in ("error", "interrupted"):
+                    snap.setdefault("phase", "done")
+                _remember_job(job_id, snap)
             except Exception as exc:
                 logger.exception("[kb_api] site ingest failed")
-                _kb_api_jobs[job_id].update(
-                    {"phase": "error", "message": str(exc),
-                     "finished_at": datetime.now(UTC).isoformat()}
+                snap = dict(_kb_api_jobs.get(job_id) or {})
+                snap.update(
+                    {
+                        "phase": "error",
+                        "message": str(exc),
+                        "finished_at": datetime.now(UTC).isoformat(),
+                    }
                 )
+                _remember_job(job_id, snap)
 
         asyncio.create_task(_run())
         return {"ok": True, "mode": "site", "job_id": job_id}
@@ -295,7 +343,20 @@ def create_kb_router() -> APIRouter:
     async def job_status(job_id: str) -> dict[str, Any]:
         job = _kb_api_jobs.get(job_id)
         if not job:
-            return {"ok": False, "error": "Unknown job_id"}
+            try:
+                from kazma_core.stores.kb_jobs import get_job
+
+                job = get_job(job_id)
+            except Exception:
+                job = None
+        if not job:
+            return {
+                "ok": False,
+                "error": (
+                    "Unknown job_id — it may have expired, or the server "
+                    "restarted before durable status was written. Re-run crawl."
+                ),
+            }
         return {"ok": True, "job": job}
 
     # ── Search (UI "Test search") ───────────────────────────────────────

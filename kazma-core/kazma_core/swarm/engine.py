@@ -314,10 +314,43 @@ class SwarmEngine:
         )
         return self.add_worker(worker_config)
 
+    def _max_concurrent_tasks(self) -> int:
+        """Global admission limit for in-flight swarm tasks (audit M11)."""
+        import os
+
+        env = (os.environ.get("KAZMA_SWARM_MAX_ACTIVE") or "").strip()
+        if env.isdigit():
+            return max(1, int(env))
+        return max(
+            1,
+            int(getattr(self.config, "max_concurrent_tasks", None) or 10),
+        )
+
     async def dispatch(self, task: SwarmTask) -> TaskResult:
         """Dispatch a swarm task to a single worker."""
         if task.type == TaskType.BROADCAST:
             return await self.broadcast(task)
+
+        # Global admission control (audit M11): reject when at capacity so
+        # chat→swarm / panel spam cannot unbounded-grow _active_tasks + LLM spend.
+        max_active = self._max_concurrent_tasks()
+        if len(self._active_tasks) >= max_active:
+            logger.warning(
+                "[SwarmEngine] Admission denied task=%s active=%d max=%d",
+                task.id,
+                len(self._active_tasks),
+                max_active,
+            )
+            return TaskResult(
+                task_id=task.id,
+                status="failed",
+                error=(
+                    f"Swarm at capacity ({max_active} concurrent tasks). "
+                    "Wait for running tasks to finish or raise "
+                    "swarm.max_concurrent_tasks / KAZMA_SWARM_MAX_ACTIVE."
+                ),
+                metadata={"admission_denied": True, "max_concurrent_tasks": max_active},
+            )
 
         started = perf_counter()
         task.started_at = task.started_at or _utc_now_iso()
@@ -513,6 +546,8 @@ class SwarmEngine:
         validation_schema: dict[str, Any] | None = None,
         fallback_chain: list[str] | None = None,
         trace_id: str | None = None,
+        _visited: dict[str, int] | None = None,
+        _depth: int = 0,
     ) -> WorkerResult:
         worker = self.get_worker(worker_name)
         if worker is None:
@@ -530,6 +565,8 @@ class SwarmEngine:
             timeout=timeout,
             validation_schema=validation_schema,
             trace_id=trace_id,
+            _visited=_visited,
+            _depth=_depth,
         )
         result = results[-1]
 
@@ -538,6 +575,7 @@ class SwarmEngine:
             return result
 
         # Execute the fallback chain (returns final result + all attempted).
+        # Thread hop budget so A→B→fallback→A cannot reset visit counts (M13).
         final_result, _all_results = await self._execute_fallback_chain(
             result,
             fallback_chain,
@@ -545,6 +583,9 @@ class SwarmEngine:
             context=context,
             timeout=timeout,
             validation_schema=validation_schema,
+            trace_id=trace_id,
+            _visited=_visited if _visited is not None else {},
+            _depth=_depth,
         )
         return final_result
 
@@ -558,6 +599,8 @@ class SwarmEngine:
         timeout: float | None = None,
         validation_schema: dict[str, Any] | None = None,
         trace_id: str | None = None,
+        _visited: dict[str, int] | None = None,
+        _depth: int = 0,
     ) -> tuple[WorkerResult, list[WorkerResult]]:
         """Execute fallback workers sequentially after primary failure.
 
@@ -566,6 +609,9 @@ class SwarmEngine:
         successful fallback ends the chain.  If all fail, a terminal
         failure result is returned with a summary error.
 
+        Hop budget (``_visited`` / ``_depth``) is threaded through so
+        fallbacks cannot reset cycle guards (audit M13).
+
         Returns:
             A tuple of ``(final_result, all_attempted_results)``.  The
             ``all_attempted_results`` list includes the primary result
@@ -573,6 +619,7 @@ class SwarmEngine:
         """
         chain = FallbackChain(fallback_workers=fallback_chain)
         task_id = primary_result.task_id
+        visited = _visited if _visited is not None else {}
 
         async def _dispatch_fallback(name: str) -> WorkerResult:
             fallback_worker = self.get_worker(name)
@@ -591,6 +638,8 @@ class SwarmEngine:
                 timeout=timeout,
                 validation_schema=validation_schema,
                 trace_id=trace_id,
+                _visited=visited,
+                _depth=_depth + 1,
             )
             return results[-1]
 

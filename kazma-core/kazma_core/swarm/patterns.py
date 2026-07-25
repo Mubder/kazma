@@ -684,13 +684,22 @@ async def execute_fan_out(
     dispatch_worker_by_name: DispatchWorkerByName,
     aggregator: ResultAggregator,
     max_concurrent: int,
+    concurrency: BoundedConcurrency | None = None,
 ) -> PatternExecution:
-    """Execute a task across multiple workers with bounded concurrency."""
+    """Execute a task across multiple workers with bounded concurrency.
+
+    Prefer passing a shared *concurrency* from
+    ``engine.get_bounded_concurrency`` (audit M12). A private semaphore is
+    only allocated when the caller omits it (tests / standalone use).
+    """
     if not task.workers:
         raise FanOutConfigurationError("Fan-out requires at least one worker.")
 
     blackboard = BlackboardStore()
-    concurrency = BoundedConcurrency(max_concurrent=max(1, min(max_concurrent, len(task.workers))))
+    if concurrency is None:
+        concurrency = BoundedConcurrency(
+            max_concurrent=max(1, min(max_concurrent, len(task.workers)))
+        )
 
     async def dispatch_one(worker_name: str) -> WorkerResult:
         dispatch_context = SwarmDispatchContext(
