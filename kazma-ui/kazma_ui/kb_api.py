@@ -235,6 +235,7 @@ def create_kb_router() -> APIRouter:
                             "failed": update.failed,
                             "current_url": update.current_url,
                             "message": update.message,
+                            "errors": list(update.errors or []),
                         }
                     )
                 _kb_api_jobs[job_id]["finished_at"] = datetime.now(UTC).isoformat()
@@ -320,6 +321,7 @@ def create_kb_router() -> APIRouter:
                             "failed": update.failed,
                             "current_url": update.current_url,
                             "message": update.message,
+                            "errors": list(update.errors or []),
                         }
                     )
                 _kb_api_jobs[job_id]["finished_at"] = datetime.now(UTC).isoformat()
