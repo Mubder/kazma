@@ -149,6 +149,31 @@ def test_tree_is_the_default_scope_mode():
             os.environ["KAZMA_KB_SCOPE_MODE"] = saved
 
 
+# ── Infra-URL filtering ────────────────────────────────────────────────────
+
+
+def test_is_infra_url_filters_sitemaps_and_feeds():
+    """Firecrawl /v1/map can return infra URLs (sitemap.xml, robots.txt,
+    feeds) that aren't doc pages. Fetching+chunking them produces garbage
+    and counts as a failed page. Discovery must filter them at the boundary."""
+    from kazma_core.stores.knowledge_ingest import _is_infra_url
+
+    # Infra — should be filtered out.
+    assert _is_infra_url("https://x.com/docs/whatsapp/overview/sitemap.xml")
+    assert _is_infra_url("https://x.com/sitemap_index.xml")
+    assert _is_infra_url("https://x.com/robots.txt")
+    assert _is_infra_url("https://x.com/docs/whatsapp/sitemap.xml.gz")
+    assert _is_infra_url("https://x.com/feed.rss")
+    assert _is_infra_url("https://x.com/api/data.json")
+    assert _is_infra_url("") is True
+    assert _is_infra_url(None) is True
+
+    # Real doc pages — must NOT be filtered.
+    assert not _is_infra_url("https://x.com/docs/whatsapp/cloud-api")
+    assert not _is_infra_url("https://x.com/docs/whatsapp/cloud-api/reference/messages")
+    assert not _is_infra_url("https://developers.facebook.com/docs/whatsapp/get-started")
+
+
 # ── Bot-block detection + .gz sitemap handling ──────────────────────────────
 
 
