@@ -142,6 +142,37 @@ def _is_infra_url(url: str) -> bool:
     path = (urlparse(url).path or "").lower()
     return any(path.endswith(suf) for suf in _INFRA_SUFFIXES)
 
+
+def _jina_opt_in() -> bool:
+    """User explicitly enabled Jina Reader via ``KAZMA_JINA_READER``."""
+    return (os.environ.get("KAZMA_JINA_READER") or "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _jina_hard_disabled() -> bool:
+    """``KAZMA_JINA_READER=0|false|off`` refuses Jina even as last-resort."""
+    return (os.environ.get("KAZMA_JINA_READER") or "").strip().lower() in (
+        "0", "false", "no", "off",
+    )
+
+
+def _kb_jina_fallback_allowed() -> bool:
+    """Whether KB may call free ``r.jina.ai`` when local fetch is bot-walled.
+
+    Default **on**: Meta/Cloudflare doc sites are unreadable via httpx/Playwright
+    alone, and a full-tree crawl is the whole point of this module.  Opt out
+    with ``KAZMA_JINA_READER=0`` or ``KAZMA_KB_JINA_FALLBACK=0``.
+    """
+    if _jina_hard_disabled():
+        return False
+    raw = (os.environ.get("KAZMA_KB_JINA_FALLBACK") or "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return False
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    return True  # default allow for KB path only
+
 # Below which an extract is considered "thin" and we retry with the
 # Playwright full-DOM extractor (likely a tabbed / JS doc page).
 MIN_USEFUL_CHARS = 200
@@ -198,6 +229,78 @@ def _normalize_url(base: str, href: str) -> str | None:
     if any((parsed.path or "").lower().endswith(ext) for ext in _SKIP_EXT):
         return None
     return abs_url
+
+
+def _canonical_page_url(url: str) -> str:
+    """Normalize a URL for de-duplication during discovery.
+
+    - strip fragments
+    - lowercase host
+    - strip trailing slash (except root)
+    - strip trailing ``.md`` (Firecrawl /map sometimes returns source-file
+      paths that 404 as HTML pages)
+    """
+    if not url:
+        return ""
+    abs_url, _frag = urldefrag(url.strip())
+    parsed = urlparse(abs_url)
+    if parsed.scheme not in ("http", "https"):
+        return abs_url
+    path = parsed.path or "/"
+    # Source-file suffix → page path (Meta map returns .../access-tokens.md).
+    if path.lower().endswith(".md"):
+        path = path[:-3]
+    if path != "/" and path.endswith("/"):
+        path = path[:-1]
+    netloc = (parsed.netloc or "").lower()
+    # Drop query for de-dup (login?next=... noise); keep path identity.
+    return f"{parsed.scheme}://{netloc}{path}"
+
+
+def _order_urls_seed_first(seed: str, urls: list[str]) -> list[str]:
+    """De-dupe by canonical form (seed first). Entries are canonical URLs."""
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for u in [seed, *urls]:
+        if not u or _is_infra_url(u):
+            continue
+        key = _canonical_page_url(u)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        ordered.append(key)
+    return ordered
+
+
+def _is_sparse_discovery(seed: str, urls: list[str], *, min_others: int = 3) -> bool:
+    """True when a discovery set is basically just the seed (not a real tree).
+
+    Firecrawl ``/v1/map`` on a Meta *leaf* page (``.../whatsapp/overview``)
+    returns only the page itself + trailing-slash + sitemap.xml — 3 URLs.
+    Mapping the *section* parent (``.../whatsapp/``) returns ~280.  Treating
+    sparse results as success short-circuits the better tiers.
+    """
+    if not urls:
+        return True
+    seed_key = _canonical_page_url(seed)
+    others = {_canonical_page_url(u) for u in urls} - {seed_key, ""}
+    return len(others) < min_others
+
+
+def _section_map_url(seed_url: str) -> str | None:
+    """Parent section URL to re-map when the seed is a leaf page.
+
+    ``.../whatsapp/overview`` → ``.../whatsapp/``
+    ``.../whatsapp/`` (already a directory) → ``None`` (no second hop)
+    """
+    parsed = urlparse(seed_url)
+    path = parsed.path or "/"
+    if path == "/" or path.endswith("/"):
+        return None
+    parent = path.rsplit("/", 1)[0]
+    if not parent:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}{parent}/"
 
 
 def _seed_prefix(seed_url: str) -> str:
@@ -364,7 +467,11 @@ async def _fetch_sitemaps(seed_url: str) -> list[str]:
     return docs
 
 
-async def _firecrawl_map_site(seed_url: str) -> list[str] | None:
+async def _firecrawl_map_site(
+    seed_url: str,
+    *,
+    search: str | None = None,
+) -> list[str] | None:
     """Use Firecrawl's ``/v1/map`` endpoint to enumerate all URLs on a site.
 
     This is the strongest discovery tier for bot-walled doc sites (Meta,
@@ -388,14 +495,16 @@ async def _firecrawl_map_site(seed_url: str) -> list[str] | None:
         from kazma_core.security.ssrf import SSRFError, validate_url
 
         validate_url(seed_url)
-        # ``search`` ranks URLs by relevance to the seed; ``limit`` caps the
-        # result set.  We pull a generous slice then scope/filter locally.
-        body = {
+        # ``search`` ranks URLs by relevance; omit it for section-root maps
+        # so Firecrawl returns the full URL set rather than a seed-ranked
+        # slice.  ``limit`` caps the result set; we scope/filter locally.
+        body: dict[str, Any] = {
             "url": seed_url,
-            "search": seed_url,  # rank by relevance to the seed
             "limit": 2000,
             "includeSubdomains": False,
         }
+        if search:
+            body["search"] = search
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -439,6 +548,34 @@ async def _firecrawl_map_site(seed_url: str) -> list[str] | None:
         return None
 
 
+async def _firecrawl_map_discover(seed: str) -> list[str] | None:
+    """Firecrawl /map with parent-section retry for leaf seeds.
+
+    Mapping a Meta leaf like ``.../whatsapp/overview`` returns ~3 URLs.
+    Mapping the section parent ``.../whatsapp/`` returns ~280.  We try the
+    seed first, then the parent section when the first result is sparse.
+    """
+    mapped = await _firecrawl_map_site(seed)
+    if mapped and not _is_sparse_discovery(seed, mapped):
+        return mapped
+
+    parent = _section_map_url(seed)
+    if parent and parent.rstrip("/") != seed.rstrip("/"):
+        logger.info(
+            "[kb_discover] Firecrawl /map sparse (%d) for leaf %s; retrying section %s",
+            len(mapped or []), seed, parent,
+        )
+        parent_mapped = await _firecrawl_map_site(parent)
+        if parent_mapped:
+            # Merge seed + parent results (parent usually supersets).
+            merged = list(mapped or []) + list(parent_mapped)
+            if not _is_sparse_discovery(seed, merged):
+                return merged
+            return merged  # even if still sparse, return what we have
+
+    return mapped  # may be sparse or None — caller decides fallthrough
+
+
 _SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 
 
@@ -466,10 +603,11 @@ async def kb_discover_pages(
 ) -> list[str]:
     """Discover the full set of in-scope URLs for a library.
 
-    Strategy (first wins):
-      1. Sitemap (robots.txt + well-known) — authoritative complete list.
-      2. BFS link-walk using Playwright-rendered HTML so SPA nav links are
-         captured.  Path-prefix scoped.
+    Strategy (first *non-sparse* result wins):
+      0. Firecrawl ``/v1/map`` (seed + parent-section retry for leaf pages)
+      1. Sitemap (robots.txt + well-known)
+      2. Jina Reader seed-expand (markdown link harvest — works on Meta)
+      3. BFS link-walk (Playwright / httpx / Jina per page)
 
     ``on_progress`` is an optional **plain async** callable ``async (msg) -> None``
     receiving a short human-readable status string (e.g. ``"fetching
@@ -486,31 +624,30 @@ async def kb_discover_pages(
     scope_mode = (mode or _kb_scope_mode()).lower()
     if scope_mode not in ("tree", "prefix", "domain", "exact"):
         scope_mode = "tree"
+    if scope_mode == "exact":
+        return [_canonical_page_url(seed) or seed]
+
+    def _scope_and_order(raw: list[str]) -> list[str]:
+        in_scope = [
+            u for u in raw
+            if not _is_infra_url(u) and _in_scope(seed, u, scope_mode)
+        ]
+        return _order_urls_seed_first(seed, in_scope)
 
     # ── 0. Firecrawl /v1/map (strongest tier for bot-walled sites) ───
     # Runs server-side on Firecrawl's browser farm, so the target's bot
     # wall never sees us.  Purpose-built for "enumerate every URL on a
     # site without scraping content" — exactly the discovery problem.
+    # IMPORTANT: leaf pages (Meta .../whatsapp/overview) return a sparse
+    # 3-URL set; we re-map the section parent and refuse sparse results
+    # so later tiers (Jina expand) still run.
     if (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip():
         await _safe_progress(on_progress, "querying Firecrawl /v1/map for site URLs…")
-        mapped = await _firecrawl_map_site(seed)
+        mapped = await _firecrawl_map_discover(seed)
         if mapped:
             await _safe_progress(on_progress, f"Firecrawl returned {len(mapped)} URLs; scoping…")
-            # Filter infra URLs (sitemap.xml, robots.txt, feeds) THEN apply
-            # topic scope.  Without this, Meta's /map output includes a
-            # /overview/sitemap.xml URL that we'd fetch as a doc page.
-            in_scope = [
-                u for u in mapped
-                if not _is_infra_url(u) and _in_scope(seed, u, scope_mode)
-            ]
-            if in_scope:
-                # De-dup, keep order, seed first.
-                seen: set[str] = set()
-                ordered: list[str] = []
-                for u in [seed, *in_scope]:
-                    if u not in seen:
-                        seen.add(u)
-                        ordered.append(u)
+            ordered = _scope_and_order(mapped)
+            if ordered and not _is_sparse_discovery(seed, ordered):
                 logger.info(
                     "[kb_discover] Firecrawl /v1/map yielded %d in-scope URLs for %s",
                     len(ordered), seed,
@@ -518,7 +655,7 @@ async def kb_discover_pages(
                 return ordered
             await _safe_progress(
                 on_progress,
-                f"Firecrawl returned {len(mapped)} URLs but 0 matched scope {scope_mode}; falling back",
+                f"Firecrawl map sparse ({len(ordered)} in-scope after filter); falling back",
             )
         else:
             await _safe_progress(on_progress, "Firecrawl /v1/map unavailable/failed; falling back to sitemap")
@@ -531,34 +668,49 @@ async def kb_discover_pages(
         await _safe_progress(on_progress, f"parsing {len(sitemap_docs)} sitemap doc(s)…")
         for doc in sitemap_docs:
             discovered.extend(_extract_urls_from_sitemap(doc))
-        discovered = [
-            u for u in discovered
-            if not _is_infra_url(u) and _in_scope(seed, u, scope_mode)
-        ]
-        if discovered:
-            # De-dup, keep order, seed first.
-            seen: set[str] = set()
-            ordered: list[str] = []
-            for u in [seed, *discovered]:
-                if u not in seen:
-                    seen.add(u)
-                    ordered.append(u)
+        ordered = _scope_and_order(discovered)
+        if ordered and not _is_sparse_discovery(seed, ordered):
             logger.info(
                 "[kb_discover] sitemap yielded %d in-scope URLs for %s",
                 len(ordered), seed,
             )
             return ordered
-        await _safe_progress(on_progress, "sitemap had 0 in-scope URLs; falling back to link-walk")
+        await _safe_progress(on_progress, "sitemap had 0/sparse in-scope URLs; falling back")
     else:
-        await _safe_progress(on_progress, "no sitemap reachable; falling back to link-walk")
+        await _safe_progress(on_progress, "no sitemap reachable; falling back")
 
-    # ── 2. BFS link-walk fallback (Playwright for SPA nav) ──────────
-    if scope_mode == "exact":
-        return [seed]
+    # ── 2. Jina seed-expand (nav links from bot-walled SPA pages) ─────
+    # One Jina fetch of the Meta overview page yields ~360 in-scope
+    # WhatsApp doc links from the sidebar nav.  Requires Jina opt-in or
+    # the KB last-resort fallback (default on; disable with
+    # KAZMA_JINA_READER=0).
+    if _jina_opt_in() or _kb_jina_fallback_allowed():
+        await _safe_progress(on_progress, "expanding seed via Jina Reader (nav link harvest)…")
+        jina_links = await _jina_expand_seed(seed)
+        if jina_links:
+            ordered = _scope_and_order(jina_links)
+            if ordered and not _is_sparse_discovery(seed, ordered):
+                logger.info(
+                    "[kb_discover] Jina seed-expand yielded %d in-scope URLs for %s",
+                    len(ordered), seed,
+                )
+                await _safe_progress(
+                    on_progress,
+                    f"Jina seed-expand found {len(ordered)} in-scope URLs",
+                )
+                return ordered
+            await _safe_progress(on_progress, "Jina seed-expand sparse; falling back to link-walk")
+        else:
+            await _safe_progress(on_progress, "Jina seed-expand unavailable; falling back to link-walk")
+
+    # ── 3. BFS link-walk fallback (Playwright / httpx / Jina) ─────────
     await _safe_progress(on_progress, "rendering seed page to discover nav links…")
     bfs_urls = await _bfs_discover(seed, scope_mode, on_progress=on_progress)
+    if bfs_urls and not _is_sparse_discovery(seed, bfs_urls):
+        return _order_urls_seed_first(seed, bfs_urls)
     if bfs_urls:
-        return bfs_urls
+        # Sparse but non-empty — still better than seed-only.
+        return _order_urls_seed_first(seed, bfs_urls)
     # BFS also found nothing usable — the seed page itself was unfetchable
     # (likely bot-walled).  Tell the user why this dropped to "just the
     # seed" so they know to enable a fetch backend rather than seeing an
@@ -568,7 +720,26 @@ async def kb_discover_pages(
         "link-walk found no nav links (seed page unreadable — site is likely "
         "bot-walled; enable KAZMA_FIRECRAWL_API_KEY or KAZMA_JINA_READER=1)",
     )
-    return [seed]
+    return [_canonical_page_url(seed) or seed]
+
+
+async def _jina_expand_seed(seed: str) -> list[str] | None:
+    """Fetch the seed via Jina Reader and harvest every linked URL.
+
+    Returns ``None`` on failure, or the raw (unscoped) link list.
+    """
+    try:
+        from kazma_core.tools.read_url import _try_jina_reader
+    except Exception:
+        return None
+    try:
+        text = await _try_jina_reader(seed)
+    except Exception as exc:
+        logger.debug("[kb_discover] Jina expand failed: %s", exc)
+        return None
+    if not text or len(text) < MIN_USEFUL_CHARS:
+        return None
+    return _extract_links_from_text(text, seed)
 
 
 async def _safe_progress(on_progress: Any, msg: str) -> None:
@@ -591,7 +762,7 @@ async def _bfs_discover(
     *,
     on_progress: Any = None,
 ) -> list[str]:
-    """BFS link-walk using Playwright-rendered HTML (so SPA nav links are seen)."""
+    """BFS link-walk using Playwright / httpx / Jina for SPA nav links."""
     max_pages = _kb_max_pages()
     max_depth = _kb_max_depth()
     queue: deque[tuple[str, int]] = deque([(seed, 0)])
@@ -599,27 +770,51 @@ async def _bfs_discover(
     ordered: list[str] = []
     while queue and len(ordered) < max_pages:
         url, depth = queue.popleft()
-        if url in seen:
+        key = _canonical_page_url(url)
+        if key in seen:
             continue
-        seen.add(url)
+        seen.add(key)
         await _safe_progress(on_progress, f"link-walk depth {depth}: {url[:80]}")
-        # Depth 0 (seed) and bot-walled sites → use Playwright first.
-        # Deeper pages are usually inter-page links the static fetcher can read.
-        html = await _fetch_html_playwright(url) if depth == 0 else await _fetch_html_raw(url)
-        if not html or _looks_like_bot_block_html(html):
-            # Fall back to the other fetcher.
-            html = await _fetch_html_raw(url) if depth == 0 else await _fetch_html_playwright(url)
-        if not html or _looks_like_bot_block_html(html):
+        doc = await _fetch_discovery_document(url, depth=depth)
+        if not doc:
             continue
-        ordered.append(url)
+        ordered.append(key)
         if depth < max_depth:
-            for href in _extract_links_from_html(html, url):
-                if href in seen:
+            for href in _extract_links_from_text(doc, url):
+                href_key = _canonical_page_url(href)
+                if not href_key or href_key in seen:
                     continue
                 if _is_infra_url(href) or not _in_scope(seed, href, scope_mode):
                     continue
-                queue.append((href, depth + 1))
+                queue.append((href_key, depth + 1))
     return ordered
+
+
+async def _fetch_discovery_document(url: str, *, depth: int) -> str | None:
+    """Fetch page content for link discovery (HTML or markdown).
+
+    Tiered: Playwright (depth 0) → httpx → Jina (opt-in / last-resort).
+    Returns raw HTML or markdown text suitable for link extraction.
+    """
+    # Depth 0 (seed) prefers Playwright; deeper pages try static first.
+    first = _fetch_html_playwright if depth == 0 else _fetch_html_raw
+    second = _fetch_html_raw if depth == 0 else _fetch_html_playwright
+    html = await first(url)
+    if not html or _looks_like_bot_block_html(html):
+        html = await second(url)
+    if html and not _looks_like_bot_block_html(html):
+        return html
+    # Bot-walled: try Jina for markdown (nav links survive conversion).
+    if _jina_opt_in() or _kb_jina_fallback_allowed():
+        try:
+            from kazma_core.tools.read_url import _try_jina_reader
+
+            text = await _try_jina_reader(url)
+            if text and len(text) >= MIN_USEFUL_CHARS:
+                return text
+        except Exception as exc:
+            logger.debug("[kb_discover] Jina discovery fetch failed %s: %s", url, exc)
+    return None
 
 
 def _extract_links_from_html(html: str, base_url: str) -> list[str]:
@@ -631,6 +826,41 @@ def _extract_links_from_html(html: str, base_url: str) -> list[str]:
         if u and u not in seen:
             seen.add(u)
             out.append(u)
+    return out
+
+
+def _extract_links_from_text(text: str, base_url: str) -> list[str]:
+    """Extract links from HTML **or** markdown (Jina / Firecrawl output)."""
+    if not text:
+        return []
+    # HTML hrefs
+    hrefs = re.findall(r'''(?:href|data-href)\s*=\s*["']([^"']+)["']''', text, flags=re.I)
+    # Markdown links: [label](url)
+    hrefs.extend(re.findall(r"\[[^\]]*\]\(([^)\s]+)\)", text))
+    # Bare absolute URLs (same host preferred later via scope filter)
+    try:
+        host = (urlparse(base_url).hostname or "").removeprefix("www.")
+        if host:
+            # Escape dots for regex
+            host_re = re.escape(host)
+            hrefs.extend(re.findall(rf"https?://(?:www\.)?{host_re}[^\s\)\]\"'<>]+", text, flags=re.I))
+    except Exception:
+        pass
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for h in hrefs:
+        h = (h or "").strip().rstrip(".,;)")
+        # Drop markdown title suffix: url "title"
+        if " " in h:
+            h = h.split(" ", 1)[0]
+        u = _normalize_url(base_url, h)
+        if not u:
+            continue
+        key = _canonical_page_url(u)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(key)
     return out
 
 

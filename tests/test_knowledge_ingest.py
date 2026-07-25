@@ -174,6 +174,77 @@ def test_is_infra_url_filters_sitemaps_and_feeds():
     assert not _is_infra_url("https://developers.facebook.com/docs/whatsapp/get-started")
 
 
+def test_canonical_page_url_dedupes_slash_and_md():
+    """overview vs overview/ and .md source paths must collapse to one page."""
+    from kazma_core.stores.knowledge_ingest import _canonical_page_url, _order_urls_seed_first
+
+    a = "https://developers.facebook.com/documentation/business-messaging/whatsapp/overview"
+    b = "https://developers.facebook.com/documentation/business-messaging/whatsapp/overview/"
+    c = "https://developers.facebook.com/documentation/business-messaging/whatsapp/access-tokens.md"
+    assert _canonical_page_url(a) == _canonical_page_url(b)
+    assert _canonical_page_url(c).endswith("/access-tokens")
+    assert not _canonical_page_url(c).endswith(".md")
+
+    ordered = _order_urls_seed_first(a, [b, c, a + "/sitemap.xml"])
+    # seed + access-tokens; sitemap filtered; slash dup removed
+    assert ordered[0] == _canonical_page_url(a)
+    assert len(ordered) == 2
+    assert any(u.endswith("/access-tokens") for u in ordered)
+
+
+def test_sparse_discovery_detects_leaf_map_results():
+    """Firecrawl /map on a Meta leaf returns seed + slash + sitemap only.
+    That must be treated as sparse so parent-map / Jina tiers still run."""
+    from kazma_core.stores.knowledge_ingest import _is_sparse_discovery
+
+    seed = "https://developers.facebook.com/documentation/business-messaging/whatsapp/overview"
+    sparse = [
+        seed,
+        seed + "/",
+        seed + "/sitemap.xml",
+    ]
+    assert _is_sparse_discovery(seed, sparse) is True
+
+    rich = [
+        seed,
+        seed.replace("/overview", "/about-the-platform"),
+        seed.replace("/overview", "/access-tokens"),
+        seed.replace("/overview", "/pricing"),
+        seed.replace("/overview", "/get-started"),
+    ]
+    assert _is_sparse_discovery(seed, rich) is False
+
+
+def test_section_map_url_walks_up_leaf():
+    from kazma_core.stores.knowledge_ingest import _section_map_url
+
+    leaf = "https://developers.facebook.com/documentation/business-messaging/whatsapp/overview"
+    assert _section_map_url(leaf) == (
+        "https://developers.facebook.com/documentation/business-messaging/whatsapp/"
+    )
+    # Already a directory → no second hop.
+    assert _section_map_url(
+        "https://developers.facebook.com/documentation/business-messaging/whatsapp/"
+    ) is None
+
+
+def test_extract_links_from_markdown_jina_style():
+    """Jina returns markdown with [label](url) nav links — harvest them."""
+    from kazma_core.stores.knowledge_ingest import _extract_links_from_text
+
+    base = "https://developers.facebook.com/documentation/business-messaging/whatsapp/overview"
+    md = """
+# WhatsApp Business Platform
+[About the platform](https://developers.facebook.com/documentation/business-messaging/whatsapp/about-the-platform/)
+[Pricing](/documentation/business-messaging/whatsapp/pricing/)
+[Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api)
+"""
+    links = _extract_links_from_text(md, base)
+    assert any(u.endswith("/about-the-platform") for u in links)
+    assert any(u.endswith("/pricing") for u in links)
+    assert any("cloud-api" in u for u in links)
+
+
 # ── Bot-block detection + .gz sitemap handling ──────────────────────────────
 
 
