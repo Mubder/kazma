@@ -98,13 +98,23 @@ def _kb_delay_ms() -> int:
 
 
 def _kb_scope_mode() -> str:
-    """``prefix`` (default) | ``domain`` | ``exact``.
+    """``tree`` (default) | ``prefix`` | ``domain`` | ``exact``.
 
-    ``prefix`` keeps only URLs under the seed's path prefix — the right
-    default for a doc subtree like ``/docs/whatsapp/``.  ``domain`` is
-    same-host (looser).  ``exact`` is single-page.
+    - ``tree``  : same host AND shares at least one *topic* path segment
+                  with the seed.  Robust to doc trees that span multiple
+                  prefixes (e.g. Meta splits WhatsApp docs across
+                  ``/documentation/business-messaging/whatsapp/...`` and
+                  ``/docs/whatsapp/...``; ``tree`` accepts both because
+                  they share the ``whatsapp`` topic segment).
+    - ``prefix``: strict path-prefix (legacy, too narrow for cross-prefix
+                  doc trees — kept for explicit opt-in).
+    - ``domain``: same host, any path (loosest useful).
+    - ``exact`` : single page only.
     """
-    return (os.environ.get("KAZMA_KB_SCOPE_MODE") or "prefix").strip().lower()
+    mode = (os.environ.get("KAZMA_KB_SCOPE_MODE") or "tree").strip().lower()
+    if mode not in ("tree", "prefix", "domain", "exact"):
+        mode = "tree"
+    return mode
 
 
 _SKIP_EXT = (
@@ -194,6 +204,32 @@ def _seed_prefix(seed_url: str) -> str:
     return (parent + "/") or "/"
 
 
+def _seed_topic_segments(seed_url: str) -> set[str]:
+    """Path segments that identify the doc *topic* (used by ``tree`` scope).
+
+    For ``/documentation/business-messaging/whatsapp/overview`` this yields
+    ``{'whatsapp'}`` — the topic word.  We drop generic path segments
+    (``docs``, ``documentation``, ``guide``, ``reference``, ``api``,
+    ``overview``, version numbers, language codes) so the topic is what
+    survives.  This lets a crawl starting at a landing page reach the
+    actual reference docs even when they live under a different prefix
+    (Meta splits WhatsApp docs across ``/documentation/.../whatsapp/...``
+    and ``/docs/whatsapp/...``).
+    """
+    parsed = urlparse(seed_url)
+    segments = [s for s in (parsed.path or "").split("/") if s]
+    _NOISE = {
+        "docs", "documentation", "doc", "guide", "guides", "reference",
+        "references", "api", "apis", "overview", "introduction", "intro",
+        "start", "started", "getting-started", "tutorial", "learn",
+        "en", "ar", "v1", "v2", "v3", "v4", "v5", "latest", "stable",
+        "cloud-api",  # Meta-specific: appears in both prefixes
+        "business-messaging",
+    }
+    topic = {s.lower() for s in segments if s.lower() not in _NOISE and not s.startswith("v")}
+    return topic
+
+
 def _in_scope(seed_url: str, candidate: str, mode: str) -> bool:
     if mode == "exact":
         return candidate == seed_url
@@ -201,7 +237,20 @@ def _in_scope(seed_url: str, candidate: str, mode: str) -> bool:
         sh = (urlparse(seed_url).hostname or "").lower().removeprefix("www.")
         ch = (urlparse(candidate).hostname or "").lower().removeprefix("www.")
         return bool(sh) and sh == ch
-    # prefix (default)
+    if mode == "tree":
+        # Same host AND shares at least one topic segment with the seed.
+        # This is the right default for doc trees that span multiple path
+        # prefixes (e.g. Meta's /documentation/... + /docs/... split).
+        sh = (urlparse(seed_url).hostname or "").lower().removeprefix("www.")
+        ch = (urlparse(candidate).hostname or "").lower().removeprefix("www.")
+        if not sh or sh != ch:
+            return False
+        seed_topic = _seed_topic_segments(seed_url)
+        if not seed_topic:
+            return False  # can't determine topic → reject to be safe
+        cand_segments = {s.lower() for s in (urlparse(candidate).path or "").split("/") if s}
+        return bool(seed_topic & cand_segments)
+    # prefix (legacy default — kept for explicit opt-in)
     seed_host = (urlparse(seed_url).hostname or "").lower().removeprefix("www.")
     cand_host = (urlparse(candidate).hostname or "").lower().removeprefix("www.")
     if seed_host != cand_host:
@@ -340,8 +389,8 @@ async def kb_discover_pages(
     if not seed.startswith(("http://", "https://")):
         seed = "https://" + seed
     scope_mode = (mode or _kb_scope_mode()).lower()
-    if scope_mode not in ("prefix", "domain", "exact"):
-        scope_mode = "prefix"
+    if scope_mode not in ("tree", "prefix", "domain", "exact"):
+        scope_mode = "tree"
 
     # ── 1. Sitemap discovery ─────────────────────────────────────────
     await _safe_progress(on_progress, "fetching robots.txt + sitemaps…")
