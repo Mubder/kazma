@@ -447,42 +447,31 @@ class KazmaAgent:
 
     # ── MCP server config management ───────────────────────────────
 
+    def _mcp_yaml_path(self) -> str:
+        """Resolve the shipped kazma.yaml path for dual-write persistence."""
+        return str(getattr(self.config, "config_path", None) or CONFIG_FILE)
+
     def get_mcp_servers_config(self) -> list[dict[str, Any]]:
-        """Return the MCP server configurations from both YAML and ConfigStore.
+        """Return MCP server configs from the unified dual store.
 
-        Merges servers from kazma.yaml (config.raw) and ConfigStore (SQLite)
-        by server name. YAML servers are checked first, then DB servers that
-        aren't already in the YAML list are appended. This ensures both
-        config sources contribute to the live server set.
+        Merges ``kazma.yaml`` + agent ``config.raw`` + ConfigStore via
+        :mod:`kazma_core.mcp_servers_store` (ConfigStore wins on name
+        conflict). Both the ``/mcp`` page and Settings use this SoT.
         """
-        # YAML servers
+        from kazma_core.mcp_servers_store import list_mcp_servers
+
         yaml_servers = list(self.config.raw.get("mcp", {}).get("servers", []))
-        yaml_names = {s.get("name") for s in yaml_servers}
-
-        # ConfigStore servers (added via Settings UI / mcp_ui)
-        try:
-            from kazma_core.config_store import get_config_store
-
-            cs = get_config_store()
-            db_servers = cs.get("mcp.servers", [])
-            if isinstance(db_servers, str):
-                import json
-                db_servers = json.loads(db_servers)
-            if isinstance(db_servers, list):
-                for s in db_servers:
-                    if isinstance(s, dict) and s.get("name") not in yaml_names:
-                        yaml_servers.append(s)
-        except Exception as _e:
-            logger.debug("[Agent] ConfigStore MCP servers not available, using YAML only: %s", _e)  # fire-and-forget fallback is ok
-
-        return yaml_servers
+        return list_mcp_servers(
+            yaml_servers=yaml_servers,
+            yaml_path=self._mcp_yaml_path(),
+        )
 
     def get_mcp_servers(self) -> list[dict[str, Any]]:
         """Return enriched MCP server info (config + connection status + tools).
 
         This is the public replacement for iterating ``agent.config.raw``
         and calling ``agent.tools.is_server_connected()`` in UI code.
-        Reads from the merged YAML + ConfigStore config.
+        Reads from the unified YAML + ConfigStore SoT.
         """
         servers = self.get_mcp_servers_config()
         result: list[dict[str, Any]] = []
@@ -525,12 +514,22 @@ class KazmaAgent:
         env: dict[str, str] | None = None,
         working_dir: str | None = None,
     ) -> dict[str, str]:
-        """Add an MCP server to the configuration AND persist it to kazma.yaml.
+        """Add an MCP server and dual-write ConfigStore + kazma.yaml.
 
         Returns ``{"status": "ok"}`` on success or
         ``{"status": "error", "error": "..."}`` if a duplicate name exists
         or persistence fails.
         """
+        from kazma_core.mcp_servers_store import list_mcp_servers, upsert_mcp_server
+
+        # Duplicate check against the merged view (not just config.raw).
+        existing = list_mcp_servers(
+            yaml_servers=self.config.raw.get("mcp", {}).get("servers", []),
+            yaml_path=self._mcp_yaml_path(),
+        )
+        if any(s.get("name") == name for s in existing):
+            return {"status": "error", "error": f"Server '{name}' already exists"}
+
         new_server: dict[str, Any] = {"name": name, "transport": transport}
         if transport == "stdio":
             new_server["command"] = command or []
@@ -541,88 +540,58 @@ class KazmaAgent:
         if env:
             new_server["env"] = env
 
-        mcp_section = self.config.raw.setdefault("mcp", {})
-        servers_list = mcp_section.setdefault("servers", [])
-
-        for s in servers_list:
-            if s.get("name") == name:
-                return {"status": "error", "error": f"Server '{name}' already exists"}
-
-        servers_list.append(new_server)
-        # Persist to kazma.yaml so the server survives restart. Without this,
-        # Add Server mutations lived only in config.raw (in-memory) and were
-        # lost on the next process boot — the "Playwright MCP disappears on
-        # restart" bug.
-        persist_err = self._persist_mcp_servers()
-        if persist_err:
-            return {"status": "error", "error": f"Saved in-memory but not persisted: {persist_err}"}
+        try:
+            upsert_mcp_server(
+                new_server,
+                config_raw=self.config.raw,
+                yaml_path=self._mcp_yaml_path(),
+                replace=False,
+            )
+        except ValueError as exc:
+            return {"status": "error", "error": str(exc)}
+        except Exception as exc:
+            logger.warning("[MCP] dual-write failed for add: %s", exc)
+            return {"status": "error", "error": f"Persist failed: {exc}"}
         return {"status": "ok"}
 
     def remove_mcp_server(self, name: str) -> dict[str, str]:
-        """Remove an MCP server from the configuration AND persist the change.
+        """Remove an MCP server from ConfigStore + yaml + config.raw.
 
         Returns ``{"status": "ok"}`` on success or
         ``{"status": "error", "error": "..."}`` if persistence fails. Does
         NOT raise if the server was absent (idempotent removal).
         """
-        mcp_section = self.config.raw.get("mcp", {})
-        servers = mcp_section.get("servers", [])
-        mcp_section["servers"] = [s for s in servers if s.get("name") != name]
-        persist_err = self._persist_mcp_servers()
-        if persist_err:
-            return {"status": "error", "error": f"Removed in-memory but not persisted: {persist_err}"}
+        from kazma_core.mcp_servers_store import delete_mcp_server
+
+        try:
+            delete_mcp_server(
+                name,
+                config_raw=self.config.raw,
+                yaml_path=self._mcp_yaml_path(),
+            )
+        except Exception as exc:
+            logger.warning("[MCP] dual-write failed for remove: %s", exc)
+            return {"status": "error", "error": f"Removed in-memory but not persisted: {exc}"}
         return {"status": "ok"}
 
     def _persist_mcp_servers(self) -> str | None:
-        """Write the current ``mcp`` section back to ``kazma.yaml``.
+        """Write the current ``mcp.servers`` list to ConfigStore + kazma.yaml.
 
-        Returns ``None`` on success or an error message string on failure.
-        The write is atomic (temp file + rename) and preserves the rest of
-        the YAML structure (comments are lost — PyYAML limitation — but
-        keys/values/formatting survive). If the file is read-only or
-        missing, the in-memory change still takes effect for the current
-        process; we just can't make it durable.
+        Kept for callers that mutate ``config.raw`` then flush. Prefer
+        :meth:`add_mcp_server` / :meth:`remove_mcp_server` which dual-write
+        via :mod:`kazma_core.mcp_servers_store`.
         """
+        from kazma_core.mcp_servers_store import sync_mcp_servers
+
+        servers = list(self.config.raw.get("mcp", {}).get("servers", []))
         try:
-            import yaml
-            from pathlib import Path
-
-            # Resolve the actual config file path. CONFIG_FILE is a relative
-            # default; honour an explicit config_path if the agent was given
-            # one (it's stored on the config object when load_config(path)
-            # was used).
-            path_str = getattr(self.config, "config_path", None) or CONFIG_FILE
-            yaml_path = Path(path_str)
-            if not yaml_path.is_file():
-                return f"kazma.yaml not found at {yaml_path}"
-
-            # Re-read the on-disk YAML (don't trust config.raw — it may have
-            # in-memory overlays from kazma.local.yaml that shouldn't be
-            # written back to the shipped file).
-            try:
-                with open(yaml_path, encoding="utf-8") as f:
-                    on_disk = yaml.safe_load(f) or {}
-            except Exception as exc:
-                return f"could not read {yaml_path}: {exc}"
-
-            # Replace ONLY the mcp section — leave everything else untouched.
-            on_disk["mcp"] = self.config.raw.get("mcp", {})
-
-            # Atomic write: temp file in the same dir, then rename.
-            tmp_path = yaml_path.with_suffix(yaml_path.suffix + ".tmp")
-            with open(tmp_path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(
-                    on_disk, f,
-                    default_flow_style=False,
-                    allow_unicode=True,
-                    sort_keys=False,
-                )
-            tmp_path.replace(yaml_path)
-            logger.info("[MCP] Persisted mcp.servers to %s (%d server(s))",
-                        yaml_path, len(on_disk["mcp"].get("servers", [])))
-            return None
+            return sync_mcp_servers(
+                servers,
+                config_raw=self.config.raw,
+                yaml_path=self._mcp_yaml_path(),
+            )
         except Exception as exc:
-            logger.warning("[MCP] Failed to persist mcp.servers: %s", exc)
+            logger.warning("[MCP] dual persist failed: %s", exc)
             return str(exc)
 
     # ── LLM config ─────────────────────────────────────────────────
