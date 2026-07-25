@@ -1286,7 +1286,12 @@
       danger: true,
     }))) return;
     fetch('/api/chat/sessions/' + encodeURIComponent(sessionId), { method: 'DELETE' })
-      .then(function() {
+      .then(function(resp) {
+        if (!resp.ok) {
+          if (window.showToast) window.showToast('Delete failed (' + resp.status + ')', 'error', 3000);
+          else if (KS.toast) KS.toast('Delete failed (' + resp.status + ')', 'error', 3000);
+          return;
+        }
         KS.toast('Session deleted', 'success', 2000);
         loadSessions();
         if (sessionId === chatSessionId) newSession();

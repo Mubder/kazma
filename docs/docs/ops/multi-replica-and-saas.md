@@ -52,15 +52,26 @@ Env: `KAZMA_MULTI_USER=1`, `KAZMA_PRODUCTION=1`, `KAZMA_DATABASE_URL`,
 |-------|-----|-----|
 | HITL bus approvals | In-process Event only | **ConfigStore dual-write** via `swarm/shared_approvals.py` + local Event |
 | Swarm task results | TaskStore (SQLite/PG) | Unchanged — use Postgres for multi-node |
+| Task list tenancy | Global | Auto `metadata.tenant_id` filter when multi-user/prod |
 | Circuit breakers | Process memory | Still process-local (acceptable; probes reset on restart) |
 | `_active_tasks` | Process memory | Still process-local; persist via TaskStore for history |
 | KB crawl jobs | Process + ConfigStore | Durable ConfigStore (`stores/kb_jobs.py`) |
+| Knowledge libraries | Global | **tenant_id** column + list/get filter when multi-user/prod |
 | Swarm bus adapters | Process singleton | Fan-out multi-platform; still one process |
+| Browser affinity | None | Cookie ``kazma-replica`` (`KAZMA_REPLICA_ID`, LB sticky) |
 
 **Minimum multi-replica stack:** shared Postgres (`KAZMA_DATABASE_URL`),
-shared/networked `kazma-data` or object store for workspaces, sticky or
-stateless LB, same `KAZMA_SECRET` / vault key on all nodes. Prefer sticky
-sessions for SSE chat.
+shared/networked `kazma-data` or object store for workspaces, sticky LB on
+cookie `kazma-replica` (or source-IP hash), same `KAZMA_SECRET` / vault key
+on all nodes. Set unique `KAZMA_REPLICA_ID` per process.
+
+### Host code_exec sandbox
+
+| Mode | Behavior |
+|------|----------|
+| Production or multi-user | **No host-local** `python_exec` — Docker required |
+| `KAZMA_CODE_EXEC_DOCKER=force` | Same |
+| Lab escape | `KAZMA_CODE_EXEC_ALLOW_LOCAL=1` (not recommended) |
 
 ## Discord / Slack vs Telegram
 

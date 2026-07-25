@@ -155,26 +155,53 @@ class KnowledgeStore:
             # Idempotent column migration: SQLite has no ADD COLUMN IF NOT
             # EXISTS, so probe PRAGMA table_info and ALTER only when the
             # column is missing. Mirrors the WorkspaceStore pattern.
-            self._migrate_archived_column(conn)
+            self._migrate_library_columns(conn)
 
     @staticmethod
-    def _migrate_archived_column(conn: sqlite3.Connection) -> None:
-        """Add the ``archived`` column to existing knowledge_libraries tables.
-
-        Safe to call on every init — existing columns are a no-op. Old DBs
-        (created before the archive feature) get the column added with a
-        default of 0 (active).
-        """
+    def _migrate_library_columns(conn: sqlite3.Connection) -> None:
+        """Idempotent ALTER TABLE for knowledge_libraries columns."""
         existing = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_libraries)")}
         if "archived" not in existing:
             conn.execute(
                 "ALTER TABLE knowledge_libraries ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
             )
             logger.debug("[KnowledgeStore] Migrated column: archived")
+        if "tenant_id" not in existing:
+            conn.execute(
+                "ALTER TABLE knowledge_libraries ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_kl_tenant ON knowledge_libraries(tenant_id)"
+            )
+            logger.debug("[KnowledgeStore] Migrated column: tenant_id")
 
     # ------------------------------------------------------------------
     # Library CRUD
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _current_tenant() -> str:
+        try:
+            from kazma_core.tenant_isolation import require_tenant_id
+
+            return require_tenant_id()
+        except Exception:
+            return "default"
+
+    @staticmethod
+    def _tenant_filter_enabled() -> bool:
+        import os
+
+        if (os.environ.get("KAZMA_TENANT_FILTER") or "1").strip().lower() in (
+            "0", "false", "off", "no",
+        ):
+            return False
+        try:
+            from kazma_core.tenant_isolation import multi_user_or_production
+
+            return multi_user_or_production()
+        except Exception:
+            return False
 
     def create_library(
         self,
@@ -195,6 +222,7 @@ class KnowledgeStore:
         lib_id = slugify_library_id(library_id)
         if not lib_id:
             raise ValueError("library_id must not be empty")
+        tenant_id = self._current_tenant()
         with self._lock:
             conn = self._get_conn()
             try:
@@ -202,48 +230,74 @@ class KnowledgeStore:
                 conn.execute(
                     """INSERT INTO knowledge_libraries
                        (id, name, description, seed_url, auto_inject,
-                        chunk_count, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, 0, 0, ?, ?)""",
-                    (lib_id, name.strip(), description.strip(), seed_url.strip(), now, now),
+                        chunk_count, created_at, updated_at, tenant_id)
+                       VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?)""",
+                    (
+                        lib_id,
+                        name.strip(),
+                        description.strip(),
+                        seed_url.strip(),
+                        now,
+                        now,
+                        tenant_id,
+                    ),
                 )
                 conn.execute("COMMIT")
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
-        logger.info("[KnowledgeStore] Created library %r", lib_id)
+        logger.info("[KnowledgeStore] Created library %r tenant=%s", lib_id, tenant_id)
         return self.get_library(lib_id)  # type: ignore[return-value]
 
     def list_libraries(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
         """List libraries. Active only by default; pass ``include_archived=True``
         for the archive tab. Archived libraries are excluded from the main
         list so failed/unfinished crawls don't clutter the active view, but
-        stay searchable (their chunks remain in the index)."""
+        stay searchable (their chunks remain in the index).
+
+        Multi-user/production scopes to the current tenant_id.
+        """
+        tenant_clause = ""
+        params: list[Any] = []
+        if self._tenant_filter_enabled():
+            tenant_clause = " AND tenant_id = ?"
+            params.append(self._current_tenant())
         with self._lock:
             conn = self._get_conn()
             if include_archived:
                 rows = conn.execute(
-                    """SELECT id, name, description, seed_url, auto_inject, archived,
-                              chunk_count, created_at, updated_at
-                       FROM knowledge_libraries ORDER BY created_at"""
+                    f"""SELECT id, name, description, seed_url, auto_inject, archived,
+                              chunk_count, created_at, updated_at, tenant_id
+                       FROM knowledge_libraries
+                       WHERE 1=1{tenant_clause}
+                       ORDER BY created_at""",
+                    params,
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    """SELECT id, name, description, seed_url, auto_inject, archived,
-                              chunk_count, created_at, updated_at
-                       FROM knowledge_libraries WHERE archived = 0
-                       ORDER BY created_at"""
+                    f"""SELECT id, name, description, seed_url, auto_inject, archived,
+                              chunk_count, created_at, updated_at, tenant_id
+                       FROM knowledge_libraries WHERE archived = 0{tenant_clause}
+                       ORDER BY created_at""",
+                    params,
                 ).fetchall()
         return [self._library_row_to_dict(r) for r in rows]
 
     def list_archived_libraries(self) -> list[dict[str, Any]]:
         """Return only archived libraries (for the Archived tab)."""
+        tenant_clause = ""
+        params: list[Any] = []
+        if self._tenant_filter_enabled():
+            tenant_clause = " AND tenant_id = ?"
+            params.append(self._current_tenant())
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
-                """SELECT id, name, description, seed_url, auto_inject, archived,
-                          chunk_count, created_at, updated_at
-                   FROM knowledge_libraries WHERE archived = 1
-                   ORDER BY updated_at DESC"""
+                f"""SELECT id, name, description, seed_url, auto_inject, archived,
+                          chunk_count, created_at, updated_at, tenant_id
+                   FROM knowledge_libraries WHERE archived = 1{tenant_clause}
+                   ORDER BY updated_at DESC""",
+                params,
             ).fetchall()
         return [self._library_row_to_dict(r) for r in rows]
 
@@ -274,11 +328,19 @@ class KnowledgeStore:
             conn = self._get_conn()
             row = conn.execute(
                 """SELECT id, name, description, seed_url, auto_inject, archived,
-                          chunk_count, created_at, updated_at
+                          chunk_count, created_at, updated_at, tenant_id
                    FROM knowledge_libraries WHERE id = ?""",
                 (library_id,),
             ).fetchone()
-        return self._library_row_to_dict(row) if row else None
+        if row is None:
+            return None
+        lib = self._library_row_to_dict(row)
+        # Cross-tenant read deny when multi-user/prod tenant filter is on
+        if self._tenant_filter_enabled():
+            lib_tenant = str(lib.get("tenant_id") or "default")
+            if lib_tenant != self._current_tenant():
+                return None
+        return lib
 
     def update_library(
         self,
@@ -581,15 +643,18 @@ class KnowledgeStore:
 
     @staticmethod
     def _library_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        keys = set(row.keys())
         return {
             "id": row["id"],
             "name": row["name"],
             "description": row["description"],
             "seed_url": row["seed_url"],
             "auto_inject": bool(row["auto_inject"]),
+            "archived": bool(row["archived"]) if "archived" in keys else False,
             "chunk_count": int(row["chunk_count"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "tenant_id": row["tenant_id"] if "tenant_id" in keys else "default",
         }
 
     @staticmethod

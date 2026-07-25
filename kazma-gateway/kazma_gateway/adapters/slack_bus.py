@@ -318,6 +318,30 @@ class SlackBusAdapter(BusAdapter):
         """Number of pending approval requests."""
         return len(self._pending_approvals)
 
+    async def set_reaction(self, channel: str, timestamp: str, emoji: str = "thumbsup") -> None:
+        """Add a reaction to a message (Telegram/Discord parity).
+
+        Args:
+            channel: Slack channel ID.
+            timestamp: Message ``ts``.
+            emoji: Slack emoji name without colons (default thumbsup).
+        """
+        if not channel or not timestamp:
+            return
+        try:
+            http = await self._ensure_http()
+            await http.post(
+                f"{_SLACK_API}/reactions.add",
+                json={
+                    "channel": channel,
+                    "timestamp": timestamp,
+                    "name": emoji.lstrip(":").rstrip(":"),
+                },
+                headers=self._headers(),
+            )
+        except Exception as exc:
+            logger.debug("[SlackBus] set_reaction failed: %s", exc)
+
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._http is not None:

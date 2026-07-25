@@ -339,9 +339,12 @@ class KazmaAppBuilder:
     def _setup_templates_and_middlewares(self) -> None:
         """Configure auth, CORS, language middleware, static files, and templates."""
         from kazma_ui.auth import create_auth_middleware, create_tenant_middleware
+        from kazma_ui.replica_affinity import create_replica_affinity_middleware
 
         self.app.middleware("http")(create_auth_middleware())
         self.app.middleware("http")(create_tenant_middleware())
+        # Sticky-session cookie for multi-replica LB (SSE / in-process state)
+        self.app.middleware("http")(create_replica_affinity_middleware())
 
         # CORS
         from fastapi.middleware.cors import CORSMiddleware

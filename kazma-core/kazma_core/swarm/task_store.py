@@ -338,6 +338,27 @@ class TaskStore:
         page_size = max(1, min(page_size, 100))
         offset = (page - 1) * page_size
 
+        # Multi-tenant hard filter: inject tenant_id unless caller opts out
+        # via metadata_filter={"tenant_id": "*"} or KAZMA_TENANT_FILTER=0.
+        metadata_filter = dict(metadata_filter or {})
+        try:
+            import os as _os_tf
+
+            filter_on = (_os_tf.environ.get("KAZMA_TENANT_FILTER") or "1").strip().lower() not in (
+                "0", "false", "off", "no",
+            )
+            if filter_on:
+                from kazma_core.tenant_isolation import multi_user_or_production, require_tenant_id
+
+                if multi_user_or_production() and metadata_filter.get("tenant_id") != "*":
+                    metadata_filter.setdefault("tenant_id", require_tenant_id())
+                if metadata_filter.get("tenant_id") == "*":
+                    metadata_filter.pop("tenant_id", None)
+        except Exception:
+            pass
+        if not metadata_filter:
+            metadata_filter = None
+
         with self._lock:
             if self._pg:
                 from kazma_core.db.pg_helpers import get_pool

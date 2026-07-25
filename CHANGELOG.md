@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Unreleased — remaining gaps: hard sandbox, tenant stores, replica affinity (2026-07-25)
+
+### Hard sandbox (post-HITL / host power)
+- **No host-local `python_exec`** when production or multi-user (Docker
+  required). Escape hatch: `KAZMA_CODE_EXEC_ALLOW_LOCAL=1` (lab only).
+
+### Multi-tenant data plane
+- **TaskStore.list_tasks** auto-filters `metadata.tenant_id` in multi-user/prod
+  (`KAZMA_TENANT_FILTER=0` or `tenant_id=*` to opt out).
+- **Knowledge libraries** get `tenant_id` column; list/get scoped to current
+  tenant when multi-user/prod.
+
+### Multi-replica
+- **Affinity cookie** `kazma-replica` (`KAZMA_REPLICA_ID`) for LB sticky SSE.
+
+### Platform parity + UI
+- Slack bus `set_reaction` API.
+- Chat session delete surfaces non-OK HTTP status.
+
 ## Unreleased — residual hardening: post-HITL, SaaS tenant, multi-replica, parity (2026-07-25)
 
 ### Post-HITL host power
