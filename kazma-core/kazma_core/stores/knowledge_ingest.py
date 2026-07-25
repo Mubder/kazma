@@ -122,6 +122,26 @@ _SKIP_EXT = (
     ".gz", ".mp4", ".mp3", ".css", ".js", ".ico", ".woff", ".woff2",
 )
 
+# Path suffixes that mark infra URLs (not doc pages).  Discovery output
+# from Firecrawl /map sometimes includes these — e.g. Meta returns a URL
+# like ``/documentation/.../whatsapp/overview/sitemap.xml``.  Fetching and
+# chunking them produces garbage (nav boilerplate) and counts as a failed
+# page.  Filter them at the discovery boundary.
+_INFRA_SUFFIXES = (
+    "/sitemap.xml", "/sitemap_index.xml", "/sitemap-index.xml",
+    "/robots.txt", "/ads.txt", "/humans.txt",
+    ".xml.gz", ".xml",
+    ".rss", ".atom", ".json",  # feeds / API endpoints, not docs
+)
+
+
+def _is_infra_url(url: str) -> bool:
+    """Return True for sitemaps, robots.txt, feeds — never doc pages."""
+    if not url:
+        return True
+    path = (urlparse(url).path or "").lower()
+    return any(path.endswith(suf) for suf in _INFRA_SUFFIXES)
+
 # Below which an extract is considered "thin" and we retry with the
 # Playwright full-DOM extractor (likely a tabbed / JS doc page).
 MIN_USEFUL_CHARS = 200
@@ -476,7 +496,13 @@ async def kb_discover_pages(
         mapped = await _firecrawl_map_site(seed)
         if mapped:
             await _safe_progress(on_progress, f"Firecrawl returned {len(mapped)} URLs; scoping…")
-            in_scope = [u for u in mapped if _in_scope(seed, u, scope_mode)]
+            # Filter infra URLs (sitemap.xml, robots.txt, feeds) THEN apply
+            # topic scope.  Without this, Meta's /map output includes a
+            # /overview/sitemap.xml URL that we'd fetch as a doc page.
+            in_scope = [
+                u for u in mapped
+                if not _is_infra_url(u) and _in_scope(seed, u, scope_mode)
+            ]
             if in_scope:
                 # De-dup, keep order, seed first.
                 seen: set[str] = set()
@@ -505,7 +531,10 @@ async def kb_discover_pages(
         await _safe_progress(on_progress, f"parsing {len(sitemap_docs)} sitemap doc(s)…")
         for doc in sitemap_docs:
             discovered.extend(_extract_urls_from_sitemap(doc))
-        discovered = [u for u in discovered if _in_scope(seed, u, scope_mode)]
+        discovered = [
+            u for u in discovered
+            if not _is_infra_url(u) and _in_scope(seed, u, scope_mode)
+        ]
         if discovered:
             # De-dup, keep order, seed first.
             seen: set[str] = set()
@@ -587,7 +616,7 @@ async def _bfs_discover(
             for href in _extract_links_from_html(html, url):
                 if href in seen:
                     continue
-                if not _in_scope(seed, href, scope_mode):
+                if _is_infra_url(href) or not _in_scope(seed, href, scope_mode):
                     continue
                 queue.append((href, depth + 1))
     return ordered
