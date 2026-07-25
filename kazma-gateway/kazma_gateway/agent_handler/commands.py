@@ -819,7 +819,7 @@ async def _try_kb_command(
     sub = tokens[0].lower() if tokens else ""
 
     try:
-        from kazma_core.stores.knowledge import get_knowledge_store
+        from kazma_core.stores.knowledge import get_knowledge_store, slugify_library_id
         from kazma_core.stores.knowledge_index import get_knowledge_index
 
         kb_store = get_knowledge_store()
@@ -870,7 +870,7 @@ async def _try_kb_command(
                 "⚠️ Usage: `/kb add <library_id> <url>`",
             )
             return True
-        lib_id = tokens[1]
+        lib_id = slugify_library_id(tokens[1])
         url = tokens[2]
         await _send_model_reply(
             msg, store, manager, thread_id,
@@ -905,7 +905,7 @@ async def _try_kb_command(
                 "⚠️ Usage: `/kb crawl <library_id> <url> [max_pages]`",
             )
             return True
-        lib_id = tokens[1]
+        lib_id = slugify_library_id(tokens[1])
         url = tokens[2]
         max_pages = None
         if len(tokens) >= 4:
@@ -968,7 +968,7 @@ async def _try_kb_command(
                 "⚠️ Usage: `/kb refresh <library_id>`",
             )
             return True
-        lib_id = tokens[1]
+        lib_id = slugify_library_id(tokens[1])
         lib = kb_store.get_library(lib_id)
         if not lib:
             await _send_model_reply(
@@ -1031,7 +1031,7 @@ async def _try_kb_command(
                 "⚠️ Usage: `/kb status <library_id>`",
             )
             return True
-        lib_id = tokens[1]
+        lib_id = slugify_library_id(tokens[1])
         job = None
         for jid, jv in _kb_jobs.items():
             if jid.startswith(lib_id + ":"):
@@ -1071,7 +1071,7 @@ async def _try_kb_command(
                 "⚠️ Usage: `/kb search <library_id> <query>`",
             )
             return True
-        lib_id = tokens[1]
+        lib_id = slugify_library_id(tokens[1])
         query = " ".join(tokens[2:])
         if not kb_store.get_library(lib_id):
             await _send_model_reply(
@@ -1114,7 +1114,7 @@ async def _try_kb_command(
                 "⚠️ Usage: `/kb delete <library_id>`",
             )
             return True
-        lib_id = tokens[1]
+        lib_id = slugify_library_id(tokens[1])
         if not kb_store.get_library(lib_id):
             await _send_model_reply(
                 msg, store, manager, thread_id,

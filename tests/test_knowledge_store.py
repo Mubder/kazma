@@ -42,6 +42,35 @@ def test_create_library_slugifies_id():
     assert s.get_library("Meta WhatsApp Docs") is None  # raw form not stored
 
 
+def test_create_or_use_pattern_does_not_race_on_slug_mismatch():
+    """Regression: the 'create-or-use' pattern in kb_api.py / commands.py
+    used to call get_library(raw_id) then create_library(raw_id). When the
+    raw ID had spaces, get_library() returned None (no row with raw id)
+    but create_library() slugified → INSERT hit the UNIQUE constraint on
+    the already-existing slug.  The fix is to slugify ONCE at the boundary
+    and use the slug for BOTH the existence check and the insert."""
+    from kazma_core.stores.knowledge import slugify_library_id
+
+    s = _fresh_store()
+    # First insert via raw name — slugifies to "shipx_whatsapp_api".
+    s.create_library("ShipX WhatsApp API", "ShipX WhatsApp API")
+    assert s.get_library("shipx_whatsapp_api") is not None
+
+    # Now simulate the create-or-use pattern done CORRECTLY: slugify first,
+    # then check, then maybe-create. Must NOT raise.
+    raw = "ShipX WhatsApp API"
+    slug = slugify_library_id(raw)
+    existing = s.get_library(slug)
+    assert existing is not None  # already there
+    # Correct pattern: only create if not existing — no insert attempted.
+    if not existing:
+        s.create_library(slug, name=raw)
+    # No exception, no duplicate row.
+    assert s.count_chunks("shipx_whatsapp_api") == 0
+    libs = [l["id"] for l in s.list_libraries()]
+    assert libs.count("shipx_whatsapp_api") == 1  # exactly one, not two
+
+
 def _fresh_store() -> KnowledgeStore:
     tmp = tempfile.mkdtemp(prefix="kazma_kb_test_")
     return KnowledgeStore(db_path=os.path.join(tmp, "settings.db"))
