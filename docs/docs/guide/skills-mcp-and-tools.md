@@ -217,7 +217,30 @@ mcp:
     max_file_size: 1048576
 ```
 
-### 5.4 IDE server
+### 5.4 Adding MCP servers via the Web UI
+
+The `/mcp` page provides a visual **Add Server** modal that replaces manual YAML editing. It has two modes:
+
+**Quick add (preset)** — a dropdown of 85+ known MCP servers grouped by category (Filesystem, Web, Database, Code, AI, Communication, etc.). Pick one and the form auto-fills the name, transport, command, and env var keys. You just fill in the API key value. Presets are loaded from `certified_servers.yaml` (81 servers) plus 5 extra high-value servers (firecrawl, playwright, sequential-thinking, memory, time).
+
+**Custom** — the same raw command form, with three safety nets:
+1. **shlex-style parsing** — quoted args with spaces survive (`npx -y foo "path/with spaces"`).
+2. **Auto-rewrite** — common install-command mistakes are detected and fixed:
+   - `npm install -g firecrawl-mcp` → `npx -y firecrawl-mcp`
+   - `pip install mcp-server` → `python -m mcp_server`
+   - `pipx install some-mcp` → `pipx run some-mcp`
+   A blue notice explains the rewrite so you know what changed.
+3. **Validate-before-save** — before persisting, the server connection is tested via `/api/mcp/test-config`. If it fails (spawn error, 0 tools, bad key), the error + subprocess stderr is shown inline and the server is **not saved**. No more "0 tools, no idea why."
+
+Servers added via the UI are persisted to `kazma.yaml` (atomic write) and survive restarts.
+
+### 5.5 Tool name namespacing
+
+MCP tool names are **namespaced** as `mcp__<server>__<tool>` before being sent to the LLM. This prevents collisions between MCP servers and built-in tools (e.g. the Playwright MCP's `browser_click` vs the browser_automation skill's `browser_click`). Without namespacing, providers that require unique tool names (DeepSeek, OpenAI) reject the entire request with `400 Tool names must be unique`, causing Kazma to strip ALL tools for the turn — the root cause of the "agent stopped talking" bug.
+
+The namespace prefix is transparently stripped when routing the tool call back to the originating MCP server (`execute_mcp_tool` handles both namespaced and raw forms).
+
+### 5.6 IDE server
 
 The in-process IDE/file MCP server (`mcp.ide_server`) exposes file read/write over the workspace root with a 1 MB per-file cap (`max_file_size`). Per audit reports, it is expected to require `_secret` matching `KAZMA_SECRET` via `hmac.compare_digest`; verify against `mcp_server.py` before relying on it.
 

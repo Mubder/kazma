@@ -23,6 +23,8 @@ Kazma is a multi-platform AI agent framework that lets you build, deploy, and or
 - 🌐 **Any LLM provider** — OpenAI, Anthropic (native Messages API), Google Gemini, DeepSeek, xAI, OpenRouter, NVIDIA NIM, Mistral, Together, Cohere, Fireworks, Perplexity, AI21, Azure OpenAI, AWS Bedrock, Ollama, LM Studio — via plain HTTP, no SDK lock-in
 - 🇸🇦 **Arabic-native** — custom Arabic tokenizer, RTL UI, Kuwaiti-dialect support, and the Majlis cultural protocol
 - 💾 **Memory & RAG** — ChromaDB vector memory with per-turn retrieval injection. **Pluggable embeddings** — local sentence-transformers or NVIDIA NIM / any OpenAI-compatible endpoint (config flip, no code change)
+- 📚 **Knowledge Library** — ingest whole documentation sites (WhatsApp API, Stripe, etc.) into a searchable RAG corpus with cited sources. Full-tree crawling (sitemap-first + Firecrawl), hierarchy-aware chunking (code-fence-atomic), per-library isolation, auto-inject, archive, and `/kb` slash commands on all platforms
+- 🔌 **MCP server marketplace** — one-click Add Server from 85+ preset MCP servers (filesystem, firecrawl, playwright, github, slack, databases, ...). Auto-rewrites install commands, validates before saving, namespaces tools to prevent collisions. Supports stdio, SSE, and Streamable HTTP transports
 - 📱 **Responsive web UI** — multi-tab code editor, AI chat, find/replace, unified dialog system — works on mobile with a slide-in nav drawer
 
 ---

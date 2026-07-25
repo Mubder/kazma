@@ -23,6 +23,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Use built-in skills (browser, calendar, docs, …) | [Native skills](guide/native-skills) |
 | Send voice / images / documents | [Voice & media](guide/voice-and-media) |
 | Connect MCP servers (stdio/sse/streamable_http) | [Skills, MCP & tools](guide/skills-mcp-and-tools) |
+| Ingest documentation into a knowledge corpus | [Knowledge Library](guide/knowledge-library) |
 | Web search / scrape / research | [Web research](guide/web-research) |
 | Email (Gmail / Microsoft / sandbox) | [Email integration](guide/email-integration) |
 
