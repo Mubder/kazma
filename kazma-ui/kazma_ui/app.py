@@ -1069,6 +1069,23 @@ class KazmaAppBuilder:
     async def _on_startup(self) -> None:
         """Application startup: checkpointer, HITL graph, gateway, cron."""
         try:
+            # ── Connect MCP servers ────────────────────────────────────
+            # The CLI path (agent_runner.run_once/main) calls
+            # connect_mcp_servers() explicitly, but the web path was
+            # creating the agent in _setup_services() and never connecting
+            # its MCP servers — so the filesystem MCP (and any other
+            # kazma.yaml mcp.servers entry) stayed dormant on the web UI.
+            # Connect here, at the start of the async lifespan, so MCP
+            # tools are available before the first chat turn.
+            try:
+                mcp_tool_count = await self.agent.connect_mcp_servers()
+                if mcp_tool_count > 0:
+                    logger.info("[App] Connected %d MCP tool(s) from kazma.yaml", mcp_tool_count)
+                else:
+                    logger.info("[App] No MCP tools connected (no servers configured or all failed)")
+            except Exception as exc:
+                logger.warning("[App] MCP server connection failed at startup: %s", exc)
+
             from kazma_gateway.stores.checkpoint import create_checkpointer
 
             self._checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
