@@ -81,6 +81,26 @@ When auto-inject is on, the top-k chunks for the user's latest message are retri
 
 Tunable: `KAZMA_KB_AUTO_INJECT_TOP_K` (default 3, max 10) controls how many chunks per turn.
 
+## Citation footer
+
+Every answer derived from Knowledge Library data carries a visible footer so you can tell where the information came from:
+
+> 📚 This data is from Knowledge "shipx_whatsapp_api".
+
+This applies to both the `knowledge_search` tool path (explicit) and the auto-inject path (implicit). The footer names the specific library (or libraries, if the search spanned multiple). This is a soft, prompt-level directive — the model is instructed to append it verbatim.
+
+## Archive
+
+Libraries can be **archived** — hidden from the Active list without deleting their chunks. Useful for failed or abandoned crawls that you don't want cluttering the main view, but whose data you might still want to search.
+
+- **📦 Archive button** on each library card (Active view).
+- **♻️ Restore button** on each library card (Archived view).
+- **Active / Archived tabs** at the top of the library list.
+- Archived libraries stay **searchable** — their chunks remain in the index. Only the list view hides them.
+- **Delete** is separate and permanent; archive is reversible.
+
+This mirrors the Research panel's archive pattern (a soft `archived` flag, not a separate table).
+
 ## Architecture notes (for contributors)
 
 | Layer | File | Purpose |

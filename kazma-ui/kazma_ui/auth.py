@@ -196,6 +196,10 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/api/status",
     "/api/telemetry",
     "/favicon.ico",
+    # MCP preset catalog — read-only metadata (server names + npx commands),
+    # no secrets or user data. Open so the Add Server dropdown works without
+    # a stale-auth 401 on first page load / localhost probes.
+    "/api/mcp/presets",
     # Explicit auth bootstrap (remote clients cannot use loopback auto-cookie)
     "/login",
     "/api/auth/login",
