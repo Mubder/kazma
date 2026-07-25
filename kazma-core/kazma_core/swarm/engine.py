@@ -355,6 +355,14 @@ class SwarmEngine:
         started = perf_counter()
         task.started_at = task.started_at or _utc_now_iso()
         task.status = TaskStatus.RUNNING
+        # Stamp tenant for multi-tenant list isolation (metadata filter).
+        try:
+            from kazma_core.tenant_isolation import require_tenant_id
+
+            task.metadata = dict(task.metadata or {})
+            task.metadata.setdefault("tenant_id", require_tenant_id())
+        except Exception:
+            pass
         self._active_tasks[task.id] = task  # track in-flight
 
         self._emit_sse(task.id, "task_started", {

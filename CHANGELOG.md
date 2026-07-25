@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## Unreleased — residual hardening: post-HITL, SaaS tenant, multi-replica, parity (2026-07-25)
+
+### Post-HITL host power
+- **Restricted PATH + which-only binaries** in production (`KAZMA_SHELL_STRICT`,
+  default on when `KAZMA_PRODUCTION=1`) via `safety/post_hitl.py`.
+- **Archives off in prod strict** (`tar`/`zip`) unless `KAZMA_SHELL_ALLOW_ARCHIVE=1`.
+- **Git denylist expanded**: reset/rebase/force/remote/submodule blocked.
+
+### Multi-tenant SaaS
+- **X-Tenant-ID ignored** when production *or* multi-user (not only prod).
+- **Opaque sessions forced** when multi-user is enabled.
+- Swarm tasks stamp `metadata.tenant_id` on dispatch.
+
+### Multi-replica
+- **`swarm/shared_approvals.py`**: durable ConfigStore wait for HITL bus
+  approvals; Telegram/Discord/Slack buses resolve across replicas.
+- Ops doc: `docs/docs/ops/multi-replica-and-saas.md`.
+
+### Discord/Slack parity
+- Discord bus gains `set_reaction` (Telegram-style status feedback API).
+- Shared approval path on all three platform buses.
+
 ## Unreleased — UI abort polish + multi-bus fan-out + cache TTL read + OAuth start gate (2026-07-25)
 
 - **Chat Stop**: `abortGeneration` clears the typing indicator (AbortError never

@@ -678,19 +678,21 @@ def extract_tenant_from_jwt(token: str) -> str | None:
 def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitable[Response]]], Awaitable[Response]]:
     """Create an HTTP middleware that extracts tenant id and propagates it.
 
-    Production (``KAZMA_PRODUCTION=1``): client-supplied ``X-Tenant-ID`` header
-    and cookies are **ignored** unless a verified JWT is present (audit H11).
-    Single-tenant default is ``default``.
+    Production **or** multi-user mode: client-supplied ``X-Tenant-ID`` header
+    and cookies are **ignored** unless a verified JWT / opaque principal is
+    present (audit H11 + SaaS residual). Single-tenant default is ``default``.
     """
     from kazma_core.tenant_context import set_current_tenant_id, reset_current_tenant_id
+    from kazma_core.tenant_isolation import (
+        client_tenant_spoof_allowed,
+        principal_tenant_id,
+    )
 
     async def tenant_middleware(
         request: Request,
         call_next: Callable[[Request], Awaitable[Response]],
     ) -> Response:
-        prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
-            "1", "true", "on", "yes",
-        )
+        allow_spoof = client_tenant_spoof_allowed()
         tenant_id: str | None = None
 
         # Always try verified JWT first
@@ -705,8 +707,16 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     if tenant_id:
                         break
 
-        # Spoofable header/cookie only outside production
-        if not tenant_id and not prod:
+        # Opaque session / principal may carry tenant (multi-user)
+        if not tenant_id:
+            try:
+                principal = get_request_principal(request)
+                tenant_id = principal_tenant_id(principal)
+            except Exception:
+                pass
+
+        # Spoofable header/cookie only in single-tenant non-prod labs
+        if not tenant_id and allow_spoof:
             tenant_id = request.headers.get("X-Tenant-ID") or request.headers.get("x-tenant-id")
             if not tenant_id:
                 tenant_id = (
@@ -714,8 +724,11 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
                     or request.cookies.get("x-tenant-id")
                     or request.cookies.get("tenant_id")
                 )
-        elif not tenant_id and prod:
-            # Single-tenant default — never trust client header
+        elif not tenant_id:
+            # Hardened mode — never trust client header
+            tenant_id = "default"
+
+        if not tenant_id:
             tenant_id = "default"
 
         if tenant_id:
@@ -724,7 +737,7 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
         token = set_current_tenant_id(tenant_id)
         try:
             response = await call_next(request)
-            if tenant_id and not prod:
+            if tenant_id and allow_spoof:
                 if request.cookies.get("X-Tenant-ID") != tenant_id:
                     response.set_cookie(
                         key="X-Tenant-ID",

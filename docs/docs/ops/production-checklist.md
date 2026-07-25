@@ -51,6 +51,7 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 ## Related ops
 
 - [Postgres & SaaS](postgres-and-saas)  
+- [Multi-replica & SaaS residual](multi-replica-and-saas)  
 - [Disaster recovery](disaster-recovery)  
 - [Multi-region](multi-region)  
 - [OIDC](oidc-setup)  

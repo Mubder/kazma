@@ -237,13 +237,22 @@ class SlackBusAdapter(BusAdapter):
         result = await self._post_message({"text": text[:2900], "blocks": blocks})
         msg_ts = str(result.get("ts", "")) if result else ""
 
+        from kazma_core.swarm import shared_approvals
+
+        shared_approvals.create_pending(
+            approval.task_id,
+            meta={"platform": "slack", "worker": approval.worker_name},
+        )
         event = asyncio.Event()
         self._pending_approvals[approval.task_id] = event
         if msg_ts:
             self._pending_msg_ts[approval.task_id] = msg_ts
         try:
-            await asyncio.wait_for(event.wait(), timeout=timeout)
-            approved = self._pending_results.get(approval.task_id, False)
+            approved = await shared_approvals.wait_for_resolution(
+                approval.task_id, timeout=timeout
+            )
+            if approval.task_id in self._pending_results:
+                approved = self._pending_results[approval.task_id]
         except TimeoutError:
             logger.warning("[SlackBus] Approval timed out for task %s", approval.task_id)
             approved = False
@@ -262,16 +271,28 @@ class SlackBusAdapter(BusAdapter):
     # ── Callback resolution ─────────────────────────────────────────
 
     def approve(self, task_id: str) -> None:
-        """Signal approval for a pending task."""
+        """Signal approval for a pending task (local + durable)."""
         if task_id in self._pending_approvals:
             self._pending_results[task_id] = True
             self._pending_approvals[task_id].set()
+        try:
+            from kazma_core.swarm.shared_approvals import resolve
+
+            resolve(task_id, True)
+        except Exception:
+            pass
 
     def reject(self, task_id: str) -> None:
-        """Signal rejection for a pending task."""
+        """Signal rejection for a pending task (local + durable)."""
         if task_id in self._pending_approvals:
             self._pending_results[task_id] = False
             self._pending_approvals[task_id].set()
+        try:
+            from kazma_core.swarm.shared_approvals import resolve
+
+            resolve(task_id, False)
+        except Exception:
+            pass
 
     def handle_callback(self, action_value: str) -> str | None:
         """Parse a Slack action value/action_id and resolve the approval.

@@ -931,6 +931,13 @@ class LocalToolRegistry:
             # even after a single HITL approval. Use python_exec / code_exec
             # for code. Aligns with swarm ShellTool._READ_ONLY_COMMANDS.
             # NO network tools (curl, wget), NO container runtimes (docker).
+            from kazma_core.safety.post_hitl import (
+                production_archive_allowed,
+                resolve_shell_binary,
+                restricted_child_env,
+                shell_strict_mode,
+            )
+
             _SAFE_BINARIES = {
                 # Read-only system (no `env` — dumps secrets after one HITL)
                 "ls", "cat", "head", "tail", "grep", "find", "wc", "sort",
@@ -938,8 +945,6 @@ class LocalToolRegistry:
                 "df", "du", "free", "uptime", "uname", "hostname",
                 # Build tools (no shell interpreters)
                 "git", "uv", "pytest", "ruff", "mypy",
-                # Archive
-                "tar", "gzip", "gunzip", "zip", "unzip",
                 # Text processing (read-only) — no `ps` (env leak on some OS)
                 "jq", "tr", "cut",
                 # File ops (write — HITL-gated via safety layer)
@@ -948,6 +953,12 @@ class LocalToolRegistry:
                 "sleep",
                 # Note: `kazma` / `ps` removed from prod allowlist (audit H4)
             }
+            # Archives: disabled by default in production strict mode
+            # (tar/zip can write outside cwd via absolute entries).
+            if production_archive_allowed():
+                _SAFE_BINARIES |= {
+                    "tar", "gzip", "gunzip", "zip", "unzip",
+                }
             # Dev-only extras when not in production
             import os as _os_bin
             if (_os_bin.environ.get("KAZMA_PRODUCTION") or "").lower() not in (
@@ -990,6 +1001,20 @@ class LocalToolRegistry:
                 cwd = _get_workspace()
                 cwd_s = str(cwd)
 
+                # Resolve binary under restricted PATH (post-HITL hardening)
+                child_env = restricted_child_env(cwd=cwd_s)
+                if shell_strict_mode():
+                    resolved = resolve_shell_binary(
+                        args[0], restricted_path=child_env.get("PATH", "")
+                    )
+                    if not resolved:
+                        return (
+                            f"Error: could not resolve '{args[0]}' under restricted PATH. "
+                            "Post-HITL shell only runs system/build tools on the "
+                            "allowlist (set KAZMA_SHELL_STRICT=0 to relax in lab)."
+                        )
+                    args = [resolved, *args[1:]]
+
                 # Reject absolute paths outside workspace (audit H4)
                 for a in args[1:]:
                     if not a or a.startswith("-"):
@@ -1018,39 +1043,28 @@ class LocalToolRegistry:
                     except Exception:
                         pass
 
-                # git subcommand denylist (destructive / credential)
+                # git subcommand denylist (destructive / credential / rewrite)
                 if binary == "git" and len(args) > 1:
                     sub = args[1].lstrip("-")
                     blocked_git = {
                         "push", "credential", "credential-manager",
                         "credential-store", "credential-cache",
+                        "reset", "rebase", "filter-branch", "filter-repo",
+                        "remote", "submodule",
                     }
                     joined = " ".join(args[1:]).lower()
-                    if sub in blocked_git or "config --global" in joined or "clean -fd" in joined:
+                    if (
+                        sub in blocked_git
+                        or "config --global" in joined
+                        or "clean -fd" in joined
+                        or " push " in f" {joined} "
+                        or "--force" in joined
+                        or " -f " in f" {joined} "
+                    ):
                         return (
                             f"Error: git subcommand/args not allowed: {' '.join(args[1:])}. "
-                            "push/credential/global config/clean -fd are blocked."
+                            "push/force/credential/reset/rebase/global config/clean -fd are blocked."
                         )
-
-                # Scrub parent env so API keys are not inherited (audit H4)
-                import os as _os_env
-
-                child_env = {
-                    "PATH": _os_env.environ.get("PATH", ""),
-                    "LANG": _os_env.environ.get("LANG", "C.UTF-8"),
-                    "LC_ALL": _os_env.environ.get("LC_ALL", "C.UTF-8"),
-                    "HOME": cwd_s,
-                    "USERPROFILE": cwd_s,
-                    "TMPDIR": cwd_s,
-                    "TEMP": cwd_s,
-                    "TMP": cwd_s,
-                    "SYSTEMROOT": _os_env.environ.get("SYSTEMROOT", ""),
-                    "COMSPEC": _os_env.environ.get("COMSPEC", ""),
-                    "PATHEXT": _os_env.environ.get("PATHEXT", ""),
-                    "WINDIR": _os_env.environ.get("WINDIR", ""),
-                }
-                # Drop empty Windows-only keys on POSIX
-                child_env = {k: v for k, v in child_env.items() if v}
 
                 # Run process asynchronously with timeout and restricted context
                 proc = await asyncio.create_subprocess_exec(
