@@ -76,7 +76,7 @@ Items are marked:
 | Swarm bus HITL gate (fail-closed) | ✅ | `swarm/safety.py`. |
 | Pipeline checkpoint HITL | ✅ | `checkpoint_manager.py`. |
 | Skill HMAC signing + verification | ✅ | `hub/cli.py` + `hub/loader.py`. |
-| Delegation Ed25519 + AES-GCM | ✅ | `delegation/security.py`. |
+| Delegation Ed25519 + AES-GCM | 🟡 | Library/archive only — not wired into default runtime; SwarmEngine is SoT. |
 | MCP SSE bearer auth | ✅ | `mcp/manager.py:461-466`. |
 | MCP stdio auth | ✅ | `auth.type: env` / `arg` injection supported on stdio servers. |
 | Vault-backed ConfigStore secrets | ✅ | Sensitive keys → AES vault when `KAZMA_VAULT_KEY` set (2026-07 audit remediations). |

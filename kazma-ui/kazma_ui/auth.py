@@ -183,6 +183,7 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/observability",
     "/replay",
     "/research",
+    "/knowledge",  # Knowledge Library admin shell (audit residual)
 )
 
 #: Exact read-only paths that are always open regardless of secret config.

@@ -298,21 +298,21 @@ This is by design — the LLM needs the value to make authenticated API calls. T
 
 ---
 
-## 7. Delegation (agent-to-agent) — separate crypto subsystem
+## 7. Delegation (agent-to-agent) — library only (not runtime)
 
-Distinct from skills and MCP, the **delegation** subsystem (`kazma_core/delegation/`) lets agents hand tasks to other agents with cryptographic integrity:
+> **Status (2026-07):** the multi-agent **delegation** package is **archived /
+> library-only**. Production multi-worker orchestration is **SwarmEngine**
+> (`kazma_core/swarm/*`). See `docs/audits/UNWIRED_INVENTORY.md`.
 
-| Primitive | Algorithm | Location |
-|---|---|---|
-| Signing | **Ed25519** (not HMAC) | `delegation/security.py:81-119` |
-| Encryption | **X25519 + AES-256-GCM** | `delegation/security.py:121-161` |
-| Wiring | requests signed on send, verified on receipt | `delegation/protocol.py:153` (sign), `:179-208` (verify, fail-closed) |
-
-This is the inter-agent delegation path — unrelated to MCP or skill signing.
+Historical code (Ed25519 + AES-GCM protocol) may still exist under
+`archive/delegation/` or as retained library modules for future product
+decisions — it is **not** wired into the default agent / swarm execute path.
+Do not configure production systems as if live cross-agent cryptographic
+delegation is active.
 
 ---
 
-## 7. Adding a new tool (extension point)
+## 8. Adding a new tool (extension point)
 
 The simplest extension is a registered tool function. Minimal pattern:
 

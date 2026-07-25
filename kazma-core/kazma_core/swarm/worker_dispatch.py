@@ -175,10 +175,10 @@ async def dispatch_worker(
             # End the dispatch span before handoff.
             if dispatch_span:
                 engine._tracing_emitter.end_span(dispatch_span, status="ok")
-            # Handoff path records on the target chain; release our probe flag.
-            breaker.record_success()
-            recorded = True
-            return await engine._handle_handoff(
+            # Do NOT record_success here — that double-counted the source
+            # breaker when _handle_handoff also record_* based on the target
+            # outcome (audit residual). Sole accounting lives in _handle_handoff.
+            results = await engine._handle_handoff(
                 handoff_req=handoff_req,
                 source_worker=worker,
                 prompt=prompt,
@@ -191,6 +191,8 @@ async def dispatch_worker(
                 _visited=_visited,
                 _depth=_depth + 1,
             )
+            recorded = True  # _handle_handoff always record_* or release_probe
+            return results
 
         worker_result = WorkerResult.from_dict(raw_result)
         if worker_result.duration_seconds <= 0:

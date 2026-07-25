@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased — OAuth Host harden + /knowledge gate + handoff breaker + docs (2026-07-25)
+
+- **GitHub OAuth**: redirect URI never uses client `Host` / `X-Forwarded-*`.
+  Prod requires `KAZMA_PUBLIC_URL`; dev uses `KAZMA_HOST`/`KAZMA_PORT` only.
+- **Auth shells**: `/knowledge` added to `SENSITIVE_PREFIXES` (admin HTML gate).
+- **Handoff breaker**: source circuit breaker records once in `_handle_handoff`
+  (removed pre-`record_success` in `worker_dispatch` that double-counted).
+- **Docs honesty**: delegation + `kazma-permissions.yaml` marked library-only /
+  not runtime-enforced (aligned with `UNWIRED_INVENTORY.md`).
+
 ## Unreleased — Swarm admission + hop budget + durable KB jobs (2026-07-25)
 
 ### Swarm reliability (audit M11 / M12 / M13)

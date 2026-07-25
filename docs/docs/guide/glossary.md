@@ -89,7 +89,7 @@ See *Authority*.
 A tool that requires HITL approval before execution. There are **three** lists (graph/swarm/MCP) — see [Security & Safety](security-and-safety#danger-tool-lists-three-of-them).
 
 **Delegation**
-Inter-agent task handoff with cryptographic integrity (Ed25519 signing, X25519+AES-256-GCM encryption) — `delegation/security.py`. Distinct from MCP and skills.
+Historical inter-agent task handoff with cryptographic integrity (Ed25519 / AES-GCM). **Library/archive only** as of 2026-07 — live multi-worker work uses SwarmEngine handoffs, not the delegation package. Distinct from MCP and skills.
 
 **DISPATCH**
 A swarm pattern: one worker handles a task.

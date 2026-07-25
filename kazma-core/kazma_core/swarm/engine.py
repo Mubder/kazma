@@ -714,6 +714,13 @@ class SwarmEngine:
             started=started,
         )
         if guard_err is not None:
+            # Cycle/depth abort: count as failure for the source breaker so
+            # half-open probes don't stick and we don't skip accounting.
+            try:
+                breaker.record_failure()
+            except Exception:
+                if hasattr(breaker, "release_probe"):
+                    breaker.release_probe()
             return [guard_err]
 
         logger.info(

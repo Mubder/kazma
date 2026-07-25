@@ -306,24 +306,36 @@ async def github_status() -> JSONResponse:
 
 
 def _oauth_redirect_uri(request: Request) -> str:
-    """Build the callback URL from the incoming request.
+    """Build the callback URL from operator-controlled config only.
 
     Prefer ``KAZMA_PUBLIC_URL`` (audit M4) so Host-header spoofing cannot
     redirect the OAuth callback to an attacker-controlled host.
+
+    Production (``KAZMA_PRODUCTION=1``) **requires** ``KAZMA_PUBLIC_URL``.
+    Dev fallback uses ``KAZMA_HOST``/``KAZMA_PORT`` only — never the request
+    ``Host`` / ``X-Forwarded-*`` headers (same posture as email OAuth).
     """
     import os
 
     public = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
     if public:
         return f"{public}/api/github/oauth/callback"
-    # Prefer the Host header (handles reverse proxies) over request.url.
-    host = request.headers.get("host") or f"{request.url.hostname}:{request.url.port}"
-    scheme = request.url.scheme
-    # Prefer X-Forwarded-Proto when behind TLS-terminating proxy
-    xf = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip()
-    if xf in ("http", "https"):
-        scheme = xf
-    return f"{scheme}://{host}/api/github/oauth/callback"
+
+    prod = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+    if prod:
+        raise ValueError(
+            "KAZMA_PUBLIC_URL is required for GitHub OAuth when "
+            "KAZMA_PRODUCTION=1 (refusing Host-header redirect construction)"
+        )
+
+    # Dev / loopback only — env config, not client Host
+    host = (os.environ.get("KAZMA_HOST") or "").strip() or "127.0.0.1"
+    if host in ("0.0.0.0", "::", "[::]"):
+        host = "127.0.0.1"
+    port = (os.environ.get("KAZMA_PORT") or "9090").strip() or "9090"
+    return f"http://{host}:{port}/api/github/oauth/callback"
 
 
 @router.get("/oauth/status")
@@ -366,7 +378,17 @@ async def oauth_start(request: Request) -> RedirectResponse | JSONResponse:
             status_code=503,
         )
     state = secrets.token_urlsafe(16)
-    redirect_uri = _oauth_redirect_uri(request)
+    try:
+        redirect_uri = _oauth_redirect_uri(request)
+    except ValueError as exc:
+        logger.warning("[github/oauth] redirect URI refused: %s", exc)
+        return JSONResponse(
+            {
+                "error": str(exc),
+                "hint": "Set KAZMA_PUBLIC_URL=https://your.public.host before OAuth.",
+            },
+            status_code=503,
+        )
     # Stash the state + redirect_uri in ConfigStore so the callback can
     # validate the state and replay the exact redirect_uri used here.
     try:
@@ -457,9 +479,18 @@ def _oauth_setup_page(request: Request) -> HTMLResponseType:
     """HTML guide when OAuth App env vars are missing (browser-friendly)."""
     from fastapi.responses import HTMLResponse
 
-    host = request.headers.get("host") or "127.0.0.1:9090"
-    scheme = request.url.scheme or "http"
-    callback = f"{scheme}://{host}/api/github/oauth/callback"
+    # Display-only callback hint — never trust Host for the real redirect URI.
+    try:
+        callback = _oauth_redirect_uri(request)
+    except ValueError:
+        import os as _os_disp
+
+        public = (_os_disp.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
+        callback = (
+            f"{public}/api/github/oauth/callback"
+            if public
+            else "https://YOUR_PUBLIC_HOST/api/github/oauth/callback"
+        )
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>GitHub OAuth setup</title>
 <style>

@@ -26,7 +26,7 @@ Kazma is a monorepo of seven installable packages (declared in `pyproject.toml` 
 
 | Package | Path | Responsibility |
 |---|---|---|
-| `kazma-core` | `kazma-core/kazma_core/` | Agent runner, LLM provider, model registry, swarm engine, ConfigStore, safety, memory, skills, MCP, hub, delegation, compaction, Majlis |
+| `kazma-core` | `kazma-core/kazma_core/` | Agent runner, LLM provider, model registry, swarm engine, ConfigStore, safety, memory, skills, MCP, hub, compaction, Majlis (delegation = library/archive only — SwarmEngine is the live multi-worker path) |
 | `kazma-gateway` | `kazma-gateway/kazma_gateway/` | Telegram/Discord/Slack adapters, agent handler (graph bridge), slash commands, session store |
 | `kazma-ui` | `kazma-ui/kazma_ui/` | FastAPI app factory, SSE chat, swarm panel, settings, dashboard, i18n, static assets |
 | `kazma-tui` | `kazma-tui/kazma_tui/` | Textual TUI dashboard (read-mostly consumer of core singletons) |

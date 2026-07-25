@@ -371,9 +371,14 @@ The `tenacity`-based retry decorators read overrides from ConfigStore (`retry.py
 
 ## 7. Security config files
 
-### 7.1 `kazma-permissions.yaml`
+### 7.1 `kazma-permissions.yaml` — library only (not runtime-enforced)
 
-Enterprise division-based MCP allow/deny lists (the "ALMuhalab" divisions):
+> **Status:** `PermissionManager` + this YAML describe an **enterprise division
+> RBAC design** that is **not enforced** on the live tool execute path. Runtime
+> authorization is HITL + shell allowlist + MCP classification + optional
+> platform RBAC (`KAZMA_MULTI_USER`). See `docs/audits/UNWIRED_INVENTORY.md`.
+
+Example shape (for future wiring / offline policy docs only):
 
 ```yaml
 divisions:
