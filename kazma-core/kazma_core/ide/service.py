@@ -303,27 +303,68 @@ class IdeService:
         return await self._call_tool("shell_exec", {"command": command, "timeout": timeout})
 
     async def run_file(self, rel_path: str, timeout: int = 60) -> dict[str, Any]:
-        """Convenience: run a script file with its inferred interpreter."""
+        """Run a script file via an allowlisted path (not shell interpreters).
+
+        ``shell_exec`` deliberately bans ``python``/``node``/``bash`` (post-HITL
+        RCE surface). Python files go through ``python_exec`` / code_exec.
+        Other extensions use allowlisted build tools when possible (``pytest``
+        not applicable for arbitrary files). Unsupported types return a clear
+        error instead of a misleading allowlist failure after HITL.
+        """
         try:
             target = self.resolve(rel_path)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "output": ""}
+        if not target.exists() or not target.is_file():
+            return {"ok": False, "error": f"File not found: {rel_path}", "output": ""}
+
         ext = target.suffix.lower()
-        runner = {
-            ".py": "python",
-            ".js": "node",
-            ".ts": "npx ts-node",
-            ".sh": "bash",
-            ".rb": "ruby",
-            ".go": "go run",
-        }.get(ext)
-        if not runner:
+        if ext == ".py":
+            # Prefer reading source + python_exec (sandboxed / Docker-jail path).
+            try:
+                source = target.read_text(encoding="utf-8")
+            except OSError as exc:
+                return {"ok": False, "error": f"Cannot read {rel_path}: {exc}", "output": ""}
+            # Cap runaway files before shipping to the executor.
+            if len(source) > 200_000:
+                return {
+                    "ok": False,
+                    "error": f"File too large for python_exec ({len(source)} chars).",
+                    "output": "",
+                }
+            return await self._call_tool(
+                "python_exec",
+                {"code": source, "timeout": timeout},
+            )
+
+        if ext in (".js", ".ts", ".mjs", ".cjs"):
             return {
                 "ok": False,
-                "error": f"No interpreter known for {ext} files.",
+                "error": (
+                    f"Running {ext} files via shell is blocked (node/npx not in "
+                    "shell_exec allowlist). Use shell_exec with an allowlisted "
+                    "tool (e.g. pytest/ruff) or run via an external terminal."
+                ),
                 "output": "",
             }
-        return await self.run(f"{runner} {target}", timeout=timeout)
+
+        if ext in (".sh", ".bash", ".ps1", ".bat", ".cmd", ".rb", ".go"):
+            return {
+                "ok": False,
+                "error": (
+                    f"Running {ext} files via shell interpreters is blocked. "
+                    "shell_exec only allows a fixed binary allowlist (no bash/"
+                    "python/node). Open a system terminal or use an allowlisted "
+                    "command (e.g. pytest, ruff, git)."
+                ),
+                "output": "",
+            }
+
+        return {
+            "ok": False,
+            "error": f"No safe runner for {ext} files.",
+            "output": "",
+        }
 
     async def diff(self, rel_path: str, old_content: str, new_content: str) -> dict[str, Any]:
         """Produce a unified diff between two versions of a file (no tool call)."""

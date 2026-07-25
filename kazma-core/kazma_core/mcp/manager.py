@@ -82,6 +82,21 @@ _SENSITIVE_READ_KEYWORDS = (
 )
 
 
+def _mcp_raw_tool_name(tool_name: str) -> str:
+    """Strip ``mcp__{server}__`` namespace so classification ignores server slugs.
+
+    Namespaced names like ``mcp__get_status_svc__frobnicate`` used to match
+    safe keywords in the *server* segment (``get``, ``status``) and skip
+    HITL in non-prod. Always classify the raw tool leaf only.
+    """
+    name = (tool_name or "").strip()
+    if name.lower().startswith("mcp__"):
+        parts = name.split("__", 2)
+        if len(parts) == 3 and parts[2]:
+            return parts[2]
+    return name
+
+
 def classify_mcp_tool(tool_name: str) -> str:
     """Classify an MCP tool by name pattern.
 
@@ -89,8 +104,11 @@ def classify_mcp_tool(tool_name: str) -> str:
         "danger" — tool name contains a danger keyword (write/exec/delete/etc.)
         "safe"   — tool name contains only safe keywords (read/list/get/etc.)
         "unknown" — neither pattern matches (treat as danger by default for safety)
+
+    Classification uses the **raw** tool name (after stripping
+    ``mcp__server__`` prefix) so server slugs cannot bleach unknown tools.
     """
-    name_lower = tool_name.lower()
+    name_lower = _mcp_raw_tool_name(tool_name).lower()
     has_danger = any(kw in name_lower for kw in _DANGER_KEYWORDS)
     has_sensitive_read = any(kw in name_lower for kw in _SENSITIVE_READ_KEYWORDS)
     if has_danger or has_sensitive_read:

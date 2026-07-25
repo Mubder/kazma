@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Unreleased — MCP dual-store unify + audit P0 fixes (2026-07-25)
+
+### MCP single source of truth
+- **Root cause fixed**: `/mcp` Add Server wrote only `kazma.yaml`; Settings
+  read only ConfigStore `mcp.servers` — so Settings Test said
+  "Server Playwright not found" for servers added from `/mcp`.
+- **New** `kazma_core/mcp_servers_store.py`: every list/add/delete/toggle
+  dual-writes ConfigStore + `kazma.yaml` and merges on read (ConfigStore
+  wins on name conflict). Both `KazmaAgent` and `MCPSettingsService` use it.
+- **Namespaced HITL classify**: `classify_mcp_tool` strips `mcp__server__`
+  and classifies the raw tool leaf only — server slugs like `get_status`
+  no longer bleach unknown tools to "safe" in non-prod.
+
+### Other audit P0 fixes
+- **`dispatch_swarm`**: registers bg tasks on `engine.register_task_handle`
+  so panel/API cancel actually stops chat-originated swarm work.
+- **IDE `run_file`**: no longer shells `python`/`node`/`bash` (blocked by
+  shell_exec allowlist). `.py` → `python_exec`; other interpreters return
+  a clear error instead of a post-HITL allowlist failure.
+
 ## Unreleased — MCP overhaul + KB polish + logging + fonts + i18n (2026-07-25)
 
 ### MCP subsystem — full overhaul

@@ -1224,11 +1224,28 @@ class LocalToolRegistry:
                 metadata={"source": "chat", "kind": "research"},
             )
             # Dispatch in the background so the tool returns immediately.
-            # Hold a strong reference so the GC doesn't kill the task
-            # before it completes (and persists to TaskStore).
+            # Register on engine._task_handles so cancel_task / panel Stop
+            # can cancel the live asyncio work (not just mark maps cancelled).
             _bg_task = _asyncio.create_task(engine.dispatch(task))
             _pending_dispatch_tasks.add(_bg_task)
-            _bg_task.add_done_callback(_pending_dispatch_tasks.discard)
+            try:
+                engine.register_task_handle(task.id, _bg_task)
+            except Exception as reg_exc:
+                logger.debug(
+                    "[dispatch_swarm] register_task_handle failed: %s", reg_exc
+                )
+
+            def _cleanup_handle(
+                h: Any, tid: str = task.id, eng: Any = engine
+            ) -> None:
+                _pending_dispatch_tasks.discard(h)
+                try:
+                    if eng is not None and hasattr(eng, "unregister_task_handle"):
+                        eng.unregister_task_handle(tid)
+                except Exception:
+                    pass
+
+            _bg_task.add_done_callback(_cleanup_handle)
             return (
                 f"Swarm task dispatched to worker '{worker}' "
                 f"(id: {task.id}). It's visible in the Swarm panel. "
