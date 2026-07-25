@@ -948,6 +948,15 @@ async def run_agent(
 
 async def main() -> None:
     """Entry point for running Kazma as a standalone agent."""
+    # Initialise logging before any subsystem boots so every log line lands
+    # in <repo>/.kazma/kazma.log. Idempotent + safe; --debug via env.
+    try:
+        from kazma_core.logging_config import setup_logging
+
+        setup_logging()
+    except Exception:
+        pass  # Logging must never block boot.
+
     config = load_config()
     agent = KazmaAgent(config)
 
