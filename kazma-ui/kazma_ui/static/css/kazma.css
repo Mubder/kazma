@@ -4,7 +4,7 @@
    Font: Inter, system-ui, sans-serif | Grid texture background
    ═══════════════════════════════════════════════════════════════════ */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap');
 
 /* ── 1. CSS Variables — kazma.ai palette ─────────────────────────── */
 :root {
@@ -106,7 +106,7 @@
      (cv01/ss03) break Arabic ligature shaping, so they are scoped to LTR
      only via [dir="ltr"] below, NOT applied globally on body. */
   --font-sans: 'Inter', 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-arabic: 'Cairo', 'Calibri', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-arabic: 'Rubik', 'Calibri', 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
   /* Inter-only OpenType features.  Applied to LTR text ONLY (see body
      override below) — forcing these on Arabic breaks ligature shaping. */
@@ -208,6 +208,24 @@ button { cursor: pointer; font-family: inherit; }
 [dir="rtl"] button,
 [dir="rtl"] select {
   font-family: var(--font-arabic);
+}
+
+/* English/code/numbers inside Arabic pages render in Inter (smooth, with
+   tabular numerals) — prevents the "out of sync, looks bigger" mismatch
+   when Arabic font metrics clash with Latin glyphs in code blocks and
+   metrics like "discovered=42 · fetched=38". The bdi tag handles inline
+   bidirectional runs (e.g. an English product name in an Arabic sentence). */
+[dir="rtl"] code,
+[dir="rtl"] pre,
+[dir="rtl"] kbd,
+[dir="rtl"] samp,
+[dir="rtl"] .metric-value,
+[dir="rtl"] .metric-label,
+[dir="rtl"] .num,
+[dir="rtl"] bdi,
+[dir="rtl"] .latinx {
+  font-family: var(--font-sans);
+  font-feature-settings: var(--font-features);
 }
 
 /* Inter's OpenType features (cv01/ss03/tnum) are scoped to LTR only.
