@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased — Discord/Slack Telegram-level UX modules (2026-07-25)
+
+- **Shared action vocabulary**: `platform_callbacks` + `platform_keyboards`
+  (HITL / model / personality IDs identical on TG/Discord/Slack).
+- **Discord modules**: `discord_parse`, `discord_callbacks`, `discord_keyboards`,
+  `discord_send` — adapter delegates; graph HITL sends components.
+- **Slack modules**: `slack_parse`, `slack_callbacks`, `slack_blocks`,
+  `slack_send` — Block Kit builders; graph HITL sends blocks.
+- **HITL handler** builds platform-native approval controls for all three.
+
 ## Unreleased — remaining gaps phase 2: shared breakers, tenant MCP/cron, RO shell (2026-07-25)
 
 - **Shared circuit breakers**: ConfigStore dual-write when multi-user/prod

@@ -110,92 +110,11 @@ class SlackAdapter(BaseAdapter):
     def _parse_event(self, event: dict[str, Any] | None) -> IncomingMessage | None:
         """Parse a raw Slack event dict into an IncomingMessage.
 
-        Returns None for events that should be skipped (bot messages,
-        edits, empty text, non-message types, missing fields).
+        Delegates to :mod:`slack_parse` (Telegram-style pure helper).
         """
-        if event is None:
-            return None
+        from kazma_gateway.adapters.slack_parse import parse_message_event
 
-        event_type = event.get("type", "")
-
-        # Only handle message and app_mention events
-        if event_type not in ("message", "app_mention"):
-            return None
-
-        # Skip bot messages
-        if "bot_id" in event:
-            return None
-
-        # Skip edit / delete etc.
-        subtype = event.get("subtype", "")
-        if subtype and subtype != "bot_message":
-            return None
-
-        # Require channel
-        channel_id = event.get("channel")
-        if not channel_id:
-            return None
-
-        # Require user
-        user_id = event.get("user", "")
-        if not user_id:
-            return None
-
-        text = event.get("text", "")
-        raw_files = event.get("files") or []
-
-        # Accept if there is text OR any attached file. Media-only uploads
-        # are common, so don't require text when files are present.
-        if not text and not raw_files:
-            return None
-
-        ts = event.get("ts", "")
-        team_id = event.get("team", "")
-        username = event.get("username") or f"slack_{user_id}"
-
-        attachments: list[Attachment] = []
-        for f in raw_files:
-            mime = (f.get("mimetype") or "").lower()
-            if mime.startswith("image/"):
-                kind = "image"
-            elif mime.startswith("video/"):
-                kind = "video"
-            elif mime.startswith("audio/"):
-                kind = "audio"
-            else:
-                kind = "file"
-            # url_private_download is the direct fetch URL (needs the bearer
-            # token); url_private is the authenticated asset URL.
-            attachments.append(
-                Attachment(
-                    kind=kind,
-                    mime=mime or "application/octet-stream",
-                    filename=f.get("name", "") or f"slack_{f.get('id', 'file')}",
-                    url=f.get("url_private_download") or f.get("url_private"),
-                    meta={
-                        "file_id": f.get("id"),
-                        "source": "slack",
-                        "size": f.get("size"),
-                    },
-                )
-            )
-
-        msg_text = text or (f"[{attachments[0].kind}]" if attachments else "")
-        return IncomingMessage(
-            platform="slack",
-            sender_id=f"slack:{user_id}",
-            text=msg_text,
-            attachments=attachments,
-            context_metadata={
-                "channel_id": channel_id,
-                "user_id": user_id,
-                "team_id": team_id,
-                "thread_ts": event.get("thread_ts"),
-                "message_ts": ts,
-                "username": username,
-                "media": bool(attachments),
-            },
-        )
+        return parse_message_event(event)
 
     # ── Typing indicator (fire-and-forget) ──────────────────────────
 
@@ -236,6 +155,9 @@ class SlackAdapter(BaseAdapter):
             logger.error("[Slack] No channel_id in target: %s", outbound.target_id)
             return False
 
+        from kazma_gateway.adapters.slack_send import resolve_channel_id
+
+        channel_id = resolve_channel_id(outbound.context_metadata, outbound.target_id) or channel_id
         payload: dict[str, Any] = {
             "channel": channel_id,
             "text": outbound.text,
@@ -244,6 +166,9 @@ class SlackAdapter(BaseAdapter):
         thread_ts = outbound.context_metadata.get("thread_ts")
         if thread_ts:
             payload["thread_ts"] = thread_ts
+        blocks = outbound.context_metadata.get("blocks")
+        if blocks:
+            payload["blocks"] = blocks
 
         for attempt in range(1, _MAX_RETRIES + 1):
             try:
@@ -566,34 +491,38 @@ class SlackAdapter(BaseAdapter):
                             payload_type = payload.get("type", "")
 
                             if payload_type == "block_actions":
-                                actions = payload.get("actions", [])
-                                for action in actions:
-                                    value = action.get("value", "")
-                                    action_id = action.get("action_id", "")
-                                    
-                                    if (
-                                        value.startswith("install_dependency:") or 
-                                        action_id.startswith("install_dependency:") or
-                                        value.startswith("sys_install:") or
-                                        action_id.startswith("sys_install:")
-                                    ):
-                                        val = value or action_id
-                                        package_name = val.split(":", 1)[1]
-                                        from kazma_core.system.runtime_manager import trigger_package_promotion
+                                from kazma_gateway.adapters.slack_callbacks import (
+                                    iter_block_actions,
+                                    route_swarm_bus,
+                                )
+
+                                for value, action in iter_block_actions(payload):
+                                    if action.kind in ("sys_install", "install_dep"):
+                                        package_name = action.package_name
+                                        from kazma_core.system.runtime_manager import (
+                                            trigger_package_promotion,
+                                        )
+
                                         await trigger_package_promotion(package_name)
-                                        
                                         response_url = payload.get("response_url", "")
                                         if response_url:
                                             try:
-                                                if val.startswith("sys_install:"):
-                                                    updated_text = "[⏳ Installing package... please wait]"
+                                                if action.kind == "sys_install":
+                                                    updated_text = (
+                                                        "[⏳ Installing package... please wait]"
+                                                    )
                                                 else:
-                                                    updated_text = "⏳ *Installing ML dependencies in the background...*"
-                                                    
+                                                    updated_text = (
+                                                        "⏳ *Installing ML dependencies "
+                                                        "in the background...*"
+                                                    )
                                                 updated_blocks = [
                                                     {
                                                         "type": "section",
-                                                        "text": {"type": "mrkdwn", "text": updated_text}
+                                                        "text": {
+                                                            "type": "mrkdwn",
+                                                            "text": updated_text,
+                                                        },
                                                     }
                                                 ]
                                                 async with httpx.AsyncClient() as client:
@@ -602,22 +531,50 @@ class SlackAdapter(BaseAdapter):
                                                         json={
                                                             "text": updated_text,
                                                             "blocks": updated_blocks,
-                                                            "replace_original": True
-                                                        }
+                                                            "replace_original": True,
+                                                        },
                                                     )
                                             except Exception as exc:
-                                                logger.warning("[Slack] Failed to update interactive card: %s", exc)
-                                                
-                                    elif value.startswith(("swarm_approve_", "swarm_reject_")):
+                                                logger.warning(
+                                                    "[Slack] Failed to update interactive card: %s",
+                                                    exc,
+                                                )
+                                    elif action.kind == "swarm":
                                         try:
-                                            from kazma_core.swarm.bus import get_message_bus
-                                            from kazma_gateway.adapters.slack_bus import SlackBusAdapter
-                                            
-                                            adapter = get_message_bus().adapter
-                                            if isinstance(adapter, SlackBusAdapter):
-                                                adapter.handle_callback(value)
+                                            route_swarm_bus(value)
                                         except Exception as exc:
-                                            logger.warning("[Slack] Swarm approval callback failed: %s", exc)
+                                            logger.warning(
+                                                "[Slack] Swarm approval callback failed: %s",
+                                                exc,
+                                            )
+                                    elif action.kind in (
+                                        "hitl",
+                                        "personality",
+                                        "model_provider",
+                                        "model_select",
+                                    ) and action.text:
+                                        # Graph HITL / pickers → enqueue synthetic command
+                                        try:
+                                            user = payload.get("user", {})
+                                            channel = (
+                                                payload.get("channel", {}) or {}
+                                            ).get("id", "")
+                                            incoming = IncomingMessage(
+                                                platform="slack",
+                                                sender_id=f"slack:{user.get('id', '')}",
+                                                text=action.text,
+                                                context_metadata={
+                                                    "channel_id": channel,
+                                                    "user_id": user.get("id", ""),
+                                                    "interaction": True,
+                                                },
+                                            )
+                                            self._queue.put_nowait(incoming)
+                                        except Exception as exc:
+                                            logger.warning(
+                                                "[Slack] Failed to enqueue interaction: %s",
+                                                exc,
+                                            )
                             continue
 
                         if msg_type == "events_api":
@@ -824,6 +781,33 @@ class SlackAdapter(BaseAdapter):
             logger.warning("[Slack] Queue full — dropping message from %s", user_id)
             return
         logger.debug("[Slack] ← from %s: %.80s", user_id, incoming.text)
+
+    # ── Interactive builders (Telegram-parity static API) ───────────
+
+    @staticmethod
+    def build_approval_keyboard(request_id: str) -> list[dict[str, Any]]:
+        """Slack Block Kit for graph HITL (shared callback IDs with Telegram)."""
+        from kazma_gateway.adapters.slack_blocks import build_approval_blocks
+
+        return build_approval_blocks(request_id)
+
+    @staticmethod
+    def build_personality_keyboard(personalities: list[str]) -> list[dict[str, Any]]:
+        from kazma_gateway.adapters.slack_blocks import build_personality_blocks
+
+        return build_personality_blocks(personalities)
+
+    @staticmethod
+    def build_provider_keyboard(providers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from kazma_gateway.adapters.slack_blocks import build_provider_blocks
+
+        return build_provider_blocks(providers)
+
+    @staticmethod
+    def build_model_keyboard(provider_name: str, models: list[str]) -> list[dict[str, Any]]:
+        from kazma_gateway.adapters.slack_blocks import build_model_blocks
+
+        return build_model_blocks(provider_name, models)
 
     # ── Lifecycle ───────────────────────────────────────────────────
 

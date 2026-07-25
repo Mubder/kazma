@@ -883,12 +883,19 @@ def create_graph_handler(
                     ctx = await _store.get(thread_id)
                     if not ctx:
                         ctx = msg.context_metadata
-                    prompt = _build_approval_prompt(hitl_payload, thread_id)
-                    # reply_markup travels inside context_metadata — the
-                    # Telegram adapter reads it from there.
+                    prompt = _build_approval_prompt(
+                        hitl_payload, thread_id, platform=msg.platform
+                    )
+                    # Interactive controls travel in context_metadata:
+                    # Telegram → reply_markup, Discord → components, Slack → blocks.
                     prompt_text, send_ctx = _prepare_tg_outbound(msg, prompt["text"], ctx)
                     if prompt.get("markup"):
-                        send_ctx["reply_markup"] = prompt["markup"]
+                        if msg.platform == "telegram":
+                            send_ctx["reply_markup"] = prompt["markup"]
+                        elif msg.platform == "discord":
+                            send_ctx["components"] = prompt["markup"]
+                        elif msg.platform == "slack":
+                            send_ctx["blocks"] = prompt["markup"]
                     await manager.send(
                         OutboundMessage(
                             target_id=_build_target_id(msg.platform, ctx),

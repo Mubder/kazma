@@ -82,14 +82,24 @@ on all nodes. Set unique `KAZMA_REPLICA_ID` per process.
 | Text chat | Full | Full | Full |
 | Typing indicator | Full | Yes | Yes |
 | Voice STT/TTS | Native deep path | `voice_helpers` | `voice_helpers` |
+| Graph HITL buttons | `telegram_keyboards` | `discord_keyboards` | `slack_blocks` |
 | Swarm HITL buttons | Inline keyboard | Components v2 | Block Kit |
+| Shared callback IDs | `platform_callbacks` | same schemes | same schemes |
+| Modular parse/send | `telegram_parse/send` | `discord_parse/send` | `slack_parse/send` |
 | Shared multi-replica approvals | Yes | Yes | Yes |
-| Message reactions | setMessageReaction | `set_reaction` API | Partial (reactions API not first-class) |
-| Modular keyboards/parse | Dedicated modules | In-adapter | In-adapter |
+| Message reactions | setMessageReaction | `set_reaction` API | `set_reaction` API |
 
-Telegram remains the richest UX surface; Discord/Slack are production-capable
-for text + HITL + voice helpers. Further parity is incremental adapter work,
-not a core gap.
+Layout (2026-07 UX modules):
+
+```
+adapters/
+  platform_callbacks.py   # hitl: / swarm_ / model_ schemes
+  platform_keyboards.py   # Discord components + Slack blocks
+  telegram_{keyboards,callbacks,parse,send,stt}.py
+  discord_{keyboards,callbacks,parse,send}.py
+  slack_{blocks,callbacks,parse,send}.py
+  voice_helpers.py
+```
 
 ## Related
 
