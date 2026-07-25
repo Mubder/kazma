@@ -61,6 +61,7 @@ const sidebars = {
       items: [
         'ops/production-checklist',
         'ops/postgres-and-saas',
+        'ops/multi-replica-and-saas',
         'ops/disaster-recovery',
         'ops/multi-region',
         'ops/oidc-setup',
