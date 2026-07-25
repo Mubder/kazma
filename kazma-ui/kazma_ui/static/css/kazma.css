@@ -93,11 +93,21 @@
   --sidebar-collapsed: 60px;
   --header-height: 56px;
 
-  /* Typography */
-  --font-sans: 'Calibri', 'Inter', 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-arabic: 'Calibri', 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  /* Typography
+     ─────────
+     Inter is the primary English face: razor-sharp at small sizes, ships
+     tabular numerals (so metrics like `discovered=42 · fetched=38` don't
+     jitter), and pairs cleanly with Cairo for Arabic.  Calibri was removed
+     from the chain — it's a Microsoft Office font not installed on
+     Linux/WSL, and the silent fall-through was the source of the
+     "glitchy" rendering. */
+  --font-sans: 'Inter', 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-arabic: 'Cairo', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
-  --font-features: 'cv01', 'ss03';
+  /* cv01: single-story `a` (cleaner at small sizes)
+     ss03: slashed zero + alternate numeral shapes
+     tnum: tabular numbers (fixed-width digits) — essential for tables/metrics */
+  --font-features: 'cv01', 'ss03', 'tnum';
 
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
