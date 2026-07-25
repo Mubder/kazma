@@ -10,6 +10,8 @@
   var currentMsgEl = null;
   var tokenAccum = '';
   var activeStream = null;
+  /** Live typing-indicator element for the current turn (cleared on abort). */
+  var activeTypingEl = null;
   // Track the last successfully-sent user message so the empty-turn
   // recovery can offer a one-click Retry instead of leaving the user
   // staring at "_No response received._" with no recourse. Reset on
@@ -300,6 +302,14 @@
       activeStream = null;
       KS.toast('Generation stopped', 'info', 2000);
     }
+    // Abort does not fire onDone/onError (AbortError is swallowed) — clear
+    // the "thinking" indicator so Stop never leaves a stuck spinner.
+    if (activeTypingEl && KS.hideTyping) {
+      KS.hideTyping(activeTypingEl);
+    }
+    activeTypingEl = null;
+    currentMsgEl = null;
+    tokenAccum = '';
     enableInput();
   }
 
@@ -587,13 +597,17 @@
     inputEl.style.height = 'auto';
     inputEl.placeholder = 'Type your message\u2026 (Enter to send)';
 
-    // Show typing indicator
+    // Show typing indicator (tracked so abortGeneration can clear it)
+    activeTypingEl = typingEl;
     KS.showTyping(typingEl, 'Kazma is thinking');
 
     // Start SSE stream
     currentMsgEl = null;
     tokenAccum = '';
-    if (activeStream) activeStream.abort();
+    if (activeStream) {
+      activeStream.abort();
+      activeStream = null;
+    }
 
     // Ensure we have a stable session id (generated client-side so it
     // survives page refreshes and is reused for the same conversation).
@@ -610,6 +624,7 @@
     }, {
       onToken: function(data) {
         KS.hideTyping(typingEl);
+        activeTypingEl = null;
         if (!currentMsgEl) {
           currentMsgEl = createAssistantMessage();
         }
@@ -651,6 +666,7 @@
 
       onDone: function(data) {
         KS.hideTyping(typingEl);
+        activeTypingEl = null;
         // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
         // Layer 4 of the agent-stopped-talking defense: instead of a bare
         // "_No response received._" with no recourse, show a Retry button
@@ -703,11 +719,13 @@
         // Keep _isGenerating=true and activeStream alive so the Stop button
         // can still abort the SSE connection while waiting for approval.
         KS.hideTyping(typingEl);
+        activeTypingEl = null;
         renderHitlCard(data);
       },
 
       onError: function(msg) {
         KS.hideTyping(typingEl);
+        activeTypingEl = null;
         if (!currentMsgEl) currentMsgEl = createAssistantMessage();
         var textEl = currentMsgEl.querySelector('.message-text');
         textEl.innerHTML = '<div class="error-message">\u26A0 ' + escapeHtml(msg) +
@@ -716,6 +734,9 @@
         tokenAccum = '';
         activeStream = null;
         enableInput();
+        if (msg && window.showToast) {
+          try { window.showToast(String(msg), 'error', 4000); } catch (_t) {}
+        }
       }
     });
   }

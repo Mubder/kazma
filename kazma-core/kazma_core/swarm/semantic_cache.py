@@ -108,13 +108,16 @@ class SemanticCache:
         default ``_global_`` is shared across callers — only safe for prompts
         with no user-specific content.
         """
-        # 1. Exact hash fast lookup (always available)
+        # 1. Exact hash fast lookup (always available) — skip expired rows
+        # on read so TTL is honored even before the next write eviction.
         prompt_hash = self._compute_hash(prompt, tools, scope)
+        ttl_clause, ttl_params = self._ttl_sql_clause()
         with self._lock:
             conn = self._get_conn()
             row = conn.execute(
-                "SELECT response_json FROM semantic_cache WHERE prompt_hash = ? LIMIT 1",
-                (prompt_hash,),
+                "SELECT response_json FROM semantic_cache "
+                f"WHERE prompt_hash = ?{ttl_clause} LIMIT 1",
+                (prompt_hash, *ttl_params),
             ).fetchone()
             if row:
                 logger.info("[SemanticCache] Exact hash HIT!")
@@ -140,8 +143,9 @@ class SemanticCache:
             conn = self._get_conn()
             cursor = conn.execute(
                 "SELECT response_json, embedding FROM semantic_cache "
-                "WHERE tools_json = ? AND embedding IS NOT NULL AND scope = ?",
-                (tools_json, scope),
+                "WHERE tools_json = ? AND embedding IS NOT NULL AND scope = ?"
+                f"{ttl_clause}",
+                (tools_json, scope, *ttl_params),
             )
             rows = cursor.fetchall()
 
@@ -202,6 +206,20 @@ class SemanticCache:
             except Exception as exc:
                 logger.warning("[SemanticCache] Failed to write cache entry: %s", exc)
 
+    @staticmethod
+    def _ttl_seconds() -> int:
+        try:
+            return int(os.environ.get("KAZMA_SEMANTIC_CACHE_TTL_SECONDS") or "86400")
+        except ValueError:
+            return 86400
+
+    def _ttl_sql_clause(self) -> tuple[str, tuple[Any, ...]]:
+        """SQL fragment + params that exclude expired rows (empty if TTL off)."""
+        ttl = self._ttl_seconds()
+        if ttl <= 0:
+            return "", ()
+        return " AND created_at >= datetime('now', ?)", (f"-{ttl} seconds",)
+
     def _evict_if_needed(self, conn: sqlite3.Connection) -> None:
         """TTL + max-row eviction (audit M18).
 
@@ -213,10 +231,7 @@ class SemanticCache:
             max_rows = int(os.environ.get("KAZMA_SEMANTIC_CACHE_MAX_ROWS") or "10000")
         except ValueError:
             max_rows = 10000
-        try:
-            ttl = int(os.environ.get("KAZMA_SEMANTIC_CACHE_TTL_SECONDS") or "86400")
-        except ValueError:
-            ttl = 86400
+        ttl = self._ttl_seconds()
 
         if ttl > 0:
             try:

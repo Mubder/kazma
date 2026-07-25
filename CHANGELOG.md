@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased — UI abort polish + multi-bus fan-out + cache TTL read + OAuth start gate (2026-07-25)
+
+- **Chat Stop**: `abortGeneration` clears the typing indicator (AbortError never
+  fires `onDone`/`onError`); error path toasts when possible.
+- **Swarm bus multi-platform**: `FanOutBusAdapter` wires all configured
+  Telegram/Discord/Slack buses (not exclusive priority). Approvals: first yes
+  wins.
+- **Semantic cache**: TTL filter on **lookup** (not only write eviction).
+- **GitHub OAuth start**: removed from `ALWAYS_OPEN_PREFIXES` — requires auth
+  cookie/session; callback remains open.
+
 ## Unreleased — OAuth Host harden + /knowledge gate + handoff breaker + docs (2026-07-25)
 
 - **GitHub OAuth**: redirect URI never uses client `Host` / `X-Forwarded-*`.

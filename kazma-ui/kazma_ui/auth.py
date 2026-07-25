@@ -214,8 +214,11 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
 #  cannot carry the X-Kazma-Secret header, e.g. the GitHub OAuth callback
 #  which GitHub redirects to with only a ?code= query param).
 ALWAYS_OPEN_PREFIXES: tuple[str, ...] = (
+    # Callbacks are browser redirects with ?code= only (no secret header).
     "/api/github/oauth/callback",
-    "/api/github/oauth/start",
+    # /api/github/oauth/start is intentionally *not* open: starting OAuth
+    # requires an authenticated session/cookie (audit residual — unauth start
+    # could write oauth_state into ConfigStore).
     # Email OAuth: Google/Microsoft redirect with ?code= only (no secret header)
     "/api/email/oauth/gmail/callback",
     "/api/email/oauth/microsoft/callback",

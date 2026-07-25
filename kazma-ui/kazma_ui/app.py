@@ -755,7 +755,6 @@ class KazmaAppBuilder:
                     from kazma_core.swarm.bus import get_message_bus
 
                     bus = get_message_bus()
-                    _bus_wired = False
                     # Never wire real platform adapters under pytest: tests
                     # call create_app() with the real kazma.yaml, which would
                     # wire a live TelegramBusAdapter and cause test dispatches
@@ -763,58 +762,82 @@ class KazmaAppBuilder:
                     # (the bus default) keeps swarm events in-process for tests.
                     import sys as _sys
                     _skip_real_adapters = "pytest" in _sys.modules
+                    _wired_adapters: list[Any] = []
 
-                    # TelegramBusAdapter
+                    # Collect every available platform bus (fan-out, not exclusive).
                     if not _skip_real_adapters and tg_adapter is not None and telegram_token:
                         try:
                             from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
 
-                            tg_bus = TelegramBusAdapter(
-                                bot_token=telegram_token,
-                                chat_id=self.config_store.get("connectors.telegram.swarm_chat_id", ""),
+                            _wired_adapters.append(
+                                TelegramBusAdapter(
+                                    bot_token=telegram_token,
+                                    chat_id=self.config_store.get(
+                                        "connectors.telegram.swarm_chat_id", ""
+                                    ),
+                                )
                             )
-                            bus.set_adapter(tg_bus)
-                            _bus_wired = True
-                            logger.info("[SwarmBus] TelegramBusAdapter wired — swarm events will appear in Telegram")
+                            logger.info(
+                                "[SwarmBus] TelegramBusAdapter ready"
+                            )
                         except ImportError:
                             logger.debug("[SwarmBus] TelegramBusAdapter not available")
                         except Exception as e:
-                            logger.warning("[SwarmBus] Failed to wire TelegramBusAdapter: %s", e)
+                            logger.warning("[SwarmBus] Failed to build TelegramBusAdapter: %s", e)
 
-                    # DiscordBusAdapter
-                    if not _bus_wired:
-                        _discord_tok = self.config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
-                        _discord_chan = self.config_store.get("connectors.discord.swarm_channel_id", "")
-                        if not _skip_real_adapters and _discord_tok and _discord_chan:
-                            try:
-                                from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
+                    _discord_tok = self.config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
+                    _discord_chan = self.config_store.get("connectors.discord.swarm_channel_id", "")
+                    if not _skip_real_adapters and _discord_tok and _discord_chan:
+                        try:
+                            from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
 
-                                bus.set_adapter(DiscordBusAdapter(bot_token=_discord_tok, channel_id=_discord_chan))
-                                _bus_wired = True
-                                logger.info("[SwarmBus] DiscordBusAdapter wired — swarm events will appear in Discord")
-                            except ImportError:
-                                logger.debug("[SwarmBus] DiscordBusAdapter not available")
-                            except Exception as e:
-                                logger.warning("[SwarmBus] Failed to wire DiscordBusAdapter: %s", e)
+                            _wired_adapters.append(
+                                DiscordBusAdapter(
+                                    bot_token=_discord_tok, channel_id=_discord_chan
+                                )
+                            )
+                            logger.info("[SwarmBus] DiscordBusAdapter ready")
+                        except ImportError:
+                            logger.debug("[SwarmBus] DiscordBusAdapter not available")
+                        except Exception as e:
+                            logger.warning("[SwarmBus] Failed to build DiscordBusAdapter: %s", e)
 
-                    # SlackBusAdapter
-                    if not _bus_wired:
-                        _slack_tok = self.config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
-                        _slack_chan = self.config_store.get("connectors.slack.swarm_channel_id", "")
-                        if not _skip_real_adapters and _slack_tok and _slack_chan:
-                            try:
-                                from kazma_gateway.adapters.slack_bus import SlackBusAdapter
+                    _slack_tok = self.config_store.get("connectors.slack.token", "") or os.environ.get("SLACK_BOT_TOKEN", "")
+                    _slack_chan = self.config_store.get("connectors.slack.swarm_channel_id", "")
+                    if not _skip_real_adapters and _slack_tok and _slack_chan:
+                        try:
+                            from kazma_gateway.adapters.slack_bus import SlackBusAdapter
 
-                                bus.set_adapter(SlackBusAdapter(bot_token=_slack_tok, channel_id=_slack_chan))
-                                _bus_wired = True
-                                logger.info("[SwarmBus] SlackBusAdapter wired — swarm events will appear in Slack")
-                            except ImportError:
-                                logger.debug("[SwarmBus] SlackBusAdapter not available")
-                            except Exception as e:
-                                logger.warning("[SwarmBus] Failed to wire SlackBusAdapter: %s", e)
+                            _wired_adapters.append(
+                                SlackBusAdapter(
+                                    bot_token=_slack_tok, channel_id=_slack_chan
+                                )
+                            )
+                            logger.info("[SwarmBus] SlackBusAdapter ready")
+                        except ImportError:
+                            logger.debug("[SwarmBus] SlackBusAdapter not available")
+                        except Exception as e:
+                            logger.warning("[SwarmBus] Failed to build SlackBusAdapter: %s", e)
 
-                    if not _bus_wired:
-                        logger.info("[SwarmBus] No platform adapter — swarm events stay internal (NullBusAdapter)")
+                    if len(_wired_adapters) == 1:
+                        bus.set_adapter(_wired_adapters[0])
+                        logger.info(
+                            "[SwarmBus] Single adapter wired: %s",
+                            type(_wired_adapters[0]).__name__,
+                        )
+                    elif len(_wired_adapters) > 1:
+                        from kazma_core.swarm.bus import FanOutBusAdapter
+
+                        bus.set_adapter(FanOutBusAdapter(_wired_adapters))
+                        logger.info(
+                            "[SwarmBus] FanOutBusAdapter wired with %d platforms: %s",
+                            len(_wired_adapters),
+                            ", ".join(type(a).__name__ for a in _wired_adapters),
+                        )
+                    else:
+                        logger.info(
+                            "[SwarmBus] No platform adapter — swarm events stay internal (NullBusAdapter)"
+                        )
                 except Exception as e:
                     logger.warning("[SwarmBus] Failed to initialize message bus: %s", e)
 
