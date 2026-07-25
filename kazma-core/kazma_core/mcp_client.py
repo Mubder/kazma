@@ -79,7 +79,10 @@ class MCPServerConfig:
     # sse fields
     url: str = ""
     headers: dict[str, str] = field(default_factory=dict)
-    timeout: float = 30.0
+    # 90s default — long enough for npx cold starts that fetch the package
+    # on first invocation (can take 30-60s on slow networks). Override per
+    # server via the ``timeout`` field, or globally via KAZMA_MCP_TIMEOUT_MS.
+    timeout: float = 90.0
     # auth: first-class auth config for SSE servers.
     # {"type": "bearer", "token": "..."} → Authorization: Bearer {token}
     # {"type": "header", "name": "X-API-Key", "value": "..."} → custom header

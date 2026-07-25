@@ -457,7 +457,16 @@ class AsyncMCPManager:
             command=command,
         )
 
-        # MCP handshake
+        # MCP handshake.  The readline wait in ``_send`` defaults to 60s,
+        # which is too short for ``npx`` cold starts (npm fetch of a fresh
+        # package can take 30-90s on slow networks).  Allow a per-server
+        # override via ``cfg["timeout"]`` or the ``KAZMA_MCP_TIMEOUT_MS``
+        # env; default 90s for stdio.
+        handshake_timeout = float(
+            cfg.get("timeout")
+            or (os.environ.get("KAZMA_MCP_TIMEOUT_MS") or "90000")
+            and str(int(os.environ.get("KAZMA_MCP_TIMEOUT_MS") or 90000) / 1000.0)
+        )
         try:
             await self._send(
                 handle,
@@ -467,11 +476,32 @@ class AsyncMCPManager:
                     "capabilities": {"tools": {"listChanged": False}},
                     "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
                 },
+                timeout=handshake_timeout,
             )
             await self._notify(handle, "notifications/initialized", {})
+        except asyncio.TimeoutError:
+            # npx cold-start or server never replied.  Capture stderr so the
+            # user can see WHY (npm fetch failure / missing dependency /
+            # bad config) instead of an opaque empty error.
+            stderr_tail = await self._drain_stderr(handle, max_bytes=1024)
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            reason = "timed out waiting for initialize response"
+            if stderr_tail:
+                reason += f" — server stderr: {stderr_tail.strip()[:400]}"
+            raise MCPBridgeError(f"Handshake failed for '{name}': {reason}")
         except Exception as exc:
-            process.terminate()
-            raise MCPBridgeError(f"Handshake failed for '{name}': {exc}") from exc
+            stderr_tail = await self._drain_stderr(handle, max_bytes=1024)
+            try:
+                process.terminate()
+            except Exception:
+                pass
+            msg = f"Handshake failed for '{name}': {exc}"
+            if stderr_tail:
+                msg += f" — server stderr: {stderr_tail.strip()[:400]}"
+            raise MCPBridgeError(msg) from exc
 
         # Discover tools
         result = await self._send(handle, "tools/list", {})
@@ -548,16 +578,67 @@ class AsyncMCPManager:
     # Internal: JSON-RPC transport
     # ════════════════════════════════════════════════════════════════
 
-    async def _send(self, handle: MCPServerHandle, method: str, params: dict[str, Any] | None = None) -> Any:
-        """Send a JSON-RPC request and return the result."""
+    async def _send(
+        self,
+        handle: MCPServerHandle,
+        method: str,
+        params: dict[str, Any] | None = None,
+        *,
+        timeout: float | None = None,
+    ) -> Any:
+        """Send a JSON-RPC request and return the result.
+
+        Args:
+            timeout: Optional per-call override (seconds) for the response
+                read.  Used by the stdio handshake to give ``npx`` cold
+                starts enough time to fetch the package before the default
+                read timeout fires.
+        """
         request = _jsonrpc_request(method, params)
         raw = json.dumps(request) + "\n"
 
         if handle.transport == "stdio":
-            return await self._send_stdio(handle, raw)
+            return await self._send_stdio(handle, raw, timeout=timeout)
         if handle.transport == "streamable_http":
             return await self._send_streamable_http(handle, raw)
         return await self._send_sse(handle, raw)
+
+    async def _drain_stderr(self, handle: MCPServerHandle, *, max_bytes: int = 2048) -> str:
+        """Best-effort non-blocking read of a stdio server's stderr.
+
+        Used by the handshake failure path so the user can see WHY an MCP
+        server didn't respond (npm fetch failure, missing dependency, bad
+        config, expired token) instead of an opaque empty error message.
+        Returns up to ``max_bytes`` of whatever is buffered.  Never raises.
+        """
+        proc = getattr(handle, "process", None)
+        if proc is None or not getattr(proc, "stderr", None):
+            return ""
+        try:
+            import threading
+
+            result: dict[str, str] = {"data": ""}
+
+            def _read() -> None:
+                try:
+                    data = (
+                        proc.stderr.read1(max_bytes)
+                        if hasattr(proc.stderr, "read1")
+                        else proc.stderr.read(max_bytes)
+                    )
+                    if isinstance(data, bytes):
+                        result["data"] = data.decode("utf-8", errors="replace")
+                    elif data:
+                        result["data"] = str(data)
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=_read, daemon=True)
+            t.start()
+            t.join(timeout=1.0)
+            return result["data"]
+        except Exception:
+            return ""
 
     async def _notify(self, handle: MCPServerHandle, method: str, params: dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no response expected)."""
@@ -583,8 +664,15 @@ class AsyncMCPManager:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[MCP] streamable_http notify failed for '%s': %s", handle.name, exc)
 
-    async def _send_stdio(self, handle: MCPServerHandle, raw: str) -> Any:
-        """Send a JSON-RPC message over stdio and read the response."""
+    async def _send_stdio(self, handle: MCPServerHandle, raw: str, *, timeout: float | None = None) -> Any:
+        """Send a JSON-RPC message over stdio and read the response.
+
+        Args:
+            timeout: Optional per-call read timeout (seconds). Defaults to
+                60s — the stdio handshake passes a longer value (90s by
+                default, ``KAZMA_MCP_TIMEOUT_MS``) so ``npx`` cold starts
+                that fetch packages on first run don't get killed mid-fetch.
+        """
         proc = handle.process
         if proc is None or proc.stdin is None or proc.stdout is None:
             raise MCPBridgeError(f"stdio process '{handle.name}' not running")
@@ -595,7 +683,7 @@ class AsyncMCPManager:
 
         # Read response (one line per JSON-RPC message)
         async with handle.read_lock:
-            line = await asyncio.wait_for(proc.stdout.readline(), timeout=60.0)
+            line = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout or 60.0)
 
         if not line:
             # Check if process died
