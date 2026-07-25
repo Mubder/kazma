@@ -10,6 +10,11 @@
   var currentMsgEl = null;
   var tokenAccum = '';
   var activeStream = null;
+  // Track the last successfully-sent user message so the empty-turn
+  // recovery can offer a one-click Retry instead of leaving the user
+  // staring at "_No response received._" with no recourse. Reset on
+  // every fresh sendMessage(); only the recovery path reads it.
+  var lastSentUserText = '';
   var sessions = [];
   var messageReactions = {};
   var searchQuery = '';

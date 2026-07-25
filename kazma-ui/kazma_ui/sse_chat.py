@@ -443,7 +443,27 @@ async def _stream_langgraph_events(
 
         except Exception as exc:
             logger.error("SSE stream error: %s", exc, exc_info=True)
-            yield _sse_frame("error", {"content": sanitize_error(exc)})
+            # Layer 2 of the "agent stopped talking" defense: if the stream
+            # errored WITHOUT producing any assistant text (the classic
+            # "_No response received_" symptom), emit a recoverable notice
+            # BEFORE the raw error. The bare error frame used to leave the
+            # chat showing only a blank "K" bubble — the user thought the
+            # agent died. Now they get an explanation + the error inline.
+            if not content_acc and not interrupted:
+                recovery = (
+                    "⚠️ The agent hit an error before producing a reply. "
+                    "This is usually transient — please try again, or rephrase.\n\n"
+                    f"Detail: {sanitize_error(exc)}\n"
+                    f"Thread: `{thread_id}`"
+                )
+                content_acc = recovery
+                yield _sse_frame("token", {"content": recovery})
+                logger.warning(
+                    "[SSE] Empty turn recovered on exception — thread=%s tokens=%s",
+                    thread_id, total_tokens,
+                )
+            else:
+                yield _sse_frame("error", {"content": sanitize_error(exc)})
     finally:
         if token is not None:
             reset_current_thread_id(token)

@@ -525,10 +525,11 @@ class KazmaAgent:
         env: dict[str, str] | None = None,
         working_dir: str | None = None,
     ) -> dict[str, str]:
-        """Add an MCP server to the in-memory configuration.
+        """Add an MCP server to the configuration AND persist it to kazma.yaml.
 
         Returns ``{"status": "ok"}`` on success or
-        ``{"status": "error", "error": "..."}`` if a duplicate name exists.
+        ``{"status": "error", "error": "..."}`` if a duplicate name exists
+        or persistence fails.
         """
         new_server: dict[str, Any] = {"name": name, "transport": transport}
         if transport == "stdio":
@@ -548,17 +549,81 @@ class KazmaAgent:
                 return {"status": "error", "error": f"Server '{name}' already exists"}
 
         servers_list.append(new_server)
+        # Persist to kazma.yaml so the server survives restart. Without this,
+        # Add Server mutations lived only in config.raw (in-memory) and were
+        # lost on the next process boot — the "Playwright MCP disappears on
+        # restart" bug.
+        persist_err = self._persist_mcp_servers()
+        if persist_err:
+            return {"status": "error", "error": f"Saved in-memory but not persisted: {persist_err}"}
         return {"status": "ok"}
 
     def remove_mcp_server(self, name: str) -> dict[str, str]:
-        """Remove an MCP server from the in-memory configuration.
+        """Remove an MCP server from the configuration AND persist the change.
 
-        Returns ``{"status": "ok"}``. Does NOT raise if the server was absent.
+        Returns ``{"status": "ok"}`` on success or
+        ``{"status": "error", "error": "..."}`` if persistence fails. Does
+        NOT raise if the server was absent (idempotent removal).
         """
         mcp_section = self.config.raw.get("mcp", {})
         servers = mcp_section.get("servers", [])
         mcp_section["servers"] = [s for s in servers if s.get("name") != name]
+        persist_err = self._persist_mcp_servers()
+        if persist_err:
+            return {"status": "error", "error": f"Removed in-memory but not persisted: {persist_err}"}
         return {"status": "ok"}
+
+    def _persist_mcp_servers(self) -> str | None:
+        """Write the current ``mcp`` section back to ``kazma.yaml``.
+
+        Returns ``None`` on success or an error message string on failure.
+        The write is atomic (temp file + rename) and preserves the rest of
+        the YAML structure (comments are lost — PyYAML limitation — but
+        keys/values/formatting survive). If the file is read-only or
+        missing, the in-memory change still takes effect for the current
+        process; we just can't make it durable.
+        """
+        try:
+            import yaml
+            from pathlib import Path
+
+            # Resolve the actual config file path. CONFIG_FILE is a relative
+            # default; honour an explicit config_path if the agent was given
+            # one (it's stored on the config object when load_config(path)
+            # was used).
+            path_str = getattr(self.config, "config_path", None) or CONFIG_FILE
+            yaml_path = Path(path_str)
+            if not yaml_path.is_file():
+                return f"kazma.yaml not found at {yaml_path}"
+
+            # Re-read the on-disk YAML (don't trust config.raw — it may have
+            # in-memory overlays from kazma.local.yaml that shouldn't be
+            # written back to the shipped file).
+            try:
+                with open(yaml_path, encoding="utf-8") as f:
+                    on_disk = yaml.safe_load(f) or {}
+            except Exception as exc:
+                return f"could not read {yaml_path}: {exc}"
+
+            # Replace ONLY the mcp section — leave everything else untouched.
+            on_disk["mcp"] = self.config.raw.get("mcp", {})
+
+            # Atomic write: temp file in the same dir, then rename.
+            tmp_path = yaml_path.with_suffix(yaml_path.suffix + ".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(
+                    on_disk, f,
+                    default_flow_style=False,
+                    allow_unicode=True,
+                    sort_keys=False,
+                )
+            tmp_path.replace(yaml_path)
+            logger.info("[MCP] Persisted mcp.servers to %s (%d server(s))",
+                        yaml_path, len(on_disk["mcp"].get("servers", [])))
+            return None
+        except Exception as exc:
+            logger.warning("[MCP] Failed to persist mcp.servers: %s", exc)
+            return str(exc)
 
     # ── LLM config ─────────────────────────────────────────────────
 
