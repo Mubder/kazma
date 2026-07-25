@@ -256,7 +256,7 @@ class AsyncMCPManager:
             if not handle.connected:
                 continue
             for tool in handle.tools:
-                name = tool.get("name", "")
+                raw_name = tool.get("name", "")
                 desc = tool.get("description", "")
                 input_schema = tool.get("inputSchema", {"type": "object", "properties": {}})
 
@@ -264,40 +264,60 @@ class AsyncMCPManager:
                 if "type" not in input_schema:
                     input_schema["type"] = "object"
 
+                # NAMESPACE the tool name as mcp__<server>__<tool> so it can
+                # never collide with a built-in tool (e.g. Playwright MCP's
+                # 'browser_click' vs the browser_automation skill's
+                # 'browser_click'). Without this, providers that require
+                # unique tool names (DeepSeek, OpenAI) reject the whole
+                # request with HTTP 400 'Tool names must be unique' and the
+                # agent loses ALL tools for the turn (the
+                # 'agent-stopped-talking' / raw-markup-in-reply symptom).
+                namespaced = f"mcp__{handle.name}__{raw_name}" if raw_name else raw_name
+
                 schemas.append(
                     {
                         "type": "function",
                         "function": {
-                            "name": name,
+                            "name": namespaced,
                             "description": desc,
                             "parameters": input_schema,
                         },
-                        "_mcp_server": handle.name,  # routing hint (stripped before sending to LLM)
+                        "_mcp_server": handle.name,        # routing hint (stripped before sending to LLM)
+                        "_mcp_raw_name": raw_name,          # original name for execution routing
                     }
                 )
         return schemas
 
     def get_tool_server_map(self) -> dict[str, str]:
-        """Return a mapping of tool_name → server_name for all MCP tools."""
+        """Return a mapping of namespaced_tool_name → server_name.
+
+        Keys are the ``mcp__<server>__<tool>`` form the LLM sees (matching
+        :meth:`get_all_tool_schemas`), so execute_mcp_tool can route a
+        model-emitted call back to the right server.
+        """
         mapping: dict[str, str] = {}
         for handle in self._servers.values():
             if not handle.connected:
                 continue
             for tool in handle.tools:
-                tool_name = tool.get("name", "")
-                if tool_name:
-                    mapping[tool_name] = handle.name
+                raw_name = tool.get("name", "")
+                if raw_name:
+                    namespaced = f"mcp__{handle.name}__{raw_name}"
+                    mapping[namespaced] = handle.name
         return mapping
 
     def get_clean_schemas(self) -> list[dict[str, Any]]:
-        """Return schemas with the internal ``_mcp_server`` key stripped.
+        """Return schemas with internal routing keys stripped.
 
-        This is what gets sent to the LLM — the ``_mcp_server`` hint is
-        only used internally for routing.
+        This is what gets sent to the LLM — the ``_mcp_server`` and
+        ``_mcp_raw_name`` hints are only used internally for routing.
+        The ``function.name`` stays in its namespaced ``mcp__<server>__<tool>``
+        form so it's unique across all servers + built-in tools.
         """
         schemas = self.get_all_tool_schemas()
         for s in schemas:
             s.pop("_mcp_server", None)
+            s.pop("_mcp_raw_name", None)
         return schemas
 
     # ── Tool execution ──────────────────────────────────────────────
@@ -312,7 +332,11 @@ class AsyncMCPManager:
 
         Args:
             server_name: The MCP server name (as configured).
-            tool_name: The tool name to call.
+            tool_name: The tool name to call. Accepts BOTH the namespaced
+                form (``mcp__<server>__<tool>``, what the LLM sees after
+                :meth:`get_all_tool_schemas` namespaces) and the raw form
+                (``<tool>``, what the server expects). The namespace prefix
+                is stripped before sending so the server recognises the call.
             arguments: Tool arguments.
 
         Returns:
@@ -325,9 +349,20 @@ class AsyncMCPManager:
                 "is_error": True,
             }
 
+        # Strip the mcp__<server>__ namespace prefix if present — the LLM
+        # emits the namespaced form (to avoid collisions), but the server
+        # only knows its own raw tool names.
+        raw_tool_name = tool_name
+        prefix = f"mcp__{server_name}__"
+        if tool_name.startswith(prefix):
+            raw_tool_name = tool_name[len(prefix):]
+        elif tool_name.startswith("mcp__"):
+            # Namespaced for a different server — strip just the last segment.
+            raw_tool_name = tool_name.split("__", 2)[-1] if "__" in tool_name else tool_name
+
         start = time.monotonic()
         try:
-            params: dict[str, Any] = {"name": tool_name, "arguments": arguments if arguments is not None else {}}
+            params: dict[str, Any] = {"name": raw_tool_name, "arguments": arguments if arguments is not None else {}}
 
             result = await self._send(handle, "tools/call", params)
 
@@ -372,7 +407,22 @@ class AsyncMCPManager:
     # ── Introspection ───────────────────────────────────────────────
 
     def is_mcp_tool(self, tool_name: str) -> bool:
-        """Check if a tool name belongs to any connected MCP server."""
+        """Check if a tool name belongs to any connected MCP server.
+
+        Accepts both the namespaced form (``mcp__<server>__<tool>``, what
+        the LLM emits after :meth:`get_all_tool_schemas` namespaces) and
+        the raw form (``<tool>``).
+        """
+        # Fast path: namespaced form → split once, check the named server.
+        if tool_name.startswith("mcp__"):
+            parts = tool_name.split("__", 2)
+            if len(parts) == 3:
+                server, raw = parts[1], parts[2]
+                handle = self._servers.get(server)
+                if handle and handle.connected:
+                    return any(t.get("name") == raw for t in handle.tools)
+            return False
+        # Raw form → scan all servers.
         for handle in self._servers.values():
             if not handle.connected:
                 continue
@@ -382,7 +432,22 @@ class AsyncMCPManager:
         return False
 
     def get_server_for_tool(self, tool_name: str) -> str | None:
-        """Return the server name that owns a tool, or None."""
+        """Return the server name that owns a tool, or None.
+
+        Accepts both the namespaced form (``mcp__<server>__<tool>``) and
+        the raw form (``<tool>``).
+        """
+        # Fast path: namespaced form → the server is encoded in the name.
+        if tool_name.startswith("mcp__"):
+            parts = tool_name.split("__", 2)
+            if len(parts) == 3:
+                server, raw = parts[1], parts[2]
+                handle = self._servers.get(server)
+                if handle and handle.connected:
+                    if any(t.get("name") == raw for t in handle.tools):
+                        return handle.name
+            return None
+        # Raw form → scan all servers.
         for handle in self._servers.values():
             if not handle.connected:
                 continue

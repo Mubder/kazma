@@ -508,6 +508,11 @@
     var hasUploads = pendingUploads.length > 0;
     if (!text && !hasTextAtt && !hasUploads) return;
 
+    // Track for the empty-turn Retry button (agent-stopped-talking layer 4).
+    // Only set when there's real text — uploads-only turns can't be retried
+    // by re-typing in the input.
+    if (text) lastSentUserText = text;
+
     hideSlashMenu();
 
     // Handle /voice commands locally
@@ -646,14 +651,29 @@
 
       onDone: function(data) {
         KS.hideTyping(typingEl);
-        // Never leave a blank turn after "Thinking…" (empty stream / missed HITL)
+        // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
+        // Layer 4 of the agent-stopped-talking defense: instead of a bare
+        // "_No response received._" with no recourse, show a Retry button
+        // that re-sends the last user message in one click. Recoverable in
+        // one click instead of looking broken.
         if (!tokenAccum && !currentMsgEl && !(data && data.interrupted)) {
           currentMsgEl = createAssistantMessage();
           var emptyEl = currentMsgEl.querySelector('.message-text');
           if (emptyEl) {
-            emptyEl.innerHTML = KS.markdown
-              ? KS.markdown('_No response received. Try again, or check server logs / Pending Approvals._')
-              : '<em>No response received. Try again.</em>';
+            // Build a Retry button only if there's a message to retry.
+            // Prefer the tracked lastSentUserText (robust — works even
+            // when no user bubble rendered); fall back to window.KazmaChat.retry()
+            // which reads from the DOM.
+            var retryHtml = '';
+            if (lastSentUserText || (messagesEl.querySelector('.message-user'))) {
+              retryHtml = ' <button class="btn btn-secondary btn-sm" '
+                + 'style="margin-left:8px;" '
+                + 'onclick="window.KazmaChat && window.KazmaChat.retry && window.KazmaChat.retry()">'
+                + '↻ Retry</button>';
+            }
+            emptyEl.innerHTML = (KS.markdown
+              ? KS.markdown('_No response received._ Check server logs or Pending Approvals.')
+              : '<em>No response received.</em>') + retryHtml;
           }
         }
         if (data) {

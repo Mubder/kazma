@@ -807,8 +807,23 @@ class LocalToolRegistry:
                     if h.document_title:
                         lines.append(f"*(page: {h.document_title})*")
                     lines.append(h.content)
+                # Citation directive: the user wants every KB-derived answer
+                # to carry a visible footer naming the source library, so they
+                # can tell where the information came from. Per-item libraries
+                # vary when searching across libraries; collect the unique set.
+                cited_libs = sorted({h.library_id for h in hits})
+                if len(cited_libs) == 1:
+                    lib_footer = f'📚 This data is from Knowledge "{cited_libs[0]}".'
+                else:
+                    lib_footer = (
+                        "📚 This data is from Knowledge libraries: "
+                        + ", ".join(f'"{l}"' for l in cited_libs) + "."
+                    )
                 lines.append(
-                    "\n---\nCite the source URL + section header above when you use this material."
+                    "\n---\n"
+                    + lib_footer + "\n"
+                    "You MUST include this footer verbatim at the end of any answer "
+                    "that uses the material above."
                 )
                 return "\n".join(lines)
             except Exception as exc:
