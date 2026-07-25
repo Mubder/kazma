@@ -96,6 +96,59 @@ def test_prefix_scope_rejects_other_host():
     assert not _in_scope(seed, "https://y.com/docs/whatsapp/attack", "prefix")
 
 
+# ── Tree scope (default) — handles cross-prefix doc trees like Meta's ──────
+
+
+def test_tree_scope_accepts_cross_prefix_same_topic():
+    """Meta splits WhatsApp docs across /documentation/.../whatsapp/... and
+    /docs/whatsapp/... The 'tree' scope (default) must accept both because
+    they share the 'whatsapp' topic segment. 'prefix' scope wrongly rejected
+    the /docs/* URLs, which is why a crawl from the overview page only ever
+    ingested 1 page."""
+    from kazma_core.stores.knowledge_ingest import _seed_topic_segments
+
+    seed = "https://developers.facebook.com/documentation/business-messaging/whatsapp/overview"
+    assert _seed_topic_segments(seed) == {"whatsapp"}
+
+    # Cross-prefix but same topic → accepted.
+    assert _in_scope(seed, "https://developers.facebook.com/docs/whatsapp/cloud-api", "tree")
+    assert _in_scope(seed, "https://developers.facebook.com/docs/whatsapp/cloud-api/reference/messages", "tree")
+    assert _in_scope(seed, "https://developers.facebook.com/documentation/business-messaging/whatsapp/in-app-signup", "tree")
+
+    # Wrong topic → rejected.
+    assert not _in_scope(seed, "https://developers.facebook.com/docs/instagram-api", "tree")
+    assert not _in_scope(seed, "https://developers.facebook.com/marketing-api/ads", "tree")
+
+    # Wrong host → rejected.
+    assert not _in_scope(seed, "https://evil.com/docs/whatsapp/x", "tree")
+
+
+def test_tree_scope_strips_generic_segments():
+    """Generic segments (docs, documentation, overview, cloud-api, v1, en)
+    don't count as the topic. The topic is the distinctive word."""
+    from kazma_core.stores.knowledge_ingest import _seed_topic_segments
+
+    # Only 'shipx' is the topic; everything else is noise.
+    assert _seed_topic_segments("https://x.com/docs/v1/en/overview/shipx") == {"shipx"}
+    # No distinctive segments → empty set → tree scope rejects everything
+    # (safe default; user should pick a more specific seed).
+    assert _seed_topic_segments("https://x.com/docs/overview") == set()
+
+
+def test_tree_is_the_default_scope_mode():
+    """'tree' must be the default so cross-prefix doc trees work out of the
+    box. Was 'prefix' which silently broke crawls from landing pages."""
+    from kazma_core.stores.knowledge_ingest import _kb_scope_mode
+
+    import os
+    saved = os.environ.pop("KAZMA_KB_SCOPE_MODE", None)
+    try:
+        assert _kb_scope_mode() == "tree"
+    finally:
+        if saved is not None:
+            os.environ["KAZMA_KB_SCOPE_MODE"] = saved
+
+
 # ── Bot-block detection + .gz sitemap handling ──────────────────────────────
 
 
