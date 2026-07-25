@@ -212,15 +212,21 @@ def _in_scope(seed_url: str, candidate: str, mode: str) -> bool:
 
 
 async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None, str]:
-    """Lightweight GET.  Returns (text, final_url).  None text on failure."""
+    """Lightweight GET.  Returns (text, final_url).  None text on failure.
+
+    Transparently handles gzip/deflate Content-Encoding AND ``.gz`` URLs
+    (some sites — e.g. developers.facebook.com — ship sitemaps as
+    ``sitemap.xml.gz`` even though the response is the raw gzip bytes).
+    """
     try:
+        import gzip
         import httpx
         from kazma_core.security.ssrf import SSRFError, validate_url
 
         validate_url(url)
         async with httpx.AsyncClient(
             follow_redirects=True, timeout=timeout,
-            headers={"User-Agent": _BROWSER_UA},
+            headers={"User-Agent": _BROWSER_UA, "Accept-Encoding": "gzip, deflate"},
         ) as client:
             r = await client.get(url)
             final = str(r.url)
@@ -230,6 +236,21 @@ async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None
                 return None, url
             if r.status_code >= 400:
                 return None, final
+            content = r.content or b""
+            # Case 1: URL ends in .gz → content is raw gzip bytes regardless
+            # of Content-Encoding.  Decompress and inspect.
+            if final.lower().endswith(".gz"):
+                try:
+                    decompressed = gzip.decompress(content).decode("utf-8", errors="replace")
+                    if decompressed.lstrip().startswith("<"):
+                        return decompressed, final
+                except Exception as exc:
+                    logger.debug("[kb_discover] .gz decompress failed %s: %s", final, exc)
+                # Decompression failed or didn't yield XML — likely a bot-walled
+                # HTML error page returned for a .gz URL.  Drop it.
+                return None, final
+            # Case 2: response body (httpx already decompresses Content-Encoding
+            # for us, so r.text is plain text).
             return r.text or "", final
     except Exception as exc:
         logger.debug("[kb_discover] GET %s failed: %s", url, exc)
@@ -292,13 +313,23 @@ def _extract_urls_from_sitemap(xml_text: str) -> list[str]:
     return urls
 
 
-async def kb_discover_pages(seed_url: str, *, mode: str | None = None) -> list[str]:
+async def kb_discover_pages(
+    seed_url: str,
+    *,
+    mode: str | None = None,
+    on_progress: Any = None,
+) -> list[str]:
     """Discover the full set of in-scope URLs for a library.
 
     Strategy (first wins):
       1. Sitemap (robots.txt + well-known) — authoritative complete list.
       2. BFS link-walk using Playwright-rendered HTML so SPA nav links are
          captured.  Path-prefix scoped.
+
+    ``on_progress`` is an optional **plain async** callable ``async (msg) -> None``
+    receiving a short human-readable status string (e.g. ``"fetching
+    robots.txt…"``) so the caller can show live discovery activity
+    instead of a silent 0/0/0.  It must NOT be a generator.
 
     Returns a de-duplicated, in-scope, ordered URL list, seed first.
     """
@@ -312,9 +343,11 @@ async def kb_discover_pages(seed_url: str, *, mode: str | None = None) -> list[s
         scope_mode = "prefix"
 
     # ── 1. Sitemap discovery ─────────────────────────────────────────
+    await _safe_progress(on_progress, "fetching robots.txt + sitemaps…")
     discovered: list[str] = []
     sitemap_docs = await _fetch_sitemaps(seed)
     if sitemap_docs:
+        await _safe_progress(on_progress, f"parsing {len(sitemap_docs)} sitemap doc(s)…")
         for doc in sitemap_docs:
             discovered.extend(_extract_urls_from_sitemap(doc))
         discovered = [u for u in discovered if _in_scope(seed, u, scope_mode)]
@@ -331,15 +364,38 @@ async def kb_discover_pages(seed_url: str, *, mode: str | None = None) -> list[s
                 len(ordered), seed,
             )
             return ordered
+        await _safe_progress(on_progress, "sitemap had 0 in-scope URLs; falling back to link-walk")
+    else:
+        await _safe_progress(on_progress, "no sitemap reachable; falling back to link-walk")
 
     # ── 2. BFS link-walk fallback (Playwright for SPA nav) ──────────
     if scope_mode == "exact":
         return [seed]
-    bfs_urls = await _bfs_discover(seed, scope_mode)
+    await _safe_progress(on_progress, "rendering seed page to discover nav links…")
+    bfs_urls = await _bfs_discover(seed, scope_mode, on_progress=on_progress)
     return bfs_urls or [seed]
 
 
-async def _bfs_discover(seed: str, scope_mode: str) -> list[str]:
+async def _safe_progress(on_progress: Any, msg: str) -> None:
+    """Invoke an optional progress callback, swallowing any error.
+
+    The callback must be a plain ``async (str) -> None`` (NOT a generator).
+    """
+    if on_progress is not None:
+        try:
+            res = on_progress(msg)
+            if hasattr(res, "__await__"):
+                await res
+        except Exception:
+            pass
+
+
+async def _bfs_discover(
+    seed: str,
+    scope_mode: str,
+    *,
+    on_progress: Any = None,
+) -> list[str]:
     """BFS link-walk using Playwright-rendered HTML (so SPA nav links are seen)."""
     max_pages = _kb_max_pages()
     max_depth = _kb_max_depth()
@@ -351,11 +407,14 @@ async def _bfs_discover(seed: str, scope_mode: str) -> list[str]:
         if url in seen:
             continue
         seen.add(url)
+        await _safe_progress(on_progress, f"link-walk depth {depth}: {url[:80]}")
+        # Depth 0 (seed) and bot-walled sites → use Playwright first.
+        # Deeper pages are usually inter-page links the static fetcher can read.
         html = await _fetch_html_playwright(url) if depth == 0 else await _fetch_html_raw(url)
-        if not html:
+        if not html or _looks_like_bot_block_html(html):
             # Fall back to the other fetcher.
             html = await _fetch_html_raw(url) if depth == 0 else await _fetch_html_playwright(url)
-        if not html:
+        if not html or _looks_like_bot_block_html(html):
             continue
         ordered.append(url)
         if depth < max_depth:
@@ -385,11 +444,60 @@ async def _fetch_html_raw(url: str) -> str | None:
     return text
 
 
+def _looks_like_bot_block_html(html: str | None) -> bool:
+    """Heuristic: did the server return an error/bot-block page instead of content?
+
+    Many bot-walled sites (Meta especially) return HTTP 200 with a tiny
+    ``<title>Error</title>`` HTML stub to non-browser clients.  Detecting
+    this lets us fall through to Playwright instead of treating the stub
+    as a (worthless) successful fetch.
+    """
+    if not html:
+        return True
+    sample = html[:2000].lower()
+    if "<title>error</title>" in sample:
+        return True
+    if "<title>404</title>" in sample or "<title>403</title>" in sample:
+        return True
+    # Very short HTML with no real body content.
+    if len(html) < 500 and "<p>" not in sample and "<article" not in sample:
+        return True
+    return False
+
+
 async def _fetch_html_playwright(url: str) -> str | None:
     """Render a page with Playwright and return its full HTML.
 
     Used for SPA doc sites whose nav links are absent from the static
     HTML.  Optional — returns None if Playwright isn't installed.
+    """
+    html = await _render_with_playwright(url, want_text=False)
+    return html
+
+
+# ── Page extraction (static + tabbed/JS) ────────────────────────────────────
+
+
+async def _render_with_playwright(url: str, *, want_text: bool) -> str | None:
+    """Render a URL with a stealth Chromium context, return HTML or full-DOM text.
+
+    This is the **primary** fetcher for bot-walled SPA doc sites (Meta,
+    etc.) where httpx returns a 400/error stub regardless of UA.  We:
+
+    - Use ``domcontentloaded`` instead of ``networkidle`` so SPAs that
+      keep long-poll connections open don't hang forever (the cause of
+      the original crawl hanging at 0/0/0 on Meta).
+    - Apply the same stealth init scripts as ``read_url._fetch_with_playwright``
+      (``navigator.webdriver`` removal, fake plugins, etc.).
+    - Wait for *content* (``body`` innerText to exceed a threshold) rather
+      than network quiescence.
+    - Detect a returned bot-block/error page and return None so the caller
+      can fall through or surface a clean error.
+
+    Args:
+        want_text: ``False`` → return raw HTML (for link discovery).
+                   ``True``  → return the full-DOM textContent (for chunking;
+                   includes hidden-tab panels).
     """
     try:
         from playwright.async_api import async_playwright
@@ -397,22 +505,76 @@ async def _fetch_html_playwright(url: str) -> str | None:
         return None
     try:
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                ],
+            )
             try:
-                ctx = await browser.new_context(user_agent=_BROWSER_UA)
+                ctx = await browser.new_context(
+                    viewport={"width": 1920, "height": 1080},
+                    user_agent=_BROWSER_UA,
+                    locale="en-US",
+                    timezone_id="America/New_York",
+                )
+                await ctx.add_init_script(
+                    """
+                    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                    Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+                    Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+                    window.chrome = { runtime: {} };
+                    """
+                )
                 page = await ctx.new_page()
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-                await page.wait_for_timeout(1500)
-                html = await page.content()
-                return html
+                # ``domcontentloaded`` returns as soon as the DOM parses —
+                # NOT after network quiescence.  SPAs with analytics/beacon
+                # traffic never reach networkidle and would hang here.
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                # Wait for real content: body innerText must exceed the
+                # useful-chars threshold within a bounded budget.
+                try:
+                    await page.wait_for_function(
+                        f"() => (document.body && (document.body.innerText || '').length) >= {MIN_USEFUL_CHARS}",
+                        timeout=20000,
+                    )
+                except Exception:
+                    # Content never reached the threshold — give up gracefully
+                    # rather than hanging.  Caller will treat as a failed page.
+                    logger.debug("[kb_ingest] Playwright content wait failed for %s", url)
+                    return None
+
+                if not want_text:
+                    html = await page.content()
+                    if _looks_like_bot_block_html(html):
+                        return None
+                    return html
+
+                # want_text: click tabs to render hidden panels, then pull
+                # full-DOM textContent (includes display:none/aria-hidden).
+                try:
+                    await _click_tabs(page)
+                except Exception as exc:
+                    logger.debug("[kb_ingest] tab click pass skipped: %s", exc)
+                text = await page.evaluate(
+                    """() => {
+                        const root = document.body || document.documentElement;
+                        return root ? (root.textContent || '') : '';
+                    }"""
+                )
+                if not text or len(text) < MIN_USEFUL_CHARS:
+                    return None
+                # Collapse whitespace; the chunker re-introduces structure.
+                text = re.sub(r"[ \t]+\n", "\n", text)
+                text = re.sub(r"\n{3,}", "\n\n", text)
+                return text.strip()
             finally:
                 await browser.close()
     except Exception as exc:
-        logger.debug("[kb_discover] Playwright html fetch failed %s: %s", url, exc)
+        logger.debug("[kb_ingest] Playwright render failed %s: %s", url, exc)
         return None
-
-
-# ── Page extraction (static + tabbed/JS) ────────────────────────────────────
 
 
 async def _extract_page(url: str) -> tuple[str | None, str]:
@@ -420,23 +582,24 @@ async def _extract_page(url: str) -> tuple[str | None, str]:
 
     Tiered:
       1. ``_fetch_full_text`` (Jina → Firecrawl → httpx+trafilatura → Playwright).
-      2. If (1) returns thin content or fails on what looks like a JS/tab
-         page, fall back to Playwright full-DOM extraction (hidden panels
-         included).
+      2. If (1) returns thin content, an error stub, or fails on what looks
+         like a bot-walled JS/tab page, fall back to Playwright full-DOM
+         extraction (hidden panels included).
 
     Returns ``(markdown_or_None, status)`` where status is one of
     ``"ok"``, ``"thin"`` (suspiciously short, candidate for retry),
     ``"empty"``, ``"error"``.
     """
     text = await _fetch_full_text(url)
-    if text.startswith("Error:"):
+    looks_blocked = text.startswith("Error:") or _looks_like_bot_block_html(text)
+    if looks_blocked:
         # Try Playwright full-DOM before giving up.
-        pw = await _extract_playwright_full_dom(url)
+        pw = await _render_with_playwright(url, want_text=True)
         if pw and len(pw) >= MIN_USEFUL_CHARS:
             return pw, "ok"
         return None, "error"
     if len(text) < MIN_USEFUL_CHARS:
-        pw = await _extract_playwright_full_dom(url)
+        pw = await _render_with_playwright(url, want_text=True)
         if pw and len(pw) > len(text):
             return pw, "ok"
         if not text.strip():
@@ -446,55 +609,12 @@ async def _extract_page(url: str) -> tuple[str | None, str]:
 
 
 async def _extract_playwright_full_dom(url: str) -> str | None:
-    """Render and pull text from EVERY element, including hidden panels.
+    """Back-compat thin wrapper around :func:`_render_with_playwright`.
 
-    This is the key for tabbed doc sites: trafilatura extracts only the
-    "main visible article" and discards ``display:none``/``aria-hidden``
-    panels (i.e. every non-active tab).  We instead iterate the whole DOM.
-
-    Optional — returns None if Playwright isn't installed.
+    Kept so external callers/tests that referenced the old name keep
+    working.  New code should call ``_render_with_playwright`` directly.
     """
-    try:
-        from playwright.async_api import async_playwright
-    except ImportError:
-        return None
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-            try:
-                ctx = await browser.new_context(user_agent=_BROWSER_UA)
-                page = await ctx.new_page()
-                await page.goto(url, wait_until="networkidle", timeout=30000)
-                await page.wait_for_timeout(2000)
-                # Click each tab-ish control once so hidden panels render
-                # their content into the DOM, then pull everything.  This is
-                # a heuristic; the full-DOM pull below also catches panels
-                # that never get clicked because their text is already in
-                # the DOM behind display:none.
-                try:
-                    await _click_tabs(page)
-                except Exception as exc:
-                    logger.debug("[kb_ingest] tab click pass skipped: %s", exc)
-                # Pull visible *and* hidden text.  ``innerText`` respects
-                # CSS visibility, so we use ``textContent`` on body which
-                # includes hidden-but-DOM-present panels.
-                text = await page.evaluate(
-                    """() => {
-                        const root = document.body || document.documentElement;
-                        return root ? (root.textContent || '') : '';
-                    }"""
-                )
-                if not text:
-                    return None
-                # Collapse whitespace; the chunker will re-introduce structure.
-                text = re.sub(r"[ \t]+\n", "\n", text)
-                text = re.sub(r"\n{3,}", "\n\n", text)
-                return text.strip()
-            finally:
-                await browser.close()
-    except Exception as exc:
-        logger.debug("[kb_ingest] Playwright full-DOM failed %s: %s", url, exc)
-        return None
+    return await _render_with_playwright(url, want_text=True)
 
 
 async def _click_tabs(page: Any) -> None:
@@ -625,6 +745,17 @@ async def ingest_site(
 
     # ── Discover ─────────────────────────────────────────────────────
     yield ProgressUpdate(phase="discover", started_at=started, message=f"discovering pages under {seed_url}")
+
+    # Discovery runs as a task so we can stream its progress messages to
+    # the caller live (otherwise the slow robots.txt/sitemap/Playwright
+    # sequence looks like a silent hang).  The callback pushes messages
+    # into a queue; we drain it while awaiting the discovery result.
+    import asyncio as _aio
+    progress_q: _aio.Queue[str] = _aio.Queue()
+
+    async def _on_discovery_progress(msg: str) -> None:
+        await progress_q.put(msg)
+
     try:
         from kazma_core.security.ssrf import SSRFError, validate_url
 
@@ -632,12 +763,36 @@ async def ingest_site(
     except Exception as exc:
         yield ProgressUpdate(phase="error", message=f"invalid seed: {exc}", started_at=started)
         return
-    pages = await kb_discover_pages(seed_url)
+
+    disco_task = _aio.create_task(kb_discover_pages(seed_url, on_progress=_on_discovery_progress))
+    try:
+        while not disco_task.done():
+            # Drain any progress messages that arrived, with a short timeout
+            # so we still poll the task promptly.
+            try:
+                msg = await _aio.wait_for(progress_q.get(), timeout=0.5)
+                yield ProgressUpdate(
+                    phase="discover", started_at=started,
+                    message=f"discovery: {msg}",
+                )
+            except _aio.TimeoutError:
+                # No message yet; yield control so the task can progress.
+                await _aio.sleep(0.1)
+        # Task finished — drain any remaining messages.
+        while not progress_q.empty():
+            msg = progress_q.get_nowait()
+            yield ProgressUpdate(phase="discover", started_at=started, message=f"discovery: {msg}")
+        pages = await disco_task
+    except Exception as exc:
+        disco_task.cancel()
+        yield ProgressUpdate(phase="error", message=f"discovery failed: {exc}", started_at=started)
+        return
+
     pages = pages[:page_cap]
     result.pages_discovered = len(pages)
     yield ProgressUpdate(
         phase="discover", discovered=len(pages), started_at=started,
-        message=f"discovered {len(pages)} pages",
+        message=f"discovered {len(pages)} pages — starting fetch",
     )
 
     # ── Fetch + ingest each page ─────────────────────────────────────
