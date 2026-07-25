@@ -691,8 +691,8 @@ async def tool_worker_node(
             "tool_calls_pending": [],
             "tool_calls_done": list(results),
             "tool_results": cumulative,
-            "consecutive_tool_failures": state.get("consecutive_tool_failures", 0),
-            "circuit_breaker_tripped": True,
+            "consecutive_tool_failures": 0,
+            "circuit_breaker_tripped": False,
             "next_node": NodeName.RESPOND,
         }
 
@@ -842,6 +842,7 @@ async def tool_worker_node(
                 allow = approved and (approved_ids is None or tc_id in approved_ids)
                 if allow:
                     logger.info("[ToolWorker] HITL approved: %s", tc["name"])
+                    consecutive_failures = 0
                     _token = _hitl_approved_ctx.set(True)
                     try:
                         results.append(await _exec_one(tc))
@@ -906,8 +907,8 @@ async def tool_worker_node(
             "tool_calls_pending": [],  # all consumed
             "tool_calls_done": list(results),
             "tool_results": cumulative,
-            "consecutive_tool_failures": consecutive_failures,
-            "circuit_breaker_tripped": breaker_tripped_now,
+            "consecutive_tool_failures": 0 if breaker_tripped_now else consecutive_failures,
+            "circuit_breaker_tripped": False,
             # If the breaker just tripped, force RESPOND so the model
             # synthesizes an answer with what it has instead of dead-looping
             # back to the supervisor which would try more tools → bypass → loop.
