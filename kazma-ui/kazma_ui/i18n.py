@@ -38,7 +38,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "nav.tools": {"en": "Tools", "ar": "الأدوات"},
     "nav.system": {"en": "System", "ar": "النظام"},
     "nav.workspace": {"en": "Workspace", "ar": "مساحة العمل"},
-    "nav.ide": {"en": "IDE", "ar": "محرر الأكواد"},
+    "nav.ide": {"en": "IDE", "ar": "بيئة التطوير المتكاملة"},
     "nav.chat": {"en": "Chat", "ar": "المحادثة"},
     "nav.dashboard": {"en": "Dashboard", "ar": "لوحة التحكم"},
     "nav.skills": {"en": "Skills", "ar": "المهارات"},
@@ -842,7 +842,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.deleted_msg": {"en": "Session deleted", "ar": "تم حذف الجلسة"},
 
     # ── IDE ───────────────────────────────────────────────────────────
-    "ide.title": {"en": "IDE", "ar": "محرر الأكواد"},
+    "ide.title": {"en": "IDE", "ar": "بيئة التطوير المتكاملة"},
     "ide.save": {"en": "Save", "ar": "حفظ"},
     "ide.new": {"en": "New", "ar": "جديد"},
     "ide.delete": {"en": "Delete", "ar": "حذف"},
