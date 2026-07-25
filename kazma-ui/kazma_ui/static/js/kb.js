@@ -43,6 +43,8 @@ function knowledgePage() {
       _t_test: S.test || "🔍 Test",
       _t_refresh: S.refresh || "↻ Refresh",
       _t_browse: S.browse || "📋 Browse",
+      _t_archive: S.archive_label || "📦 Archive",
+      _t_unarchive: S.unarchive_label || "♻️ Restore",
       _t_delete: S.delete || "🗑",
       _t_search_placeholder: S.search_placeholder || "Ask something…",
       _t_search_btn: S.search_btn || "Search",
@@ -67,6 +69,7 @@ function knowledgePage() {
     loading: false,
     creating: false,
     libraries: [],
+    viewArchived: false,   // Active (false) / Archived (true) tab state
     form: { id: "", name: "", seed_url: "" },
     activeJob: null,    // latest ProgressUpdate from /api/kb/jobs/{id}
     _pollTimer: null,
@@ -84,7 +87,11 @@ function knowledgePage() {
     async load() {
       this.loading = true;
       try {
-        const r = await fetch("/api/kb/libraries");
+        // Fetch active or archived depending on the current tab.
+        const url = this.viewArchived
+          ? "/api/kb/libraries/archived/list"
+          : "/api/kb/libraries";
+        const r = await fetch(url);
         const data = await r.json();
         if (!data.ok) throw new Error(data.error || "failed");
         this.libraries = (data.libraries || []).map(withStrings);
@@ -202,6 +209,39 @@ function knowledgePage() {
     },
 
     resetForm() { this.form = { id: "", name: "", seed_url: "" }; },
+
+    switchTab(toArchived) {
+      if (this.viewArchived === toArchived) return;
+      this.viewArchived = toArchived;
+      this.load();
+    },
+
+    async archive(lib) {
+      // Archive hides the library from the Active list without deleting
+      // its chunks (they stay searchable). Useful for failed/abandoned
+      // crawls. Mirrors the Research panel's archive pattern.
+      try {
+        const r = await fetch(`/api/kb/libraries/${lib.id}/archive`, { method: "POST" });
+        const data = await r.json();
+        if (!data.ok) throw new Error(data.error || "archive failed");
+        toast(S.archived_msg || "Library archived.", "info");
+        await this.load();
+      } catch (e) {
+        toast(e.message, "error");
+      }
+    },
+
+    async unarchive(lib) {
+      try {
+        const r = await fetch(`/api/kb/libraries/${lib.id}/unarchive`, { method: "POST" });
+        const data = await r.json();
+        if (!data.ok) throw new Error(data.error || "unarchive failed");
+        toast(S.restored_msg || "Library restored.", "success");
+        await this.load();
+      } catch (e) {
+        toast(e.message, "error");
+      }
+    },
 
     testSearch(lib) {
       lib._search_open = !lib._search_open;

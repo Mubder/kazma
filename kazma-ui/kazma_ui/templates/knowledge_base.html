@@ -26,6 +26,13 @@
     auto_on_msg: {{ t('knowledge.auto_on_msg') | default('Auto-inject ON — chunks from this library will be folded into every prompt.') | tojson }},
     auto_off_msg: {{ t('knowledge.auto_off_msg') | default('Auto-inject OFF.') | tojson }},
     library_deleted: {{ t('knowledge.library_deleted') | default('Library deleted.') | tojson }},
+    archived_msg: {{ t('knowledge.archived_msg') | tojson }},
+    restored_msg: {{ t('knowledge.restored_msg') | tojson }},
+    archive_label: {{ t('knowledge.archive') | tojson }},
+    unarchive_label: {{ t('knowledge.unarchive') | tojson }},
+    tab_active: {{ t('knowledge.tab_active') | tojson }},
+    tab_archived: {{ t('knowledge.tab_archived') | tojson }},
+    archived_empty: {{ t('knowledge.archived_empty') | tojson }},
     library_not_found: {{ t('knowledge.library_not_found') | default('Library not found.') | tojson }},
     ingest_failed: {{ t('knowledge.ingest_failed') | default('Ingest failed.') | tojson }},
     crawl_started: {{ t('knowledge.crawl_started') | tojson }},
@@ -119,8 +126,21 @@
 
   {# ── Library list ── #}
   <div class="card" style="padding:1rem 1.25rem;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
-      <h3 style="margin:0;font-size:1rem;">{{ t('knowledge.libraries') }}</h3>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;flex-wrap:wrap;gap:8px;">
+      <div style="display:flex;gap:6px;">
+        <button
+          class="btn btn-sm"
+          :class="!viewArchived ? 'btn-primary' : 'btn-secondary'"
+          @click="switchTab(false)"
+          x-text="S.tab_active || 'Active'"
+        ></button>
+        <button
+          class="btn btn-sm"
+          :class="viewArchived ? 'btn-primary' : 'btn-secondary'"
+          @click="switchTab(true)"
+          x-text="S.tab_archived || 'Archived'"
+        ></button>
+      </div>
       <button class="btn btn-secondary btn-sm" @click="load()">{{ t('knowledge.refresh') }}</button>
     </div>
 
@@ -129,7 +149,8 @@
     </div>
 
     <div x-show="!loading && libraries.length === 0" style="padding:1.5rem;text-align:center;color:var(--text-secondary);">
-      {{ t('knowledge.empty') }}
+      <span x-show="!viewArchived">{{ t('knowledge.empty') }}</span>
+      <span x-show="viewArchived" x-text="S.archived_empty || 'No archived libraries.'"></span>
     </div>
 
     <template x-for="lib in libraries" :key="lib.id">
@@ -163,6 +184,12 @@
             <button class="btn btn-secondary btn-sm" @click="testSearch(lib)" x-text="lib._t_test"></button>
             <button class="btn btn-secondary btn-sm" @click="refresh(lib)" :disabled="!lib.seed_url" x-text="lib._t_refresh"></button>
             <button class="btn btn-secondary btn-sm" @click="browse(lib)" x-text="lib._t_browse"></button>
+            <template x-if="!viewArchived">
+              <button class="btn btn-secondary btn-sm" @click="archive(lib)" x-text="lib._t_archive"></button>
+            </template>
+            <template x-if="viewArchived">
+              <button class="btn btn-secondary btn-sm" @click="unarchive(lib)" x-text="lib._t_unarchive"></button>
+            </template>
             <button class="btn btn-secondary btn-sm" @click="del(lib)" style="color:var(--danger,#e53935);" x-text="lib._t_delete"></button>
           </div>
         </div>

@@ -105,6 +105,38 @@ def create_kb_router() -> APIRouter:
             return {"ok": False, "error": "Not found"}
         return {"ok": True, "library": lib}
 
+    @router.get("/libraries/archived/list")
+    async def list_archived() -> dict[str, Any]:
+        """List archived libraries for the Archived tab."""
+        try:
+            libs = _store().list_archived_libraries()
+            return {"ok": True, "libraries": libs}
+        except Exception as exc:
+            logger.exception("[kb_api] list_archived failed")
+            return {"ok": False, "error": str(exc), "libraries": []}
+
+    @router.post("/libraries/{library_id}/archive")
+    async def archive_library(library_id: str) -> dict[str, Any]:
+        try:
+            ok = _store().archive_library(library_id, archived=True)
+            if not ok:
+                return {"ok": False, "error": "Not found"}
+            return {"ok": True}
+        except Exception as exc:
+            logger.exception("[kb_api] archive_library failed")
+            return {"ok": False, "error": str(exc)}
+
+    @router.post("/libraries/{library_id}/unarchive")
+    async def unarchive_library(library_id: str) -> dict[str, Any]:
+        try:
+            ok = _store().archive_library(library_id, archived=False)
+            if not ok:
+                return {"ok": False, "error": "Not found"}
+            return {"ok": True}
+        except Exception as exc:
+            logger.exception("[kb_api] unarchive_library failed")
+            return {"ok": False, "error": str(exc)}
+
     @router.patch("/libraries/{library_id}")
     async def update_library(
         library_id: str,

@@ -505,6 +505,23 @@ async def get_knowledge_auto_inject_block(user_message: str) -> str:
         if h.document_title:
             lines.append(f"_(page: {h.document_title})_")
         lines.append(h.content)
+    # Citation directive (matches the knowledge_search tool path): every
+    # answer derived from this auto-injected context must carry a footer
+    # naming the source library, so the user can tell where the info came
+    # from even when they didn't explicitly invoke knowledge_search.
+    cited_libs = sorted({h.library_id for h in hits})
+    if len(cited_libs) == 1:
+        lib_footer = f'📚 This data is from Knowledge "{cited_libs[0]}".'
+    else:
+        lib_footer = (
+            "📚 This data is from Knowledge libraries: "
+            + ", ".join(f'"{l}"' for l in cited_libs) + "."
+        )
+    lines.append(
+        "\n---\n"
+        + lib_footer + "\n"
+        "When you use this material in your answer, append this footer verbatim."
+    )
     return "\n".join(lines)
 
 

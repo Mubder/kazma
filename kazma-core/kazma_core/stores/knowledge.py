@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS knowledge_libraries (
     description TEXT NOT NULL DEFAULT '',
     seed_url    TEXT NOT NULL DEFAULT '',
     auto_inject INTEGER NOT NULL DEFAULT 0,
+    archived    INTEGER NOT NULL DEFAULT 0,
     chunk_count INTEGER NOT NULL DEFAULT 0,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
@@ -151,6 +152,25 @@ class KnowledgeStore:
             # FK support is needed for ON DELETE CASCADE on library deletion.
             conn.execute("PRAGMA foreign_keys = ON")
             conn.executescript(_SCHEMA)
+            # Idempotent column migration: SQLite has no ADD COLUMN IF NOT
+            # EXISTS, so probe PRAGMA table_info and ALTER only when the
+            # column is missing. Mirrors the WorkspaceStore pattern.
+            self._migrate_archived_column(conn)
+
+    @staticmethod
+    def _migrate_archived_column(conn: sqlite3.Connection) -> None:
+        """Add the ``archived`` column to existing knowledge_libraries tables.
+
+        Safe to call on every init — existing columns are a no-op. Old DBs
+        (created before the archive feature) get the column added with a
+        default of 0 (active).
+        """
+        existing = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_libraries)")}
+        if "archived" not in existing:
+            conn.execute(
+                "ALTER TABLE knowledge_libraries ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"
+            )
+            logger.debug("[KnowledgeStore] Migrated column: archived")
 
     # ------------------------------------------------------------------
     # Library CRUD
@@ -193,21 +213,67 @@ class KnowledgeStore:
         logger.info("[KnowledgeStore] Created library %r", lib_id)
         return self.get_library(lib_id)  # type: ignore[return-value]
 
-    def list_libraries(self) -> list[dict[str, Any]]:
+    def list_libraries(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
+        """List libraries. Active only by default; pass ``include_archived=True``
+        for the archive tab. Archived libraries are excluded from the main
+        list so failed/unfinished crawls don't clutter the active view, but
+        stay searchable (their chunks remain in the index)."""
+        with self._lock:
+            conn = self._get_conn()
+            if include_archived:
+                rows = conn.execute(
+                    """SELECT id, name, description, seed_url, auto_inject, archived,
+                              chunk_count, created_at, updated_at
+                       FROM knowledge_libraries ORDER BY created_at"""
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT id, name, description, seed_url, auto_inject, archived,
+                              chunk_count, created_at, updated_at
+                       FROM knowledge_libraries WHERE archived = 0
+                       ORDER BY created_at"""
+                ).fetchall()
+        return [self._library_row_to_dict(r) for r in rows]
+
+    def list_archived_libraries(self) -> list[dict[str, Any]]:
+        """Return only archived libraries (for the Archived tab)."""
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
-                """SELECT id, name, description, seed_url, auto_inject,
+                """SELECT id, name, description, seed_url, auto_inject, archived,
                           chunk_count, created_at, updated_at
-                   FROM knowledge_libraries ORDER BY created_at"""
+                   FROM knowledge_libraries WHERE archived = 1
+                   ORDER BY updated_at DESC"""
             ).fetchall()
         return [self._library_row_to_dict(r) for r in rows]
+
+    def archive_library(self, library_id: str, archived: bool = True) -> bool:
+        """Set the archived flag on a library. Returns True if updated.
+
+        Archiving hides a library from the main list (useful for failed or
+        abandoned crawls) WITHOUT deleting its chunks — they stay searchable
+        so you can still query old data. Use :meth:`delete_library` for
+        permanent removal.
+        """
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute("BEGIN")
+                cur = conn.execute(
+                    "UPDATE knowledge_libraries SET archived = ?, updated_at = ? WHERE id = ?",
+                    (1 if archived else 0, _now_iso(), library_id),
+                )
+                conn.execute("COMMIT")
+                return cur.rowcount > 0
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
 
     def get_library(self, library_id: str) -> dict[str, Any] | None:
         with self._lock:
             conn = self._get_conn()
             row = conn.execute(
-                """SELECT id, name, description, seed_url, auto_inject,
+                """SELECT id, name, description, seed_url, auto_inject, archived,
                           chunk_count, created_at, updated_at
                    FROM knowledge_libraries WHERE id = ?""",
                 (library_id,),
