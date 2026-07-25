@@ -124,7 +124,14 @@ function knowledgePage() {
         if (!data.ok) throw new Error(data.error || "ingest failed");
 
         if (mode === "page") {
-          toast(`Ingested 1 page — ${data.chunks_new} new chunks.`, "success");
+          // Page ingest: show clean toast from structured fields, not raw internal message.
+          if (data.chunks_new > 0) {
+            toast((S.page_ingested || "Ingested 1 page — {chunks} new chunks.").replace("{chunks}", data.chunks_new), "success");
+          } else if (data.errors && data.errors.length) {
+            toast((S.page_ingested_failed || "Ingest failed: {error}").replace("{error}", data.errors[0]), "error");
+          } else {
+            toast((S.page_ingested || "Ingested 1 page — {chunks} new chunks.").replace("{chunks}", 0), "info");
+          }
           this.resetForm();
           await this.load();
         } else {
@@ -153,7 +160,31 @@ function knowledgePage() {
             clearInterval(this._pollTimer);
             this._pollTimer = null;
             await this.load();
-            toast((S.crawl_finished || "Crawl finished: ") + (data.job.message || "done"), "success");
+            // Clean toast from STRUCTURED fields, not the raw internal job
+            // message (which used to dump "done: 8/200 pages, 210 chunks
+            // (+0 deduped), 113 failed — first failure: ..." into the toast).
+            const j = data.job || {};
+            const fetched = j.fetched || 0;
+            const discovered = j.discovered || 0;
+            const ingested = j.ingested || 0;
+            const failed = j.failed || 0;
+            if (ingested === 0 && fetched === 0) {
+              toast(S.crawl_finished_empty || "Crawl finished but no pages were ingested.", "warning");
+            } else if (failed > 0) {
+              toast(
+                (S.crawl_finished_partial || "Crawl finished: {fetched}/{discovered} pages · {ingested} chunks · {failed} failed")
+                  .replace("{fetched}", fetched).replace("{discovered}", discovered)
+                  .replace("{ingested}", ingested).replace("{failed}", failed),
+                "warning",
+              );
+            } else {
+              toast(
+                (S.crawl_finished_ok || "Crawl finished: {fetched}/{discovered} pages · {ingested} chunks")
+                  .replace("{fetched}", fetched).replace("{discovered}", discovered)
+                  .replace("{ingested}", ingested),
+                "success",
+              );
+            }
           }
         } catch (e) { /* keep polling */ }
       }, 2000);

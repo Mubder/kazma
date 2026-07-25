@@ -58,6 +58,42 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "knowledge.seed_placeholder": {"en": "Seed URL (doc root or page)", "ar": "رابط البذرة (جذر التوثيق أو صفحة)"},
     "knowledge.ingest_page": {"en": "Ingest single page", "ar": "ابتلاع صفحة واحدة"},
     "knowledge.crawl_tree": {"en": "🕷️ Crawl whole doc tree", "ar": "🕷️ زحف لشجرة التوثيق كاملة"},
+    "knowledge.crawl_started": {
+        "en": "Crawl started — watch progress below.",
+        "ar": "بدأ الزحف — تابع التقدّم بالأسفل.",
+    },
+    "knowledge.crawl_finished_ok": {
+        "en": "Crawl finished: {fetched}/{discovered} pages · {ingested} chunks",
+        "ar": "اكتمل الزحف: {fetched}/{discovered} صفحة · {ingested} مقطع",
+    },
+    "knowledge.crawl_finished_partial": {
+        "en": "Crawl finished: {fetched}/{discovered} pages · {ingested} chunks · {failed} failed",
+        "ar": "اكتمل الزحف: {fetched}/{discovered} صفحة · {ingested} مقطع · فشل {failed}",
+    },
+    "knowledge.crawl_finished_empty": {
+        "en": "Crawl finished but no pages were ingested. Check the failures list.",
+        "ar": "اكتمل الزحف دون ابتلاع أي صفحة. تحقق من قائمة الفشل.",
+    },
+    "knowledge.page_ingested": {
+        "en": "Ingested 1 page — {chunks} new chunks.",
+        "ar": "تم ابتلاع صفحة واحدة — {chunks} مقطع جديد.",
+    },
+    "knowledge.page_ingested_failed": {
+        "en": "Ingest failed: {error}",
+        "ar": "فشل الابتلاع: {error}",
+    },
+    "knowledge.refresh_started": {
+        "en": "Refresh started.",
+        "ar": "بدأ التحديث.",
+    },
+    "knowledge.refresh_confirm_title": {
+        "en": "Re-ingest library?",
+        "ar": "إعادة ابتلاع المكتبة؟",
+    },
+    "knowledge.refresh_confirm_msg": {
+        "en": "This will re-crawl the seed. Only changed pages are re-indexed (content-hash dedup).",
+        "ar": "سيتم إعادة زحف البذرة. فقط الصفحات المتغيرة تُعاد فهرستها (إزالة تكرار بتجزئة المحتوى).",
+    },
     "knowledge.add_hint": {
         "en": "Single page is instant. Crawl discovers every page under the seed (via sitemap.xml or link-walk) and runs in the background — watch the progress of the job below.",
         "ar": "الصفحة الواحدة فورية. أمّا الزحف فيكتشف كل صفحة تحت البذرة (عبر sitemap.xml أو تتبّع الروابط) ويعمل في الخلفية — تابع تقدّم المهمة بالأسفل.",
