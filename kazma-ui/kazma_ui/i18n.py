@@ -1163,6 +1163,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "mcp.trust_trusted": {"en": "Trusted (no HITL)", "ar": "موثوق (بدون HITL)"},
     "mcp.cancel": {"en": "Cancel", "ar": "إلغاء"},
     "mcp.add_server": {"en": "Add Server", "ar": "إضافة خادم"},
+    "mcp.preset_label": {"en": "Quick add (preset)", "ar": "إضافة سريعة (قالب)"},
+    "mcp.preset_none": {"en": "— Custom —", "ar": "— مخصص —"},
+    "mcp.field_env": {"en": "Environment variables", "ar": "متغيرات البيئة"},
 
     # ── Dashboard: Memory & Governance ─────────────────────────────
     "dashboard.memory_governance": {"en": "Memory & Governance", "ar": "الذاكرة والحوكمة"},

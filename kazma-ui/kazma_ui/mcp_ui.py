@@ -97,6 +97,22 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
         """List configured MCP servers."""
         return _get_configured_servers()
 
+    @router.get("/api/mcp/presets")
+    async def api_list_presets() -> dict[str, Any]:
+        """List available MCP server presets for the Add Server dropdown.
+
+        Returns presets grouped by category, so the UI can render optgroups:
+        ``{"ok": true, "categories": [{name, presets}, ...]}``
+        """
+        try:
+            from kazma_ui.mcp_presets import list_presets_grouped
+
+            categories = list_presets_grouped()
+            return {"ok": True, "categories": categories}
+        except Exception as exc:
+            logger.exception("[mcp_api] list_presets failed")
+            return {"ok": False, "error": str(exc), "categories": []}
+
     @router.post("/api/mcp/servers")
     async def api_add_server(req: MCPServerAddRequest) -> dict[str, str]:
         """Add a new MCP server to the configuration."""
