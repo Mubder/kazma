@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — Discord/Slack Telegram-depth voice path (2026-07-25)
+
+- **Shared voice SoT** (`voice_helpers`): 10MB size caps, language/provider
+  from ConfigStore, STT fallback chain, markdown strip for TTS, rich metadata
+  (`voice_transcribed`, `stt_provider`, `stt_language`, `voice_bytes`).
+- **`discord_stt` / `slack_stt`**: platform download/auth + upload; adapters
+  delegate `_maybe_transcribe_audio` / voice reply to the deep path.
+- **Telegram STT module** re-exports shared helpers for a single voice surface.
+
 ## Unreleased — Discord/Slack Telegram-level UX modules (2026-07-25)
 
 - **Shared action vocabulary**: `platform_callbacks` + `platform_keyboards`

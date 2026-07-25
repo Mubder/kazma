@@ -223,90 +223,29 @@ class SlackAdapter(BaseAdapter):
         return False
 
     async def _maybe_transcribe_audio(self, msg: IncomingMessage) -> IncomingMessage:
-        """When voice is enabled, transcribe any audio attachment to text.
+        """Telegram-depth STT: size caps, language, provider, metadata tags."""
+        from kazma_gateway.adapters.slack_stt import transcribe_message
 
-        Slack's ``url_private`` requires the bearer token, so the download is
-        authenticated. Replaces ``msg.text`` with the transcript and tags
-        ``voice_transcribed`` for the outbound TTS reply path.
-        """
-        audio = next((a for a in msg.attachments if a.kind == "audio"), None)
-        if audio is None or not self._http:
-            return msg
-        try:
-            from kazma_gateway.adapters.voice_helpers import (
-                live_voice_settings,
-                transcribe_audio,
-            )
+        return await transcribe_message(
+            msg, http=self._http, bot_token=self._bot_token or ""
+        )
 
-            if not live_voice_settings().get("enabled"):
-                return msg
-            data = audio.data
-            if data is None and audio.url:
-                resp = await self._http.get(
-                    audio.url,
-                    timeout=30.0,
-                    headers={"Authorization": f"Bearer {self._bot_token}"},
-                )
-                resp.raise_for_status()
-                data = resp.content
-            if not data:
-                return msg
-            transcript = await transcribe_audio(data)
-            if transcript:
-                msg.text = transcript
-                msg.context_metadata["voice_transcribed"] = True
-                logger.info("[Slack] transcribed audio (%d bytes) from %s",
-                            len(data), msg.context_metadata.get("channel_id"))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[Slack] audio transcription failed: %s", type(exc).__name__)
-        return msg
-
-    async def _send_voice_reply(self, channel_id: str, text: str, thread_ts: str | None = None) -> bool:
-        """Synthesize *text* and upload it as an audio file to Slack."""
-        try:
-            from kazma_gateway.adapters.voice_helpers import (
-                live_voice_settings,
-                synthesize_speech,
-            )
-
-            if not live_voice_settings().get("enabled") or not self._http or not text:
-                return False
-            audio = await synthesize_speech(text)
-            if not audio:
-                return False
-            # Reuse the modern upload flow.
-            safe_name = "reply.mp3"
-            resp = await self._http.post(
-                f"{_SLACK_API}/files.getUploadURLExternal",
-                params={"filename": safe_name, "length": str(len(audio))},
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
-            up = resp.json()
-            if not up.get("ok"):
-                return False
-            ul_resp = await self._http.post(
-                up["upload_url"],
-                files={"file": (safe_name, audio, "audio/mpeg")},
-            )
-            ul_resp.raise_for_status()
-            complete_body: dict[str, Any] = {
-                "files": [{"id": up["file_id"], "title": safe_name}],
-                "channel_id": channel_id,
-            }
-            cp = await self._http.post(
-                f"{_SLACK_API}/files.completeUploadExternal",
-                json=complete_body,
-                headers=self._headers(),
-            )
-            cp.raise_for_status()
-            ok = cp.json().get("ok", False)
-            if ok:
-                logger.info("[Slack] voice reply sent to %s (%d bytes)", channel_id, len(audio))
-            return ok
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[Slack] voice reply failed: %s", type(exc).__name__)
+    async def _send_voice_reply(
+        self, channel_id: str, text: str, thread_ts: str | None = None
+    ) -> bool:
+        """Synthesize *text* and upload as audio (TG-depth shared TTS path)."""
+        if not self._http:
             return False
+        from kazma_gateway.adapters.slack_stt import send_voice_reply
+
+        return await send_voice_reply(
+            http=self._http,
+            bot_token=self._bot_token or "",
+            channel_id=channel_id,
+            text=text,
+            thread_ts=thread_ts,
+            headers_fn=self._headers,
+        )
 
     async def _send_attachment(
         self,

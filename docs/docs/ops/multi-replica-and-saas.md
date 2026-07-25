@@ -81,7 +81,7 @@ on all nodes. Set unique `KAZMA_REPLICA_ID` per process.
 |---------|----------|---------|-------|
 | Text chat | Full | Full | Full |
 | Typing indicator | Full | Yes | Yes |
-| Voice STT/TTS | Native deep path | `voice_helpers` | `voice_helpers` |
+| Voice STT/TTS | Deep path | **Same depth** via `voice_helpers` + `discord_stt` / `slack_stt` |
 | Graph HITL buttons | `telegram_keyboards` | `discord_keyboards` | `slack_blocks` |
 | Swarm HITL buttons | Inline keyboard | Components v2 | Block Kit |
 | Shared callback IDs | `platform_callbacks` | same schemes | same schemes |

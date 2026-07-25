@@ -467,66 +467,23 @@ class DiscordAdapter(BaseAdapter):
         return all_sent
 
     async def _send_voice_reply(self, channel_id: str, text: str) -> bool:
-        """Synthesize *text* and upload it as an audio attachment."""
-        try:
-            from kazma_gateway.adapters.voice_helpers import (
-                live_voice_settings,
-                synthesize_speech,
-            )
-
-            if not live_voice_settings().get("enabled") or not self._http:
-                return False
-            audio = await synthesize_speech(text)
-            if not audio:
-                return False
-            await self._rate_limiter.acquire()
-            resp = await self._http.post(
-                f"/channels/{channel_id}/messages",
-                data={"payload_json": json.dumps({"content": ""})},
-                files={"files[0]": ("reply.mp3", audio, "audio/mpeg")},
-            )
-            resp.raise_for_status()
-            logger.info("[discord] voice reply sent to %s (%d bytes)", channel_id, len(audio))
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[discord] voice reply failed: %s", type(exc).__name__)
+        """Synthesize *text* and upload it as an audio attachment (TG-depth path)."""
+        if not self._http:
             return False
+        from kazma_gateway.adapters.discord_stt import send_voice_reply
+
+        return await send_voice_reply(
+            http=self._http,
+            channel_id=channel_id,
+            text=text,
+            rate_limiter=self._rate_limiter,
+        )
 
     async def _maybe_transcribe_audio(self, msg: IncomingMessage) -> IncomingMessage:
-        """When voice is enabled, transcribe any audio attachment to text.
+        """Telegram-depth STT: size caps, language, provider, metadata tags."""
+        from kazma_gateway.adapters.discord_stt import transcribe_message
 
-        Downloads the audio (Discord exposes a URL) and replaces ``msg.text``
-        with the transcript, tagging ``voice_transcribed`` so the outbound
-        path can reply with TTS. No-op when voice is disabled or no audio is
-        present.
-        """
-        audio = next((a for a in msg.attachments if a.kind == "audio"), None)
-        if audio is None:
-            return msg
-        try:
-            from kazma_gateway.adapters.voice_helpers import (
-                live_voice_settings,
-                transcribe_audio,
-            )
-
-            if not live_voice_settings().get("enabled"):
-                return msg
-            data = audio.data
-            if data is None and audio.url:
-                resp = await self._http.get(audio.url, timeout=30.0)
-                resp.raise_for_status()
-                data = resp.content
-            if not data:
-                return msg
-            transcript = await transcribe_audio(data)
-            if transcript:
-                msg.text = transcript
-                msg.context_metadata["voice_transcribed"] = True
-                logger.info("[discord] transcribed audio (%d bytes) from %s",
-                            len(data), msg.context_metadata.get("channel_id"))
-        except Exception as exc:  # noqa: BLE001 — never drop a turn over STT
-            logger.warning("[discord] audio transcription failed: %s", type(exc).__name__)
-        return msg
+        return await transcribe_message(msg, http=self._http)
 
     async def _send_attachment(self, channel_id: str, att: Attachment) -> bool:
         """Upload one attachment to a Discord channel via multipart.
