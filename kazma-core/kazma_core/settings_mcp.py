@@ -69,13 +69,38 @@ class MCPSettingsService:
         self._cs.set("mcp.servers", json.dumps(servers), category="mcp")
 
     async def test_mcp_server(self, name: str) -> dict[str, Any]:
-        """Test an MCP server connection."""
+        """Test an MCP server connection.
+
+        Looks up the server in BOTH the ConfigStore (DB) and kazma.yaml
+        (via the agent's config.raw). This fixes the 'Server not found'
+        error when testing from the Settings page — servers added via
+        the /mcp page's Add Server (which persists to kazma.yaml) were
+        invisible to the Settings page's test button (which only read
+        ConfigStore). Now both stores are checked.
+        """
         servers = self.get_mcp_servers()
         server = None
         for s in servers:
             if s.get("name") == name:
                 server = s
                 break
+
+        # Fallback: if not in ConfigStore, check kazma.yaml via the agent.
+        # This is the common case — the /mcp page persists to kazma.yaml,
+        # not ConfigStore, so Settings-only readers miss those servers.
+        if not server:
+            try:
+                from kazma_core.service_container import get_container
+
+                agent = get_container().resolve("KazmaAgent")
+                yaml_servers = agent.get_mcp_servers_config()
+                for s in yaml_servers:
+                    if s.get("name") == name:
+                        server = s
+                        break
+            except Exception:
+                pass
+
         if not server:
             return {"success": False, "error": f"Server '{name}' not found"}
 
