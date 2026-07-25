@@ -120,8 +120,24 @@ def _resolve_level(explicit: str | None) -> str:
     return "INFO"
 
 
+# Process-wide flag: once setup_logging() has configured handlers, subsequent
+# calls become no-ops. Prevents the double "Logging initialised" log line that
+# happens because both ``kazma serve`` CLI AND ``app.py:_setup_services`` call
+# setup_logging() during a single web boot. The first call wins; later calls
+# return the previously-effective level without re-running dictConfig.
+_logging_configured: bool = False
+_last_effective_level: str = "INFO"
+
+
 def setup_logging(level: str | None = None) -> str:
     """Configure root + library logging. Idempotent.
+
+    The FIRST call configures handlers (file + stdout) and library levels.
+    Subsequent calls are no-ops — they return the previously-effective level
+    without re-running ``dictConfig``. This matters because both the
+    ``kazma serve`` CLI bootstrap AND ``app.py:_setup_services`` call this
+    during a single web boot; without the guard, the "Logging initialised"
+    line is logged twice and handlers can multiply on re-config.
 
     Args:
         level: Optional level override (``DEBUG``/``INFO``/...). If omitted,
@@ -130,6 +146,15 @@ def setup_logging(level: str | None = None) -> str:
     Returns:
         The effective level name (for entry points to log on startup).
     """
+    global _logging_configured, _last_effective_level
+
+    # Idempotency guard: the first call configures; later calls are no-ops.
+    # Both ``kazma serve`` and ``app.py:_setup_services`` invoke this during
+    # a single boot — without the guard we get double "Logging initialised"
+    # lines and potentially duplicated handlers.
+    if _logging_configured:
+        return _last_effective_level
+
     # Lazy import to avoid a circular: paths.py is imported pervasively.
     from kazma_core.paths import log_file, migrate_legacy_user_home
 
@@ -214,6 +239,10 @@ def setup_logging(level: str | None = None) -> str:
     logging.getLogger(__name__).info(
         "Logging initialised: level=%s file=%s", effective, log_path,
     )
+    # Mark configured AFTER the success log so subsequent calls skip — this
+    # also catches the line itself being logged only once.
+    _logging_configured = True
+    _last_effective_level = effective
     return effective
 
 
