@@ -120,6 +120,8 @@ def _kb_scope_mode() -> str:
 _SKIP_EXT = (
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".pdf", ".zip",
     ".gz", ".mp4", ".mp3", ".css", ".js", ".ico", ".woff", ".woff2",
+    # Source / machine-readable artifacts from Firecrawl /map — not doc pages.
+    ".yaml", ".yml", ".map", ".wasm",
 )
 
 # Path suffixes that mark infra URLs (not doc pages).  Discovery output
@@ -136,11 +138,19 @@ _INFRA_SUFFIXES = (
 
 
 def _is_infra_url(url: str) -> bool:
-    """Return True for sitemaps, robots.txt, feeds — never doc pages."""
+    """Return True for sitemaps, robots.txt, feeds, binary/source assets.
+
+    Firecrawl /map sometimes returns OpenAPI ``.yaml`` files and other
+    non-HTML artifacts; fetching them wastes quota and produces garbage.
+    """
     if not url:
         return True
     path = (urlparse(url).path or "").lower()
-    return any(path.endswith(suf) for suf in _INFRA_SUFFIXES)
+    if any(path.endswith(suf) for suf in _INFRA_SUFFIXES):
+        return True
+    if any(path.endswith(ext) for ext in _SKIP_EXT):
+        return True
+    return False
 
 
 def _jina_opt_in() -> bool:

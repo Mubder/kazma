@@ -349,39 +349,74 @@ async def _try_jina_reader(url: str) -> str | None:
 
 
 async def _try_firecrawl(url: str) -> str | None:
-    """Optional Firecrawl API when ``KAZMA_FIRECRAWL_API_KEY`` is set."""
+    """Optional Firecrawl API when ``KAZMA_FIRECRAWL_API_KEY`` is set.
+
+    Retries once on HTTP 429 / 502 / 503 with a short backoff — bulk KB
+    crawls of 200+ pages routinely trip Firecrawl rate limits mid-job.
+    """
     api_key = (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip()
     if not api_key:
         return None
     base = (os.environ.get("KAZMA_FIRECRAWL_URL") or "https://api.firecrawl.dev").rstrip("/")
     try:
+        import asyncio
+
         import httpx
         from kazma_core.security.ssrf import SSRFError, validate_url
 
         validate_url(url)
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {"url": url, "formats": ["markdown", "html"]}
         async with httpx.AsyncClient(timeout=60.0) as client:
-            r = await client.post(
-                f"{base}/v1/scrape",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={"url": url, "formats": ["markdown", "html"]},
-            )
-            if r.status_code != 200:
-                logger.debug("[read_url] Firecrawl status %s", r.status_code)
+            last_status = 0
+            for attempt in range(3):
+                r = await client.post(
+                    f"{base}/v1/scrape",
+                    headers=headers,
+                    json=body,
+                )
+                last_status = r.status_code
+                if r.status_code in (429, 502, 503) and attempt < 2:
+                    # Honor Retry-After when present; otherwise exponential backoff.
+                    ra = r.headers.get("Retry-After")
+                    try:
+                        delay = float(ra) if ra else (1.5 * (attempt + 1))
+                    except ValueError:
+                        delay = 1.5 * (attempt + 1)
+                    delay = min(max(delay, 0.5), 20.0)
+                    logger.info(
+                        "[read_url] Firecrawl %s for %s — retry in %.1fs (attempt %d)",
+                        r.status_code, url, delay, attempt + 1,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                if r.status_code != 200:
+                    logger.debug(
+                        "[read_url] Firecrawl status %s for %s", r.status_code, url
+                    )
+                    return None
+                data = r.json()
+                payload = data.get("data") or data
+                text = (
+                    payload.get("markdown")
+                    or payload.get("content")
+                    or payload.get("text")
+                    or ""
+                )
+                if text and len(str(text).strip()) > 50:
+                    logger.info(
+                        "[read_url] Firecrawl ok for %s (%d chars)",
+                        url, len(str(text)),
+                    )
+                    return str(text).strip()
+                logger.debug(
+                    "[read_url] Firecrawl empty body for %s (status %s)",
+                    url, last_status,
+                )
                 return None
-            data = r.json()
-            payload = data.get("data") or data
-            text = (
-                payload.get("markdown")
-                or payload.get("content")
-                or payload.get("text")
-                or ""
-            )
-            if text and len(str(text).strip()) > 50:
-                logger.info("[read_url] Firecrawl ok for %s (%d chars)", url, len(str(text)))
-                return str(text).strip()
     except Exception as exc:
         logger.debug("[read_url] Firecrawl failed: %s", exc)
     return None

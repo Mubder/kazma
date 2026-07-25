@@ -168,6 +168,12 @@ def test_is_infra_url_filters_sitemaps_and_feeds():
     assert _is_infra_url("") is True
     assert _is_infra_url(None) is True
 
+    # Source/binary artifacts Firecrawl /map sometimes returns — not HTML docs.
+    assert _is_infra_url(
+        "https://x.com/docs/whatsapp/reference/v23.0.openapi.yaml"
+    )
+    assert _is_infra_url("https://x.com/static/app.js")
+
     # Real doc pages — must NOT be filtered.
     assert not _is_infra_url("https://x.com/docs/whatsapp/cloud-api")
     assert not _is_infra_url("https://x.com/docs/whatsapp/cloud-api/reference/messages")

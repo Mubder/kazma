@@ -78,14 +78,18 @@ def _fresh_store() -> KnowledgeStore:
 
 def _chunk_dict(library_id: str, source_url: str, idx: int, content: str) -> dict:
     import hashlib
+
+    from kazma_core.stores.knowledge_chunker import make_chunk_id
+
+    content_hash = hashlib.sha256(content.encode()).hexdigest()
     return {
-        "id": f"{library_id}:{hashlib.sha256(content.encode()).hexdigest()[:16]}",
+        "id": make_chunk_id(library_id, source_url, content_hash),
         "library_id": library_id,
         "source_url": source_url,
         "document_title": "T",
         "section_header": f"Section {idx}",
         "chunk_index": idx,
-        "content_hash": hashlib.sha256(content.encode()).hexdigest(),
+        "content_hash": content_hash,
         "has_code": False,
         "char_count": len(content),
         "content": content,
@@ -139,6 +143,24 @@ def test_upsert_chunk_then_dedup_on_same_hash():
     assert s.upsert_chunk(chunk) is True        # first insert
     assert s.upsert_chunk(chunk) is False        # same hash → no-op
     assert s.count_chunks("lib") == 1
+
+
+def test_identical_content_on_different_pages_does_not_collide():
+    """Regression: Meta pages share nav/footer chrome. Content-only chunk
+    IDs made the second page's INSERT hit PRIMARY KEY UNIQUE and the whole
+    page was counted as failed despite a successful fetch."""
+    s = _fresh_store()
+    s.create_library("lib", "L")
+    shared = "WhatsApp Business Platform\n\nWas this helpful?\n"
+    a = _chunk_dict("lib", "https://x/docs/a", 0, shared)
+    b = _chunk_dict("lib", "https://x/docs/b", 0, shared)
+    assert a["id"] != b["id"], "IDs must include source_url so shared chrome is unique per page"
+    assert a["content_hash"] == b["content_hash"]
+    assert s.upsert_chunk(a) is True
+    assert s.upsert_chunk(b) is True  # must NOT raise / collide
+    assert s.count_chunks("lib") == 2
+    urls = {c["source_url"] for c in s.list_chunks("lib")}
+    assert urls == {"https://x/docs/a", "https://x/docs/b"}
 
 
 def test_upsert_replaces_when_content_changed():
