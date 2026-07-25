@@ -344,6 +344,81 @@ async def _fetch_sitemaps(seed_url: str) -> list[str]:
     return docs
 
 
+async def _firecrawl_map_site(seed_url: str) -> list[str] | None:
+    """Use Firecrawl's ``/v1/map`` endpoint to enumerate all URLs on a site.
+
+    This is the strongest discovery tier for bot-walled doc sites (Meta,
+    Cloudflare-protected, etc.): Firecrawl runs the actual crawl server-side
+    on their managed browser farm, so the target site's bot-wall never sees
+    our IP.  ``/v1/map`` is purpose-built for "give me every URL on this
+    site without scraping content" — exactly the discovery problem.
+
+    Returns the list of URLs, or ``None`` if Firecrawl isn't configured or
+    the call failed (caller falls through to sitemap/BFS tiers).
+
+    Response shape (per Firecrawl OpenAPI spec):
+        {"success": bool, "links": [{"url": "...", "title": "...", ...}, ...]}
+    """
+    api_key = (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip()
+    if not api_key:
+        return None
+    base = (os.environ.get("KAZMA_FIRECRAWL_URL") or "https://api.firecrawl.dev").rstrip("/")
+    try:
+        import httpx
+        from kazma_core.security.ssrf import SSRFError, validate_url
+
+        validate_url(seed_url)
+        # ``search`` ranks URLs by relevance to the seed; ``limit`` caps the
+        # result set.  We pull a generous slice then scope/filter locally.
+        body = {
+            "url": seed_url,
+            "search": seed_url,  # rank by relevance to the seed
+            "limit": 2000,
+            "includeSubdomains": False,
+        }
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            # Firecrawl has historically shipped both /v1 and /v2 of the
+            # map endpoint (the scrape side is on /v1 in this codebase and
+            # works).  Try /v1/map first (matches the working scrape path),
+            # fall back to /v2/map if /v1 404s (some plans only have v2).
+            r = await client.post(f"{base}/v1/map", headers=headers, json=body)
+            if r.status_code == 404:
+                logger.debug("[kb_discover] Firecrawl /v1/map 404, trying /v2/map")
+                r = await client.post(f"{base}/v2/map", headers=headers, json=body)
+            if r.status_code != 200:
+                logger.debug("[kb_discover] Firecrawl /map status %s", r.status_code)
+                return None
+            data = r.json()
+            if not data.get("success"):
+                logger.debug("[kb_discover] Firecrawl /map success=false")
+                return None
+            links = data.get("links") or []
+            # links may be list of {"url": ...} OR list of bare strings
+            # depending on Firecrawl version — handle both.
+            urls: list[str] = []
+            for entry in links:
+                if isinstance(entry, dict):
+                    u = entry.get("url")
+                else:
+                    u = entry
+                if u and isinstance(u, str):
+                    urls.append(u)
+            logger.info(
+                "[kb_discover] Firecrawl /map returned %d URLs for %s",
+                len(urls), seed_url,
+            )
+            return urls
+    except ImportError:
+        return None
+    except Exception as exc:
+        logger.debug("[kb_discover] Firecrawl /map failed: %s", exc)
+        return None
+
+
 _SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 
 
@@ -391,6 +466,36 @@ async def kb_discover_pages(
     scope_mode = (mode or _kb_scope_mode()).lower()
     if scope_mode not in ("tree", "prefix", "domain", "exact"):
         scope_mode = "tree"
+
+    # ── 0. Firecrawl /v1/map (strongest tier for bot-walled sites) ───
+    # Runs server-side on Firecrawl's browser farm, so the target's bot
+    # wall never sees us.  Purpose-built for "enumerate every URL on a
+    # site without scraping content" — exactly the discovery problem.
+    if (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip():
+        await _safe_progress(on_progress, "querying Firecrawl /v1/map for site URLs…")
+        mapped = await _firecrawl_map_site(seed)
+        if mapped:
+            await _safe_progress(on_progress, f"Firecrawl returned {len(mapped)} URLs; scoping…")
+            in_scope = [u for u in mapped if _in_scope(seed, u, scope_mode)]
+            if in_scope:
+                # De-dup, keep order, seed first.
+                seen: set[str] = set()
+                ordered: list[str] = []
+                for u in [seed, *in_scope]:
+                    if u not in seen:
+                        seen.add(u)
+                        ordered.append(u)
+                logger.info(
+                    "[kb_discover] Firecrawl /v1/map yielded %d in-scope URLs for %s",
+                    len(ordered), seed,
+                )
+                return ordered
+            await _safe_progress(
+                on_progress,
+                f"Firecrawl returned {len(mapped)} URLs but 0 matched scope {scope_mode}; falling back",
+            )
+        else:
+            await _safe_progress(on_progress, "Firecrawl /v1/map unavailable/failed; falling back to sitemap")
 
     # ── 1. Sitemap discovery ─────────────────────────────────────────
     await _safe_progress(on_progress, "fetching robots.txt + sitemaps…")
