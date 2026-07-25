@@ -524,41 +524,44 @@ class SessionManager:
         Archived sessions are excluded by default (they clutter the sidebar).
         Pass ``include_archived=True`` to get everything (for the archive view).
         """
-        tenant_id = get_current_tenant_id() or "default"
-        sessions = [
-            sess for key, sess in self._sessions.items()
-            if key.startswith(f"{tenant_id}:")
-            and (include_archived or not sess.archived)
-        ]
-        # Sort by updated_at descending (newest activity first).
-        # Fall back to created_at for old sessions without updated_at.
-        sessions.sort(
-            key=lambda s: s.updated_at or s.created_at or "",
-            reverse=True,
-        )
-        return sessions
+        with self._lock:
+            tenant_id = get_current_tenant_id() or "default"
+            sessions = [
+                sess for key, sess in self._sessions.items()
+                if key.startswith(f"{tenant_id}:")
+                and (include_archived or not sess.archived)
+            ]
+            # Sort by updated_at descending (newest activity first).
+            # Fall back to created_at for old sessions without updated_at.
+            sessions.sort(
+                key=lambda s: s.updated_at or s.created_at or "",
+                reverse=True,
+            )
+            return sessions
 
     def rename(self, session_id: str, title: str) -> ChatSession | None:
         """Set a custom title on a session. Returns the session or None."""
-        tenant_id = get_current_tenant_id() or "default"
-        key = f"{tenant_id}:{session_id}"
-        session = self._sessions.get(key)
-        if session is None:
-            return None
-        session.title = title.strip()[:120]
-        self._upsert_db(session)
-        return session
+        with self._lock:
+            tenant_id = get_current_tenant_id() or "default"
+            key = f"{tenant_id}:{session_id}"
+            session = self._sessions.get(key)
+            if session is None:
+                return None
+            session.title = title.strip()[:120]
+            self._upsert_db(session)
+            return session
 
     def set_archived(self, session_id: str, archived: bool) -> ChatSession | None:
         """Archive or unarchive a session. Returns the session or None."""
-        tenant_id = get_current_tenant_id() or "default"
-        key = f"{tenant_id}:{session_id}"
-        session = self._sessions.get(key)
-        if session is None:
-            return None
-        session.archived = archived
-        self._upsert_db(session)
-        return session
+        with self._lock:
+            tenant_id = get_current_tenant_id() or "default"
+            key = f"{tenant_id}:{session_id}"
+            session = self._sessions.get(key)
+            if session is None:
+                return None
+            session.archived = archived
+            self._upsert_db(session)
+            return session
 
     # ── convenience helpers used by SSE transport ──────────────────
 
@@ -570,29 +573,30 @@ class SessionManager:
         This helper upserts that data into a :class:`ChatSession` so the
         WebSocket session-list / message-history endpoints see it.
         """
-        tenant_id = get_current_tenant_id() or "default"
-        key = f"{tenant_id}:{session_id}"
-        session = self._sessions.get(key)
-        if session is None:
-            session = ChatSession(session_id=session_id, tenant_id=tenant_id)
-            self._sessions[key] = session
+        with self._lock:
+            tenant_id = get_current_tenant_id() or "default"
+            key = f"{tenant_id}:{session_id}"
+            session = self._sessions.get(key)
+            if session is None:
+                session = ChatSession(session_id=session_id, tenant_id=tenant_id)
+                self._sessions[key] = session
 
-        session.messages = list(data.get("messages", []))
-        session.trim_messages()
-        session.total_cost = data.get("total_cost", 0.0)
-        session.total_tokens = data.get("total_tokens", 0)
-        session.thread_id = data.get("thread_id", session.thread_id)
-        session.updated_at = datetime.now(UTC).isoformat()
+            session.messages = list(data.get("messages", []))
+            session.trim_messages()
+            session.total_cost = data.get("total_cost", 0.0)
+            session.total_tokens = data.get("total_tokens", 0)
+            session.thread_id = data.get("thread_id", session.thread_id)
+            session.updated_at = datetime.now(UTC).isoformat()
 
-        # Auto-generate title from first user message if not set.
-        if not session.title:
-            session.title = session.auto_title()
+            # Auto-generate title from first user message if not set.
+            if not session.title:
+                session.title = session.auto_title()
 
-        # LRU: mark as most-recently-used.
-        self._sessions.move_to_end(key)
-        self._upsert_db(session)
-        self._evict_if_needed(tenant_id)
-        return session
+            # LRU: mark as most-recently-used.
+            self._sessions.move_to_end(key)
+            self._upsert_db(session)
+            self._evict_if_needed(tenant_id)
+            return session
 
     def clear(self) -> None:
         """Remove every session (mainly for tests)."""
@@ -618,6 +622,18 @@ class SessionManager:
         ]
         for key in keys_to_remove:
             self._sessions.pop(key, None)
+
+    def close(self) -> None:
+        """Explicitly close the database connection and flush WAL checkpoint."""
+        with self._lock:
+            if self._conn is not None:
+                try:
+                    self._conn.execute("PRAGMA wal_checkpoint(FULL)")
+                    self._conn.close()
+                except Exception as exc:
+                    logger.debug("[SessionManager] error closing db: %s", exc)
+                finally:
+                    self._conn = None
 
 
 # ── Singleton accessor ──────────────────────────────────────────────

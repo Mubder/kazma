@@ -184,6 +184,8 @@ async def _stream_langgraph_events(
     total_cost = 0.0
     turn_start = time.monotonic()
     content_acc = ""  # accumulated assistant text for the done event
+    interrupted = False
+    thread_id = tid or ""
     _snapshot_info: dict[str, Any] | None = None  # last snapshot_id/iteration from graph state
 
     try:
@@ -438,8 +440,8 @@ async def _stream_langgraph_events(
                 yield _sse_frame("snapshot", _snapshot_info)
 
         except asyncio.CancelledError:
-            logger.warning("SSE stream cancelled by client disconnect")
-            yield _sse_frame("error", {"content": "Connection cancelled"})
+            logger.info("SSE stream cancelled by client disconnect (thread=%s)", thread_id)
+            raise
 
         except Exception as exc:
             logger.error("SSE stream error: %s", exc, exc_info=True)
@@ -462,8 +464,7 @@ async def _stream_langgraph_events(
                     "[SSE] Empty turn recovered on exception — thread=%s tokens=%s",
                     thread_id, total_tokens,
                 )
-            else:
-                yield _sse_frame("error", {"content": sanitize_error(exc)})
+            yield _sse_frame("error", {"content": sanitize_error(exc)})
     finally:
         if token is not None:
             reset_current_thread_id(token)

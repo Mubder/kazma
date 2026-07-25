@@ -1317,7 +1317,17 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[app] Error closing http client during shutdown: %s", e)
 
-        # 6) Best-effort vector memory close
+        # 6) Best-effort vector memory close & SessionManager close
+        try:
+            from kazma_ui.session_manager import get_session_manager
+
+            sm = get_session_manager()
+            if sm is not None and hasattr(sm, "close"):
+                sm.close()
+                logger.info("[app] SessionManager closed cleanly")
+        except Exception as e:
+            logger.debug("[app] SessionManager close: %s", e)
+
         try:
             from kazma_core.memory import vector_store as _vs
 

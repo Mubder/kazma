@@ -167,10 +167,9 @@ def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
                     m = {**m, "tool_calls": kept}
                 valid_ids.update(tc.get("id") or "" for tc in kept)
                 out.append(m)
-            else:
-                dropped += len(m["tool_calls"])
                 content = m.get("content")
-                if isinstance(content, str) and content.strip():
+                has_text = bool(content.strip()) if isinstance(content, str) else bool(content)
+                if has_text:
                     out.append({k: v for k, v in m.items() if k != "tool_calls"})
                 # else: tool-calls-only message with no responses — drop
             continue

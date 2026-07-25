@@ -1033,10 +1033,12 @@ class LocalToolRegistry:
                     try:
                         import os as _os
 
-                        cand = _os.path.normpath(
+                        cand = _os.path.realpath(
                             a if _os.path.isabs(a) else _os.path.join(cwd_s, a)
                         )
-                        root_n = _os.path.normpath(cwd_s)
+                        root_n = _os.path.realpath(cwd_s)
+                        if _os.name == "nt":
+                            cand, root_n = cand.lower(), root_n.lower()
                         if cand != root_n and not cand.startswith(root_n + _os.sep):
                             return (
                                 f"Error: path '{a}' is outside the workspace "
@@ -1078,13 +1080,38 @@ class LocalToolRegistry:
                     env=child_env,
                 )
                 
+                # Bounded stream reader to cap memory allocations for large outputs
+                async def _read_stream_capped(stream: asyncio.StreamReader | None, limit: int) -> bytes:
+                    if stream is None:
+                        return b""
+                    buf = bytearray()
+                    while len(buf) < limit:
+                        chunk = await stream.read(min(4096, limit - len(buf)))
+                        if not chunk:
+                            break
+                        buf.extend(chunk)
+                    return bytes(buf)
+
                 try:
-                    stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                    async def _communicate_capped():
+                        so_task = asyncio.create_task(_read_stream_capped(proc.stdout, 20_000))
+                        se_task = asyncio.create_task(_read_stream_capped(proc.stderr, 10_000))
+                        so, se = await asyncio.gather(so_task, se_task)
+                        await proc.wait()
+                        return so, se
+
+                    stdout, stderr = await asyncio.wait_for(_communicate_capped(), timeout=timeout)
                 except asyncio.TimeoutError:
                     try:
                         proc.kill()
+                        await proc.wait()
                     except ProcessLookupError:
                         pass
+                    finally:
+                        if proc.stdout:
+                            proc.stdout.close()
+                        if proc.stderr:
+                            proc.stderr.close()
                     return f"Error: Command timed out after {timeout}s"
 
                 output = stdout.decode("utf-8", errors="replace")
