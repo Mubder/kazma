@@ -3,18 +3,22 @@
 All file paths in Kazma are resolved through this module to ensure
 **portability** — the project is self-contained in its directory.
 
-Two data categories:
+Two data categories (both **project-local**, travel with the repo):
 
-1. **Project data** (``kazma-data/`` relative to the project root):
+1. **Project data** (``kazma-data/`` at the project root):
    - Vector memory, FTS5 memory, backups
    - ConfigStore, checkpoints, audit logs
    - Self-improvement evolution history
-   - These are *project-specific* and should travel with the project.
 
-2. **User data** (``~/.kazma/``):
+2. **Kazma home** (``.kazma/`` at the project root):
    - Hub skill registry, installed skills
    - TUI themes, tutorial state
-   - These are *user preferences* shared across projects (like ``~/.gitconfig``).
+   - The application log (``kazma.log``) — see ``logging_config.py``
+   - Previously this lived at ``~/.kazma`` (user-global); it is now
+     project-local so the whole Kazma state moves with the repo.
+     :func:`migrate_legacy_user_home` performs a one-time move of any
+     pre-existing ``~/.kazma`` on first boot. Override with
+     ``KAZMA_USER_HOME``.
 
 The project root is resolved as the directory containing ``pyproject.toml``
 (walking up from CWD).  This ensures paths work regardless of where the
@@ -151,18 +155,94 @@ def rbac_db() -> str:
 
 
 def log_file() -> Path:
-    """Application log file."""
-    return data_dir() / "kazma.log"
+    """Application log file — lives under ``.kazma/`` (the single-folder rule).
+
+    Override with ``KAZMA_LOG_FILE`` for ad-hoc redirection (e.g. tests).
+    """
+    env = (os.environ.get("KAZMA_LOG_FILE") or "").strip()
+    if env:
+        return Path(env).expanduser()
+    return user_home() / "kazma.log"
 
 
-# ── User data paths (user-level — shared across projects) ─────────────────
+# ── User data paths (project-local — travels with the repo) ───────────────
+#
+# Historically these lived at ``~/.kazma`` (user-global, mirroring
+# ``~/.gitconfig``). That breaks portability: moving/cloning the repo to
+# another machine leaves skill installs, TUI themes, etc. behind. The
+# default is now **project-local** (``<repo>/.kazma``) so the whole Kazma
+# state travels together. Power users can override with ``KAZMA_USER_HOME``.
+# A one-time migration moves any legacy ``~/.kazma`` into the new location.
 
 
 def user_home() -> Path:
-    """The user's Kazma home directory (``~/.kazma/``). Created if missing."""
-    h = Path.home() / ".kazma"
+    """The Kazma home directory — **project-local** by default.
+
+    Resolution precedence:
+      1. ``KAZMA_USER_HOME`` env (absolute path; power-user override)
+      2. ``<repo>/.kazma`` (default — travels with the repo)
+
+    The directory is created if missing.  Callers should also invoke
+    :func:`migrate_legacy_user_home` once at boot to move any pre-existing
+    ``~/.kazma`` into the new location.
+    """
+    env = (os.environ.get("KAZMA_USER_HOME") or "").strip()
+    if env:
+        h = Path(env).expanduser()
+    else:
+        # Project-local: sibling of kazma-data/, at the repo root.
+        h = get_project_root() / ".kazma"
     h.mkdir(parents=True, exist_ok=True)
     return h
+
+
+def migrate_legacy_user_home() -> bool:
+    """One-time migration: move ``~/.kazma`` → ``<repo>/.kazma`` if needed.
+
+    Idempotent and safe:
+      - No-op if no legacy ``~/.kazma`` exists.
+      - No-op if legacy exists but target already exists (target wins;
+        we don't overwrite the user's current state).
+      - Only moves when legacy exists AND target doesn't — the clean
+        first-boot case.
+
+    Returns ``True`` if a migration was performed.
+    """
+    legacy = Path.home() / ".kazma"
+    if not legacy.exists() or not legacy.is_dir():
+        return False
+    # Resolve target without creating it (we want to detect existence).
+    env = (os.environ.get("KAZMA_USER_HOME") or "").strip()
+    target = Path(env).expanduser() if env else (get_project_root() / ".kazma")
+    if target.exists():
+        # Both exist — user has state in both places. Don't clobber the
+        # target; leave legacy in place for manual reconciliation.
+        return False
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        legacy.rename(target)
+        # Drop a marker at the old location so the user knows where it went.
+        try:
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            (legacy.with_suffix(".kazma.migrated.txt")).write_text(
+                f"Your ~/.kazma was migrated to {target} on first boot of the "
+                "project-local layout. This file is a marker; safe to delete.\n",
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+        return True
+    except OSError:
+        # Cross-device rename can fail; fall back to copy. We avoid shutil
+        # at module top to keep paths.py dependency-light.
+        import shutil
+
+        try:
+            shutil.copytree(legacy, target)
+            shutil.rmtree(legacy)
+            return True
+        except Exception:
+            return False
 
 
 def hub_registry_db() -> str:

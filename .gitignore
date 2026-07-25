@@ -81,6 +81,7 @@ docs/build/
 
 # Runtime data (generated per-installation, never commit)
 kazma-data/
+.kazma/
 swarm_registry.json
 
 # Machine-local config overrides (never commit — use Settings UI or this file)
