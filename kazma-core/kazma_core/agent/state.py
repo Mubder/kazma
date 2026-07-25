@@ -130,6 +130,9 @@ class SupervisorState(TypedDict, total=False):
     circuit_breaker_tripped: bool
     """Flag indicating whether the tool execution circuit breaker has tripped."""
 
+    auto_continue: bool
+    """Flag indicating whether the supervisor should auto-continue turns for multi-step goals."""
+
 
 # ── Factory ─────────────────────────────────────────────────────────────
 
@@ -174,4 +177,5 @@ def initial_supervisor_state(
         created_at=now,
         consecutive_tool_failures=0,
         circuit_breaker_tripped=False,
+        auto_continue=False,
     )

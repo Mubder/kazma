@@ -656,10 +656,16 @@
           var statusEl = lastBox.querySelector('.tool-status');
           if (statusEl) { statusEl.textContent = 'Done'; statusEl.className = 'tool-status done'; }
         }
-        // Add result box
+        // Add result box or active background task badge
+        var isSwarm = (data.tool_name === 'dispatch_swarm' || data.tool_name === 'swarm_dispatch' || (data.result && data.result.indexOf('Swarm task dispatched') !== -1));
         var resultBox = document.createElement('div');
-        resultBox.className = 'tool-result-box';
-        resultBox.innerHTML = '<strong>Result:</strong> ' + escapeHtml(truncateStr(data.result, 500));
+        if (isSwarm) {
+          resultBox.className = 'swarm-bg-badge';
+          resultBox.innerHTML = '<span class="pulse-dot"></span><div><strong>Background Task Active:</strong> ' + escapeHtml(truncateStr(data.result, 300)) + '</div>';
+        } else {
+          resultBox.className = 'tool-result-box';
+          resultBox.innerHTML = '<strong>Result:</strong> ' + escapeHtml(truncateStr(data.result, 500));
+        }
         content.appendChild(resultBox);
         scrollToBottom();
       },

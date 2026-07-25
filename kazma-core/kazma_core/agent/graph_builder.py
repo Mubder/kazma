@@ -561,6 +561,27 @@ async def supervisor_node(
             except Exception as nudge_exc:
                 logger.warning("[Supervisor] Nudge retry failed: %s", nudge_exc)
 
+        # Auto-continuation guard for multi-step goals/tasks
+        is_auto = state.get("auto_continue", False)
+        if not is_auto and content:
+            _content_lower = content.lower()
+            if any(marker in _content_lower for marker in ["now section", "proceeding to section", "next section", "proceeding with section"]):
+                is_auto = True
+
+        if is_auto and iteration + 1 < max_iter:
+            logger.info("[Supervisor] Auto-continue active (iteration=%d/%d) — looping back to supervisor", iteration + 1, max_iter)
+            assistant_msg = {"role": "assistant", "content": content}
+            continuation_msg = {"role": "user", "content": "Please proceed automatically with the remaining steps and complete the task."}
+            return {
+                **breaker_reset,
+                "messages": messages + [assistant_msg, continuation_msg],
+                "next_node": NodeName.SUPERVISOR,
+                "iteration": iteration + 1,
+                "last_model": response.model,
+                "last_tokens": response.usage.get("total_tokens", 0),
+                "last_cost_usd": response.cost_usd,
+            }
+
         # Pure text response → RESPOND
         assistant_msg = {"role": "assistant", "content": content or "I apologize, I couldn't generate a response. Please try rephrasing your question."}
         return {
