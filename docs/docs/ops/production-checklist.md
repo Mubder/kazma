@@ -29,7 +29,8 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 
 - [ ] Auth default-deny on `/api/*`
 - [ ] Discovery SSRF protections enabled
-- [ ] `code_exec` Docker force where required (`KAZMA_CODE_EXEC_DOCKER=force`)
+- [ ] `code_exec` Docker force where required (`KAZMA_CODE_EXEC_DOCKER=force`; host-local disabled in prod/multi-user)
+- [ ] Multi-replica: unique `KAZMA_REPLICA_ID` + LB sticky on `kazma-replica` cookie
 - [ ] Shell allowlist + env scrub active
 - [ ] Workspace root confinement in production
 - [ ] Cron concurrency / stop / stale RUNNING handled
