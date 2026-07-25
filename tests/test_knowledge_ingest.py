@@ -94,3 +94,62 @@ def test_domain_scope_allows_any_path_on_host():
 def test_prefix_scope_rejects_other_host():
     seed = "https://x.com/docs/whatsapp/"
     assert not _in_scope(seed, "https://y.com/docs/whatsapp/attack", "prefix")
+
+
+# ── Bot-block detection + .gz sitemap handling ──────────────────────────────
+
+
+def test_looks_like_bot_block_html_detects_meta_error_stub():
+    """Meta returns <title>Error</title> HTML stubs to non-browser clients.
+    The discovery loop must treat these as failures, not as content."""
+    from kazma_core.stores.knowledge_ingest import _looks_like_bot_block_html
+
+    assert _looks_like_bot_block_html('<!DOCTYPE html><html><head><title>Error</title></head><body></body></html>')
+    assert _looks_like_bot_block_html('<html><head><title>403</title></head></html>')
+    assert _looks_like_bot_block_html(None)
+    assert _looks_like_bot_block_html("")
+    # Real content must NOT be flagged.
+    assert not _looks_like_bot_block_html(
+        '<html><head><title>WhatsApp Cloud API</title></head>'
+        '<body><article><p>' + ('x' * 800) + '</p></article></body></html>'
+    )
+
+
+def test_http_get_text_decompresses_gz_sitemap():
+    """A ``.xml.gz`` URL must be decompressed before parsing.  The body
+    returned for ``sitemap.xml.gz`` is raw gzip bytes — without explicit
+    decompression the parser sees binary garbage and silently yields 0 URLs."""
+    import asyncio
+    import gzip
+    import os
+    import tempfile
+
+    from kazma_core.stores.knowledge_ingest import _extract_urls_from_sitemap
+
+    # Simulate a .gz sitemap body (raw gzip bytes).
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/docs/a</loc></url>
+  <url><loc>https://example.com/docs/b</loc></url>
+</urlset>"""
+    raw_gz = gzip.compress(xml.encode("utf-8"))
+    decompressed = gzip.decompress(raw_gz).decode("utf-8")
+    urls = _extract_urls_from_sitemap(decompressed)
+    assert len(urls) == 2
+    assert "https://example.com/docs/a" in urls
+
+
+def test_safe_progress_swallows_callback_errors():
+    """The progress callback is optional and must never break discovery."""
+    import asyncio
+
+    from kazma_core.stores.knowledge_ingest import _safe_progress
+
+    async def boom(_msg: str) -> None:
+        raise RuntimeError("callback exploded")
+
+    # Should not raise.
+    asyncio.run(_safe_progress(None, "msg"))
+    asyncio.run(_safe_progress(lambda m: None, "msg"))      # sync callable
+    asyncio.run(_safe_progress(boom, "msg"))                # raising async callable
+

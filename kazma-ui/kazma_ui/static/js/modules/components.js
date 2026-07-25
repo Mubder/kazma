@@ -68,7 +68,38 @@ export function kazmaApp() {
         },
 
         toggleLanguage() {
-            // Switch between 'ar' and 'en', persist, then reload for SSR pickup
+            // Switch between 'ar' and 'en', persist, then reload for SSR pickup.
+            // Before reloading, check whether any long-running work is in
+            // flight (a Knowledge crawl, a chat SSE stream, a swarm task…).
+            // Reloading mid-job silently orphans the UI handle to the job
+            // (the server-side task keeps running but the page loses its
+            // polling timer).  Warn the user and let them back out.
+            const inflight = (typeof window.kazmaHasInflightWork === 'function')
+                ? window.kazmaHasInflightWork()
+                : false;
+            if (inflight) {
+                // Defer the confirm so the click handler settles; kazmaConfirm
+                // is Promise-based and backed by the unified modal.
+                (async () => {
+                    let proceed = true;
+                    if (window.kazmaConfirm) {
+                        proceed = await window.kazmaConfirm({
+                            title: this.lang === 'ar' ? 'Switch language?' : 'تبديل اللغة؟',
+                            message: this.lang === 'ar'
+                                ? 'Work is in progress (a crawl or generation). Switching the language reloads the page and disconnects the live progress, though the server-side task keeps running. Continue?'
+                                : 'هناك مهمة قيد التشغيل (زحف أو توليد). تبديل اللغة يعيد تحميل الصفحة ويقطع التقدّم المباشر، رغم أن المهمة على الخادم تستمر. متابعة؟',
+                            confirmText: this.lang === 'ar' ? 'Switch anyway' : 'بدّل على أي حال',
+                            cancelText: this.lang === 'ar' ? 'Cancel' : 'إلغاء',
+                        });
+                    }
+                    if (proceed) this._doLanguageSwitch();
+                })();
+            } else {
+                this._doLanguageSwitch();
+            }
+        },
+
+        _doLanguageSwitch() {
             const newLang = this.lang === 'ar' ? 'en' : 'ar';
             this.lang = newLang;
             // Store in localStorage
