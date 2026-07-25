@@ -134,8 +134,22 @@ class KnowledgeIndex:
         skipped = 0
 
         # SQLite (source of truth) + FTS5 first.
+        # Per-chunk try/except: one bad row must not abort the rest of the
+        # page (legacy content-only IDs used to raise UNIQUE and mark the
+        # whole page failed even after a successful fetch).
         for chunk in chunks:
-            wrote = self._store.upsert_chunk(chunk)
+            try:
+                wrote = self._store.upsert_chunk(chunk)
+            except Exception as exc:
+                logger.warning(
+                    "[KnowledgeIndex] upsert failed library=%s url=%s idx=%s: %s",
+                    library_id,
+                    (chunk.get("source_url") or "")[:80],
+                    chunk.get("chunk_index"),
+                    exc,
+                )
+                skipped += 1
+                continue
             if wrote:
                 new_count += 1
             else:

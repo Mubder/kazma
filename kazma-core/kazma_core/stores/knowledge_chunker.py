@@ -313,6 +313,26 @@ def chunk_markdown_doc(
     return chunks
 
 
+def make_chunk_id(library_id: str, source_url: str, content_hash: str) -> str:
+    """Stable primary key that is unique **per page**, not just per content.
+
+    Older IDs used ``{library_id}:{content_hash[:16]}``.  Meta (and most doc
+    sites) repeat the same nav/footer chrome on every page, so identical
+    sections across URLs produced the *same* primary key.  SQLite then raised
+    UNIQUE constraint on INSERT and the whole page was counted as failed —
+    even though the fetch succeeded (provenance was written).  Observed on a
+    live Meta WhatsApp crawl: 182 pages fetched, only 10 URLs in the index.
+
+    Including a short digest of ``source_url`` keeps IDs stable under
+    re-ingest of the same page while allowing shared chrome across pages.
+    """
+    import hashlib
+
+    url_digest = hashlib.sha256((source_url or "").encode("utf-8")).hexdigest()[:10]
+    body = (content_hash or "")[:16]
+    return f"{library_id}:{url_digest}:{body}"
+
+
 # Convenience: marshal a chunk to the dict shape KnowledgeStore expects.
 def chunk_to_dict(chunk: KnowledgeChunk) -> dict[str, Any]:
     return {
@@ -326,5 +346,5 @@ def chunk_to_dict(chunk: KnowledgeChunk) -> dict[str, Any]:
         "content_hash": chunk.content_hash,
         "has_code": chunk.has_code,
         "char_count": len(chunk.content),
-        "id": f"{chunk.library_id}:{chunk.content_hash[:16]}",
+        "id": make_chunk_id(chunk.library_id, chunk.source_url, chunk.content_hash),
     }

@@ -13,9 +13,11 @@ The store is deliberately **decoupled** from chat memory:
 - It writes its own tables (``knowledge_libraries``, ``knowledge_chunks``,
   ``knowledge_chunks_fts``) in the shared ``kazma-data/settings.db``.
 - It never touches the ``agent_memory`` ChromaDB collection.
-- Chunks are keyed by ``"{library_id}:{content_hash[:16]}"`` so identical
-  sections across pages do not collide (a real bug in the shared
-  ``UnifiedMemoryAdapter`` which keys on a bare content hash).
+- Chunks are keyed by ``"{library_id}:{url_digest}:{content_hash[:16]}"``
+  so the same nav/footer chrome on two different pages never collides on
+  the SQLite primary key (a real production failure mode on Meta doc
+  crawls).  Dedup of *unchanged* pages still uses
+  ``(library_id, source_url, chunk_index)`` + ``content_hash``.
 
 Concurrency model
 -----------------
@@ -325,7 +327,15 @@ class KnowledgeStore:
             if existing and existing["content_hash"] == content_hash:
                 return False  # unchanged — skip
 
-            chunk_id = chunk.get("id") or f"{library_id}:{content_hash[:16]}"
+            # Prefer caller-supplied id (chunk_to_dict); fall back to the
+            # source-url-scoped form so shared chrome across pages never
+            # collides on the PRIMARY KEY.
+            if chunk.get("id"):
+                chunk_id = chunk["id"]
+            else:
+                from kazma_core.stores.knowledge_chunker import make_chunk_id
+
+                chunk_id = make_chunk_id(library_id, source_url, content_hash)
             try:
                 conn.execute("BEGIN")
                 if existing:
@@ -340,6 +350,15 @@ class KnowledgeStore:
                     conn.execute(
                         "DELETE FROM knowledge_chunks WHERE id = ?", (old_id,)
                     )
+                # Also clear any stale row that already owns this id under a
+                # different (library, source, index) — legacy content-only
+                # ids could leave orphans that block INSERT.
+                conn.execute(
+                    "DELETE FROM knowledge_chunks_fts WHERE chunk_id = ?", (chunk_id,)
+                )
+                conn.execute(
+                    "DELETE FROM knowledge_chunks WHERE id = ?", (chunk_id,)
+                )
                 conn.execute(
                     """INSERT INTO knowledge_chunks
                        (id, library_id, source_url, document_title, section_header,
