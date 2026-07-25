@@ -942,6 +942,10 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     messages = list(state.get("messages", []))
     iteration = state.get("iteration", 0) + 1
 
+    # Sanitize tool chains to remove any unhandled/dangling tool_calls
+    # (e.g. when max_iterations forced routing to respond before ToolWorker ran)
+    messages = sanitize_tool_chains(messages)
+
     logger.info(
         "[Respond] Finalizing turn (iteration=%d, messages=%d)",
         iteration,
