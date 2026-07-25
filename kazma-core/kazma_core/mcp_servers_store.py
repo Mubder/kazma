@@ -42,6 +42,18 @@ _DEFAULT_YAML = "kazma.yaml"
 # ── ConfigStore helpers ───────────────────────────────────────────────────
 
 
+def _config_key() -> str:
+    """ConfigStore key — tenant-scoped when multi-user/production isolation is on."""
+    try:
+        from kazma_core.tenant_isolation import multi_user_or_production, tenant_key
+
+        if multi_user_or_production():
+            return tenant_key(CONFIG_KEY)
+    except Exception:
+        pass
+    return CONFIG_KEY
+
+
 def _normalize_list(raw: Any) -> list[dict[str, Any]]:
     if raw is None:
         return []
@@ -63,7 +75,12 @@ def _cs_get() -> list[dict[str, Any]]:
     try:
         from kazma_core.config_store import get_config_store
 
-        return _normalize_list(get_config_store().get(CONFIG_KEY, []))
+        key = _config_key()
+        servers = _normalize_list(get_config_store().get(key, []))
+        # Legacy: if tenant key empty, also merge global mcp.servers once
+        if key != CONFIG_KEY and not servers:
+            servers = _normalize_list(get_config_store().get(CONFIG_KEY, []))
+        return servers
     except Exception as exc:
         logger.debug("[mcp_servers_store] ConfigStore read failed: %s", exc)
         return []
@@ -74,7 +91,7 @@ def _cs_set(servers: list[dict[str, Any]]) -> None:
         from kazma_core.config_store import get_config_store
 
         get_config_store().set(
-            CONFIG_KEY,
+            _config_key(),
             json.dumps(servers, ensure_ascii=False),
             category="mcp",
         )

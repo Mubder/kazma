@@ -211,6 +211,16 @@ async def dispatch_worker(
         else:
             breaker.record_failure()
         recorded = True
+        # Multi-replica: dual-write breaker state to ConfigStore
+        try:
+            if hasattr(engine, "_reliability") and hasattr(
+                engine._reliability, "note_breaker_outcome"
+            ):
+                engine._reliability.note_breaker_outcome(worker.name)
+            else:
+                breaker.persist_shared(worker.name)
+        except Exception:
+            pass
 
         worker.mark_completed(worker_result.status)
 

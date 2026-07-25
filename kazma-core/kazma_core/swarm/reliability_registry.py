@@ -67,15 +67,27 @@ class ReliabilityRegistry:
     # ── Circuit breakers ────────────────────────────────────────────
 
     def get_circuit_breaker(self, worker_name: str) -> CircuitBreaker:
-        """Return (or create) the circuit breaker for a worker."""
+        """Return (or create) the circuit breaker for a worker.
+
+        When shared breakers are enabled (multi-user/prod or
+        ``KAZMA_SHARED_BREAKERS=1``), hydrate from ConfigStore on first get.
+        """
         if worker_name not in self._circuit_breakers:
-            self._circuit_breakers[worker_name] = CircuitBreaker()
+            shared = CircuitBreaker.load_shared(worker_name)
+            self._circuit_breakers[worker_name] = shared or CircuitBreaker()
         return self._circuit_breakers[worker_name]
+
+    def note_breaker_outcome(self, worker_name: str) -> None:
+        """Persist breaker state after success/failure (multi-replica)."""
+        b = self._circuit_breakers.get(worker_name)
+        if b is not None:
+            b.persist_shared(worker_name)
 
     def reset_circuit_breaker(self, worker_name: str) -> CircuitBreaker:
         """Manually reset a worker's circuit breaker to closed state."""
         breaker = self.get_circuit_breaker(worker_name)
         breaker.reset()
+        breaker.persist_shared(worker_name)
         logger.info("[Reliability] circuit breaker reset for worker '%s'", worker_name)
         return breaker
 
@@ -91,6 +103,7 @@ class ReliabilityRegistry:
             failure_threshold=failure_threshold,
             cooldown_seconds=cooldown_seconds,
         )
+        self._circuit_breakers[worker_name].persist_shared(worker_name)
         return self._circuit_breakers[worker_name]
 
     def get_circuit_breaker_status(self, worker_name: str) -> dict[str, Any]:

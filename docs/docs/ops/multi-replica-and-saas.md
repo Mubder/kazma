@@ -53,7 +53,9 @@ Env: `KAZMA_MULTI_USER=1`, `KAZMA_PRODUCTION=1`, `KAZMA_DATABASE_URL`,
 | HITL bus approvals | In-process Event only | **ConfigStore dual-write** via `swarm/shared_approvals.py` + local Event |
 | Swarm task results | TaskStore (SQLite/PG) | Unchanged — use Postgres for multi-node |
 | Task list tenancy | Global | Auto `metadata.tenant_id` filter when multi-user/prod |
-| Circuit breakers | Process memory | Still process-local (acceptable; probes reset on restart) |
+| Circuit breakers | Process memory | **Shared** via ConfigStore when multi-user/prod (`KAZMA_SHARED_BREAKERS`) |
+| MCP servers (user-added) | Global ConfigStore | **Tenant-scoped** key `tenant.<id>.mcp.servers` |
+| Cron job list | Global | **tenant_id** column; UI list filtered |
 | `_active_tasks` | Process memory | Still process-local; persist via TaskStore for history |
 | KB crawl jobs | Process + ConfigStore | Durable ConfigStore (`stores/kb_jobs.py`) |
 | Knowledge libraries | Global | **tenant_id** column + list/get filter when multi-user/prod |

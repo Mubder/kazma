@@ -808,6 +808,15 @@ class SwarmEngine:
                 handoffs=[handoff_record],
             )
             breaker.record_failure()
+        try:
+            if hasattr(self, "_reliability") and hasattr(
+                self._reliability, "note_breaker_outcome"
+            ):
+                self._reliability.note_breaker_outcome(source_worker.name)
+            else:
+                breaker.persist_shared(source_worker.name)
+        except Exception:
+            pass
 
         source_worker.mark_completed(source_result.status)
         return [source_result] + target_results

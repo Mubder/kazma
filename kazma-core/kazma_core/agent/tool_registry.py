@@ -935,6 +935,7 @@ class LocalToolRegistry:
                 production_archive_allowed,
                 resolve_shell_binary,
                 restricted_child_env,
+                shell_mutate_allowed,
                 shell_strict_mode,
             )
 
@@ -947,12 +948,13 @@ class LocalToolRegistry:
                 "git", "uv", "pytest", "ruff", "mypy",
                 # Text processing (read-only) — no `ps` (env leak on some OS)
                 "jq", "tr", "cut",
-                # File ops (write — HITL-gated via safety layer)
-                "mkdir", "cp", "mv", "touch",
                 # Process control (safe)
                 "sleep",
                 # Note: `kazma` / `ps` removed from prod allowlist (audit H4)
             }
+            # File ops: off in multi-user/prod unless KAZMA_SHELL_ALLOW_MUTATE=1
+            if shell_mutate_allowed():
+                _SAFE_BINARIES |= {"mkdir", "cp", "mv", "touch"}
             # Archives: disabled by default in production strict mode
             # (tar/zip can write outside cwd via absolute entries).
             if production_archive_allowed():

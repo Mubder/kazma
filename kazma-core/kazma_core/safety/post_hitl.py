@@ -141,3 +141,23 @@ def production_archive_allowed() -> bool:
     if is_production() and shell_strict_mode():
         return False
     return True
+
+
+def shell_mutate_allowed() -> bool:
+    """Whether shell_exec may run mkdir/cp/mv/touch after HITL.
+
+    Multi-user/production defaults to read-only shell (use file_write tool).
+    Opt in with ``KAZMA_SHELL_ALLOW_MUTATE=1``.
+    """
+    raw = (os.environ.get("KAZMA_SHELL_ALLOW_MUTATE") or "").strip().lower()
+    if raw in ("1", "true", "on", "yes"):
+        return True
+    try:
+        from kazma_core.tenant_isolation import multi_user_or_production
+
+        if multi_user_or_production():
+            return False
+    except Exception:
+        if is_production():
+            return False
+    return True

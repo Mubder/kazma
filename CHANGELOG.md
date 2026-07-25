@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — remaining gaps phase 2: shared breakers, tenant MCP/cron, RO shell (2026-07-25)
+
+- **Shared circuit breakers**: ConfigStore dual-write when multi-user/prod
+  (`KAZMA_SHARED_BREAKERS`); wall-clock cooldown for multi-replica.
+- **Tenant MCP ConfigStore keys**: `tenant.<id>.mcp.servers` under isolation.
+- **Cron `tenant_id`**: stamped on schedule; list filtered in multi-user/prod.
+- **Shell mutate off** in multi-user/prod (`mkdir`/`cp`/`mv`/`touch`) unless
+  `KAZMA_SHELL_ALLOW_MUTATE=1` — prefer `file_write` tool.
+
 ## Unreleased — remaining gaps: hard sandbox, tenant stores, replica affinity (2026-07-25)
 
 ### Hard sandbox (post-HITL / host power)
