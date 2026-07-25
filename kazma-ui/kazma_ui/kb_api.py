@@ -76,9 +76,12 @@ def create_kb_router() -> APIRouter:
     async def create_library(
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
-        lib_id = (payload.get("id") or "").strip()
-        name = (payload.get("name") or lib_id).strip()
-        if not lib_id:
+        from kazma_core.stores.knowledge import slugify_library_id
+
+        raw_id = (payload.get("id") or "").strip()
+        lib_id = slugify_library_id(raw_id)
+        name = (payload.get("name") or raw_id).strip() or lib_id
+        if not raw_id:
             return {"ok": False, "error": "Missing 'id'"}
         try:
             existing = _store().get_library(lib_id)
@@ -184,7 +187,14 @@ def create_kb_router() -> APIRouter:
         if mode not in ("page", "site"):
             return {"ok": False, "error": "mode must be 'page' or 'site'"}
 
-        # Create-or-use library.
+        # Create-or-use library.  Slugify ONCE at the boundary so the
+        # existence check and the insert agree on the ID (otherwise a raw
+        # user input like "ShipX WhatsApp API" passes get_library() as
+        # None but create_library() slugifies it to an existing slug and
+        # raises UNIQUE constraint).
+        from kazma_core.stores.knowledge import slugify_library_id
+
+        lib_id = slugify_library_id(lib_id)
         try:
             if not _store().get_library(lib_id):
                 _store().create_library(lib_id, name=lib_id, seed_url=url)
