@@ -153,7 +153,7 @@ def _last_assistant_text(messages: list[Any] | None) -> str:
 
 async def _stream_langgraph_events(
     graph: Any,
-    input_state: dict[str, Any],
+    input_state: dict[str, Any] | Any,
     config: dict[str, Any],
 ) -> AsyncGenerator[str, None]:
     """Consume LangGraph astream_events and yield SSE frames.
@@ -167,9 +167,15 @@ async def _stream_langgraph_events(
       on_tool_end           → tool_result
       on_chain_end          → done (only from the respond node)
 
+    When *input_state* is a ``langgraph.types.Command`` (HITL resume path),
+    ``graph.ainvoke()`` is used instead of ``astream_events`` because the
+    custom LLMProvider does not emit ``on_chat_model_stream`` events, causing
+    ``astream_events`` to hang without producing any frames.  The post-stream
+    backfill logic still runs and surfaces assistant text from the checkpoint.
+
     Args:
-        graph: Compiled LangGraph app (must support astream_events).
-        input_state: The SupervisorState dict to feed into the graph.
+        graph: Compiled LangGraph app (must support astream_events/ainvoke).
+        input_state: The SupervisorState dict, or a Command for HITL resume.
         config: LangGraph config dict (thread_id, checkpoint_ns, etc.).
 
     Yields:
@@ -190,111 +196,136 @@ async def _stream_langgraph_events(
 
     try:
         try:
-            async for event in graph.astream_events(input_state, config=config, version="v2"):
-                kind = event.get("event", "")
-                data = event.get("data", {})
-                name = event.get("name", "")
+            # ── Detect Command input (HITL resume path) ─────────────────
+            # When resuming from a HITL interrupt, input_state is a
+            # langgraph.types.Command object (not a state dict).  In that
+            # case astream_events(version="v2") hangs without producing any
+            # frames because Kazma's custom LLMProvider does not emit
+            # on_chat_model_stream events (see comment below).  The async-for
+            # loop never exhausts, so the post-stream backfill logic that
+            # reads graph.aget_state() is never reached — the SSE stream stays
+            # open with a fake "Thinking…" spinner.
+            #
+            # Fix: for Command inputs, use graph.ainvoke() which completes
+            # synchronously (stopping at any new interrupt), then fall through
+            # to the existing post-stream logic that backfills assistant text
+            # and detects chained HITL interrupts from the checkpoint.
+            from langgraph.types import Command as _Command
 
-                # ── on_chat_model_stream: LLM token delta ──────────────
-                if kind == "on_chat_model_stream":
-                    chunk = data.get("chunk")
-                    if chunk is not None:
-                        # chunk is an AIMessageChunk — extract content
-                        token_text = ""
-                        if hasattr(chunk, "content"):
-                            token_text = chunk.content or ""
-                        elif isinstance(chunk, dict):
-                            token_text = chunk.get("content", "")
+            _is_resume = isinstance(input_state, _Command)
 
-                        if token_text:
-                            content_acc += token_text
-                            yield _sse_frame("token", {"content": token_text})
+            if _is_resume:
+                logger.debug(
+                    "[SSE] HITL resume path — using ainvoke() for thread=%s",
+                    thread_id,
+                )
+                await graph.ainvoke(input_state, config)
+            else:
+                async for event in graph.astream_events(input_state, config=config, version="v2"):
+                    kind = event.get("event", "")
+                    data = event.get("data", {})
+                    name = event.get("name", "")
 
-                # ── on_chat_model_end: LLM finished — extract usage ────
-                elif kind == "on_chat_model_end":
-                    output = data.get("output", {})
-                    if hasattr(output, "usage_metadata"):
-                        usage = output.usage_metadata or {}
-                        total_tokens = usage.get("total_tokens", total_tokens)
-                    elif isinstance(output, dict):
-                        usage = output.get("usage", {})
-                        total_tokens = usage.get("total_tokens", total_tokens)
-                        # Some providers put cost in response_metadata
-                        meta = output.get("response_metadata", {})
-                        if "cost" in meta:
-                            total_cost += meta["cost"]
+                    # ── on_chat_model_stream: LLM token delta ──────────────
+                    if kind == "on_chat_model_stream":
+                        chunk = data.get("chunk")
+                        if chunk is not None:
+                            # chunk is an AIMessageChunk — extract content
+                            token_text = ""
+                            if hasattr(chunk, "content"):
+                                token_text = chunk.content or ""
+                            elif isinstance(chunk, dict):
+                                token_text = chunk.get("content", "")
 
-                # ── on_tool_start: tool execution beginning ────────────
-                elif kind == "on_tool_start":
-                    inputs = data.get("input", {})
-                    # data.input can be the raw args dict or nested
-                    if isinstance(inputs, dict) and "input" in inputs:
-                        inputs = inputs["input"]
-                    yield _sse_frame(
-                        "tool_call",
-                        {
-                            "tool_name": name,
-                            "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
-                            if isinstance(inputs, dict)
-                            else str(inputs)[:2000],
-                        },
-                    )
+                            if token_text:
+                                content_acc += token_text
+                                yield _sse_frame("token", {"content": token_text})
 
-                # ── on_tool_end: tool execution finished ───────────────
-                elif kind == "on_tool_end":
-                    output = data.get("output", "")
-                    if hasattr(output, "content"):
-                        output = output.content
-                    elif isinstance(output, dict):
-                        output = output.get("content", json.dumps(output, ensure_ascii=False))
-                    yield _sse_frame(
-                        "tool_result",
-                        {
-                            "tool_name": name,
-                            "result": str(output)[:5000],
-                        },
-                    )
+                    # ── on_chat_model_end: LLM finished — extract usage ────
+                    elif kind == "on_chat_model_end":
+                        output = data.get("output", {})
+                        if hasattr(output, "usage_metadata"):
+                            usage = output.usage_metadata or {}
+                            total_tokens = usage.get("total_tokens", total_tokens)
+                        elif isinstance(output, dict):
+                            usage = output.get("usage", {})
+                            total_tokens = usage.get("total_tokens", total_tokens)
+                            # Some providers put cost in response_metadata
+                            meta = output.get("response_metadata", {})
+                            if "cost" in meta:
+                                total_cost += meta["cost"]
 
-                # ── on_chain_end at graph terminal: graph finished ─────
-                # LangGraph 1.x emits the terminal on_chain_end with name
-                # "LangGraph"; older versions (and some test mocks) use
-                # "__end__".  Match both so the handler fires in production
-                # and in unit tests.
-                elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
-                    # Extract final state if available
-                    output = data.get("output", {})
-                    if isinstance(output, dict):
-                        # Pull cost/tokens from the final state
-                        final_cost = output.get("last_cost_usd", total_cost)
-                        final_tokens = output.get("last_tokens", total_tokens)
-                        if final_cost:
-                            total_cost = final_cost
-                        if final_tokens:
-                            total_tokens = final_tokens
+                    # ── on_tool_start: tool execution beginning ────────────
+                    elif kind == "on_tool_start":
+                        inputs = data.get("input", {})
+                        # data.input can be the raw args dict or nested
+                        if isinstance(inputs, dict) and "input" in inputs:
+                            inputs = inputs["input"]
+                        yield _sse_frame(
+                            "tool_call",
+                            {
+                                "tool_name": name,
+                                "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
+                                if isinstance(inputs, dict)
+                                else str(inputs)[:2000],
+                            },
+                        )
 
-                        # Time Travel: capture snapshot id/iteration if the
-                        # graph stamped one (snapshot_recorder is wired).
-                        _sid = output.get("snapshot_id")
-                        if _sid:
-                            _snapshot_info = {
-                                "snapshot_id": _sid,
-                                "iteration": output.get("snapshot_iteration", 0),
-                                "model": output.get("last_model", ""),
-                            }
+                    # ── on_tool_end: tool execution finished ───────────────
+                    elif kind == "on_tool_end":
+                        output = data.get("output", "")
+                        if hasattr(output, "content"):
+                            output = output.content
+                        elif isinstance(output, dict):
+                            output = output.get("content", json.dumps(output, ensure_ascii=False))
+                        yield _sse_frame(
+                            "tool_result",
+                            {
+                                "tool_name": name,
+                                "result": str(output)[:5000],
+                            },
+                        )
 
-                        # CRITICAL: LLMProvider uses custom httpx (not
-                        # BaseChatModel), so on_chat_model_stream never fires.
-                        # Surface final assistant text from graph state.
-                        if not content_acc:
-                            msg_content = _last_assistant_text(
-                                output.get("messages") or []
-                            )
-                            if msg_content:
-                                content_acc = msg_content
-                                yield _sse_frame(
-                                    "token",
-                                    {"content": msg_content},
+                    # ── on_chain_end at graph terminal: graph finished ─────
+                    # LangGraph 1.x emits the terminal on_chain_end with name
+                    # "LangGraph"; older versions (and some test mocks) use
+                    # "__end__".  Match both so the handler fires in production
+                    # and in unit tests.
+                    elif kind == "on_chain_end" and name in ("__end__", "LangGraph"):
+                        # Extract final state if available
+                        output = data.get("output", {})
+                        if isinstance(output, dict):
+                            # Pull cost/tokens from the final state
+                            final_cost = output.get("last_cost_usd", total_cost)
+                            final_tokens = output.get("last_tokens", total_tokens)
+                            if final_cost:
+                                total_cost = final_cost
+                            if final_tokens:
+                                total_tokens = final_tokens
+
+                            # Time Travel: capture snapshot id/iteration if the
+                            # graph stamped one (snapshot_recorder is wired).
+                            _sid = output.get("snapshot_id")
+                            if _sid:
+                                _snapshot_info = {
+                                    "snapshot_id": _sid,
+                                    "iteration": output.get("snapshot_iteration", 0),
+                                    "model": output.get("last_model", ""),
+                                }
+
+                            # CRITICAL: LLMProvider uses custom httpx (not
+                            # BaseChatModel), so on_chat_model_stream never fires.
+                            # Surface final assistant text from graph state.
+                            if not content_acc:
+                                msg_content = _last_assistant_text(
+                                    output.get("messages") or []
                                 )
+                                if msg_content:
+                                    content_acc = msg_content
+                                    yield _sse_frame(
+                                        "token",
+                                        {"content": msg_content},
+                                    )
 
             # ── Post-stream: HITL + backfill assistant text ────────────
             # Custom LLM path never streams tokens. On HITL interrupt,
@@ -408,7 +439,8 @@ async def _stream_langgraph_events(
                     # Recover user text from input_state when available
                     umsg = ""
                     try:
-                        for m in reversed(list((input_state or {}).get("messages") or [])):
+                        _state_for_msgs = input_state if isinstance(input_state, dict) else {}
+                        for m in reversed(list((_state_for_msgs or {}).get("messages") or [])):
                             if isinstance(m, dict) and m.get("role") == "user":
                                 umsg = str(m.get("content") or "")
                                 break
