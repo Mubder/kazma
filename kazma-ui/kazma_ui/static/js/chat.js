@@ -917,34 +917,50 @@
         tool: data.tool || '',
       };
 
-      fetch('/api/approve/' + encodeURIComponent(data.thread_id), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        credentials: 'same-origin',
-      }).then(function(res) {
-        return res.json().then(function(body) {
-          return { status: res.status, body: body || {} };
-        }).catch(function() {
-          return { status: res.status, body: {} };
-        });
-      }).then(function(out) {
-        if (out.status === 202) {
+      if (!currentMsgEl) {
+        currentMsgEl = createAssistantMessage();
+      }
+      setIsThinking(true, pendingLabel);
+
+      var approvalUrl = '/api/approve/' + encodeURIComponent(data.thread_id);
+
+      KazmaStream.ssePost(approvalUrl, payload, {
+        onEvent: function(eventType, payloadData) {
+          if (eventType === 'status' && payloadData && payloadData.content) {
+            setIsThinking(true, payloadData.content);
+          }
+        },
+        onToken: function(tokenData) {
+          if (tokenData && tokenData.content) {
+            setIsThinking(false);
+            appendToken(tokenData.content);
+          }
+        },
+        onToolCall: function(toolData) {
+          setIsThinking(true, 'Executing tool: ' + (toolData.name || 'tool') + '\u2026');
+          renderToolCallCard(toolData);
+        },
+        onToolResult: function(resultData) {
+          updateToolResultCard(resultData);
+        },
+        onApprovalRequired: function(nextApproval) {
+          setIsThinking(false);
           var okLabel = action === 'deny' ? 'Denied \u2717'
             : (scope === 'yolo' ? 'YOLO on \u2713'
               : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
           setCardState(action === 'approve' ? 'approved' : 'denied', okLabel);
 
-          if (out.body.content) {
-            appendAssistantText(out.body.content);
-          } else if (action === 'deny') {
-            appendAssistantText('_Tool denied — continuing without it._');
-          } else if (out.body.approval_required) {
-            // Mid-chain with no new prose: quiet continue
-          } else if (action === 'approve') {
-            // Final turn with empty model text — server usually sends a note
-            appendAssistantText('_Tool finished. Ask a follow-up if you need a summary._');
-          }
+          setTimeout(function() {
+            currentMsgEl = createAssistantMessage();
+            renderHitlCard(nextApproval);
+          }, 40);
+        },
+        onDone: function(doneData) {
+          setIsThinking(false);
+          var okLabel = action === 'deny' ? 'Denied \u2717'
+            : (scope === 'yolo' ? 'YOLO on \u2713'
+              : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
+          setCardState(action === 'approve' ? 'approved' : 'denied', okLabel);
 
           if (scope === 'tool' && KS.toast) {
             KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
@@ -953,30 +969,16 @@
             KS.toast('YOLO on for this session — danger tools auto-approved', 'warning', 4000);
           }
 
-          if (out.body.approval_required) {
-            var next = out.body.approval_required;
-            setTimeout(function() {
-              currentMsgEl = createAssistantMessage();
-              renderHitlCard(next);
-            }, 40);
-          } else {
-            currentMsgEl = null;
-            tokenAccum = '';
-            enableInput();
-          }
-        } else if (out.status === 409) {
-          setCardState('error', 'No pending approval (already resumed?)');
-          appendAssistantText('_' + truncateStr(String((out.body && out.body.error) || 'No pending approval for this thread.'), 200) + '_');
+          currentMsgEl = null;
+          tokenAccum = '';
           enableInput();
-        } else {
-          var errMsg = (out.body && (out.body.error || out.body.detail)) || ('HTTP ' + out.status);
-          setCardState('error', 'Error: ' + truncateStr(String(errMsg), 120));
-          appendAssistantText('_Approval failed: ' + escapeHtml(String(errMsg)) + '_');
+        },
+        onError: function(errMsg) {
+          setIsThinking(false);
+          setCardState('error', 'Error: ' + truncateStr(String(errMsg || 'Approval failed'), 120));
+          appendAssistantText('_Approval failed: ' + escapeHtml(String(errMsg || 'Error')) + '_');
           enableInput();
         }
-      }).catch(function(err) {
-        setCardState('error', 'Error: ' + (err && err.message ? err.message : 'network'));
-        enableInput();
       });
     }
 

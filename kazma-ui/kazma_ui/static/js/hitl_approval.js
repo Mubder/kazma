@@ -129,74 +129,77 @@
     scope = scope || 'once';
     tool = tool || '';
 
-    // Disable buttons while request is in-flight
     buttons.forEach(function (b) { b.disabled = true; });
     if (statusEl) {
       statusEl.textContent = approve ? 'Approving…' : 'Denying…';
       statusEl.style.display = 'inline-block';
     }
 
-    try {
-      var resp = await fetch('/api/approve/' + encodeURIComponent(threadId), {
-        method: 'POST',
-        headers: approvalHeaders(),
-        body: JSON.stringify({
-          action: approve ? 'approve' : 'deny',
-          scope: scope,
-          tool: tool,
-        }),
-        credentials: 'same-origin',
-      });
+    var payload = {
+      action: approve ? 'approve' : 'deny',
+      scope: scope,
+      tool: tool,
+    };
 
-      if (resp.status === 202) {
+    var url = '/api/approve/' + encodeURIComponent(threadId);
+
+    if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+      window.KazmaApp.setIsThinking(true, approve ? 'Running approved tool…' : 'Denying tool…');
+    }
+
+    KazmaStream.ssePost(url, payload, {
+      onEvent: function(type, data) {
+        if (type === 'status' && data && data.content && statusEl) {
+          statusEl.textContent = data.content;
+          if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+            window.KazmaApp.setIsThinking(true, data.content);
+          }
+        }
+      },
+      onToken: function(d) {
+        if (window.KazmaApp) {
+          if (window.KazmaApp.setIsThinking) window.KazmaApp.setIsThinking(false);
+          if (window.KazmaApp.appendToken && d && d.content) {
+            window.KazmaApp.appendToken(d.content);
+          }
+        }
+      },
+      onToolCall: function(d) {
+        if (window.KazmaApp) {
+          if (window.KazmaApp.setIsThinking) window.KazmaApp.setIsThinking(true, 'Executing tool: ' + (d.name || 'tool') + '…');
+          if (window.KazmaApp.addToolCall) window.KazmaApp.addToolCall(d);
+        }
+      },
+      onDone: function(d) {
+        if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+          window.KazmaApp.setIsThinking(false);
+        }
         if (statusEl) {
           if (window.KazmaIcons) {
             statusEl.innerHTML = approve
-              ? (KazmaIcons.span('check') + ' Approved — agent resuming')
+              ? (KazmaIcons.span('check') + ' Approved — complete')
               : (KazmaIcons.span('x') + ' Denied');
           } else {
-            statusEl.textContent = approve ? 'Approved — agent resuming' : 'Denied';
+            statusEl.textContent = approve ? 'Approved — complete' : 'Denied';
           }
           statusEl.className = 'hitl-approval-status hitl-status-' + (approve ? 'ok' : 'denied');
         }
-        // Remove the card after a short delay
         setTimeout(function () {
           if (card) card.remove();
           refreshPending();
         }, 1500);
-      } else if (resp.status === 401) {
+      },
+      onError: function(err) {
+        if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+          window.KazmaApp.setIsThinking(false);
+        }
         if (statusEl) {
-          statusEl.textContent = '⚠ Unauthorized (invalid secret)';
+          statusEl.textContent = '⚠ Error: ' + err;
           statusEl.className = 'hitl-approval-status hitl-status-error';
         }
         buttons.forEach(function (b) { b.disabled = false; });
-      } else {
-        var data = await resp.json().catch(function () { return {}; });
-        if (resp.status === 409 || data.status === 'expired' || data.status === 'noop') {
-          if (statusEl) {
-            statusEl.textContent = '⏰ Expired or already resumed';
-            statusEl.className = 'hitl-approval-status hitl-status-denied';
-            statusEl.style.display = 'inline-block';
-          }
-          setTimeout(function () {
-            if (card) card.remove();
-            refreshPending();
-          }, 1500);
-        } else if (statusEl) {
-          statusEl.textContent = '⚠ Error: ' + (data.error || resp.statusText);
-          statusEl.className = 'hitl-approval-status hitl-status-error';
-          buttons.forEach(function (b) { b.disabled = false; });
-        } else {
-          buttons.forEach(function (b) { b.disabled = false; });
-        }
       }
-    } catch (err) {
-      if (statusEl) {
-        statusEl.textContent = '⚠ Network error';
-        statusEl.className = 'hitl-approval-status hitl-status-error';
-      }
-      buttons.forEach(function (b) { b.disabled = false; });
-    }
+    });
   }
 
   /**

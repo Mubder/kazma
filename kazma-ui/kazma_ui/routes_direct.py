@@ -1244,147 +1244,41 @@ def register_direct_routes(self: Any) -> None:
             if isinstance(body.get("approved_ids"), list):
                 resume_value["approved_ids"] = body["approved_ids"]
 
-            # Thread id for requires_approval/grants during the resumed run
+            from fastapi.responses import StreamingResponse
+            from typing import AsyncGenerator
+            from kazma_ui.sse_chat import _stream_langgraph_events, _sse_frame
             from kazma_core.safety.hitl import (
                 reset_current_thread_id,
                 set_current_thread_id,
             )
 
-            _tid_token = set_current_thread_id(thread_id)
-            try:
-                result = await graph_ref.ainvoke(
-                    Command(resume=resume_value),
-                    config=config,
+            async def _approval_stream_generator() -> AsyncGenerator[str, None]:
+                status_msg = (
+                    "Executing approved tool..."
+                    if approved
+                    else "Continuing after denial..."
                 )
-            finally:
-                reset_current_thread_id(_tid_token)
+                yield _sse_frame("status", {"content": status_msg})
 
-            def _assistant_text(m: Any) -> str:
-                if isinstance(m, dict):
-                    role = m.get("role") or m.get("type")
-                    text = m.get("content")
-                else:
-                    role = getattr(m, "type", None) or getattr(m, "role", None)
-                    text = getattr(m, "content", None)
-                if role not in ("assistant", "ai"):
-                    return ""
-                if isinstance(text, list):
-                    parts: list[str] = []
-                    for block in text:
-                        if isinstance(block, str):
-                            parts.append(block)
-                        elif isinstance(block, dict) and block.get("type") == "text":
-                            parts.append(str(block.get("text") or ""))
-                        else:
-                            t = getattr(block, "text", None)
-                            if t:
-                                parts.append(str(t))
-                    text = "".join(parts)
-                if text is None:
-                    return ""
-                s = str(text).strip()
-                return s
-
-            # Extract only *new* assistant text produced after resume.
-            content = ""
-            msgs: list[Any] = []
-            if isinstance(result, dict):
-                msgs = result.get("messages") or []
-            if not msgs:
+                _tid_token = set_current_thread_id(thread_id)
                 try:
-                    post = await graph_ref.aget_state(config)
-                    vals = getattr(post, "values", None) or {}
-                    if isinstance(vals, dict):
-                        msgs = vals.get("messages") or []
-                except Exception:
-                    pass
-            if isinstance(msgs, list) and msgs:
-                new_msgs = msgs[pre_msg_count:] if pre_msg_count else msgs
-                # If pre_msg_count was 0 or wrong, still prefer trailing new AI text
-                candidates = [
-                    _assistant_text(m) for m in new_msgs if _assistant_text(m)
-                ]
-                if candidates:
-                    content = candidates[-1]
-                else:
-                    # Fallback: last assistant in full history that is *not*
-                    # identical to the last pre-resume assistant (avoid replay).
-                    pre_last = ""
-                    if pre_msg_count and pre_msg_count <= len(msgs):
-                        for m in reversed(msgs[:pre_msg_count]):
-                            t = _assistant_text(m)
-                            if t:
-                                pre_last = t
-                                break
-                    for m in reversed(msgs):
-                        t = _assistant_text(m)
-                        if t and t != pre_last:
-                            content = t
-                            break
+                    async for frame in _stream_langgraph_events(
+                        graph_ref,
+                        Command(resume=resume_value),
+                        config=config,
+                    ):
+                        yield frame
+                finally:
+                    reset_current_thread_id(_tid_token)
 
-            # Detect a *new* HITL interrupt after resume (chain of danger tools).
-            next_approval: dict[str, Any] | None = None
-            try:
-                snapshot = await graph_ref.aget_state(config)
-                if snapshot and getattr(snapshot, "next", None):
-                    for task in getattr(snapshot, "tasks", []) or []:
-                        for intr in getattr(task, "interrupts", []) or []:
-                            payload = getattr(intr, "value", None)
-                            if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
-                                next_approval = {
-                                    "thread_id": thread_id,
-                                    "tool": payload.get("tool", ""),
-                                    "args": payload.get("args", {}),
-                                    "tools": payload.get("tools") or [],
-                                    "message": payload.get("message", ""),
-                                }
-                                break
-                        if next_approval:
-                            break
-            except Exception:
-                logger.debug("[HITL] post-resume interrupt probe failed", exc_info=True)
-
-            # If the turn finished with no new prose, give the UI a clear note
-            # instead of going silent (common after long shell_exec chains).
-            if approved and not content and not next_approval:
-                content = (
-                    "_Tools finished. The model did not return more text — "
-                    "ask a follow-up, or check tool results above._"
-                )
-            elif approved and not content and next_approval:
-                # Mid-chain: don't spam old text; optional quiet status
-                content = ""
-
-            # Persist *new* assistant text into SessionManager (not replays).
-            if content and not content.startswith("_Tools finished"):
-                try:
-                    from kazma_ui.session_manager import get_session_manager
-
-                    store = get_session_manager()
-                    sid = (body.get("session_id") or "").strip()
-                    sess = store.get(sid) if sid else None
-                    if sess is None:
-                        for s in store.list_all(include_archived=True):
-                            if s.thread_id == thread_id:
-                                sess = s
-                                break
-                    if sess is not None:
-                        sess.messages.append({"role": "assistant", "content": content})
-                        store.put(sess)
-                except Exception:
-                    logger.debug("[HITL] session persist after resume failed", exc_info=True)
-
-            payload_out: dict[str, Any] = {
-                "status": "approved" if approved else "denied",
-                "thread_id": thread_id,
-                "content": content,
-                "scope": scope,
-            }
-            if grant_info is not None:
-                payload_out["grant"] = grant_info
-            if next_approval:
-                payload_out["approval_required"] = next_approval
-            return _JSONResponse(payload_out, status_code=202)
+            return StreamingResponse(
+                _approval_stream_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                },
+            )
         except Exception:
             logger.exception("[HITL] Failed to resume graph for thread=%s", thread_id)
             return _JSONResponse({"error": "Internal error"}, status_code=500)
