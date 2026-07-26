@@ -119,6 +119,12 @@
         };
     </script>
 
+    {# WebSocket auth token for browser WS connections (query param fallback) #}
+    {% set ws_token = ws_token() if ws_token is callable else ws_token %}
+    {% if ws_token %}
+    <meta name="kazma-ws-token" content="{{ ws_token }}">
+    {% endif %}
+
     {# ES module cache-bust: relative imports from app.js resolve to absolute
        /static/js/modules/* URLs; map them to versioned paths so nav.js edits
        are picked up without a hard empty-cache reload. #}

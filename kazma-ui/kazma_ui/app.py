@@ -474,6 +474,16 @@ class KazmaAppBuilder:
         self.templates.env.globals["css_version"] = _css_version
         self.templates.env.globals["js_version"] = _js_version
 
+        # WebSocket token for browser WS connections (query param fallback)
+        # Browsers can't send custom headers on WebSocket handshake, so we inject
+        # the KAZMA_SECRET as a meta tag for the agentStore to pick up.
+        from kazma_ui.auth import get_kazma_secret as _get_kazma_secret
+
+        def _ws_token() -> str:
+            return _get_kazma_secret()
+
+        self.templates.env.globals["ws_token"] = _ws_token
+
         @self.app.middleware("http")
         async def language_middleware(request: Request, call_next):
             cookie_lang = request.cookies.get("kazma-lang")
@@ -949,7 +959,7 @@ class KazmaAppBuilder:
             # ── WebSocket Chat Gateway ──
             from kazma_ui.routes.ws_chat import create_ws_chat_router
             ws_router = create_ws_chat_router(
-                graph_holder=self.graph_holder,
+                graph_holder=self._graph_holder,
                 graph_getter=lambda: self.graph,
             )
             self.app.include_router(ws_router)

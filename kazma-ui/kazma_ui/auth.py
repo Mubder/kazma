@@ -401,24 +401,45 @@ def is_authenticated(request: Request, expected_secret: str = "") -> bool:
 
 
 def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> bool:
-    """Auth for WebSocket handshakes (cookies/headers/loopback/private LAN).
+    """Auth for WebSocket handshakes (cookies/headers/query/loopback/private LAN).
 
-    Accepts the same credentials as HTTP:
+    Accepts the same credentials as HTTP, plus query parameter token:
       1. ``X-Kazma-Secret`` header
       2. ``Authorization: Bearer …``
-      3. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
-      4. ``kazma-secret`` legacy cookie
-      5. Loopback or private LAN peers (WSL bridge 172.28.x.x, Docker 172.17.x.x, 192.168.x.x)
+      3. ``?token=…`` query parameter (for browser WS connections that can't set headers)
+      4. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
+      5. ``kazma-secret`` legacy cookie
+      6. Loopback or private LAN peers (WSL bridge 172.28.x.x, Docker 172.17.x.x, 192.168.x.x)
+      7. Dev bypass: ``KAZMA_DEV_WS_BYPASS=1`` (local testing only)
     """
     expected = expected_secret or get_kazma_secret()
+
+    # Dev bypass for local testing — never enable in production
+    if os.environ.get("KAZMA_DEV_WS_BYPASS", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+
     if not expected:
         return True
 
-    # Loopback or private LAN peers (WSL virtual bridge / Docker / LAN)
-    if _is_loopback_client(websocket) or _is_private_lan_client(websocket) or _trust_lan_enabled():
+    # Loopback peers (always allowed for single-operator local use)
+    if _is_loopback_client(websocket):
         return True
 
-    provided = (websocket.headers.get(SECRET_HEADER) or "").strip()
+    # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN enabled
+    if _is_private_lan_client(websocket) and _trust_lan_enabled():
+        return True
+
+    # Query parameter token (browser WebSocket can't set headers)
+    provided = ""
+    try:
+        query_params = websocket.query_params
+        if query_params:
+            provided = (query_params.get("token") or "").strip()
+    except Exception:
+        pass
+
+    if not provided:
+        provided = (websocket.headers.get(SECRET_HEADER) or "").strip()
     if not provided:
         auth = (websocket.headers.get("authorization") or "").strip()
         if auth.lower().startswith("bearer "):

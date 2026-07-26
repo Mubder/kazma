@@ -34,7 +34,16 @@ document.addEventListener('alpine:init', () => {
       this._closeSocket();
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/chat/${encodeURIComponent(sessionId)}`;
+      let wsUrl = `${protocol}//${window.location.host}/ws/chat/${encodeURIComponent(sessionId)}`;
+
+      // Append token from localStorage or meta tag as query param fallback
+      // (browser WebSocket can't send custom headers; cookies are sent automatically)
+      const token = localStorage.getItem('kazma.ws.token') ||
+        document.querySelector('meta[name="kazma-ws-token"]')?.getAttribute('content') ||
+        '';
+      if (token) {
+        wsUrl += `?token=${encodeURIComponent(token)}`;
+      }
 
       this.connectionStatus = 'connecting';
       try {
