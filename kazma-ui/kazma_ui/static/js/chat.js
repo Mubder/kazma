@@ -601,19 +601,26 @@
     activeTypingEl = typingEl;
     KS.showTyping(typingEl, 'Kazma is thinking');
 
-    // Start SSE stream
-    currentMsgEl = null;
-    tokenAccum = '';
-    if (activeStream) {
-      activeStream.abort();
-      activeStream = null;
-    }
-
-    // Ensure we have a stable session id (generated client-side so it
-    // survives page refreshes and is reused for the same conversation).
+    // Ensure we have a stable session id
     if (!chatSessionId) {
       chatSessionId = generateSessionId();
       persistSessionId();
+    }
+
+    currentMsgEl = null;
+    tokenAccum = '';
+
+    // Route over Central WebSocket Telemetry Bus if connected
+    const agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
+    if (agentStore && agentStore.connectionStatus === 'connected') {
+      agentStore.sendPrompt(content, selectedModel || '');
+      return;
+    }
+
+    // Fallback to HTTP SSE stream if WS is disconnected
+    if (activeStream) {
+      activeStream.abort();
+      activeStream = null;
     }
 
     activeStream = KS.sse('/api/chat/stream', {
@@ -1279,6 +1286,12 @@
   function loadSession(sessionId) {
     chatSessionId = sessionId;
     persistSessionId();
+
+    // Connect to Central WebSocket Telemetry Bus
+    if (window.Alpine && Alpine.store && Alpine.store('agent')) {
+      Alpine.store('agent').connect(sessionId);
+    }
+
     // Clear messages and show loading state
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
@@ -1450,6 +1463,25 @@
         persistSessionId();
       }
       return chatSessionId;
+    },
+
+    // Telemetry WS hooks — called by agentStore
+    appendLiveToken: function(content) {
+      KS.hideTyping(typingEl);
+      if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+      tokenAccum += content;
+      var textEl = currentMsgEl.querySelector('.message-text');
+      if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
+      scrollToBottom();
+    },
+    appendErrorMessage: function(errMsg) {
+      KS.hideTyping(typingEl);
+      if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+      var textEl = currentMsgEl.querySelector('.message-text');
+      if (textEl) textEl.innerHTML = '<div class="error-message">⚠️ ' + escapeHtml(errMsg) + '</div>';
+      currentMsgEl = null;
+      tokenAccum = '';
+      enableInput();
     },
 
     // Voice streaming hooks — called by voice.js WebSocket client

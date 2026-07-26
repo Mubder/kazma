@@ -945,8 +945,17 @@ class KazmaAppBuilder:
             )
             self.app.include_router(sse_router)
             logger.info("SSE chat router mounted at /api/chat/stream")
+
+            # ── WebSocket Chat Gateway ──
+            from kazma_ui.routes.ws_chat import create_ws_chat_router
+            ws_router = create_ws_chat_router(
+                graph_holder=self.graph_holder,
+                graph_getter=lambda: self.graph,
+            )
+            self.app.include_router(ws_router)
+            logger.info("WebSocket chat gateway router mounted at /ws/chat/{session_id}")
         except Exception as e:
-            logger.warning("SSE chat router failed to initialize: %s", e)
+            logger.warning("SSE/WS chat router failed to initialize: %s", e)
             self._init_errors.append({"subsystem": "sse_chat", "error": str(e)})
 
         # ── Chat attachment upload ──
