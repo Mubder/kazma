@@ -401,21 +401,21 @@ def is_authenticated(request: Request, expected_secret: str = "") -> bool:
 
 
 def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> bool:
-    """Auth for WebSocket handshakes (cookies/headers/loopback).
+    """Auth for WebSocket handshakes (cookies/headers/loopback/private LAN).
 
     Accepts the same credentials as HTTP:
       1. ``X-Kazma-Secret`` header
       2. ``Authorization: Bearer …``
       3. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
       4. ``kazma-secret`` legacy cookie
-      5. Loopback / TRUST_LAN local peers
+      5. Loopback or private LAN peers (WSL bridge 172.28.x.x, Docker 172.17.x.x, 192.168.x.x)
     """
     expected = expected_secret or get_kazma_secret()
     if not expected:
         return True
 
-    # Loopback or TRUST_LAN local peers
-    if _is_loopback_client(websocket) or (_trust_lan_enabled() and _is_private_lan_client(websocket)):
+    # Loopback or private LAN peers (WSL virtual bridge / Docker / LAN)
+    if _is_loopback_client(websocket) or _is_private_lan_client(websocket) or _trust_lan_enabled():
         return True
 
     provided = (websocket.headers.get(SECRET_HEADER) or "").strip()
