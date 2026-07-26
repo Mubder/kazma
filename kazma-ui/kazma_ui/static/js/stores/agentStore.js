@@ -9,6 +9,7 @@ document.addEventListener('alpine:init', () => {
   Alpine.store('agent', {
     // ── Reactive State Properties ───────────────────────────
     isThinking: false,
+    statusMessage: 'Kazma is thinking...',
     activeNode: '',
     activeTool: null, // { name: string, status: string, inputs: object|null, result: string|null, error: string|null }
     pendingApproval: null, // { thread_id: string, tool: string, args: object, tools: array, message: string }
@@ -115,6 +116,7 @@ document.addEventListener('alpine:init', () => {
     sendPrompt(text, model) {
       if (!text || !text.trim()) return;
       this.isThinking = true;
+      this.statusMessage = 'Kazma is thinking...';
       this.activeNode = 'Supervisor';
       this.pendingApproval = null;
 
@@ -129,6 +131,7 @@ document.addEventListener('alpine:init', () => {
 
     submitApproval(approved = true, scope = 'once', threadId = null) {
       this.isThinking = true;
+      this.statusMessage = 'Executing approved action...';
       const targetThreadId = threadId || (this.pendingApproval ? this.pendingApproval.thread_id : null) || this.sessionId;
 
       const payload = {
@@ -154,7 +157,7 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    // ── Deterministic Event Dispatcher ───────────────────────
+    // ── Deterministic Dual-Schema Event Dispatcher ────────────
     handleSocketMessage(frame) {
       if (!frame || !frame.type) return;
 
@@ -162,74 +165,106 @@ document.addEventListener('alpine:init', () => {
       const data = frame.data || {};
 
       switch (type) {
+        case 'status':
         case 'status_update':
-          if (data.status === 'thinking') {
+          const statusVal = frame.status || data.status;
+          if (statusVal === 'thinking') {
             this.isThinking = true;
-            if (data.active_node) this.activeNode = data.active_node;
-          } else if (data.status === 'routing_node') {
+            this.statusMessage = frame.message || data.message || 'Kazma is thinking...';
+            if (frame.active_node || data.active_node) this.activeNode = frame.active_node || data.active_node;
+          } else if (statusVal === 'routing_node') {
             this.isThinking = true;
-            this.activeNode = data.active_node || 'Supervisor';
-          } else if (data.status === 'paused_for_approval') {
-            // Pause thinking banner, present pending approval card
+            this.activeNode = frame.active_node || data.active_node || 'Supervisor';
+            this.statusMessage = `Routing: ${this.activeNode}`;
+          } else if (statusVal === 'paused_for_approval') {
             this.isThinking = false;
             this.pendingApproval = {
-              thread_id: data.thread_id || this.sessionId,
-              tool: data.tool || '',
-              args: data.args || {},
-              tools: data.tools || [],
-              message: data.message || '',
+              thread_id: frame.thread_id || data.thread_id || this.sessionId,
+              tool: frame.tool || data.tool || '',
+              args: frame.args || data.args || {},
+              tools: frame.tools || data.tools || [],
+              message: frame.message || data.message || '',
             };
-          } else if (data.status === 'idle') {
-            // Strictly set isThinking = false only on explicit idle
+          } else if (statusVal === 'idle') {
             this.isThinking = false;
             this.activeNode = '';
             this.activeTool = null;
           }
           break;
 
+        case 'tool_start':
         case 'tool_lifecycle':
           this.isThinking = true;
-          if (data.status === 'tool_running') {
+          const toolStatus = frame.status || data.status || 'tool_running';
+          if (type === 'tool_start' || toolStatus === 'tool_running') {
             this.activeTool = {
-              name: data.tool_name || 'tool',
+              name: frame.tool_name || data.tool_name || 'tool',
               status: 'running',
-              inputs: data.inputs || null,
+              inputs: frame.input || data.inputs || null,
               result: null,
               error: null,
             };
-          } else if (data.status === 'tool_completed') {
+          } else if (toolStatus === 'tool_completed') {
             if (this.activeTool) {
               this.activeTool.status = 'completed';
-              this.activeTool.result = data.result || 'Done';
+              this.activeTool.result = frame.output || data.result || 'Done';
             }
-          } else if (data.status === 'tool_failed') {
+          } else if (toolStatus === 'tool_failed') {
             if (this.activeTool) {
               this.activeTool.status = 'failed';
-              this.activeTool.error = data.error || 'Execution failed';
+              this.activeTool.error = frame.output || data.error || 'Execution failed';
             }
           }
           break;
 
-        case 'llm_delta':
-          // Token streaming delta received
+        case 'tool_completed':
           this.isThinking = true;
-          if (window.KazmaChat && typeof window.KazmaChat.appendLiveToken === 'function') {
-            window.KazmaChat.appendLiveToken(data.content);
+          if (this.activeTool) {
+            this.activeTool.status = 'completed';
+            this.activeTool.result = frame.output || 'Done';
           }
           break;
 
-        case 'graph_error':
-          console.error('[AgentStore] Graph error:', data);
+        case 'approval_required':
+          this.isThinking = false;
+          this.pendingApproval = {
+            thread_id: frame.thread_id || this.sessionId,
+            tool: frame.tool || '',
+            args: frame.args || {},
+            tools: frame.tools || [],
+            message: frame.message || '',
+          };
+          break;
+
+        case 'token':
+        case 'llm_delta':
+          this.isThinking = true;
+          const text = frame.content || data.content;
+          if (text && window.KazmaChat && typeof window.KazmaChat.appendLiveToken === 'function') {
+            window.KazmaChat.appendLiveToken(text);
+          }
+          break;
+
+        case 'stream_end':
           this.isThinking = false;
           this.activeNode = '';
           this.activeTool = null;
+          break;
+
+        case 'error':
+        case 'graph_error':
+          console.error('[AgentStore] Graph error:', frame);
+          this.isThinking = false;
+          this.activeNode = '';
+          this.activeTool = null;
+          const errMsg = frame.message || data.message || 'Graph execution error';
           if (window.KazmaChat && typeof window.KazmaChat.appendErrorMessage === 'function') {
-            window.KazmaChat.appendErrorMessage(data.message || 'Graph execution error');
+            window.KazmaChat.appendErrorMessage(errMsg);
           }
           break;
 
         default:
-          console.debug('[AgentStore] Unhandled telemetry event type:', type, data);
+          console.debug('[AgentStore] Unhandled telemetry event type:', type, frame);
       }
     },
   });
