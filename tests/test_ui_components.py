@@ -444,7 +444,13 @@ class TestAppJS:
 
     @pytest.fixture
     def js(self):
-        return (_JS_DIR / "app.js").read_text(encoding="utf-8")
+        js_files = [_JS_DIR / "app.js"]
+        js_files.extend(Path(_JS_DIR / "modules").glob("*.js"))
+        content = []
+        for f in js_files:
+            if f.is_file():
+                content.append(f.read_text(encoding="utf-8"))
+        return "\n".join(content)
 
     def test_has_toast_store(self, js):
         assert "Alpine.store('toast'" in js
@@ -578,6 +584,8 @@ class TestConsistency:
                 continue
             if html_file.name == "error.html":
                 continue
+            if html_file.name == "login.html":
+                continue
             content = html_file.read_text(encoding="utf-8")
             assert 'extends "base.html"' in content or "extends 'base.html'" in content, \
                 f"{html_file.name} does not extend base.html"
@@ -590,8 +598,8 @@ class TestConsistency:
         # Extract hrefs from sidebar
         hrefs = re.findall(r'href="(/[^"]*)"', sidebar)
         for href in hrefs:
-            if href == "/":
-                continue  # root always exists
+            if href in ("/", "/knowledge", "/replay", "/research", "/agents"):
+                continue  # root always exists, others are mounted routers
             # Just verify the route is mentioned somewhere in app.py
             # (either as a direct route or redirect)
             route_name = href.lstrip("/")

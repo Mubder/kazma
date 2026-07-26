@@ -50,13 +50,13 @@ class TestGatewayRefreshOnSave:
         )
 
     def test_refresh_adapters_endpoint_exists(self) -> None:
-        app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
+        app_source = (_UI_DIR / "routes_direct.py").read_text(encoding="utf-8")
         assert "/api/gateway/refresh-adapters" in app_source
         assert "refresh_gateway_adapters" in app_source
 
     def test_refresh_adapters_reads_config_store_for_telegram(self) -> None:
         """The refresh endpoint must re-read tokens from config_store (not env only)."""
-        app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
+        app_source = (_UI_DIR / "routes_direct.py").read_text(encoding="utf-8")
         # Find the refresh_gateway_adapters function body
         fn_start = app_source.find("async def refresh_gateway_adapters")
         assert fn_start != -1, "refresh_gateway_adapters function not found"
@@ -69,7 +69,7 @@ class TestGatewayRefreshOnSave:
 
     def test_refresh_adapters_no_syntax_error_star(self) -> None:
         """The old 'telegram_token *' typo (should be '=') must be gone."""
-        app_source = (_UI_DIR / "app.py").read_text(encoding="utf-8")
+        app_source = (_UI_DIR / "routes_direct.py").read_text(encoding="utf-8")
         fn_start = app_source.find("async def refresh_gateway_adapters")
         fn_body = app_source[fn_start : fn_start + 1800]
         # The buggy line was: telegram_token * config_store.get(...)
@@ -88,11 +88,11 @@ class TestAgentStatusReady:
 
     def test_agents_html_shows_ready_when_idle(self) -> None:
         html = (_TEMPLATES_DIR / "agents.html").read_text(encoding="utf-8")
-        assert "Ready" in html, (
-            "agents.html must show 'Ready' status when agent is running but idle"
+        assert "t('agents.ready')" in html, (
+            "agents.html must use t('agents.ready') status when agent is running but idle"
         )
-        assert "waiting for messages" in html, (
-            "agents.html must show 'waiting for messages' context"
+        assert "t('agents.waiting')" in html, (
+            "agents.html must use t('agents.waiting') context"
         )
 
     def test_agents_html_no_bare_running_status(self) -> None:
@@ -164,9 +164,9 @@ class TestKeyboardShortcuts:
 
     def test_app_js_ctrl_k_search(self) -> None:
         """Ctrl+K must toggle/focus search (global shortcut)."""
-        js = (_JS_DIR / "app.js").read_text(encoding="utf-8")
+        js = (_JS_DIR / "modules" / "components.js").read_text(encoding="utf-8")
         assert "ctrlKey" in js or "metaKey" in js
-        assert "'k'" in js, "app.js must bind Ctrl+K"
+        assert "'k'" in js, "components.js must bind Ctrl+K"
 
     def test_chat_js_ctrl_k_focuses_search(self) -> None:
         """In chat context, Ctrl+K focuses the session search input."""
@@ -261,11 +261,17 @@ class TestWorkspacePathConfigRelative:
 
     def test_file_write_workspace_not_drive_root(self) -> None:
         """When no workspace is configured, the default must NOT be the drive root."""
+        from unittest.mock import patch
         from kazma_core.tools.file_write import _get_workspace, configure_workspace
+        import os
 
         # Reset to unconfigured state
         configure_workspace(workspace=None, allow_absolute=False)
-        ws = _get_workspace()
+        with patch("kazma_core.stores.get_workspace_store") as mock_store:
+            mock_store.return_value.get_active_workspace.return_value = None
+            with patch.dict(os.environ, {"KAZMA_WORKSPACE": ""}):
+                ws = _get_workspace()
+
         # The workspace name must be 'workspace', parent must be 'kazma-data'
         assert ws.name == "workspace"
         assert ws.parent.name == "kazma-data"

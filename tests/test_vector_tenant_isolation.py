@@ -23,7 +23,11 @@ def temp_vector_memory():
     if not _rag_dependencies_available():
         pytest.skip("RAG dependencies not available for VectorMemory tenant isolation test")
     with tempfile.TemporaryDirectory() as tmpdir:
-        yield VectorMemory(path=tmpdir, collection_name="test_tenant_isolation")
+        vm = VectorMemory(path=tmpdir, collection_name="test_tenant_isolation")
+        try:
+            yield vm
+        finally:
+            vm.close()
 
 
 def test_tenant_isolation_stored_and_retrieved(temp_vector_memory):

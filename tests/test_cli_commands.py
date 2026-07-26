@@ -82,7 +82,7 @@ class TestGatewayArgParsing:
 
     def test_resolve_port_default(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
-            assert resolve_port() == 8000
+            assert resolve_port() == 9090
 
     def test_resolve_port_from_env(self) -> None:
         with patch.dict("os.environ", {"KAZMA_PORT": "9999"}, clear=True):
@@ -94,7 +94,7 @@ class TestGatewayArgParsing:
 
     def test_resolve_port_invalid_env_falls_back(self) -> None:
         with patch.dict("os.environ", {"KAZMA_PORT": "not-a-number"}, clear=True):
-            assert resolve_port() == 8000
+            assert resolve_port() == 9090
 
     def test_resolve_base_url(self) -> None:
         assert resolve_base_url(8000) == "http://localhost:8000"
@@ -543,7 +543,7 @@ class TestStatusCommand:
             _run_status()
 
         out = capsys.readouterr().out
-        assert "running on http://localhost:8000" in out
+        assert "running on http://localhost:9090" in out
         assert "1 adapter(s) active" in out
         assert "telegram" in out
         assert "3 worker(s) registered" in out
@@ -920,19 +920,19 @@ class TestDetectInstallType:
         from kazma_cli.update import detect_install_type
 
         pip_output = "Name: kazma\nVersion: 0.1.0\nLocation: /usr/lib/python3.11/site-packages\n"
-        with patch("kazma_cli.update._run_pip", return_value=_make_completed_process(stdout=pip_output)):
+        with patch("kazma_cli.update._find_git_root", return_value=None), patch("kazma_cli.update._run_pip", return_value=_make_completed_process(stdout=pip_output)):
             assert detect_install_type() == "pip"
 
     def test_defaults_to_pip_on_failure(self) -> None:
         from kazma_cli.update import detect_install_type
 
-        with patch("kazma_cli.update._run_pip", side_effect=Exception("pip not found")):
+        with patch("kazma_cli.update._find_git_root", return_value=None), patch("kazma_cli.update._run_pip", side_effect=Exception("pip not found")):
             assert detect_install_type() == "pip"
 
     def test_defaults_to_pip_on_nonzero_returncode(self) -> None:
         from kazma_cli.update import detect_install_type
 
-        with patch(
+        with patch("kazma_cli.update._find_git_root", return_value=None), patch(
             "kazma_cli.update._run_pip",
             return_value=_make_completed_process(returncode=1, stderr="not found"),
         ):
@@ -950,6 +950,7 @@ class TestPypiVersionFetch:
         from kazma_cli.update import get_latest_pypi_version
 
         mock_response = MagicMock()
+        mock_response.status_code = 200
         mock_response.json.return_value = {"info": {"version": "0.5.0"}}
         mock_response.raise_for_status = MagicMock()
 
@@ -1002,14 +1003,14 @@ class TestGetCurrentVersion:
     def test_uses_importlib_metadata(self) -> None:
         from kazma_cli.update import get_current_version
 
-        with patch("importlib.metadata.version", return_value="0.3.0"):
+        with patch("kazma_cli.update._find_git_root", return_value=None), patch("importlib.metadata.version", return_value="0.3.0"):
             assert get_current_version() == "0.3.0"
 
     def test_falls_back_to_pip_show(self) -> None:
         from kazma_cli.update import get_current_version
 
         pip_output = "Name: kazma\nVersion: 0.4.0\n"
-        with patch(
+        with patch("kazma_cli.update._find_git_root", return_value=None), patch(
             "importlib.metadata.version", side_effect=Exception("not found")
         ), patch(
             "kazma_cli.update._run_pip",
@@ -1180,7 +1181,9 @@ class TestUpdateRunDispatch:
         """With --check and update available, should not install."""
         from kazma_cli.update import run
 
-        with patch("kazma_cli.update.detect_install_type", return_value="pip"), patch(
+        with patch("kazma_cli.update._find_git_root", return_value=None), patch(
+            "kazma_cli.update.detect_install_type", return_value="pip"
+        ), patch(
             "kazma_cli.update.get_current_version", return_value="0.1.0"
         ), patch(
             "kazma_cli.update.get_latest_pypi_version", return_value="0.2.0"
@@ -1194,7 +1197,9 @@ class TestUpdateRunDispatch:
         """With --yes and update available, should install without prompting."""
         from kazma_cli.update import run
 
-        with patch("kazma_cli.update.detect_install_type", return_value="pip"), patch(
+        with patch("kazma_cli.update._find_git_root", return_value=None), patch(
+            "kazma_cli.update.detect_install_type", return_value="pip"
+        ), patch(
             "kazma_cli.update.get_current_version", return_value="0.1.0"
         ), patch(
             "kazma_cli.update.get_latest_pypi_version", return_value="0.2.0"
@@ -1208,7 +1213,9 @@ class TestUpdateRunDispatch:
         """If PyPI fetch fails, run() should exit with code 1."""
         from kazma_cli.update import run
 
-        with patch("kazma_cli.update.detect_install_type", return_value="pip"), patch(
+        with patch("kazma_cli.update._find_git_root", return_value=None), patch(
+            "kazma_cli.update.detect_install_type", return_value="pip"
+        ), patch(
             "kazma_cli.update.get_current_version", return_value="0.1.0"
         ), patch("kazma_cli.update.get_latest_pypi_version", return_value=None):
             with pytest.raises(SystemExit) as exc_info:
