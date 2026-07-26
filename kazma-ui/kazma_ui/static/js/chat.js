@@ -144,7 +144,8 @@
     var initialSessionId = localStorage.getItem(SESSION_LS_KEY);
     if (initialSessionId) {
       chatSessionId = initialSessionId;
-      loadSession(initialSessionId);
+      // Use setTimeout to ensure Alpine store is initialized before connecting
+      setTimeout(function() { loadSession(initialSessionId); }, 100);
     }
 
     // Load available models for the model selector
