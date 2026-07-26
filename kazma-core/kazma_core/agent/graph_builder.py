@@ -818,11 +818,24 @@ async def tool_worker_node(
                 "message": message,
             }
 
-            # interrupt() pauses the graph — resumes when /api/approve calls
-            # graph.ainvoke(Command(resume=...), config)
-            approval = interrupt(approval_input)
-
-            approved = isinstance(approval, dict) and approval.get("approved", False)
+            # Check for YOLO grant before interrupting - if YOLO is active for this thread,
+            # auto-approve all danger tools without prompting
+            from kazma_core.safety.yolo import is_yolo_active
+            from kazma_core.safety.hitl import get_current_thread_id
+            current_thread = get_current_thread_id()
+            if current_thread and is_yolo_active(current_thread):
+                logger.warning(
+                    "[ToolWorker] YOLO active for thread=%s — auto-approving %d danger tool(s)",
+                    current_thread,
+                    len(danger_tools),
+                )
+                approved = True
+                approval = {"approved": True, "yolo": True}
+            else:
+                # interrupt() pauses the graph — resumes when /api/approve calls
+                # graph.ainvoke(Command(resume=...), config)
+                approval = interrupt(approval_input)
+                approved = isinstance(approval, dict) and approval.get("approved", False)
             # Optional selective ids; None/missing → all tools in the batch.
             if isinstance(approval, dict):
                 raw_ids = approval.get("approved_ids")

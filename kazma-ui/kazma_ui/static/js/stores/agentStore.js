@@ -245,6 +245,28 @@ document.addEventListener('alpine:init', () => {
           };
           break;
 
+        case 'approval_started':
+          this.isThinking = true;
+          this.statusMessage = 'Approval started: ' + (data.message || 'Processing approval...');
+          break;
+
+        case 'approval_progress':
+          this.isThinking = true;
+          this.statusMessage = data.message || 'Approval in progress...';
+          break;
+
+        case 'approval_resuming':
+          this.isThinking = true;
+          this.statusMessage = data.message || 'Resuming execution...';
+          break;
+
+        case 'approval_error':
+          this.isThinking = false;
+          this.activeNode = '';
+          this.activeTool = null;
+          console.error('[AgentStore] Approval error:', frame);
+          break;
+
         case 'token':
         case 'llm_delta':
           this.isThinking = true;
