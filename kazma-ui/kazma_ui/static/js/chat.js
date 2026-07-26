@@ -139,6 +139,14 @@
     // Load sessions and connect
     loadSessions();
 
+    // Load the current session's messages if we have a session ID
+    // (e.g., after page refresh)
+    var initialSessionId = localStorage.getItem(SESSION_LS_KEY);
+    if (initialSessionId) {
+      chatSessionId = initialSessionId;
+      loadSession(initialSessionId);
+    }
+
     // Load available models for the model selector
     loadModels();
 
