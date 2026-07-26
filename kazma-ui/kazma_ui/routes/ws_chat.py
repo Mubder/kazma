@@ -114,8 +114,9 @@ def create_ws_chat_router(
         config: dict[str, Any],
         websocket: WebSocket,
         thread_id: str,
+        pre_msg_count: int = 0,
     ) -> None:
-        """If no tokens were streamed (non-BaseChatModel LLM), backfill assistant text from graph state."""
+        """If no tokens were streamed (non-BaseChatModel LLM), backfill NEW assistant text from graph state."""
         try:
             snapshot = await graph_inst.aget_state(config)
             if snapshot is None:
@@ -124,8 +125,9 @@ def create_ws_chat_router(
             msgs = vals.get("messages") if isinstance(vals, dict) else None
             if not msgs or not isinstance(msgs, list):
                 return
+            new_msgs = msgs[pre_msg_count:] if pre_msg_count < len(msgs) else []
             text = ""
-            for m in reversed(msgs):
+            for m in reversed(new_msgs):
                 role = None
                 if isinstance(m, dict):
                     role = m.get("role")
@@ -223,6 +225,16 @@ def create_ws_chat_router(
 
                     async def _run_prompt_stream():
                         try:
+                            pre_msg_count = 0
+                            try:
+                                snap = await graph_inst.aget_state(config)
+                                if snap and getattr(snap, "values", None):
+                                    p_msgs = snap.values.get("messages")
+                                    if isinstance(p_msgs, list):
+                                        pre_msg_count = len(p_msgs)
+                            except Exception:
+                                pass
+
                             stream = graph_inst.astream_events(
                                 input_state, config=config, version="v2"
                             )
@@ -234,7 +246,7 @@ def create_ws_chat_router(
 
                             if not tokens_emitted:
                                 await _backfill_assistant_text_if_needed(
-                                    graph_inst, config, websocket, thread_id
+                                    graph_inst, config, websocket, thread_id, pre_msg_count
                                 )
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
@@ -299,6 +311,16 @@ def create_ws_chat_router(
 
                     async def _run_approve_stream():
                         try:
+                            pre_msg_count = 0
+                            try:
+                                snap = await graph_inst.aget_state(approve_config)
+                                if snap and getattr(snap, "values", None):
+                                    p_msgs = snap.values.get("messages")
+                                    if isinstance(p_msgs, list):
+                                        pre_msg_count = len(p_msgs)
+                            except Exception:
+                                pass
+
                             stream = graph_inst.astream_events(
                                 resume_command, config=approve_config, version="v2"
                             )
@@ -310,7 +332,7 @@ def create_ws_chat_router(
 
                             if not tokens_emitted:
                                 await _backfill_assistant_text_if_needed(
-                                    graph_inst, approve_config, websocket, target_thread_id
+                                    graph_inst, approve_config, websocket, target_thread_id, pre_msg_count
                                 )
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
