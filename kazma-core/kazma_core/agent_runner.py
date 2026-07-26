@@ -869,7 +869,10 @@ class KazmaAgent:
 
         graph_state = initial_supervisor_state(thread_id=self._thread_id)
         graph_state["messages"] = messages
-        config = {"configurable": {"thread_id": self._thread_id}}
+        config = {
+            "configurable": {"thread_id": self._thread_id},
+            "recursion_limit": 100,
+        }
 
         from kazma_core.safety.hitl import set_current_thread_id, reset_current_thread_id
 

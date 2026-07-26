@@ -1011,6 +1011,7 @@ def create_sse_chat_router(
                 "thread_id": thread_id,
                 "checkpoint_ns": "",
             },
+            "recursion_limit": 100,
         }
 
         # ── Build agent messages from CHECKPOINTER (source of truth) ─

@@ -355,7 +355,10 @@ def create_graph_handler(
         # ── Build platform-agnostic state ──────────────────────────
         state = await _build_initial_state(msg, _store)
 
-        config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+        config = {
+            "configurable": {"thread_id": thread_id, "checkpoint_ns": ""},
+            "recursion_limit": 100,
+        }
 
         # ── Interactive model selector (/models, /_models_provider, /_models_select) ──
         model_handled = await _try_model_command(msg, _store, manager, thread_id)
