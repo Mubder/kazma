@@ -73,6 +73,18 @@ class ChatSession:
         if not self.updated_at:
             self.updated_at = now
 
+    def add_message(self, role: str, content: str) -> None:
+        """Append a message dict to message history and update timestamp."""
+        if not content:
+            return
+        # Deduplicate consecutive identical messages
+        if self.messages and self.messages[-1].get("role") == role and self.messages[-1].get("content") == content:
+            return
+        self.messages.append({"role": role, "content": content})
+        if len(self.messages) > MAX_MESSAGES_PER_SESSION:
+            self.messages = self.messages[-MAX_MESSAGES_PER_SESSION:]
+        self.updated_at = datetime.now(UTC).isoformat()
+
     def to_summary(self) -> dict[str, Any]:
         """Return a serializable summary used by the session-list API."""
         platform = "web"

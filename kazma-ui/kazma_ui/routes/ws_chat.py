@@ -149,6 +149,41 @@ def create_ws_chat_router(
         except Exception as exc:
             logger.debug("[WS-Chat] Text backfill failed: %s", exc)
 
+    async def _persist_final_assistant_message(
+        graph_inst: Any,
+        config: dict[str, Any],
+        session_id: str,
+    ) -> None:
+        """Read the latest assistant response from graph state and persist to SessionStore."""
+        try:
+            snapshot = await graph_inst.aget_state(config)
+            if snapshot is None:
+                return
+            vals = getattr(snapshot, "values", None) or {}
+            msgs = vals.get("messages") if isinstance(vals, dict) else None
+            if not msgs or not isinstance(msgs, list):
+                return
+            text = ""
+            for m in reversed(msgs):
+                role = None
+                if isinstance(m, dict):
+                    role = m.get("role")
+                else:
+                    role = getattr(m, "type", None) or getattr(m, "role", None)
+                if role in ("assistant", "ai"):
+                    content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
+                    if isinstance(content, str) and content.strip():
+                        text = content
+                        break
+            if text:
+                store = get_session_manager()
+                sess = store.get(session_id)
+                if sess:
+                    sess.add_message("assistant", text)
+                    store.put(sess)
+        except Exception as exc:
+            logger.warning("[WS-Chat] Failed persisting assistant message: %s", exc)
+
     @router.websocket("/ws/chat/{session_id}")
     async def chat_websocket(websocket: WebSocket, session_id: str) -> None:
         """WebSocket connection handler for session-bound agent telemetry."""
@@ -213,15 +248,24 @@ def create_ws_chat_router(
 
                     # Record user message in SessionStore
                     try:
-                        if hasattr(session, "add_message"):
-                            session.add_message("user", text)
-                        elif hasattr(session, "messages") and isinstance(session.messages, list):
-                            session.messages.append({"role": "user", "content": text})
+                        session.add_message("user", text)
                         get_session_manager().put(session)
                     except Exception as exc:
                         logger.warning("[WS-Chat] Failed writing user msg to SessionStore: %s", exc)
 
-                    input_state = {"messages": [("user", text)]}
+                    from kazma_core.agent.turn_input import build_turn_messages
+                    from kazma_core.agent.env_context import build_env_context
+
+                    env_block = build_env_context()
+                    sys_msgs = [{"role": "system", "content": env_block}] if env_block else None
+                    full_messages = await build_turn_messages(
+                        graph_inst,
+                        config,
+                        user_text=text,
+                        system_messages=sys_msgs,
+                        fallback_history=session.messages,
+                    )
+                    input_state = {"messages": full_messages}
 
                     async def _run_prompt_stream():
                         try:
@@ -248,6 +292,8 @@ def create_ws_chat_router(
                                 await _backfill_assistant_text_if_needed(
                                     graph_inst, config, websocket, thread_id, pre_msg_count
                                 )
+
+                            await _persist_final_assistant_message(graph_inst, config, session_id)
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
                                 graph_inst, config, websocket, thread_id
@@ -334,6 +380,8 @@ def create_ws_chat_router(
                                 await _backfill_assistant_text_if_needed(
                                     graph_inst, approve_config, websocket, target_thread_id, pre_msg_count
                                 )
+
+                            await _persist_final_assistant_message(graph_inst, approve_config, session_id)
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
                                 graph_inst, approve_config, websocket, target_thread_id
