@@ -699,28 +699,25 @@ class AsyncMCPManager:
         if proc is None or not getattr(proc, "stderr", None):
             return ""
         try:
-            import threading
-
-            result: dict[str, str] = {"data": ""}
-
-            def _read() -> None:
+            # Use asyncio.to_thread to avoid blocking the event loop
+            stderr = proc.stderr
+            read_result: dict[str, str] = {"data": ""}
+            
+            def _sync_read() -> None:
                 try:
-                    data = (
-                        proc.stderr.read1(max_bytes)
-                        if hasattr(proc.stderr, "read1")
-                        else proc.stderr.read(max_bytes)
-                    )
+                    if hasattr(stderr, "read1"):
+                        data = stderr.read1(max_bytes)
+                    else:
+                        data = stderr.read(max_bytes)
                     if isinstance(data, bytes):
-                        result["data"] = data.decode("utf-8", errors="replace")
+                        read_result["data"] = data.decode("utf-8", errors="replace")
                     elif data:
-                        result["data"] = str(data)
+                        read_result["data"] = str(data)
                 except Exception:
                     pass
 
-            t = threading.Thread(target=_read, daemon=True)
-            t.start()
-            t.join(timeout=1.0)
-            return result["data"]
+            await asyncio.to_thread(_sync_read)
+            return read_result["data"]
         except Exception:
             return ""
 
@@ -767,7 +764,17 @@ class AsyncMCPManager:
 
         # Read response (one line per JSON-RPC message)
         async with handle.read_lock:
-            line = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout or 60.0)
+            try:
+                line = await asyncio.wait_for(
+                    proc.stdout.readline(), 
+                    timeout=timeout or 60.0
+                )
+            except Exception as exc:
+                # On read error, attempt to dump stderr and re-raise with diagnostic
+                stderr_snippet = await self._drain_stderr(handle, max_bytes=2048)
+                raise MCPBridgeError(
+                    f"stdio read error for '{handle.name}': {exc}\nstderr: {stderr_snippet[:500]}"
+                ) from exc
 
         if not line:
             # Check if process died
