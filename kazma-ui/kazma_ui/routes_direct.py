@@ -1301,6 +1301,22 @@ def register_direct_routes(self: Any) -> None:
             logger.exception("[HITL] Failed to list pending approvals")
             return _JSONResponse({"pending": [], "count": 0, "error": "Internal error"}, status_code=500)
 
+    @self.app.post("/api/pending-approvals/clear")
+    @self.app.delete("/api/pending-approvals")
+    async def clear_pending_approvals_route() -> _JSONResponse:
+        from kazma_ui.hitl_approval import clear_pending_approvals
+
+        graph = _resolve_hitl_graph()
+        checkpointer = _resolve_hitl_checkpointer()
+        if checkpointer is None:
+            return _JSONResponse({"error": "Checkpointer not available"}, status_code=503)
+        try:
+            cleared = await clear_pending_approvals(graph, checkpointer)
+            return _JSONResponse({"status": "ok", "cleared": cleared})
+        except Exception:
+            logger.exception("[HITL] Failed to clear pending approvals")
+            return _JSONResponse({"error": "Internal error"}, status_code=500)
+
     @self.app.get("/api/status")
     async def get_status() -> dict[str, Any]:
         return {

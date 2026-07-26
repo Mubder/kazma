@@ -45,12 +45,17 @@
     var list = panel.querySelector('.hitl-approval-list');
     var badge = panel.querySelector('.hitl-approval-count');
     var empty = panel.querySelector('.hitl-approval-empty');
+    var clearBtn = document.getElementById('hitl-clear-all-btn');
 
     if (!list) return;
 
     if (badge) {
       badge.textContent = String(pending.length);
       badge.style.display = pending.length > 0 ? 'inline-block' : 'none';
+    }
+
+    if (clearBtn) {
+      clearBtn.style.display = pending.length > 0 ? 'inline-block' : 'none';
     }
 
     if (pending.length === 0) {
@@ -194,8 +199,16 @@
           window.KazmaApp.setIsThinking(false);
         }
         if (statusEl) {
-          statusEl.textContent = '⚠ Error: ' + err;
+          statusEl.innerHTML = '⚠ Error: ' + escapeHtml(err) + ' <a href="#" class="hitl-dismiss-link" style="margin-left:8px;color:var(--text-danger);text-decoration:underline;">Dismiss</a>';
           statusEl.className = 'hitl-approval-status hitl-status-error';
+          var dismissLink = statusEl.querySelector('.hitl-dismiss-link');
+          if (dismissLink) {
+            dismissLink.addEventListener('click', function(e) {
+              e.preventDefault();
+              if (card) card.remove();
+              refreshPending();
+            });
+          }
         }
         buttons.forEach(function (b) { b.disabled = false; });
       }
@@ -221,6 +234,20 @@
    * listen for manual refresh requests.
    */
   function initHitlApproval() {
+    var clearBtn = document.getElementById('hitl-clear-all-btn');
+    if (clearBtn && !clearBtn.dataset.wired) {
+      clearBtn.dataset.wired = 'true';
+      clearBtn.addEventListener('click', async function () {
+        if (!confirm('Clear all pending approvals?')) return;
+        clearBtn.disabled = true;
+        try {
+          await fetch('/api/pending-approvals/clear', { method: 'POST', credentials: 'same-origin' });
+        } catch (e) {}
+        clearBtn.disabled = false;
+        refreshPending();
+      });
+    }
+
     // Only init once
     if (document.getElementById(containerId)) {
       refreshPending();

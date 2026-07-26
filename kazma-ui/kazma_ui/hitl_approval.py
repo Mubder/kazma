@@ -164,6 +164,24 @@ async def _get_pending_approvals(
     return approvals
 
 
+async def clear_pending_approvals(graph: Any, checkpointer: Any) -> int:
+    """Clear/delete checkpoints for all threads currently in an interrupt state."""
+    pending = await _get_pending_approvals(graph, checkpointer)
+    cleared = 0
+    for item in pending:
+        thread_id = item.get("thread_id")
+        if thread_id:
+            try:
+                if hasattr(checkpointer, "adelete_thread"):
+                    await checkpointer.adelete_thread(thread_id)
+                elif hasattr(checkpointer, "_saver") and hasattr(checkpointer._saver, "adelete_thread"):
+                    await checkpointer._saver.adelete_thread(thread_id)
+                cleared += 1
+            except Exception as exc:
+                logger.warning("[HITL] Failed to delete checkpoint thread=%s: %s", thread_id, exc)
+    return cleared
+
+
 def create_hitl_approval_router(graph: Any, checkpointer: Any) -> APIRouter:
     """Create a router exposing the pending-approvals listing endpoint.
 
@@ -190,6 +208,20 @@ def create_hitl_approval_router(graph: Any, checkpointer: Any) -> APIRouter:
             logger.exception("[HITL] Failed to list pending approvals")
             return JSONResponse(
                 {"pending": [], "count": 0, "error": str(exc)},
+                status_code=500,
+            )
+
+    @router.post("/api/pending-approvals/clear")
+    @router.delete("/api/pending-approvals")
+    async def clear_pending_endpoint(request: Request) -> JSONResponse:
+        """Clear all pending approvals by deleting their interrupted checkpoints."""
+        try:
+            cleared = await clear_pending_approvals(graph, checkpointer)
+            return JSONResponse({"status": "ok", "cleared": cleared})
+        except Exception as exc:
+            logger.exception("[HITL] Failed to clear pending approvals")
+            return JSONResponse(
+                {"status": "error", "error": str(exc)},
                 status_code=500,
             )
 
