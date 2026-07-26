@@ -11,3 +11,13 @@ tools:
             - findstr "FAILED"
             - sleep 120
             - sleep 180
+            - grep *
+            - findstr *
+            - pwd
+            - ls
+            - wc *
+            - find *
+            - Select-Object *
+            - Get-ChildItem *
+            - Where-Object { *
+            - python *
