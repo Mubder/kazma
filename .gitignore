@@ -102,3 +102,4 @@ kubernetes/*secrets*.yaml
 .zcode/
 .keys/
 /.poolside
+/.poolside

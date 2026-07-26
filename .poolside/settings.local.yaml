@@ -21,3 +21,6 @@ tools:
             - Get-ChildItem *
             - Where-Object { *
             - python *
+paths:
+    allow:
+        - path: C:/temp/**
