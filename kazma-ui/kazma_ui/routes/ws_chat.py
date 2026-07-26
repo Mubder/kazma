@@ -255,7 +255,7 @@ def create_ws_chat_router(
                         logger.warning("[WS-Chat] Failed writing user msg to SessionStore: %s", exc)
 
                     from kazma_core.agent.turn_input import build_turn_messages
-                    from kazma_core.agent.env_context import build_env_context
+                    from kazma_core.ide.env_context import build_env_context
 
                     env_block = build_env_context()
                     sys_msgs = [{"role": "system", "content": env_block}] if env_block else None
