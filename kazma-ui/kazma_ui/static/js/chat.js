@@ -837,7 +837,8 @@
    *  - Deny
    */
   function renderHitlCard(data) {
-    if (!data || !data.thread_id) return;
+    if (!data) return;
+    var targetThreadId = data.thread_id || chatSessionId || '';
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
     var content = currentMsgEl.querySelector('.message-content');
     if (!content) return;
@@ -1257,6 +1258,7 @@
           appendMessage(role, msg.content || '');
         });
         scrollToBottom();
+        checkPendingApprovals();
       })
       .catch(function(err) {
         messagesEl.innerHTML =
@@ -1267,6 +1269,24 @@
           '</div>';
         KS.toast('Failed to load session messages', 'error', 3000);
       });
+  }
+
+  function checkPendingApprovals() {
+    if (!chatSessionId) return;
+    fetch('/api/pending-approvals', { credentials: 'same-origin' })
+      .then(function(res) { return res.ok ? res.json() : null; })
+      .then(function(data) {
+        if (!data || !Array.isArray(data.pending)) return;
+        for (var i = 0; i < data.pending.length; i++) {
+          var item = data.pending[i];
+          if (item.thread_id === chatSessionId || item.session_id === chatSessionId) {
+            if (!messagesEl.querySelector('.hitl-approval-card')) {
+              renderHitlCard(item);
+            }
+            break;
+          }
+        }
+      }).catch(function() {});
   }
 
   function newSession() {
