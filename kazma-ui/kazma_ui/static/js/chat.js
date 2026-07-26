@@ -843,6 +843,11 @@
     var content = currentMsgEl.querySelector('.message-content');
     if (!content) return;
 
+    var textEl = content.querySelector('.message-text');
+    if (textEl && !textEl.innerHTML.trim()) {
+      textEl.innerHTML = KS.markdown ? KS.markdown('_Action required: The agent paused to ask for permission to run a tool._') : '<em>Action required: The agent paused to ask for permission to run a tool.</em>';
+    }
+
     var tools = Array.isArray(data.tools) ? data.tools : [];
     var toolsHtml = '';
     if (tools.length > 1) {
@@ -903,7 +908,7 @@
       scrollToBottom();
     }
 
-    function submitApproval(action, scope) {
+      function submitApproval(action, scope) {
       scope = scope || 'once';
       var pendingLabel = action === 'deny'
         ? 'Denying\u2026'
@@ -921,31 +926,66 @@
       if (!currentMsgEl) {
         currentMsgEl = createAssistantMessage();
       }
-      setIsThinking(true, pendingLabel);
+      
+      var approvalTypingEl = KS.showTyping(currentMsgEl.querySelector('.message-content'));
 
       var approvalUrl = '/api/approve/' + encodeURIComponent(data.thread_id);
 
       KazmaStream.ssePost(approvalUrl, payload, {
         onEvent: function(eventType, payloadData) {
-          if (eventType === 'status' && payloadData && payloadData.content) {
-            setIsThinking(true, payloadData.content);
-          }
+          // just ignore custom events if we don't have a specific handler
         },
         onToken: function(tokenData) {
-          if (tokenData && tokenData.content) {
-            setIsThinking(false);
-            appendToken(tokenData.content);
+          KS.hideTyping(approvalTypingEl);
+          if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
+          
+          if (!currentMsgEl) {
+            currentMsgEl = createAssistantMessage();
           }
+          tokenAccum += tokenData.content;
+          var textEl = currentMsgEl.querySelector('.message-text');
+          if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
+          scrollToBottom();
         },
         onToolCall: function(toolData) {
-          setIsThinking(true, 'Executing tool: ' + (toolData.name || 'tool') + '\u2026');
-          renderToolCallCard(toolData);
+          KS.hideTyping(approvalTypingEl);
+          if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
+          if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+          var content = currentMsgEl.querySelector('.message-content');
+          var box = document.createElement('div');
+          box.className = 'tool-call-box';
+          box.innerHTML = '<span class="tool-name">\u2699 ' + escapeHtml(toolData.tool_name || toolData.name || 'tool') + '</span>' +
+            '<code class="tool-inputs">' + escapeHtml(truncateStr(toolData.inputs || '{}', 200)) + '</code>' +
+            '<span class="tool-status running">Running\u2026</span>';
+          content.appendChild(box);
+          scrollToBottom();
         },
         onToolResult: function(resultData) {
-          updateToolResultCard(resultData);
+          if (!currentMsgEl) return;
+          var content = currentMsgEl.querySelector('.message-content');
+          // Update last tool-call box
+          var boxes = content.querySelectorAll('.tool-call-box');
+          var lastBox = boxes.length ? boxes[boxes.length - 1] : null;
+          if (lastBox) {
+            var statusEl = lastBox.querySelector('.tool-status');
+            if (statusEl) { statusEl.textContent = 'Done'; statusEl.className = 'tool-status done'; }
+          }
+          // Add result box
+          var isSwarm = (resultData.tool_name === 'dispatch_swarm' || resultData.tool_name === 'swarm_dispatch' || (resultData.result && resultData.result.indexOf('Swarm task dispatched') !== -1));
+          var resultBox = document.createElement('div');
+          if (isSwarm) {
+            resultBox.className = 'swarm-bg-badge';
+            resultBox.innerHTML = '<span class="pulse-dot"></span><div><strong>Background Task Active:</strong> ' + escapeHtml(truncateStr(resultData.result, 300)) + '</div>';
+          } else {
+            resultBox.className = 'tool-result-box';
+            resultBox.innerHTML = '<strong>Result:</strong> ' + escapeHtml(truncateStr(resultData.result, 500));
+          }
+          content.appendChild(resultBox);
+          scrollToBottom();
         },
         onApprovalRequired: function(nextApproval) {
-          setIsThinking(false);
+          KS.hideTyping(approvalTypingEl);
+          if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
           var okLabel = action === 'deny' ? 'Denied \u2717'
             : (scope === 'yolo' ? 'YOLO on \u2713'
               : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
@@ -957,7 +997,8 @@
           }, 40);
         },
         onDone: function(doneData) {
-          setIsThinking(false);
+          KS.hideTyping(approvalTypingEl);
+          if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
           var okLabel = action === 'deny' ? 'Denied \u2717'
             : (scope === 'yolo' ? 'YOLO on \u2713'
               : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
@@ -967,7 +1008,23 @@
             KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
           }
           if (scope === 'yolo' && KS.toast) {
-            KS.toast('YOLO on for this session — danger tools auto-approved', 'warning', 4000);
+            KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
+          }
+          
+          if (!tokenAccum && !currentMsgEl && !(doneData && doneData.interrupted)) {
+              appendAssistantText('_No response received._');
+          }
+
+          if (doneData && (doneData.cost || doneData.tokens)) {
+              if (currentMsgEl) {
+                  var meta = currentMsgEl.querySelector('.message-meta');
+                  if (meta) {
+                      meta.innerHTML = '<span>' + (doneData.tokens ? doneData.tokens.toLocaleString() + ' tokens' : '') + 
+                                       (doneData.cost ? ' \u2022 $' + doneData.cost.toFixed(4) : '') + 
+                                       (doneData.duration_ms ? ' \u2022 ' + (doneData.duration_ms/1000).toFixed(1) + 's' : '') +
+                                       '</span>';
+                  }
+              }
           }
 
           currentMsgEl = null;
@@ -1281,6 +1338,9 @@
           var item = data.pending[i];
           if (item.thread_id === chatSessionId || item.session_id === chatSessionId) {
             if (!messagesEl.querySelector('.hitl-approval-card')) {
+              // Map from API schema to SSE event schema that renderHitlCard expects
+              item.tool = item.tool || item.tool_name;
+              item.args = item.args || item.arguments;
               renderHitlCard(item);
             }
             break;
