@@ -1204,6 +1204,10 @@ def create_sse_chat_router(
         # ── Stream the response ────────────────────────────────────
         async def _event_generator() -> AsyncGenerator[str, None]:
             content_acc = ""
+            # Track if we've started persisting assistant messages
+            assistant_message_started = False
+            # Temporary message dict for incremental persistence
+            temp_assistant_msg: dict[str, Any] = {"role": "assistant", "content": ""}
 
             try:
                 async for frame in _stream_langgraph_events(
@@ -1215,20 +1219,47 @@ def create_sse_chat_router(
                     if frame.startswith("event: token\n"):
                         try:
                             data = json.loads(frame.split("data: ", 1)[1].split("\n\n")[0])
-                            content_acc += data.get("content", "")
+                            token_text = data.get("content", "")
+                            content_acc += token_text
+                            temp_assistant_msg["content"] += token_text
+                            
+                            # Persist incrementally every few tokens to prevent data loss
+                            if len(content_acc) % 50 == 0:  # Every ~50 characters
+                                if not assistant_message_started:
+                                    # Add to session messages
+                                    session.messages.append(temp_assistant_msg.copy())
+                                    assistant_message_started = True
+                                else:
+                                    # Update last message
+                                    if session.messages:
+                                        session.messages[-1]["content"] = temp_assistant_msg["content"]
+                                try:
+                                    _get_store().put(session)
+                                except Exception:
+                                    logger.debug(
+                                        "[SSE] failed to persist incremental assistant message for session=%s",
+                                        session_id
+                                    )
                         except (json.JSONDecodeError, IndexError):
                             pass
 
                     yield frame
 
-                # Store assistant response in session history + persist to disk.
+                # Store final assistant response in session history + persist to disk.
                 if content_acc:
-                    session.messages.append(
-                        {
-                            "role": "assistant",
-                            "content": content_acc,
-                        }
-                    )
+                    # Remove temporary message if it was added incrementally
+                    if assistant_message_started and session.messages:
+                        # Update the last message with final content
+                        if session.messages and session.messages[-1].get("role") == "assistant":
+                            session.messages[-1]["content"] = content_acc
+                    else:
+                        # Add new message
+                        session.messages.append(
+                            {
+                                "role": "assistant",
+                                "content": content_acc,
+                            }
+                        )
                 try:
                     _get_store().put(session)
                 except Exception:
@@ -1242,9 +1273,20 @@ def create_sse_chat_router(
                 # lose the user message (and partial assistant text).
                 try:
                     if content_acc:
-                        session.messages.append(
-                            {"role": "assistant", "content": content_acc}
+                        # Check if we already have an assistant message
+                        has_assistant = any(
+                            msg.get("role") == "assistant" for msg in session.messages
                         )
+                        if not has_assistant:
+                            session.messages.append(
+                                {"role": "assistant", "content": content_acc}
+                            )
+                        else:
+                            # Update existing assistant message
+                            for msg in reversed(session.messages):
+                                if msg.get("role") == "assistant":
+                                    msg["content"] = content_acc
+                                    break
                     _get_store().put(session)
                 except Exception:
                     pass
@@ -1253,6 +1295,20 @@ def create_sse_chat_router(
             except Exception as exc:
                 logger.error("SSE generator error: %s", exc, exc_info=True)
                 try:
+                    if content_acc:
+                        # Ensure assistant message is persisted even on error
+                        has_assistant = any(
+                            msg.get("role") == "assistant" for msg in session.messages
+                        )
+                        if not has_assistant:
+                            session.messages.append(
+                                {"role": "assistant", "content": content_acc}
+                            )
+                        else:
+                            for msg in reversed(session.messages):
+                                if msg.get("role") == "assistant":
+                                    msg["content"] = content_acc
+                                    break
                     _get_store().put(session)
                 except Exception:
                     pass

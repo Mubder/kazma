@@ -9,6 +9,7 @@ import asyncio
 import logging
 import os
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Request, WebSocket
@@ -1259,6 +1260,49 @@ def register_direct_routes(self: Any) -> None:
                     else "Continuing after denial..."
                 )
                 yield _sse_frame("status", {"content": status_msg})
+
+                # Update checkpoint metadata with HITL resolution state
+                # This ensures the thread won't show up in pending approvals after this
+                _hitl_state = "approved" if approved else "denied"
+                _resolution_time = datetime.now(UTC).isoformat()
+                
+                try:
+                    # Get the checkpointer to update metadata
+                    cp = _resolve_hitl_checkpointer()
+                    if cp is not None:
+                        # Try to update metadata directly
+                        conn = getattr(cp, "conn", None)
+                        if conn is not None:
+                            try:
+                                # For aiosqlite
+                                if hasattr(conn, 'execute'):
+                                    import json as _json
+                                    await conn.execute(
+                                        "UPDATE checkpoints SET metadata = json_set(metadata, '$.hitl_state', ?) WHERE thread_id = ?",
+                                        (_hitl_state, thread_id)
+                                    )
+                                    await conn.execute(
+                                        "UPDATE checkpoints SET metadata = json_set(metadata, '$.hitl_resolved_at', ?) WHERE thread_id = ?",
+                                        (_resolution_time, thread_id)
+                                    )
+                                    await conn.commit()
+                                # For Postgres
+                                elif hasattr(conn, 'connection'):
+                                    async with conn.connection() as pg_conn:
+                                        async with pg_conn.cursor() as cur:
+                                            await cur.execute(
+                                                "UPDATE checkpoints SET metadata = jsonb_set(metadata, '{hitl_state}', %s) WHERE thread_id = %s",
+                                                (_hitl_state, thread_id)
+                                            )
+                                            await cur.execute(
+                                                "UPDATE checkpoints SET metadata = jsonb_set(metadata, '{hitl_resolved_at}', %s) WHERE thread_id = %s",
+                                                (_resolution_time, thread_id)
+                                            )
+                                            await pg_conn.commit()
+                            except Exception as e:
+                                logger.warning("[HITL] Failed to update checkpoint metadata for thread=%s: %s", thread_id, e)
+                except Exception as e:
+                    logger.debug("[HITL] Could not update checkpoint metadata: %s", e)
 
                 _tid_token = set_current_thread_id(thread_id)
                 try:

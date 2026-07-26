@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import traceback
 import uuid
 from typing import Any, Callable
 
@@ -283,9 +284,33 @@ def create_ws_chat_router(
                                 input_state, config=config, version="v2"
                             )
                             tokens_emitted = False
+                            assistant_content_acc = ""
+                            # Track if we've added assistant message to session
+                            assistant_msg_added = False
+                            
                             async for ev in EventBridge.process_stream(stream, thread_id=thread_id):
                                 if ev.type == "llm_delta":
                                     tokens_emitted = True
+                                    # Accumulate assistant content
+                                    if hasattr(ev, 'data') and isinstance(ev.data, dict):
+                                        content = ev.data.get('content', '')
+                                        if content:
+                                            assistant_content_acc += content
+                                            
+                                            # Persist incrementally every ~50 characters
+                                            if len(assistant_content_acc) % 50 == 0:
+                                                store = get_session_manager()
+                                                sess = store.get(session_id)
+                                                if sess:
+                                                    if not assistant_msg_added:
+                                                        sess.add_message("assistant", assistant_content_acc)
+                                                        assistant_msg_added = True
+                                                    else:
+                                                        # Update last assistant message
+                                                        if sess.messages and sess.messages[-1].get("role") == "assistant":
+                                                            sess.messages[-1]["content"] = assistant_content_acc
+                                                    store.put(sess)
+                                
                                 await websocket.send_json(ev.to_dict())
 
                             if not tokens_emitted:
@@ -293,7 +318,22 @@ def create_ws_chat_router(
                                     graph_inst, config, websocket, thread_id, pre_msg_count
                                 )
 
-                            await _persist_final_assistant_message(graph_inst, config, session_id)
+                            # Persist final assistant message
+                            if assistant_content_acc:
+                                store = get_session_manager()
+                                sess = store.get(session_id)
+                                if sess:
+                                    if assistant_msg_added:
+                                        # Update existing message
+                                        if sess.messages and sess.messages[-1].get("role") == "assistant":
+                                            sess.messages[-1]["content"] = assistant_content_acc
+                                    else:
+                                        # Add new message
+                                        sess.add_message("assistant", assistant_content_acc)
+                                    store.put(sess)
+                            else:
+                                # Fallback to existing persistence
+                                await _persist_final_assistant_message(graph_inst, config, session_id)
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
                                 graph_inst, config, websocket, thread_id
@@ -304,9 +344,47 @@ def create_ws_chat_router(
                                 )
                         except asyncio.CancelledError:
                             logger.info("[WS-Chat] Prompt stream cancelled for session=%s", session_id)
+                            # Persist partial assistant content on cancel
+                            if assistant_content_acc:
+                                try:
+                                    store = get_session_manager()
+                                    sess = store.get(session_id)
+                                    if sess:
+                                        has_assistant = any(
+                                            msg.get("role") == "assistant" for msg in sess.messages
+                                        )
+                                        if not has_assistant:
+                                            sess.add_message("assistant", assistant_content_acc)
+                                        else:
+                                            for msg in reversed(sess.messages):
+                                                if msg.get("role") == "assistant":
+                                                    msg["content"] = assistant_content_acc
+                                                    break
+                                        store.put(sess)
+                                except Exception as e:
+                                    logger.warning("[WS-Chat] Failed to persist partial assistant on cancel: %s", e)
                             raise
                         except Exception as exc:
                             logger.exception("[WS-Chat] Error in prompt stream: %s", exc)
+                            # Persist partial assistant content on error
+                            if assistant_content_acc:
+                                try:
+                                    store = get_session_manager()
+                                    sess = store.get(session_id)
+                                    if sess:
+                                        has_assistant = any(
+                                            msg.get("role") == "assistant" for msg in sess.messages
+                                        )
+                                        if not has_assistant:
+                                            sess.add_message("assistant", assistant_content_acc)
+                                        else:
+                                            for msg in reversed(sess.messages):
+                                                if msg.get("role") == "assistant":
+                                                    msg["content"] = assistant_content_acc
+                                                    break
+                                        store.put(sess)
+                                except Exception as e:
+                                    logger.warning("[WS-Chat] Failed to persist partial assistant on error: %s", e)
                             await websocket.send_json(
                                 TelemetryEvent(
                                     type="graph_error",
@@ -354,6 +432,43 @@ def create_ws_chat_router(
 
                     resume_val = {"approved": approved, "scope": scope}
                     resume_command = Command(resume=resume_val)
+                    
+                    # Send approval started event
+                    from kazma_ui.sse_utils import ApprovalEventBridge
+                    import time
+                    approval_start_time = time.monotonic()
+                    tool_name = "unknown"
+                    
+                    await websocket.send_json(
+                        ApprovalEventBridge.create_approval_started_event(
+                            target_thread_id,
+                            tool=tool_name,
+                            scope=scope,
+                            request_id=session_id[:12]
+                        )
+                    )
+                    
+                    # Try to get the tool name from the checkpoint
+                    try:
+                        snap = await graph_inst.aget_state(approve_config)
+                        if snap and getattr(snap, "tasks", None):
+                            for task in snap.tasks or []:
+                                for intr in getattr(task, "interrupts", None) or []:
+                                    payload = getattr(intr, "value", None)
+                                    if isinstance(payload, dict) and payload.get("type") == "hitl_approval":
+                                        tool_name = payload.get("tool", "unknown")
+                                        # Update with actual tool name
+                                        await websocket.send_json(
+                                            ApprovalEventBridge.create_approval_progress_event(
+                                                target_thread_id,
+                                                f"Preparing to execute {tool_name}...",
+                                                "preparing",
+                                                {"tool": tool_name, "scope": scope}
+                                            )
+                                        )
+                                        break
+                    except Exception as e:
+                        logger.debug("[WS-Chat] Failed to extract tool name for approval: %s", e)
 
                     async def _run_approve_stream():
                         try:
@@ -367,13 +482,86 @@ def create_ws_chat_router(
                             except Exception:
                                 pass
 
+                            # Update checkpoint metadata with HITL resolution state
+                            from datetime import UTC, datetime
+                            _hitl_state = "approved" if approved else "denied"
+                            _resolution_time = datetime.now(UTC).isoformat()
+                            
+                            try:
+                                # Try to get checkpointer from graph
+                                cp = getattr(graph_inst, "checkpointer", None)
+                                if cp is not None:
+                                    conn = getattr(cp, "conn", None)
+                                    if conn is not None:
+                                        try:
+                                            import json as _json
+                                            # For aiosqlite
+                                            if hasattr(conn, 'execute'):
+                                                await conn.execute(
+                                                    "UPDATE checkpoints SET metadata = json_set(metadata, '$.hitl_state', ?) WHERE thread_id = ?",
+                                                    (_hitl_state, target_thread_id)
+                                                )
+                                                await conn.execute(
+                                                    "UPDATE checkpoints SET metadata = json_set(metadata, '$.hitl_resolved_at', ?) WHERE thread_id = ?",
+                                                    (_resolution_time, target_thread_id)
+                                                )
+                                                await conn.commit()
+                                            # For Postgres
+                                            elif hasattr(conn, 'connection'):
+                                                async with conn.connection() as pg_conn:
+                                                    async with pg_conn.cursor() as cur:
+                                                        await cur.execute(
+                                                            "UPDATE checkpoints SET metadata = jsonb_set(metadata, '{hitl_state}', %s) WHERE thread_id = %s",
+                                                            (_hitl_state, target_thread_id)
+                                                        )
+                                                        await cur.execute(
+                                                            "UPDATE checkpoints SET metadata = jsonb_set(metadata, '{hitl_resolved_at}', %s) WHERE thread_id = %s",
+                                                            (_resolution_time, target_thread_id)
+                                                        )
+                                                        await pg_conn.commit()
+                                        except Exception as e:
+                                            logger.warning("[WS-Chat] Failed to update checkpoint metadata for thread=%s: %s", target_thread_id, e)
+                            except Exception as e:
+                                logger.debug("[WS-Chat] Could not update checkpoint metadata: %s", e)
+
+                            # Send resuming event
+                            await websocket.send_json(
+                                ApprovalEventBridge.create_approval_resuming_event(
+                                    target_thread_id,
+                                    tool="unknown",  # Tool name extracted earlier
+                                    scope=scope
+                                )
+                            )
+                            
                             stream = graph_inst.astream_events(
                                 resume_command, config=approve_config, version="v2"
                             )
                             tokens_emitted = False
+                            assistant_content_acc = ""
+                            assistant_msg_added = False
+                            
                             async for ev in EventBridge.process_stream(stream, thread_id=target_thread_id):
                                 if ev.type == "llm_delta":
                                     tokens_emitted = True
+                                    # Accumulate assistant content
+                                    if hasattr(ev, 'data') and isinstance(ev.data, dict):
+                                        content = ev.data.get('content', '')
+                                        if content:
+                                            assistant_content_acc += content
+                                            
+                                            # Persist incrementally
+                                            if len(assistant_content_acc) % 50 == 0:
+                                                store = get_session_manager()
+                                                sess = store.get(session_id)
+                                                if sess:
+                                                    if not assistant_msg_added:
+                                                        sess.add_message("assistant", assistant_content_acc)
+                                                        assistant_msg_added = True
+                                                    else:
+                                                        if sess.messages and sess.messages[-1].get("role") == "assistant":
+                                                            sess.messages[-1]["content"] = assistant_content_acc
+                                                    store.put(sess)
+                                
                                 await websocket.send_json(ev.to_dict())
 
                             if not tokens_emitted:
@@ -381,20 +569,96 @@ def create_ws_chat_router(
                                     graph_inst, approve_config, websocket, target_thread_id, pre_msg_count
                                 )
 
-                            await _persist_final_assistant_message(graph_inst, approve_config, session_id)
+                            # Persist final assistant message
+                            if assistant_content_acc:
+                                store = get_session_manager()
+                                sess = store.get(session_id)
+                                if sess:
+                                    if assistant_msg_added:
+                                        if sess.messages and sess.messages[-1].get("role") == "assistant":
+                                            sess.messages[-1]["content"] = assistant_content_acc
+                                    else:
+                                        sess.add_message("assistant", assistant_content_acc)
+                                    store.put(sess)
+                            else:
+                                await _persist_final_assistant_message(graph_inst, approve_config, session_id)
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
                                 graph_inst, approve_config, websocket, target_thread_id
                             )
+                            
+                            # Calculate duration and send completion event
+                            duration_ms = (time.monotonic() - approval_start_time) * 1000
+                            await websocket.send_json(
+                                ApprovalEventBridge.create_approval_complete_event(
+                                    target_thread_id,
+                                    tool=tool_name,
+                                    scope=scope,
+                                    duration_ms=duration_ms
+                                )
+                            )
+                            
                             if not interrupted:
                                 await websocket.send_json(
                                     EventBridge.create_idle_event(target_thread_id).to_dict()
                                 )
                         except asyncio.CancelledError:
                             logger.info("[WS-Chat] Approve stream cancelled for session=%s", session_id)
+                            # Persist partial content on cancel
+                            if assistant_content_acc:
+                                try:
+                                    store = get_session_manager()
+                                    sess = store.get(session_id)
+                                    if sess:
+                                        has_assistant = any(
+                                            msg.get("role") == "assistant" for msg in sess.messages
+                                        )
+                                        if not has_assistant:
+                                            sess.add_message("assistant", assistant_content_acc)
+                                        else:
+                                            for msg in reversed(sess.messages):
+                                                if msg.get("role") == "assistant":
+                                                    msg["content"] = assistant_content_acc
+                                                    break
+                                        store.put(sess)
+                                except Exception as e:
+                                    logger.warning("[WS-Chat] Failed to persist partial assistant on approve cancel: %s", e)
                             raise
                         except Exception as exc:
                             logger.exception("[WS-Chat] Error in approve stream: %s", exc)
+                            # Persist partial content on error
+                            if assistant_content_acc:
+                                try:
+                                    store = get_session_manager()
+                                    sess = store.get(session_id)
+                                    if sess:
+                                        has_assistant = any(
+                                            msg.get("role") == "assistant" for msg in sess.messages
+                                        )
+                                        if not has_assistant:
+                                            sess.add_message("assistant", assistant_content_acc)
+                                        else:
+                                            for msg in reversed(sess.messages):
+                                                if msg.get("role") == "assistant":
+                                                    msg["content"] = assistant_content_acc
+                                                    break
+                                        store.put(sess)
+                                except Exception as e:
+                                    logger.warning("[WS-Chat] Failed to persist partial assistant on approve error: %s", e)
+                            
+                            # Send detailed error event
+                            await websocket.send_json(
+                                ApprovalEventBridge.create_approval_error_event(
+                                    target_thread_id,
+                                    error=str(exc),
+                                    code="APPROVAL_FAILED",
+                                    traceback_str=traceback.format_exc(),
+                                    tool=tool_name,
+                                    scope=scope
+                                )
+                            )
+                            
+                            # Also send the generic error for backward compatibility
                             await websocket.send_json(
                                 TelemetryEvent(
                                     type="graph_error",
