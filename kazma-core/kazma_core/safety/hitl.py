@@ -218,6 +218,15 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
 
     if not hitl_config.get("enabled", True):
         return False
+
+    if tool_name.startswith("mcp__"):
+        try:
+            from kazma_core.mcp.manager import classify_mcp_tool
+
+            return classify_mcp_tool(tool_name) != "safe"
+        except Exception:
+            pass
+
     danger_tools = hitl_config.get("require_approval_for", set())
     return tool_name in danger_tools
 

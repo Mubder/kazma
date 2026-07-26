@@ -72,7 +72,7 @@ _DANGER_KEYWORDS = (
 # Keywords that indicate a safe read-only tool (never requires approval).
 _SAFE_KEYWORDS = (
     "read", "list", "search", "get", "info", "status", "check",
-    "describe", "query", "count", "exists", "help",
+    "describe", "query", "count", "exists", "help", "tree",
 )
 
 # Even with a "safe" verb, these substrings force danger (audit H6)

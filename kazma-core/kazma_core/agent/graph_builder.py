@@ -1177,8 +1177,8 @@ def build_supervisor_graph(
         return NodeName.RESPOND
 
     def _route_from_worker(state: SupervisorState) -> str:
-        """Route from Tool Worker — always back to Supervisor."""
-        return NodeName.SUPERVISOR
+        """Route from Tool Worker — respects next_node (e.g. RESPOND when circuit breaker trips)."""
+        return state.get("next_node", NodeName.SUPERVISOR)
 
     def _route_from_saturation(state: SupervisorState) -> str:
         """Route from Check Saturation — to summarize if over threshold, else supervisor."""
@@ -1230,11 +1230,14 @@ def build_supervisor_graph(
         },
     )
 
-    # Tool Worker → Supervisor (loop back)
+    # Tool Worker → Supervisor / Respond (circuit breaker route)
     graph.add_conditional_edges(
         NodeName.TOOL_WORKER,
         _route_from_worker,
-        {NodeName.SUPERVISOR: NodeName.SUPERVISOR},
+        {
+            NodeName.SUPERVISOR: NodeName.SUPERVISOR,
+            NodeName.RESPOND: NodeName.RESPOND,
+        },
     )
 
     # Respond → END
