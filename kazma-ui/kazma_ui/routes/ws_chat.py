@@ -109,6 +109,44 @@ def create_ws_chat_router(
             logger.warning("[WS-Chat] Failed scanning graph snapshot for interrupts: %s", exc)
         return False
 
+    async def _backfill_assistant_text_if_needed(
+        graph_inst: Any,
+        config: dict[str, Any],
+        websocket: WebSocket,
+        thread_id: str,
+    ) -> None:
+        """If no tokens were streamed (non-BaseChatModel LLM), backfill assistant text from graph state."""
+        try:
+            snapshot = await graph_inst.aget_state(config)
+            if snapshot is None:
+                return
+            vals = getattr(snapshot, "values", None) or {}
+            msgs = vals.get("messages") if isinstance(vals, dict) else None
+            if not msgs or not isinstance(msgs, list):
+                return
+            text = ""
+            for m in reversed(msgs):
+                role = None
+                if isinstance(m, dict):
+                    role = m.get("role")
+                else:
+                    role = getattr(m, "type", None) or getattr(m, "role", None)
+                if role in ("assistant", "ai"):
+                    content = m.get("content") if isinstance(m, dict) else getattr(m, "content", None)
+                    if isinstance(content, str) and content.strip():
+                        text = content
+                        break
+            if text:
+                await websocket.send_json(
+                    TelemetryEvent(
+                        type="llm_delta",
+                        data={"content": text},
+                        thread_id=thread_id,
+                    ).to_dict()
+                )
+        except Exception as exc:
+            logger.debug("[WS-Chat] Text backfill failed: %s", exc)
+
     @router.websocket("/ws/chat/{session_id}")
     async def chat_websocket(websocket: WebSocket, session_id: str) -> None:
         """WebSocket connection handler for session-bound agent telemetry."""
@@ -173,7 +211,10 @@ def create_ws_chat_router(
 
                     # Record user message in SessionStore
                     try:
-                        session.add_message("user", text)
+                        if hasattr(session, "add_message"):
+                            session.add_message("user", text)
+                        elif hasattr(session, "messages") and isinstance(session.messages, list):
+                            session.messages.append({"role": "user", "content": text})
                         get_session_manager().put(session)
                     except Exception as exc:
                         logger.warning("[WS-Chat] Failed writing user msg to SessionStore: %s", exc)
@@ -185,8 +226,16 @@ def create_ws_chat_router(
                             stream = graph_inst.astream_events(
                                 input_state, config=config, version="v2"
                             )
+                            tokens_emitted = False
                             async for ev in EventBridge.process_stream(stream, thread_id=thread_id):
+                                if ev.type == "llm_delta":
+                                    tokens_emitted = True
                                 await websocket.send_json(ev.to_dict())
+
+                            if not tokens_emitted:
+                                await _backfill_assistant_text_if_needed(
+                                    graph_inst, config, websocket, thread_id
+                                )
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
                                 graph_inst, config, websocket, thread_id
@@ -218,8 +267,25 @@ def create_ws_chat_router(
                 # ── Action 2: approve_tool ───────────────────────────────
                 elif action == "approve_tool":
                     approved = bool(payload.get("approved", True))
-                    scope = payload.get("scope", "once")
-                    target_thread_id = payload.get("thread_id") or thread_id
+                    scope = str(payload.get("scope") or "once").strip().lower()
+                    target_thread_id = str(payload.get("thread_id") or thread_id)
+
+                    # Persist scope grants (yolo / per-tool) so future turns skip HITL
+                    actor = f"ws:{(session_id or '')[:12] or 'anon'}"
+                    if approved and scope == "yolo":
+                        try:
+                            from kazma_core.safety.yolo import enable_yolo
+                            enable_yolo(target_thread_id, actor=actor)
+                        except Exception as exc:
+                            logger.warning("[WS-Chat] Failed to enable YOLO scope: %s", exc)
+                    elif approved and scope in ("tool", "allow_tool"):
+                        try:
+                            from kazma_core.safety.hitl_grants import grant_tool
+                            tname = payload.get("tool") or payload.get("grant_tool")
+                            if tname:
+                                grant_tool(target_thread_id, str(tname), actor=actor)
+                        except Exception as exc:
+                            logger.warning("[WS-Chat] Failed to apply tool grant: %s", exc)
 
                     approve_config: dict[str, Any] = {
                         "configurable": {
@@ -236,8 +302,16 @@ def create_ws_chat_router(
                             stream = graph_inst.astream_events(
                                 resume_command, config=approve_config, version="v2"
                             )
+                            tokens_emitted = False
                             async for ev in EventBridge.process_stream(stream, thread_id=target_thread_id):
+                                if ev.type == "llm_delta":
+                                    tokens_emitted = True
                                 await websocket.send_json(ev.to_dict())
+
+                            if not tokens_emitted:
+                                await _backfill_assistant_text_if_needed(
+                                    graph_inst, approve_config, websocket, target_thread_id
+                                )
 
                             interrupted = await _scan_and_emit_hitl_interrupt(
                                 graph_inst, approve_config, websocket, target_thread_id
