@@ -47,25 +47,45 @@ Summary of prior conversation:
 [End summary. The conversation continues below.]"""
 
 
-def estimate_tokens(messages: list[dict[str, Any]]) -> int:
+def _normalize_msg(msg: Any) -> dict[str, Any]:
+    """Normalize a message (dict, tuple, or BaseMessage) to a dict."""
+    if isinstance(msg, dict):
+        return msg
+    if isinstance(msg, tuple) and len(msg) == 2:
+        return {"role": str(msg[0]), "content": msg[1], "tool_calls": []}
+    if hasattr(msg, "content"):
+        return {
+            "role": getattr(msg, "type", getattr(msg, "role", "unknown")),
+            "content": msg.content,
+            "tool_calls": getattr(msg, "tool_calls", []) or [],
+        }
+    return {"role": "unknown", "content": str(msg), "tool_calls": []}
+
+
+def estimate_tokens(messages: list[Any]) -> int:
     """Estimate token count from messages using a chars/4 heuristic.
 
     Args:
-        messages: List of message dicts with 'content' fields.
+        messages: List of message dicts, tuples, or objects.
 
     Returns:
         Estimated token count.
     """
     total_chars = 0
-    for msg in messages:
+    for raw_msg in messages:
+        msg = _normalize_msg(raw_msg)
         content = msg.get("content", "")
         if isinstance(content, str):
             total_chars += len(content)
         # Account for tool calls
         tool_calls = msg.get("tool_calls", [])
         for tc in tool_calls:
-            fn = tc.get("function", {})
-            total_chars += len(str(fn.get("name", ""))) + len(str(fn.get("arguments", "")))
+            if isinstance(tc, dict):
+                if "name" in tc and "function" not in tc:
+                    total_chars += len(str(tc.get("name", ""))) + len(str(tc.get("args", "")))
+                else:
+                    fn = tc.get("function", {})
+                    total_chars += len(str(fn.get("name", ""))) + len(str(fn.get("arguments", "")))
     return total_chars // 4
 
 
@@ -90,7 +110,7 @@ def format_summary(summary_text: str) -> str:
     return SUMMARY_TEMPLATE.format(summary=summary_text)
 
 
-async def summarize(messages: list[dict[str, Any]], llm: Any, thread_id: str = "") -> str:
+async def summarize(messages: list[Any], llm: Any, thread_id: str = "") -> str:
     """Generate a conversation summary using the LLM.
 
     Args:
@@ -103,7 +123,8 @@ async def summarize(messages: list[dict[str, Any]], llm: Any, thread_id: str = "
     """
     # Build the summarization prompt
     conversation_text: list[str] = []
-    for msg in messages:
+    for raw_msg in messages:
+        msg = _normalize_msg(raw_msg)
         role = msg.get("role", "unknown")
         content = msg.get("content", "")
         if role == "system":
@@ -113,8 +134,12 @@ async def summarize(messages: list[dict[str, Any]], llm: Any, thread_id: str = "
         # Include tool calls if present
         tool_calls = msg.get("tool_calls", [])
         for tc in tool_calls:
-            fn = tc.get("function", {})
-            conversation_text.append(f"tool_call: {fn.get('name', '?')}({fn.get('arguments', '')})")
+            if isinstance(tc, dict):
+                if "name" in tc and "function" not in tc:
+                    conversation_text.append(f"tool_call: {tc.get('name', '?')}({tc.get('args', '')})")
+                else:
+                    fn = tc.get("function", {})
+                    conversation_text.append(f"tool_call: {fn.get('name', '?')}({fn.get('arguments', '')})")
 
     conversation_block = "\n".join(conversation_text)
 
@@ -141,14 +166,15 @@ async def summarize(messages: list[dict[str, Any]], llm: Any, thread_id: str = "
     return formatted
 
 
-def _fallback_summary(messages: list[dict[str, Any]]) -> str:
+def _fallback_summary(messages: list[Any]) -> str:
     """Generate a simple extractive summary when LLM is unavailable."""
     parts: list[str] = []
-    for msg in messages:
+    for raw_msg in messages:
+        msg = _normalize_msg(raw_msg)
         role = msg.get("role", "")
         content = msg.get("content", "")
-        if role == "user" and content:
+        if role == "user" and content and isinstance(content, str):
             parts.append(f"- User asked: {content[:100]}")
-        elif role == "assistant" and content:
+        elif role == "assistant" and content and isinstance(content, str):
             parts.append(f"- Agent responded: {content[:100]}")
     return "\n".join(parts[-10:]) if parts else "(no conversation to summarize)"

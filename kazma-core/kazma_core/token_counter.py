@@ -4,6 +4,9 @@ import logging
 
 __all__ = ["TokenCounter"]
 
+from kazma_core.summarizer import _normalize_msg
+
+
 logger = logging.getLogger(__name__)
 
 # Try to import tiktoken; fall back to None if not installed
@@ -35,6 +38,7 @@ class TokenCounter:
 
     def count(self, messages: list[dict]) -> int:
         """Return total token count for a list of messages."""
+        messages = [_normalize_msg(m) for m in messages]
         total = 0
         for msg in messages:
             # 4 tokens overhead per message for role/formatting

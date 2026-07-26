@@ -63,6 +63,7 @@ from kazma_core.time_travel import SnapshotRecorder
 
 from kazma_core.tracing import KazmaTracer
 from kazma_core.config_schema import TracingConfig
+from kazma_core.summarizer import _normalize_msg
 
 __all__ = ["TOOL_RESULT_MAX_CHARS", "build_supervisor_graph", "check_saturation_node", "respond_node", "sanitize_tool_chains", "summarize_node", "supervisor_node", "tool_worker_node", "truncate_tool_result"]
 
@@ -138,7 +139,7 @@ def sanitize_tool_chains(messages: list[dict[str, Any]]) -> list[dict[str, Any]]
       - orphaned ``tool`` messages (no surviving matching assistant
         ``tool_calls``) are dropped.
     """
-    msgs = list(messages)
+    msgs = [_normalize_msg(m) for m in messages]
 
     # tool_call_id → indices of every tool response (ids can repeat across turns)
     response_indices: dict[str, list[int]] = {}
@@ -252,7 +253,7 @@ def _ensure_personality(
     On subsequent calls (personality switch or re-entry), the old
     personality message is replaced in-place.
     """
-    msgs = list(messages)
+    msgs = [_normalize_msg(m) for m in messages]
 
     # Remove any old personality-tagged system message
     msgs = [m for m in msgs if _PERSONALITY_MARKER not in m.get("content", "")]
@@ -298,7 +299,7 @@ async def supervisor_node(
       4. Route: tool_calls → TOOL_WORKER, text → RESPOND.
     """
     iteration = state.get("iteration", 0)
-    messages = list(state.get("messages", []))
+    messages = [_normalize_msg(m) for m in state.get("messages", [])]
 
     logger.info("[Supervisor] iteration=%d messages=%d", iteration, len(messages))
 
@@ -673,7 +674,7 @@ async def tool_worker_node(
             for tc in pending
         ]
         # Build tool-role messages for the conversation
-        messages = list(state.get("messages", []))
+        messages = [_normalize_msg(m) for m in state.get("messages", [])]
         tool_messages = [
             {
                 "role": "tool",
@@ -709,7 +710,7 @@ async def tool_worker_node(
         set_current_session_messages,
     )
 
-    session_messages = list(state.get("messages", []))
+    session_messages = [_normalize_msg(m) for m in state.get("messages", [])]
     _messages_token = set_current_session_messages(session_messages)
 
     try:
@@ -886,7 +887,7 @@ async def tool_worker_node(
                 breaker_tripped_now = True
 
         # Build tool-role messages for the conversation
-        messages = list(state.get("messages", []))
+        messages = [_normalize_msg(m) for m in state.get("messages", [])]
         tool_messages: list[dict[str, Any]] = []
         for tr in results:
             tool_messages.append(
@@ -939,7 +940,7 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                max-iterations forces a respond mid-tool-loop. Optional
                for backward compat (the synthesis step is skipped if None).
     """
-    messages = list(state.get("messages", []))
+    messages = [_normalize_msg(m) for m in state.get("messages", [])]
     iteration = state.get("iteration", 0) + 1
 
     # Sanitize tool chains to remove any unhandled/dangling tool_calls
@@ -999,7 +1000,7 @@ async def check_saturation_node(state: SupervisorState) -> dict[str, Any]:
     """
     from kazma_core.summarizer import TOKEN_THRESHOLD, estimate_tokens
 
-    messages = state.get("messages", [])
+    messages = [_normalize_msg(m) for m in state.get("messages", [])]
     estimated = estimate_tokens(messages)
 
     if estimated > TOKEN_THRESHOLD:
@@ -1022,7 +1023,7 @@ async def summarize_node(
     """Summarize the conversation and inject as a SystemMessage at position 0."""
     from kazma_core.summarizer import format_summary, get_summary, summarize
 
-    messages = list(state.get("messages", []))
+    messages = [_normalize_msg(m) for m in state.get("messages", [])]
     thread_id = state.get("thread_id", "")
 
     # Check if we already have a summary for this thread
