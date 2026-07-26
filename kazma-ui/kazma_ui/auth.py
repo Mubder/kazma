@@ -401,19 +401,21 @@ def is_authenticated(request: Request, expected_secret: str = "") -> bool:
 
 
 def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> bool:
-    """Auth for WebSocket handshakes (cookies/headers only — no middleware path).
+    """Auth for WebSocket handshakes (cookies/headers/loopback).
 
     Accepts the same credentials as HTTP:
       1. ``X-Kazma-Secret`` header
       2. ``Authorization: Bearer …``
       3. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
       4. ``kazma-secret`` legacy cookie
-
-    Without this, browsers that only hold ``kazma-session`` get HTTP 200 on
-    ``/api/*`` but WebSocket ``/ws/dashboard`` 403 (legacy secret-cookie only).
+      5. Loopback / TRUST_LAN local peers
     """
     expected = expected_secret or get_kazma_secret()
     if not expected:
+        return True
+
+    # Loopback or TRUST_LAN local peers
+    if _is_loopback_client(websocket) or (_trust_lan_enabled() and _is_private_lan_client(websocket)):
         return True
 
     provided = (websocket.headers.get(SECRET_HEADER) or "").strip()
@@ -427,9 +429,10 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
             try:
                 from kazma_core.security.web_sessions import validate_session
 
-                return bool(validate_session(sess))
+                if validate_session(sess):
+                    return True
             except Exception:
-                return False
+                pass
     if not provided:
         provided = (websocket.cookies.get(SECRET_COOKIE) or "").strip()
     if not provided:

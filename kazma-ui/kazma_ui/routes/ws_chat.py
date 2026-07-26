@@ -112,6 +112,14 @@ def create_ws_chat_router(
     @router.websocket("/ws/chat/{session_id}")
     async def chat_websocket(websocket: WebSocket, session_id: str) -> None:
         """WebSocket connection handler for session-bound agent telemetry."""
+        from kazma_ui.auth import websocket_is_authenticated
+
+        if not websocket_is_authenticated(websocket):
+            logger.warning("[WS-Chat] Unauthenticated connection attempt for session=%s", session_id)
+            await websocket.accept()
+            await websocket.close(code=4003, reason="Unauthorized")
+            return
+
         await websocket.accept()
         logger.info("[WS-Chat] Client connected: session_id=%s", session_id)
 

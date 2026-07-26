@@ -64,12 +64,20 @@ document.addEventListener('alpine:init', () => {
       };
 
       this._socket.onerror = (err) => {
-        console.warn('[AgentStore] WebSocket error:', err);
+        console.warn('[AgentStore] WebSocket transport error:', err);
       };
 
-      this._socket.onclose = () => {
+      this._socket.onclose = (evt) => {
         this.connectionStatus = 'disconnected';
-        console.log(`[AgentStore] Telemetry socket closed for session ${sessionId}`);
+        const code = evt ? evt.code : 0;
+        const reason = evt ? evt.reason : '';
+        console.warn(`[AgentStore] Telemetry socket closed for session ${sessionId} (code=${code}, reason=${reason || 'none'})`);
+
+        if (code === 4003) {
+          console.warn('[AgentStore] WebSocket connection rejected (4003 Unauthorized). Pausing auto-reconnect.');
+          return;
+        }
+
         this._scheduleReconnect();
       };
     },
