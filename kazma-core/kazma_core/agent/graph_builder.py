@@ -691,8 +691,8 @@ async def tool_worker_node(
             "tool_calls_pending": [],
             "tool_calls_done": list(results),
             "tool_results": cumulative,
-            "consecutive_tool_failures": 0,
-            "circuit_breaker_tripped": False,
+            "consecutive_tool_failures": state.get("consecutive_tool_failures", 3),
+            "circuit_breaker_tripped": True,
             "next_node": NodeName.RESPOND,
         }
 
@@ -907,12 +907,10 @@ async def tool_worker_node(
             "tool_calls_pending": [],  # all consumed
             "tool_calls_done": list(results),
             "tool_results": cumulative,
-            "consecutive_tool_failures": 0 if breaker_tripped_now else consecutive_failures,
-            "circuit_breaker_tripped": False,
-            # If the breaker just tripped, force RESPOND so the model
-            # synthesizes an answer with what it has instead of dead-looping
-            # back to the supervisor which would try more tools → bypass → loop.
-            "next_node": NodeName.RESPOND if breaker_tripped_now else NodeName.SUPERVISOR,
+            "consecutive_tool_failures": consecutive_failures,
+            "circuit_breaker_tripped": breaker_tripped_now,
+            # If the breaker just tripped or max consecutive failures hit, force RESPOND
+            "next_node": NodeName.RESPOND if (breaker_tripped_now or consecutive_failures >= 3) else NodeName.SUPERVISOR,
         }
     finally:
         # Always restore the prior ContextVar value, even if a tool
@@ -1178,6 +1176,9 @@ def build_supervisor_graph(
 
     def _route_from_worker(state: SupervisorState) -> str:
         """Route from Tool Worker — respects next_node (e.g. RESPOND when circuit breaker trips)."""
+        next_n = state.get("next_node")
+        if next_n == NodeName.RESPOND or state.get("circuit_breaker_tripped") or (state.get("consecutive_tool_failures", 0) >= 3):
+            return NodeName.RESPOND
         return state.get("next_node", NodeName.SUPERVISOR)
 
     def _route_from_saturation(state: SupervisorState) -> str:

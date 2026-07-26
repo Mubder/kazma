@@ -73,6 +73,7 @@ _DANGER_KEYWORDS = (
 _SAFE_KEYWORDS = (
     "read", "list", "search", "get", "info", "status", "check",
     "describe", "query", "count", "exists", "help", "tree",
+    "directory_tree", "file_tree", "find", "show", "cat", "view",
 )
 
 # Even with a "safe" verb, these substrings force danger (audit H6)

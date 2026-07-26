@@ -284,6 +284,7 @@
   function enableInput() {
     _isGenerating = false;
     if (inputEl) {
+      inputEl.disabled = false;
       inputEl.placeholder = 'Type a message or /yolo \u2026 (Enter to send)';
     }
     // Restore send button from Stop mode.
@@ -294,6 +295,20 @@
       sendBtn.innerHTML = _SEND_SVG;
     }
     if (inputEl) inputEl.focus();
+  }
+
+  function lockInputForApproval() {
+    if (inputEl) {
+      inputEl.disabled = true;
+      inputEl.placeholder = 'Please approve or deny the pending action to continue.';
+    }
+    if (sendBtn) {
+      sendBtn.disabled = true;
+    }
+  }
+
+  function unlockInputForApproval() {
+    enableInput();
   }
 
   function abortGeneration() {
@@ -845,6 +860,7 @@
    */
   function renderHitlCard(data) {
     if (!data) return;
+    lockInputForApproval();
     var targetThreadId = data.thread_id || chatSessionId || '';
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
     var content = currentMsgEl.querySelector('.message-content');

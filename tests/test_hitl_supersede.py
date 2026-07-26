@@ -35,32 +35,34 @@ async def test_has_pending_hitl_false() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_pending_hitl_resumes_deny() -> None:
+async def test_cancel_pending_hitl_preserves_state_by_default() -> None:
     graph = MagicMock()
-    # First call: pending; after resume: clear
-    graph.aget_state = AsyncMock(
-        side_effect=[
-            _interrupt_snapshot(True),
-            _interrupt_snapshot(True),  # inside cancel loop check before ainvoke... 
-            _interrupt_snapshot(False),
-            _interrupt_snapshot(False),
-        ]
+    graph.aget_state = AsyncMock(return_value=_interrupt_snapshot(True))
+    ok = await cancel_pending_hitl(
+        graph,
+        {"configurable": {"thread_id": "t1"}},
+        reason="test preserve",
     )
-    graph.ainvoke = AsyncMock(return_value={})
+    assert ok is False
 
-    # has_pending called once, then ainvoke, then chained checks
-    # Simplify: first has_pending True, ainvoke once, subsequent False
+
+@pytest.mark.asyncio
+async def test_cancel_pending_hitl_resumes_deny_when_auto_deny_true() -> None:
+    graph = MagicMock()
+
     async def _aget(_config):
         if graph.ainvoke.await_count == 0:
             return _interrupt_snapshot(True)
         return _interrupt_snapshot(False)
 
     graph.aget_state = AsyncMock(side_effect=_aget)
+    graph.ainvoke = AsyncMock(return_value={})
 
     ok = await cancel_pending_hitl(
         graph,
         {"configurable": {"thread_id": "t1"}},
         reason="test supersede",
+        auto_deny=True,
     )
     assert ok is True
     assert graph.ainvoke.await_count >= 1
