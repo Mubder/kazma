@@ -134,12 +134,12 @@ async def synthesize_from_digests(
     )
 
     try:
-        from kazma_core.model_registry import get_client, get_model_registry
+        from kazma_core.model_registry import get_model_registry
 
-        client = get_client()
+        reg = get_model_registry()
+        client = reg.get_client()  # active model+provider (not a free function)
         model = None
         try:
-            reg = get_model_registry()
             profile = reg.get_active_profile() or {}
             model = profile.get("model")
         except Exception:
