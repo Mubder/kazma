@@ -1654,6 +1654,13 @@ tbody tr:last-child td {
   color: var(--text-muted);
   font-size: 0.72rem;
 }
+.agent-progress-elapsed {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 2.5em;
+  text-align: end;
+}
 .agent-progress-chevron {
   color: var(--text-muted);
   font-size: 0.75rem;
@@ -1667,9 +1674,16 @@ tbody tr:last-child td {
 
 /* Sticky plan checklist */
 .agent-plan {
-  padding: 8px 12px 6px;
+  padding: 8px 12px 8px;
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   border-bottom: 1px solid var(--border-subtle);
+}
+.agent-plan-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
 }
 .agent-plan-label,
 .agent-activity-label {
@@ -1678,7 +1692,27 @@ tbody tr:last-child td {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
-  margin-bottom: 6px;
+  margin-bottom: 0;
+}
+.agent-plan-meta {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.agent-plan-bar {
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 80%, transparent);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.agent-plan-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.25s ease;
 }
 .agent-activity-label {
   padding: 8px 12px 0;
@@ -1699,6 +1733,15 @@ tbody tr:last-child td {
   font-size: 0.8rem;
   color: var(--text-primary);
   line-height: 1.35;
+}
+.agent-plan-item.is-active .plan-text {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.agent-plan-item.is-active .plan-check {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 .agent-plan-item .plan-check {
   flex-shrink: 0;
@@ -1723,6 +1766,30 @@ tbody tr:last-child td {
   color: var(--text-secondary);
   text-decoration: line-through;
   text-decoration-color: color-mix(in srgb, var(--text-muted) 60%, transparent);
+}
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-surface) 90%, transparent);
+  border: 1px solid var(--border-subtle);
+  max-width: 100%;
+}
+.source-chip-label {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-size: 0.62rem;
+}
+.source-chip code {
+  font-size: 0.68rem;
+  color: var(--accent);
 }
 
 .agent-progress-steps {

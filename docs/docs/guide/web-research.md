@@ -76,6 +76,20 @@ read_url_to_file(url) → digest_research_file(path) → read_research_chunk for
 
 Saves under the workspace (default research subfolder) and returns a markdown index.
 
+## Stronger search (SearXNG)
+
+`web_search` tries **SearXNG first**, then DuckDuckGo → Bing → Wikipedia.
+
+| Setup | Command / env |
+|-------|----------------|
+| Compose profile | `docker compose --profile search up -d searxng` |
+| Host port | `http://127.0.0.1:8088` (maps container `8080`) |
+| Env | `KAZMA_SEARXNG_URL=http://127.0.0.1:8088` |
+| ConfigStore | key `search.searxng_url` (same purpose) |
+| Settings | `deploy/searxng/settings.yml` enables **JSON** format (required) |
+
+Kazma multi-base discovery also probes `localhost:8088`, `host.docker.internal:8088`, and `searxng:8080`. Live bases are cached briefly; dead hosts cool down ~60s.
+
 ## Optional harder fetch backends
 
 Not invincible against enterprise bot walls. Improves success rate:
@@ -83,11 +97,19 @@ Not invincible against enterprise bot walls. Improves success rate:
 | Env | Purpose |
 |-----|---------|
 | `KAZMA_FETCH_BACKEND` | `auto` \| `httpx` \| `jina` \| `firecrawl` |
-| `KAZMA_FIRECRAWL_API_KEY` | Firecrawl API key |
+| `KAZMA_FIRECRAWL_API_KEY` | Firecrawl API key (best quality on hard sites) |
 | `KAZMA_FIRECRAWL_URL` | Self-hosted Firecrawl base (optional) |
-| `KAZMA_JINA_READER` | `1` / `true` to try `r.jina.ai` |
+| `KAZMA_JINA_READER` | `1` = always try first; unset = **recovery only**; `0` = never |
+| `JINA_API_KEY` / `KAZMA_JINA_API_KEY` | Optional Jina auth (higher rate limits) |
 
-`auto`: Firecrawl (if key) → Jina (if enabled) → local httpx + Playwright fallback.
+**Fetch order**
+
+1. Optional pre-backends when opted in (Firecrawl key / `KAZMA_JINA_READER=1`).
+2. Local httpx + trafilatura.
+3. **Hard-page recovery** on bot walls / thin or empty extracts:  
+   Firecrawl (if key) → Jina (unless `KAZMA_JINA_READER=0`) → Playwright.
+
+Knowledge ingest (`knowledge_ingest_url` / site) reuses the same `_fetch_full_text` cascade.
 
 Playwright (optional install): `pip install 'kazma[web]'` and `playwright install chromium`.
 

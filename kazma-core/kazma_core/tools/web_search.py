@@ -1,13 +1,15 @@
 """Web search tool — multi-backend search returning markdown.
 
 Resolution order (each step continues on **empty results**, not only errors):
-    1. SearXNG (``KAZMA_SEARXNG_URL`` or localhost:8088)
+    1. SearXNG — multi-base discovery (``KAZMA_SEARXNG_URL``, ConfigStore
+       ``search.searxng_url``, localhost:8088/8080, Docker service names)
     2. DuckDuckGo (``duckduckgo_search`` / DDGS)
     3. Bing HTML scrape
     4. Wikipedia OpenSearch (last-resort for brand/entity queries)
 
 Not a paid search API (Tavily/Brave/Serper). For production reliability, run
-SearXNG and set ``KAZMA_SEARXNG_URL``.
+SearXNG: ``docker compose --profile search up -d searxng`` and set
+``KAZMA_SEARXNG_URL=http://127.0.0.1:8088``.
 
 Usage:
     from kazma_core.tools.web_search import web_search
@@ -55,53 +57,119 @@ def _friendly_error(exc: Exception) -> str:
     return f"Error: Search failed ({type(exc).__name__}). Try rephrasing or use ``read_url``."
 
 
-def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
-    """Try SearXNG. Returns (results|None, status_note)."""
+# Cache which SearXNG base URL worked (or that none did) for a short TTL
+# so multi-query turns don't hammer dead localhost:8088 every time.
+_searxng_cache: dict[str, Any] = {"base": None, "dead_until": 0.0, "note": ""}
+
+
+def _searxng_candidate_bases() -> list[str]:
+    """Ordered list of SearXNG base URLs to try."""
     import os
 
-    searxng_url = os.environ.get("KAZMA_SEARXNG_URL", "").strip()
-    if not searxng_url:
-        searxng_url = "http://localhost:8088"
-
+    bases: list[str] = []
+    explicit = (os.environ.get("KAZMA_SEARXNG_URL") or "").strip()
+    if explicit:
+        bases.append(explicit.rstrip("/"))
+    # ConfigStore override (settings UI / ops)
     try:
-        import httpx
+        from kazma_core.config_store import get_config_store
 
-        search_url = f"{searxng_url.rstrip('/')}/search"
-        params = {
-            "q": query,
-            "format": "json",
-            "categories": "general",
-            "language": "en",
-            "pageno": 1,
-        }
-        r = httpx.get(
-            search_url,
-            params=params,
-            timeout=10,
-            headers={"Accept": "application/json"},
-        )
-        if r.status_code != 200:
-            return None, f"searxng:http_{r.status_code}"
+        cfg = get_config_store().get("search.searxng_url")
+        if cfg and str(cfg).strip():
+            bases.append(str(cfg).strip().rstrip("/"))
+    except Exception:
+        pass
+    # Common local / Docker locations
+    for b in (
+        "http://127.0.0.1:8088",
+        "http://localhost:8088",
+        "http://host.docker.internal:8088",
+        "http://searxng:8080",
+        "http://127.0.0.1:8080",
+    ):
+        if b not in bases:
+            bases.append(b)
+    # de-dupe preserve order
+    seen: set[str] = set()
+    out: list[str] = []
+    for b in bases:
+        if b not in seen:
+            seen.add(b)
+            out.append(b)
+    return out
 
-        data = r.json()
-        raw_results = data.get("results", [])
-        if not raw_results:
-            return None, "searxng:empty"
 
-        normalized = []
-        for res in raw_results[:max_results]:
-            normalized.append(
-                {
-                    "title": res.get("title", "Untitled"),
-                    "href": res.get("url", ""),
-                    "body": res.get("content", ""),
-                }
+def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
+    """Try SearXNG across candidate bases. Returns (results|None, status_note)."""
+    import time as _time
+
+    import httpx
+
+    now = _time.time()
+    if _searxng_cache.get("dead_until", 0) > now and not _searxng_cache.get("base"):
+        return None, _searxng_cache.get("note") or "searxng:skipped (recently unavailable)"
+
+    candidates = _searxng_candidate_bases()
+    # Prefer last known good base first
+    good = _searxng_cache.get("base")
+    if good and good in candidates:
+        candidates = [good] + [c for c in candidates if c != good]
+
+    last_note = "searxng:unavailable"
+    for base in candidates:
+        try:
+            search_url = f"{base}/search"
+            params = {
+                "q": query,
+                "format": "json",
+                "categories": "general",
+                "language": "all",
+                "pageno": 1,
+            }
+            r = httpx.get(
+                search_url,
+                params=params,
+                timeout=8.0,
+                headers={"Accept": "application/json", "User-Agent": "KazmaSearch/0.6"},
             )
-        logger.info("[web_search] SearXNG returned %d results", len(normalized))
-        return normalized, "searxng:ok"
-    except Exception as exc:
-        logger.debug("[web_search] SearXNG not available: %s", exc)
-        return None, f"searxng:unavailable ({type(exc).__name__})"
+            if r.status_code != 200:
+                last_note = f"searxng:http_{r.status_code}@{base}"
+                continue
+            data = r.json()
+            raw_results = data.get("results", [])
+            if not raw_results:
+                last_note = f"searxng:empty@{base}"
+                # empty is still a live instance — keep base cached
+                _searxng_cache["base"] = base
+                _searxng_cache["dead_until"] = 0.0
+                continue
+
+            normalized = []
+            for res in raw_results[:max_results]:
+                normalized.append(
+                    {
+                        "title": res.get("title", "Untitled"),
+                        "href": res.get("url", ""),
+                        "body": res.get("content", ""),
+                    }
+                )
+            _searxng_cache["base"] = base
+            _searxng_cache["dead_until"] = 0.0
+            _searxng_cache["note"] = f"searxng:ok@{base}"
+            logger.info(
+                "[web_search] SearXNG %s returned %d results", base, len(normalized)
+            )
+            return normalized, f"searxng:ok@{base}"
+        except Exception as exc:
+            last_note = f"searxng:unavailable@{base} ({type(exc).__name__})"
+            logger.debug("[web_search] SearXNG %s: %s", base, exc)
+            continue
+
+    # All candidates failed — cool down 60s
+    _searxng_cache["base"] = None
+    _searxng_cache["dead_until"] = now + 60.0
+    _searxng_cache["note"] = last_note
+    return None, last_note
 
 
 def _ddg_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:

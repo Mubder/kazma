@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Unreleased — SearXNG, hard-page recovery, workbench polish (2026-07-27)
+
+### Search
+- **SearXNG multi-base discovery**: `KAZMA_SEARXNG_URL`, ConfigStore
+  `search.searxng_url`, localhost `:8088`/`:8080`, Docker DNS; last-good cache +
+  60s dead cooldown.
+- **Compose profile `search`**: `searxng/searxng` on host `8088` with
+  `deploy/searxng/settings.yml` (JSON format enabled).
+
+### Fetch / KB ingest
+- **Hard-page recovery** after bot walls / thin or empty extracts:
+  Firecrawl (key) → Jina (unless `KAZMA_JINA_READER=0`) → Playwright.
+  Shared by `read_url` and knowledge ingest via `_fetch_full_text`.
+- Jina: optional Bearer (`JINA_API_KEY` / `KAZMA_JINA_API_KEY`), markdown
+  return format; recovery-on by default (opt-out with `=0`).
+
+### Chat workbench
+- Elapsed timer, plan progress bar + active step, friendly tool labels,
+  source chips (`via searxng` / jina / …), activity auto-scroll.
+
 ## Unreleased — Discord/Slack Telegram-depth voice path (2026-07-25)
 
 - **Shared voice SoT** (`voice_helpers`): 10MB size caps, language/provider

@@ -124,7 +124,7 @@ Indexed retrieval needs the `rag` extra (`pip install kazma[rag]` → `chromadb`
 
 - **Bot-walled sites need a fetch backend.** Sites that block non-browser clients via TLS/header fingerprinting — Meta (`developers.facebook.com`), Cloudflare-protected properties, Instagram, etc. — return a 200-OK `<title>Error</title>` stub to httpx and defeat vanilla Playwright too. For those, set **one** of:
   - `KAZMA_FIRECRAWL_API_KEY=<key>` — paid, best quality, handles JS + bot walls
-  - `KAZMA_JINA_READER=1` — free proxy (`r.jina.ai`), no key needed, good for most doc sites
+  - Jina Reader (`r.jina.ai`) — used automatically on hard-page recovery unless `KAZMA_JINA_READER=0`; set `=1` to always try first; optional `JINA_API_KEY`
   - `pip install kazma[web]` then `playwright install chromium` — local headless browser, works for SPAs that aren't server-side fingerprinting
   The job's `errors` list (visible in the progress panel + `/kb status`) names the missing backend when all tiers fail, so you know exactly which to enable.
 - **Chromium binary is separate from the Python package.** `pip install kazma[web]` installs the playwright Python bindings; you still need `playwright install chromium` to download the browser binary itself. The job error names this explicitly: *"Chromium binary not installed (run: playwright install chromium)"*.

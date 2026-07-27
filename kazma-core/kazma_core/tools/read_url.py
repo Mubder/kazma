@@ -2,8 +2,10 @@
 
 Tiered fetch (public web, not anti-bot invincible):
 
-    1. httpx fast path with browser-like UA + trafilatura extraction.
-    2. Playwright stealth when bot walls / thin JS shells (optional).
+    1. Optional pre-backends when opted in (Firecrawl key / ``KAZMA_JINA_READER=1``).
+    2. httpx fast path with browser-like UA + trafilatura extraction.
+    3. **Hard-page recovery** on bot walls / empty extracts:
+       Firecrawl (if key) → Jina Reader (unless ``KAZMA_JINA_READER=0``) → Playwright.
 
 Research features
 -----------------
@@ -14,7 +16,7 @@ Research features
 * **Chunks:** ``list_research_chunks`` / ``read_research_chunk`` /
   ``summarize_research_file`` for map-style research without flooding context.
 
-SSRF-safe (validate URL + redirects).
+SSRF-safe (validate URL + redirects). Knowledge ingest reuses ``_fetch_full_text``.
 """
 
 from __future__ import annotations
@@ -414,8 +416,33 @@ async def _fetch_with_playwright(url: str) -> str | None:
         return None
 
 
+def _jina_hard_disabled() -> bool:
+    return (os.environ.get("KAZMA_JINA_READER") or "").strip().lower() in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def _jina_explicit_opt_in() -> bool:
+    return (os.environ.get("KAZMA_JINA_READER") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 async def _try_jina_reader(url: str) -> str | None:
-    """Optional Jina Reader proxy (``KAZMA_JINA_READER=1`` or backend=jina)."""
+    """Jina Reader proxy (``r.jina.ai``).
+
+    Used when explicitly enabled (``KAZMA_JINA_READER=1``), when
+    ``KAZMA_FETCH_BACKEND=jina``, or as a **last-resort recovery** after
+    local httpx/Playwright fail (unless hard-disabled with ``=0``).
+    """
+    if _jina_hard_disabled():
+        return None
     try:
         import httpx
         from kazma_core.security.ssrf import SSRFError, validate_url
@@ -423,14 +450,20 @@ async def _try_jina_reader(url: str) -> str | None:
         validate_url(url)
         # Proxy is public; still SSRF-check the *target* URL above.
         jina_url = f"https://r.jina.ai/{url}"
+        token = (os.environ.get("JINA_API_KEY") or os.environ.get("KAZMA_JINA_API_KEY") or "").strip()
+        headers = {
+            "Accept": "text/plain",
+            "User-Agent": _BROWSER_UA,
+            "X-Return-Format": "markdown",
+        }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
-            r = await client.get(
-                jina_url,
-                headers={"Accept": "text/plain", "User-Agent": _BROWSER_UA},
-            )
+            r = await client.get(jina_url, headers=headers)
             if r.status_code == 200 and r.text and len(r.text.strip()) > 50:
                 logger.info("[read_url] Jina Reader ok for %s (%d chars)", url, len(r.text))
                 return r.text.strip()
+            logger.debug("[read_url] Jina status %s for %s", r.status_code, url)
     except Exception as exc:
         logger.debug("[read_url] Jina Reader failed: %s", exc)
     return None
@@ -514,7 +547,8 @@ async def _fetch_via_optional_backends(url: str) -> str | None:
     """Try stronger optional backends before local httpx.
 
     ``KAZMA_FETCH_BACKEND``: auto | httpx | jina | firecrawl
-    - auto: firecrawl (if key) → jina (if KAZMA_JINA_READER=1) → None (caller uses httpx)
+    - auto: firecrawl (if key) → jina (if explicitly opted in) → None (caller uses httpx)
+    - Hard-site recovery after local failure uses :func:`_recover_hard_page`.
     """
     backend = (os.environ.get("KAZMA_FETCH_BACKEND") or "auto").strip().lower()
     if backend == "httpx":
@@ -523,15 +557,35 @@ async def _fetch_via_optional_backends(url: str) -> str | None:
         return await _try_firecrawl(url)
     if backend == "jina":
         return await _try_jina_reader(url)
-    # auto
+    # auto — only *opt-in* backends before the cheap httpx path
     if (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip():
         text = await _try_firecrawl(url)
         if text:
             return text
-    if (os.environ.get("KAZMA_JINA_READER") or "").strip() in ("1", "true", "yes", "on"):
+    if _jina_explicit_opt_in():
         text = await _try_jina_reader(url)
         if text:
             return text
+    return None
+
+
+async def _recover_hard_page(url: str, *, why: str = "") -> str | None:
+    """Last-resort cascade for bot walls / empty extracts.
+
+    Order: Firecrawl (key) → Jina (unless hard-disabled) → Playwright.
+    """
+    logger.info("[read_url] Hard-page recovery for %s (%s)", url, why or "unspecified")
+    if (os.environ.get("KAZMA_FIRECRAWL_API_KEY") or "").strip():
+        text = await _try_firecrawl(url)
+        if text:
+            return text
+    if not _jina_hard_disabled():
+        text = await _try_jina_reader(url)
+        if text:
+            return text
+    text = await _fetch_with_playwright(url)
+    if text:
+        return text
     return None
 
 
@@ -601,33 +655,55 @@ async def _fetch_full_text(url: str) -> str:
 
             if _looks_like_bot_block(html, status_code):
                 logger.info(
-                    "[read_url] Bot detection on %s (status=%s), trying Playwright",
+                    "[read_url] Bot detection on %s (status=%s), hard-page recovery",
                     final_url,
                     status_code,
                 )
-                tried_playwright = True
-                pw_text = await _fetch_with_playwright(final_url)
-                if pw_text:
-                    _cache_put(url, pw_text)
-                    _cache_put(final_url, pw_text)
-                    return pw_text
+                tried_playwright = True  # recovery includes Playwright
+                recovered = await _recover_hard_page(
+                    final_url, why=f"bot_wall status={status_code}"
+                )
+                if recovered:
+                    _cache_put(url, recovered)
+                    _cache_put(final_url, recovered)
+                    return recovered
                 if status_code >= 400:
                     return (
                         f"Error: Server returned HTTP {status_code} for {final_url} "
                         "(bot protection or access denied). "
-                        "Install Playwright (`pip install 'kazma[web]'` + browsers) "
-                        "or try a different URL."
+                        "Recovery tried Firecrawl/Jina/Playwright. "
+                        "Set ``KAZMA_FIRECRAWL_API_KEY``, ensure Jina is not disabled "
+                        "(``KAZMA_JINA_READER=0``), or install Playwright "
+                        "(`pip install 'kazma[web]'` + browsers)."
                     )
 
             if status_code >= 400 and not _looks_like_bot_block(html, status_code):
                 try:
                     response.raise_for_status()
                 except Exception as exc:
+                    # Last chance: paid/proxy backends may still reach the page
+                    recovered = await _recover_hard_page(
+                        final_url, why=f"http_{status_code}"
+                    )
+                    if recovered:
+                        _cache_put(url, recovered)
+                        _cache_put(final_url, recovered)
+                        return recovered
                     return _friendly_error(exc, final_url)
 
     except ConnectionError:
+        recovered = await _recover_hard_page(final_url, why="connection_error")
+        if recovered:
+            _cache_put(url, recovered)
+            _cache_put(final_url, recovered)
+            return recovered
         return _friendly_error(ConnectionError(), final_url)
     except TimeoutError:
+        recovered = await _recover_hard_page(final_url, why="timeout")
+        if recovered:
+            _cache_put(url, recovered)
+            _cache_put(final_url, recovered)
+            return recovered
         return _friendly_error(TimeoutError(), final_url)
     except OSError as exc:
         return _friendly_error(exc, final_url)
@@ -636,26 +712,34 @@ async def _fetch_full_text(url: str) -> str:
 
     text = _extract_text(html)
 
-    # Only escalate to Playwright for true bot walls / empty SPA shells —
-    # not for short static pages that already extracted fine.
+    # Escalate for true bot walls / empty SPA shells — not short static pages.
     if not tried_playwright and _should_try_playwright(html, status_code, extracted=text):
         logger.info(
-            "[read_url] Thin/empty extract or JS shell for %s (%d chars text / %d html), trying Playwright",
+            "[read_url] Thin/empty extract or JS shell for %s (%d chars text / %d html)",
             final_url,
             len(text),
             len(html),
         )
-        pw_text = await _fetch_with_playwright(final_url)
-        if pw_text and len(pw_text) > len(text):
-            _cache_put(url, pw_text)
-            _cache_put(final_url, pw_text)
-            return pw_text
+        recovered = await _recover_hard_page(
+            final_url, why=f"thin_extract text={len(text)} html={len(html)}"
+        )
+        if recovered and len(recovered) > len(text):
+            _cache_put(url, recovered)
+            _cache_put(final_url, recovered)
+            return recovered
 
     if not text:
+        if not tried_playwright:
+            recovered = await _recover_hard_page(final_url, why="empty_extract")
+            if recovered:
+                _cache_put(url, recovered)
+                _cache_put(final_url, recovered)
+                return recovered
         return (
             f"Error: Could not extract readable content from {final_url}. "
             "The page may be empty, require JavaScript, or block automated access. "
-            "Optional: set KAZMA_JINA_READER=1, KAZMA_FIRECRAWL_API_KEY, "
+            "Tried hard-page recovery (Firecrawl/Jina/Playwright). "
+            "Set ``KAZMA_FIRECRAWL_API_KEY``, leave Jina enabled, "
             "or `pip install 'kazma[web]'` + `playwright install chromium`."
         )
 

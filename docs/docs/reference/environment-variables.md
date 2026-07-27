@@ -91,7 +91,7 @@ See [Web research](../guide/web-research) for playbooks. Tools are used from **c
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `KAZMA_SEARXNG_URL` | auto `http://localhost:8088` if up | Preferred search backend for `web_search`. |
+| `KAZMA_SEARXNG_URL` | multi-base auto-discovery | Preferred search backend for `web_search` (also ConfigStore `search.searxng_url`). |
 | `KAZMA_READ_URL_MAX_CHARS` | `16000` | Default window size for one `read_url` / `crawl_page` response. |
 | `KAZMA_TOOL_RESULT_MAX_CHARS` | `4000` | Graph truncate cap for ordinary tools. |
 | `KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS` | `16000` | Higher graph truncate for research tools (`read_url`, digests, `crawl_site`, …). |
@@ -100,11 +100,14 @@ See [Web research](../guide/web-research) for playbooks. Tools are used from **c
 | `KAZMA_CRAWL_MAX_PAGES` | `50` | Hard ceiling for `crawl_site` `max_pages`. |
 | `KAZMA_CRAWL_MAX_DEPTH` | `5` | Hard ceiling for `crawl_site` `max_depth`. |
 | `KAZMA_FETCH_BACKEND` | `auto` | `auto` \| `httpx` \| `jina` \| `firecrawl`. |
-| `KAZMA_FIRECRAWL_API_KEY` | unset | Optional Firecrawl scrape API. |
+| `KAZMA_FIRECRAWL_API_KEY` | unset | Optional Firecrawl scrape API (used in pre-fetch + hard-page recovery). |
 | `KAZMA_FIRECRAWL_URL` | `https://api.firecrawl.dev` | Firecrawl API base (self-host OK). |
-| `KAZMA_JINA_READER` | unset | Set `1` / `true` to try Jina Reader (`r.jina.ai`). |
+| `KAZMA_JINA_READER` | unset (recovery-on) | `1` = always try first; unset = last-resort recovery; `0`/`off` = never use Jina. |
+| `JINA_API_KEY` / `KAZMA_JINA_API_KEY` | unset | Optional Jina Bearer token for higher rate limits. |
 
 Optional package: Playwright via `pip install 'kazma[web]'` then `playwright install chromium` (bot walls / thin JS shells).
+
+**SearXNG ops:** `docker compose --profile search up -d searxng` → `http://127.0.0.1:8088` (JSON enabled in `deploy/searxng/settings.yml`).
 
 ---
 

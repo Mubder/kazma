@@ -30,6 +30,9 @@ services:
       KAZMA_PRODUCTION: "${KAZMA_PRODUCTION:-1}"
       KAZMA_CODE_EXEC_DOCKER: "${KAZMA_CODE_EXEC_DOCKER:-force}"
       KAZMA_VECTOR_PATH: "/home/kazma/.kazma/vector_memory"
+      # When running with profile `search`, point at the compose service DNS name.
+      # Host-local Kazma should use http://127.0.0.1:8088 instead.
+      KAZMA_SEARXNG_URL: "${KAZMA_SEARXNG_URL:-http://searxng:8080}"
     restart: unless-stopped
     healthcheck:
       # /health is always open; /api/gateway/status requires auth when secret set
@@ -38,6 +41,29 @@ services:
       timeout: 10s
       retries: 3
       start_period: 15s
+
+  # Optional privacy-friendly meta-search (enables reliable web_search).
+  # Start: docker compose --profile search up -d searxng
+  # Point host Kazma at: KAZMA_SEARXNG_URL=http://127.0.0.1:8088
+  searxng:
+    profiles: ["search"]
+    image: docker.io/searxng/searxng:latest
+    container_name: kazma-searxng
+    ports:
+      - "${SEARXNG_HOST_PORT:-8088}:8080"
+    volumes:
+      - ./deploy/searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: "${SEARXNG_BASE_URL:-http://127.0.0.1:8088/}"
+    restart: unless-stopped
+    # JSON API is required by kazma_core.tools.web_search — enabled in
+    # deploy/searxng/settings.yml (search.formats includes json).
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
 volumes:
   kazma_data:

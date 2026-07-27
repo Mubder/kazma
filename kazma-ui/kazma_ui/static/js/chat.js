@@ -946,7 +946,72 @@
   var _progressStepCount = 0;
   var _planItems = [];
   var _planParsedFromText = false;
+  var _progressStartedAt = 0;
+  var _progressTimerId = null;
   var TOOL_DETAIL_MAX = 900;
+
+  var _TOOL_FRIENDLY = {
+    web_search: 'Search',
+    read_url: 'Read page',
+    read_url_to_file: 'Save page',
+    crawl_site: 'Crawl site',
+    crawl_page: 'Crawl page',
+    knowledge_ingest_url: 'KB ingest',
+    knowledge_ingest_site: 'KB crawl',
+    knowledge_search: 'KB search',
+    knowledge_create_library: 'KB create',
+    knowledge_list_libraries: 'KB list',
+    file_read: 'Read file',
+    file_write: 'Write file',
+    file_delete: 'Delete file',
+    file_list: 'List files',
+    file_search: 'Find files',
+    shell_exec: 'Shell',
+    code_exec: 'Code',
+    python_exec: 'Python',
+    digest_research_file: 'Digest',
+    list_research_chunks: 'Chunks',
+    read_research_chunk: 'Chunk',
+    summarize_research_file: 'Summarize'
+  };
+
+  function _friendlyToolName(name) {
+    var n = String(name || '').trim();
+    if (!n) return n;
+    if (_TOOL_FRIENDLY[n]) return _TOOL_FRIENDLY[n];
+    var low = n.toLowerCase();
+    if (_TOOL_FRIENDLY[low]) return _TOOL_FRIENDLY[low];
+    return n.replace(/_/g, ' ');
+  }
+
+  function _formatElapsed(ms) {
+    var s = Math.max(0, Math.floor(ms / 1000));
+    if (s < 60) return s + 's';
+    var m = Math.floor(s / 60);
+    var r = s % 60;
+    return m + 'm ' + r + 's';
+  }
+
+  function _tickProgressElapsed() {
+    if (!_progressEl || !_progressStartedAt) return;
+    var el = _progressEl.querySelector('.agent-progress-elapsed');
+    if (!el) return;
+    el.textContent = _formatElapsed(Date.now() - _progressStartedAt);
+  }
+
+  function _startProgressTimer() {
+    _progressStartedAt = Date.now();
+    if (_progressTimerId) clearInterval(_progressTimerId);
+    _progressTimerId = setInterval(_tickProgressElapsed, 1000);
+    _tickProgressElapsed();
+  }
+
+  function _stopProgressTimer() {
+    if (_progressTimerId) {
+      clearInterval(_progressTimerId);
+      _progressTimerId = null;
+    }
+  }
 
   function _extractPathFromTool(toolName, detail) {
     var n = String(toolName || '').toLowerCase();
@@ -982,12 +1047,17 @@
       '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench">' +
         '<span class="agent-progress-pulse" aria-hidden="true"></span>' +
         '<span class="agent-progress-title">Working\u2026</span>' +
+        '<span class="agent-progress-elapsed" title="Elapsed">0s</span>' +
         '<span class="agent-progress-count">0 steps</span>' +
         '<span class="agent-progress-chevron" aria-hidden="true">\u25BE</span>' +
       '</div>' +
       '<div class="agent-progress-body">' +
         '<div class="agent-plan" hidden>' +
-          '<div class="agent-plan-label">Plan</div>' +
+          '<div class="agent-plan-head">' +
+            '<div class="agent-plan-label">Plan</div>' +
+            '<div class="agent-plan-meta"></div>' +
+          '</div>' +
+          '<div class="agent-plan-bar" aria-hidden="true"><div class="agent-plan-bar-fill"></div></div>' +
           '<ol class="agent-plan-list"></ol>' +
         '</div>' +
         '<div class="agent-activity-label">Activity</div>' +
@@ -1012,6 +1082,7 @@
     _progressStepCount = 0;
     _planItems = [];
     _planParsedFromText = false;
+    _startProgressTimer();
     return panel;
   }
 
@@ -1025,9 +1096,17 @@
       return;
     }
     wrap.hidden = false;
+    var doneN = _planItems.filter(function(p) { return p.done; }).length;
+    var total = _planItems.length;
+    var pct = total ? Math.round((doneN / total) * 100) : 0;
+    var meta = panel.querySelector('.agent-plan-meta');
+    if (meta) meta.textContent = doneN + '/' + total;
+    var fill = panel.querySelector('.agent-plan-bar-fill');
+    if (fill) fill.style.width = pct + '%';
     ol.innerHTML = _planItems.map(function(item, idx) {
       var done = item.done ? ' is-done' : '';
-      return '<li class="agent-plan-item' + done + '" data-idx="' + idx + '">' +
+      var active = (!item.done && (idx === 0 || _planItems[idx - 1].done)) ? ' is-active' : '';
+      return '<li class="agent-plan-item' + done + active + '" data-idx="' + idx + '">' +
         '<span class="plan-check" aria-hidden="true">' + (item.done ? '\u2713' : (idx + 1)) + '</span>' +
         '<span class="plan-text">' + escapeHtml(item.text) + '</span></li>';
     }).join('');
@@ -1116,7 +1195,8 @@
 
     var kind = step.kind || 'status';
     var state = step.state || (kind === 'error' ? 'failed' : (kind === 'done' ? 'done' : 'info'));
-    var title = String(step.title || '').trim() || '\u2026';
+    var rawTitle = String(step.title || '').trim() || '\u2026';
+    var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
     var detail = step.detail != null ? String(step.detail) : '';
 
     // Plan lines go to the sticky plan list (not the activity log)
@@ -1138,15 +1218,21 @@
       var tEl = last.querySelector('.step-time');
       if (tEl) tEl.textContent = formatMsgTime();
       last.className = 'agent-progress-step step-' + kind + ' state-' + state;
+      list.scrollTop = list.scrollHeight;
       scrollToBottom();
       return;
     }
     // Update in-place when the same tool is completing — keep result expanded
-    if (last && kind === 'tool' && state !== 'running' && last.dataset.kind === 'tool' && last.dataset.title === title) {
+    // Match either friendly label or raw tool name on the row.
+    if (last && kind === 'tool' && state !== 'running' && last.dataset.kind === 'tool' &&
+        (last.dataset.title === title || last.dataset.rawTitle === rawTitle || last.dataset.title === rawTitle)) {
       last.className = 'agent-progress-step step-tool state-' + state + ' is-expanded';
       last.dataset.state = state;
+      last.dataset.title = title;
       var st = last.querySelector('.step-state');
       if (st) st.textContent = state === 'done' ? 'Done' : (state === 'failed' ? 'Failed' : state);
+      var titleNode = last.querySelector('.step-title');
+      if (titleNode) titleNode.textContent = title;
       if (detail) {
         var det = last.querySelector('.step-detail');
         if (!det) {
@@ -1156,10 +1242,13 @@
         }
         det.textContent = truncateStr(detail, TOOL_DETAIL_MAX);
         det.classList.add('is-expanded');
+        // Surface search backend / recovery source when present
+        _maybeAddSourceChip(last, detail);
       }
       var t2 = last.querySelector('.step-time');
       if (t2) t2.textContent = formatMsgTime();
-      if (state === 'done') markPlanProgress(title);
+      if (state === 'done') markPlanProgress(rawTitle);
+      list.scrollTop = list.scrollHeight;
       scrollToBottom();
       return;
     }
@@ -1170,6 +1259,7 @@
       (kind === 'tool' ? ' is-expanded' : '');
     li.dataset.kind = kind;
     li.dataset.title = title;
+    li.dataset.rawTitle = rawTitle;
     li.dataset.state = state;
 
     var icon = kind === 'tool' ? '\u2699'
@@ -1180,12 +1270,12 @@
     // File-diff chips for write/delete tools
     var fileChip = '';
     if (kind === 'tool' || kind === 'file') {
-      var pathGuess = _extractPathFromTool(title, detail);
+      var pathGuess = _extractPathFromTool(rawTitle, detail);
       if (pathGuess) {
         fileChip =
           '<div class="file-diff-chip" title="' + escapeHtml(pathGuess) + '">' +
             '<span class="file-diff-op">' +
-              (state === 'failed' ? 'failed' : (title.indexOf('delete') >= 0 ? 'deleted' : 'wrote')) +
+              (state === 'failed' ? 'failed' : (rawTitle.toLowerCase().indexOf('delete') >= 0 ? 'deleted' : 'wrote')) +
             '</span> ' +
             '<code class="file-diff-path">' + escapeHtml(pathGuess) + '</code>' +
           '</div>';
@@ -1209,27 +1299,54 @@
       '</div>';
 
     list.appendChild(li);
+    if (detail) _maybeAddSourceChip(li, detail);
     while (list.children.length > 100) list.removeChild(list.firstChild);
 
     var countEl = panel.querySelector('.agent-progress-count');
     if (countEl) {
       var planN = _planItems.length;
+      var donePlan = _planItems.filter(function(p) { return p.done; }).length;
       countEl.textContent =
         _progressStepCount + (_progressStepCount === 1 ? ' step' : ' steps') +
-        (planN ? ' \u00B7 ' + planN + ' plan' : '');
+        (planN ? ' \u00B7 plan ' + donePlan + '/' + planN : '');
     }
     var titleEl = panel.querySelector('.agent-progress-title');
-    if (titleEl && state === 'running') titleEl.textContent = 'Working\u2026';
+    if (titleEl && state === 'running') {
+      titleEl.textContent = kind === 'tool' ? title : 'Working\u2026';
+    }
     if (titleEl && kind === 'status' && step.title) titleEl.textContent = truncateStr(step.title, 48);
 
     panel.classList.add('is-active');
     panel.classList.remove('is-collapsed', 'is-done');
+    list.scrollTop = list.scrollHeight;
     scrollToBottom();
+  }
+
+  function _maybeAddSourceChip(li, detail) {
+    if (!li || !detail) return;
+    var body = li.querySelector('.step-body');
+    if (!body) return;
+    if (body.querySelector('.source-chip')) return;
+    var m = String(detail).match(/Source:\s*([a-z0-9_.@\/:\-]+)/i) ||
+      String(detail).match(/searxng:ok@([^\s,]+)/i) ||
+      String(detail).match(/\b(jina|firecrawl|playwright|duckduckgo|bing|wikipedia)\b/i);
+    if (!m) return;
+    var label = m[1] || m[0];
+    var chip = document.createElement('div');
+    chip.className = 'source-chip';
+    chip.title = 'Backend / source';
+    chip.innerHTML = '<span class="source-chip-label">via</span> ' +
+      '<code>' + escapeHtml(String(label).slice(0, 48)) + '</code>';
+    var detailEl = body.querySelector('.step-detail');
+    if (detailEl) body.insertBefore(chip, detailEl);
+    else body.appendChild(chip);
   }
 
   function finalizeProgress(ok) {
     if (!_progressEl) return;
     var panel = _progressEl;
+    _stopProgressTimer();
+    _tickProgressElapsed();
     panel.classList.remove('is-active');
     panel.classList.add('is-done');
     // Stay expanded — user can collapse; tool results remain visible
@@ -1237,18 +1354,22 @@
     var chev = panel.querySelector('.agent-progress-chevron');
     if (chev) chev.textContent = '\u25BE';
     var titleEl = panel.querySelector('.agent-progress-title');
+    var elapsed = _progressStartedAt ? _formatElapsed(Date.now() - _progressStartedAt) : '';
     if (titleEl) {
       var donePlan = _planItems.filter(function(p) { return p.done; }).length;
-      titleEl.textContent = ok === false
+      var base = ok === false
         ? 'Stopped'
         : (_planItems.length
           ? 'Done \u00B7 plan ' + donePlan + '/' + _planItems.length
           : 'Done');
+      titleEl.textContent = elapsed ? base + ' \u00B7 ' + elapsed : base;
     }
+    if (_progressEl) _renderPlanList(_progressEl);
     var pulse = panel.querySelector('.agent-progress-pulse');
     if (pulse) pulse.classList.add('is-off');
     _progressEl = null;
     _planParsedFromText = false;
+    _progressStartedAt = 0;
   }
 
   // ── Message rendering ─────────────────────────────────
