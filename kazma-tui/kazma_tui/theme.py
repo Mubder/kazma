@@ -216,19 +216,24 @@ MetricsDashboard .metrics-grid {
 }
 
 MetricsDashboard .metric-row {
-    height: auto;
+    height: 7;
+    min-height: 7;
+    max-height: 7;
     layout: horizontal;
     margin-bottom: 1;
+    align: left middle;
 }
 
 MetricCard {
-    height: auto;
+    height: 7;
     width: 1fr;
-    min-height: 5;
+    min-height: 7;
+    max-height: 7;
     padding: 1 2;
     margin: 0 1;
     background: $panel;
     border: tall $border;
+    layout: vertical;
 }
 
 MetricCard:hover {
@@ -239,12 +244,65 @@ MetricCard:hover {
 MetricCard > .card-label {
     color: $text-muted;
     text-style: bold;
+    height: 1;
+}
+
+MetricCard > .card-value {
+    height: 1;
+}
+
+MetricCard > .card-spacer {
+    height: 1;
 }
 
 MetricCard > Sparkline {
     margin-top: 1;
     color: $primary;
     height: 1;
+}
+
+/* Left nav rail — full labels, equal-width strip */
+NavRail {
+    dock: left;
+    width: 20;
+    background: $panel;
+    border-right: solid $border;
+    height: 1fr;
+}
+
+NavRail .nav-brand {
+    height: 3;
+    content-align: center middle;
+    color: $primary;
+    text-style: bold;
+    border-bottom: solid $border;
+    margin-bottom: 1;
+}
+
+NavRail .nav-btn {
+    width: 100%;
+    min-width: 1;
+    height: 3;
+    margin: 0;
+    padding: 0 1;
+    border: none;
+    border-left: solid transparent;
+    background: transparent;
+    color: $text-muted;
+    text-align: left;
+}
+
+NavRail .nav-btn:hover {
+    background: $boost;
+    color: $text;
+    border-left: solid $primary 40%;
+}
+
+NavRail .nav-btn.-active {
+    background: $primary 12%;
+    color: $primary;
+    text-style: bold;
+    border-left: solid $primary;
 }
 
 MemoryHealthPanel {

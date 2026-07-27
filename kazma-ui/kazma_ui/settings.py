@@ -250,8 +250,17 @@ class SettingsRouterBuilder:
                     return default
                 return str(v)
 
+            def _get_bool(key: str, default: bool = False) -> bool:
+                v = config_store.get(key)
+                if v is None:
+                    return default
+                if isinstance(v, bool):
+                    return v
+                return str(v).strip().lower() in ("1", "true", "yes", "on")
+
             return {
-                "enabled": bool(config_store.get("voice.enabled", False)),
+                "enabled": _get_bool("voice.enabled", False),
+                "tts_reply": _get_bool("voice.tts_reply", True),
                 "stt_provider": _get_val("voice.stt_provider", "openai"),
                 "stt_model": _get_val("voice.stt_model", "default"),
                 "stt_base_url": _get_val("voice.stt_base_url", ""),
@@ -265,6 +274,7 @@ class SettingsRouterBuilder:
         async def api_save_voice_settings(req: VoiceSettingsUpdate) -> dict[str, str]:
             """Save voice subsystem settings."""
             config_store.set("voice.enabled", req.enabled, category="voice")
+            config_store.set("voice.tts_reply", req.tts_reply, category="voice")
             config_store.set("voice.stt_provider", req.stt_provider, category="voice")
             config_store.set("voice.stt_model", req.stt_model, category="voice")
             config_store.set("voice.stt_base_url", req.stt_base_url or "", category="voice")

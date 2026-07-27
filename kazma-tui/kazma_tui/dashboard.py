@@ -46,13 +46,15 @@ class MetricCard(Widget):
 
     DEFAULT_CSS = """
     MetricCard {
-        height: auto;
+        height: 7;
         width: 1fr;
-        min-height: 5;
+        min-height: 7;
+        max-height: 7;
         padding: 1 2;
         background: $panel;
         border: tall $border;
         margin: 0 1;
+        layout: vertical;
     }
 
     MetricCard:hover {
@@ -63,6 +65,15 @@ class MetricCard(Widget):
     MetricCard > .card-label {
         color: $text-muted;
         text-style: bold;
+        height: 1;
+    }
+
+    MetricCard > .card-value {
+        height: 1;
+    }
+
+    MetricCard > .card-spacer {
+        height: 1;
     }
 
     MetricCard > Sparkline {
@@ -90,9 +101,12 @@ class MetricCard(Widget):
     def compose(self) -> ComposeResult:
         """Compose the card with label, value, and optional sparkline."""
         yield Static(self._label, classes="card-label")
-        yield Static(self._render_value())
+        yield Static(self._render_value(), classes="card-value")
         if self.show_sparkline:
             yield Sparkline(max_points=25, id="card-sparkline")
+        else:
+            # Spacer keeps non-sparkline cards the same height/layout
+            yield Static("", classes="card-spacer")
 
     def update_card(self, label: str, value: str, status: str = "normal", spark_val: float | None = None) -> None:
         """Update the card content and refresh the display.
@@ -108,10 +122,13 @@ class MetricCard(Widget):
         self._status = status
         try:
             self.query_one(".card-label", Static).update(label)
-            # The value is the second Static child
-            value_widgets = self.query(Static)
-            if len(value_widgets) >= 2:
-                value_widgets[1].update(self._render_value())
+            try:
+                self.query_one(".card-value", Static).update(self._render_value())
+            except Exception:
+                # Fallback: second Static child
+                value_widgets = self.query(Static)
+                if len(value_widgets) >= 2:
+                    value_widgets[1].update(self._render_value())
             if self.show_sparkline and spark_val is not None:
                 try:
                     sp = self.query_one("#card-sparkline", Sparkline)
@@ -164,15 +181,19 @@ class MetricsDashboard(Widget):
     }
 
     .metric-row {
-        height: auto;
+        height: 7;
+        min-height: 7;
+        max-height: 7;
         layout: horizontal;
         margin-bottom: 1;
+        align: left middle;
     }
 
     MetricCard {
         width: 1fr;
-        height: auto;
-        min-height: 5;
+        height: 7;
+        min-height: 7;
+        max-height: 7;
         padding: 1 2;
         margin: 0 1;
         background: $panel;

@@ -153,6 +153,7 @@ function settingsApp() {
         // ── Voice Tab ──
         voiceForm: {
             enabled: false,
+            tts_reply: true,
             stt_provider: 'openai',
             stt_model: 'default',
             stt_base_url: '',

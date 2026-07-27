@@ -11,6 +11,7 @@ from kazma_gateway.adapters.voice_helpers import (
     download_audio_bytes,
     find_audio_attachment,
     prepare_tts_text,
+    should_send_tts_reply,
     transcribe_inbound_message,
 )
 from kazma_gateway.gateway import Attachment, IncomingMessage
@@ -113,3 +114,63 @@ async def test_transcribe_skips_when_disabled() -> None:
         out = await transcribe_inbound_message(msg)
     assert out.text == "[audio]"
     assert not out.context_metadata.get("voice_transcribed")
+
+
+def test_should_send_tts_reply_requires_all_gates() -> None:
+    """Platform TTS only when enabled + tts_reply + this turn was voice."""
+    with patch(
+        "kazma_gateway.adapters.voice_helpers.live_voice_settings",
+        return_value={"enabled": True, "tts_reply": True},
+    ):
+        assert should_send_tts_reply({"voice_transcribed": True}) is True
+        assert should_send_tts_reply({}) is False
+        assert should_send_tts_reply({"voice_transcribed": False}) is False
+    with patch(
+        "kazma_gateway.adapters.voice_helpers.live_voice_settings",
+        return_value={"enabled": True, "tts_reply": False},
+    ):
+        assert should_send_tts_reply({"voice_transcribed": True}) is False
+    with patch(
+        "kazma_gateway.adapters.voice_helpers.live_voice_settings",
+        return_value={"enabled": False, "tts_reply": True},
+    ):
+        assert should_send_tts_reply({"voice_transcribed": True}) is False
+
+
+@pytest.mark.asyncio
+async def test_session_store_clears_sticky_voice_transcribed() -> None:
+    """Text turn after voice must not keep voice_transcribed in SessionStore."""
+    from kazma_gateway.agent_handler.store import _InMemoryStore, _build_initial_state
+
+    store = _InMemoryStore()
+    voice_msg = IncomingMessage(
+        platform="telegram",
+        sender_id="telegram:1",
+        text="hello from voice",
+        context_metadata={
+            "chat_id": 1,
+            "user_id": 1,
+            "message_id": 10,
+            "voice_transcribed": True,
+        },
+    )
+    await _build_initial_state(voice_msg, store)
+    thread_id = "gw-telegram-1"
+    mid = await store.get(thread_id)
+    assert mid.get("voice_transcribed") is True
+
+    text_msg = IncomingMessage(
+        platform="telegram",
+        sender_id="telegram:1",
+        text="just text",
+        context_metadata={
+            "chat_id": 1,
+            "user_id": 1,
+            "message_id": 11,
+            "thread_id": thread_id,
+        },
+    )
+    await _build_initial_state(text_msg, store)
+    after = await store.get(thread_id)
+    assert after.get("voice_transcribed") is None
+    assert after.get("message_id") == 11

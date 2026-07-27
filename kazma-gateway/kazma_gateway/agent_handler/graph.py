@@ -1009,7 +1009,13 @@ def create_graph_handler(
                 # so crash-recovery routing can rehydrate the platform context
                 # (chat_id, user_id) on the next inbound message. Stale
                 # entries are evicted lazily by TTL below.
-                ctx = await _store.get(thread_id)
+                ctx = dict(await _store.get(thread_id) or {})
+                # Turn-scoped voice flag: only this inbound may request TTS.
+                # Prefer live msg metadata over a sticky store value.
+                if msg.context_metadata.get("voice_transcribed"):
+                    ctx["voice_transcribed"] = True
+                else:
+                    ctx.pop("voice_transcribed", None)
 
                 # Convert Markdown → Telegram HTML so bold/code/etc. render
                 # instead of showing literal ** markers (which legacy Markdown

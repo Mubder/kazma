@@ -141,6 +141,9 @@ gateway:
     enabled: true
   voice:
     enabled: false
+    # When true (and enabled): voice inbound → TTS voice-note reply on platforms.
+    # Turn off in Settings → Voice for text-only replies while keeping STT.
+    tts_reply: true
     stt_provider: openai
     tts_provider: edgetts
     tts_voice: default

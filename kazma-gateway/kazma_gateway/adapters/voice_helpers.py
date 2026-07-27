@@ -8,6 +8,7 @@ same when ``voice.enabled`` is on.
 Env / ConfigStore keys (shared with Settings UI)::
 
     voice.enabled
+    voice.tts_reply          # auto voice-note replies on platforms (after STT turns)
     voice.stt_provider / voice.stt_language / voice.stt_api_key / voice.stt_model
     voice.tts_provider / voice.tts_voice / voice.tts_output_format
 """
@@ -30,10 +31,20 @@ __all__ = [
     "find_audio_attachment",
     "live_voice_settings",
     "prepare_tts_text",
+    "should_send_tts_reply",
     "synthesize_speech",
     "transcribe_audio",
     "transcribe_inbound_message",
 ]
+
+
+def _as_bool(val: Any, default: bool = False) -> bool:
+    """Parse ConfigStore / yaml bools that may be str/int/bool."""
+    if val is None:
+        return default
+    if isinstance(val, bool):
+        return val
+    return str(val).strip().lower() in ("1", "true", "yes", "on")
 
 #: Same cap as Telegram (``telegram.MAX_VOICE_BYTES``).
 MAX_VOICE_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -43,11 +54,15 @@ def live_voice_settings() -> dict[str, str | bool]:
     """Read voice settings from ConfigStore with sensible defaults.
 
     Mirrors ``TelegramAdapter._live_voice_settings``. Returns a dict with
-    keys: ``enabled``, ``stt_provider``, ``stt_language``, ``stt_api_key``,
-    ``stt_model``, ``tts_provider``, ``tts_voice``, ``tts_output_format``.
+    keys: ``enabled``, ``tts_reply``, ``stt_provider``, ``stt_language``,
+    ``stt_api_key``, ``stt_model``, ``tts_provider``, ``tts_voice``,
+    ``tts_output_format``.
     """
     out: dict[str, str | bool] = {
         "enabled": False,
+        # When True (default): after a voice inbound, also speak the reply.
+        # Independent of STT — turn off to keep listening without voice notes.
+        "tts_reply": True,
         "stt_provider": "openai",
         "stt_language": "auto",
         "stt_api_key": "",
@@ -62,6 +77,7 @@ def live_voice_settings() -> dict[str, str | bool]:
         cs = get_config_store()
         mapping: tuple[tuple[str, str], ...] = (
             ("voice.enabled", "enabled"),
+            ("voice.tts_reply", "tts_reply"),
             ("voice.stt_provider", "stt_provider"),
             ("voice.stt_language", "stt_language"),
             ("voice.stt_api_key", "stt_api_key"),
@@ -74,16 +90,31 @@ def live_voice_settings() -> dict[str, str | bool]:
             val = cs.get(key)
             if val is None:
                 continue
+            if attr in ("enabled", "tts_reply"):
+                out[attr] = _as_bool(val, default=bool(out[attr]))
+                continue
             sval = str(val).strip()
             if not sval or sval.lower() == "none":
                 continue
-            if attr == "enabled":
-                out[attr] = sval.lower() in ("true", "1", "yes", "on")
-            else:
-                out[attr] = sval
+            out[attr] = sval
     except Exception:
         logger.debug("[voice] live settings unavailable", exc_info=True)
     return out
+
+
+def should_send_tts_reply(context_metadata: dict[str, Any] | None = None) -> bool:
+    """True when platform adapters should synthesize a voice-note reply.
+
+    Requires all of:
+    - ``voice.enabled``
+    - ``voice.tts_reply`` (Settings → Voice → auto voice-note replies)
+    - This turn's inbound was transcribed voice (``voice_transcribed``)
+    """
+    cfg = live_voice_settings()
+    if not cfg.get("enabled") or not cfg.get("tts_reply", True):
+        return False
+    meta = context_metadata or {}
+    return bool(meta.get("voice_transcribed"))
 
 
 def find_audio_attachment(msg: IncomingMessage) -> Attachment | None:
@@ -304,12 +335,20 @@ def prepare_tts_text(text: str) -> str:
     return clean
 
 
-async def synthesize_speech(text: str) -> bytes | None:
-    """Synthesize text to audio bytes via the configured TTS provider."""
+async def synthesize_speech(text: str, *, require_tts_reply: bool = False) -> bytes | None:
+    """Synthesize text to audio bytes via the configured TTS provider.
+
+    Args:
+        text: Spoken content (markdown stripped).
+        require_tts_reply: When True, also require ``voice.tts_reply`` (platform
+            auto-replies). Web UI explicit TTS can pass False (enabled only).
+    """
     from kazma_core.voice.tts import synthesize
 
     cfg = live_voice_settings()
     if not cfg.get("enabled"):
+        return None
+    if require_tts_reply and not cfg.get("tts_reply", True):
         return None
     clean = prepare_tts_text(text)
     if not clean:

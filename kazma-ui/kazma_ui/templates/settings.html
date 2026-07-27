@@ -1583,9 +1583,12 @@
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <div>
                     <h3 style="margin:0;">Voice Subsystem</h3>
-                    <p style="font-size:0.85rem;color:var(--text-muted);margin:4px 0 0 0;">Configure speech-to-text (STT) and text-to-speech (TTS) engines.</p>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:4px 0 0 0;">
+                        Master switch for STT/TTS on Telegram, Discord, Slack, and Web.
+                        Turn <strong>off</strong> to stop all voice notes and transcription.
+                    </p>
                 </div>
-                <label class="toggle" style="scale: 1.2;">
+                <label class="toggle" style="scale: 1.2;" title="Enable voice subsystem">
                     <input type="checkbox" x-model="voiceForm.enabled" @change="saveVoiceSettings()">
                     <span class="toggle-slider"></span>
                 </label>
@@ -1595,6 +1598,22 @@
             <div x-show="voiceForm.enabled" x-transition x-cloak>
 
                 <div style="height:1px; background:var(--border-subtle); margin:16px 0;"></div>
+
+                <!-- Platform auto voice-note replies (Telegram/Discord/Slack) -->
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; padding:12px 14px; background:var(--surface-raised, var(--boost, #161d27)); border:1px solid var(--border-subtle, var(--border)); border-radius:8px;">
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-weight:600; margin-bottom:4px;">Auto voice-note replies</div>
+                        <p style="font-size:0.85rem;color:var(--text-muted);margin:0;">
+                            When <strong>on</strong>: if you send a voice note on Telegram/Discord/Slack,
+                            the agent also replies with a spoken voice note (after the text reply).
+                            When <strong>off</strong>: replies stay text-only; inbound STT still works.
+                        </p>
+                    </div>
+                    <label class="toggle" style="flex-shrink:0; scale: 1.1;" title="Toggle auto voice-note replies">
+                        <input type="checkbox" x-model="voiceForm.tts_reply" @change="saveVoiceSettings()">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
 
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
                     <!-- Speech to Text (STT) Configuration -->

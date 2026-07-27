@@ -9,9 +9,9 @@ from textual.widgets import Button, Static
 
 __all__ = ["NavRail", "NavSelected"]
 
-# (tab_id, short label, key hint)
+# (tab_id, full label, key hint) — labels must fit width 20 with key prefix
 NAV_ITEMS: tuple[tuple[str, str, str], ...] = (
-    ("dashboard", "Dash", "1"),
+    ("dashboard", "Dashboard", "1"),
     ("memory", "Memory", "2"),
     ("chat", "Chat", "3"),
     ("files", "Files", "4"),
@@ -30,49 +30,62 @@ class NavSelected(Message):
 
 
 class NavRail(Widget):
-    """Vertical nav: keys 1–7 map to main tabs."""
+    """Vertical nav: keys 1–7 map to main tabs. Full labels always visible."""
 
     DEFAULT_CSS = """
     NavRail {
         dock: left;
-        width: 14;
+        width: 20;
         background: $panel;
-        border-right: tall $border;
-        padding: 1 0;
+        border-right: solid $border;
+        padding: 1 0 0 0;
         height: 1fr;
+        layout: vertical;
     }
     NavRail .nav-brand {
-        height: 2;
+        height: 3;
+        width: 100%;
         content-align: center middle;
         color: $primary;
         text-style: bold;
+        border-bottom: solid $border;
         margin-bottom: 1;
     }
-    NavRail Button {
+    NavRail .nav-btn {
         width: 100%;
         min-width: 1;
+        max-width: 100%;
         height: 3;
-        margin: 0 1 1 1;
-        border: tall $border;
-        background: $boost;
+        margin: 0 0 0 0;
+        padding: 0 1;
+        border: none;
+        border-left: solid transparent;
+        background: transparent;
         color: $text-muted;
         text-align: left;
+        content-align: left middle;
     }
-    NavRail Button:hover {
-        border: tall $primary;
+    NavRail .nav-btn:hover {
+        background: $boost;
         color: $text;
+        border-left: solid $primary 40%;
     }
-    NavRail Button.-active {
-        border: tall $primary;
-        background: $primary 15%;
+    NavRail .nav-btn.-active {
+        background: $primary 12%;
         color: $primary;
         text-style: bold;
+        border-left: solid $primary;
+    }
+    NavRail .nav-key {
+        color: $text-disabled;
+        text-style: none;
     }
     """
 
     def compose(self) -> ComposeResult:
         yield Static("KAZMA", classes="nav-brand")
         for tab_id, label, key in NAV_ITEMS:
+            # Key + full label — width 20 fits " 7  Settings" cleanly
             yield Button(
                 f" {key}  {label}",
                 id=f"nav-{tab_id}",

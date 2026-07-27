@@ -48,7 +48,8 @@ async def send_voice_reply(
         synthesize_speech,
     )
 
-    if not live_voice_settings().get("enabled") or not text:
+    cfg = live_voice_settings()
+    if not cfg.get("enabled") or not cfg.get("tts_reply", True) or not text:
         return False
 
     def _headers() -> dict[str, str]:
@@ -57,7 +58,7 @@ async def send_voice_reply(
         return {"Authorization": f"Bearer {bot_token}"}
 
     try:
-        audio = await synthesize_speech(text)
+        audio = await synthesize_speech(text, require_tts_reply=True)
         if not audio:
             return False
         fmt = str(live_voice_settings().get("tts_output_format") or "mp3")
