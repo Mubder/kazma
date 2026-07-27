@@ -99,6 +99,18 @@ Install for full vector: `pip install -e ".[rag]"`.
 - Merging Knowledge Library into chat `agent_memory`  
 - Dropping SQLite L2 for Neo4j on single-node by default  
 
+### Hygiene P1–P3 (optional; shipped 2026-07-27)
+
+These are **not** a greenfield rewrite — strengthen-existing stack only.
+
+| # | Item | Status |
+|---|------|--------|
+| **H-P1** | `sqlite_query` authorizer allows safe `COUNT`/`LIKE`/… | **Done** — `database_client/tools.py` |
+| **H-P2** | Always retire empty legacy `memory_fts` | **Done** — `memory/fts5.py` |
+| **H-P3** | Populate named-worker L4 after successful dispatch | **Done** — `swarm/worker_dispatch.py` |
+
+**P0 (agent reliability, not memory):** max-iter synthesis + Settings **Max tool rounds** (`agent.max_iterations`, clamp 5–100) already on main (`6b5aa5f0`, `8fd85ff3`).
+
 ---
 
 ## 4. Operator smoke checklist
@@ -127,6 +139,7 @@ Install for full vector: `pip install -e ".[rag]"`.
 | Graph HTTP + export | `kazma-ui/kazma_ui/routes_direct.py` |
 | Graph UI | `kazma-ui/kazma_ui/templates/dashboard.html` |
 | Polish tests | `kazma-core/tests/test_memory_polish_p2_p7.py` |
+| Hygiene P1–P3 tests | `kazma-core/tests/test_memory_p1_p2_p3.py` |
 
 ---
 
@@ -136,3 +149,4 @@ Install for full vector: `pip install -e ".[rag]"`.
 - `CHANGELOG.md` → **L2 property graph + LLM consolidator**  
 - `CHANGELOG.md` → **Consolidator cost/fence/dedup + graph UI**  
 - `CHANGELOG.md` → **Memory polish P2–P7**  
+- `CHANGELOG.md` → **Memory hygiene P1–P3 (optional)**  

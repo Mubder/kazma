@@ -142,7 +142,8 @@ Install: `pip install -e ".[rag]"` (chromadb, sentence-transformers, sqlite-vec)
 ### 4.3 L3 — FTS5
 
 - Adapter uses `FTS5LexicalStore` → `kazma_memory.SQLiteMemoryBackend`.
-- Degrade path `FTS5Memory` writes the **same** `memories` schema (legacy `memory_fts` migrated).
+- Degrade path `FTS5Memory` writes the **same** `memories` schema (legacy
+  `memory_fts` migrated then retired as `memory_fts_migrated` even when empty).
 
 ### 4.4 L4 — sqlite-vec
 

@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Unreleased — Memory hygiene P1–P3 (optional) (2026-07-27)
+
+- **P1 sqlite_query authorizer:** allow safe read functions (`COUNT`, `LIKE`,
+  `substr`, `length`, datetime/json/FTS helpers). Function name is read from
+  authorizer `arg2` (SQLite zName2). Writes still denied.
+- **P2 legacy FTS:** empty `memory_fts` always retired (rename →
+  `memory_fts_migrated` or drop) so health scans no longer report a dead table
+  beside live `memories_fts`.
+- **P3 swarm L4:** after successful worker dispatch, index compact prompt+output
+  into L4 under the worker name (`worker` metadata / `worker_vectors_<name>`).
+- Tests: `kazma-core/tests/test_memory_p1_p2_p3.py`.
+
 ## Unreleased — Memory polish P2–P7 (2026-07-27)
 
 - **P2 cost:** `skip_llm_if_auto_stored` (default true) skips consolidator LLM

@@ -159,14 +159,75 @@ async def execute_db_query(
         conn = sqlite3.connect(db_uri)
         conn.row_factory = sqlite3.Row
 
-        # Set database-level read-only authorizer
-        def authorizer_callback(action, arg1, arg2, dbname, trigger_name):
-            allowed_actions = {
-                sqlite3.SQLITE_SELECT,
-                sqlite3.SQLITE_READ,
+        # Read-only authorizer: allow SELECT/READ plus safe scalar/aggregate
+        # functions (COUNT, LIKE, substr, length, …). Deny writes and DDL.
+        # P1: previously only SELECT/READ were allowed, so COUNT/LIKE failed
+        # with "not authorized to use function" and broke agent diagnostics.
+        _SQLITE_FUNCTION = getattr(sqlite3, "SQLITE_FUNCTION", 31)
+        _SAFE_SQL_FUNCTIONS = frozenset(
+            {
+                # aggregates
+                "count",
+                "sum",
+                "avg",
+                "min",
+                "max",
+                "total",
+                "group_concat",
+                # scalars / string
+                "length",
+                "lower",
+                "upper",
+                "substr",
+                "substring",
+                "trim",
+                "ltrim",
+                "rtrim",
+                "replace",
+                "instr",
+                "like",
+                "glob",
+                "ifnull",
+                "coalesce",
+                "nullif",
+                "abs",
+                "round",
+                "typeof",
+                "hex",
+                "quote",
+                "printf",
+                "unicode",
+                "char",
+                # datetime
+                "date",
+                "time",
+                "datetime",
+                "julianday",
+                "strftime",
+                # json (when extension present)
+                "json",
+                "json_extract",
+                "json_array_length",
+                "json_type",
+                "json_valid",
+                # FTS5 helpers
+                "bm25",
+                "highlight",
+                "snippet",
+                "rank",
             }
-            if action in allowed_actions:
+        )
+
+        def authorizer_callback(action, arg1, arg2, dbname, trigger_name):
+            if action in (sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ):
                 return sqlite3.SQLITE_OK
+            if action == _SQLITE_FUNCTION:
+                # SQLite authorizer: SQLITE_FUNCTION → (None, function_name)
+                # See sqlite3_set_authorizer: zName1=NULL, zName2=func name.
+                fname = (arg2 or arg1 or "").lower()
+                if fname in _SAFE_SQL_FUNCTIONS:
+                    return sqlite3.SQLITE_OK
+                return sqlite3.SQLITE_DENY
             return sqlite3.SQLITE_DENY
 
         conn.set_authorizer(authorizer_callback)

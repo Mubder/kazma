@@ -114,23 +114,34 @@ class FTS5Memory:
         self._conn.commit()
 
     def _migrate_legacy_memory_fts(self) -> None:
-        """One-shot: copy legacy memory_fts rows into memories if present."""
+        """One-shot: copy legacy memory_fts rows into memories if present.
+
+        P2: Always retire the legacy table name even when empty — an empty
+        ``memory_fts`` next to live ``memories_fts`` confuses diagnostics.
+        Renamed to ``memory_fts_migrated`` (or dropped if rename fails).
+        """
         try:
             row = self._conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'"
             ).fetchone()
             if not row:
                 return
-            legacy = self._conn.execute(
-                "SELECT text, metadata, doc_id, timestamp FROM memory_fts"
-            ).fetchall()
-            if not legacy:
-                return
+            legacy: list = []
+            try:
+                legacy = self._conn.execute(
+                    "SELECT text, metadata, doc_id, timestamp FROM memory_fts"
+                ).fetchall()
+            except Exception:
+                # Schema may differ; still retire the table name below.
+                legacy = []
             migrated = 0
             for r in legacy:
-                text = r["text"] if "text" in r.keys() else r[0]
-                meta_raw = r["metadata"] if "metadata" in r.keys() else r[1]
-                doc_id = r["doc_id"] if "doc_id" in r.keys() else r[2]
+                try:
+                    text = r["text"] if "text" in r.keys() else r[0]
+                    meta_raw = r["metadata"] if "metadata" in r.keys() else r[1]
+                    doc_id = r["doc_id"] if "doc_id" in r.keys() else r[2]
+                except Exception:
+                    continue
                 if not text or not doc_id:
                     continue
                 exists = self._conn.execute(
@@ -147,20 +158,33 @@ class FTS5Memory:
                     (doc_id, text, meta_raw or "{}"),
                 )
                 migrated += 1
-            self._conn.commit()
             if migrated:
+                self._conn.commit()
                 logger.info(
                     "[FTS5Memory] Migrated %d rows from legacy memory_fts → memories",
                     migrated,
                 )
-            # Rename legacy table so we don't double-migrate
+            # Always retire legacy name (empty or migrated) so health scans
+            # don't report a dead empty FTS table.
             try:
+                # Drop prior _migrated if present so rename always succeeds
+                self._conn.execute("DROP TABLE IF EXISTS memory_fts_migrated")
                 self._conn.execute(
                     "ALTER TABLE memory_fts RENAME TO memory_fts_migrated"
                 )
                 self._conn.commit()
+                logger.info(
+                    "[FTS5Memory] Retired legacy memory_fts → memory_fts_migrated "
+                    "(rows_migrated=%d)",
+                    migrated,
+                )
             except Exception:
-                pass
+                try:
+                    self._conn.execute("DROP TABLE IF EXISTS memory_fts")
+                    self._conn.commit()
+                    logger.info("[FTS5Memory] Dropped empty/legacy memory_fts table")
+                except Exception:
+                    pass
         except Exception:
             logger.debug("[FTS5Memory] legacy migrate skipped", exc_info=True)
 
