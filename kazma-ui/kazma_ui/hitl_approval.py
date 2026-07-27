@@ -45,18 +45,24 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
     for intr in interrupts:
         value = getattr(intr, "value", None)
         if isinstance(value, dict) and value.get("type") == "hitl_approval":
+            tool = value.get("tool") or value.get("tool_name") or "unknown"
+            msg = value.get("message")
             return {
-                "tool_name": value.get("tool", "unknown"),
-                "arguments": value.get("args", value.get("arguments", {})),
-                "message": value.get("message", ""),
+                "tool_name": str(tool) if tool is not None else "unknown",
+                "arguments": value.get("args") or value.get("arguments") or {},
+                "message": "" if msg is None else str(msg),
             }
         # Fallback: some interrupt payloads may not carry the type tag but
         # still have tool/args keys
-        if isinstance(value, dict) and ("tool" in value or "args" in value):
+        if isinstance(value, dict) and (
+            "tool" in value or "tool_name" in value or "args" in value
+        ):
+            tool = value.get("tool") or value.get("tool_name") or "unknown"
+            msg = value.get("message")
             return {
-                "tool_name": value.get("tool", "unknown"),
-                "arguments": value.get("args", value.get("arguments", {})),
-                "message": value.get("message", ""),
+                "tool_name": str(tool) if tool is not None else "unknown",
+                "arguments": value.get("args") or value.get("arguments") or {},
+                "message": "" if msg is None else str(msg),
             }
     return None
 

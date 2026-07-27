@@ -364,9 +364,12 @@
            '<span>' + (t.duration || 0).toFixed(1) + 's</span> · ' +
            '<span>' + timeAgo(t.completed_at || t.created_at) + '</span>');
       var actions = isPaper
-        ? (t.report_path
-          ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/ide/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="Open report">MD</a>'
-          : '')
+        ? ((t.report_path
+            ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.report_path) + '" onclick="event.stopPropagation();" target="_blank" title="' + esc(i18n('research.open_md') || 'Open report') + '">MD</a>'
+            : '') +
+           (t.docx_path
+            ? '<a class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" href="/api/research/papers/file?path=' + encodeURIComponent(t.docx_path) + '" onclick="event.stopPropagation();" target="_blank" title="DOCX">DOCX</a>'
+            : ''))
         : ('<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">' + ARCHIVE_SVG + '</button>' +
            '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.del(\'' + t.id + '\')" title="Delete">×</button>');
       var onclick = isPaper ? '' : ' onclick="KazmaResearch.viewDetail(\'' + t.id + '\')"';

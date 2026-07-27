@@ -791,6 +791,7 @@
         tryIngestPlanFromText(tokenAccum);
         var textEl = currentMsgEl.querySelector('.message-text');
         textEl.innerHTML = KS.markdown(tokenAccum);
+        if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
         scrollToBottom();
       },
 
@@ -1390,7 +1391,7 @@
     wrapper.innerHTML =
       '<div class="message-avatar" style="background:' + avatarBg + '">' + avatar + '</div>' +
       '<div class="message-content">' +
-        '<div class="message-text">' + (role === 'user' ? escapeHtml(content) : KS.markdown(content)) + '</div>' +
+        '<div class="message-text" dir="auto">' + (role === 'user' ? escapeHtml(content) : KS.markdown(content)) + '</div>' +
         '<div class="message-meta" data-ts="' + escapeHtml(iso) + '">' +
           (attachmentName ? '\uD83D\uDCCE ' + escapeHtml(attachmentName) + ' \u00B7 ' : '') +
           '<time datetime="' + escapeHtml(iso) + '">' + escapeHtml(when) + '</time>' +
@@ -1525,9 +1526,11 @@
       }
       var existing = textEl.innerHTML || '';
       var rendered = KS.markdown ? KS.markdown(text) : escapeHtml(text);
+      // bidi applied after set on textEl below
       textEl.innerHTML = existing
         ? existing + '<hr style="border:none;border-top:1px solid var(--border-subtle);margin:10px 0;">' + rendered
         : rendered;
+      if (window.KazmaBidi) KazmaBidi.apply(textEl, text);
       scrollToBottom();
     }
 

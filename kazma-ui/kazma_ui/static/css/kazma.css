@@ -1343,6 +1343,25 @@ tbody tr:last-child td {
   border-radius: var(--radius);
   line-height: 1.7;
   word-wrap: break-word;
+  /* Mixed AR/EN: each paragraph follows its first strong character
+     (works in both LTR English UI and RTL Arabic UI). */
+  unicode-bidi: plaintext;
+}
+
+/* Global bidi helpers — apply to any surface that shows user/model text */
+.bidi-auto,
+.bidi-content,
+.message-content,
+.hitl-approval-message,
+.skill-desc,
+.tool-desc-ar-safe,
+.step-detail,
+.agent-plan-item .plan-text {
+  unicode-bidi: plaintext;
+}
+/* Isolate inline Latin/Arabic spans so numbers and brand names keep order */
+.bidi-isolate {
+  unicode-bidi: isolate;
 }
 .message-user .message-text { background: var(--accent); color: #001016; font-weight: 500; }
 .message-assistant .message-text {

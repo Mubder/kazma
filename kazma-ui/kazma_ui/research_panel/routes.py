@@ -116,6 +116,31 @@ def create_research_router() -> APIRouter:
             logger.exception("[research] list papers failed")
             return JSONResponse({"ok": False, "error": str(exc), "papers": []}, status_code=500)
 
+    @router.get("/api/research/papers/file")
+    async def get_paper_file(path: str) -> Any:
+        """Serve a research report file from the workspace (path under research/reports/)."""
+        try:
+            from kazma_core.tools.file_write import _get_workspace
+
+            root = _get_workspace().resolve()
+        except Exception:
+            root = Path.cwd().resolve() / "kazma-data" / "workspace"
+        raw = (path or "").strip().replace("\\", "/")
+        if not raw or ".." in raw.split("/"):
+            return JSONResponse({"error": "invalid path"}, status_code=400)
+        # Only research/reports/** under workspace
+        if not raw.startswith("research/reports/"):
+            return JSONResponse({"error": "path must be under research/reports/"}, status_code=403)
+        target = (root / raw).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError:
+            return JSONResponse({"error": "path outside workspace"}, status_code=403)
+        if not target.is_file():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        media = "text/markdown; charset=utf-8" if target.suffix.lower() == ".md" else "application/octet-stream"
+        return FileResponse(str(target), filename=target.name, media_type=media)
+
     @router.get("/api/research/tasks")
     async def list_research(
         page: int = 1,

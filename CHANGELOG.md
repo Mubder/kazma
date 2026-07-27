@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Unreleased — UI i18n, bidi, HITL undefined, papers open (2026-07-27)
+
+- **Bidi:** `unicode-bidi: plaintext` + `dir=auto` for chat/tool/skill text so
+  mixed Arabic+English stays correct in **both** English and Arabic UI
+  (`bidi.js`, CSS, chat render hooks).
+- **Arabic UI:** HITL button labels, skills install strings, expanded
+  `tool.desc.*` AR for research/knowledge tools; settings tool cards use
+  localized desc when present.
+- **HITL dashboard:** fixed empty-state icon that rendered the literal
+  ``undefined``; safer tool_name/message; i18n for Clear All / Once / Deny.
+- **Research papers:** `GET /api/research/papers/file` serves workspace reports;
+  panel MD/DOCX links fixed.
+
 ## Unreleased — Research Phase 3 polish (2026-07-27)
 
 - **WS `/research deep`** parity with SSE + gateway; stage progress events

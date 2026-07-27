@@ -145,6 +145,8 @@
 
     {# SVG icon registry (global — loaded before page scripts) #}
     <script src="/static/js/icons.js?v={{ js_version() }}"></script>
+    {# Bidirectional text (mixed Arabic/English) — both LTR and RTL UI #}
+    <script src="/static/js/bidi.js?v={{ js_version() }}"></script>
 
     {# HTMX #}
     <script src="/static/js/htmx.min.js"></script>
