@@ -131,8 +131,9 @@ class DiscordAdapter(BaseAdapter):
                     await self._connect_gateway(queue, shutdown_event)
                 except asyncio.CancelledError:
                     raise
-                except Exception:
-                    logger.exception("[discord] Gateway connection error")
+                except Exception as exc:
+                    err_msg = str(exc) or exc.__class__.__name__
+                    logger.warning("[discord] Gateway connection dropped (%s) — reconnecting...", err_msg)
                     if await self.jitter_sleep(shutdown_event):
                         break
                     continue
@@ -274,8 +275,8 @@ class DiscordAdapter(BaseAdapter):
                 await ws.send(json.dumps({"op": 1, "d": self._sequence}))
         except asyncio.CancelledError:
             pass
-        except Exception:
-            logger.exception("[discord] Heartbeat error")
+        except Exception as exc:
+            logger.debug("[discord] Heartbeat stopped (%s)", exc)
 
     async def _handle_interaction(self, data: dict[str, Any]) -> None:
         """Route Discord component interactions via shared callback schemes.
