@@ -48,15 +48,12 @@ async def main() -> None:
         web_search,
     )
 
-    # Prefer common local instances if unset
+    # Prefer Kazma compose SearXNG (:8088) when unset.
+    # Note: this script does NOT load .env — export the var or use
+    #   set -a; source .env; set +a
+    # before running. Discovery still probes other bases if this one fails.
     if not (os.environ.get("KAZMA_SEARXNG_URL") or "").strip():
-        for candidate in (
-            "http://127.0.0.1:15080",
-            "http://127.0.0.1:8088",
-            "http://localhost:8088",
-        ):
-            os.environ["KAZMA_SEARXNG_URL"] = candidate
-            break
+        os.environ["KAZMA_SEARXNG_URL"] = "http://127.0.0.1:8088"
 
     print("=== Research stack smoke ===")
     print(f"KAZMA_SEARXNG_URL={os.environ.get('KAZMA_SEARXNG_URL')}")
