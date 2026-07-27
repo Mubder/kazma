@@ -190,3 +190,53 @@ class TestReadSystemLogsFallbacks:
         with patch("kazma_skills.native.system_health_monitor.tools._get_workspace", return_value=tmp_path):
             res = await read_system_logs(lines=10)
             assert "Test log line" in res
+
+
+class TestWSChatConnectHitlScan:
+    """Verify WebSocket connection handler scans graph checkpoint for pending HITL interrupts on connect."""
+
+    @pytest.mark.asyncio
+    async def test_ws_chat_scans_hitl_on_connect(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+        from kazma_ui.routes.ws_chat import create_ws_chat_router
+
+        mock_graph = MagicMock()
+        mock_snapshot = MagicMock()
+        mock_snapshot.next = ("ToolWorker",)
+        mock_task = MagicMock()
+        mock_intr = MagicMock()
+        mock_intr.value = {"type": "hitl_approval", "tool": "file_delete", "args": {"path": "smoke"}}
+        mock_task.interrupts = [mock_intr]
+        mock_snapshot.tasks = [mock_task]
+        mock_graph.aget_state = AsyncMock(return_value=mock_snapshot)
+
+        mock_ws = AsyncMock()
+        mock_ws.receive_text = AsyncMock(side_effect=Exception("Done"))
+
+        router = create_ws_chat_router(graph_getter=lambda: mock_graph)
+        endpoint = None
+        for route in router.routes:
+            if getattr(route, "path", "") == "/ws/chat/{session_id}":
+                endpoint = route.endpoint
+                break
+
+        assert endpoint is not None
+
+        mock_store = MagicMock()
+        mock_sess = MagicMock()
+        mock_sess.thread_id = "test-thread-123"
+        mock_store.get_or_create.return_value = mock_sess
+
+        with patch("kazma_ui.auth.websocket_is_authenticated", return_value=True), \
+             patch("kazma_ui.routes.ws_chat.get_session_manager", return_value=mock_store):
+            try:
+                await endpoint(mock_ws, "test-session-123")
+            except Exception:
+                pass
+
+            # Verify send_json was called with status_update (paused_for_approval) event on connect
+            calls = [c.args[0] for c in mock_ws.send_json.call_args_list if isinstance(c.args[0], dict)]
+            approval_calls = [c for c in calls if c.get("type") == "status_update" and c.get("data", {}).get("status") == "paused_for_approval"]
+            assert len(approval_calls) >= 1
+            assert approval_calls[0].get("data", {}).get("tool") == "file_delete"
+

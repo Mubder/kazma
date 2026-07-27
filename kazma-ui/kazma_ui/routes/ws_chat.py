@@ -274,6 +274,16 @@ def create_ws_chat_router(
             "recursion_limit": _GRAPH_RECURSION_LIMIT,
         }
 
+        # Scan graph state on connection/reconnection for any pending HITL interrupts
+        # so if the user reloaded or navigated away while waiting for HITL approval,
+        # the UI immediately receives the HITL event upon connecting.
+        try:
+            graph_inst = _get_graph()
+            if graph_inst:
+                await _scan_and_emit_hitl_interrupt(graph_inst, config, websocket, thread_id)
+        except Exception as init_scan_err:
+            logger.debug("[WS-Chat] Initial HITL scan on connect failed: %s", init_scan_err)
+
         active_task: asyncio.Task | None = None
 
         try:
