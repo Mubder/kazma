@@ -528,10 +528,19 @@ class SettingsManager:
         """List installed skills from the filesystem."""
         skills: list[dict[str, Any]] = []
         # Check skill directories
-        skill_dirs = [
-            Path.home() / ".kazma" / "skills",
-            Path("skills"),
-        ]
+        try:
+            from kazma_core.paths import installed_skills_dir, legacy_user_home
+
+            skill_dirs = [
+                installed_skills_dir(),
+                legacy_user_home() / "skills",
+                Path("skills"),
+            ]
+        except Exception:
+            skill_dirs = [
+                Path.home() / ".kazma" / "skills",
+                Path("skills"),
+            ]
         for skill_dir in skill_dirs:
             if not skill_dir.exists():
                 continue

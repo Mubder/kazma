@@ -95,7 +95,14 @@ def _row_to_manifest(row: dict) -> SkillManifest:
 class KazmaHub:
     """Async SQLite-backed skill registry."""
 
-    def __init__(self, registry_path: str = "~/.kazma/hub/registry.db"):
+    def __init__(self, registry_path: str | None = None):
+        if registry_path is None:
+            try:
+                from kazma_core.paths import hub_registry_db
+
+                registry_path = hub_registry_db()
+            except Exception:
+                registry_path = "~/.kazma/hub/registry.db"
         self.db_path = Path(registry_path).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: aiosqlite.Connection | None = None
@@ -271,7 +278,12 @@ class KazmaHub:
     async def install(self, skill_id: str) -> Path:
         """Stub: mark skill as installed and return install path."""
         author, name, version = _parse_skill_id(skill_id)
-        install_path = Path("~/.kazma/skills").expanduser() / name
+        try:
+            from kazma_core.paths import installed_skills_dir
+
+            install_path = installed_skills_dir() / name
+        except Exception:
+            install_path = Path("~/.kazma/skills").expanduser() / name
         install_path.mkdir(parents=True, exist_ok=True)
 
         conn = await self._get_conn()

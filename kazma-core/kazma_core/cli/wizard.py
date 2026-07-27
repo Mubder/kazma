@@ -16,8 +16,14 @@ class WizardContext:
         self.selected_skill: dict[str, Any] | None = None
         self.manifest_data: dict[str, Any] | None = None
         self.security_results: dict[str, Any] | None = None
-        self.registry_path: str = "~/.kazma/hub/registry.db"
-        self.skills_dir: Path = Path("~/.kazma/skills").expanduser()
+        try:
+            from kazma_core.paths import hub_registry_db, installed_skills_dir
+
+            self.registry_path: str = hub_registry_db()
+            self.skills_dir: Path = installed_skills_dir()
+        except Exception:
+            self.registry_path = str(Path.home() / ".kazma" / "hub" / "registry.db")
+            self.skills_dir = Path.home() / ".kazma" / "skills"
 
 
 class SkillInstallationWizard:

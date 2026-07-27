@@ -12,82 +12,46 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from kazma_core.workspace.binding import (
+    allow_absolute_paths as _allow_absolute_paths,
+    configure_workspace,
+    resolve_active_root,
+)
+
 __all__ = ["configure_workspace", "file_write"]
-
-# ── Workspace resolution ──────────────────────────────────────────────
-
-_WORKSPACE_ROOT: Path | None = None
-_ALLOW_ABSOLUTE: bool = False
-
-
-def configure_workspace(workspace: str | None = None, allow_absolute: bool = False) -> None:
-    """Configure the workspace root and absolute-path policy.
-
-    Args:
-        workspace:      Path to agent workspace. Defaults to cwd.
-        allow_absolute: If True, absolute paths outside workspace are allowed.
-    """
-    global _WORKSPACE_ROOT, _ALLOW_ABSOLUTE
-    _WORKSPACE_ROOT = Path(workspace).expanduser().resolve() if workspace else None
-    _ALLOW_ABSOLUTE = allow_absolute
 
 
 def _get_workspace() -> Path:
-    """Get the configured workspace root.
+    """Get the configured workspace root (delegates to workspace binding SoT).
 
-    Resolution precedence (mirrors ``IdeService._resolve_workspace_root``):
+    Precedence — see ``kazma_core.workspace.binding.resolve_active_root``:
 
-      1. Per-task ``workspace_scope`` (Phase 3 — concurrent multi-repo).
-      2. The **active WorkspaceStore** row (Switch Repo / clone — user intent).
-         Must beat a stale boot-time ``configure_workspace()`` pin so tools
-         follow the UI without a server restart.
-      3. Explicitly configured ``_WORKSPACE_ROOT`` (``configure_workspace``).
-      4. ``KAZMA_WORKSPACE`` env var.
-      5. ``cwd/kazma-data/workspace`` (last-resort default).
-
-    Defaults to ``kazma-data/workspace`` relative to the current working
-    directory (NOT the drive root) when nothing else is configured. This
-    prevents accidental creation of a ``C:\\workspace`` folder on Windows.
+      1. Per-task ``workspace_scope``
+      2. Active WorkspaceStore row
+      3. Process pin (``configure_workspace``)
+      4. ``KAZMA_WORKSPACE`` env
+      5. Default sandbox under project ``data_dir()/workspace``
     """
-    global _WORKSPACE_ROOT
+    return resolve_active_root()
 
-    # 1. Per-task scope (Phase 3) takes top precedence.
-    try:
-        from kazma_core.ide.workspace_scope import resolve_workspace_root
 
-        scoped = resolve_workspace_root()
-        if scoped is not None:
-            return scoped
-    except Exception:
-        pass
+class _AllowAbsoluteProxy:
+    """Bool-like proxy so ``if not _ALLOW_ABSOLUTE`` stays correct after pin changes.
 
-    # 2. Active WorkspaceStore — Switch Repo / clone target (live SoT).
-    try:
-        from kazma_core.stores import get_workspace_store
+    Prefer :func:`kazma_core.workspace.binding.allow_absolute_paths` for new code.
+    """
 
-        active = get_workspace_store().get_active_workspace()
-        if active and active.get("root_path"):
-            active_path = Path(active["root_path"]).expanduser().resolve()
-            # Keep the process pin in sync so IDE + tools never diverge.
-            if _WORKSPACE_ROOT is None or _WORKSPACE_ROOT.resolve() != active_path:
-                _WORKSPACE_ROOT = active_path
-            return active_path
-    except Exception:
-        pass
+    def __bool__(self) -> bool:
+        return _allow_absolute_paths()
 
-    # 3. Explicitly configured root (boot / tests).
-    if _WORKSPACE_ROOT is not None:
-        return _WORKSPACE_ROOT
+    def __eq__(self, other: object) -> bool:
+        return bool(self) == other
 
-    import os
+    def __repr__(self) -> str:
+        return f"_ALLOW_ABSOLUTE({bool(self)!r})"
 
-    # 4. Env var override.
-    env_ws = os.environ.get("KAZMA_WORKSPACE", "").strip()
-    if env_ws:
-        return Path(env_ws).expanduser().resolve()
 
-    # 5. Last-resort default.
-    return (Path.cwd() / "kazma-data" / "workspace").resolve()
+_ALLOW_ABSOLUTE = _AllowAbsoluteProxy()
 
 
 def _is_within_workspace(target: Path, workspace: Path) -> bool:
@@ -131,12 +95,12 @@ async def file_write(path: str, content: str) -> str:
 
     if not within:
         # Path is outside workspace — block unless explicitly allowed
-        if not _ALLOW_ABSOLUTE:
+        if not _allow_absolute_paths():
             return "Safety: writes outside workspace are not allowed."
 
     # Block obvious ../.. escape attempts regardless
     raw = Path(path)
-    if ".." in raw.parts and not within and not _ALLOW_ABSOLUTE:
+    if ".." in raw.parts and not within and not _allow_absolute_paths():
         return "Safety: writes outside workspace are not allowed."
 
     try:

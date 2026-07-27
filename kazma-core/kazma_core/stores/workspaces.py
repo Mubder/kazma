@@ -93,15 +93,23 @@ class WorkspaceStore:
             conn.executescript(_SCHEMA)
             self._migrate_repo_columns(conn)
 
-            # Boot-time check: If no workspaces are recorded, initialize current CWD
+            # Boot-time: empty store seeds the default sandbox under
+            # project data_dir (not monorepo CWD) so native tools + MCP
+            # filesystem share one root on first boot.
             try:
                 row = conn.execute("SELECT COUNT(*) as count FROM workspaces").fetchone()
                 if row and row["count"] == 0:
                     ws_id = str(uuid.uuid4())
                     name = "Default Workspace"
-                    root_path = str(Path.cwd().resolve())
+                    try:
+                        from kazma_core.workspace.binding import default_sandbox_root
+
+                        root_path = str(default_sandbox_root())
+                    except Exception:
+                        root_path = str((Path.cwd() / "kazma-data" / "workspace").resolve())
+                        Path(root_path).mkdir(parents=True, exist_ok=True)
                     created_at = datetime.now(UTC).isoformat()
-                    
+
                     conn.execute("BEGIN")
                     conn.execute(
                         "INSERT INTO workspaces (id, name, root_path, created_at, is_active) VALUES (?, ?, ?, ?, 1)",
@@ -358,20 +366,26 @@ class WorkspaceStore:
                 logger.error("[WorkspaceStore] Failed to activate workspace %s: %s", workspace_id, exc)
                 raise exc
 
-        # Outside the lock: re-pin process workspace so tools don't keep a
-        # stale boot-time root (e.g. the Kazma monorepo).
+        # Outside the lock: pin tools + fire binding bus (MCP rebind, etc.).
         if root_path:
             try:
-                from kazma_core.tools.file_write import configure_workspace
+                from kazma_core.workspace.binding import notify_root_changed
 
-                configure_workspace(workspace=str(root_path))
+                notify_root_changed(root_path, reason="set_active_workspace")
                 logger.info(
-                    "[WorkspaceStore] Tools re-pinned to workspace root %s",
+                    "[WorkspaceStore] Binding notified for workspace root %s",
                     root_path,
                 )
             except Exception as pin_exc:
+                # Fallback: pin only (compat if binding import fails)
+                try:
+                    from kazma_core.tools.file_write import configure_workspace
+
+                    configure_workspace(workspace=str(root_path))
+                except Exception:
+                    pass
                 logger.warning(
-                    "[WorkspaceStore] configure_workspace failed for %s: %s",
+                    "[WorkspaceStore] notify_root_changed failed for %s: %s",
                     root_path,
                     pin_exc,
                 )

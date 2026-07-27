@@ -114,13 +114,14 @@ def _workspace_scope_error(p: Path, path: str, op: str) -> str | None:
     Agent Skills directories so skill resources load on demand.
     """
     try:
-        from kazma_core.tools.file_write import _ALLOW_ABSOLUTE, _get_workspace
+        from kazma_core.tools.file_write import _get_workspace
+        from kazma_core.workspace.binding import allow_absolute_paths
     except (ImportError, OSError):
         return f"Safety: workspace module unavailable — {op} denied. Path: {path}"
-    
+
     workspace = _get_workspace().resolve()
     resolved_p = p.expanduser().resolve()
-    if not _ALLOW_ABSOLUTE:
+    if not allow_absolute_paths():
         try:
             resolved_p.relative_to(workspace)
         except ValueError:

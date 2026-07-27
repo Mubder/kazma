@@ -909,38 +909,20 @@ async def tool_worker_node(
                     logger.info("[ToolWorker] HITL denied: %s", tc["name"])
                     results.append(_denied_result(tc))
 
-        # ── Empty-Result Circuit Breaker ──────────────────────────────
-        consecutive_failures = state.get("consecutive_tool_failures", 0)
-        breaker_tripped_now = False
+        # ── Tool-loop breaker (typed outcomes, per-round credit) ─────
+        # Policy / HITL deny / empty results do not trip. Parallel hard
+        # errors in one batch credit +1 only (not +N). See tool_loop_breaker.
+        from kazma_core.agent.tool_loop_breaker import update_breaker
 
-        # We process results, but instead of appending a stray system message,
-        # we format the circuit breaker warning directly into the tool response
-        # so we don't violate the API schema (1 tool response per tool call).
-        for tr in results:
-            if breaker_tripped_now:
-                tr["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
-                tr["is_error"] = True
-                continue
-
-            content_str = str(tr.get("content", "")).strip()
-            # Only count actual errors and denials as failures — an empty
-            # search result ("no results" / "[]") is a normal outcome for
-            # research tasks, not a tool malfunction.
-            is_failure = (
-                tr.get("is_error", False)
-                or "denied by user" in content_str.lower()
+        prev_failures = int(state.get("consecutive_tool_failures", 0) or 0)
+        breaker_state, results = update_breaker(prev_failures, list(results))
+        consecutive_failures = breaker_state.consecutive_hard_rounds
+        breaker_tripped_now = breaker_state.tripped
+        if breaker_tripped_now:
+            logger.warning(
+                "[ToolWorker] Circuit breaker tripped! %d consecutive hard tool rounds.",
+                consecutive_failures,
             )
-
-            if is_failure:
-                consecutive_failures += 1
-            else:
-                consecutive_failures = 0
-
-            if consecutive_failures >= 3:
-                logger.warning("[ToolWorker] Circuit breaker tripped! %d consecutive tool failures.", consecutive_failures)
-                tr["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
-                tr["is_error"] = True
-                breaker_tripped_now = True
 
         # Build tool-role messages for the conversation
         messages = [_normalize_msg(m) for m in state.get("messages", [])]

@@ -27,6 +27,9 @@ def ws(tmp_path, monkeypatch):
     The workspace is created under the repo working directory (NOT pytest's
     symlinked ``Local\\Temp\\pytest-of-*`` root) so the path-traversal guard
     is exercised with real, non-junction paths.
+
+    Active WorkspaceStore must not leak the developer's monorepo into the
+    test pin (binding ladder: store beats pin when a row is active).
     """
     import shutil
 
@@ -35,7 +38,15 @@ def ws(tmp_path, monkeypatch):
         shutil.rmtree(workspace)
     workspace.mkdir(parents=True)
     monkeypatch.setenv("KAZMA_WORKSPACE", str(workspace))
-    # Keep the file_write module's resolution consistent with the env var.
+    # Isolate from process-wide WorkspaceStore (active row would win over pin).
+    monkeypatch.setattr(
+        "kazma_core.stores.get_workspace_store",
+        lambda: type(
+            "S",
+            (),
+            {"get_active_workspace": staticmethod(lambda: None)},
+        )(),
+    )
     try:
         from kazma_core.tools.file_write import configure_workspace
 

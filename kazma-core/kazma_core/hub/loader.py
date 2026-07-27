@@ -39,7 +39,14 @@ class SkillLoadError(SkillError):
 class SkillLoader:
     """Dynamically load and manage installed Kazma skills."""
 
-    def __init__(self, skills_dir: str = "~/.kazma/skills") -> None:
+    def __init__(self, skills_dir: str | None = None) -> None:
+        if skills_dir is None:
+            try:
+                from kazma_core.paths import installed_skills_dir
+
+                skills_dir = str(installed_skills_dir())
+            except Exception:
+                skills_dir = "~/.kazma/skills"
         self.skills_dir = Path(skills_dir).expanduser()
 
     # ------------------------------------------------------------------

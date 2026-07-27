@@ -388,7 +388,12 @@ class InProcessWorker(SwarmWorker):
                 }
                 messages.append(assistant_msg)
 
-                # Execute each tool call and append the result.
+                # Execute each tool call; score breaker once per round (batch).
+                from kazma_core.agent.tool_loop_breaker import update_breaker
+
+                batch_results: list[dict[str, Any]] = []
+                batch_meta: list[tuple[Any, dict[str, Any]]] = []
+
                 for tc in response.tool_calls:
                     if _circuit_breaker_tripped:
                         logger.warning(
@@ -396,7 +401,7 @@ class InProcessWorker(SwarmWorker):
                             self.name, tc.name
                         )
                         result = {
-                            "content": "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now.",
+                            "content": "SYSTEM OVERRIDE: Tool blocked due to consecutive hard tool failures. Synthesize final answer now.",
                             "is_error": True,
                         }
                     else:
@@ -417,7 +422,12 @@ class InProcessWorker(SwarmWorker):
                                 f"Please either try a different search query variation, use an alternative tool, "
                                 f"or formulate your final response using available knowledge."
                             )
-                            result = {"content": result_content, "is_error": True}
+                            # Loop intercept is policy/control, not tool death
+                            result = {
+                                "content": result_content,
+                                "is_error": True,
+                                "outcome": "policy",
+                            }
                         else:
                             # 2. Fresh Tool Execution
                             if tool_registry is None:
@@ -428,7 +438,6 @@ class InProcessWorker(SwarmWorker):
                             else:
                                 try:
                                     result = await tool_registry.execute(tc.name, tc.arguments)
-                                    # Record result content for deduplication
                                     executed_tools[tc_key] = result.get("content", "")
                                 except Exception:
                                     logger.exception(
@@ -440,32 +449,28 @@ class InProcessWorker(SwarmWorker):
                                         "is_error": True,
                                     }
 
-                        # 3. Error-Only Circuit Breaker (matches graph_builder fix)
-                        # Only actual errors and denials count as failures —
-                        # empty search results ("no results" / "[]") are normal
-                        # for research tasks, not tool malfunctions.
-                        content_str = str(result.get("content", "")).strip()
-                        is_failure = (
-                            result.get("is_error", False)
-                            or "denied by user" in content_str.lower()
+                    batch_results.append(result)
+                    batch_meta.append((tc, result))
+
+                # 3. Typed breaker — max +1 hard credit per iteration batch
+                if batch_results and not _circuit_breaker_tripped:
+                    bstate, stamped = update_breaker(
+                        _consecutive_tool_failures, batch_results
+                    )
+                    _consecutive_tool_failures = bstate.consecutive_hard_rounds
+                    if bstate.tripped:
+                        logger.warning(
+                            "[InProcessWorker:%s] Circuit breaker tripped! %d consecutive hard rounds.",
+                            self.name,
+                            _consecutive_tool_failures,
                         )
+                        _circuit_breaker_tripped = True
+                    batch_results = stamped
+                    batch_meta = [
+                        (tc, stamped[i]) for i, (tc, _) in enumerate(batch_meta)
+                    ]
 
-                        if is_failure:
-                            _consecutive_tool_failures += 1
-                        else:
-                            _consecutive_tool_failures = 0
-
-                        if _consecutive_tool_failures >= 3:
-                            logger.warning(
-                                "[InProcessWorker:%s] Circuit breaker tripped! %d consecutive tool failures for %s.",
-                                self.name, _consecutive_tool_failures, tc.name
-                            )
-                            result["content"] = "SYSTEM OVERRIDE: Tool blocked due to consecutive failures. Synthesize final answer now."
-                            result["is_error"] = True
-                            _circuit_breaker_tripped = True
-                            # We do NOT break here. The tool loop must continue to process
-                            # remaining tool calls in the batch to avoid HTTP 400 errors.
-
+                for tc, result in batch_meta:
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,

@@ -53,13 +53,31 @@ def register_direct_routes(self: Any) -> None:
         import glob as _glob_sys
         import os as _os_sys
 
-        paths = {
-            "kazma_home": str(_os_sys.path.expanduser("~/.kazma")),
-            "config_db": str(_os_sys.path.expanduser("~/.kazma/config.db")),
-            "config_yaml": next(iter(_glob_sys.glob(_os_sys.path.expanduser("~/.kazma/*.yaml"))), ""),
-            "pending_evolution": str(_os_sys.path.expanduser("~/.kazma/pending_evolution.json")),
-            "knowledge_graph": str(_os_sys.path.expanduser("kazma-data/knowledge_graph.json")),
-        }
+        try:
+            from kazma_core.paths import data_dir, settings_db, user_home
+
+            _home = user_home()
+            paths = {
+                "kazma_home": str(_home),
+                "config_db": settings_db(),
+                "config_yaml": next(iter(_glob_sys.glob(str(_home / "*.yaml"))), ""),
+                "pending_evolution": str(_home / "pending_evolution.json"),
+                "knowledge_graph": str(data_dir() / "knowledge_graph.db"),
+            }
+        except Exception:
+            paths = {
+                "kazma_home": str(_os_sys.path.expanduser("~/.kazma")),
+                "config_db": str(_os_sys.path.expanduser("~/.kazma/config.db")),
+                "config_yaml": next(
+                    iter(_glob_sys.glob(_os_sys.path.expanduser("~/.kazma/*.yaml"))), ""
+                ),
+                "pending_evolution": str(
+                    _os_sys.path.expanduser("~/.kazma/pending_evolution.json")
+                ),
+                "knowledge_graph": str(
+                    _os_sys.path.expanduser("kazma-data/knowledge_graph.json")
+                ),
+            }
         # Flush model registry cache
         try:
             import kazma_core.model_registry as _mr
@@ -90,14 +108,31 @@ def register_direct_routes(self: Any) -> None:
     async def _system_config_paths():
         import os as _osp
 
-        home = _osp.path.expanduser("~/.kazma")
+        try:
+            from kazma_core.paths import data_dir, settings_db, snapshots_db, user_home
+
+            home = str(user_home())
+            cfg = settings_db()
+            kg = str(data_dir() / "knowledge_graph.db")
+            snap = snapshots_db()
+            pending = str(user_home() / "pending_evolution.json")
+        except Exception:
+            home = _osp.path.expanduser("~/.kazma")
+            cfg = _osp.path.join(home, "config.db")
+            kg = _osp.path.expanduser("kazma-data/knowledge_graph.json")
+            snap = _osp.path.expanduser("kazma-data/snapshots.db")
+            pending = _osp.path.join(home, "pending_evolution.json")
         return {
             "kazma_home": home,
-            "config_db": _osp.path.join(home, "config.db") if _osp.path.exists(_osp.path.join(home, "config.db")) else "NOT FOUND",
-            "swarm_registry": _osp.path.expanduser("swarm_registry.json") if _osp.path.exists(_osp.path.expanduser("swarm_registry.json")) else "NOT FOUND",
-            "pending_evolution": _osp.path.join(home, "pending_evolution.json") if _osp.path.exists(_osp.path.join(home, "pending_evolution.json")) else "NOT FOUND",
-            "knowledge_graph": _osp.path.expanduser("kazma-data/knowledge_graph.json") if _osp.path.exists(_osp.path.expanduser("kazma-data/knowledge_graph.json")) else "NOT FOUND",
-            "snapshots_db": _osp.path.expanduser("kazma-data/snapshots.db") if _osp.path.exists(_osp.path.expanduser("kazma-data/snapshots.db")) else "NOT FOUND",
+            "config_db": cfg if _osp.path.exists(cfg) else "NOT FOUND",
+            "swarm_registry": (
+                _osp.path.expanduser("swarm_registry.json")
+                if _osp.path.exists(_osp.path.expanduser("swarm_registry.json"))
+                else "NOT FOUND"
+            ),
+            "pending_evolution": pending if _osp.path.exists(pending) else "NOT FOUND",
+            "knowledge_graph": kg if _osp.path.exists(kg) else "NOT FOUND",
+            "snapshots_db": snap if _osp.path.exists(snap) else "NOT FOUND",
         }
 
     @self.app.delete("/api/mcp/servers/{server_name}")

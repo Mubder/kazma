@@ -495,7 +495,7 @@ class DependabotStyleScanner:
 
         return report
 
-    async def scan_skill_manifests(self, skills_dir: str = "~/.kazma/skills") -> list[SkillScanResult]:
+    async def scan_skill_manifests(self, skills_dir: str | None = None) -> list[SkillScanResult]:
         """Scan installed skill manifests for vulnerabilities and suspicious configs.
 
         1. Find all skill directories
@@ -504,6 +504,13 @@ class DependabotStyleScanner:
         4. Flag suspicious MCP server configs
         5. Detect permission escalation attempts
         """
+        if skills_dir is None:
+            try:
+                from kazma_core.paths import installed_skills_dir
+
+                skills_dir = str(installed_skills_dir())
+            except Exception:
+                skills_dir = str(Path.home() / ".kazma" / "skills")
         resolved = Path(skills_dir).expanduser()
         results: list[SkillScanResult] = []
 

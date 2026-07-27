@@ -244,8 +244,21 @@ def build_env_context(workspace_id: str | None = None) -> str:
             "## Active Workspace (BINDING — not optional)",
             f"- **Workspace name:** {ws_name}",
             f"- **Workspace root:** `{root}`",
+            "- Native `file_*` / shell / git tools use this root (and per-task "
+            "`workspace_scope` when a swarm task targets another workspace).",
+            "- MCP `filesystem` tools rebind to the **global active** workspace on "
+            "Switch Repo; they do **not** follow concurrent per-task scope — prefer "
+            "`file_list` / `file_read` for multi-repo swarm work.",
         ]
     )
+    try:
+        from kazma_core.workspace.binding import get_bound_mcp_root
+
+        mcp_root = get_bound_mcp_root()
+        if mcp_root is not None:
+            lines.append(f"- **MCP filesystem root (last bound):** `{mcp_root}`")
+    except Exception:
+        pass
     if ws_id:
         lines.append(f"- **Workspace id:** `{ws_id}`")
     if slug:

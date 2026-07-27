@@ -110,11 +110,20 @@ RTL_CSS_OVERRIDES = """
 """
 
 
+def _preferences_paths() -> tuple[Path, Path]:
+    """Return (config_dir, preferences_file) under project-local Kazma home."""
+    try:
+        from kazma_core.paths import preferences_path, user_home
+
+        prefs = preferences_path()
+        return prefs.parent, prefs
+    except Exception:
+        d = Path.home() / ".kazma"
+        return d, d / "preferences.json"
+
+
 class ThemeManager:
     """Manage theme switching and user preferences."""
-
-    CONFIG_DIR = Path.home() / ".kazma"
-    CONFIG_FILE = CONFIG_DIR / "preferences.json"
 
     DEFAULT_PREFERENCES = {
         "theme": "kazma-dark",
@@ -125,6 +134,7 @@ class ThemeManager:
     }
 
     def __init__(self) -> None:
+        self.CONFIG_DIR, self.CONFIG_FILE = _preferences_paths()
         self._preferences = self.DEFAULT_PREFERENCES.copy()
         self.load()
 

@@ -160,8 +160,12 @@ class KazmaTUI(App[None]):
         try:
             from pathlib import Path
 
-            config_dir = Path.home() / ".kazma"
-            prefs_file = config_dir / "preferences.json"
+            try:
+                from kazma_core.paths import preferences_path
+
+                prefs_file = preferences_path()
+            except Exception:
+                prefs_file = Path.home() / ".kazma" / "preferences.json"
 
             if not prefs_file.exists():
                 # First run - show tutorial

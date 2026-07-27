@@ -136,18 +136,18 @@ The IDE is a transport-agnostic coding backend (Web, TUI, all chat platforms).
 It is the **single source of truth** for file/exec/git/swarm operations on a
 workspace. Three new modules; understanding their interaction is essential.
 
-**A. Workspace root resolution — TWO resolvers that MUST agree**
-- `file_write._get_workspace()` (`tools/file_write.py`) is used by ALL file
-  tools (`file_read`, `file_write`, `file_delete`, `file_list`, `file_search`).
-- `IdeService._resolve_workspace_root()` (`ide/service.py`) is used by the IDE
-  API + TUI.
-- **Resolution precedence (both must follow this):** per-task `workspace_scope`
-  ContextVar → `configure_workspace()` global → `KAZMA_WORKSPACE` env →
-  **active WorkspaceStore row** → `cwd/kazma-data/workspace` default.
-- `app.py` boot config (~line 250) calls `configure_workspace()` — it must
-  consult WorkspaceStore's active workspace, NOT just default to
-  `kazma-data/workspace`. Breaking this reintroduces the "reads outside
-  workspace" bug where repo files get rejected.
+**A. Workspace root resolution — ONE ladder (binding SoT)**
+- Public API: `kazma_core.workspace.binding.resolve_active_root()` (also
+  `file_write._get_workspace` / `configure_workspace` for compat).
+- Used by: all `file_*` tools, IdeService, workspace UI API, env_context.
+- **Resolution precedence:** per-task `workspace_scope` ContextVar →
+  **active WorkspaceStore row** → `configure_workspace()` pin →
+  `KAZMA_WORKSPACE` env → `{data_dir}/workspace` default sandbox.
+- **Binding bus:** `WorkspaceStore.set_active_workspace` →
+  `notify_root_changed(root)` → pin tools + MCP rebind for
+  `workspace_bound` servers (`${KAZMA_ACTIVE_WORKSPACE}` in command).
+- MCP filesystem must NOT stay on a static `kazma-data/workspace` fossil
+  after Switch Repo / clone.
 - Path-traversal protection: `IdeService.resolve()` does a string-level
   `normpath` `..` check + containment backstop (symlink/junction-aware).
 

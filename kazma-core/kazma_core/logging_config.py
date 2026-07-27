@@ -156,12 +156,13 @@ def setup_logging(level: str | None = None) -> str:
         return _last_effective_level
 
     # Lazy import to avoid a circular: paths.py is imported pervasively.
-    from kazma_core.paths import log_file, migrate_legacy_user_home
+    from kazma_core.paths import log_file, merge_legacy_hub_if_empty, migrate_legacy_user_home
 
     # Migrate any legacy ~/.kazma → <repo>/.kazma on first boot so the log
     # directory lands in the right place. Idempotent + safe.
     try:
         migrate_legacy_user_home()
+        merge_legacy_hub_if_empty()
     except Exception:
         pass  # Logging must never fail boot.
 

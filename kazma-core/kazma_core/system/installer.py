@@ -217,7 +217,12 @@ def _record_installed_extra(extra: str | None, package_name: str | None) -> None
     merged = list(dict.fromkeys([*(str(x) for x in existing), *to_add]))
     store.set("system.installed_extras", merged, category="system")
 
-    path = Path.home() / ".kazma" / "installed_extras.json"
+    try:
+        from kazma_core.paths import installed_extras_path
+
+        path = installed_extras_path()
+    except Exception:
+        path = Path.home() / ".kazma" / "installed_extras.json"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(

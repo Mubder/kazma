@@ -27,7 +27,7 @@ Config format (from kazma.yaml ``mcp.servers``):
     servers:
       - name: "filesystem"
         transport: "stdio"
-        command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "kazma-data/workspace"]
+        command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "${KAZMA_ACTIVE_WORKSPACE}"]
       - name: "web-search"
         transport: "sse"
         url: "http://localhost:8080/sse"
@@ -411,17 +411,23 @@ class AsyncMCPManager:
                 duration_ms,
                 is_error,
             )
-            return {"content": content, "is_error": is_error}
+            try:
+                from kazma_core.agent.tool_loop_breaker import classify_mcp_error
+
+                outcome = classify_mcp_error(content, is_error=is_error).value
+            except Exception:
+                outcome = "hard" if is_error else "ok"
+            return {"content": content, "is_error": is_error, "outcome": outcome}
 
         except MCPBridgeError as exc:
             duration_ms = (time.monotonic() - start) * 1000
             logger.error("[MCP] Tool '%s' on '%s' failed (%.0fms): %s", tool_name, server_name, duration_ms, exc)
-            return {"content": f"MCP error: {exc}", "is_error": True}
+            return {"content": f"MCP error: {exc}", "is_error": True, "outcome": "hard"}
 
         except Exception as exc:
             duration_ms = (time.monotonic() - start) * 1000
             logger.error("[MCP] Tool '%s' on '%s' crashed (%.0fms): %s", tool_name, server_name, duration_ms, exc)
-            return {"content": f"Unexpected error: {exc}", "is_error": True}
+            return {"content": f"Unexpected error: {exc}", "is_error": True, "outcome": "hard"}
 
     # ── Introspection ───────────────────────────────────────────────
 
@@ -974,6 +980,8 @@ class UnifiedToolExecutor:
             mcp = AsyncMCPManager()
         self._local = local
         self._mcp = mcp
+        # Original configs (pre-rebind templates) for workspace rebind
+        self._server_configs: dict[str, dict[str, Any]] = {}
 
         if rbac is None:
             from kazma_core.rbac import RBACEngine
@@ -985,14 +993,36 @@ class UnifiedToolExecutor:
     async def connect_server(self, server_config: dict[str, Any]) -> int:
         """Connect a single MCP server and register its tools.
 
-        Thin compatibility shim over ``AsyncMCPManager.connect_from_config``
-        so callers that previously used the old MCP-only ``ToolRegistry``
-        (e.g. ``KazmaAgent.connect_mcp_servers``, the MCP settings UI)
-        keep working through the unified executor.
+        Workspace-bound servers (filesystem MCP) have their allowed root
+        substituted to the active workspace before spawn. Templates are
+        stored so Switch Repo can rebind without losing the original shape.
         """
         if self._mcp is None:
             return 0
-        return await self._mcp.connect_from_config([server_config])
+
+        # Install rebind bus once (idempotent)
+        try:
+            from kazma_core.workspace.mcp_rebind import (
+                apply_workspace_to_server_config,
+                install_mcp_workspace_rebind,
+                is_workspace_bound_server,
+            )
+
+            install_mcp_workspace_rebind(self)
+            name = str(server_config.get("name") or "unnamed")
+            # Keep a template without a resolved absolute path for rebind
+            template = dict(server_config)
+            self._server_configs[name] = template
+            cfg = (
+                apply_workspace_to_server_config(template)
+                if is_workspace_bound_server(template)
+                else dict(server_config)
+            )
+        except Exception as exc:
+            logger.debug("[Unified] workspace MCP bind skipped: %s", exc)
+            cfg = dict(server_config)
+
+        return await self._mcp.connect_from_config([cfg])
 
     def list_servers(self) -> list[dict[str, Any]]:
         """Return status info for all managed MCP servers."""

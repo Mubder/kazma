@@ -411,10 +411,19 @@ class SecurityHardeningRunner:
         skills_dir = self.project_root / "skills"
         if not skills_dir.exists():
             # Try common alternative locations
-            alt_paths = [
-                self.project_root / "kazma-core" / "skills",
-                Path.home() / ".kazma" / "skills",
-            ]
+            try:
+                from kazma_core.paths import installed_skills_dir, legacy_user_home
+
+                alt_paths = [
+                    self.project_root / "kazma-core" / "skills",
+                    installed_skills_dir(),
+                    legacy_user_home() / "skills",
+                ]
+            except Exception:
+                alt_paths = [
+                    self.project_root / "kazma-core" / "skills",
+                    Path.home() / ".kazma" / "skills",
+                ]
             for alt in alt_paths:
                 if alt.exists():
                     skills_dir = alt

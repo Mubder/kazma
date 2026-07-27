@@ -100,7 +100,7 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 - **Start Web (dev):** from repo root, venv active → `kazma serve` or uvicorn factory on `127.0.0.1` (default port often 9090 CLI / 8000 Docker). Set `KAZMA_SECRET` for non-loopback.
 - **Reset conversation:** `/reset` (history only; memory DB not wiped).
 - **Swarm:** `/swarm` commands / Swarm panel; workers need models + roles configured.
-- **IDE:** open Web `/ide` or TUI editor; workspace root = active WorkspaceStore / `KAZMA_WORKSPACE` / `kazma-data/workspace`.
+- **IDE:** open Web `/ide` or TUI editor; workspace root = active WorkspaceStore / pin / `KAZMA_WORKSPACE` / project `kazma-data/workspace`. MCP filesystem rebinds to the same root on Switch Repo (`workspace_bound`). Clones go to `~/kazma-repos` (or `KAZMA_CLONE_DIR`).
 - **Switch model:** Settings UI or `set_active_model` path — **always change provider with model**.
 - **YOLO / unattended danger:** production disables YOLO unless explicitly allowed; prefer HITL.
 - **Install:** `uv sync` / `pip install -e ".[rag,dev]"`; Windows `setup.ps1`; Docker `docker compose up`.

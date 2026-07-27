@@ -21,11 +21,13 @@ mcp:
   # Real MCP only — do not commit stub echo/test servers (they cannot start).
   - name: filesystem
     transport: stdio
+    # Rebind on Switch Repo / clone to the active workspace root.
+    workspace_bound: true
     command:
     - npx
     - -y
     - '@modelcontextprotocol/server-filesystem'
-    - kazma-data/workspace
+    - ${KAZMA_ACTIVE_WORKSPACE}
     enabled: true
 system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كازما), an autonomous
   multi-platform AI agent framework.

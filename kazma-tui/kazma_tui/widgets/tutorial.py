@@ -277,9 +277,15 @@ class TutorialScreen(ModalScreen[bool]):
             import json
             from pathlib import Path
 
-            config_dir = Path.home() / ".kazma"
-            prefs_file = config_dir / "preferences.json"
-            config_dir.mkdir(exist_ok=True)
+            try:
+                from kazma_core.paths import preferences_path, user_home
+
+                prefs_file = preferences_path()
+                config_dir = user_home()
+            except Exception:
+                config_dir = Path.home() / ".kazma"
+                prefs_file = config_dir / "preferences.json"
+            config_dir.mkdir(parents=True, exist_ok=True)
 
             # Read existing preferences to preserve user customizations
             existing = {}

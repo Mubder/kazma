@@ -334,8 +334,20 @@ class KazmaAppBuilder:
                 except Exception:
                     pass
             if not _workspace_path:
-                _workspace_path = "kazma-data/workspace"
+                try:
+                    from kazma_core.workspace.binding import default_sandbox_root
+
+                    _workspace_path = str(default_sandbox_root())
+                except Exception:
+                    _workspace_path = "kazma-data/workspace"
             configure_workspace(workspace=_workspace_path)
+            # Fire binding bus so MCP (if already connected later) shares the root
+            try:
+                from kazma_core.workspace.binding import notify_root_changed
+
+                notify_root_changed(_workspace_path, reason="app_boot")
+            except Exception:
+                pass
             logger.info("[Workspace] Configured to %s", _workspace_path)
         except Exception as e:
             logger.warning("[Workspace] Failed to configure: %s", e)

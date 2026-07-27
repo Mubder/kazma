@@ -442,10 +442,23 @@ def uninstall_skill(name: str, *, target_dir: Path | None = None) -> InstallResu
     """Remove an installed Agent Skill by name from the user skills dir."""
     dest = target_dir or user_agent_skills_dir()
     target = dest / name
-    # Also check ~/.kazma/agent-skills
-    alt = Path.home() / ".kazma" / "agent-skills" / name
+    # Project-local + legacy homes (read/remove only — no new writes to legacy)
+    try:
+        from kazma_core.paths import agent_skills_dir, legacy_user_home
+
+        alts = [
+            agent_skills_dir() / name,
+            legacy_user_home() / "agent-skills" / name,
+        ]
+    except Exception:
+        alts = [Path.home() / ".kazma" / "agent-skills" / name]
     removed_from: list[str] = []
-    for path in (target, alt):
+    seen: set[str] = set()
+    for path in (target, *alts):
+        key = str(path.resolve()) if path.exists() else str(path)
+        if key in seen:
+            continue
+        seen.add(key)
         if path.is_dir() and (path / "SKILL.md").is_file():
             shutil.rmtree(path)
             removed_from.append(str(path))

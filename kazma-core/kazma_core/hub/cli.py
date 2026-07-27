@@ -106,8 +106,8 @@ def _http_request(
 @click.group()
 @click.option(
     "--registry-path",
-    default="~/.kazma/hub/registry.db",
-    help="Path to the SQLite registry database.",
+    default=None,
+    help="Path to the SQLite registry database (default: project <repo>/.kazma/hub/registry.db).",
     envvar="KAZMA_HUB_DB",
 )
 @click.option(
@@ -117,9 +117,16 @@ def _http_request(
     envvar="KAZMA_HUB_URL",
 )
 @click.pass_context
-def hub(ctx, registry_path: str, hub_url: str | None) -> None:
+def hub(ctx, registry_path: str | None, hub_url: str | None) -> None:
     """Kazma Hub — skill registry commands."""
     ctx.ensure_object(dict)
+    if not registry_path:
+        try:
+            from kazma_core.paths import hub_registry_db
+
+            registry_path = hub_registry_db()
+        except Exception:
+            registry_path = str(Path.home() / ".kazma" / "hub" / "registry.db")
     ctx.obj["registry_path"] = registry_path
     ctx.obj["hub_url"] = hub_url or "https://hub.kazma.ai"
 

@@ -222,22 +222,29 @@ Never construct `ConfigStore()` in app code — only `get_config_store()`.
 
 ## 8. Workspace resolution (single ladder)
 
-**One function:** `kazma_core.tools.file_write._get_workspace()`.
+**One function:** `kazma_core.workspace.binding.resolve_active_root()`  
+(also re-exported as `file_write._get_workspace` / `configure_workspace`).
 
 Precedence (high → low):
 
 1. Per-task `workspace_scope` ContextVar (`SwarmTask.workspace_id`)  
-2. `configure_workspace()` pin  
-3. `KAZMA_WORKSPACE` env  
-4. Active **WorkspaceStore** row  
-5. Default `cwd/kazma-data/workspace`
+2. Active **WorkspaceStore** row (Switch Repo / clone — user intent)  
+3. `configure_workspace()` process pin  
+4. `KAZMA_WORKSPACE` env  
+5. Default `{data_dir}/workspace` (project sandbox, not monorepo cwd)
+
+**Binding bus:** `WorkspaceStore.set_active_workspace` → `notify_root_changed`  
+→ process pin + MCP rebind for `workspace_bound` servers  
+(`@modelcontextprotocol/server-filesystem` uses `${KAZMA_ACTIVE_WORKSPACE}`).
 
 | Related module | Must |
 |----------------|------|
 | `IdeService._resolve_workspace_root` | **Delegate** same rules |
+| `workspace_api` | **Delegate** `resolve_active_root` (no second ladder) |
 | `env_context.build_env_context` | Same root awareness |
 | `worker_dispatch` | Wrap with `workspace_scope` when task has id |
-| All `file_*` tools | Use `_get_workspace` only |
+| All `file_*` tools | Use `_get_workspace` / `resolve_active_root` only |
+| MCP filesystem | `workspace_bound: true` + rebind on switch |
 
 ---
 

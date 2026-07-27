@@ -20,12 +20,23 @@ def _is_path_allowed(path_str: str) -> bool:
     try:
         path = Path(path_str).expanduser().resolve()
         workspace = _get_workspace().resolve()
-        _ALLOWED_DB_ROOTS = [
-            Path("kazma-data").resolve(),
-            Path.home() / ".kazma",
-            Path("/tmp").resolve(),
-            workspace,
-        ]
+        try:
+            from kazma_core.paths import data_dir, legacy_user_home, user_home
+
+            _ALLOWED_DB_ROOTS = [
+                data_dir().resolve(),
+                user_home().resolve(),
+                legacy_user_home().resolve(),
+                Path("/tmp").resolve(),
+                workspace,
+            ]
+        except Exception:
+            _ALLOWED_DB_ROOTS = [
+                Path("kazma-data").resolve(),
+                Path.home() / ".kazma",
+                Path("/tmp").resolve(),
+                workspace,
+            ]
         return any(
             str(path).lower().startswith(str(root).lower()) or path == root
             for root in _ALLOWED_DB_ROOTS

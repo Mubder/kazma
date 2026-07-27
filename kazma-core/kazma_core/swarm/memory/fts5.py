@@ -137,7 +137,13 @@ class FTS5LexicalStore:
         return texts.get(uid, "")
 
     async def get_texts(self, ids: list[str]) -> dict[str, str]:
-        """Batch-fetch content for memory ids."""
+        """Batch-fetch content for memory ids via a single SQL path.
+
+        NOTE: A previous duplicate ``get_texts`` overwrote this method and
+        called ``get_text`` → ``get_texts`` recursively, causing
+        ``RecursionError`` on every L3 hydrate (Adapter L3 query failed).
+        Keep **one** batch implementation only.
+        """
         backend = await self._ensure_backend()
         if backend is None or not ids:
             return {}
@@ -163,20 +169,6 @@ class FTS5LexicalStore:
             return out
         except Exception:
             return {}
-
-    async def get_texts(self, uids: list[str]) -> dict[str, str]:
-        """Batch fetch content text for multiple IDs."""
-        if not uids:
-            return {}
-        backend = await self._ensure_backend()
-        if backend is None:
-            return {}
-        result: dict[str, str] = {}
-        for uid in uids:
-            text = await self.get_text(uid)
-            if text:
-                result[uid] = text
-        return result
 
     async def close(self) -> None:
         if self._backend is not None:
