@@ -22,7 +22,7 @@ from textual.app import ComposeResult
 from textual.widget import Widget
 from textual.widgets import Static
 
-from kazma_tui.widgets.sparkline import Sparkline
+from kazma_tui.widgets.sparkline import Sparkline  # noqa: F401 — used in MetricCard
 
 __all__ = ["MetricCard", "MetricsDashboard"]
 
@@ -48,9 +48,16 @@ class MetricCard(Widget):
     MetricCard {
         height: auto;
         width: 1fr;
+        min-height: 5;
         padding: 1 2;
         background: $panel;
+        border: tall $border;
         margin: 0 1;
+    }
+
+    MetricCard:hover {
+        border: tall $primary;
+        background: $boost;
     }
 
     MetricCard > .card-label {
@@ -61,6 +68,7 @@ class MetricCard(Widget):
     MetricCard > Sparkline {
         margin-top: 1;
         color: $primary;
+        height: 1;
     }
     """
 
@@ -138,27 +146,37 @@ class MetricsDashboard(Widget):
 
     DEFAULT_CSS = """
     MetricsDashboard {
-        height: auto;
-        padding: 1 2;
+        height: 1fr;
+        padding: 1 1;
+        background: $surface;
+    }
+
+    MetricsDashboard .metrics-title {
+        color: $text-muted;
+        text-style: bold;
+        padding: 0 1 1 1;
+        height: 1;
     }
 
     .metrics-grid {
         height: auto;
+        background: $surface;
     }
 
     .metric-row {
         height: auto;
         layout: horizontal;
+        margin-bottom: 1;
     }
 
     MetricCard {
         width: 1fr;
         height: auto;
-        padding: 0 1;
-    }
-
-    MetricCard > .card-label {
-        color: $text-muted;
+        min-height: 5;
+        padding: 1 2;
+        margin: 0 1;
+        background: $panel;
+        border: tall $border;
     }
     """
 
@@ -190,6 +208,7 @@ class MetricsDashboard(Widget):
         """Compose the dashboard as a 3x2 grid of MetricCard widgets."""
         from textual.containers import Horizontal, Vertical
 
+        yield Static("  METRICS  ·  live · 2s refresh", classes="metrics-title")
         with Vertical(classes="metrics-grid"):
             with Horizontal(classes="metric-row"):
                 yield MetricCard(

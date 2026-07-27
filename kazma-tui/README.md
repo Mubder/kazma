@@ -1,6 +1,8 @@
 # Kazma TUI
 
-A professional terminal-based dashboard for the Kazma framework, built with [Textual](https://textual.textualize.io/).
+A professional terminal-based **ops console** for the Kazma framework, built with [Textual](https://textual.textualize.io/).
+
+**TUI v2 shell (2026-07):** denser design tokens (aligned with kazma.ai), compact brand header, pill-style tabs, metric cards with borders, focused chat composer, status bar chrome. Visual system lives in `kazma_tui/theme.py`.
 
 ## Features
 

@@ -37,16 +37,16 @@ class SettingsPanel(VerticalScroll):
     """
 
     DEFAULT_CSS = """
-    SettingsPanel { 
-        height: 1fr; 
-        background: $surface; 
+    SettingsPanel {
+        height: 1fr;
+        background: $surface;
         padding: 1 2;
     }
     SettingsPanel .settings-section {
         margin: 1 0;
-        padding: 1;
+        padding: 1 2;
         background: $panel;
-        border: solid $border;
+        border: tall $border;
     }
     SettingsPanel .settings-title {
         color: $primary;
@@ -54,11 +54,13 @@ class SettingsPanel(VerticalScroll):
         margin-bottom: 1;
     }
     SettingsPanel .theme-buttons {
-        align: center middle;
+        align: left middle;
+        height: auto;
+        padding: 1 0;
     }
     SettingsPanel .theme-buttons Button {
-        margin: 0 1;
-        min-width: 15;
+        margin: 0 1 0 0;
+        min-width: 12;
     }
     """
 

@@ -48,27 +48,54 @@ class ChatPanel(Vertical):
     ]
 
     DEFAULT_CSS = """
-    ChatPanel { height: 1fr; border: solid $border; background: $surface; }
-    ChatPanel > RichLog { height: 1fr; background: transparent; border: none; padding: 1 2; }
-    ChatPanel > ProgressBar { height: 1; margin: 0 2; }
-    ChatPanel > Input {
-        dock: bottom; height: 3; margin: 1 2;
-        background: $panel; border: solid $border; color: $text;
+    ChatPanel {
+        height: 1fr;
+        border: none;
+        background: $surface;
+        padding: 0;
     }
-    ChatPanel > Input:focus { border: solid $primary; }
+    ChatPanel > RichLog {
+        height: 1fr;
+        background: $surface;
+        border: none;
+        padding: 1 2;
+    }
+    ChatPanel > ProgressBar {
+        height: 1;
+        margin: 0 2;
+        color: $primary;
+    }
+    ChatPanel > Input {
+        dock: bottom;
+        height: 3;
+        margin: 0 1 1 1;
+        background: $panel;
+        border: tall $border;
+        color: $text;
+        padding: 0 1;
+    }
+    ChatPanel > Input:focus {
+        border: tall $primary;
+        background: $boost;
+    }
 
     ChatPanel > #autocomplete {
-        dock: bottom; offset: 0 -4;
-        width: auto; min-width: 30; max-height: 18;
-        background: $panel; border: solid $primary;
+        dock: bottom;
+        offset: 0 -4;
+        width: auto;
+        min-width: 36;
+        max-height: 16;
+        background: $panel;
+        border: tall $primary;
         display: none;
+        padding: 0 1;
     }
     ChatPanel > #autocomplete ListItem {
         padding: 0 1;
         height: auto;
     }
     ChatPanel > #autocomplete ListItem.-highlight {
-        background: $primary 20%;
+        background: $primary 18%;
     }
     ChatPanel > #autocomplete .ac-cmd { color: $primary; text-style: bold; }
     ChatPanel > #autocomplete .ac-desc { color: $text-muted; }
@@ -94,7 +121,7 @@ class ChatPanel(Vertical):
     def compose(self) -> ComposeResult:
         yield RichLog(id="chat-log", highlight=True, markup=True, wrap=True, auto_scroll=True, max_lines=500)
         yield ProgressBar(id="chat-progress", total=100, show_eta=False)
-        yield Input(placeholder="Type... / for commands", id="chat-input")
+        yield Input(placeholder="Message  ·  / for commands  ·  Ctrl+P palette", id="chat-input")
         yield ListView(id="autocomplete")
 
     # ── Slash command autocomplete ─────────────────────────────────

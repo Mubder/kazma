@@ -1,16 +1,10 @@
 """Kazma TUI — Professional terminal dashboard for the Kazma agent framework.
 
-Architecture: Header · Tabs (Chat | Files | Swarm | Settings) · Footer
+Architecture (v2 shell):
+    KazmaHeader · Tabs (Dashboard | Chat | Files | Traces | Swarm | Settings)
+    · StatusBar · Footer
 
-Features:
-    - Enhanced visual design with premium styling
-    - Vim-style keyboard navigation (j/k for scrolling)
-    - Toast notifications for user feedback
-    - Context-sensitive key bindings
-    - Loading spinners for async operations
-    - Live status bar with metrics
-    - Adaptive refresh rates
-    - Accessibility enhancements
+Visual system lives in ``theme.py`` (design tokens + global TCSS).
 """
 
 from __future__ import annotations
@@ -23,7 +17,7 @@ from typing import Optional
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import Footer, Header, RichLog, TabbedContent, TabPane
+from textual.widgets import Footer, RichLog, TabbedContent, TabPane
 
 from kazma_tui.chat import ChatPanel
 from kazma_tui.dashboard import MetricsDashboard
@@ -48,9 +42,10 @@ logger = logging.getLogger(__name__)
 
 
 class KazmaTUI(App[None]):
-    """Kazma Terminal Dashboard — kazma.ai Web UI theme."""
+    """Kazma Terminal Dashboard — professional ops console (v2 shell)."""
 
     TITLE = "Kazma"
+    SUB_TITLE = "ops console"
     CSS = KAZMA_THEME
 
     BINDINGS = [
@@ -67,6 +62,12 @@ class KazmaTUI(App[None]):
         # Tab navigation
         Binding("ctrl+n", "next_tab", "Next Tab"),
         Binding("ctrl+b", "prev_tab", "Prev Tab"),
+        Binding("1", "goto_tab('dashboard')", "Dashboard", show=False),
+        Binding("2", "goto_tab('chat')", "Chat", show=False),
+        Binding("3", "goto_tab('files')", "Files", show=False),
+        Binding("4", "goto_tab('traces')", "Traces", show=False),
+        Binding("5", "goto_tab('swarm')", "Swarm", show=False),
+        Binding("6", "goto_tab('settings')", "Settings", show=False),
         # Help
         Binding("?", "help_screen", "Help", show=False),
         # Accessibility
@@ -86,7 +87,7 @@ class KazmaTUI(App[None]):
         self._shown_approvals: set[str] = set()
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield KazmaHeader(id="kazma-header")
         with TabbedContent(initial="dashboard", id="main-tabs"):
             with TabPane("Dashboard", id="dashboard"):
                 yield MetricsDashboard()
@@ -387,6 +388,14 @@ class KazmaTUI(App[None]):
                 focused.scroll_end()
             except Exception as exc:
                 logger.debug("Scroll bottom failed: %s", exc)
+
+    def action_goto_tab(self, tab_id: str) -> None:
+        """Jump to a main tab by id (bindings 1–6)."""
+        try:
+            tabs = self.query_one("#main-tabs", TabbedContent)
+            tabs.active = tab_id
+        except Exception:
+            logger.debug("goto_tab failed for %s", tab_id, exc_info=True)
 
     def action_next_tab(self) -> None:
         """Switch to next tab."""

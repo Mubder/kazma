@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — TUI v2 professional shell (2026-07-27)
+
+- **Design system** in `kazma_tui/theme.py`: denser tokens, tall borders, boost
+  surfaces, professional tab strip, shared widget polish.
+- **Shell:** `KazmaHeader` (brand · ready · provider/model), tab shortcuts 1–6,
+  subtitle "ops console".
+- **Dashboard / Chat / Settings / status / footer** CSS and layout density pass.
+
 ## Unreleased — Settings Packages: Memory stack + rag L4 (2026-07-27)
 
 - **Packages tab:** live memory health card (layers L1–L4, embedder, consolidator);
