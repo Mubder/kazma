@@ -186,25 +186,24 @@ class KazmaAppBuilder:
         set_config_store(self.config_store)
         self.config_store.reconcile_from_yaml()
 
-        # ── Demo mode: hardcode Groq, skip all provider/model selection ──
-        # No env vars needed, no ConfigStore seeding, no settings UI.
-        # The model is fixed to groq/compound-mini for the live demo.
+        # ── Demo mode (Fly.io kazma-demo): lock Groq + preset models ──
+        # Secrets: KAZMA_DEMO_MODE=true, GROQ_API_KEY, KAZMA_SECRET.
+        # Sole provider is Groq; presets stay available on the registry.
         _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
-        if _demo_mode:
-            _groq_key = os.environ.get("GROQ_API_KEY", "").strip()
-            if _groq_key:
-                # Wipe ALL providers, register ONLY Groq, lock it.
-                self.config_store.batch_set([
-                    ("providers.list", "[]", "providers"),
-                    ("registry.providers", "[]", "registry"),
-                    ("registry.discovered_models", "{}", "registry"),
-                    ("registry.active_provider", "", "registry"),
-                    ("registry.active_model", "", "registry"),
-                    ("llm.base_url", "https://api.groq.com/openai/v1", "llm"),
-                    ("llm.api_key", _groq_key, "llm"),
-                    ("llm.model", "groq/compound-mini", "llm"),
-                ])
-                logger.info("[App] Demo mode: hardcoded Groq + compound-mini")
+        _groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+        if _demo_mode and _groq_key:
+            self.config_store.batch_set([
+                ("providers.list", "[]", "providers"),
+                ("registry.providers", "[]", "registry"),
+                ("registry.discovered_models", "{}", "registry"),
+                ("registry.active_provider", "groq", "registry"),
+                ("registry.active_model", "groq/compound-mini", "registry"),
+                ("llm.base_url", "https://api.groq.com/openai/v1", "llm"),
+                ("llm.api_key", _groq_key, "llm"),
+                ("llm.model", "groq/compound-mini", "llm"),
+                ("agent.max_iterations", 30, "agent"),
+            ])
+            logger.info("[App] Demo mode: ConfigStore seeded Groq + compound-mini")
 
         # Initialize WorkspaceStore and align active workspace configurations on boot
         try:
@@ -220,23 +219,26 @@ class KazmaAppBuilder:
 
         self.registry = initialize_model_registry(self.config_store)
 
-        # In demo mode: register Groq as the sole provider and lock it.
-        if _demo_mode and os.environ.get("GROQ_API_KEY", "").strip():
+        # Demo: sole enabled provider = Groq with preset model list
+        if _demo_mode and _groq_key:
             self.registry.upsert_provider({
                 "name": "groq",
                 "base_url": "https://api.groq.com/openai/v1",
-                "api_key": os.environ["GROQ_API_KEY"],
+                "api_key": _groq_key,
                 "enabled": True,
-                "models": ["groq/compound-mini", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+                "models": [
+                    "groq/compound-mini",
+                    "llama-3.3-70b-versatile",
+                    "llama-3.1-8b-instant",
+                ],
             })
-            # Disable all other providers
             for p in self.registry.list_providers():
                 if p.get("name") != "groq":
                     self.registry.upsert_provider({**p, "enabled": False})
             self.registry._active_provider = "groq"
             self.registry._active_model = "groq/compound-mini"
             self.registry._clients.clear()
-            logger.info("[App] Demo: Groq locked as sole provider + model")
+            logger.info("[App] Demo: Groq locked (compound-mini + preset models)")
 
         # ── Env-var override (non-demo cloud deployments) ──
         _env_provider = os.environ.get("KAZMA_PROVIDER", "").strip()
@@ -276,9 +278,10 @@ class KazmaAppBuilder:
         # The agent's ContextAuthority needs vector memory at init time
         # for compaction retrieval. Initializing it here prevents the
         # "ContextAuthority has no memory_store" warning.
+        # Re-read flag (same as above) so vector memory stays light on free-tier Fly VMs
         _demo_mode = os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes")
         if _demo_mode:
-            logger.info("[VectorMemory] Skipped — KAZMA_DEMO_MODE is set")
+            logger.info("[VectorMemory] Skipped — KAZMA_DEMO_MODE is set (demo Fly footprint)")
         else:
             try:
                 from kazma_core.agent.tool_registry import set_vector_memory

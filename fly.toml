@@ -1,8 +1,9 @@
 # Fly.io configuration for Kazma live demo
-# Deploy: fly launch (first time) then fly deploy
+# Deploy: fly deploy (from this branch after merge)
+# App: https://kazma-demo.fly.dev (or your fly app URL)
 
 app = "kazma-demo"
-primary_region = "fra"  # Frankfurt — closest to Kuwait/Europe with good latency
+primary_region = "fra"  # Frankfurt — good latency for KW/EU
 
 [build]
   dockerfile = "Dockerfile.demo"
@@ -23,9 +24,12 @@ primary_region = "fra"  # Frankfurt — closest to Kuwait/Europe with good laten
   size = "shared-cpu-1x"   # free tier (256MB RAM)
   memory = 256
 
-# Environment variables — set via `fly secrets set` (not in this file):
-#   KAZMA_SECRET=<generate a random secret>
-#   GROQ_API_KEY=<your free Groq key from console.groq.com>
+# Secrets — set once (never commit real keys):
+#   fly secrets set KAZMA_SECRET=<random> GROQ_API_KEY=<key> KAZMA_DEMO_MODE=true
+#
+# Optional overrides (demo defaults when KAZMA_DEMO_MODE=true):
 #   KAZMA_PROVIDER=groq
 #   KAZMA_MODEL=groq/compound-mini
-#   KAZMA_DEMO_MODE=true
+#
+# Demo locks provider to Groq with presets:
+#   groq/compound-mini (default), llama-3.3-70b-versatile, llama-3.1-8b-instant
