@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased — KB + research depth plan (2026-07-27)
+
+- **Plan:** `docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md` — full findings from
+  KB and research audits, scores, workstreams (KB harden + deep research
+  product), phased PRs (protocol → soft gates → synthesize → paper pipeline),
+  acceptance metrics, and defaults for open decisions.
+
 ## Unreleased — Multi-path diagnosis map + HITL Settings wire-up (2026-07-27)
 
 - **Diagnosis map** (`docs/docs/ops/diagnosis-map.md`): symptom→files,
