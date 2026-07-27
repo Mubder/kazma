@@ -485,6 +485,19 @@
                 <label>{{ t('settings.system_prompt') }}</label>
                 <textarea class="form-textarea" x-model="agent.system_prompt" rows="6" :placeholder="t('settings.system_prompt_placeholder')"></textarea>
             </div>
+            <div class="form-group">
+                <label>{{ t('settings.max_tool_rounds') }}</label>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <input type="number" class="form-input" x-model.number="agent.max_iterations"
+                           min="5" max="100" step="1"
+                           style="max-width:120px;font-variant-numeric:tabular-nums;">
+                    <span style="font-size:0.78rem;color:var(--text-muted);"
+                          x-text="(agent.max_iterations || 15) + ' / 100'"></span>
+                </div>
+                <p class="form-help" style="margin-top:6px;font-size:0.78rem;color:var(--text-muted);line-height:1.45;">
+                    {{ t('settings.max_tool_rounds_help') }}
+                </p>
+            </div>
             <button class="btn btn-primary" @click="saveAgent()" :disabled="saving" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save_agent') }}'"></button>
         </div>
 

@@ -252,7 +252,8 @@ class AgentConfigUpdate(BaseModel):
     language: str | None = None
     system_prompt: str | None = None
     personality: str | None = None
-    max_iterations: int | None = None
+    # Supervisor ReAct tool-round ceiling (5–100). Default in ConfigStore: 15.
+    max_iterations: int | None = Field(default=None, ge=5, le=100)
 
 
 class SafetySettingsUpdate(BaseModel):

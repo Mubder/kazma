@@ -577,6 +577,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.english": {"en": "English", "ar": "الإنجليزية"},
     "settings.system_prompt": {"en": "System Prompt", "ar": "الموجه النظامي"},
     "settings.save_agent": {"en": "Save Agent", "ar": "حفظ الوكيل"},
+    "settings.max_tool_rounds": {"en": "Max tool rounds", "ar": "الحد الأقصى لجولات الأدوات"},
+    "settings.max_tool_rounds_help": {
+        "en": "How many supervisor tool rounds (ReAct) are allowed per chat turn before Kazma must answer. Default 15. Raise for deep research (e.g. 25–40). Range 5–100. Higher values use more tokens and time.",
+        "ar": "كم جولة أدوات (ReAct) مسموحة لكل رسالة قبل أن يجب على كاظمه الإجابة. الافتراضي 15. ارفعها للبحث العميق (مثل 25–40). النطاق 5–100. القيم الأعلى تستهلك رموزًا ووقتًا أكثر.",
+    },
     "settings.personality_templates": {"en": "Personality Templates", "ar": "قوالب الشخصية"},
     "settings.safety_hitl": {"en": "Safety (HITL)", "ar": "الأمان (الموافقة البشرية)"},
     "settings.enable_hitl": {"en": "Enable Human-in-the-Loop", "ar": "تفعيل المشاركة البشرية"},

@@ -48,7 +48,7 @@ function settingsApp() {
         profileName: '',
 
         // ── Agent Tab ──
-        agent: { name: 'kazma', language: 'ar', system_prompt: '', personality: 'default' },
+        agent: { name: 'kazma', language: 'ar', system_prompt: '', personality: 'default', max_iterations: 15 },
         personalities: [],
         safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 60, auto_deny_on_timeout: true },
         context: { max_context_tokens: 128000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
@@ -208,16 +208,22 @@ function settingsApp() {
             this.loading = true;
             try {
                 // Load all settings in parallel
-                const [settings, providers, personalities, shortcuts] = await Promise.all([
+                const [settings, providers, personalities, shortcuts, agentCfg] = await Promise.all([
                     this._fetch('/api/settings'),
                     this._fetch('/api/settings/providers'),
                     this._fetch('/api/settings/agent/personalities'),
                     this._fetch('/api/settings/shortcuts'),
+                    this._fetch('/api/settings/agent'),
                 ]);
 
                 if (settings) {
                     if (settings.model) Object.assign(this.currentModel, settings.model);
-                    if (settings.agent) Object.assign(this.agent, settings.agent);
+                    // Prefer dedicated agent endpoint (clean keys); fall back to category bag
+                    if (agentCfg && typeof agentCfg === 'object') {
+                        Object.assign(this.agent, agentCfg);
+                    } else if (settings.agent) {
+                        Object.assign(this.agent, settings.agent);
+                    }
                     if (settings.connectors) Object.assign(this.connectors, settings.connectors);
                     if (settings.appearance) {
                         Object.assign(this.appearance, settings.appearance);

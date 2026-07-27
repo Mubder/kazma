@@ -216,6 +216,11 @@ class SettingsRouterBuilder:
             config_store.set(setting.key, setting.value, category=setting.category)
             return {"status": "ok"}
 
+        @router.get("/api/settings/agent")
+        async def api_get_agent() -> dict[str, Any]:
+            """Get agent configuration (name, language, max tool rounds, …)."""
+            return _get_sm().get_agent_config()
+
         @router.put("/api/settings/agent")
         async def api_update_agent(req: AgentConfigUpdate) -> dict[str, str]:
             """Update agent configuration."""

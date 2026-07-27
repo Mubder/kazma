@@ -290,18 +290,32 @@ class SettingsManager:
 
     def get_agent_config(self) -> dict[str, Any]:
         """Get current agent settings."""
+        raw_max = self._cs.get("agent.max_iterations", 15)
+        try:
+            max_iter = int(raw_max)
+        except (TypeError, ValueError):
+            max_iter = 15
+        max_iter = max(5, min(100, max_iter))
         return {
             "name": self._cs.get("agent.name", "kazma"),
             "language": self._cs.get("agent.language", "ar"),
             "system_prompt": self._cs.get("agent.system_prompt", ""),
             "personality": self._cs.get("agent.personality", "default"),
+            # ReAct tool-round ceiling (supervisor loop)
+            "max_iterations": max_iter,
         }
 
     def save_agent_config(self, data: dict[str, Any]) -> None:
         """Save agent configuration."""
         for key, value in data.items():
-            if value is not None:
-                self._cs.set(f"agent.{key}", value, category="agent")
+            if value is None:
+                continue
+            if key == "max_iterations":
+                try:
+                    value = max(5, min(100, int(value)))
+                except (TypeError, ValueError):
+                    value = 15
+            self._cs.set(f"agent.{key}", value, category="agent")
 
     def get_personalities(self) -> list[dict[str, Any]]:
         """List available personality templates."""
