@@ -1,8 +1,7 @@
-# Research workspace (local artifacts)
+# Research workspace
 
-Scratch / smoke outputs for research and knowledge experiments.
+Local scratch for research experiments. **Not** a production runtime path.
 
-- `kb/` — sample or smoke-ingested knowledge library markdown snapshots.
-
-These files are **not** production runtime dependencies. Prefer
-`scripts/smoke_research_*.py` and `docs/plans/` for formal plans.
+- Prefer formal plans under `docs/plans/`
+- Prefer smoke scripts under `scripts/smoke_*.py`
+- Do not commit `kb/` smoke snapshots (gitignored)

@@ -2,7 +2,7 @@
 
 ## Source of truth
 
-**All product documentation lives under `docs/docs/`.** There is no separate `docs-v2/` tree (archived at `archive/docs-v2/`).
+**All product documentation lives under `docs/docs/`.** Retired dual trees (`docs-v2`, loose handovers) were removed from the monorepo; git history retains them if needed.
 
 | Area | Path |
 |------|------|
@@ -15,7 +15,7 @@
 | Engineering audits | [`audits/`](audits/) (not in site sidebar) |
 | Full system map | [`ARCHITECTURE_AND_SYSTEM_MAP.md`](ARCHITECTURE_AND_SYSTEM_MAP.md) |
 
-**Edit `docs/docs/**` only** for user-facing content. Historical material: `archive/`.
+**Edit `docs/docs/**` only** for user-facing content.
 
 ## Develop / build
 

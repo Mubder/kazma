@@ -18,7 +18,6 @@ without searching.
 | Production checklist | [`docs/docs/ops/production-checklist.md`](docs/docs/ops/production-checklist.md) |
 | Latest production audit | [`docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md`](docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md) |
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
-| Archived old docs trees | [`archive/`](archive/) |
 
 ## Package map (quick)
 

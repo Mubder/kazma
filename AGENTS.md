@@ -315,4 +315,4 @@ cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:
 - `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Latest production audit
 - `docs/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan
 - `CHANGELOG.md` — Sprint history
-- `archive/` — Retired docs trees (former `docs-v2`, legacy pages)
+- Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees.

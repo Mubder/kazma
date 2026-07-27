@@ -111,11 +111,9 @@ kazma/
 ├── deploy/nginx-ha.conf
 ├── scripts/                 # backup, restore, migrate, smoke, entrypoint
 ├── docs/                    # Docusaurus site + audits + ops + this map
-├── archive/docs-v2/         # Archived (merged into docs/docs/)
-├── tests/                   # Root regression suite (~3.7k tests)
+├── tests/                   # Root regression suite
 ├── loadtests/               # k6/locust
-├── examples/                # Sample skills (e.g. almuhalab)
-├── archive/                 # Historical packages
+├── examples/                # Sample skills + demos
 ├── kazma-core/              # Brain, swarm, tools, safety, db
 ├── kazma-ui/                # FastAPI web + static + SSE
 ├── kazma-gateway/           # Platform adapters + slash + routers
@@ -124,9 +122,9 @@ kazma/
 ├── kazma-skills/            # Native skill packages + YAML manifests
 ├── kazma-memory/            # Shared search/tokenizer backend
 ├── kazma-data/              # Runtime DBs (local; do not commit secrets)
-├── kubernetes/              # Sample manifests
-└── library/                 # Process notes
+└── kubernetes/              # Sample manifests
 ```
+
 
 ### 2.2 Package: `kazma-core/kazma_core/` (brain)
 
