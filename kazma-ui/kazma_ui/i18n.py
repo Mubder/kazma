@@ -220,6 +220,48 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.yolo_running": {"en": "YOLO on — running…", "ar": "YOLO مفعّل — جارٍ التشغيل…"},
     "chat.executing_approved": {"en": "Executing approved action…", "ar": "جارٍ تنفيذ الإجراء الموافق عليه…"},
     "chat.denying_tool": {"en": "Denying tool…", "ar": "جارٍ رفض الأداة…"},
+    "chat.processing_approval": {
+        "en": "Processing approval…",
+        "ar": "جارٍ معالجة الموافقة…",
+    },
+    "chat.resuming_execution": {
+        "en": "Resuming execution…",
+        "ar": "جارٍ استئناف التنفيذ…",
+    },
+    "chat.resuming_graph": {
+        "en": "Resuming graph execution…",
+        "ar": "جارٍ استئناف تنفيذ المخطط…",
+    },
+    "chat.preparing_tool": {
+        "en": "Preparing to execute {tool}…",
+        "ar": "جارٍ التحضير لتنفيذ {tool}…",
+    },
+    "chat.preparing_n_tools": {
+        "en": "Preparing to execute {n} tools…",
+        "ar": "جارٍ التحضير لتنفيذ {n} أدوات…",
+    },
+    "chat.running_tool": {
+        "en": "Running {tool}…",
+        "ar": "جارٍ تشغيل {tool}…",
+    },
+    "chat.running_after_approval": {
+        "en": "Running after {scope} approval…",
+        "ar": "جارٍ التشغيل بعد موافقة {scope}…",
+    },
+    "chat.continuing_after_deny": {
+        "en": "Continuing after deny…",
+        "ar": "جارٍ المتابعة بعد الرفض…",
+    },
+    "chat.still_working_approval": {
+        "en": "Still working after approval ({s}s)…",
+        "ar": "ما زال يعمل بعد الموافقة ({s} ث)…",
+    },
+    "chat.approval_complete": {
+        "en": "Approval completed successfully!",
+        "ar": "اكتملت الموافقة بنجاح!",
+    },
+    "chat.step_done": {"en": "Done", "ar": "تم"},
+    "chat.step_failed": {"en": "Failed", "ar": "فشل"},
     "chat.placeholder": {
         "en": "Type a message or /yolo … (Enter to send, / for commands)",
         "ar": "اكتب رسالة أو /yolo … (Enter للإرسال، / للأوامر)",

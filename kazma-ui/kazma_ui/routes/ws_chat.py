@@ -706,12 +706,24 @@ def create_ws_chat_router(
                             request_id=session_id[:12],
                         )
                     )
+                    # English message is a fallback for non-UI clients; the
+                    # chat UI localizes via step + tool/details (CHAT_I18N).
+                    _prep_msg = (
+                        f"Preparing to execute {len(tools_to_grant)} tools..."
+                        if len(tools_to_grant) > 1
+                        else f"Preparing to execute {tool_name}..."
+                    )
                     await websocket.send_json(
                         ApprovalEventBridge.create_approval_progress_event(
                             target_thread_id,
-                            f"Preparing to execute {tool_name}...",
+                            _prep_msg,
                             "preparing",
-                            {"tool": tool_name, "scope": scope},
+                            {
+                                "tool": tool_name,
+                                "scope": scope,
+                                "tools": tools_to_grant,
+                                "n": len(tools_to_grant) or 1,
+                            },
                         )
                     )
 

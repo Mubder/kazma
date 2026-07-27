@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — Arabic CoT: plan RTL + HITL activity i18n (2026-07-27)
+
+- **Plan panel RTL** from the first paint in Arabic UI (`dir=rtl` / Arabic-dominant
+  plan text); CSS for plan items, labels, activity steps.
+- **Activity i18n:** localize HITL CoT lines that were still English —
+  Processing approval, Preparing to execute N tools, Resuming graph execution,
+  Running tool, Done/Failed — via `CHAT_I18N` + client-side EN→locale map.
+
 ## Unreleased — Memory hygiene P1–P3 (optional) (2026-07-27)
 
 - **P1 sqlite_query authorizer:** allow safe read functions (`COUNT`, `LIKE`,

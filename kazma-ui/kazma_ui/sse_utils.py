@@ -88,7 +88,9 @@ class ApprovalEventBridge:
             "data": {
                 "tool": tool,
                 "scope": scope,
+                # English fallback for non-UI clients; chat UI localizes via step.
                 "message": "Resuming graph execution...",
+                "step": "resuming",
                 "thread_id": thread_id,
                 "timestamp": datetime.now(UTC).isoformat(),
             },
@@ -146,6 +148,7 @@ class ApprovalEventBridge:
                 "tool": tool,
                 "scope": scope,
                 "message": "Approval completed successfully!",
+                "step": "complete",
                 "thread_id": thread_id,
                 "duration_ms": round(duration_ms, 0),
                 "timestamp": datetime.now(UTC).isoformat(),

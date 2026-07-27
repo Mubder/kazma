@@ -2582,6 +2582,54 @@ tbody tr:last-child td {
 [dir="rtl"] .thinking-indicator {
   flex-direction: row-reverse;
 }
+
+/* ── RTL: Agent plan + activity workbench ── */
+[dir="rtl"] .agent-progress,
+[dir="rtl"] .agent-plan,
+.agent-plan.is-rtl,
+.agent-plan[dir="rtl"] {
+  text-align: right;
+}
+[dir="rtl"] .agent-plan-head,
+.agent-plan.is-rtl .agent-plan-head,
+.agent-plan[dir="rtl"] .agent-plan-head {
+  flex-direction: row; /* space-between already mirrors under dir=rtl */
+}
+[dir="rtl"] .agent-plan-item,
+.agent-plan.is-rtl .agent-plan-item,
+.agent-plan[dir="rtl"] .agent-plan-item {
+  flex-direction: row; /* check then text; dir=rtl puts check on the right */
+  text-align: right;
+}
+[dir="rtl"] .agent-plan-item .plan-text,
+.agent-plan.is-rtl .agent-plan-item .plan-text,
+.agent-plan[dir="rtl"] .agent-plan-item .plan-text {
+  text-align: right;
+  direction: rtl;
+  flex: 1;
+  min-width: 0;
+}
+[dir="rtl"] .agent-plan-bar-fill,
+.agent-plan.is-rtl .agent-plan-bar-fill,
+.agent-plan[dir="rtl"] .agent-plan-bar-fill {
+  /* Grow from the right (inline-start in RTL) */
+  margin-inline-start: auto;
+  float: none;
+}
+[dir="rtl"] .agent-activity-label,
+[dir="rtl"] .agent-plan-label {
+  text-align: right;
+}
+[dir="rtl"] .agent-progress-step {
+  text-align: right;
+}
+[dir="rtl"] .agent-progress-step .step-title,
+[dir="rtl"] .agent-progress-step .step-detail {
+  text-align: right;
+}
+[dir="rtl"] .agent-progress-header {
+  /* pulse | title | meta — natural RTL order */
+}
 [dir="rtl"] .input-wrapper {
   flex-direction: row-reverse;
 }

@@ -28,6 +28,63 @@ document.addEventListener('alpine:init', () => {
     return s;
   }
 
+  /** Localize server/EN CoT status lines for Arabic (and structured step codes). */
+  function _localizeStatus(raw, data) {
+    const msg = String(raw || '').trim();
+    const d = data || {};
+    const step = String(d.step || '').toLowerCase();
+    const tool = String(d.tool || d.tool_name || '').trim();
+    const scope = String(d.scope || '').trim() || 'tool';
+    const nTools = Array.isArray(d.tools) ? d.tools.length : 0;
+
+    if (step === 'preparing' || /^preparing to execute\b/i.test(msg)) {
+      const mN = msg.match(/preparing to execute\s+(\d+)\s+tools?/i);
+      if (mN) return _tiFmt('preparing_n_tools', 'Preparing to execute {n} tools…', { n: mN[1] });
+      if (/^\d+\s+tools?$/i.test(tool) || (nTools > 1 && !tool)) {
+        const n = nTools > 1 ? nTools : (tool.match(/^(\d+)/) || [])[1] || tool;
+        return _tiFmt('preparing_n_tools', 'Preparing to execute {n} tools…', { n: n });
+      }
+      const tname = tool || (msg.replace(/^preparing to execute\s+/i, '').replace(/\.{2,}$/, '').trim()) || 'tool';
+      if (/^\d+\s+tools?$/i.test(tname)) {
+        return _tiFmt('preparing_n_tools', 'Preparing to execute {n} tools…', {
+          n: (tname.match(/^(\d+)/) || [])[1] || tname,
+        });
+      }
+      return _tiFmt('preparing_tool', 'Preparing to execute {tool}…', { tool: tname });
+    }
+    if (step === 'resuming' || /resuming graph execution/i.test(msg) || /resuming execution/i.test(msg)) {
+      return /graph/i.test(msg)
+        ? _ti('resuming_graph', 'Resuming graph execution…')
+        : _ti('resuming_execution', 'Resuming execution…');
+    }
+    if (/processing approval/i.test(msg)) {
+      return _ti('processing_approval', 'Processing approval…');
+    }
+    if (/approval completed successfully/i.test(msg)) {
+      return _ti('approval_complete', 'Approval completed successfully!');
+    }
+    if (/continuing after deny/i.test(msg)) {
+      return _ti('continuing_after_deny', 'Continuing after deny…');
+    }
+    const afterAppr = msg.match(/running after\s+(\w+)\s+approval/i);
+    if (afterAppr) {
+      return _tiFmt('running_after_approval', 'Running after {scope} approval…', {
+        scope: afterAppr[1] || scope,
+      });
+    }
+    const still = msg.match(/still working after approval\s*\((\d+)\s*s\)/i);
+    if (still) {
+      return _tiFmt('still_working_approval', 'Still working after approval ({s}s)…', {
+        s: still[1],
+      });
+    }
+    const runTool = msg.match(/^running\s+(.+?)\s*[.…]*$/i);
+    if (runTool && !/after/i.test(msg)) {
+      return _tiFmt('running_tool', 'Running {tool}…', { tool: runTool[1] });
+    }
+    return msg;
+  }
+
   Alpine.store('agent', {
     // ── Reactive State Properties ───────────────────────────
     isThinking: false,
@@ -377,7 +434,7 @@ document.addEventListener('alpine:init', () => {
               detail: detail || '',
               state: 'running',
             });
-            this.statusMessage = 'Running ' + tName + '…';
+            this.statusMessage = _tiFmt('running_tool', 'Running {tool}…', { tool: tName });
             this._syncThinkingBanner();
           } else if (toolStatus === 'tool_completed') {
             if (this.activeTool) {
@@ -422,7 +479,7 @@ document.addEventListener('alpine:init', () => {
         case 'approval_required':
           this._progress({
             kind: 'status',
-            title: 'Waiting for approval',
+            title: _ti('waiting_approval', 'Waiting for approval'),
             detail: frame.tool || data.tool || frame.message || '',
             state: 'info',
           });
@@ -440,9 +497,34 @@ document.addEventListener('alpine:init', () => {
         case 'approval_resuming':
           this.isThinking = true;
           this._turnActive = true;
-          this.statusMessage =
-            (data && data.message) ||
-            (type === 'approval_resuming' ? 'Resuming execution...' : 'Processing approval...');
+          {
+            let raw =
+              (data && data.message) ||
+              (type === 'approval_resuming'
+                ? 'Resuming graph execution...'
+                : type === 'approval_progress'
+                  ? (data && data.tool
+                      ? 'Preparing to execute ' + data.tool + '...'
+                      : 'Processing approval...')
+                  : 'Processing approval...');
+            // Prefer structured step when present
+            if (type === 'approval_resuming' && !(data && data.message)) {
+              raw = 'Resuming graph execution...';
+            }
+            if (type === 'approval_started' && !(data && data.message)) {
+              raw = 'Processing approval...';
+            }
+            this.statusMessage = _localizeStatus(raw, Object.assign({}, data, {
+              step:
+                (data && data.step) ||
+                (type === 'approval_resuming'
+                  ? 'resuming'
+                  : type === 'approval_progress'
+                    ? 'preparing'
+                    : ''),
+              tool: (data && (data.tool || data.tool_name)) || frame.tool || '',
+            }));
+          }
           this._progress({
             kind: 'thought',
             title: this.statusMessage,

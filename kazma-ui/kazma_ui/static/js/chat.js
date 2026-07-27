@@ -1060,6 +1060,11 @@
     }
     panel = document.createElement('div');
     panel.className = 'agent-progress is-active';
+    var pageRtl = (document.documentElement.getAttribute('dir') || '') === 'rtl';
+    if (pageRtl) {
+      panel.setAttribute('dir', 'rtl');
+      panel.classList.add('is-rtl');
+    }
     panel.innerHTML =
       '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench">' +
         '<span class="agent-progress-pulse" aria-hidden="true"></span>' +
@@ -1069,7 +1074,8 @@
         '<span class="agent-progress-chevron" aria-hidden="true">\u25BE</span>' +
       '</div>' +
       '<div class="agent-progress-body">' +
-        '<div class="agent-plan" hidden>' +
+        '<div class="agent-plan' + (pageRtl ? ' is-rtl' : '') + '"' +
+          (pageRtl ? ' dir="rtl"' : '') + ' hidden>' +
           '<div class="agent-plan-head">' +
             '<div class="agent-plan-label">' + escapeHtml(ti('plan', 'Plan')) + '</div>' +
             '<div class="agent-plan-meta"></div>' +
@@ -1127,6 +1133,20 @@
         '<span class="plan-check" aria-hidden="true">' + (item.done ? '\u2713' : (idx + 1)) + '</span>' +
         '<span class="plan-text">' + escapeHtml(item.text) + '</span></li>';
     }).join('');
+    // Arabic UI / Arabic plan text: force RTL layout (not only after bidi late-pass)
+    var pageRtl = (document.documentElement.getAttribute('dir') || '') === 'rtl';
+    var planSample = _planItems.map(function(p) { return p.text; }).join(' ');
+    var arPlan = pageRtl || (window.KazmaBidi && KazmaBidi.isArabicDominant(planSample));
+    if (arPlan) {
+      wrap.setAttribute('dir', 'rtl');
+      wrap.classList.add('is-rtl');
+    } else {
+      wrap.setAttribute('dir', 'ltr');
+      wrap.classList.remove('is-rtl');
+    }
+    if (window.KazmaBidi) {
+      try { KazmaBidi.applyAll(wrap); } catch (e) { /* ignore */ }
+    }
   }
 
   function setPlan(items) {
@@ -1227,6 +1247,38 @@
     return false;
   }
 
+  /** Map common English CoT/HITL titles to CHAT_I18N (Activity log). */
+  function _localizeCotTitle(title) {
+    var s = String(title || '').trim();
+    if (!s) return s;
+    // Already Arabic-heavy — leave alone
+    if (/[\u0600-\u06FF]/.test(s) && !/^[A-Za-z]/.test(s)) return s;
+    var m;
+    if (/^processing approval/i.test(s)) return ti('processing_approval', s);
+    if (/^resuming graph execution/i.test(s)) return ti('resuming_graph', s);
+    if (/^resuming execution/i.test(s)) return ti('resuming_execution', s);
+    if (/^approval completed successfully/i.test(s)) return ti('approval_complete', s);
+    if (/^continuing after deny/i.test(s)) return ti('continuing_after_deny', s);
+    if (/^waiting for approval/i.test(s)) return ti('waiting_approval', s);
+    m = s.match(/^preparing to execute\s+(\d+)\s+tools?/i);
+    if (m) return tiFmt('preparing_n_tools', s, { n: m[1] });
+    m = s.match(/^preparing to execute\s+(.+?)\s*\.?\.?\.?$/i);
+    if (m) {
+      var tool = m[1].replace(/\.+$/, '').trim();
+      if (/^\d+\s+tools?$/i.test(tool)) {
+        return tiFmt('preparing_n_tools', s, { n: (tool.match(/^(\d+)/) || [])[1] || tool });
+      }
+      return tiFmt('preparing_tool', s, { tool: tool });
+    }
+    m = s.match(/^running after\s+(\w+)\s+approval/i);
+    if (m) return tiFmt('running_after_approval', s, { scope: m[1] });
+    m = s.match(/^still working after approval\s*\((\d+)\s*s\)/i);
+    if (m) return tiFmt('still_working_approval', s, { s: m[1] });
+    m = s.match(/^running\s+(.+?)\s*[.…]*$/i);
+    if (m && !/after/i.test(s)) return tiFmt('running_tool', s, { tool: m[1] });
+    return s;
+  }
+
   function logProgress(step) {
     if (!step) return;
     var panel = ensureProgressPanel();
@@ -1239,6 +1291,10 @@
     // Canonical display for thinking heartbeats (localized)
     if (kind === 'status' && _isThinkingStatus(title)) {
       title = ti('thinking', 'Kazma is thinking\u2026');
+    }
+    // Localize leftover English HITL / CoT lines if server sent raw EN
+    if (kind !== 'tool') {
+      title = _localizeCotTitle(title);
     }
     var detail = step.detail != null ? String(step.detail) : '';
 
@@ -1292,7 +1348,9 @@
       last.dataset.state = state;
       last.dataset.title = title;
       var st = last.querySelector('.step-state');
-      if (st) st.textContent = state === 'done' ? 'Done' : (state === 'failed' ? 'Failed' : state);
+      if (st) st.textContent = state === 'done'
+        ? ti('step_done', 'Done')
+        : (state === 'failed' ? ti('step_failed', 'Failed') : state);
       var titleNode = last.querySelector('.step-title');
       if (titleNode) titleNode.textContent = title;
       if (detail) {
@@ -1353,7 +1411,9 @@
             ? ' <span class="step-state">' + escapeHtml(
                 state === 'running'
                   ? ti('running', 'Running\u2026')
-                  : (state === 'done' ? ti('done', 'Done') : state)
+                  : (state === 'done'
+                      ? ti('step_done', ti('done', 'Done'))
+                      : (state === 'failed' ? ti('step_failed', 'Failed') : state))
               ) + '</span>'
             : '') +
           '<span class="step-time">' + escapeHtml(formatMsgTime()) + '</span>' +
