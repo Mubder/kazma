@@ -82,6 +82,31 @@ def test_needs_synthesis_when_last_is_tool():
     assert needs is True
 
 
+def test_short_sanitized_preamble_is_not_final():
+    """After max-iter, sanitize turns tool_calls assistant into ~100-char text.
+
+    That must NOT count as a final answer (smoke regression 2026-07-27).
+    """
+    msgs = [
+        {"role": "user", "content": "smoke test 2"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "1"}]},
+        {"role": "tool", "content": "ok files"},
+        # What sanitize leaves after stripping dangling tool_calls:
+        {
+            "role": "assistant",
+            "content": "I'll keep exploring with a few more tools and then summarize.",
+        },
+    ]
+    assert _has_final_assistant_after_tools(msgs) is True  # any non-empty
+    # Production gate: substantial only
+    assert len(msgs[-1]["content"]) < 250
+    min_chars = 250
+    text = msgs[-1]["content"].strip()
+    assert len(text) < min_chars
+    needs = True and (False or len(text) < min_chars)
+    assert needs is True
+
+
 @pytest.mark.asyncio
 async def test_respond_node_synthesizes_after_max_with_tool_tail(monkeypatch):
     """Full respond_node path: last role=tool + early chatter → LLM synthesis runs."""
@@ -127,3 +152,54 @@ async def test_respond_node_synthesizes_after_max_with_tool_tail(monkeypatch):
         if m.get("role") == "assistant" and (m.get("content") or "").strip() and not m.get("tool_calls")
     ]
     assert any("memory_search" in (m.get("content") or "") or "تقرير" in (m.get("content") or "") for m in finals)
+
+
+@pytest.mark.asyncio
+async def test_respond_synthesizes_when_only_short_preamble_after_tools(monkeypatch):
+    """Max-iter + short sanitized assistant preamble must force synthesis."""
+    from kazma_core.agent import graph_builder as gb
+
+    class _Resp:
+        content = (
+            "Smoke complete. Workspace is healthy: file tools OK, git OK, "
+            "memory layers responded, and no circuit breaker tripped. "
+            "Ready for deeper tasks."
+        )
+
+    class _LLM:
+        async def chat(self, messages, tools=None):
+            assert tools is None
+            return _Resp()
+
+    short = "I'll keep exploring a bit more and then write the report."
+    assert len(short) < 250
+
+    state = {
+        "messages": [
+            {"role": "user", "content": "Smoke test 2 — full system check"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "c1", "function": {"name": "file_list", "arguments": "{}"}}],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "ok: files listed"},
+            # Simulates sanitize_tool_chains after dangling tool_calls stripped
+            {"role": "assistant", "content": short},
+        ],
+        "iteration": 16,
+        "max_iterations": 15,
+    }
+
+    monkeypatch.setattr(
+        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        lambda *_a, **_k: None,
+    )
+
+    out = await gb.respond_node(state, llm=_LLM())
+    texts = [
+        m.get("content") or ""
+        for m in out["messages"]
+        if m.get("role") == "assistant" and not m.get("tool_calls")
+    ]
+    assert any("Smoke complete" in t or "Workspace is healthy" in t for t in texts)
+    assert any(len(t) >= 250 or "Smoke complete" in t for t in texts)

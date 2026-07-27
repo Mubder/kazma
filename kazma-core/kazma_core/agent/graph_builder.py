@@ -1022,44 +1022,52 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     )
 
     # If max iterations forced us here mid-tool-loop, there is often no
-    # *final* user-visible answer after the last tool results. An early
-    # assistant thought (e.g. "ممتاز قاعدة البيانات…") used to make us skip
-    # synthesis (bug: empty CoT + 53-char leftover after YOLO/shell rabbit
-    # hole). Only treat assistant text AFTER the last tool as a final answer.
-    def _has_final_assistant_after_tools(msgs: list[dict[str, Any]]) -> bool:
+    # *final* user-visible answer after the last tool results.
+    #
+    # Bugs this guards against:
+    # 1. Early assistant chatter (pre-tool "ممتاز…") counted as final.
+    # 2. Sanitize strips dangling tool_calls from the last supervisor
+    #    turn, leaving a short preamble (~100 chars) that looked like a
+    #    final answer — smoke test "done" with no real reply (2026-07-27).
+    # Only treat **substantial** plain assistant text AFTER the last tool
+    # as a real final answer when max-iter forces stop.
+    _MIN_FINAL_CHARS_ON_MAX = 250
+
+    def _final_assistant_text_after_tools(msgs: list[dict[str, Any]]) -> str:
         last_tool_idx = -1
         for i, m in enumerate(msgs):
             if isinstance(m, dict) and m.get("role") in ("tool", "function"):
                 last_tool_idx = i
-        if last_tool_idx < 0:
-            # No tools — any plain assistant text counts.
-            for m in reversed(msgs):
-                if not isinstance(m, dict):
-                    continue
-                if m.get("role") not in ("assistant", "ai"):
-                    continue
-                content = m.get("content") or ""
-                if isinstance(content, str) and content.strip() and not m.get("tool_calls"):
-                    return True
-            return False
-        for m in msgs[last_tool_idx + 1 :]:
+        candidates: list[str] = []
+        scan = msgs if last_tool_idx < 0 else msgs[last_tool_idx + 1 :]
+        for m in scan:
             if not isinstance(m, dict):
                 continue
             if m.get("role") not in ("assistant", "ai"):
                 continue
+            if m.get("tool_calls"):
+                continue
             content = m.get("content") or ""
-            if isinstance(content, str) and content.strip() and not m.get("tool_calls"):
-                return True
-        return False
+            if isinstance(content, str) and content.strip():
+                candidates.append(content.strip())
+        return candidates[-1] if candidates else ""
+
+    def _has_final_assistant_after_tools(
+        msgs: list[dict[str, Any]], *, min_chars: int = 1
+    ) -> bool:
+        text = _final_assistant_text_after_tools(msgs)
+        return len(text) >= min_chars
 
     _last = messages[-1] if messages else {}
     _last_role = _last.get("role") if isinstance(_last, dict) else None
     _max_hit = iteration >= state.get("max_iterations", 15)
     # Always synthesize when we stop on a tool result, or when there is no
-    # plain assistant text after the last tool (mid-loop chatter does not count).
+    # *substantial* plain assistant text after the last tool.
+    _final_text = _final_assistant_text_after_tools(messages)
     _needs_synthesis = _max_hit and (
         _last_role in ("tool", "function")
-        or not _has_final_assistant_after_tools(messages)
+        or len(_final_text) < _MIN_FINAL_CHARS_ON_MAX
+        or bool(isinstance(_last, dict) and _last.get("tool_calls"))
     )
     if _needs_synthesis:
         _llm = llm or state.get("_llm")
@@ -1130,9 +1138,10 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
             )
     elif _max_hit:
         logger.info(
-            "[Respond] Max iterations but assistant text already present "
-            "(last_role=%s) — skipping synthesis",
+            "[Respond] Max iterations but substantial final text already present "
+            "(last_role=%s chars=%d) — skipping synthesis",
             _last_role,
+            len(_final_text),
         )
 
     # Post-turn memory: auto_store (vacuum) then consolidator (librarian)
