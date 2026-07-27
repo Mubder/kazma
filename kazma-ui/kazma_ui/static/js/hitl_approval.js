@@ -152,7 +152,19 @@
       window.KazmaApp.setIsThinking(true, approve ? 'Running approved tool…' : 'Denying tool…');
     }
 
-    KazmaStream.ssePost(url, payload, {
+    var sseFn = (window.KazmaStream && (KazmaStream.ssePost || KazmaStream.sse));
+    if (!sseFn) {
+      if (statusEl) {
+        statusEl.style.display = 'inline';
+        statusEl.textContent = 'Streaming unavailable';
+        statusEl.className = 'hitl-approval-status hitl-status-error';
+      }
+      if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+        window.KazmaApp.setIsThinking(false);
+      }
+      return;
+    }
+    sseFn(url, payload, {
       onEvent: function(type, data) {
         if (type === 'status' && data && data.content && statusEl) {
           statusEl.textContent = data.content;

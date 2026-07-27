@@ -273,15 +273,50 @@
   // Original SVG icons for the send button (restored after Stop mode).
   var _SEND_SVG = '<svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
   var _STOP_SVG = '<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+  /**
+   * Single turn-state machine shared by SSE and WebSocket transports.
+   *
+   * Root cause of "must press Stop/ESC before I can chat again":
+   * chat preferred the WebSocket bus when connected, called beginTurn()
+   * (Stop pulses, Enter blocked), but never called endTurn() because SSE
+   * onDone never fires on that path — and newSession used to leave the
+   * flag set. Both transports must end every turn.
+   */
   var _isGenerating = false;
+  var _awaitingApproval = false;
+  /** Absolute failsafe so a dropped idle frame can never trap the UI forever. */
+  var _turnWatchdogTimer = null;
+  /** Desync healer: if agent store is idle but Stop is still on, release. */
+  var _turnSyncTimer = null;
+  var TURN_WATCHDOG_MS = 3 * 60 * 1000;
 
-  function disableInput() {
-    // Keep the input ENABLED so the user can type their next message while
-    // the agent works. Only the send button transforms into a Stop button.
+  function _clearTurnTimers() {
+    if (_turnWatchdogTimer) {
+      clearTimeout(_turnWatchdogTimer);
+      _turnWatchdogTimer = null;
+    }
+  }
+
+  function _armTurnWatchdog() {
+    _clearTurnTimers();
+    _turnWatchdogTimer = setTimeout(function() {
+      _turnWatchdogTimer = null;
+      if (_isGenerating && !_awaitingApproval) {
+        console.warn('[KazmaChat] Turn watchdog released a stuck Stop/Enter lock');
+        forceEndTurn();
+      }
+    }, TURN_WATCHDOG_MS);
+  }
+
+  function beginTurn() {
     _isGenerating = true;
-    if (inputEl) inputEl.placeholder = 'Kazma is thinking\u2026 type to queue your next message';
+    _awaitingApproval = false;
+    _armTurnWatchdog();
+    if (inputEl) {
+      inputEl.disabled = false;
+      inputEl.placeholder = 'Kazma is thinking\u2026 type to queue your next message';
+    }
     hideSlashMenu();
-    // Transform send button → Stop button.
     if (sendBtn) {
       sendBtn.disabled = false;
       sendBtn.classList.add('stop-mode');
@@ -290,34 +325,81 @@
     }
   }
 
-  function enableInput() {
+  function endTurn() {
+    _clearTurnTimers();
     _isGenerating = false;
+    _awaitingApproval = false;
+    if (activeTypingEl && KS.hideTyping) {
+      KS.hideTyping(activeTypingEl);
+    }
+    activeTypingEl = null;
+    if (typingEl && KS.hideTyping) KS.hideTyping(typingEl);
     if (inputEl) {
       inputEl.disabled = false;
       inputEl.placeholder = 'Type a message or /yolo \u2026 (Enter to send)';
     }
-    // Restore send button from Stop mode.
     if (sendBtn) {
       sendBtn.disabled = false;
       sendBtn.classList.remove('stop-mode');
       sendBtn.title = 'Send (Enter / Ctrl+Enter)';
       sendBtn.innerHTML = _SEND_SVG;
     }
-    if (inputEl) inputEl.focus();
+    // Finalize open assistant bubble so the next token starts a new one.
+    currentMsgEl = null;
+    tokenAccum = '';
+    activeStream = null;
   }
 
-  function lockInputForApproval() {
+  /**
+   * Hard reset used by new session / ESC / desync recovery.
+   * Always clears Stop + Alpine thinking even if the server never sent idle.
+   */
+  function forceEndTurn() {
+    try {
+      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
+        var store = Alpine.store('agent');
+        store.isThinking = false;
+        store.activeNode = '';
+        store.activeTool = null;
+        store.pendingApproval = null;
+        store._turnActive = false;
+      }
+    } catch (e) {}
+    endTurn();
+  }
+
+  function pauseForApproval(data) {
+    // HITL: turn is paused, not generating. Stop must not pulse; input locked
+    // until the user picks Approve / YOLO / Deny.
+    _clearTurnTimers();
+    _isGenerating = false;
+    _awaitingApproval = true;
+    if (activeTypingEl && KS.hideTyping) KS.hideTyping(activeTypingEl);
+    activeTypingEl = null;
+    if (typingEl && KS.hideTyping) KS.hideTyping(typingEl);
     if (inputEl) {
       inputEl.disabled = true;
       inputEl.placeholder = 'Please approve or deny the pending action to continue.';
     }
     if (sendBtn) {
       sendBtn.disabled = true;
+      sendBtn.classList.remove('stop-mode');
+      sendBtn.title = 'Awaiting approval';
+      sendBtn.innerHTML = _SEND_SVG;
     }
+    void data;
+  }
+
+  // Back-compat aliases used throughout this file.
+  function disableInput() { beginTurn(); }
+  function enableInput() { endTurn(); }
+
+  function lockInputForApproval() {
+    pauseForApproval(null);
   }
 
   function unlockInputForApproval() {
-    enableInput();
+    endTurn();
   }
 
   function abortGeneration() {
@@ -326,15 +408,24 @@
       activeStream = null;
       KS.toast('Generation stopped', 'info', 2000);
     }
-    // Abort does not fire onDone/onError (AbortError is swallowed) — clear
-    // the "thinking" indicator so Stop never leaves a stuck spinner.
-    if (activeTypingEl && KS.hideTyping) {
-      KS.hideTyping(activeTypingEl);
-    }
-    activeTypingEl = null;
-    currentMsgEl = null;
-    tokenAccum = '';
-    enableInput();
+    forceEndTurn();
+  }
+
+  // Heal desync: WS sets isThinking=false but missed chat.endTurn (or vice versa).
+  // Runs cheaply; only acts when Stop is stuck while the bus reports idle.
+  if (!_turnSyncTimer) {
+    _turnSyncTimer = setInterval(function() {
+      if (!_isGenerating || _awaitingApproval) return;
+      try {
+        if (!window.Alpine || !Alpine.store || !Alpine.store('agent')) return;
+        var store = Alpine.store('agent');
+        if (store.pendingApproval) return;
+        if (store._turnActive || store.isThinking) return;
+        // Bus is idle; chat still thinks a turn is running → release.
+        console.warn('[KazmaChat] Desync recovery: releasing stuck generation lock');
+        endTurn();
+      } catch (e) {}
+    }, 1500);
   }
 
   // ── File handling ─────────────────────────────────────
@@ -709,14 +800,11 @@
         // "_No response received._" with no recourse, show a Retry button
         // that re-sends the last user message in one click. Recoverable in
         // one click instead of looking broken.
-        if (!tokenAccum && !currentMsgEl && !(data && data.interrupted)) {
+        var interrupted = !!(data && data.interrupted);
+        if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval) {
           currentMsgEl = createAssistantMessage();
           var emptyEl = currentMsgEl.querySelector('.message-text');
           if (emptyEl) {
-            // Build a Retry button only if there's a message to retry.
-            // Prefer the tracked lastSentUserText (robust — works even
-            // when no user bubble rendered); fall back to window.KazmaChat.retry()
-            // which reads from the DOM.
             var retryHtml = '';
             if (lastSentUserText || (messagesEl.querySelector('.message-user'))) {
               retryHtml = ' <button class="btn btn-secondary btn-sm" '
@@ -741,22 +829,25 @@
           }
         }
         // Play TTS for the assistant's response
-        if (tokenAccum && window.KazmaVoice) {
+        if (tokenAccum && window.KazmaVoice && !interrupted) {
           window.KazmaVoice.playTTS(tokenAccum);
         }
-        currentMsgEl = null;
-        tokenAccum = '';
-        activeStream = null;
-        enableInput();
-        if (showArchived) loadArchivedSessions(); else loadSessions(); // refresh session list
+        // If HITL paused this turn, onApprovalRequired already called
+        // pauseForApproval — do NOT endTurn (would re-enable input under the card).
+        if (interrupted || _awaitingApproval) {
+          activeStream = null;
+          if (!_awaitingApproval) pauseForApproval(null);
+        } else {
+          endTurn();
+        }
+        if (showArchived) loadArchivedSessions(); else loadSessions();
       },
 
       onApprovalRequired: function(data) {
-        // HITL: graph paused — render scope-aware approval card.
-        // Keep _isGenerating=true and activeStream alive so the Stop button
-        // can still abort the SSE connection while waiting for approval.
+        // HITL: graph paused — render scope-aware approval card and lock input.
         KS.hideTyping(typingEl);
         activeTypingEl = null;
+        pauseForApproval(data);
         renderHitlCard(data);
       },
 
@@ -767,10 +858,7 @@
         var textEl = currentMsgEl.querySelector('.message-text');
         textEl.innerHTML = '<div class="error-message">\u26A0 ' + escapeHtml(msg) +
           '<br><button class="btn btn-sm btn-danger" onclick="window.KazmaChat.retry()">Retry</button></div>';
-        currentMsgEl = null;
-        tokenAccum = '';
-        activeStream = null;
-        enableInput();
+        endTurn();
         if (msg && window.showToast) {
           try { window.showToast(String(msg), 'error', 4000); } catch (_t) {}
         }
@@ -869,7 +957,7 @@
    */
   function renderHitlCard(data) {
     if (!data) return;
-    lockInputForApproval();
+    pauseForApproval(data);
     var targetThreadId = data.thread_id || chatSessionId || '';
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
     var content = currentMsgEl.querySelector('.message-content');
@@ -947,6 +1035,20 @@
         : (scope === 'yolo' ? 'YOLO on \u2014 running\u2026'
           : (scope === 'tool' ? 'Granting tool \u2014 running\u2026' : 'Running approved tool\u2026'));
       setCardState('pending', pendingLabel);
+      beginTurn();
+
+      // Prefer the live WebSocket bus when connected (same graph + grants path).
+      var agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
+      if (agentStore && agentStore.connectionStatus === 'connected') {
+        agentStore.submitApproval(action === 'approve', scope, data.thread_id || targetThreadId);
+        if (scope === 'yolo' && KS.toast) {
+          KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
+        }
+        if (scope === 'tool' && KS.toast) {
+          KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
+        }
+        return;
+      }
 
       var payload = {
         action: action,
@@ -958,22 +1060,28 @@
       if (!currentMsgEl) {
         currentMsgEl = createAssistantMessage();
       }
-      
+
       var approvalTypingEl = KS.showTyping(currentMsgEl.querySelector('.message-content'));
+      var approvalUrl = '/api/approve/' + encodeURIComponent(data.thread_id || targetThreadId);
+      var sseFn = (KS && (KS.ssePost || KS.sse)) || (window.KazmaStream && (KazmaStream.ssePost || KazmaStream.sse));
 
-      var approvalUrl = '/api/approve/' + encodeURIComponent(data.thread_id);
+      if (!sseFn) {
+        setCardState('error', 'Streaming unavailable');
+        endTurn();
+        return;
+      }
 
-      KazmaStream.ssePost(approvalUrl, payload, {
-        onEvent: function(eventType, payloadData) {
-          // just ignore custom events if we don't have a specific handler
-        },
+      if (activeStream) {
+        try { activeStream.abort(); } catch (e) {}
+        activeStream = null;
+      }
+
+      activeStream = sseFn(approvalUrl, payload, {
+        onEvent: function() {},
         onToken: function(tokenData) {
           KS.hideTyping(approvalTypingEl);
           if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
-          
-          if (!currentMsgEl) {
-            currentMsgEl = createAssistantMessage();
-          }
+          if (!currentMsgEl) currentMsgEl = createAssistantMessage();
           tokenAccum += tokenData.content;
           var textEl = currentMsgEl.querySelector('.message-text');
           if (textEl) textEl.innerHTML = KS.markdown(tokenAccum);
@@ -983,26 +1091,24 @@
           KS.hideTyping(approvalTypingEl);
           if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
           if (!currentMsgEl) currentMsgEl = createAssistantMessage();
-          var content = currentMsgEl.querySelector('.message-content');
+          var contentEl = currentMsgEl.querySelector('.message-content');
           var box = document.createElement('div');
           box.className = 'tool-call-box';
           box.innerHTML = '<span class="tool-name">\u2699 ' + escapeHtml(toolData.tool_name || toolData.name || 'tool') + '</span>' +
             '<code class="tool-inputs">' + escapeHtml(truncateStr(toolData.inputs || '{}', 200)) + '</code>' +
             '<span class="tool-status running">Running\u2026</span>';
-          content.appendChild(box);
+          contentEl.appendChild(box);
           scrollToBottom();
         },
         onToolResult: function(resultData) {
           if (!currentMsgEl) return;
-          var content = currentMsgEl.querySelector('.message-content');
-          // Update last tool-call box
-          var boxes = content.querySelectorAll('.tool-call-box');
+          var contentEl = currentMsgEl.querySelector('.message-content');
+          var boxes = contentEl.querySelectorAll('.tool-call-box');
           var lastBox = boxes.length ? boxes[boxes.length - 1] : null;
           if (lastBox) {
             var statusEl = lastBox.querySelector('.tool-status');
             if (statusEl) { statusEl.textContent = 'Done'; statusEl.className = 'tool-status done'; }
           }
-          // Add result box
           var isSwarm = (resultData.tool_name === 'dispatch_swarm' || resultData.tool_name === 'swarm_dispatch' || (resultData.result && resultData.result.indexOf('Swarm task dispatched') !== -1));
           var resultBox = document.createElement('div');
           if (isSwarm) {
@@ -1012,7 +1118,7 @@
             resultBox.className = 'tool-result-box';
             resultBox.innerHTML = '<strong>Result:</strong> ' + escapeHtml(truncateStr(resultData.result, 500));
           }
-          content.appendChild(resultBox);
+          contentEl.appendChild(resultBox);
           scrollToBottom();
         },
         onApprovalRequired: function(nextApproval) {
@@ -1022,9 +1128,10 @@
             : (scope === 'yolo' ? 'YOLO on \u2713'
               : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
           setCardState(action === 'approve' ? 'approved' : 'denied', okLabel);
-
+          // Another danger tool after grant — should be rare for YOLO; surface card.
           setTimeout(function() {
             currentMsgEl = createAssistantMessage();
+            tokenAccum = '';
             renderHitlCard(nextApproval);
           }, 40);
         },
@@ -1042,32 +1149,36 @@
           if (scope === 'yolo' && KS.toast) {
             KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
           }
-          
-          if (!tokenAccum && !currentMsgEl && !(doneData && doneData.interrupted)) {
-              appendAssistantText('_No response received._');
+
+          var interrupted = !!(doneData && doneData.interrupted);
+          if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval) {
+            appendAssistantText('_No response received._');
           }
 
           if (doneData && (doneData.cost || doneData.tokens)) {
-              if (currentMsgEl) {
-                  var meta = currentMsgEl.querySelector('.message-meta');
-                  if (meta) {
-                      meta.innerHTML = '<span>' + (doneData.tokens ? doneData.tokens.toLocaleString() + ' tokens' : '') + 
-                                       (doneData.cost ? ' \u2022 $' + doneData.cost.toFixed(4) : '') + 
-                                       (doneData.duration_ms ? ' \u2022 ' + (doneData.duration_ms/1000).toFixed(1) + 's' : '') +
-                                       '</span>';
-                  }
+            if (currentMsgEl) {
+              var meta = currentMsgEl.querySelector('.message-meta');
+              if (meta) {
+                meta.innerHTML = '<span>' + (doneData.tokens ? doneData.tokens.toLocaleString() + ' tokens' : '') +
+                  (doneData.cost ? ' \u2022 $' + doneData.cost.toFixed(4) : '') +
+                  (doneData.duration_ms ? ' \u2022 ' + (doneData.duration_ms / 1000).toFixed(1) + 's' : '') +
+                  '</span>';
               }
+            }
           }
 
-          currentMsgEl = null;
-          tokenAccum = '';
-          enableInput();
+          if (interrupted || _awaitingApproval) {
+            activeStream = null;
+            if (!_awaitingApproval) pauseForApproval(null);
+          } else {
+            endTurn();
+          }
+          if (showArchived) loadArchivedSessions(); else loadSessions();
         },
         onError: function(errMsg) {
-          setIsThinking(false);
           setCardState('error', 'Error: ' + truncateStr(String(errMsg || 'Approval failed'), 120));
           appendAssistantText('_Approval failed: ' + escapeHtml(String(errMsg || 'Error')) + '_');
-          enableInput();
+          endTurn();
         }
       });
     }
@@ -1309,10 +1420,17 @@
   }
 
   function loadSession(sessionId) {
+    // Abort any in-flight turn from the previous session so Stop never sticks.
+    if (activeStream) {
+      try { activeStream.abort(); } catch (e) {}
+      activeStream = null;
+    }
+    endTurn();
+
     chatSessionId = sessionId;
     persistSessionId();
 
-    // Connect to Central WebSocket Telemetry Bus
+    // Connect to Central WebSocket Telemetry Bus for THIS session
     if (window.Alpine && Alpine.store && Alpine.store('agent')) {
       Alpine.store('agent').connect(sessionId);
     }
@@ -1334,7 +1452,9 @@
         return r.json();
       })
       .then(function(messages) {
-        // Clear the loading placeholder
+        // Guard against race: user switched sessions while fetch was in flight
+        if (chatSessionId !== sessionId) return;
+
         messagesEl.innerHTML = '';
 
         if (!messages || messages.length === 0) {
@@ -1347,7 +1467,6 @@
           return;
         }
 
-        // Render each stored message
         messages.forEach(function(msg) {
           var role = msg.role === 'assistant' ? 'assistant' : 'user';
           appendMessage(role, msg.content || '');
@@ -1356,6 +1475,7 @@
         checkPendingApprovals();
       })
       .catch(function(err) {
+        if (chatSessionId !== sessionId) return;
         messagesEl.innerHTML =
           '<div class="chat-welcome">' +
             '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
@@ -1368,19 +1488,41 @@
 
   function checkPendingApprovals() {
     if (!chatSessionId) return;
+    // Resolve LangGraph thread_id from the sidebar session list (web sessions
+    // use session_id ≠ thread_id — matching only session_id missed approvals).
+    var threadId = '';
+    try {
+      var listed = sessions.find(function(s) { return s.session_id === chatSessionId; });
+      if (listed && listed.thread_id) threadId = listed.thread_id;
+    } catch (e) {}
+
     fetch('/api/pending-approvals', { credentials: 'same-origin' })
       .then(function(res) { return res.ok ? res.json() : null; })
       .then(function(data) {
         if (!data || !Array.isArray(data.pending)) return;
         for (var i = 0; i < data.pending.length; i++) {
           var item = data.pending[i];
-          if (item.thread_id === chatSessionId || item.session_id === chatSessionId) {
+          var match =
+            item.thread_id === chatSessionId ||
+            item.session_id === chatSessionId ||
+            (threadId && item.thread_id === threadId);
+          if (match) {
             if (!messagesEl.querySelector('.hitl-approval-card')) {
-              // Map from API schema to SSE event schema that renderHitlCard expects
               item.tool = item.tool || item.tool_name;
               item.args = item.args || item.arguments;
               renderHitlCard(item);
             }
+            try {
+              if (window.Alpine && Alpine.store && Alpine.store('agent')) {
+                Alpine.store('agent').pendingApproval = {
+                  thread_id: item.thread_id || threadId || chatSessionId,
+                  tool: item.tool || '',
+                  args: item.args || {},
+                  tools: item.tools || [],
+                  message: item.message || '',
+                };
+              }
+            } catch (e2) {}
             break;
           }
         }
@@ -1388,6 +1530,14 @@
   }
 
   function newSession() {
+    if (activeStream) {
+      try { activeStream.abort(); } catch (e) {}
+      activeStream = null;
+    }
+    // MUST clear Stop/Enter lock — previously new chat inherited a stuck turn
+    // so users had to press ESC before typing in a brand-new session.
+    forceEndTurn();
+
     chatSessionId = generateSessionId();
     persistSessionId();
     messagesEl.innerHTML =
@@ -1399,9 +1549,24 @@
     updateSessionStats(0, 0);
     currentMsgEl = null;
     tokenAccum = '';
-    if (activeStream) { activeStream.abort(); activeStream = null; }
+    lastSentUserText = '';
+
+    // Bind WS bus to the NEW session (disconnect old so late frames can't
+    // re-arm beginTurn on the fresh chat).
+    if (window.Alpine && Alpine.store && Alpine.store('agent')) {
+      try {
+        var store = Alpine.store('agent');
+        if (typeof store.disconnect === 'function') store.disconnect();
+        else if (typeof store._resetTurnState === 'function') store._resetTurnState();
+        store.connect(chatSessionId);
+      } catch (e) {}
+    }
+
     renderSessionList();
-    if (inputEl) { inputEl.focus(); }
+    if (inputEl) {
+      inputEl.disabled = false;
+      inputEl.focus();
+    }
   }
 
   async function deleteSession(sessionId) {
@@ -1475,13 +1640,18 @@
     init();
   }
 
-  // Expose for inline handlers
+  // Expose for inline handlers + agentStore turn lifecycle bridge
   window.KazmaChat = {
     sendMessage: sendMessage,
     newSession: newSession,
     retry: retry,
     toggleArchivedView: toggleArchivedView,
     _hitlApproval: renderHitlCard,
+    beginTurn: beginTurn,
+    endTurn: endTurn,
+    forceEndTurn: forceEndTurn,
+    pauseForApproval: pauseForApproval,
+    isGenerating: function() { return _isGenerating; },
     getOrCreateSessionId: function() {
       if (!chatSessionId) {
         chatSessionId = generateSessionId();
@@ -1493,6 +1663,7 @@
     // Telemetry WS hooks — called by agentStore
     appendLiveToken: function(content) {
       KS.hideTyping(typingEl);
+      activeTypingEl = null;
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
       tokenAccum += content;
       var textEl = currentMsgEl.querySelector('.message-text');
@@ -1501,18 +1672,20 @@
     },
     appendErrorMessage: function(errMsg) {
       KS.hideTyping(typingEl);
+      activeTypingEl = null;
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
       var textEl = currentMsgEl.querySelector('.message-text');
       if (textEl) textEl.innerHTML = '<div class="error-message">⚠️ ' + escapeHtml(errMsg) + '</div>';
+      // endTurn is invoked by agentStore after graph_error; keep bubble closed.
       currentMsgEl = null;
       tokenAccum = '';
-      enableInput();
     },
 
     // Voice streaming hooks — called by voice.js WebSocket client
     onUserTranscription: function(text) {
       appendMessage('user', text);
       scrollToBottom();
+      beginTurn();
       KS.showTyping(typingEl, 'Kazma is thinking');
     },
     onStreamToken: function(content) {
@@ -1524,10 +1697,7 @@
       scrollToBottom();
     },
     onStreamDone: function() {
-      currentMsgEl = null;
-      tokenAccum = '';
-      activeStream = null;
-      enableInput();
+      endTurn();
     },
   };
 })();

@@ -713,6 +713,23 @@ async def tool_worker_node(
     session_messages = [_normalize_msg(m) for m in state.get("messages", [])]
     _messages_token = set_current_session_messages(session_messages)
 
+    # ── Bind YOLO/HITL thread id from checkpointed state ────────────
+    # Transports (SSE/WS) set the ContextVar, but LangGraph node execution
+    # (or a missing transport bind) can leave it empty. state.thread_id is
+    # the durable identity used when enabling YOLO/tool grants — without
+    # this fallback, YOLO Session behaves like Approve once forever.
+    from kazma_core.safety.hitl import (
+        get_current_thread_id,
+        reset_current_thread_id,
+        set_current_thread_id,
+    )
+
+    _state_tid_token = None
+    if not get_current_thread_id():
+        _state_tid = state.get("thread_id")
+        if _state_tid:
+            _state_tid_token = set_current_thread_id(str(_state_tid))
+
     try:
         # ── HITL: separate safe and danger tools ──────────────────────
         safe_tools: list[PendingToolCall] = []
@@ -818,12 +835,13 @@ async def tool_worker_node(
                 "message": message,
             }
 
-            # Check for YOLO grant before interrupting - if YOLO is active for this thread,
-            # auto-approve all danger tools without prompting
+            # Defense-in-depth: requires_approval() already filtered YOLO/grants
+            # when splitting safe/danger above. Re-check here in case grants
+            # were applied mid-turn (e.g. YOLO enabled just before resume).
             from kazma_core.safety.yolo import is_yolo_active
-            from kazma_core.safety.hitl import get_current_thread_id
-            current_thread = get_current_thread_id()
-            if current_thread and is_yolo_active(current_thread):
+
+            current_thread = get_current_thread_id() or state.get("thread_id") or ""
+            if current_thread and is_yolo_active(str(current_thread)):
                 logger.warning(
                     "[ToolWorker] YOLO active for thread=%s — auto-approving %d danger tool(s)",
                     current_thread,
@@ -832,8 +850,8 @@ async def tool_worker_node(
                 approved = True
                 approval = {"approved": True, "yolo": True}
             else:
-                # interrupt() pauses the graph — resumes when /api/approve calls
-                # graph.ainvoke(Command(resume=...), config)
+                # interrupt() pauses the graph — resumes when /api/approve
+                # calls graph.ainvoke(Command(resume=...), config)
                 approval = interrupt(approval_input)
                 approved = isinstance(approval, dict) and approval.get("approved", False)
             # Optional selective ids; None/missing → all tools in the batch.
@@ -927,13 +945,18 @@ async def tool_worker_node(
             "next_node": NodeName.RESPOND if (breaker_tripped_now or consecutive_failures >= 3) else NodeName.SUPERVISOR,
         }
     finally:
-        # Always restore the prior ContextVar value, even if a tool
-        # raised or the graph was interrupted by HITL.
+        # Always restore prior ContextVar values, even if a tool raised or
+        # the graph was interrupted by HITL.
         reset_current_session_messages(_messages_token)
-        if _graph_gate_token is not None:
-            from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+        try:
+            if _graph_gate_token is not None:
+                from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
 
-            _graph_hitl_gate_ctx.reset(_graph_gate_token)
+                _graph_hitl_gate_ctx.reset(_graph_gate_token)
+        except NameError:
+            pass
+        if _state_tid_token is not None:
+            reset_current_thread_id(_state_tid_token)
 
 
 async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any]:

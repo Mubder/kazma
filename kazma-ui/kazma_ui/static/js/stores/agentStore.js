@@ -3,6 +3,13 @@
  *
  * Exposes `Alpine.store('agent')` to drive chat UI templates, "Kazma is Thinking..." status,
  * active tool execution badges, and HITL approval dialogs reactively.
+ *
+ * CRITICAL CONTRACT with chat.js:
+ *   - beginTurn()  → Stop button / input lock for the current turn
+ *   - endTurn()    → ALWAYS released on idle / error / stream_end
+ *   - pauseForApproval() → HITL card visible; input locked for approval only
+ * Without these hooks the WS path left `_isGenerating=true` forever (Stop pulses,
+ * Enter blocked) because SSE callbacks never fire when the WS bus is preferred.
  */
 
 document.addEventListener('alpine:init', () => {
@@ -22,12 +29,69 @@ document.addEventListener('alpine:init', () => {
     _reconnectTimer: null,
     _reconnectDelay: 1000,
     _maxReconnectDelay: 16000,
+    /** True while a send_prompt / approve_tool turn is in flight on this bus. */
+    _turnActive: false,
+
+    // ── UI bridge helpers ────────────────────────────────────
+    _chat() {
+      return window.KazmaChat || null;
+    },
+    _beginTurn() {
+      this._turnActive = true;
+      this.isThinking = true;
+      const chat = this._chat();
+      if (chat && typeof chat.beginTurn === 'function') chat.beginTurn();
+    },
+    _endTurn() {
+      this.isThinking = false;
+      this.activeNode = '';
+      this.activeTool = null;
+      // Server always emits idle after a graph pause so the thinking spinner
+      // clears — but if HITL is still waiting, keep the approval lock.
+      if (this.pendingApproval) {
+        this._turnActive = false;
+        const chat = this._chat();
+        if (chat && typeof chat.pauseForApproval === 'function') {
+          chat.pauseForApproval(this.pendingApproval);
+        }
+        return;
+      }
+      this._turnActive = false;
+      const chat = this._chat();
+      if (chat && typeof chat.endTurn === 'function') chat.endTurn();
+    },
+    _pauseForApproval(approval) {
+      this.isThinking = false;
+      this.activeTool = null;
+      this._turnActive = false;
+      this.pendingApproval = approval;
+      // Stop must not pulse; input locked until Approve / YOLO / Deny.
+      const chat = this._chat();
+      if (chat && typeof chat.pauseForApproval === 'function') {
+        chat.pauseForApproval(approval);
+      }
+    },
+    _resetTurnState() {
+      this._turnActive = false;
+      this.isThinking = false;
+      this.activeNode = '';
+      this.activeTool = null;
+      this.pendingApproval = null;
+      this.statusMessage = 'Kazma is thinking...';
+    },
 
     // ── Connection Lifecycle ─────────────────────────────────
     connect(sessionId) {
       if (!sessionId) return;
       if (this.sessionId === sessionId && this._socket && this._socket.readyState === WebSocket.OPEN) {
         return;
+      }
+
+      // Switching sessions must never inherit a stuck turn from the previous one.
+      if (this.sessionId && this.sessionId !== sessionId) {
+        this._resetTurnState();
+        const chat = this._chat();
+        if (chat && typeof chat.endTurn === 'function') chat.endTurn();
       }
 
       this.sessionId = sessionId;
@@ -83,6 +147,11 @@ document.addEventListener('alpine:init', () => {
         const reason = evt ? evt.reason : '';
         console.warn(`[AgentStore] Telemetry socket closed for session ${sessionId} (code=${code}, reason=${reason || 'none'})`);
 
+        // Socket died mid-turn → release UI so user is never trapped.
+        if (this._turnActive) {
+          this._endTurn();
+        }
+
         if (code === 4003) {
           console.warn('[AgentStore] WebSocket connection rejected (4003 Unauthorized). Pausing auto-reconnect.');
           return;
@@ -90,6 +159,13 @@ document.addEventListener('alpine:init', () => {
 
         this._scheduleReconnect();
       };
+    },
+
+    disconnect() {
+      this._closeSocket();
+      this._resetTurnState();
+      this.sessionId = null;
+      this.connectionStatus = 'disconnected';
     },
 
     _closeSocket() {
@@ -124,10 +200,10 @@ document.addEventListener('alpine:init', () => {
     // ── WebSocket Actions ────────────────────────────────────
     sendPrompt(text, model) {
       if (!text || !text.trim()) return;
-      this.isThinking = true;
+      this.pendingApproval = null;
+      this._beginTurn();
       this.statusMessage = 'Kazma is thinking...';
       this.activeNode = 'Supervisor';
-      this.pendingApproval = null;
 
       const payload = {
         action: 'send_prompt',
@@ -139,18 +215,27 @@ document.addEventListener('alpine:init', () => {
     },
 
     submitApproval(approved = true, scope = 'once', threadId = null) {
-      this.isThinking = true;
-      this.statusMessage = 'Executing approved action...';
-      const targetThreadId = threadId || (this.pendingApproval ? this.pendingApproval.thread_id : null) || this.sessionId;
+      const pending = this.pendingApproval;
+      const targetThreadId =
+        threadId ||
+        (pending && pending.thread_id) ||
+        this.sessionId;
 
       const payload = {
         action: 'approve_tool',
         thread_id: targetThreadId,
         approved: !!approved,
         scope: scope || 'once',
+        // Required for tool-scope grants when interrupt payload is unavailable
+        tool: (pending && pending.tool) || '',
       };
 
       this.pendingApproval = null;
+      this._beginTurn();
+      this.statusMessage = approved
+        ? (scope === 'yolo' ? 'YOLO on — running…' : 'Executing approved action...')
+        : 'Denying tool…';
+
       this._sendPayload(payload);
     },
 
@@ -162,6 +247,8 @@ document.addEventListener('alpine:init', () => {
         if (this.sessionId) {
           this.connect(this.sessionId);
           setTimeout(() => this._sendPayload(payload), 500);
+        } else {
+          this._endTurn();
         }
       }
     },
@@ -175,35 +262,37 @@ document.addEventListener('alpine:init', () => {
 
       switch (type) {
         case 'status':
-        case 'status_update':
+        case 'status_update': {
           const statusVal = frame.status || data.status;
           if (statusVal === 'thinking') {
             this.isThinking = true;
+            this._turnActive = true;
             this.statusMessage = frame.message || data.message || 'Kazma is thinking...';
             if (frame.active_node || data.active_node) this.activeNode = frame.active_node || data.active_node;
           } else if (statusVal === 'routing_node') {
             this.isThinking = true;
+            this._turnActive = true;
             this.activeNode = frame.active_node || data.active_node || 'Supervisor';
             this.statusMessage = `Routing: ${this.activeNode}`;
           } else if (statusVal === 'paused_for_approval') {
-            this.isThinking = false;
-            this.pendingApproval = {
+            this._pauseForApproval({
               thread_id: frame.thread_id || data.thread_id || this.sessionId,
               tool: frame.tool || data.tool || '',
               args: frame.args || data.args || {},
               tools: frame.tools || data.tools || [],
               message: frame.message || data.message || '',
-            };
+            });
           } else if (statusVal === 'idle') {
-            this.isThinking = false;
-            this.activeNode = '';
-            this.activeTool = null;
+            // End of turn — MUST release chat.js Stop / Enter lock.
+            this._endTurn();
           }
           break;
+        }
 
         case 'tool_start':
-        case 'tool_lifecycle':
+        case 'tool_lifecycle': {
           this.isThinking = true;
+          this._turnActive = true;
           const toolStatus = frame.status || data.status || 'tool_running';
           if (type === 'tool_start' || toolStatus === 'tool_running') {
             this.activeTool = {
@@ -225,6 +314,7 @@ document.addEventListener('alpine:init', () => {
             }
           }
           break;
+        }
 
         case 'tool_completed':
           this.isThinking = true;
@@ -235,63 +325,79 @@ document.addEventListener('alpine:init', () => {
           break;
 
         case 'approval_required':
-          this.isThinking = false;
-          this.pendingApproval = {
-            thread_id: frame.thread_id || this.sessionId,
-            tool: frame.tool || '',
-            args: frame.args || {},
-            tools: frame.tools || [],
-            message: frame.message || '',
-          };
+          this._pauseForApproval({
+            thread_id: frame.thread_id || data.thread_id || this.sessionId,
+            tool: frame.tool || data.tool || '',
+            args: frame.args || data.args || {},
+            tools: frame.tools || data.tools || [],
+            message: frame.message || data.message || '',
+          });
           break;
 
         case 'approval_started':
-          this.isThinking = true;
-          this.statusMessage = 'Approval started: ' + (data.message || 'Processing approval...');
-          break;
-
         case 'approval_progress':
-          this.isThinking = true;
-          this.statusMessage = data.message || 'Approval in progress...';
-          break;
-
         case 'approval_resuming':
           this.isThinking = true;
-          this.statusMessage = data.message || 'Resuming execution...';
+          this._turnActive = true;
+          this.statusMessage =
+            (data && data.message) ||
+            (type === 'approval_resuming' ? 'Resuming execution...' : 'Processing approval...');
+          break;
+
+        case 'approval_complete':
+          // Prefer idle (always sent after this). If idle is dropped, still
+          // release Stop so the user is never trapped after a finished turn.
+          this.isThinking = false;
+          if (!this.pendingApproval) {
+            this._endTurn();
+          }
+          break;
+
+        case 'done':
+          // SSE-compat frames sometimes arrive over mixed transports
+          if (!this.pendingApproval) {
+            this._endTurn();
+          }
           break;
 
         case 'approval_error':
-          this.isThinking = false;
-          this.activeNode = '';
-          this.activeTool = null;
           console.error('[AgentStore] Approval error:', frame);
+          this._endTurn();
+          {
+            const errMsg = (data && (data.error || data.message)) || 'Approval failed';
+            const chat = this._chat();
+            if (chat && typeof chat.appendErrorMessage === 'function') {
+              chat.appendErrorMessage(errMsg);
+            }
+          }
           break;
 
         case 'token':
-        case 'llm_delta':
+        case 'llm_delta': {
           this.isThinking = true;
+          this._turnActive = true;
           const text = frame.content || data.content;
           if (text && window.KazmaChat && typeof window.KazmaChat.appendLiveToken === 'function') {
             window.KazmaChat.appendLiveToken(text);
           }
           break;
+        }
 
         case 'stream_end':
-          this.isThinking = false;
-          this.activeNode = '';
-          this.activeTool = null;
+          // Same as idle — _endTurn keeps approval lock if pendingApproval set.
+          this._endTurn();
           break;
 
         case 'error':
         case 'graph_error':
           console.error('[AgentStore] Graph error:', frame);
-          this.isThinking = false;
-          this.activeNode = '';
-          this.activeTool = null;
-          const errMsg = frame.message || data.message || 'Graph execution error';
-          if (window.KazmaChat && typeof window.KazmaChat.appendErrorMessage === 'function') {
-            window.KazmaChat.appendErrorMessage(errMsg);
+          {
+            const errMsg = frame.message || data.message || 'Graph execution error';
+            if (window.KazmaChat && typeof window.KazmaChat.appendErrorMessage === 'function') {
+              window.KazmaChat.appendErrorMessage(errMsg);
+            }
           }
+          this._endTurn();
           break;
 
         default:

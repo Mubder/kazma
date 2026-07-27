@@ -367,8 +367,11 @@ var KazmaStream = (function() {
   }
 
   // ── Public API ────────────────────────────────────────
+  // `sse` is the canonical name; `ssePost` is kept as a stable alias —
+  // chat.js HITL cards and hitl_approval.js call ssePost and must not break.
   return {
     sse: ssePost,
+    ssePost: ssePost,
     ws: wsConnect,
     markdown: mdRender,
     copyCode: copyCode,
