@@ -1040,15 +1040,30 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     )
 
     # If max iterations forced us here mid-tool-loop, there is often no
-    # user-visible assistant *text* (only tool_calls / tool results). The Web
-    # YOLO resume path uses ainvoke without streaming, so missing synthesis
-    # leaves the UI stuck on the pre-HITL sentence forever.
-    def _has_user_visible_assistant_text(msgs: list[dict[str, Any]]) -> bool:
-        for m in reversed(msgs):
+    # *final* user-visible answer after the last tool results. An early
+    # assistant thought (e.g. "ممتاز قاعدة البيانات…") used to make us skip
+    # synthesis (bug: empty CoT + 53-char leftover after YOLO/shell rabbit
+    # hole). Only treat assistant text AFTER the last tool as a final answer.
+    def _has_final_assistant_after_tools(msgs: list[dict[str, Any]]) -> bool:
+        last_tool_idx = -1
+        for i, m in enumerate(msgs):
+            if isinstance(m, dict) and m.get("role") in ("tool", "function"):
+                last_tool_idx = i
+        if last_tool_idx < 0:
+            # No tools — any plain assistant text counts.
+            for m in reversed(msgs):
+                if not isinstance(m, dict):
+                    continue
+                if m.get("role") not in ("assistant", "ai"):
+                    continue
+                content = m.get("content") or ""
+                if isinstance(content, str) and content.strip() and not m.get("tool_calls"):
+                    return True
+            return False
+        for m in msgs[last_tool_idx + 1 :]:
             if not isinstance(m, dict):
                 continue
-            role = m.get("role")
-            if role not in ("assistant", "ai"):
+            if m.get("role") not in ("assistant", "ai"):
                 continue
             content = m.get("content") or ""
             if isinstance(content, str) and content.strip() and not m.get("tool_calls"):
@@ -1058,7 +1073,12 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
     _last = messages[-1] if messages else {}
     _last_role = _last.get("role") if isinstance(_last, dict) else None
     _max_hit = iteration >= state.get("max_iterations", 15)
-    _needs_synthesis = _max_hit and not _has_user_visible_assistant_text(messages)
+    # Always synthesize when we stop on a tool result, or when there is no
+    # plain assistant text after the last tool (mid-loop chatter does not count).
+    _needs_synthesis = _max_hit and (
+        _last_role in ("tool", "function")
+        or not _has_final_assistant_after_tools(messages)
+    )
     if _needs_synthesis:
         _llm = llm or state.get("_llm")
         if _llm is not None:
@@ -1066,9 +1086,13 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                 _wrap_msg = {
                     "role": "user",
                     "content": (
-                        "Based on the tool results above, provide your final answer "
-                        "to the user now. Do not call any more tools. Be concrete "
-                        "about what you found or what failed."
+                        "You hit the tool-round limit. Based on ALL tool results "
+                        "above (including errors like unauthorized SQL functions), "
+                        "write the final answer to the user NOW. "
+                        "Do not call any more tools. Do not dig into source code. "
+                        "If checking memory: report which of memory_search / "
+                        "memory_store / layers worked or failed, and what needs "
+                        "attention. Match the user's language (Arabic if they wrote Arabic)."
                     ),
                 }
                 _resp = await _llm.chat(messages + [_wrap_msg], tools=None)
