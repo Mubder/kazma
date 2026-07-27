@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Unreleased — Memory remaining plan + docs refresh (2026-07-27)
+
+- **`docs/plans/MEMORY_REMAINING.md`** — done vs later backlog for memory work.
+- **Docs:** rewrite [Memory & RAG](docs/docs/guide/memory-and-rag.md); update FAQ/architecture
+  already shipped; refresh configuration, diagnosis map, glossary, roadmap,
+  API routes, web-ui, disaster recovery, intro plans link.
+- **`research/`** — tracked with README (local smoke/KB artifacts).
+
 ## Unreleased — Consolidator cost/fence/dedup + graph UI (2026-07-27)
 
 - **Cost:** `every_n_turns`, `skip_llm_in_demo` (DEMO_MODE), unified

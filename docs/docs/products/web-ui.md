@@ -24,7 +24,7 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 | Page | Path | Purpose |
 |------|------|---------|
 | Chat | `/` or chat route | SSE streaming agent chat (`sse_chat.py`, `streaming.js`) |
-| Dashboard | `/dashboard` | Observability: cost, tokens, tool calls, cost breaker, uptime, traces |
+| Dashboard | `/dashboard` | Observability + **Memory & Governance** (health board, L2 property graph explorer, backups) |
 | Settings | `/settings` | Models, providers, safety, account, **Email** (`?tab=email`) |
 | Swarm / Command Center | `/swarm` | Workers, live tasks, dispatch UI |
 | Time Travel | `/replay` | Snapshot timeline browser, restore (rewind), fork (branch), compare diff, live SSE snapshot events |
@@ -45,6 +45,14 @@ Cards are fed by the in-memory **`TraceStore`** (LLM/tool traces) plus the **cos
 | Uptime | TraceStore start time | Process lifetime of the store singleton. |
 
 `GET /api/dashboard/status` and WebSocket `/ws/dashboard` push numeric metrics (legacy string forms like `"$0.00"` / `"1,234"` are parsed safely in `dashboard.js`). Chat footer token/cost on a turn still comes from the SSE `done` event for that session.
+
+### Memory & Governance (Dashboard)
+
+- **Component health** from `build_memory_health()` (embedder, VectorMemory, L1–L4, consolidator, packages).
+- **Property graph (L2)** canvas: search, refresh, clear; APIs under `/api/memory/graph*`.
+- Backups/maintenance for FTS + vector stores.
+
+Full guide: [Memory & RAG](../guide/memory-and-rag). Remaining work: [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
 
 Research / scrape runs through **chat tools** (see [Web research](../guide/web-research)), not a separate dashboard action.
 

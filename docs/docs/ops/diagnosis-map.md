@@ -245,12 +245,17 @@ Precedence (high → low):
 
 | Layer | Role |
 |-------|------|
-| Prefer | `UnifiedMemoryAdapter` (Chroma + KG + FTS5 + sqlite-vec) |
-| Fallback | `VectorMemory` singleton if adapter init fails |
-| Per-turn | Supervisor inject when `memory.per_turn_retrieval` |
-| Compaction | `compaction.py` / ContextAuthority |
+| Default | `UnifiedMemoryAdapter` RRF (L1 Chroma + L2 SQLite graph + L3 FTS5 + L4 sqlite-vec) |
+| Fallback | `VectorMemory` singleton if adapter path fails |
+| Per-turn | Supervisor inject when `memory.per_turn_retrieval` (ConfigStore ← yaml) |
+| Post-turn | `schedule_post_turn_memory` → auto_store + consolidator |
+| Compaction | `compaction.py` / ContextAuthority → same adapter |
+| Health | `build_memory_health()` on Dashboard |
+| Graph UI | `GET/POST /api/memory/graph*` |
 
-If chat recall ≠ `memory_search` tool results, check **which backend** was wired at agent init.
+If chat recall is empty: install `.[rag]`, check Dashboard health (embedder / L1 / L3), confirm `memory.enabled`.  
+If chat ≠ tool results: both should hit the adapter; look for fail-closed empty store or DEMO mode.  
+Backlog: [`docs/plans/MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
 
 ---
 

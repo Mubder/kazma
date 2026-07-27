@@ -50,6 +50,19 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 | * | `/api/research/*` | Session | Research: list, detail, compare, export, archive, unarchive (`research_panel/routes.py`) |
 | GET | `/research` | Session | Research panel page |
 
+## Memory / RAG
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/system/status` | Session | Memory health board + embedder/layer probes (`build_memory_health`) |
+| GET | `/api/memory/graph` | Session | Property graph JSON (`nodes`/`edges`); optional `?q=` filter |
+| GET | `/api/memory/graph/stats` | Session | Node/edge counts + backend path |
+| GET | `/api/memory/graph/search` | Session | FTS search over graph nodes (`?q=&limit=`) |
+| POST | `/api/memory/graph/clear` | Session | Destructive clear of L2 graph (UI confirms) |
+| * | `/api/system/memory/*` | Session | Backup / restore / maintenance of memory stores |
+
+Guide: [Memory & RAG](../guide/memory-and-rag).
+
 ## Settings & config
 
 | Method | Path | Auth | Description |

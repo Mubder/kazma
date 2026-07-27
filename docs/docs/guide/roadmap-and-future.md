@@ -35,21 +35,23 @@ Items are marked:
 
 ## 3. Memory & RAG
 
-> **Updated July 2026** — the memory overhaul (Phases 1–4) closed all previously-documented gaps. Items below reflect the current state.
+> **Updated 2026-07-27** — strengthen + SQLite L2 graph + consolidator + graph UI on `main`.  
+> Backlog: [`docs/plans/MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md). Full guide: [Memory & RAG](memory-and-rag).
 
 | Capability | Status | Notes |
 |---|---|---|
-| ChromaDB vector memory (RAG tools) | ✅ | Via `memory_search`/`memory_store` + compaction injection. |
-| **Memory injection during compaction** | ✅ | `CompactionEngine.retrieve_memories()` now retrieves top-5 and injects `## Relevant Memories`. Lazy resolution handles init ordering. |
-| 4-layer UnifiedMemoryAdapter (RRF) | ✅ | **Fixed** — L1 import typo + caller tuple-unpacking bug resolved. Used by swarm (self-improvement + phonebook). |
-| Automatic RAG injection into prompts | ✅ | Compaction injects at 80% context; LLM tools remain opt-in. |
-| Short-term→permanent consolidation | 🟡 | Explicit-only (`memory_store` tool). No background auto-promotion — deliberate design choice. |
-| Document chunking | ✅ | `VectorMemory.add()` chunks at 2000 chars with 200-char overlap. |
-| Arabic tokenizer (FTS5) | ✅ | **Improved** — symmetric normalization, conservative clitic splitting, deduplicated stop words, dead rules removed. |
-| VectorMemory CRUD | ✅ | `delete()`, `update()`, `clear()` added; chunk-aware. |
-| `SQLiteMemoryBackend` vector search | ✅ | **Fixed** — `distance()` replaced with cosine distance; `_vec_available` detection corrected. |
-| BM25 ranking | ✅ | **Fixed** — ascending sort (was inverted). |
-| `checkpoint_manager` in compaction | 🟡 | Still not passed to `create_authority()` — low-risk (LangGraph checkpointer covers this). |
+| ChromaDB vector memory | ✅ | Adapter L1 + VectorMemory singleton; collection `agent_memory`. |
+| Per-turn RAG | ✅ | Every user turn when `memory.per_turn_retrieval`. |
+| Compaction memory inject | ✅ | Adapter-backed retrieve + summary store. |
+| 4-layer UnifiedMemoryAdapter (RRF) | ✅ | **Chat default** (not swarm-only). Fail-closed durable store. |
+| Auto-store | ✅ | Heuristic durable facts + turn snapshots. |
+| LLM consolidator | ✅ | Facts + SPO triples; fence + dedup + cost flags. |
+| L2 SQLite property graph | ✅ | Replaces NetworkX JSON; Dashboard + `/api/memory/graph*`. |
+| FTS unified schema | ✅ | `memories` / `memories_fts` for L3 + degrade path. |
+| Document chunking | ✅ | 2000/200 on VectorMemory and adapter L1. |
+| Arabic tokenizer (FTS5) | ✅ | Symmetric normalization + clitic split. |
+| Multi-replica shared vectors/graph | 🔴 | Local files only — MEMORY_REMAINING S1–S2. |
+| `checkpoint_manager` in compaction | 🟡 | Still optional — LangGraph checkpointer covers turns. |
 
 ---
 
@@ -139,19 +141,14 @@ Items are marked:
 
 ## 9. Suggested next steps
 
-The memory overhaul closed items #1–4; the capability-expansion sprint closed #6–10. Remaining open items:
+Memory (2026-07): strengthen + L2 graph + consolidator + graph UI are **done**.  
+Remaining memory polish/scale only in [`MEMORY_REMAINING.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md).
 
-1. ~~**Wire `memory_store` into `create_authority()`**~~ ✅ Done — compaction retrieves + injects memories.
-2. ~~**Fix `search_backend.py`**~~ ✅ Done — vec detection + cosine distance in Python.
-3. ~~**Fix the 4-layer adapter**~~ ✅ Done — L1 import typo + caller bug fixed.
-4. ~~**Add a document chunker**~~ ✅ Done — 2000-char chunks with 200-char overlap.
-5. **Add 429 backoff** to the retry layer (or document the proxy requirement more loudly).
-6. ~~**Auto-wire `CostCircuitBreaker`**~~ ✅ Done — instantiated per-agent and driven on the live loop (`agent_runner.py`, `graph_builder.py`).
-7. ~~**Sync the version strings**~~ ✅ Done — `pyproject.toml`, `kazma.yaml`, gateway, TUI all track 0.6.1; parity test added.
-8. **Resolve the OpenTelemetry question** — the dead OTel code + `[tracing]` extra were removed; Langfuse + Console remain as backends. Re-add only if OTLP export becomes a real requirement.
-9. ~~**Prometheus `/metrics`**~~ ✅ Done — `/metrics` + `/api/metrics` emit Prometheus 0.0.4 text (`kazma_ui/metrics.py`).
-10. ~~**Remove dead `/ws/chat` + stub `/undo`/`/edit`**~~ ✅ Done — `/ws/chat` removed; `/undo`/`/edit` now handled by the graph.
-11. **Hosted vector DB** (Pinecone/pgvector/Weaviate) — the local 4-layer RAG stack is fine for single-replica; add a managed backend for multi-replica SaaS.
+Other open items:
+
+1. **Add 429 backoff** to the retry layer (or document the proxy requirement more loudly).
+2. **Resolve the OpenTelemetry question** — dead OTel code + `[tracing]` extra removed; Langfuse + Console remain. Re-add only if OTLP export is required.
+3. **Hosted vector DB** (pgvector/Qdrant/Weaviate) — only when multi-replica shared recall is a product requirement.
 
 ---
 

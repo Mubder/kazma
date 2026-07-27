@@ -112,16 +112,26 @@ Multi-line string. The default is Arabic-aware: "You are Kazma (كاظمه), an 
 |---|---|---|---|
 | `storage.engine` | string | `sqlite` | Checkpointer engine. |
 | `storage.path` | string | `kazma-data/checkpoints.db` | LangGraph checkpointer DB. |
-| `storage.vector_dim` | int | `1536` | Declared vector dimension. **Note:** the actual `VectorMemory` uses `all-MiniLM-L6-v2` (384-d). This value is informational and not enforced consistently. |
+| `storage.vector_dim` | int | `384` | Declared vector dimension (should match `memory.embedding.dim`; default MiniLM is **384**). |
 
 ### `memory` (lines 50-54)
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `memory.enabled` | bool | `true` | Master memory switch. |
-| `memory.max_context_tokens` | int | `128000` | Context window for compaction. Compaction fires at 80% (= 102,400). |
-| `memory.retrieval_top_k` | int | `5` | Top-K for memory retrieval (used by compaction's intended retrieval step — see [Memory & RAG](memory-and-rag)). |
+| `memory.enabled` | bool | `true` | Master switch (per-turn RAG, auto-store, consolidator). ConfigStore overlays yaml. |
+| `memory.per_turn_retrieval` | bool | `true` | Inject top-k memories on every user turn. |
+| `memory.auto_store` | bool | `true` | Heuristic durable / turn writes after each reply. |
+| `memory.auto_store_mode` | str | `both` | `durable` \| `turns` \| `both`. |
+| `memory.max_context_tokens` | int | `128000` | Context window for compaction (fires at 80%). |
+| `memory.retrieval_top_k` | int | `5` | Top-K for per-turn RAG and compaction. |
 | `memory.provenance` | bool | `true` | Tag memories with source metadata. |
+| `memory.consolidation.enabled` | bool | `true` | Post-turn librarian (facts + graph triples). |
+| `memory.consolidation.use_llm` | bool | `true` | LLM extract; heuristic fallback if fail/off. |
+| `memory.consolidation.every_n_turns` | int | `1` | Cost control: run consolidator every N turns. |
+| `memory.consolidation.skip_llm_in_demo` | bool | `true` | No LLM under `KAZMA_DEMO_MODE`. |
+| `memory.embedding.provider` | str | `local` | `local` or remote OpenAI-compatible embed API. |
+| `memory.embedding.model` | str | `all-MiniLM-L6-v2` | Embedding model id. |
+| `memory.embedding.dim` | int | `384` | Must match the embedder. |
 
 ### `skills` (lines 55-57)
 
@@ -426,6 +436,6 @@ services: {}
 ## Documentation Audit Notes
 
 - **Version drift:** `pyproject.toml` is `0.3.0`; `kazma.yaml` `agent.version` is `0.2.0`; the CLI `--help` text prints `v0.2.0`. These are independent and unsynchronized — a known wart.
-- **`storage.vector_dim: 1536`** does not match the actual embedding model (`all-MiniLM-L6-v2` = 384-d). Documented as-is.
+- **Memory flags** are read via `kazma_core.memory.config` (ConfigStore ← yaml). See [Memory & RAG](memory-and-rag) and `docs/plans/MEMORY_REMAINING.md`.
 - **`.env.example` lists `DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY`** but no code reads them — flagged to prevent user confusion.
 - **`mcp.servers[].trust`** is a plain YAML string with no enforcing consumer — not a cryptographic trust tier.
